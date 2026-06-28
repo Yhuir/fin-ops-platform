@@ -26,14 +26,12 @@ import {
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
   fetchWorkbenchOaSyncStatus,
-  fetchWorkbenchRefreshStatus,
   fetchWorkbenchRowDetail,
   fetchWorkbenchSettings,
   ignoreWorkbenchRow,
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
-  subscribeWorkbenchRefreshEvents,
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
   WORKBENCH_GROUP_PAGE_SIZE,
@@ -47,7 +45,6 @@ import {
   eventAffectedMonths,
 } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import { operationBarrierTargets, waitForOperationFreshness, type OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
@@ -70,7 +67,6 @@ import type {
   WorkbenchInitialPageResult,
   WorkbenchOaSyncStatus,
   WorkbenchRecord,
-  WorkbenchRefreshStatus,
   WorkbenchRelationPreview,
   WorkbenchSettings,
   WorkbenchZoneCounts,
@@ -131,7 +127,6 @@ function createInitialZonePageInfo(zone: "paired" | "open"): WorkbenchZonePageIn
     total: 0,
     rowCounts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
     hasMore: false,
-    readModelStatus: "refreshing",
   };
 }
 
@@ -222,11 +217,6 @@ const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能�
 const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
-const WORKBENCH_REFRESH_POLL_INTERVAL_MS = 5_000;
-const WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS = 300;
-const WORKBENCH_OPERATION_FRESH_POLL_MS = 300;
-const WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS = 20_000;
-const WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS = 10_000;
 
 function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
   return JSON.stringify(query);
@@ -307,83 +297,8 @@ function actionAffectedMonths(result: {
   return [WORKBENCH_VIEW_MONTH];
 }
 
-function actionFreshnessTargets(result: WorkbenchActionResult | null): OperationBarrierTarget[] {
-  if (!result) {
-    return [];
-  }
-  if (result.operationBarrierTargets.length > 0) {
-    return result.operationBarrierTargets.filter((target) => target.scopeKey !== "all");
-  }
-  if (result.freshnessTargets.length > 0) {
-    return result.freshnessTargets.filter((target) => target.scopeKey !== "all");
-  }
-  const scopeKeys = result.affectedScopeKeys.length > 0
-    ? result.affectedScopeKeys
-    : actionAffectedMonths(result).filter((scopeKey) => scopeKey !== "all");
-  if (scopeKeys.length > 0) {
-    if (hasOperationProjection(result.operationProjection)) {
-      return operationBarrierTargets("workbench_relation", scopeKeys);
-    }
-    return [
-      ...operationBarrierTargets("workbench_relation", scopeKeys),
-      ...operationBarrierTargets("workbench", scopeKeys),
-    ];
-  }
-  return [];
-}
-
 function actionResultMessage(result: string | WorkbenchActionResult) {
   return typeof result === "string" ? result : result.message;
-}
-
-function workbenchInitialPageIsFresh(result: WorkbenchInitialPageResult | null) {
-  return result?.pages.paired.readModelStatus === "fresh" && result.pages.open.readModelStatus === "fresh";
-}
-
-function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "open", WorkbenchZonePageInfo>) {
-  const statuses = [pages.paired.readModelStatus, pages.open.readModelStatus]
-    .map((status) => String(status || "refreshing").trim() || "refreshing");
-  if (statuses.some((status) => status === "failed")) {
-    return "failed";
-  }
-  if (statuses.some((status) => status === "unavailable")) {
-    return "unavailable";
-  }
-  if (statuses.some((status) => status === "refreshing")) {
-    return "refreshing";
-  }
-  if (statuses.some((status) => status === "stale")) {
-    return "stale";
-  }
-  return statuses.every((status) => status === "fresh") ? "fresh" : statuses.find((status) => status !== "fresh") ?? "refreshing";
-}
-
-function workbenchReadModelStatusMessage(status: string | null, lastError?: string | null) {
-  if (status === "failed") {
-    return `关联台刷新失败${lastError ? `：${lastError}` : ""}`;
-  }
-  if (status === "unavailable") {
-    return "关联台读模型不可用";
-  }
-  return null;
-}
-
-function delayWorkbenchOperationPoll() {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, WORKBENCH_OPERATION_FRESH_POLL_MS);
-  });
-}
-
-function workbenchRefreshStatusVersionKey(status: WorkbenchRefreshStatus) {
-  const version = status.readModelVersion ?? status.generatedAt;
-  return version === null || version === undefined ? "" : String(version);
-}
-
-function workbenchRefreshStatusMessage(status: WorkbenchRefreshStatus | null) {
-  if (!status) {
-    return null;
-  }
-  return workbenchReadModelStatusMessage(status.readModelStatus, status.lastError);
 }
 
 export default function ReconciliationWorkbenchPage() {
@@ -431,7 +346,6 @@ export default function ReconciliationWorkbenchPage() {
     percent: null,
     indeterminate: true,
   });
-  const [workbenchRefreshStatus, setWorkbenchRefreshStatus] = useState<WorkbenchRefreshStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -472,8 +386,6 @@ export default function ReconciliationWorkbenchPage() {
   const setOpenDisplayState = openDisplaySession.setValue;
   const columnLayoutSaveRequestIdRef = useRef(0);
   const oaSyncRefreshTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const workbenchRefreshReloadTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const lastWorkbenchRefreshVersionRef = useRef<string>("");
   const previousOaSyncStatusRef = useRef<WorkbenchOaSyncStatus | null>(null);
   const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
   const deferredOpenDisplayState = useDeferredValue(openDisplayState);
@@ -888,59 +800,14 @@ export default function ReconciliationWorkbenchPage() {
     }
   }
 
-  const waitForWorkbenchFreshAfterOperation = useCallback(async () => {
-    const startedAt = Date.now();
-    let lastReadModelStatus = "";
-
-    while (Date.now() - startedAt <= WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS) {
-      const result = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-        background: true,
-        includeAuxiliary: false,
-        zoneQueries: zoneServerPageQueries,
-        propagateError: true,
-      });
-      const pairedStatus = result?.pages.paired.readModelStatus ?? "unknown";
-      const openStatus = result?.pages.open.readModelStatus ?? "unknown";
-      lastReadModelStatus = pairedStatus === openStatus ? pairedStatus : `${pairedStatus}/${openStatus}`;
-      if (workbenchInitialPageIsFresh(result)) {
-        return;
-      }
-      await delayWorkbenchOperationPoll();
-    }
-
-    throw new Error(`关联台最新数据同步超过 ${Math.round(WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS / 1000)} 秒，当前状态：${lastReadModelStatus || "unknown"}。`);
+  const reloadWorkbenchAfterOperation = useCallback(async () => {
+    await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+      background: true,
+      includeAuxiliary: false,
+      zoneQueries: zoneServerPageQueries,
+      propagateError: true,
+    });
   }, [zoneServerPageQueries]);
-
-  const scheduleWorkbenchReadModelReload = useCallback(() => {
-    if (workbenchRefreshReloadTimeoutRef.current !== null) {
-      window.clearTimeout(workbenchRefreshReloadTimeoutRef.current);
-    }
-    workbenchRefreshReloadTimeoutRef.current = window.setTimeout(() => {
-      workbenchRefreshReloadTimeoutRef.current = null;
-      void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-        background: true,
-        includeAuxiliary: false,
-        zoneQueries: zoneServerPageQueries,
-      });
-    }, WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS);
-  }, [zoneServerPageQueries]);
-
-  const applyWorkbenchRefreshStatus = useCallback((status: WorkbenchRefreshStatus) => {
-    setWorkbenchRefreshStatus(status);
-    const nextVersionKey = workbenchRefreshStatusVersionKey(status);
-    const previousVersionKey = lastWorkbenchRefreshVersionRef.current;
-    if (nextVersionKey) {
-      lastWorkbenchRefreshVersionRef.current = nextVersionKey;
-    }
-    if (
-      status.readModelStatus === "fresh"
-      && nextVersionKey
-      && previousVersionKey
-      && previousVersionKey !== nextVersionKey
-    ) {
-      scheduleWorkbenchReadModelReload();
-    }
-  }, [scheduleWorkbenchReadModelReload]);
 
   const handleLoadMoreZone = useCallback(async (zone: "paired" | "open") => {
     const pageInfo = zonePages[zone];
@@ -1049,75 +916,6 @@ export default function ReconciliationWorkbenchPage() {
       return undefined;
     }
     let isActive = true;
-    let pollIntervalId: number | null = null;
-    let pollController: AbortController | null = null;
-    let subscription: { close: () => void } | null = null;
-
-    const pollRefreshStatus = () => {
-      pollController?.abort();
-      const controller = new AbortController();
-      pollController = controller;
-      void fetchWorkbenchRefreshStatus(WORKBENCH_VIEW_MONTH, controller.signal)
-        .then((status) => {
-          if (!isActive || controller.signal.aborted) {
-            return;
-          }
-          applyWorkbenchRefreshStatus(status);
-        })
-        .catch(() => undefined);
-    };
-
-    const startPolling = () => {
-      if (pollIntervalId !== null) {
-        return;
-      }
-      pollRefreshStatus();
-      pollIntervalId = window.setInterval(pollRefreshStatus, WORKBENCH_REFRESH_POLL_INTERVAL_MS);
-    };
-
-    subscription = subscribeWorkbenchRefreshEvents(
-      WORKBENCH_VIEW_MONTH,
-      ({ status }) => {
-        if (isActive) {
-          applyWorkbenchRefreshStatus(status);
-        }
-      },
-      () => {
-        subscription?.close();
-        subscription = null;
-        startPolling();
-      },
-    );
-
-    if (!subscription) {
-      startPolling();
-    }
-
-    const handleFocus = () => {
-      pollRefreshStatus();
-    };
-    window.addEventListener("focus", handleFocus);
-
-    return () => {
-      isActive = false;
-      subscription?.close();
-      if (pollIntervalId !== null) {
-        window.clearInterval(pollIntervalId);
-      }
-      pollController?.abort();
-      if (workbenchRefreshReloadTimeoutRef.current !== null) {
-        window.clearTimeout(workbenchRefreshReloadTimeoutRef.current);
-        workbenchRefreshReloadTimeoutRef.current = null;
-      }
-      window.removeEventListener("focus", handleFocus);
-    };
-  }, [active, applyWorkbenchRefreshStatus]);
-
-  useEffect(() => {
-    if (!active) {
-      return undefined;
-    }
-    let isActive = true;
     let pollController: AbortController | null = null;
 
     const pollOaSyncStatus = () => {
@@ -1189,13 +987,6 @@ export default function ReconciliationWorkbenchPage() {
       setWorkbenchStatus({ level: "error", reason: workbenchData.oaStatus.message });
       return;
     }
-    if (workbenchRefreshStatus?.readModelStatus === "failed" || workbenchRefreshStatus?.readModelStatus === "unavailable") {
-      setWorkbenchStatus({
-        level: "error",
-        reason: workbenchRefreshStatusMessage(workbenchRefreshStatus) ?? "关联台刷新失败",
-      });
-      return;
-    }
     if (oaSyncShellStatus) {
       setWorkbenchStatus(oaSyncShellStatus);
       return;
@@ -1224,7 +1015,6 @@ export default function ReconciliationWorkbenchPage() {
     loadProgress.percent,
     oaSyncShellStatus,
     setWorkbenchStatus,
-    workbenchRefreshStatus,
     workbenchData?.oaStatus?.code,
     workbenchData?.oaStatus?.message,
   ]);
@@ -1512,43 +1302,33 @@ export default function ReconciliationWorkbenchPage() {
     return true;
   }, []);
 
-  const executeWorkbenchActionWithFreshness = useCallback(async ({
+  const executeWorkbenchActionWithReload = useCallback(async ({
     loadingMessage,
-    syncingMessage = "正在同步关联台最新数据...",
     action,
     onProgress,
-    waitForFreshWorkbenchLoad = false,
+    forceReload = false,
   }: {
     loadingMessage: string;
-    syncingMessage?: string;
     action: () => Promise<string | WorkbenchActionResult>;
     onProgress?: WorkbenchActionProgressHandler;
-    waitForFreshWorkbenchLoad?: boolean;
+    forceReload?: boolean;
   }) => {
     onProgress?.({ phase: "submitting", message: loadingMessage, committed: false });
     const result = await action();
     const actionResult = typeof result === "string" ? null : result;
-    const targets = actionFreshnessTargets(actionResult);
     const committed = Boolean(actionResult);
-    if (targets.length > 0) {
-      onProgress?.({ phase: "syncing", message: syncingMessage, committed: true });
-      await waitForOperationFreshness(
-        targets,
-        { timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS },
-      );
-    }
-    const projectionApplied = !waitForFreshWorkbenchLoad && actionResult
+    const projectionApplied = !forceReload && actionResult
       ? applyWorkbenchOperationProjection(actionResult)
       : false;
-    if (waitForFreshWorkbenchLoad || !projectionApplied) {
+    if (forceReload || !projectionApplied) {
       onProgress?.({ phase: "loading", message: "正在加载关联台最新数据...", committed });
-      await waitForWorkbenchFreshAfterOperation();
+      await reloadWorkbenchAfterOperation();
     } else {
       onProgress?.({ phase: "loading", message: "正在更新关联台页面...", committed });
       refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
     }
     return actionResultMessage(result);
-  }, [applyWorkbenchOperationProjection, refreshWorkbenchDataInBackground, waitForWorkbenchFreshAfterOperation]);
+  }, [applyWorkbenchOperationProjection, refreshWorkbenchDataInBackground, reloadWorkbenchAfterOperation]);
 
   const runBlockingAction = useCallback(async ({
     loadingMessage,
@@ -1561,7 +1341,7 @@ export default function ReconciliationWorkbenchPage() {
     const outcome = await runOperation({
       loadingMessage,
       action: async ({ setMessage }) => {
-        return executeWorkbenchActionWithFreshness({
+        return executeWorkbenchActionWithReload({
           loadingMessage,
           action,
           onProgress: (progress) => setMessage(progress.message),
@@ -1572,7 +1352,7 @@ export default function ReconciliationWorkbenchPage() {
     if (outcome.status === "success") {
       setLastActionMessage(outcome.value);
     }
-  }, [executeWorkbenchActionWithFreshness, handleCloseDetail, runOperation]);
+  }, [executeWorkbenchActionWithReload, handleCloseDetail, runOperation]);
 
   const openRelationPreviewErrorDialog = useCallback((error: unknown) => {
     openActionResultDialog(actionErrorMessage(error), "操作失败");
@@ -1582,33 +1362,17 @@ export default function ReconciliationWorkbenchPage() {
     result: WorkbenchExceptionApplyResult,
     onProgress: WorkbenchActionProgressHandler,
   ) => {
-    const targets = result.operationBarrierTargets.length > 0
-      ? result.operationBarrierTargets.filter((target) => target.scopeKey !== "all")
-      : result.freshnessTargets.length > 0
-        ? result.freshnessTargets.filter((target) => target.scopeKey !== "all")
-        : operationBarrierTargets("workbench_relation", result.affectedScopeKeys);
-    if (targets.length > 0) {
-      onProgress({
-        phase: "syncing",
-        message: "异常处理已写入，正在同步关联台最新数据...",
-        committed: true,
-      });
-      await waitForOperationFreshness(
-        targets,
-        { timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS },
-      );
-    }
-    if (result.workbenchRefreshRequired || targets.length > 0) {
+    if (result.workbenchRefreshRequired) {
       onProgress({
         phase: "loading",
         message: "正在加载关联台最新数据...",
         committed: true,
       });
-      await waitForWorkbenchFreshAfterOperation();
+      await reloadWorkbenchAfterOperation();
     }
     clearOpenSelection();
     setLastActionMessage(result.message ?? "已提交统一异常处理。");
-  }, [clearOpenSelection, waitForWorkbenchFreshAfterOperation]);
+  }, [clearOpenSelection, reloadWorkbenchAfterOperation]);
 
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
@@ -1817,9 +1581,8 @@ export default function ReconciliationWorkbenchPage() {
     const { preview, rowIds, caseId } = relationPreviewDialog;
     if (preview.operation === "confirm_link") {
       let submittedResult: WorkbenchActionResult | null = null;
-      const message = await executeWorkbenchActionWithFreshness({
+      const message = await executeWorkbenchActionWithReload({
         loadingMessage: "正在确认关联...",
-        syncingMessage: "关系已写入，正在同步关联台最新数据...",
         onProgress,
         action: async () => {
           const result = await confirmWorkbenchLink({
@@ -1845,13 +1608,9 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     const operationCopy = relationPreviewOperationCopy(preview);
-    const syncingMessage = preview.operation === "split_candidate"
-      ? "候选已拆分，正在同步关联台最新数据..."
-      : "关系已写入，正在同步关联台最新数据...";
     let submittedResult: WorkbenchActionResult | null = null;
-    const message = await executeWorkbenchActionWithFreshness({
+    const message = await executeWorkbenchActionWithReload({
       loadingMessage: operationCopy.submittingMessage,
-      syncingMessage,
       onProgress,
       action: async () => {
         const result = await withdrawWorkbenchLink({
@@ -2084,8 +1843,6 @@ export default function ReconciliationWorkbenchPage() {
     [handleOpenIgnoredModal, handleOpenProcessedExceptionsModal, ignoredData.rows.length, processedExceptionRows.length],
   );
 
-  const workbenchPageReadModelStatus = workbenchZonePagesReadModelStatus(zonePages);
-  const isWorkbenchPageFresh = workbenchPageReadModelStatus === "fresh";
   const isEmpty = (workbenchData?.summary.totalCount ?? 0) === 0;
   const oaStatus = workbenchData?.oaStatus ?? null;
   const isOaReady = oaStatus?.code === "ready";
@@ -2188,7 +1945,7 @@ export default function ReconciliationWorkbenchPage() {
         {!loadError && oaStatusPanelMessage ? (
           <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
         ) : null}
-        {!isLoading && !loadError && isEmpty && isOaReady && isWorkbenchPageFresh ? (
+        {!isLoading && !loadError && isEmpty && isOaReady ? (
           <div className="state-panel">当前没有可展示的 OA / 银行流水 / 发票记录。</div>
         ) : null}
 
@@ -2475,7 +2232,7 @@ function RelationPreviewDialog({
         committed,
         retryable,
         message: committed
-          ? `关系已写入，关联台刷新未完成：${message}`
+          ? `关系已写入，页面刷新失败：${message}`
           : retryable
             ? message
             : relationPreviewNonRetryableMessage(message),

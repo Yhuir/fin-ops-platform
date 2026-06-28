@@ -27,7 +27,6 @@ import {
   savePendingInvoiceIncomeStatuses,
 } from "../features/pendingInvoices/api";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
-import { OperationBarrierTimeoutError, operationBarrierTargets, operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
 import type {
   AttachExistingInvoiceResult,
   AttachExistingInvoicesResult,
@@ -112,27 +111,6 @@ function effectiveBackendFilter(direction: PendingInvoiceDirection, selectedFilt
       .map((option) => option.backendFilter),
   );
   return backendFilters.size === 1 ? [...backendFilters][0] : "all";
-}
-
-function pendingInvoiceRuleRefreshScopes(
-  rulesDirection: RulesDirection,
-  currentDirection: PendingInvoiceDirection,
-  currentFilters: StatusFilterSelection[],
-) {
-  const refreshFilter = currentDirection === rulesDirection ? effectiveBackendFilter(currentDirection, currentFilters) : "all";
-  return [`${rulesDirection}:${refreshFilter}`];
-}
-
-function pendingInvoiceAttachRefreshScopes(
-  currentDirection: PendingInvoiceDirection,
-  currentFilters: StatusFilterSelection[],
-  affectedMonths: string[],
-) {
-  const refreshDirection: RulesDirection = currentDirection === "income" ? "income" : "expense";
-  const refreshFilter = effectiveBackendFilter(refreshDirection, currentFilters);
-  const baseScope = `${refreshDirection}:${refreshFilter}`;
-  const months = Array.from(new Set(affectedMonths.map((month) => month.trim()).filter(Boolean)));
-  return months.length > 0 ? months.map((month) => `${baseScope}:${month}`) : [baseScope];
 }
 
 function transactionIdForRow(row: PendingInvoiceRow) {
@@ -233,7 +211,6 @@ export default function PendingInvoicesPage() {
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [readModelStatus, setReadModelStatus] = useState("");
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
@@ -264,7 +241,6 @@ export default function PendingInvoicesPage() {
     setRows(payload.rows);
     setTotal(payload.pagination.total);
     setSourceSummary(payload.summary.sourceSummary ?? null);
-    setReadModelStatus(payload.readModelStatus);
     const version = payload.tagDictionary?.version;
     if (typeof version === "number" && version > 0) {
       const previousVersion = tagVersionRef.current;
@@ -379,7 +355,7 @@ export default function PendingInvoicesPage() {
     sortField,
     sortDirection,
   }), [sortDirection, sortField]);
-  const exportDisabled = Boolean(error) || Boolean(readModelStatus && readModelStatus !== "fresh");
+  const exportDisabled = Boolean(error);
   const isTransactionSelectable = useCallback((row: PendingInvoiceRow) => {
     if (direction === "expense") {
       return row.availableActions.includes("attach_existing_invoice");
@@ -481,21 +457,11 @@ export default function PendingInvoicesPage() {
       source: "pending_invoice_attach_existing_invoice",
     });
     const operationResult = await runOperation({
-      loadingMessage: "正在等待关联关系同步...",
+      loadingMessage: "正在刷新待找发票...",
       blockOnError: false,
       action: async ({ setMessage }) => {
         if (result.row) {
           setRows((current) => current.map((row) => (row.id === result.row?.id ? result.row : row)));
-        }
-        try {
-          await waitForOperationFreshness([
-            ...operationBarrierTargetsFromMonths("workbench_relation", result.affectedMonths),
-            ...operationBarrierTargets("pending_invoice", pendingInvoiceAttachRefreshScopes(direction, statusFilters, result.affectedMonths)),
-          ]);
-        } catch (caught) {
-          if (!(caught instanceof OperationBarrierTimeoutError)) {
-            throw caught;
-          }
         }
         setMessage("正在刷新待找发票...");
         const rowsPayload = await fetchPendingInvoiceRows(query);
@@ -522,16 +488,6 @@ export default function PendingInvoicesPage() {
       blockOnError: false,
       action: async ({ setMessage }) => {
         const savedPayload = await savePendingInvoiceRules(payload, rulesDirection);
-        setMessage("正在等待待找发票读模型同步...");
-        try {
-          await waitForOperationFreshness(
-            operationBarrierTargets("pending_invoice", pendingInvoiceRuleRefreshScopes(rulesDirection, direction, statusFilters)),
-          );
-        } catch (caught) {
-          if (!(caught instanceof OperationBarrierTimeoutError)) {
-            throw caught;
-          }
-        }
         setMessage("正在刷新待找发票...");
         const rowsPayload = await fetchPendingInvoiceRows(query);
         applyRowsPayload(rowsPayload);
@@ -628,15 +584,6 @@ export default function PendingInvoicesPage() {
               const updatedRows = new Map(result.rows.map((row) => [row.id, row]));
               setRows((current) => current.map((item) => updatedRows.get(item.id) ?? item));
             }
-            try {
-              await waitForOperationFreshness(
-                operationBarrierTargets("pending_invoice", pendingInvoiceAttachRefreshScopes("income", statusFilters, result.affectedMonths)),
-              );
-            } catch (caught) {
-              if (!(caught instanceof OperationBarrierTimeoutError)) {
-                throw caught;
-              }
-            }
             setMessage("正在刷新待找发票...");
             const rowsPayload = await fetchPendingInvoiceRows(query);
             applyRowsPayload(rowsPayload);
@@ -663,13 +610,7 @@ export default function PendingInvoicesPage() {
       });
   }, [applyRowsPayload, canMutateData, clearSelectedTransactions, query, runOperation, selectedRows, statusFilters]);
 
-  const compactStatusText = error
-    ? error
-    : readModelStatus === "refreshing"
-      ? "数据刷新中"
-      : readModelStatus && !["fresh", "refreshing"].includes(readModelStatus)
-        ? `读模型 ${readModelStatus}，写入和导出已暂停`
-        : "";
+  const compactStatusText = error ?? "";
 
   const summaryCounts = {
     all: sourceSummary?.bankTransactionRows ?? 0,
@@ -787,7 +728,7 @@ export default function PendingInvoicesPage() {
           className="pending-invoices-toolbar"
           left={(
             <div
-              className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : readModelStatus && !["fresh", "refreshing"].includes(readModelStatus) ? " pending-invoices-status-text--warning" : ""}`}
+              className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : ""}`}
               role={error ? "alert" : "status"}
             >
               {compactStatusText}

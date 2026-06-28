@@ -17,7 +17,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Callable, Protocol
 import xml.etree.ElementTree as ET
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 from zipfile import BadZipFile, ZipFile
@@ -179,6 +179,22 @@ class NotConfiguredEtcOAClient:
         raise EtcOAClientError("ETC OA client is not configured.")
 
 
+def _normalize_oa_attachment_reference(value: str) -> str:
+    trimmed = value.strip()
+    parsed = urlsplit(trimmed)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        path = parsed.path
+        if path.startswith("/oa-api/fileManager/"):
+            path = path.removeprefix("/oa-api")
+        if path.startswith("/fileManager/"):
+            if parsed.query:
+                path = f"{path}?{parsed.query}"
+            if parsed.fragment:
+                path = f"{path}#{parsed.fragment}"
+            return path
+    return trimmed
+
+
 @dataclass(frozen=True, slots=True)
 class EtcOAHttpClientSettings:
     base_url: str | None
@@ -252,9 +268,9 @@ class HttpEtcOAClient:
             for key in ("url", "id", "fileId", "file_id", "path"):
                 value = data.get(key)
                 if value not in (None, ""):
-                    return str(value)
+                    return _normalize_oa_attachment_reference(str(value))
         if isinstance(data, str) and data.strip():
-            return data.strip()
+            return _normalize_oa_attachment_reference(data)
         raise EtcOAClientError("OA attachment upload response did not include a file id or URL.")
 
     def create_form_draft(self, *, form_id: int, payload: dict[str, object]) -> tuple[str, str]:

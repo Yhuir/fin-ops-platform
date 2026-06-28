@@ -25,9 +25,9 @@
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
 - 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
+- API contract、DTO shape、错误字段、权限校验、状态值或 direct payload 字段变化。
+- 业务状态、UI 状态、派生数据状态、worker 状态或状态流转变化。
+- 跨页面刷新、domain event、derived lifecycle、真实后台任务、outbox 或缓存边界变化。
 - 测试入口、回归范围、验证命令或未测风险变化。
 
 ## 本目录文件

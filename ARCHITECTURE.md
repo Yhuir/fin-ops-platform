@@ -10,6 +10,10 @@
 - OA 数据源：通过 `MongoOAAdapter` 只读读取 OA MongoDB。
 - 部署：当前已有 OA 同域部署资产，前端路径 `/fin-ops/`，后端路径 `/fin-ops-api/`。
 
+## 目标架构变更
+
+2026-06-26 起，页面读路径目标改为 direct API：所有业务页面通过 API 直接从 PostgreSQL canonical facts、OA SQL projection、导入事实和业务 repository 查询并组装 DTO，不再新增或扩展页面 read model。现有 `read_model.*`、read model refresh worker、freshness gate 和 operation barrier 只作为 legacy migration inventory，迁移和删除计划见 `docs/architecture/direct-api-read-architecture.md` 与 `.planning/refactors/remove-read-models/`。
+
 ## 核心模块
 
 | 模块 | 职责 | 主要文档 |
@@ -31,16 +35,13 @@ OA MongoDB       Excel/PDF/ZIP 导入
    v                    v
 OA Adapter       Import/File Services
    |                    |
-   +------> 业务服务与状态投影 <------+
+   +------> 业务服务与 canonical facts <------+
                     |                 |
                     v                 |
               PostgreSQL app store    |
                     |                 |
                     v                 |
-        Workbench pair relations      |
-                    |                 |
-                    v                 |
-        Workbench read models / search|
+        Direct query services / repositories
                     |                 |
                     v                 |
               React 前端页面
@@ -49,19 +50,19 @@ OA Adapter       Import/File Services
 ## 架构原则
 
 - 核销事实必须落到结构化模型，不靠备注表达业务状态。
-- 写模型和读模型分离：确认、撤回、异常处理只改最小事实；页面读取优先走物化读模型。工作台读模型采用 generation 原子发布，刷新期间只暴露最近 active generation，不读取 building/failed 中间状态。
+- 页面读取目标是 direct API：确认、撤回、异常处理只改最小事实；页面 GET 由 query service/repository 直接读取 canonical facts、OA projection 和导入事实并组装 DTO。旧物化读模型不再作为新增设计方向。
 - 外部系统只通过适配层接入，OA 原始库保持只读。
 - 导入必须先预览后确认，确认动作必须幂等并可审计。
 - 生产操作必须有权限、审计、状态反馈和回滚路径。
 
 ## 性能演进方向
 
-当前系统已经拆出 pair relations、read models、candidate matches、dirty scopes 等性能相关模型。后续如果做高性能生产重构，建议优先处理：
+历史上系统曾拆出 pair relations、read models、candidate matches、dirty scopes 等性能相关模型。新的性能演进方向是不继续扩大 read model，而是把页面迁移到可索引的 direct API 查询；legacy read-model 只作为迁移删除清单。后续如果做高性能生产重构，建议优先处理：
 
 1. 完成 PostgreSQL primary 的观察期，保留 app Mongo 回滚路径直到 contract 阶段。
 2. 继续把 `ApplicationStateStore` 中的兼容 snapshot 语义收敛成明确 repository。
-3. 将工作台、搜索、成本统计、税金抵扣的高频查询进一步优化为数据库可索引查询和物化读模型；工作台 Redis page cache 以 active generation 作为版本边界。
-4. 将导入、OCR、OA 同步、统计预热迁入后台任务。
+3. 将工作台、搜索、成本统计、税金抵扣的高频查询改为数据库可索引 direct SQL/query service；只有真实性能证据不足时再考虑短 TTL response cache，不能恢复 read model freshness proof。
+4. 将导入、OCR、OA 同步等真正异步工作保留在后台任务；删除页面 read model refresh worker。
 5. 对核心接口建立压测基线和 `EXPLAIN ANALYZE` 调优闭环。
 
 详细文档见 `docs/architecture/index.md`。

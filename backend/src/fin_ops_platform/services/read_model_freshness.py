@@ -23,6 +23,24 @@ def normalize_source_versions(source_versions: Any) -> dict[str, str]:
     return normalized
 
 
+def build_fresh_cache_envelope(
+    payload: dict[str, Any],
+    *,
+    scope_key: str,
+    source_versions: dict[str, Any] | None,
+    schema_version: Any | None = None,
+) -> dict[str, Any]:
+    return {
+        "payload": payload,
+        "fresh_gate": {
+            "scope_key": scope_key,
+            "status": "fresh",
+            "schema_version": str(schema_version) if schema_version not in (None, "") else "",
+            "source_versions": normalize_source_versions(source_versions),
+        },
+    }
+
+
 def require_expected_source_versions(source_versions: Any, *, context: str) -> dict[str, str]:
     normalized = normalize_source_versions(source_versions)
     if not normalized:
@@ -58,9 +76,9 @@ class ReadModelFreshness:
     stale_reasons: tuple[str, ...] = ()
 
     def as_payload(self) -> dict[str, object]:
-        payload: dict[str, object] = {"read_model_status": self.status}
+        payload: dict[str, object] = {"status": self.status}
         if self.stale_reasons:
-            payload["read_model_stale_reasons"] = list(self.stale_reasons)
+            payload["stale_reasons"] = list(self.stale_reasons)
         return payload
 
 

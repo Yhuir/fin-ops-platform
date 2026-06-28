@@ -14,9 +14,7 @@ import ReceiptHistoryDrawer from "../components/outputInvoiceCollections/Receipt
 import ReceiptPreviewDrawer from "../components/outputInvoiceCollections/ReceiptPreviewDrawer";
 import ReceiptSettingsDrawer from "../components/outputInvoiceCollections/ReceiptSettingsDrawer";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
-import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   cancelOutputInvoiceCollectionReminder,
   downloadOutputInvoiceCollectionExport,
@@ -66,23 +64,6 @@ const initialQuery: OutputInvoiceCollectionQuery = {
   activeWorkflow: null,
   detailTarget: null,
 };
-const READ_MODEL_REFRESH_RETRY_MS = 10000;
-const READ_MODEL_REFRESHING_STATUSES = new Set(["refreshing", "stale", "missing", "schema_mismatch"]);
-const READ_MODEL_NON_FRESH_STATUSES = new Set([...READ_MODEL_REFRESHING_STATUSES, "failed", "unavailable"]);
-
-function normalizeReadModelStatus(value: string | undefined) {
-  return (value ?? "").trim().toLowerCase();
-}
-
-function combineReadModelStatus(...statuses: Array<string | undefined>) {
-  const normalized = statuses.map(normalizeReadModelStatus).filter(Boolean);
-  if (normalized.some((status) => READ_MODEL_REFRESHING_STATUSES.has(status))) {
-    return "refreshing";
-  }
-  const nonFresh = normalized.find((status) => READ_MODEL_NON_FRESH_STATUSES.has(status));
-  return nonFresh ?? normalized[0] ?? "";
-}
-
 function isFilterArray(value: unknown): value is OutputInvoiceCollectionFilter[] {
   return Array.isArray(value) && value.every((item) => (
     item
@@ -202,7 +183,6 @@ function normalizeFilterValue(filter: {
 }
 
 export default function OutputInvoiceCollectionsPage() {
-  const { active } = useOptionalPageActivation("output-invoice-collections");
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const querySession = usePageSessionState({
     pageKey: "output-invoice-collections",
@@ -224,7 +204,6 @@ export default function OutputInvoiceCollectionsPage() {
   const [statusRulesPayload, setStatusRulesPayload] = useState<OutputInvoiceCollectionStatusRulesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [readModelStatus, setReadModelStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
@@ -274,7 +253,6 @@ export default function OutputInvoiceCollectionsPage() {
         setTotal(payload.pagination.total);
         setFilterConfigs(payload.filterConfig.length > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields));
         setFilterOptions(filterOptionsByField(optionsPayload.fields));
-        setReadModelStatus(combineReadModelStatus(payload.readModelStatus, optionsPayload.readModelStatus));
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -284,7 +262,6 @@ export default function OutputInvoiceCollectionsPage() {
         setTotal(0);
         setFilterConfigs([]);
         setFilterOptions({});
-        setReadModelStatus("");
         setError(caught instanceof Error ? caught.message : "销项发票收款情况加载失败，请稍后重试。");
       })
       .finally(() => {
@@ -310,14 +287,6 @@ export default function OutputInvoiceCollectionsPage() {
     loadRows("reset", controller.signal);
     return () => controller.abort();
   }, [loadRows]);
-
-  useEffect(() => {
-    if (!active || readModelStatus !== "refreshing" || loading || refreshing) {
-      return undefined;
-    }
-    const retryId = window.setTimeout(() => loadRows("refresh"), READ_MODEL_REFRESH_RETRY_MS);
-    return () => window.clearTimeout(retryId);
-  }, [active, loadRows, loading, readModelStatus, refreshing]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({
@@ -470,20 +439,9 @@ export default function OutputInvoiceCollectionsPage() {
     return code ? [{ code, label }] : [];
   }, [collectionStatusRow, manualStatusOptions]);
 
-  const handleLifecycleChanged = useCallback(async (result?: OutputInvoiceCollectionMutationResponse | null) => {
-    const responseTargets = (result?.operationBarrierTargets ?? result?.freshnessTargets ?? [])
-      .filter((target) => target.scopeKey && target.scopeKey !== "all");
-    const targets = responseTargets.length > 0
-      ? responseTargets
-      : operationBarrierTargets("output_invoice_collection", [query.month || "all"]);
-    try {
-      await waitForOperationFreshness(targets);
-      loadRows("refresh");
-    } catch {
-      // The write already committed. Do not immediately reread a projection that
-      // the runtime has reported as not yet fresh.
-    }
-  }, [loadRows, query.month]);
+  const handleLifecycleChanged = useCallback(async (_result?: OutputInvoiceCollectionMutationResponse | null) => {
+    loadRows("refresh");
+  }, [loadRows]);
 
   const exportRequest = useMemo(() => ({
     page: query.page,
@@ -506,9 +464,7 @@ export default function OutputInvoiceCollectionsPage() {
     query.sortDirection,
     query.sortField,
   ]);
-  const isReadModelNonFresh = READ_MODEL_NON_FRESH_STATUSES.has(readModelStatus);
-  const isReadModelRefreshing = READ_MODEL_REFRESHING_STATUSES.has(readModelStatus);
-  const exportDisabled = Boolean(error) || isReadModelNonFresh;
+  const exportDisabled = Boolean(error);
   const loadExportPreview = useCallback(() => fetchOutputInvoiceCollectionExportPreview(exportRequest), [exportRequest]);
   const downloadExport = useCallback(() => downloadOutputInvoiceCollectionExport(exportRequest), [exportRequest]);
 
@@ -548,7 +504,7 @@ export default function OutputInvoiceCollectionsPage() {
       ) : null}
     </div>
   ), [canAdminAccess, exportDisabled, handleOpenWorkflow, loadRows, loading, refreshing]);
-  const isEmpty = !loading && !error && !isReadModelNonFresh && rows.length === 0;
+  const isEmpty = !loading && !error && rows.length === 0;
 
   return (
     <>
@@ -602,36 +558,29 @@ export default function OutputInvoiceCollectionsPage() {
             </div>
           ) : (
             <>
-              {isReadModelNonFresh ? (
-                <StatePanel tone={isReadModelRefreshing ? "loading" : "warning"} compact title="销项发票收款情况数据正在刷新">
-                  当前数据仍在刷新或等待后台任务完成，请稍后重试。
-                </StatePanel>
-              ) : null}
               {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
-              {!isReadModelNonFresh ? (
-                <OutputInvoiceCollectionsTable
-                  rows={rows}
-                  page={query.page}
-                  pageSize={query.pageSize}
-                  total={total}
-                  sortField={query.sortField}
-                  sortDirection={query.sortDirection}
-                  filters={query.filters}
-                  filterConfigs={filterConfigs}
-                  filterOptions={filterOptions}
-                  canMutateData={canMutateData}
-                  expandedCells={expandedCells}
-                  onToggleCellExpand={handleToggleCellExpand}
-                  onOpenDetail={handleOpenDetail}
-                  onOpenWorkflow={handleOpenWorkflow}
-                  onFilterApply={handleFilterApply}
-                  onFilterClear={handleFilterClear}
-                  onSortChange={handleSortChange}
-                  onPageChange={handlePageChange}
-                  onPageSizeChange={handlePageSizeChange}
-                  emptyStateMessage={error ? "销项发票收款情况加载失败，请点击刷新重试。" : undefined}
-                />
-              ) : null}
+              <OutputInvoiceCollectionsTable
+                rows={rows}
+                page={query.page}
+                pageSize={query.pageSize}
+                total={total}
+                sortField={query.sortField}
+                sortDirection={query.sortDirection}
+                filters={query.filters}
+                filterConfigs={filterConfigs}
+                filterOptions={filterOptions}
+                canMutateData={canMutateData}
+                expandedCells={expandedCells}
+                onToggleCellExpand={handleToggleCellExpand}
+                onOpenDetail={handleOpenDetail}
+                onOpenWorkflow={handleOpenWorkflow}
+                onFilterApply={handleFilterApply}
+                onFilterClear={handleFilterClear}
+                onSortChange={handleSortChange}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+                emptyStateMessage={error ? "销项发票收款情况加载失败，请点击刷新重试。" : undefined}
+              />
             </>
           )}
         </div>

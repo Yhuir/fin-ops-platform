@@ -1,33 +1,32 @@
-# Worker + Read Model 统一治理
+# Worker + Legacy Read Model 统一治理
 
-本页描述生产和开发环境如何统一管理 `fin-ops-platform` runtime worker 与 SQL read model。
+本页描述生产和开发环境如何统一管理 `fin-ops-platform` runtime worker 与 legacy SQL read model。
 治理闭环不引入 Celery/RQ/Redis Queue 等新任务框架：PostgreSQL durable queue 是任务和
 read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写入任务、记录 heartbeat、
 暴露健康状态和给出运维提示。
 
-本文同时维护 read model production audit、SQL-native hardening、bank detail/read model backfill、
+2026-06-26 起，页面读路径目标改为 direct API，read model refresh worker、dirty scope、readiness 和 SLO smoke 是下线对象。新增 worker 只允许用于导入、OA 同步、文件迁移、外部系统同步和受控修复等真实异步任务。目标架构见 `../architecture/direct-api-read-architecture.md`。
+
+本文同时维护 legacy projection production audit、SQL-native hardening、bank detail/legacy projection backfill、
 invoice usage/output collection backfill、App Health/workbench performance 和 worker 运维治理的长期结论。
 阶段报告和一次性执行记录不再单独保留。
 
 ## Hardening 基线
 
-- SQL-native read model 必须有 source version guard，避免读取旧 projection 并标记为 fresh。
-- rebuild/backfill 应按 scope 批量执行，避免逐行重建。
+- legacy SQL projection 是下线对象；不得把旧 projection/readiness 恢复为页面 freshness proof。
+- 真实后台 rebuild/backfill 应按业务事实或 outbox 批量执行，避免逐行重建。
 - 请求线程不做高成本 live rebuild；miss/stale 返回 refresh 状态并 enqueue。
 - 关键 query 需要保留 EXPLAIN/性能观测入口；性能结论进入 `monitoring.md` 或本文，而不是保留一次性 audit。
 - Redis payload 必须在 fresh gate 后写入，并设置可解释 TTL。
 
 ## 管理边界
 
-- App 负责：通过 `RuntimeQueueRepository` 写入 `job.outbox_events`、`job.read_model_dirty_scopes`，
-  接收 worker heartbeat，并在 `/health` 与 App Health 中暴露 missing/stale/mismatch/backlog。
+- App 负责：通过 `RuntimeQueueRepository` 写入 `job.outbox_events`，接收 worker heartbeat，并在 `/health` 与 App Health 中暴露 missing/stale/mismatch/backlog。
 - systemd 负责：启动、停止、重启 worker 进程，保持进程常驻。
 - deploy helper 负责：从 registry 生成 required worker 矩阵，安装 env，执行 `--check`，重启
   systemd unit，并在发布阶段等待 worker readiness 收敛。
 - 用户只看到业务状态：queued、running、refreshing、stale、failed。用户不直接 start/stop worker。
-- read model query service 负责：通过统一 freshness/status gate 判定是否可读 SQL projection；
-  missing、dirty、schema mismatch、source version mismatch 都必须返回 refreshing 并入队。
-- read model refresh worker 负责：消费 durable queue event，重建 projection，完成 dirty scope。
+- legacy projection query service / refresh worker 是下线对象；新页面不得新增 freshness/status gate、dirty scope 或 page read-model refresh worker。
   worker 不构造页面 payload，也不读取 HTTP cookie/header。
 
 ## 单一事实源
@@ -52,185 +51,76 @@ python -m fin_ops_platform.tools.runtime_worker_manifest --env-example workbench
 python -m fin_ops_platform.tools.runtime_worker_manifest --worker-check-command workbench
 ```
 
-不要在部署脚本、文档或 runbook 中手写另一份 required worker 列表。新增 read model refresh
-event 或 worker instance 时，必须先更新 registry，再让 deploy/preflight/monitoring 从 registry
-推导。
+不要在部署脚本、文档或 runbook 中手写另一份 required worker 列表。不得新增页面 read model refresh event。新增真实后台 worker instance 时，必须先更新 registry，再让 deploy/preflight/monitoring 从 registry 推导；迁移 read model 下线时同步删除 registry、env、systemd、RabbitMQ dispatch 和 smoke 引用。
 
 本地 parity 门禁必须把这些事实源绑在一起：
 
-- `APP_STATUS_READ_MODEL_REGISTRY` 中的每个 read model 必须有对应 required worker registration、refresh event、RabbitMQ dispatch event 和 SLO smoke 计划。
+- `APP_STATUS_READ_MODEL_REGISTRY` 中的每个 legacy read model 必须有对应 required worker registration、refresh event 和 RabbitMQ dispatch event，直至该 read model 下线。
 - `tests/test_postgres_migrations.py` 的 read model storage contract 必须覆盖每个 App Status read model；新增 SQL projection 表时不能只写 migration 而不更新本地 schema 基线。
-- `read_model_slo_smoke --critical-only` 必须规划所有 critical App Status read model；dry-run 只证明 scope discovery，`--apply` 才证明真实 enqueue-to-fresh worker drain。
 - `fin-ops.rabbitmq-worker.env` 只放共享 RabbitMQ 凭据和 consumer fallback 参数，不设置 `FIN_OPS_QUEUE_BACKEND`；RabbitMQ 灰度切换只能发生在单 worker instance env。
 - Redis 生产 env 模板必须和 `RuntimeRedisSettings.from_env()` 保持一致；Redis 只能缓存 fresh gate 后 payload，不能成为 worker/readiness 状态事实源。
 
-## Read Model 查询合同
+## Legacy Read Model 查询合同
 
-页面读取 SQL read model 时，必须先经过统一 freshness/status 边界：
+页面读路径目标是 direct API，不能再新增页面级 read model freshness/status 合同。保留的 SQL read model 查询只用于后台兼容、运维诊断、worker 闭环或尚未完成的 legacy projection。
 
-1. route 只解析 HTTP 参数并调用 query service。
-2. query service 调 `ReadModelQueryGateway` 或同等统一 freshness resolver，并必须声明 `expected_source_versions` 或 `expected_schema_version`。
-3. fresh 时才允许读取 SQL payload，并且 Redis 只可缓存 fresh gate 之后的 payload；fresh gate 必须同时带 scope、schema/source metadata proof。
-4. missing、dirty、schema mismatch、schema proof missing、source version missing/mismatch 时返回 `read_model_status=refreshing`，
-   同时通过 `ReadModelRefreshGateway` 入队。
-5. query service 缺少 expected freshness contract 属于代码配置错误，应 fail fast，不能默认空 versions 后继续返回 fresh。
-6. unavailable 时由 route 映射 HTTP 状态，不能把不可用 projection 包装成 fresh。
+保留 legacy 查询时必须满足：
 
-统一响应至少应包含：
-
-- `read_model_status`
-- `read_model_scope_key`
-- `source_versions`
-- `read_model_stale_reasons`
-- `refresh_enqueued`
-
-Redis cache key 必须包含 schema/source versions/generation/query hash。RabbitMQ 只能作为可选
-transport/wakeup，不能作为 read model 状态事实源。
+1. 不作为页面 GET 返回前置条件。
+2. 不把 `read_model_status`、scope、stale reasons 或 `refresh_enqueued` 透传给页面合同。
+3. 缺少 expected freshness contract 属于代码配置错误，应 fail fast，不能默认空 versions 后继续返回 fresh。
+4. Redis 只能缓存已证明 fresh 的后台 payload，不能成为 worker/readiness 状态事实源。
+5. RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
 
 ## Read Model 刷新链路
 
-刷新请求只允许写入 PostgreSQL durable queue：
+Legacy read-model 刷新请求是下线对象。保留本节只用于识别并删除旧兼容面：
 
-- `ReadModelRefreshGateway` / scope policy registry：在写入 durable queue 前统一做 read model scope normalize、validate 和 dedupe；具体 read model 的 scope contract 不放进 `RuntimeQueueRepository`。
-- `job.read_model_dirty_scopes`：scope 的刷新状态事实源。
-- `job.outbox_events`：worker 可 claim 的事件事实源。
-- `RuntimeQueueRepository.enqueue_read_model_refresh(...)`：gateway 和事务内 writer 委托的 durable queue 写入入口。
-- 事务内 writer：写业务数据时需要同事务标记 dirty/outbox 时使用。
+- `ReadModelRefreshGateway` / scope policy registry：legacy compatibility shell；不得作为页面同步路径。
+- `job.read_model_dirty_scopes`：legacy page read-model scope 状态表；不得作为 App Health、`/health` 或页面可读证明。
+- `job.outbox_events`：真实 worker 可 claim 的事件事实源。
+- `RuntimeQueueRepository.enqueue_read_model_refresh(...)`：已删除兼容入口；未登记 `.read_model.refresh` 必须 no-op。
+- 事务内 writer：真实业务后台事件使用 `job.outbox_events`；不得直接 SQL 写 legacy read-model scope。
 
-业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。refresh service
-完成 projection 后调用 queue repository 完成 dirty scope；失败或 dead-letter 后由运维 inspect/requeue。
+业务 service 不直接 SQL 写 `job.outbox_events` 或 legacy read-model scope 表。真实后台失败或 dead-letter 后由运维 inspect/requeue；页面 read-model dirty/readiness 残留留给 cleanup wave。
 
 如果 downstream refresh handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，runtime worker
 会调用 `RuntimeQueueRepository.defer_event(...)`，把该 outbox event 短延迟放回 `pending`，生产模板默认 0.25 秒后
 重新 claim。这只用于依赖顺序竞态，不写 fresh readiness、不缓存 payload，也不进入 failed/dead-letter。
 
-### Read model scope contract 检查
+### Deleted read-model scope repair
 
-发布前后或 App Status 出现无法解释的 cost statistics failed/refreshing scope 时，先运行只读检查：
+旧 `read-model-scope-contract` deploy helper、`scripts/check-read-model-scope-contracts.py` 和对应服务/测试已删除。页面级 read model scope repair 不再是生产恢复入口；不得通过删除 legacy scope、补投 replacement scope 或写 readiness 来制造“已同步”。
 
-```bash
-sudo -n /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
-```
+App Status 仍出现历史 read-model dirty/outbox/readiness 残留时，处理原则是：
 
-脚本会检查 `job.read_model_dirty_scopes`、`job.outbox_events` 与 `read_model.app_status_readiness`
-中不符合当前 registry 的 `cost_statistics` scope，同时扫描未完成或 publish 异常的
-read model outbox event 是否已有 later done 或 fresh readiness 覆盖。发现 violation、历史已覆盖 outbox
-或 current uncovered failure 时默认返回非 0，JSON 的 `repair_manifest` 会区分：
+- 先判断是否影响当前 direct API 页面读取；direct API 不应依赖这些旧行。
+- 对真实后台任务 outbox 使用 `runtime_queue_ops inspect`、`requeue`、`release-stale-processing` 或 `resolve-superseded-processing`。
+- 对仅属于已删除页面 read model 的残留，记录为 legacy residue，优先在后续 migration/cleanup wave 删除存储和监控入口，而不是恢复 repair helper。
+- 禁止新增页面 `.read_model.refresh` worker、freshness proof 或 scope cleanup 工具。
 
-- `legacy`：如 `2026-03`、裸 `all`，可归一化为规范 `active/all` scope。
-- `invalid`：如未知 project scope，当前 registry 无法解释，不猜测 replacement。
-- `covered_historical_outbox_failures`：同一 tenant/event/scope 后续已有 `done` 或 `fresh` readiness，可进入人工 resolve/归档候选；字段名沿用历史命名，但 App Status current-effective 口径也会过滤旧 pending/backlog。
-- `current_uncovered_outbox_failures`：没有后续成功或 fresh 证明，仍然是当前真实 blocker，必须调查 worker、query、数据或重投原因。
+### Legacy Workbench Projection Residue
 
-dry-run JSON 必须随发布/修复记录归档，至少保留 `repair_manifest.items[]` 的 `scope_type`、`scope_key`、
-`event_type`、`status`、`last_error`、`updated_at`、`covered_by`、`proposed_action` 和 `rollback_hint`。
+Workbench 页面读路径不再保留 active generation 原子发布模型；`read_model.workbench_generations.status='active'`
+只属于 legacy storage/migration residue，不再是页面 GET 读路径、readiness proof 或 freshness gate。
 
-确认报告后执行受控修复：
-
-```bash
-sudo -n /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> \
-  --apply \
-  --reason production_scope_contract_repair \
-  --json
-```
-
-`--apply` 只删除非规范的 `cost_statistics` runtime 状态，并通过 `ReadModelRefreshGateway` 补投
-可归一化的 replacement scope；不会手工把 readiness 改成 `fresh`，也不会删除 current uncovered
-outbox failure。apply 报告必须包含：
-
-- `cleanup.deleted`：本次实际删除的 dirty/outbox/readiness 行数。
-- `replacement_enqueue`：补投的规范 replacement scope。
-- `repair_audit`：写入 `audit.events` 的修复审计 id。
-- `rollback`：基于 `repair_manifest.items[].row` 恢复被删 runtime 行的策略。
-
-如果只需要删除旧状态而不补投 replacement scope，可加 `--no-enqueue-replacements`。如果 dry-run
-存在 `current_uncovered_outbox_failures`，先按 App Health/worker log/EXPLAIN 定位并 requeue 或修复
-worker/query；不能通过删除 failed event 或批量写 fresh readiness 达成“已同步”。
-
-### Legacy import fact dirty scope 清理
-
-历史导入路径可能写入 `reason='import_facts_changed'` 的 dirty scope，但对应 `import.fact.changed`
-outbox event 已经 `done`，且没有新的 `pending/processing` 事件可被 worker claim。此时 App Status
-会继续看到 pending dirty scope，用户表现为导入已可见但全局状态长时间“同步中”。
-
-先运行只读 dry-run：
-
-```bash
-scripts/check-read-model-scope-contracts.py --repair orphaned-import-facts --json
-```
-
-报告只列出没有 active `import.fact.changed` outbox 可处理的 legacy dirty scope，并给出 `items[].row`
-用于回滚。确认这些 scope 已被当前真实 read model refresh 取代，且没有正在运行的导入窗口后，才执行：
-
-```bash
-scripts/check-read-model-scope-contracts.py \
-  --repair orphaned-import-facts \
-  --apply \
-  --reason production_orphaned_import_fact_cleanup \
-  --json
-```
-
-该 repair 只删除 orphaned `job.read_model_dirty_scopes` 行并写审计；不会删除 outbox event、不会写
-`read_model.app_status_readiness=fresh`，也不会补投 replacement refresh。清理后必须重新检查
-App Status、`job.read_model_dirty_scopes` 非 done 行和 write-operation SLO audit。
-
-### Invalid read model scope 清理
-
-检查 policy 明确判定无效的 read model dirty/outbox runtime 行，例如旧工具误投的
-`pending_invoice:all`：
-
-```bash
-scripts/check-read-model-scope-contracts.py --repair invalid-read-model-scopes --json
-```
-
-确认 manifest 后才允许 apply：
-
-```bash
-scripts/check-read-model-scope-contracts.py \
-  --repair invalid-read-model-scopes \
-  --apply \
-  --reason production_invalid_read_model_scope_cleanup \
-  --json
-```
-
-该 repair 只删除 registry/policy 无法接受的 dirty/outbox/readiness runtime 行，不补投 replacement，
-不删除合法但 stale 的 dirty scope。合法 stale scope 应由 worker dependency refresh 自动补投，或通过
-对应 read model 的正常 refresh 入口恢复。
-
-### Workbench generation retention
-
-Workbench 使用 active generation 原子发布模型，`read_model.workbench_generations.status='active'`
-是页面读路径的边界。发布新的月份或 `all` active generation 后，repository 会对本次发布涉及的
-scope 执行 bounded retention：保留每个 scope 最近 3 个非 active generation，且只删除超过 1 天的
-旧 generation，每次最多 100 个。retention 只删除 `read_model.workbench_*` generation 投影行，
-不删除 `app.*`、`job.*` 或其他业务事实；删除条件始终包含 `status <> 'active'`。
-
-retention 是发布后的维护动作，不得让清理失败回滚已经发布成功的 fresh generation。生产环境还应
-保留 `finops-prune-workbench-generations.timer` 作为兜底防线，低峰期运行同一保留策略并记录：
-
-```bash
-systemctl list-timers finops-prune-workbench-generations.timer
-journalctl -u finops-prune-workbench-generations.service -n 100 --no-pager
-tail -n 100 /var/log/fin-ops/workbench-generation-prune-$(date +%Y%m%d).log
-```
-
-如果 Workbench read model 表再次膨胀，先确认 retention timer、`workbench_generations` 状态分布、
-`pg_wal` 大小和 `/health/ready`。不得直接 `VACUUM FULL` 大表，除非根分区或临时表空间已满足重写
-空间需求；read model 可重建但业务事实表不可清空。
+如果 legacy Workbench projection 表再次增长，先排查旧写入路径是否回归，再看 `pg_wal` 大小和
+`/health/ready`。不得恢复 pruning worker、refresh worker 或页面 freshness gate 来掩盖增长；也不得直接
+`VACUUM FULL` 大表，除非根分区或临时表空间已满足重写空间需求。旧 projection 可迁移/删除，但
+`app.*`、`job.*` 和 matching/decision facts 不可按 read model 清空。
 
 ### Workbench matching source-version recovery
 
-`workbench-matching` worker 是 matching 规则版本发布后的常驻一致性边界。每轮 claim dirty scope 前，
+`workbench-matching` worker 是 matching 规则版本发布后的常驻一致性边界。每轮 claim matching scope 前，
 worker 会通过 `WorkbenchReconciliationDirtyQueue` / repository 检查
 `job.workbench_matching_dirty_scopes.status='completed'` 的 scope run；如果 row 的 `source_versions`
 不包含当前 matching source versions（例如 `workbench_matching_rules_version`），repository 使用
 `for update skip locked` 把该 scope 原子转回 `dirty`，再由同一 worker 正常 claim、重建候选/decision、
 complete。不要手工改 `job.workbench_matching_dirty_scopes` 状态来补指定月份；生产恢复应走发布后的
-worker、read model refresh 和只读审计验证。
+worker 和只读审计验证。
 
-Workbench `all` active generation 从 month shard 聚合时必须传播单一且完整的
-`workbench_matching_rules_version`。如果 all scope 缺失该版本证明，先通过正式 Workbench refresh 重建
-month/all active generation，并检查 `workbench-matching` worker heartbeat 与 dirty scope 收敛。
+Workbench matching source version 以 `job.workbench_matching_dirty_scopes`、candidate matches 和
+reconciliation decisions 为准；不要通过重建 month/all active generation 来修复 matching 规则版本。
 
 ## 生产启动合同
 
@@ -327,18 +217,14 @@ Worker 在收到 `SIGTERM` 或 `SIGINT` 时必须释放当前持有的 PostgreSQ
 
 2026-06-12 Stage 6 生产发布 `main-3933b00f-stage6-202606122329` 已验证该路径：发布期间
 `fin-ops-worker@workbench.service` 两次 stop 均记录 `runtime_worker.event_released`，
-后续 `job.outbox_events` read model 非 `done`、`job.read_model_dirty_scopes` 非 `done` 和
-`read_model.app_status_readiness` 非 `fresh` 均收敛为 0。该验证只证明发布/重启不再依赖 300 秒
+后续 `job.outbox_events` processing lease 及时释放并重新 claim。该验证只证明发布/重启不再依赖 300 秒
 lock timeout；单个重型 read model rebuild 的执行时间仍需通过 worker 增量化、索引/分区和缓存阶段优化。
 
 ## RabbitMQ Real Consumer 运维
 
-RabbitMQ 是 read model refresh 的 transport/wakeup，不是状态事实源。切换前后都必须以
-PostgreSQL durable queue 和 readiness 为准：
+RabbitMQ 是 worker transport/wakeup，不是状态事实源。切换前后都必须以 PostgreSQL durable outbox 和 worker heartbeat 为准：
 
 - `job.outbox_events`
-- `job.read_model_dirty_scopes`
-- `read_model.app_status_readiness`
 
 生产启用 required RabbitMQ real consumers 的顺序：
 
@@ -383,7 +269,6 @@ PostgreSQL durable queue 和 readiness 为准：
 - `/health/ready.runtime_infrastructure.rabbitmq_queue_depth=0` 或短时间内下降。
 - `/health/ready.runtime_infrastructure.rabbitmq_consumer_count` 覆盖已切换 required queues。
 - PostgreSQL `job.outbox_events` 没有 active failed/dead-lettered current blocker。
-- `job.read_model_dirty_scopes` 非 `done` 与 `read_model.app_status_readiness` 非 `fresh` 不持续增长。
 
 如果 RabbitMQ DLQ 中 envelope 没有 PostgreSQL outbox 对应行，它是 transport orphan，不是 read model
 事实 blocker。处理顺序是先导出审计摘要，再 purge 该 DLQ；禁止反向根据 broker-only envelope 写入
@@ -391,7 +276,7 @@ PostgreSQL done/fresh。
 
 生产 Stage 9 已验证 required worker cutover：`main-99a98feb-stage9-202606130000` 切换后
 `rabbitmq_consumer_count=15`、`rabbitmq_queue_depth=0`、`rabbitmq_dlq_count=0`、
-`rabbitmq_metric_error=null`，同时 PostgreSQL queue/dirty/readiness 全部保持收敛。
+`rabbitmq_metric_error=null`，同时 PostgreSQL outbox 与 worker heartbeat 保持收敛。
 
 回滚步骤：
 
@@ -399,68 +284,23 @@ PostgreSQL done/fresh。
    `FIN_OPS_QUEUE_BACKEND=postgres`。
 2. 重启对应 worker unit。
 3. 检查 `/health/ready.runtime_infrastructure` 的 required worker missing/stale/mismatch 为 0。
-4. 检查 PostgreSQL durable queue 和 readiness 是否收敛。
+4. 检查 PostgreSQL durable outbox 和 worker heartbeat 是否收敛。
 5. RabbitMQ 残留消息只按 transport envelope 处理；不要把清空 RabbitMQ 当成 read model 修复。
 
 ## App Status Readiness Convergence
 
-`read_model.app_status_readiness` 是全局状态 icon 允许变绿的 read model 证明层。上线该表或新增 read model 后，不能用批量 `insert fresh` 伪造状态；必须先用真实 read model 表、active generation、schema/source version 和 row count 做 convergence。
-
-发布或迁移后的固定顺序：
-
-1. 部署包含 `ReadModelReadinessReporter` 和 backfill tool 的版本。
-2. 执行 dry-run：
-
-   ```bash
-   cd /opt/fin-ops/current
-   set -a
-   source /etc/fin-ops/fin-ops.api.env
-   set +a
-   PYTHONPATH=/opt/fin-ops/current/backend/src \
-     /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.app_status_readiness_backfill --dry-run
-   ```
-
-3. 如果 dry-run 输出 `schema_mismatch`、`source_mismatch`、`failed` 或 `missing`，先修复对应 projection/refresh/rebuild 原因；不要把这些状态改写成 `fresh`。
-4. dry-run 判定合理后再 apply：
-
-   ```bash
-   PYTHONPATH=/opt/fin-ops/current/backend/src \
-     /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.app_status_readiness_backfill --apply
-   ```
-
-5. 只读核对 `read_model.app_status_readiness`、`job.read_model_dirty_scopes`、`job.outbox_events`、`job.runtime_worker_heartbeats` 和 `/api/app-health.app_status`。如果还有 dirty scope、outbox backlog、worker stale/missing 或 dependency issue，global icon 仍应保持 yellow/red。
-
-空业务结果可以是 `fresh`，但必须有真实生成事实；没有 readiness 记录的 read model 必须显示 `missing`，不能因为当前没有 dirty scope 而显示 ready。
+`app_status_readiness_backfill` 已删除。不得再通过 backfill 或批量 `insert fresh` 修复页面 read model readiness；App Health 只能展示真实 worker、outbox、RabbitMQ、dependency 和 direct API facts。
 
 ### Cost Statistics Scope Readiness
 
-`cost-tax` worker 仍作为兼容 combined consumer 处理 `cost_statistics.read_model.refresh` 与 `tax_offset.read_model.refresh`；生产 SLO lane 还会启动专用 `cost-statistics` 与 `tax-offset` RabbitMQ consumers。成本统计是跨银行流水、发票、OA 关系、项目归因和费用分类的派生 read model，因此 App Status 必须展示 scope 级 readiness，而不是只显示一个聚合后的 `cost_statistics=failed`。
-
-高频 read model 的专用 consumers 是当前 P2/P3 一秒级 closure 的基础；历史 5s SLO 记录只是旧基线，不是当前验收上限。当前 direct refresh / 首屏 API 以 p95 <= 1000ms 为门禁，写操作链路还要求 operation-to-fresh p99 <= 3000ms：
-
-- `search` / `search-secondary` / `search-tertiary`：只消费 `search.read_model.refresh`，并发处理关系变更中的 bank 月、invoice 月以及快速 confirm/withdraw 连续写入产生的同 scope search 事件。
-- `pending-invoice`：只消费 `pending_invoice.read_model.refresh`。
-- `cost-statistics`：只消费 `cost_statistics.read_model.refresh`。
-- `tax-offset`：只消费 `tax_offset.read_model.refresh`。
-- `invoice-lifecycle-secondary`：作为第二条 `invoice_lifecycle.read_model.refresh` consumer，和 `invoice-lifecycle` 并发 drain 多月份 scope。
-
-这些 worker 不改变 PostgreSQL durable queue / readiness 事实源；它们只是同一 outbox event type 的并发消费者。旧 `search-pending`、`cost-tax` 不应作为唯一性能 lane 依赖，后续清理必须先确认生产 SLO 稳定。
+`cost-tax`、`cost-statistics`、`tax-offset`、`invoice-lifecycle` 和 `invoice-lifecycle-secondary` page read-model worker lanes 已删除。成本统计、税金抵扣和发票生命周期页面验收走 direct API / query service / export regression，不再以 scope readiness 或 enqueue-to-fresh 作为页面证明。
 
 成本统计 scope 分为：
 
 - 父 scope：`active:all`、`all:all`。
 - 月份 shard：`active:YYYY-MM`、`all:YYYY-MM`。
 
-处理规则：
-
-- refresh `active:YYYY-MM` 或 `all:YYYY-MM` 时，worker 从对应工作台月份 read model 构建成本统计 shard，发布成功后重新入队同 project scope 的父 scope，推动全期间视图收敛。
-- refresh `active:all` 或 `all:all` 时，worker 先检查对应月份 shard readiness。缺失、stale 或 failed 的 shard 通过 `ReadModelRefreshGateway` 入队，父 scope 记录 `refreshing`，不完成 dirty scope，不伪造 `fresh`。
-- 所有所需月份 shard fresh 后，worker 从 `read_model.cost_statistics_rows` 中的月份 rows 聚合生成父 scope，原子写入 `read_model.cost_statistics_read_models` snapshot，并写入父 scope `fresh` readiness。`read_model.cost_statistics_rows` 只承载月份 shard 明细，不承载 `active:all` / `all:all` parent rows。
-- 父 scope 不直接读取 `read_model.workbench_groups(scope_key='all')` 的全量 JSON payload；工作台 `all` scope 超时不能再成为成本统计全期间父 scope rebuild 的关键路径。
-- 父 scope failed/unavailable 代表成本统计主体验不可用，App Status domain 可以 blocked/red。
-- 单个月份 shard failed/unavailable 只代表该分片需要重试，App Status domain 应保持 busy/yellow，并暴露 `read_model_scopes[].scope_key`、`last_error` 和 `updated_at`。
-- historical failed readiness 只能由同一 `read_model_key + scope_type + scope_key` 的真实 successful rebuild 覆盖；运维不得手工改写 readiness 为 fresh。
-- 重新入队必须走 `ReadModelRefreshGateway` 或受控运维工具，保留 dirty scope/outbox 事实链路。
+处理规则：不要恢复 `cost_statistics.read_model.refresh` / `tax_offset.read_model.refresh` worker lane、readiness proof 或 dirty scope repair。若 direct API 性能退化，优化 query service、索引或 canonical facts，不恢复页面 read model。
 
 ## 健康字段
 
@@ -471,13 +311,10 @@ PostgreSQL done/fresh。
 - `mismatched_required_worker_count`：heartbeat 的 kind 或 configured event types 与 registry 不一致。
 - `worker_metrics[]`：每个 expected instance 的明细。
 
-`runtime_infrastructure` 还暴露 read model/backlog 运维入口：
+`runtime_infrastructure` 还暴露 runtime 运维入口：
 
 - `queue_backlog`：outbox event 状态汇总。
-- `dirty_scopes`：dirty scope 状态汇总。
-- `pending_outbox_events_by_scope`：按 event/scope 定位 pending refresh。
-- `dirty_scopes_by_scope`：按 scope 定位刷新卡住的位置。
-- `stale_dirty_scope_count` 和 `stale_dirty_scopes[]`：超过阈值仍未完成的 scope。
+- `pending_outbox_events_by_scope`：按 event/scope 定位 pending outbox。
 
 每行 `worker_metrics` 至少应包含：
 
@@ -496,11 +333,11 @@ PostgreSQL done/fresh。
 
 - `queued`：任务已进入 durable queue，等待 worker claim。
 - `running`：后台 job 已被 worker 处理。
-- `refreshing`：read model 已发起刷新，页面可展示旧数据或刷新提示。
-- `stale`：数据已经过期，App Health 会提示 worker 或 read model 未收敛。
+- `refreshing`：后台 outbox/job 正在处理，页面按 direct API 返回当前事实或明确 loading。
+- `stale`：数据已经过期，App Health 会提示 worker 或 dependency 未收敛。
 - `failed`：worker 处理失败或任务进入 failed/dead-letter 状态。
 
-运维侧 heartbeat 可能看到 `deferred`：表示 worker 已识别依赖 read model 尚未 fresh，并将事件短延迟回
+运维侧 heartbeat 可能看到 `deferred`：表示 worker 已识别依赖尚未 ready，并将事件短延迟回
 `pending`。用户侧仍应表现为 `refreshing`，不能把 deferred 解释为已同步。
 
 当 worker 缺失或 stale 时，App 不直接启动 worker；App Health 负责把问题定位到具体 worker instance，
@@ -508,17 +345,11 @@ PostgreSQL done/fresh。
 
 ## 运维修复流程
 
-查看 read model dirty/outbox 汇总：
+查看 outbox 汇总：
 
 ```sql
-select scope_type, status, count(*)
-from job.read_model_dirty_scopes
-group by scope_type, status
-order by scope_type, status;
-
 select event_type, status, count(*)
 from job.outbox_events
-where event_type like '%.read_model.refresh'
 group by event_type, status
 order by event_type, status;
 ```
@@ -554,7 +385,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-superseded-processing \
     --dry-run \
     --stale-after-seconds 300 \
-    --event-type bank_detail.read_model.refresh \
+    --event-type <real-background-event-type> \
     --limit 100 \
     --reason rabbitmq_stale_processing_superseded
 
@@ -562,7 +393,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-superseded-processing \
     --execute \
     --stale-after-seconds 300 \
-    --event-type bank_detail.read_model.refresh \
+    --event-type <real-background-event-type> \
     --limit 100 \
     --reason rabbitmq_stale_processing_superseded
 ```
@@ -574,7 +405,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops release-stale-processing \
     --dry-run \
     --stale-after-seconds 300 \
-    --event-type bank_detail.read_model.refresh \
+    --event-type <real-background-event-type> \
     --limit 100 \
     --reason rabbitmq_stale_processing_repair
 
@@ -582,84 +413,34 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops release-stale-processing \
     --execute \
     --stale-after-seconds 300 \
-    --event-type bank_detail.read_model.refresh \
+    --event-type <real-background-event-type> \
     --limit 100 \
     --reason rabbitmq_stale_processing_repair
 ```
 
-如果 dead-letter 来自历史 invalid-scope cost statistics 事件，优先使用 `scripts/check-read-model-scope-contracts.py`
-检查和清理同类 legacy/invalid scope，避免逐个重放必然再次失败的旧事件。对于其他 read model，且当前版本
-已经通过真实 readiness convergence 证明同一 scope 已被覆盖，可以使用受控 resolve：
-
-```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
-  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-dead-letter \
-    --event-id <uuid> \
-    --reason readiness_converged_obsolete_invalid_scope
-```
-
-批量归档前必须先 dry-run：
-
-```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
-  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-covered-dead-letters \
-    --dry-run \
-    --limit 100 \
-    --reason readiness_converged_obsolete_dead_letter
-```
-
-dry-run 中 `eligible_count` 必须等于准备归档的候选数，且每条 event 的 `proof.covered_by` 至少包含
-`fresh_readiness` 或 `later_done`。确认后才能执行：
-
-```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
-  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-covered-dead-letters \
-    --execute \
-    --limit 100 \
-    --reason readiness_converged_obsolete_dead_letter
-```
-
-`resolve-dead-letter` 和 `resolve-covered-dead-letters` 只适用于注册的 read model refresh event。命令会先检查：
-
-- 事件当前必须仍是 `dead_lettered`。
-- 同一 `tenant_id + read_model_key + scope_type + scope_key` 在 `read_model.app_status_readiness` 中已经有 `fresh` 证明，或同一 outbox scope 在该 dead-letter 后已有 `done` 事件。
-- 同一 `tenant_id + scope_type + scope_key` 没有 `pending`、`processing` 或 `failed` dirty scope。
-
-不满足这些条件时命令必须拒绝处理。禁止直接 SQL 把 `dead_lettered` 改成 `done`；需要保留
-`raw_payload.operator_resolution` 审计记录。
+`resolve-dead-letter` 和 `resolve-covered-dead-letters` 已删除，因为它们依赖 legacy readiness/dirty-scope proof。不要直接 SQL 把 `dead_lettered` 改成 `done`；可重放事件走 `requeue`，被更新同 dedupe event 覆盖的旧 `processing` 走 `resolve-superseded-processing`，其余页面 read-model 历史残留留给后续 migration/cleanup wave。
 
 重放后必须确认：
 
 - 对应 worker heartbeat fresh 且 `warning_code` 为空。
 - outbox event 不再 failed/dead-letter。
-- dirty scope 进入 done 或明确仍在 processing。
-- API 返回 fresh，或在 worker 尚未完成时返回明确 refreshing。
+- 页面 API 仍按 direct business contract 验证。
 
 ## 统一关系与发票生命周期分发回填顺序
 
-涉及 OA、银行流水、进项发票、销项发票通用关系展示和发票生命周期展示的页面，必须先回填
-`workbench_relation` read model，再回填 `invoice_lifecycle` read model，最后回填页面自己的 read model。推荐顺序：
+涉及 OA、银行流水、进项发票、销项发票通用关系展示和发票生命周期展示的后台 projection 回填，必须先回填
+canonical relation facts，再验证仍保留的真实后台任务。`workbench_relation` 和 `invoice_lifecycle` read model worker 已下线，不再作为回填前置条件。
 
-1. 启动并检查 `workbench-relation` worker，确认
-   `workbench_relation.read_model.refresh` 可 claim。
-2. 对历史月份 enqueue `workbench_relation` scope；`all` 只作为 fan-out 入口，实际重建必须落到
-   `YYYY-MM` shard。
-3. 启动并检查 `invoice-lifecycle` worker，确认
-   `invoice_lifecycle.read_model.refresh` 可 claim。
-4. 等 `read_model.workbench_relation_rows/groups` 对目标月份 fresh 后，再 enqueue
-   `invoice_lifecycle` scope；`all` 同样只作为 fan-out 入口。
-5. 等 `read_model.invoice_lifecycle_rows` 对目标月份 fresh 后，再 enqueue
-   `pending_invoice`、`bank_detail`、`input_invoice_usage`、`output_invoice_collection`、
-   `oa_pending_payment`、`no_oa_bank_batch`、`cost_statistics`、`tax_offset`、`search`。
-6. 页面验证以 facade/read model 状态为准：如果 `workbench_relation` 或 `invoice_lifecycle` stale/missing，
-   下游页面不能用旧 SQL、pair relation snapshot 或页面私有 lifecycle 规则同步补数据伪装 fresh。
+1. 确认 `app.workbench_pair_relations`、`read_model.workbench_reconciliation_decisions` 和相关 canonical invoice/OA/bank facts 已完成导入或修复。
+2. 运行目标页面 direct API smoke，验证关系上下文、空关系、候选关系和已确认关系展示正确。
+3. 需要后台任务时，只 enqueue 真实导入、OA 同步、文件迁移、外部系统同步或受控修复任务；不得 enqueue 页面 read model refresh。
+4. 页面验证以 direct API 业务结果为准；legacy stale/missing 只能作为历史诊断信息，不能让下游页面用旧 SQL、pair relation snapshot 或页面私有 lifecycle 规则同步补数据伪装 fresh。
 
-## Ensure refresh 与真实写入 dirty 的边界
+## Legacy ensure refresh 边界归档
 
 `dependency_not_fresh`、`api_*`、`pending_invoice_sql_projection`、`bank_detail_relation_tags_read`、
-`workbench_relation_write_precondition`、`downstream_bank_tag_read` 属于 ensure/wakeup 类刷新请求。它们只能确保目标
-read model 有 refresh 在跑；当同一 `tenant_id + scope_type + scope_key` 已经 `pending` 或 `processing` 时，
-`ReadModelRefreshGateway` 必须 coalesce，不应 bump `source_version`，否则 downstream projection 会追逐移动目标。
+`workbench_relation_write_precondition`、`downstream_bank_tag_read` 曾属于 ensure/wakeup 类刷新请求。该机制只作为
+legacy archive 保留；当前页面读取不得依赖 ensure refresh、gateway coalesce 或 page read-model source version。
 
-真实写入原因，例如 `workbench_relation_changed`、`confirm_link`、`withdraw_link`、导入/设置/标签变更，仍然必须写
-durable dirty scope 并在 active scope 上提高 `source_version`。这是防止旧 worker 把新事实误发布为 fresh 的一致性边界。
+真实写入原因，例如 `workbench_relation_changed`、`confirm_link`、`withdraw_link`、导入/设置/标签变更，应返回
+affected scope/ids/months 或写真实 outbox/lifecycle side effect，再由页面 direct API 重读证明结果。

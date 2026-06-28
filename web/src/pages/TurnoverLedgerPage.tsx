@@ -13,11 +13,6 @@ import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
 } from "../features/domainEvents";
-import {
-  operationBarrierTargetsFromMonths,
-  waitForOperationFreshness,
-  type OperationBarrierTarget,
-} from "../features/operationBarrier/api";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { ApiClientError } from "../features/apiClient";
 import {
@@ -276,27 +271,11 @@ function relationDetailErrorMessage(caught: unknown) {
   return caught instanceof Error ? caught.message : "往来关系详情加载失败";
 }
 
-function mutationVisibilityTargets(result: {
-  affectedMonths: string[];
-  freshnessTargets: OperationBarrierTarget[];
-  operationBarrierTargets?: OperationBarrierTarget[];
-}) {
-  if (result.operationBarrierTargets && result.operationBarrierTargets.length > 0) {
-    return result.operationBarrierTargets;
-  }
-  if (result.freshnessTargets.length > 0) {
-    return result.freshnessTargets;
-  }
-  return operationBarrierTargetsFromMonths("turnover_ledger", result.affectedMonths, "all");
-}
-
 async function waitForPostMutationVisibility(
-  targets: OperationBarrierTarget[],
   reloadLedger: () => Promise<TurnoverLedgerGroupedResponse>,
   markReloading: () => void,
 ) {
   try {
-    await waitForOperationFreshness(targets);
     markReloading();
     await reloadLedger();
     return "";
@@ -422,8 +401,6 @@ export default function TurnoverLedgerPage() {
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
-  const readModelStatus = cleanText(ledger?.readModelStatus) || "refreshing";
-  const readModelNeedsRefresh = readModelStatus !== "fresh";
   const familySummaryMap = useMemo(() => new Map((ledger?.familySummaries ?? []).map((item) => [item.family, item])), [
     ledger?.familySummaries,
   ]);
@@ -460,14 +437,12 @@ export default function TurnoverLedgerPage() {
   }, [selectedClosureRows, selectedRowsAllCashClosure]);
   const canWithdrawSelectedCashClosure = Boolean(
     canMutateData
-      && !readModelNeedsRefresh
       && selectedRowsAllCashClosure
       && selectedCashClosureCaseId
       && !closureSubmitting
       && !mutatingRelation,
   );
   const canOpenClosureDrawer = canMutateData
-    && !readModelNeedsRefresh
     && selectedClosureRows.length >= 2
     && !selectedRowsContainCashClosure;
   const closureActionLabel = selectedRowsAllCashClosure ? "撤回闭环" : "确认闭环";
@@ -631,19 +606,8 @@ export default function TurnoverLedgerPage() {
       action: async ({ setMessage }) => {
         setClosureSubmitting(true);
         try {
-          setMessage("正在确认所选流水为最新版本...");
-          await waitForOperationFreshness(operationBarrierTargetsFromMonths(
-            "turnover_ledger",
-            turnoverRowScopeMonths(currentSelection.rows),
-            "all",
-          ));
           setMessage("正在刷新往来款台账...");
           const freshLedger = await reloadLedgerAfterMutation();
-          if ((cleanText(freshLedger.readModelStatus) || "refreshing") !== "fresh") {
-            setClosureSelection(null);
-            setClosureDrawerOpen(false);
-            throw new Error(CLOSURE_SELECTION_STALE_MESSAGE);
-          }
           const freshRows = freshClosureRowsFromLedger(freshLedger, currentSelection, bankRowIds);
           const freshPreview = freshRows ? buildClosurePreview(freshRows) : null;
           if (!freshRows || !freshPreview?.canConfirm) {
@@ -660,9 +624,8 @@ export default function TurnoverLedgerPage() {
           });
           setClosureSelection(null);
           setClosureDrawerOpen(false);
-          setMessage("正在等待往来款台账和关联台读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            mutationVisibilityTargets(closureResult),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -759,9 +722,8 @@ export default function TurnoverLedgerPage() {
           const saved = await saveTurnoverRelationExtra(targetRow.relationId, nextExtra);
           setExtraForm(saved.extra);
           setExtraDirty(false);
-          setMessage("正在等待往来款台账读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            operationBarrierTargetsFromMonths("turnover_ledger", [], "all"),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -800,9 +762,8 @@ export default function TurnoverLedgerPage() {
           const mutationResult = kind === "confirm"
             ? await confirmTurnoverRelation({ bankRowIds: targetRow.bankRowIds })
             : await withdrawTurnoverRelation({ relationId: targetRow.relationId });
-          setMessage("正在等待往来款台账读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            mutationVisibilityTargets(mutationResult),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -854,9 +815,8 @@ export default function TurnoverLedgerPage() {
             : await withdrawTurnoverClosure({ cashClosureCaseId });
           setClosureSelection(null);
           setClosureDrawerOpen(false);
-          setMessage("正在等待往来款台账和关联台读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            mutationVisibilityTargets(mutationResult),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -916,9 +876,8 @@ export default function TurnoverLedgerPage() {
           setTagSelection(saved);
           setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
           setTagDrawerOpen(false);
-          setMessage("正在等待往来款台账读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            operationBarrierTargetsFromMonths("turnover_ledger", [], "all"),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -998,12 +957,6 @@ export default function TurnoverLedgerPage() {
             {error}
           </StatePanel>
         ) : null}
-        {readModelNeedsRefresh ? (
-          <div className="turnover-ledger-page-notice turnover-ledger-page-notice--warning" role="alert">
-            往来款台账正在刷新，当前展示的是非最新数据。
-          </div>
-        ) : null}
-
         <div className="turnover-ledger-summary-grid">
           <SummaryCard
             label="当前待还款金额"
@@ -1226,7 +1179,7 @@ export default function TurnoverLedgerPage() {
             <button className="turnover-ledger-button" disabled={closureSubmitting} onClick={() => setClosureDrawerOpen(false)} type="button">取消</button>
             <button
               className="turnover-ledger-button turnover-ledger-button--primary"
-              disabled={!closurePreview.canConfirm || closureSubmitting || readModelNeedsRefresh}
+              disabled={!closurePreview.canConfirm || closureSubmitting}
               onClick={() => void handleConfirmClosure()}
               type="button"
             >

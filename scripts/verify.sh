@@ -14,7 +14,7 @@ docs      Run lightweight documentation structure checks.
 runtime-check
           Run app check against the current configured runtime state.
 infra-smoke
-          Run runtime/read-model smoke tooling checks. If real staging
+          Run runtime smoke tooling checks. If real staging
           PostgreSQL/RabbitMQ env vars are present, also run real infra preflight.
           Always print the production external gate input preflight without secrets.
           Set FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS to run read-only
@@ -110,7 +110,6 @@ run_docs() {
 run_infra_smoke() {
   cd "$ROOT_DIR"
   PYTHONPATH=backend/src python3 -m unittest \
-    tests.test_read_model_slo_smoke \
     tests.test_runtime_sync_closure_gate \
     tests.test_write_operation_slo_audit \
     tests.test_production_external_gate_preflight \
@@ -120,21 +119,6 @@ run_infra_smoke() {
     -v
 
   PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.production_external_gate_preflight --json
-
-  if [[ -n "${FIN_OPS_TEST_DATABASE_URL:-}" ]]; then
-    local read_model_slo_args=(--json --critical-only)
-    if [[ "${FIN_OPS_INFRA_SMOKE_APPLY:-}" == "1" ]]; then
-      read_model_slo_args+=(--apply)
-      echo "Running read_model_slo_smoke with --apply; this enqueues refresh events and waits for worker drain." >&2
-    else
-      echo "Running read_model_slo_smoke dry-run only; set FIN_OPS_INFRA_SMOKE_APPLY=1 to enqueue refresh events and verify worker drain." >&2
-    fi
-    FIN_OPS_POSTGRES_DATABASE_URL="${FIN_OPS_POSTGRES_DATABASE_URL:-$FIN_OPS_TEST_DATABASE_URL}" \
-      PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.read_model_slo_smoke \
-      "${read_model_slo_args[@]}"
-  else
-    echo "Skipping read_model_slo_smoke real Postgres check; FIN_OPS_TEST_DATABASE_URL is not set." >&2
-  fi
 
   if [[ -n "${FIN_OPS_TEST_DATABASE_URL:-}" && -n "${FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS:-}" ]]; then
     local write_operation_audit_args=(--json)

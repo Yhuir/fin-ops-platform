@@ -39,7 +39,7 @@ def _event(
     return {
         "event_id": f"{scope_type}-{reason}",
         "tenant_id": "default",
-        "event_type": f"{scope_type}.read_model.refresh",
+        "event_type": f"{scope_type}.fact.changed",
         "scope_type": scope_type,
         "scope_key": "all",
         "reason": reason,
@@ -62,7 +62,6 @@ def _turnover_withdraw_rows() -> list[dict[str, object]]:
         _event(scope_type="workbench", reason="turnover_relation_changed", action_name="withdraw_relation"),
         _event(scope_type="workbench_relation", reason="turnover_relation_changed", action_name="withdraw_relation"),
         _event(scope_type="cost_statistics", reason="turnover_relation_changed", action_name="withdraw_relation"),
-        _event(scope_type="search", reason="turnover_relation_changed", action_name="withdraw_relation"),
     ]
 
 
@@ -390,7 +389,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(observed[0][1], "POST")
         self.assertEqual(observed[0][0], "https://example.test/fin-ops-api/api/turnover-ledger/relations/REL-1/withdraw")
         self.assertEqual(report["results"][0]["write_slo"]["status"], "pass")
-        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 5)
+        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 4)
 
     def test_write_step_failure_skips_write_slo_claim(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(

@@ -10,7 +10,6 @@ from fin_ops_platform.services.workbench_matching_orchestrator import (
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 from fin_ops_platform.services.workbench_special_pair_rule_service import WORKBENCH_SPECIAL_RULES_VERSION
 
 
@@ -91,8 +90,6 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
 
     def test_legacy_mode_persists_oa_bank_exact_sum_candidate(self) -> None:
         candidate_service = WorkbenchCandidateMatchService()
-        read_model_service = WorkbenchReadModelService()
-        read_model_service.upsert_read_model(scope_key="2026-05", payload={"cached": True})
 
         summary = self._orchestrator(
             row_provider=FakeRowProvider(
@@ -105,7 +102,6 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
                 },
             ),
             candidate_service=candidate_service,
-            read_model_service=read_model_service,
             rules=WorkbenchMatchingRules(include_special_rules=False),
         ).run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-oa-bank-sum")
 
@@ -117,7 +113,6 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(exact_sum["oa_row_ids"], ["oa-split"])
         self.assertCountEqual(exact_sum["bank_row_ids"], ["bank-120", "bank-180"])
         self.assertEqual(exact_sum["amount"], "300.00")
-        self.assertIsNone(read_model_service.get_read_model("2026-05"))
 
     def test_manual_confirmed_relation_row_ids_are_excluded_from_automatic_candidates(self) -> None:
         pair_service = WorkbenchPairRelationService()
@@ -204,20 +199,6 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
                 },
             )
         )
-
-    def test_read_model_for_affected_scope_is_invalidated(self) -> None:
-        read_model_service = WorkbenchReadModelService()
-        read_model_service.upsert_read_model(scope_key="2026-05", payload={"cached": True})
-        read_model_service.upsert_read_model(scope_key="all", payload={"cached": True})
-
-        self._orchestrator(
-            row_provider=FakeRowProvider(),
-            read_model_service=read_model_service,
-            rules=StaticRules([]),
-        ).run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-003")
-
-        self.assertIsNone(read_model_service.get_read_model("2026-05"))
-        self.assertIsNone(read_model_service.get_read_model("all"))
 
     def test_run_is_idempotent_for_same_scope_and_rows(self) -> None:
         candidate_service = WorkbenchCandidateMatchService()
@@ -410,8 +391,6 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
     def test_decision_store_mode_persists_oa_bank_exact_sum_decision(self) -> None:
         decision_store = WorkbenchReconciliationDecisionStore()
         candidate_service = WorkbenchCandidateMatchService()
-        read_model_service = WorkbenchReadModelService()
-        read_model_service.upsert_read_model(scope_key="2026-05", payload={"cached": True})
 
         summary = self._orchestrator(
             row_provider=FakeRowProvider(
@@ -424,7 +403,6 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
                 },
             ),
             candidate_service=candidate_service,
-            read_model_service=read_model_service,
             decision_store=decision_store,
             rules=StaticRules([]),
         ).run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-decision-oa-bank-sum")
@@ -440,7 +418,6 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(decisions[0]["bank_row_ids"], ["bank-120", "bank-180"])
         self.assertTrue(decisions[0]["payment_amount_closed"])
         self.assertIsNone(decisions[0]["invoice_amount_closed"])
-        self.assertIsNone(read_model_service.get_read_model("2026-05"))
 
     def _orchestrator(
         self,
@@ -448,7 +425,6 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         row_provider: object,
         pair_relation_service: WorkbenchPairRelationService | None = None,
         candidate_service: WorkbenchCandidateMatchService | None = None,
-        read_model_service: WorkbenchReadModelService | None = None,
         exception_case_service: object | None = None,
         decision_store: WorkbenchReconciliationDecisionStore | None = None,
         rules: object,
@@ -457,7 +433,6 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             row_provider=row_provider,
             relation_read_port=WorkbenchMatchingRelationReadPort(pair_relation_service or WorkbenchPairRelationService()),
             candidate_match_service=candidate_service or WorkbenchCandidateMatchService(),
-            read_model_service=read_model_service or WorkbenchReadModelService(),
             decision_store=decision_store,
             rules=rules,
             exception_case_service=exception_case_service,

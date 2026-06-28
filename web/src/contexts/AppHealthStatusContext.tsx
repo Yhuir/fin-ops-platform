@@ -8,7 +8,6 @@ import {
   fetchAppHealth,
   fetchOaSyncStatus,
   mapAppHealthBackgroundJobsSource,
-  mapAppHealthWorkbenchSource,
   mapOaSyncSource,
   subscribeAppHealth,
 } from "../features/appHealth/api";
@@ -33,7 +32,6 @@ import type {
   AppHealthSessionSource,
   AppHealthSources,
   AppHealthStatus,
-  AppHealthWorkbenchSource,
 } from "../features/appHealth/types";
 
 const HEALTH_POLL_MS = 5000;
@@ -130,7 +128,7 @@ function importProgressSource(tone: string | null | undefined): AppHealthImportP
   return "idle";
 }
 
-function workbenchSourceFromShell(level: "ok" | "pending" | "error" | undefined): AppHealthWorkbenchSource {
+function workbenchSourceFromShell(level: "ok" | "pending" | "error" | undefined): AppHealthSources["workbench"] {
   if (level === "error") {
     return "error";
   }
@@ -141,16 +139,6 @@ function workbenchSourceFromShell(level: "ok" | "pending" | "error" | undefined)
     return "ready";
   }
   return "unknown";
-}
-
-function cleanStringArray(values: unknown): string[] {
-  return Array.isArray(values)
-    ? values.map((value) => String(value ?? "").trim()).filter(Boolean)
-    : [];
-}
-
-function isMonthScope(value: string) {
-  return /^\d{4}-\d{2}$/.test(value);
 }
 
 function mapApiJobSummary(job: ApiAppHealthJobSummary | null | undefined): AppHealthJobSummary | null {
@@ -244,28 +232,18 @@ function detailFromPayload(
     ?? ""
   );
   const backgroundJobs = apiPayload?.background_jobs;
-  const workbench = apiPayload?.workbench_read_model;
-  const matchingDirtyEntries = Array.isArray(workbench?.matching_dirty_scopes)
-    ? workbench?.matching_dirty_scopes ?? []
-    : [];
-  const matchingDirtyMonths = matchingDirtyEntries
-    .map((entry) => String(entry?.scope_month ?? "").trim())
-    .filter(Boolean);
   return {
     fallbackReason,
     details: [
       dependencyMessage?.message,
-      workbench?.last_matching_error ?? undefined,
       shellReason,
     ].filter(Boolean) as string[],
     primaryRunning: mapApiJobSummary(backgroundJobs?.primary_running ?? backgroundJobs?.primaryRunning) ?? mapLocalJobSummary(chooseLocalRunningJob(jobs)),
     primaryAttention: mapApiJobSummary(backgroundJobs?.primary_attention ?? backgroundJobs?.primaryAttention) ?? mapLocalJobSummary(chooseLocalAttentionJob(jobs)),
     attentionCount: backgroundJobs?.attention ?? jobs.filter((job) => job.status === "failed" || job.status === "partial_success").length,
-    matchingRunningMonths: cleanStringArray(workbench?.matching_running_scopes),
-    matchingDirtyMonths: matchingDirtyMonths.length > 0
-      ? matchingDirtyMonths
-      : cleanStringArray(workbench?.dirty_scopes ?? []).filter(isMonthScope),
-    matchingError: workbench?.last_matching_error ?? null,
+    matchingRunningMonths: [],
+    matchingDirtyMonths: [],
+    matchingError: null,
   };
 }
 
@@ -469,18 +447,13 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
         ? "unreachable"
         : backgroundSourceFromLocal(jobs, connectionFailed, apiPayload);
     const importProgress = importProgressSource(progress?.tone);
-    const apiWorkbenchSource = mapAppHealthWorkbenchSource(apiPayload);
     const shellWorkbenchSource = workbenchSourceFromShell(workbenchStatus?.level);
-    const workbench =
-      apiWorkbenchSource !== "unknown"
-        ? apiWorkbenchSource
-        : shellWorkbenchSource;
     const sources: AppHealthSources = {
       session: sessionSource,
       backgroundJobs,
       importProgress,
       oaSync: oaSyncSourceFromPayload(apiPayload, fallbackOaSync),
-      workbench,
+      workbench: shellWorkbenchSource,
     };
     const detailReason = detailFromPayload(apiPayload, fallbackOaSync, workbenchStatus?.reason, jobs);
     const resolved = resolveAppHealthStatus(sources, detailReason);

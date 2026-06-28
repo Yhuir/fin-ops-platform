@@ -16,11 +16,11 @@
 
 - 平台设置页面、工作台设置、OA 凭证设置、数据重置入口。
 - 调用 app settings、credential provider、data reset service。
-- 设置变更后触发必要 lifecycle/read model invalidation。
+- 设置变更后触发必要 lifecycle/direct API refetch signal。
 
 ### 不负责
 
-- 不直接执行业务导入或 read model projection。
+- 不直接执行业务导入或页面投影。
 - 不在前端保存敏感凭证。
 - 不绕过数据安全 reset service。
 
@@ -38,14 +38,14 @@
 | --- | --- | --- |
 | 设置 payload/result | 前端页面 | 不泄露 secret |
 | Reset job | background job/app health | 可查询、可恢复 |
-| Dirty scope/lifecycle | runtime queue | 设置影响 read model 时必须显式触发 |
-| OA manual import target envelope | operation barrier/frontend refresh | OA 手工导入、附件刷新、删除导入标记返回的 `operation_barrier_targets` 必须被设置页等待后再展示最终 fresh 状态 |
+| Lifecycle/outbox | runtime queue | 设置影响下游页面时必须显式触发 |
+| OA manual import result | frontend refresh | OA 手工导入、附件刷新、删除导入标记返回业务结果和 `affected_scope_keys`；设置页直接重读列表，不等待 operation barrier |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 影响 read model：设置重置可能影响全部 read model。
-- OA 手工导入设置入口会影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search`、`cost_statistics`，不拥有这些 read model。
+- 影响页面：设置重置可能影响全部 direct API 页面。
+- OA 手工导入设置入口会影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search`、`cost_statistics`，不拥有这些页面读取路径。
 - Services：`AppSettingsService`、`SettingsDataResetService`、OA applicant credentials。
 
 ## 文件范围
@@ -58,14 +58,14 @@
 | Backend route | settings endpoints in `backend/src/fin_ops_platform/app/server.py` |
 | Backend service | `app_settings_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Repository | `postgres_repositories/oa_applicant_credentials.py` |
-| Lifecycle | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`、`app_status_read_model_registry.py` |
+| Lifecycle/runtime | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`、`app_status_job_registry.py`、runtime worker registry |
 | Tests | `tests/test_app_settings_service.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/Settings*.test.*` |
 
 ## 依赖方向
 
 - 允许依赖：settings/data reset service, credential repository, background job service。
 - 必须通过：settings service and explicit reset job API。
-- 禁止绕过：前端直接保存 secret；settings API 直接清库或直接写 read model。
+- 禁止绕过：前端直接保存 secret；settings API 直接清库或直接写页面投影。
 
 ## 测试与验证
 

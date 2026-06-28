@@ -9,7 +9,7 @@
 3. `docs/index.md`：长期文档索引。
 4. `docs/app-architecture/README.md`：当前 app 架构、页面、运行时序和跨页面影响关系。
 5. `docs/modules/README.md`：按页面或关键功能域定位模块维护文档。
-6. `docs/architecture/module-boundaries/README.md`：模块边界、I/O、文件范围、read model 合同和 GSD 维护规则。
+6. `docs/architecture/module-boundaries/README.md`：模块边界、I/O、文件范围、direct API 目标读路径、legacy read model 合同和 GSD 维护规则。
 7. `docs/product-specs/index.md`：按业务专题阅读需求。
 8. `docs/dev/index.md`：按开发任务查接口、测试和本地运行说明。
 9. `docs/operations/index.md`：部署、数据重置、备份、监控和故障处理。
@@ -17,9 +17,9 @@
 ## 文档事实源
 
 - 产品和业务口径以 `docs/product-specs/` 为准。
-- 当前 app 页面、运行时调用链、read model/worker 和页面间影响关系以 `docs/app-architecture/` 为准。
+- 当前 app 页面、运行时调用链、direct API 目标读路径、legacy read model/worker 和页面间影响关系以 `docs/app-architecture/` 为准。
 - 页面或关键功能域的日常维护入口以 `docs/modules/` 为准；模块文档用于定位上下文、状态机、测试矩阵和实施记录，不替代产品、架构、开发或运维长期事实源。
-- 模块边界、I/O、文件范围索引和 read model 合同以 `docs/architecture/module-boundaries/` 为准；模块级边界细节以对应 `docs/modules/<module>/boundary-io.md` 为准。
+- 模块边界、I/O、文件范围索引、direct API 目标读路径和 legacy read model 下线清单以 `docs/architecture/module-boundaries/` 为准；模块级边界细节以对应 `docs/modules/<module>/boundary-io.md` 为准。
 - 系统边界和长期技术决策以 `ARCHITECTURE.md` 和 `docs/architecture/` 为准。
 - 运行、测试、接口契约以 `docs/dev/`、`backend/README.md`、`web/README.md` 为准。
 - 部署和生产操作以 `docs/operations/` 与 `deploy/oa/README.md` 为准。
@@ -30,13 +30,13 @@
 - 每次修改代码、新增功能、修 Bug、调整 API、改页面、改 read model/worker、改权限、改导入导出、改部署或删除旧代码前，必须先识别直接受影响模块和上下游受影响模块。
 - 使用 `docs/architecture/module-boundaries/inventory.md` 定位模块后，必须读取每个受影响模块的 `docs/modules/<module>/boundary-io.md`；不要只读模块 `README.md`。
 - 跨模块改动必须读取所有直接模块和上下游模块的 `boundary-io.md`，并明确输入 I/O、输出 I/O、文件范围、依赖方向和旧代码删除条件是否变化。
-- 涉及 read model 或 worker 时，还必须读取 `docs/architecture/module-boundaries/read-model-contracts.md`、`docs/modules/read-models/boundary-io.md`、`docs/modules/runtime-workers/boundary-io.md` 和 `docs/operations/runtime-worker-governance.md`。
+- 涉及页面读取、列表、统计、搜索、导出、legacy read model 或 worker 时，还必须读取 `docs/architecture/direct-api-read-architecture.md`、`docs/architecture/module-boundaries/read-model-contracts.md`、`docs/modules/read-models/boundary-io.md`、`docs/modules/runtime-workers/boundary-io.md` 和 `docs/operations/runtime-worker-governance.md`。
 - 如果改动改变模块职责、输入 I/O、输出 I/O、文件范围、依赖方向、read model scope、worker、API response shape、权限、测试矩阵或旧代码删除条件，必须同步更新对应 `boundary-io.md`。
 
 ## 写文档约定
 
 - 文档默认使用中文。
-- 每次修改或新增功能前，先识别目标页面/功能域，读取 `docs/architecture/module-boundaries/README.md`、`docs/architecture/module-boundaries/inventory.md`、`docs/modules/README.md`、对应 `docs/modules/<module>/README.md` 和 `docs/modules/<module>/boundary-io.md`；若涉及状态机、API、read model、worker、权限、部署或测试，还要读取该模块下的相关维护文档和其链接的长期事实源。
+- 每次修改或新增功能前，先识别目标页面/功能域，读取 `docs/architecture/module-boundaries/README.md`、`docs/architecture/module-boundaries/inventory.md`、`docs/modules/README.md`、对应 `docs/modules/<module>/README.md` 和 `docs/modules/<module>/boundary-io.md`；若涉及状态机、API、页面读取、legacy read model、worker、权限、部署或测试，还要读取该模块下的相关维护文档和其链接的长期事实源。
 - 每次功能、API、架构、read model/worker、运维、权限审计或数据流相关变更，都必须先做 docs impact assessment。
 - 每次修改或新增功能后，若模块事实、状态机、测试矩阵、跨页面影响、实施决策或验证方式发生变化，必须同步维护对应 `docs/modules/<module>/` 文档；如果目标模块目录不存在，先创建模块骨架并在 `docs/modules/README.md` 登记。
 - 每次模块边界、I/O、文件范围或 read model 合同变化后，必须同步维护 `docs/architecture/module-boundaries/` 和对应 `docs/modules/<module>/boundary-io.md`。
@@ -59,13 +59,12 @@
 - service 不直接读取 HTTP cookie/header，不直接 import `app.auth`，不构造 Flask/HTTP response。
 - repository 可以知道 SQL 表结构；业务 service 不应散落 SQL。
 
-## Worker + Read Model 治理约束
+## Direct API + Legacy Read Model 治理约束
 
 - Worker 不得依赖 `Application`、`app.server`、`app.auth`、HTTP response 或 HTTP 状态对象。
-- Read model 查询必须走 freshness/status/enqueue 边界，不能让页面读旧 read model 却伪装 fresh。
-- Read model refresh 的事实源是 PostgreSQL durable queue：`job.outbox_events` 与 `job.read_model_dirty_scopes`。
-- 所有非事务 read model refresh 请求必须先通过 `ReadModelRefreshGateway` / scope policy registry 做 normalize、validate 和 dedupe，再委托 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`；事务内 writer 必须保持同一业务事务并承担等价 scope contract。业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。
-- Redis 只能缓存 fresh gate 之后的 payload；RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
-- 新增 read model 或 worker 时，必须同步更新 registry、manifest/systemd env、tests、docs。
-- `workbench` 保留 active generation 原子发布模型；不要把它机械套成普通 read model gateway。
+- 页面读路径目标是 direct API：route -> service -> repository -> PostgreSQL canonical facts / OA SQL projection / import facts。新增页面、列表、统计、搜索或导出时不得新增 read model、freshness gate、read model dirty scope、read model refresh worker 或 operation barrier target。
+- Legacy read model 只作为迁移清单存在。修改旧 read model 路径时必须优先制定删除条件；除非是在迁移期间保持生产不退化，否则不要继续优化 PSCIP/readiness/freshness 体系。
+- Redis 只能作为 direct API 的可删除短 TTL response cache，不能作为 freshness proof；RabbitMQ 只能作为真实后台任务 wakeup/transport，不能作为页面数据状态事实源。
+- 新增 worker 仅限导入、OA 同步、文件迁移、外部系统同步、受控修复等真实异步任务；不得新增页面 read model refresh worker。
+- 旧 `workbench` active generation 是下线对象，不是新页面读取模式；迁移时必须以 direct SQL/query service 替代，而不是套成新的 gateway。
 - 生产发布入口是 `./scripts/deploy-oa.sh`。发布和运维细节以 `docs/operations/runtime-worker-governance.md` 与 `deploy/oa/README.md` 为准。

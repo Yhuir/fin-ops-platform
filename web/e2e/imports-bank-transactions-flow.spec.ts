@@ -37,17 +37,17 @@ function responsePathMatches(responseUrl: string, pathname: string) {
   return new URL(responseUrl).pathname === pathname;
 }
 
-async function expectFreshReadModelResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
-  const payload = await (await responsePromise).json();
-  expect(payload).toMatchObject({ read_model_status: "fresh" });
+async function expectDirectPayloadResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
+  const payload = await (await responsePromise).json() as Record<string, unknown>;
+  expect(payload.read_model_status).toBeUndefined();
+  expect(payload.read_model_scope_key).toBeUndefined();
+  expect(payload.read_model_stale_reasons).toBeUndefined();
 }
 
-async function expectFreshBankAccountBalanceResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
-  const payload = await (await responsePromise).json();
-  expect(payload).toMatchObject({
-    read_model_status: "fresh",
-    balance_read_model_status: "fresh",
-  });
+async function expectDirectBankAccountBalanceResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
+  const payload = await (await responsePromise).json() as Record<string, unknown>;
+  expect(payload.read_model_status).toBeUndefined();
+  expect(payload.balance_read_model_status).toBeUndefined();
 }
 
 async function previewBankStatementFiles(
@@ -121,7 +121,7 @@ test.describe("bank transaction import browser flow", () => {
       && response.status() === 200);
     await page.getByRole("link", { name: "银行明细" }).click();
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
-    await expectFreshBankAccountBalanceResponse(accountBalanceResponse);
+    await expectDirectBankAccountBalanceResponse(accountBalanceResponse);
     const importedRow = page.getByRole("row", { name: /导入浏览器测试客户/ });
     await expect(importedRow).toBeVisible();
     await expect(importedRow.getByText("1,688.00")).toBeVisible();
@@ -130,7 +130,7 @@ test.describe("bank transaction import browser flow", () => {
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
-  test("confirms bank statement import and observes cost statistics as a fresh downstream read model", async ({ page }) => {
+  test("confirms bank statement import and observes cost statistics as a direct downstream payload", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       bankImportDownstreamFanout: true,
@@ -151,7 +151,7 @@ test.describe("bank transaction import browser flow", () => {
       && response.status() === 200);
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    await expectFreshReadModelResponse(costRowsResponse);
+    await expectDirectPayloadResponse(costRowsResponse);
 
     await page.getByRole("button", { name: "按项目" }).click();
     const importedCostProject = page.getByRole("button", { name: /银行导入成本项目/ });

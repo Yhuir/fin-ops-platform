@@ -7,8 +7,8 @@
 
 - 税金抵扣认证状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 和认证导入事实共同决定，页面不私有定义认证状态。
 - `tax_offset` read model 只物化月份 scope `YYYY-MM`；`all` refresh 只用于 fan-out 月份 shard，不写普通 tax offset payload。
-- 税金抵扣计划保存必须校验 `read_model_scope_key`、`source_versions` 和 `idempotency_key`；source mismatch 返回 conflict，不能基于旧 read model 保存。
-- 税金抵扣计划保存成功、已认证发票导入 confirm/job 成功后，页面必须先等待当前月份 `tax_offset` operation barrier fresh，再重新读取 `/api/tax-offset`；barrier blocked/timeout 只提示后台同步尚未完成，不能提前读旧投影。
+- 税金抵扣计划保存必须校验 direct payload `source_versions` 和 `idempotency_key`；source mismatch 返回 conflict，不能基于旧 read model 保存。
+- 税金抵扣计划保存成功、已认证发票导入 confirm/job 成功后，页面直接重新读取 `/api/tax-offset`；前端不再等待当前月份 `tax_offset` operation barrier。
 - 进项计划行只从 canonical invoice facts 读取；OA 附件正式发票必须先 promotion 到 Invoice repository / `app.invoices`，`app.oa_attachment_invoice_cache` 只作为解析缓存，不是税金抵扣事实源。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖税额试算、已认证导入、权限、计划保存、SQL read model、Redis cache、worker fan-out、lifecycle fan-out、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
 - 2026-06-19 Spec-first 基线补齐：新增 `e2e-spec.md` / `e2e-coverage.md`，并用 Browser smoke 覆盖 Workbench relation -> tax offset fresh read model fan-out。
@@ -32,6 +32,36 @@
 ```
 
 ## 历史记录
+
+## 2026-06-27 - 删除 stale tax SQL read-model API tests
+
+- 目标：继续 remove-read-models 主控闭环，清理 `tests/test_tax_offset_sql_runtime.py` 中仍断言 `/api/tax-offset` 读取 Redis/SQL read model fresh gate 并返回 `read_model_status` 的旧 API 测试。
+- 影响范围：`tests/test_tax_offset_sql_runtime.py` 和本模块测试矩阵；不改变运行时代码、API shape、worker event、queue schema、Redis key/envelope 或前端行为。
+- 关键决策：页面 GET 已是 direct `TaxOffsetService` payload；这些旧测试和 `docs/modules/tax-offset/README.md` / `tests/test_tax_offset_api.py` 的 direct API 合同冲突。保留 SQL projection repository、worker refresh、all fan-out、runtime invalidation 和 Redis delete best-effort 测试。
+- 文档影响：更新 `tests.md` 和本实施记录。
+- 测试覆盖：`tests/test_tax_offset_sql_runtime.py` 现在只覆盖 legacy projection/runtime/worker 边界；direct API shape 继续由 `tests/test_tax_offset_api.py` 覆盖。
+- 验证命令：见 remove-read-models Loop 121 执行状态。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；本轮不删除 worker、manifest、dirty scope 或 DB 表。
+
+## 2026-06-27 - 删除 tax offset app invalidation wrapper
+
+- 目标：继续 remove-read-models 主控闭环，删除 `Application._invalidate_tax_offset_read_model_scopes(...)` 这一层仅转发到 `TaxOffsetRuntimeService` 的 app helper。
+- 影响范围：import processing tax offset invalidation port、OA attachment invoice promotion、invoice import revert、Workbench scope invalidation 和 tax offset runtime tests；不改变税金试算、认证导入、计划保存、API shape、worker event、queue schema、Redis key/envelope 或前端行为。
+- 关键决策：调用点直接使用 `self._tax_offset_runtime_for_read_model().invalidate_read_model_scopes(...)`；`ImportProcessingService` 仍保留注入端口，避免把 runtime 依赖塞进 import service。
+- 文档影响：本实施记录同步；长期页面 contract 不变。
+- 测试覆盖：更新 `tests/test_tax_offset_sql_runtime.py` 直接验证 runtime invalidation；扩展 architecture guard 防止 app helper 回归。
+- 验证命令：见 remove-read-models Loop 120 执行状态。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；本轮不删除 shared runtime service、worker、dirty scope 或 DB 表。
+
+## 2026-06-26 - 前端保存/认证导入后移除operation barrier等待
+
+- 目标：税金抵扣页面保存计划和已认证发票导入完成后，直接重读当前月份 `/api/tax-offset`，不再等待 `/api/operation-barrier/status`。
+- 影响范围：`web/src/pages/TaxOffsetPage.tsx`、`web/src/test/TaxOffsetPage.test.tsx`、本模块边界和测试文档。
+- 关键决策：本轮不改后端 plan/import response shape，也不删除 shared operation barrier helper；旧 target 字段暂作兼容/诊断字段，页面不消费。
+- 文档影响：同步 `boundary-io.md`、`tests.md`、`e2e-coverage.md` 和本实施记录。
+- 测试覆盖：Vitest 覆盖保存计划和 queued import job 完成后直接刷新，且没有 `/api/operation-barrier/status` 请求。
+- 验证命令：`cd web && npm test -- --run src/test/TaxOffsetPage.test.tsx`。
+- 未测风险：本轮未迁移 `/api/tax-offset` 后端 read model 读路径；真实 worker drain 和后端 direct query 仍属后续迁移。
 
 ## 2026-06-25 - 税金抵扣 route-owner 本地闭环审计
 
@@ -200,7 +230,7 @@
 - 关键决策：页面用当前月份构造 `tax_offset` operation barrier target。保存计划或认证导入写成功后，barrier fresh 才 `loadMonthData("refresh")`；barrier blocked/timeout 只展示“后台同步尚未完成”，不读取旧投影。
 - 文档影响：更新本实施记录、`tests.md`、`e2e-spec.md` 和 `e2e-coverage.md`。
 - 测试覆盖：新增 Vitest 回归，证明保存计划后 barrier resolve 前 `/api/tax-offset?month=2026-03` 请求数不增加；排队导入自定义 mock 补齐 barrier fresh。
-- 验证命令：`cd web && npm test -- --run src/test/TaxOffsetPage.test.tsx src/test/OperationBarrierApi.test.ts`。
+- 验证命令：`cd web && npm test -- --run src/test/TaxOffsetPage.test.tsx`。
 - 未测风险：本地 Vitest 证明页面等待 barrier，不证明真实 PostgreSQL/RabbitMQ/Redis/systemd `tax-offset` worker drain。
 
 ## 2026-06-19 - 税金抵扣成功写流 UI 错误残留 guard

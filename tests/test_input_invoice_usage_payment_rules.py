@@ -29,14 +29,6 @@ class StaticOAProjection:
         return [record for record in self.records if record.id in wanted]
 
 
-class QueueRecorder:
-    def __init__(self) -> None:
-        self.refreshes: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-        self.refreshes.append((scope_type, scope_key, reason))
-
-
 class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
     def test_default_rules_are_editable_versioned_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -54,12 +46,10 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             "input_invoice_usage_payment_status_rules",
         )
 
-    def test_put_rules_handler_saves_and_enqueues_refresh(self) -> None:
+    def test_put_rules_handler_saves_without_read_model_enqueue(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._oa_identity_service = None
-            queue = QueueRecorder()
-            app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             current = app._app_settings_service.get_input_invoice_usage_payment_status_rules_payload(can_save=True)
             next_rules = [dict(rule) for rule in current["rules"]]
             next_rules[1]["label"] = "已支付"
@@ -78,13 +68,9 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            queue.refreshes,
-            [
-                ("input_invoice_usage", "all", "payment_status_rules_updated"),
-                ("invoice_lifecycle", "all", "payment_status_rules_updated"),
-            ],
-        )
+        payload = json.loads(response.body)
+        self.assertEqual(payload["version"], current["version"] + 1)
+        self.assertNotIn("readModelRefresh", payload)
 
     def test_rules_update_persists_audits_and_returns_invalidation_event(self) -> None:
         events: list[dict[str, object]] = []

@@ -22,16 +22,16 @@
 | `APP-SHELL-E2E-005` | compact/mobile 视口可以打开主导航，点击业务入口后抽屉关闭并进入目标页面。 | P0 |
 | `APP-SHELL-E2E-006` | embedded OA 模式使用 embedded shell；桌面侧栏默认折叠，用户仍可展开/收起，不遮挡页面主体。 | P1 |
 | `APP-SHELL-E2E-007` | forbidden/expired/read-export/full/admin session gate 不触发越权 protected API；不可访问页面展示正确 gate 或不可用状态。 | P0 |
-| `APP-SHELL-E2E-008` | Global operation overlay 只承载写操作后的短暂等待/失败确认，不保存业务事实，不替代 read model freshness。 | P1 |
-| `APP-SHELL-E2E-009` | Page session state 只保存轻量 UI 状态，并按 page/state/user/version/TTL 隔离；不保存 read model payload 或业务事实。 | P1 |
-| `APP-SHELL-E2E-010` | App Status indicator 是全局事实展示；路由切换不能改变 app status 投影或把页面 read model 状态写入 shell。 | P1 |
+| `APP-SHELL-E2E-008` | Global operation overlay 只承载写操作后的短暂等待/失败确认，不保存业务事实，不替代页面 direct-read 收敛。 | P1 |
+| `APP-SHELL-E2E-009` | Page session state 只保存轻量 UI 状态，并按 page/state/user/version/TTL 隔离；不保存业务 payload 或业务事实。 | P1 |
+| `APP-SHELL-E2E-010` | App Status indicator 是全局事实展示；路由切换不能改变 app status 投影或把页面 direct-read 状态写入 shell。 | P1 |
 
 ## 数据状态
 
 - `loading`：session gate 或 lazy route fallback 可以显示轻量加载，但不能泄露旧业务页。
 - `forbidden` / `expired`：业务页面不渲染，protected API 不应被调用。
 - `error`：session error 允许用户重试；route preload 失败不能污染当前 route。
-- `fresh` / `stale` / `refreshing`：由具体页面和 App Status 投影负责，shell 只展示全局状态，不伪造页面 freshness。
+- direct-read 可用/不可用/重试：由具体页面和 App Status 投影负责，shell 只展示全局状态，不伪造页面数据状态。
 
 ## 权限规则
 
@@ -41,7 +41,7 @@
 
 ## API / Runtime 边界
 
-- Shell 可以消费 session 和 app status API，但不得持有业务 read model payload。
+- Shell 可以消费 session 和 app status API，但不得持有业务 payload。
 - `PageRouteHost` 每次只挂载当前 route，不保留隐藏页面 frame。
 - route preload 只预取 chunk，不改变 route，不写业务状态。
 - `GlobalOperationOverlayProvider` 是唯一 shell 级操作 overlay，页面不得各自实现第二套全屏阻塞机制。

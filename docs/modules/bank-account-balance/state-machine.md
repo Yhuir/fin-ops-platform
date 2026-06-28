@@ -1,38 +1,28 @@
 # Bank Account Balance 状态机
 
-## Read Model 状态
+## 当前状态
 
-| 状态 | 含义 | 合法来源 |
-| --- | --- | --- |
-| `fresh` | `read_model.bank_account_balances` 与 `bank_account_balance:all` scope summary 当前可用。 | Bank Details accounts SQL read path。 |
-| `refreshing` | scope missing、dirty/outbox active、migration missing 或 worker 正在刷新。 | Bank Details accounts fresh gate、runtime queue、App Status。 |
-| `stale` | scope/source/schema 不匹配，或已有 payload 不能证明当前 freshness。 | API fresh gate / App Status。 |
-| `failed` | worker/runtime queue 对 `bank_account_balance.read_model.refresh` 记录失败。 | Runtime worker / App Status。 |
-| `unavailable` | SQL repository、table 或 storage contract 不可用。 | API fresh gate / App Status。 |
+独立 `bank_account_balance` read model 状态机已下线。`/api/bank-details/accounts` 只有 direct API 读取状态：成功返回当前业务 payload，失败返回普通 API 错误；不再暴露 `fresh`、`refreshing`、`stale`、`failed`、`unavailable` 或等价 freshness 字段。
 
-## Worker 状态
+## 已删除状态
 
-- `bank-account-balance` 是 `bank_account_balance.read_model.refresh` 的 required worker。
-- 当前 worker handler 只接受 `scope_type=bank_account_balance` 且 `scope_key=all`。
-- `bank_account_balance:all` 当前是唯一 projection publish scope；不要在没有设计的情况下把它机械改成 month/account shard。
+- `fresh` / `refreshing` / `stale` / `failed` / `unavailable`
+- `bank_account_balance:all` scope
+- `bank_account_balance.read_model.refresh`
+- `bank-account-balance` worker
+- `read_model.bank_account_balances` 当前运行读写路径
 
 ## 非法状态
 
-- Bank Details accounts API 用 `bank_detail` rows 推导余额金额或余额 freshness。
-- 页面/API 返回 `read_model_status=fresh`，但账户余额 table/scope summary missing、dirty、failed 或 schema/source 不匹配。
-- `bank_account_balance` refresh 绕过 `ReadModelRefreshGateway` / scope policy / durable queue。
-- `BankDetailReadModelRepositoryPort` 长期作为账户余额 read model 的正式 owner。
+- Bank Details accounts API 返回 read-model freshness 字段。
+- 导入、settings reset、runtime lifecycle 或 backfill 重新 enqueue `bank_account_balance.read_model.refresh`。
+- Worker registry、App Status、RabbitMQ dispatcher、deploy env 或 manifest 重新注册 `bank-account-balance`。
+- 新增 `BankAccountBalance*ReadModel*` service/port/projection/backfill。
 
 ## 变更记录
 
 | 日期 | 变更 | 状态机影响 | 测试/验证 |
 | --- | --- | --- | --- |
-| 2026-06-24 | 建立模块维护骨架，并选择为 Search 后的下一 read model pilot | 不改变运行时状态定义；记录当前 all-only worker/storage contract 和 repository port gap | `bash scripts/verify.sh docs` |
-| 2026-06-24 | Repository port extraction | 不改变运行时状态定义；账户余额 projection save 和 Bank Details accounts SQL read path 收敛到 `BankAccountBalanceReadModelRepositoryPort` | `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model tests.test_bank_details_sql_runtime tests.test_bankdetail_backfill_cli tests.test_read_model_manifest tests.test_runtime_worker_registry -v` |
-| 2026-06-24 | Refresh/freshness/operation-barrier audit | 不改变运行时状态定义；确认 `bank_account_balance:all` 仍是唯一 publish scope，并把 refresh producer extraction 作为下一条实现边界 | `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model tests.test_bank_details_sql_runtime tests.test_bankdetail_backfill_cli tests.test_read_model_manifest tests.test_runtime_worker_registry -v` |
-| 2026-06-24 | Refresh producer extraction | 不改变运行时状态定义；`BankAccountBalanceReadModelRefreshProducer` 成为 all-only refresh enqueue 边界 | `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_read_model tests.test_runtime_worker_read_model_refresh_scopes tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_refresh_producer_helpers_stay_out_of_application tests.test_bank_details_sql_runtime tests.test_bankdetail_backfill_cli -v` |
-| 2026-06-24 | Derived lifecycle executor extraction | 不改变运行时状态定义；derived lifecycle response assembly 移入 `BankAccountBalanceDerivedLifecycleExecutor` | `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_account_balance_derived_lifecycle_executor tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary tests.test_bank_account_balance_read_model tests.test_runtime_worker_read_model_refresh_scopes tests.test_bank_details_sql_runtime tests.test_bankdetail_backfill_cli -v` |
-| 2026-06-24 | All-only scope contract | 不改变运行时状态定义；gateway scope policy 现在只接受 `bank_account_balance:all`，非 all scope 在 durable enqueue 前 fail fast | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_refresh_gateway -v` |
-| 2026-06-24 | Operation barrier regression | 不改变运行时状态定义；`bank_account_balance:all` dirty/readiness 或 pending outbox 会让 accounts freshness target 保持 refreshing | `PYTHONPATH=backend/src python3 -m unittest tests.test_operation_freshness_barrier -v` |
-| 2026-06-24 | Bank Detail fallback quarantine | 不改变运行时状态定义；Bank Details accounts SQL read path 不再通过 Bank Detail port 读取 account-balance payload | `PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_runtime_bootstrap -v` |
-| 2026-06-24 | Local implementation closure audit | 不改变运行时状态定义；本地 repository/producer/executor/scope/barrier/fallback 证据已 accounted，剩余真实 PostgreSQL/worker/App Status/high-row/browser evidence deferred | `PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_bank_account_balance_derived_lifecycle_executor tests.test_read_model_refresh_gateway tests.test_operation_freshness_barrier tests.test_runtime_worker_read_model_refresh_scopes tests.test_bankdetail_backfill_cli tests.test_runtime_bootstrap tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_refresh_producer_helpers_stay_out_of_application tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_derived_lifecycle_uses_explicit_executor_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port -v` |
+| 2026-06-24 | 建立模块维护骨架，并选择为 Search 后的 read model pilot | 历史记录；当时定义了 all-only worker/storage contract | 历史验证见 implementation notes |
+| 2026-06-27 | Bank Details accounts page read 改为 direct API | 页面不再消费账户余额 read-model freshness | `tests/test_bank_details_routes.py`、`tests/test_bank_details_sql_runtime.py` |
+| 2026-06-28 | 删除账户余额 legacy read-model runtime | 删除 worker/projection/repository/backfill/producer/manifest/App Status/deploy env；状态机转为已下线负向守卫 | `tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_manifest.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` |

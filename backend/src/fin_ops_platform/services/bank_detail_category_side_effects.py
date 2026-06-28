@@ -11,12 +11,10 @@ class BankDetailCategoryMutationSideEffectPort:
     def __init__(
         self,
         *,
-        enqueue_bank_detail_refresh: Callable[..., bool],
         enqueue_turnover_ledger_refresh: Callable[..., bool],
         invalidate_workbench_after_category_mutation: Callable[[list[str]], bool],
         audit_service: AuditTrailService,
     ) -> None:
-        self._enqueue_bank_detail_refresh = enqueue_bank_detail_refresh
         self._enqueue_turnover_ledger_refresh = enqueue_turnover_ledger_refresh
         self._invalidate_workbench_after_category_mutation = invalidate_workbench_after_category_mutation
         self._audit_service = audit_service
@@ -30,8 +28,6 @@ class BankDetailCategoryMutationSideEffectPort:
         affected_months: list[str],
         metadata: dict[str, object],
     ) -> None:
-        scope_keys = affected_months or ["all"]
-        self._enqueue_bank_detail_refresh(scope_keys, reason="bank_detail_category_confirmation_changed")
         self._enqueue_turnover_ledger_refresh(
             ["all"],
             reason="bank_detail_category_confirmation_changed",

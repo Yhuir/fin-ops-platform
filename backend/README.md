@@ -8,7 +8,7 @@
 backend/src/fin_ops_platform/
   app/       HTTP 入口、路由、OA 鉴权、响应组装
   domain/    领域模型和枚举
-  services/  业务服务、适配层、持久化、读模型和后台任务
+  services/  业务服务、适配层、持久化、direct query 和后台任务
 ```
 
 ## 本地检查
@@ -66,7 +66,7 @@ PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 
 ## Worker
 
-生产 read model 刷新使用独立 worker 进程，不依赖 API 进程内 thread。worker 通过 PostgreSQL durable queue claim 任务，Redis 只做短 TTL cache 和 wake-up。RabbitMQ 未来只能作为 envelope 投递通道，不能替代 `job.outbox_events` 事实源：
+生产后台任务使用独立 worker 进程，不依赖 API 进程内 thread。worker 通过 PostgreSQL durable queue claim 任务，Redis 只做短 TTL cache 和 wake-up。RabbitMQ 只能作为 envelope 投递通道，不能替代 `job.outbox_events` 事实源：
 
 ```bash
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
@@ -75,15 +75,11 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
 常用角色：
 
 - `worker-oa-sync`：`--enable-oa-sync --worker-kind oa-sync --event-type oa.sync`
-- `worker-workbench`：`--enable-workbench-read-model-refresh --worker-kind workbench-read-model --event-type workbench.read_model.refresh`
-- `worker-bank-detail`：`--enable-bank-detail-read-model-refresh --worker-kind bank-detail-read-model --event-type bank_detail.read_model.refresh`
-- `worker-no-oa-bank-batch`：`--enable-no-oa-bank-batch-read-model-refresh --worker-kind no-oa-bank-batch-read-model --event-type no_oa_bank_batch.read_model.refresh`
-- `worker-search-pending`：`--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh --worker-kind search-pending-read-model --event-type search.read_model.refresh --event-type pending_invoice.read_model.refresh`
-- `worker-invoice-usage-collection`：`--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --worker-kind invoice-usage-collection-read-model --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh`
-- `worker-cost-tax`：`--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh`
 - `worker-import`：`--enable-import-job-processing --worker-kind import-job --event-type import.process.requested`
 - `worker-workbench-matching`：`--enable-workbench-matching --worker-kind workbench-matching`
 - `worker-file-migration`：可选迁移 worker，只有 legacy GridFS 与对象存储 secret 已配置时才启用
+
+权威 worker 清单来自 `python -m fin_ops_platform.tools.runtime_worker_manifest`；不要在文档中维护第二份页面 read-model refresh worker 清单。
 
 最小生产正确性先用 PostgreSQL polling worker，不需要 RabbitMQ。标准 release 发布会自动运行服务器
 root-owned helper `/usr/local/sbin/finops-ensure-runtime-workers`，确保常驻 worker 矩阵安装、开机自启并重启到当前 release。
@@ -100,10 +96,9 @@ sudo /usr/local/sbin/finops-ensure-runtime-workers "$(pwd)"
 
 ```bash
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
-  --worker-id worker-workbench-1 \
-  --worker-kind workbench-read-model \
-  --enable-workbench-read-model-refresh \
-  --event-type workbench.read_model.refresh \
+  --worker-id worker-import-1 \
+  --registration import \
+  --worker-instance import \
   --poll-interval-seconds 2 \
   --lock-timeout-seconds 300 \
   --task-timeout-seconds 60 \
@@ -117,10 +112,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
 FIN_OPS_QUEUE_BACKEND=postgres
 RABBITMQ_URL=
 RABBITMQ_EXCHANGE=finops.events
-RABBITMQ_WORKBENCH_QUEUE=finops.workbench.read_model.refresh
-RABBITMQ_WORKBENCH_ROUTING_KEY=workbench.read_model.refresh
 RABBITMQ_DEAD_LETTER_EXCHANGE=finops.events.dlx
-RABBITMQ_WORKBENCH_DEAD_LETTER_QUEUE=finops.workbench.read_model.refresh.dlq
 RABBITMQ_PREFETCH=10
 RABBITMQ_PUBLISH_CONFIRM=true
 ```
@@ -135,36 +127,13 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.rabbitmq_dispatcher --che
 
 `rabbitmq_dispatcher` 只发布 `RuntimeQueueEvent.to_envelope()`，并且只在 publisher confirm 后更新 PostgreSQL publish 状态。`FIN_OPS_QUEUE_BACKEND=rabbitmq` 时，`app.worker` 使用 RabbitMQ consumer，但仍回 PostgreSQL claim event；`FIN_OPS_QUEUE_BACKEND=postgres` 是回滚路径。
 
-全量补数入口：
+运行时补数和收敛入口优先使用 direct API、import/OA/file-migration worker 和专用 repair 工具。页面 read-model backfill 脚本不再是生产发布或页面可见性入口。常用 worker 自检：
 
 ```bash
-set -a
-source .runtime/fin_ops_platform/local-postgres.env
-set +a
-
-/opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
-  --backfill-oa-children \
-  --invoice-expand-all \
-  --enqueue-missing \
-  --json
-
-/opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
-  --enqueue-invoice-usage-collection \
-  --invoice-expand-all \
-  --reason invoice_usage_collection_release_warmup \
-  --json
-
-/opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
-  --run-worker \
-  --max-iterations 200 \
-  --lock-timeout-seconds 30 \
-  --task-timeout-seconds 60 \
-  --statement-timeout-seconds 30 \
-  --json
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check --registration import
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check --registration oa-sync
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check --registration workbench-matching
 ```
-
-read model refresh worker 不构造完整 `Application`，不调用 `StateStore.load()`；`all` scope 会展开成 month/entity shard 后再处理。
-发票使用/收款页面的生产补数和验证细节见 `../docs/operations/invoice-usage-collection-read-model-backfill.md`。
 
 ## 相关文档
 

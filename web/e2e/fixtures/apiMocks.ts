@@ -7,20 +7,9 @@ export type AccessTier = "denied" | "read_export_only" | "full_access" | "admin"
 type SessionMode = "admin" | "full_access" | "read_export_only" | "forbidden" | "expired" | "error";
 type OaSyncMockMode = "idle" | "dirty" | "refreshing" | "error";
 type WorkbenchHealthMockStatus = "ready" | "stale" | "rebuilding" | "error";
-type WorkbenchRefreshMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
-type WorkbenchPageMockStatus = "fresh" | "refreshing" | "stale";
-type OperationBarrierMockMode = "fresh" | "refreshing" | "blocked";
-type InputInvoiceUsageReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
-type OaPendingPaymentReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
-type OutputInvoiceCollectionReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
+type InputInvoiceUsageRelationDetailMockStatus = "ready" | "refreshing" | "stale" | "missing";
 type OutputInvoiceReceiptLifecycleState = "none" | "issued" | "voided" | "reissued";
-type PendingInvoiceReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
-type BankDetailReadModelMockStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
-type CostStatisticsReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
-type TaxOffsetReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "missing" | "unavailable";
-type NoOaBankBatchReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
-type BatchAccountingReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
-type TurnoverLedgerReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
+type CostStatisticsTransactionDetailMockStatus = "ready" | "refreshing" | "stale" | "failed" | "unavailable";
 type BankDetailClassificationMockMode = "auto_matched" | "needs_confirmation" | "unmatched";
 type BankDetailCategoryOverride = {
   categoryCode: string;
@@ -32,7 +21,6 @@ type BankDetailCategoryOverride = {
 };
 type BankAutoTagRulesPayloadOptions = {
   version?: number;
-  readModelStatus?: "fresh" | "refreshing";
   salarySubLabel?: string;
 };
 
@@ -71,45 +59,30 @@ type ApiMockOptions = {
   noOaCostFanout?: boolean;
   noOaBankBatchFailOnce?: boolean;
   noOaBankBatchFailuresBeforeSuccess?: number;
-  noOaBankBatchReadModelStatus?: NoOaBankBatchReadModelMockStatus;
-  noOaBankBatchReadModelStatuses?: NoOaBankBatchReadModelMockStatus[];
   noOaBankBatchScenario?: NoOaBankBatchMockScenario;
   settingsProjectScopeFanout?: boolean;
   turnoverCostFanout?: boolean;
   turnoverLedgerFailOnce?: boolean;
   turnoverLedgerFailuresBeforeSuccess?: number;
-  turnoverLedgerReadModelStatus?: TurnoverLedgerReadModelMockStatus;
-  turnoverLedgerReadModelStatuses?: TurnoverLedgerReadModelMockStatus[];
-  bankDetailsAccountReadModelStatus?: BankDetailReadModelMockStatus;
-  bankDetailsAccountReadModelStatuses?: BankDetailReadModelMockStatus[];
   bankDetailsClassificationMode?: BankDetailClassificationMockMode;
-  bankDetailsExportReadModelStatus?: BankDetailReadModelMockStatus;
   bankDetailsLargeDataset?: boolean;
-  bankDetailsTransactionReadModelStatus?: BankDetailReadModelMockStatus;
-  bankDetailsTransactionReadModelStatuses?: BankDetailReadModelMockStatus[];
   bankDetailsTransactionsEmpty?: boolean;
   bankDetailsTransactionsTotal?: number;
   batchAccountingInitialSubmitted?: boolean;
   batchAccountingFailOnce?: boolean;
   batchAccountingFailuresBeforeSuccess?: number;
-  batchAccountingReadModelStatus?: BatchAccountingReadModelMockStatus;
-  batchAccountingReadModelStatuses?: BatchAccountingReadModelMockStatus[];
   costStatisticsExportDownloadSuccess?: boolean;
-  costStatisticsExportReadModelStatus?: CostStatisticsReadModelMockStatus;
   costStatisticsExplorerFailOnce?: boolean;
   costStatisticsExplorerFailuresBeforeSuccess?: number;
   costStatisticsLargeDataset?: boolean;
-  costStatisticsReadModelStatus?: CostStatisticsReadModelMockStatus;
   costStatisticsRelationFanout?: boolean;
-  costStatisticsTransactionDetailReadModelStatus?: CostStatisticsReadModelMockStatus;
-  inputInvoiceUsageExportReadModelStatus?: InputInvoiceUsageReadModelMockStatus;
+  costStatisticsTransactionDetailStatus?: CostStatisticsTransactionDetailMockStatus;
   inputInvoiceUsageExportRowLimitError?: boolean;
   inputInvoiceUsageFilterSortRows?: boolean;
   inputInvoiceUsagePaymentRulesSaveFlow?: boolean;
-  inputInvoiceUsageReadModelStatus?: InputInvoiceUsageReadModelMockStatus;
   inputInvoiceUsageRowsFailOnce?: boolean;
   inputInvoiceUsageRowsFailuresBeforeSuccess?: number;
-  inputInvoiceUsageRelationDetailReadModelStatus?: InputInvoiceUsageReadModelMockStatus;
+  inputInvoiceUsageRelationDetailStatus?: InputInvoiceUsageRelationDetailMockStatus;
   inputInvoiceUsageRelationFanout?: boolean;
   oaPendingPaymentCandidateRelations?: boolean;
   oaPendingPaymentBankLinkDelayMs?: number;
@@ -122,7 +95,6 @@ type ApiMockOptions = {
   oaPendingPaymentConfirmPaidError?: boolean;
   oaPendingPaymentConfirmPaidFlow?: boolean;
   oaPendingPaymentDetailReadModelRefreshing?: boolean;
-  oaPendingPaymentReadModelStatus?: OaPendingPaymentReadModelMockStatus;
   oaPendingPaymentRowsFailOnce?: boolean;
   oaPendingPaymentRowsFailuresBeforeSuccess?: number;
   oaPendingPaymentRelationFanout?: boolean;
@@ -142,7 +114,6 @@ type ApiMockOptions = {
   outputInvoiceCollectionStatusFailOnce?: boolean;
   outputInvoiceCollectionStatusFailuresBeforeSuccess?: number;
   outputInvoiceDownstreamFanout?: boolean;
-  outputInvoiceCollectionReadModelStatus?: OutputInvoiceCollectionReadModelMockStatus;
   outputInvoiceRedRelationCandidate?: boolean;
   pendingInvoiceCandidateRelations?: boolean;
   pendingInvoiceAttachExistingBatchRows?: boolean;
@@ -160,17 +131,13 @@ type ApiMockOptions = {
   pendingInvoiceRulesSaveFailOnce?: boolean;
   pendingInvoiceRulesSaveFlow?: boolean;
   pendingInvoiceRulesSaveFailuresBeforeSuccess?: number;
-  pendingInvoiceReadModelStatus?: PendingInvoiceReadModelMockStatus;
   pendingInvoiceRowsEmpty?: boolean;
   sessionMode?: SessionMode;
   taxOffsetRelationFanout?: boolean;
   taxOffsetLargeDataset?: boolean;
-  taxOffsetReadModelStatus?: TaxOffsetReadModelMockStatus;
-  taxOffsetReadModelStatuses?: TaxOffsetReadModelMockStatus[];
   taxOffsetPlanSaveConflict?: boolean;
   dashboardError?: boolean;
   oaSyncMode?: OaSyncMockMode;
-  operationBarrierMode?: OperationBarrierMockMode;
   workbenchConfirmSubmitConflict?: boolean;
   workbenchConfirmSubmitDelayMs?: number;
   workbenchConfirmSubmitError?: boolean;
@@ -183,8 +150,6 @@ type ApiMockOptions = {
   workbenchInitialRowIgnored?: boolean;
   workbenchLargeDataset?: boolean;
   workbenchPageEmpty?: boolean;
-  workbenchPageStatus?: WorkbenchPageMockStatus;
-  workbenchRefreshStatus?: WorkbenchRefreshMockStatus;
   workbenchWithdrawSubmitDelayMs?: number;
 };
 
@@ -266,7 +231,7 @@ function appStatusWriteSafety(blocksMutations = false, reason = blocksMutations 
 }
 
 function appStatusWorkbenchDomain(status: WorkbenchHealthMockStatus = "ready") {
-  const readModelStatus = status === "ready" ? "ready" : status === "rebuilding" ? "refreshing" : status === "error" ? "failed" : "stale";
+  const runtimeStatus = status === "ready" ? "ready" : status === "rebuilding" ? "refreshing" : status === "error" ? "failed" : "stale";
   const level = status === "error" ? "blocked" : status === "ready" ? "ok" : "busy";
   const reason = status === "ready"
     ? "关联台已同步"
@@ -280,11 +245,9 @@ function appStatusWorkbenchDomain(status: WorkbenchHealthMockStatus = "ready") {
     label: "关联台",
     route: "/",
     level,
-    status: readModelStatus,
+    status: runtimeStatus,
     reason,
     details: [],
-    read_models: ["workbench"],
-    read_model_scopes: [],
     workers: ["workbench-read-model"],
     job_ids: [],
     updated_at: "2026-06-17T01:00:00Z",
@@ -375,44 +338,6 @@ function oaSyncPayload(mode: OaSyncMockMode = "idle") {
   };
 }
 
-function workbenchReadModelHealthPayload(status: WorkbenchHealthMockStatus = "ready") {
-  return {
-    status,
-    read_model_status: status === "ready" ? "fresh" : status === "rebuilding" ? "refreshing" : status === "error" ? "failed" : "stale",
-    dirty_scopes: status === "ready" ? [] : ["2026-03"],
-    matching_dirty_scopes: status === "ready" ? [] : ["2026-03"],
-    matching_running_scopes: status === "rebuilding" ? ["2026-03"] : [],
-    stale_scopes: status === "ready" ? [] : ["2026-03"],
-    rebuilding_scopes: status === "rebuilding" ? ["2026-03"] : [],
-    last_matching_error: status === "error" ? "browser workbench refresh failed" : null,
-  };
-}
-
-function workbenchRefreshStatusPayload(status: WorkbenchRefreshMockStatus = "fresh") {
-  const scopeStatus = status === "fresh"
-    ? "completed"
-    : status === "failed" || status === "unavailable"
-      ? "failed"
-      : "processing";
-  return {
-    scope_key: "all",
-    read_model_status: status,
-    read_model_version: "workbench-refresh-e2e-001",
-    active_generation_id: "workbench-generation-e2e-001",
-    dirty_scopes: status === "fresh"
-      ? []
-      : [
-        {
-          scope_key: "2026-03",
-          status: scopeStatus,
-          last_error: status === "failed" ? "browser refresh failed" : null,
-        },
-      ],
-    last_error: status === "failed" ? "browser refresh failed" : null,
-    retryable: status === "failed",
-  };
-}
-
 function appHealthPayload(options: ApiMockOptions = {}) {
   return {
     status: "ok",
@@ -421,7 +346,6 @@ function appHealthPayload(options: ApiMockOptions = {}) {
     app_status: appStatusOverview(options),
     session: { status: "authenticated" },
     oa_sync: oaSyncPayload(options.oaSyncMode),
-    workbench_read_model: workbenchReadModelHealthPayload(options.workbenchHealthStatus),
     background_jobs: {
       active: 0,
       queued: 0,
@@ -498,22 +422,6 @@ function operationsDashboardPayload() {
         status: "available",
       },
       queues: [],
-      read_models: [
-        {
-          key: "workbench",
-          refresh_duration_ms: percentile(120),
-          refresh_duration_windows: {
-            recent_15m: {
-              sample_count: 1,
-              last_completed_at: "2026-06-17T01:00:00Z",
-              duration_ms: percentile(120),
-            },
-          },
-          stale_count: 0,
-          unavailable_count: 0,
-          status: "available",
-        },
-      ],
       workers: [
         {
           worker_kind: "workbench-read-model",
@@ -565,10 +473,8 @@ function settingsDataResetJobPayload(params: {
           action: params.action,
           status: "completed",
           job_id: params.jobId,
-          cleared_collections: ["workbench_read_models"],
-          deleted_counts: {
-            workbench_read_models: 1,
-          },
+          cleared_collections: [],
+          deleted_counts: {},
           protected_targets: ["form_data_db.form_data"],
           rebuild_status: params.action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
           message: "已完成数据重置。",
@@ -939,7 +845,6 @@ function workbenchSummaryPayload(
   candidateSplitSuppressed = false,
   exceptionApplied = false,
   rowIgnored = false,
-  pageStatus: WorkbenchPageMockStatus = "fresh",
   pageEmpty = false,
   largeDataset = false,
 ) {
@@ -956,7 +861,6 @@ function workbenchSummaryPayload(
       etc_summary_batch_count: 0,
       oa_attachment_total: largeDataset ? 210 : 1,
     },
-    read_model_status: pageStatus,
     generated_at: "2026-06-17T01:00:00Z",
   };
 }
@@ -967,7 +871,6 @@ function workbenchGroupsPayload(
   candidateSplitSuppressed = false,
   exceptionApplied = false,
   rowIgnored = false,
-  pageStatus: WorkbenchPageMockStatus = "fresh",
   pageEmpty = false,
   largeDataset = false,
   includeCashSpecialActions = false,
@@ -1003,7 +906,6 @@ function workbenchGroupsPayload(
     row_counts: countWorkbenchRows(groups),
     has_more: start + pageGroups.length < groups.length,
     groups: pageGroups,
-    read_model_status: pageStatus,
   };
 }
 
@@ -1103,7 +1005,6 @@ function legacyWorkbenchPayload(
   candidateSplitSuppressed = false,
   exceptionApplied = false,
   rowIgnored = false,
-  pageStatus: WorkbenchPageMockStatus = "fresh",
   pageEmpty = false,
   largeDataset = false,
   includeCashSpecialActions = false,
@@ -1135,7 +1036,6 @@ function legacyWorkbenchPayload(
         ),
     },
     open: { groups: pageEmpty ? [] : workbenchGroups("open", relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, largeDataset) },
-    read_model_status: pageStatus,
     generated_at: "2026-06-17T01:00:00Z",
   };
 }
@@ -1997,7 +1897,6 @@ function taxOffsetPayload(
   relationFanout = false,
   invoiceImportFanout = false,
   etcImportFanout = false,
-  readModelStatus: TaxOffsetReadModelMockStatus = "fresh",
   largeDataset = false,
 ) {
   const month = "2026-03";
@@ -2084,40 +1983,8 @@ function taxOffsetPayload(
       ...(invoiceImportFanout && !selectedInputIds.includes("ti-202603-import-001") ? ["ti-202603-import-001"] : []),
       ...(etcImportFanout && !selectedInputIds.includes("ti-202603-etc-import-001") ? ["ti-202603-etc-import-001"] : []),
     ];
-  if (readModelStatus !== "fresh") {
-    return {
-      month,
-      read_model_status: readModelStatus,
-      read_model_scope_key: month,
-      read_model_generated_at: "2026-06-17T01:00:00Z",
-      read_model_stale_reasons: [`tax_offset_${readModelStatus}`],
-      source_versions: taxSourceVersions(month),
-      output_items: [],
-      input_plan_items: [],
-      certified_items: [],
-      certified_matched_rows: [],
-      certified_outside_plan_rows: [],
-      locked_certified_input_ids: [],
-      default_selected_output_ids: [],
-      default_selected_input_ids: [],
-      summary: {
-        output_tax: "0.00",
-        certified_input_tax: "0.00",
-        planned_input_tax: "0.00",
-        input_tax: "0.00",
-        deductible_tax: "0.00",
-        result_label: "本月留抵税额",
-        result_amount: "0.00",
-      },
-    };
-  }
-
   return {
     month,
-    read_model_status: "fresh",
-    read_model_scope_key: month,
-    read_model_generated_at: "2026-06-17T01:00:00Z",
-    read_model_stale_reasons: [],
     source_versions: taxSourceVersions(month),
     output_items: [
       {
@@ -2367,27 +2234,11 @@ function inputInvoiceUsageWorkbenchRelationRow(relationConfirmed: boolean) {
 function inputInvoiceUsageRowsPayload(
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
-  readModelStatus: InputInvoiceUsageReadModelMockStatus = "fresh",
   includeRelationDetailList = false,
   paymentRulesSaved = false,
   paymentRulesSaveFlow = false,
   includeInvoiceImportRows = false,
 ) {
-  if (readModelStatus !== "fresh") {
-    return {
-      rows: [],
-      pagination: { page: 1, page_size: 20, total: 0 },
-      filter_config: [
-        { field: "seller_name", label: "销方名称", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
-        { field: "payment_status", label: "支付状态", mode: "enum_multi", sortable: true, operators: ["in"] },
-        { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
-      ],
-      read_model_status: "refreshing",
-      read_model_scope_key: "all",
-      read_model_stale_reasons: [`input_invoice_usage_${readModelStatus}`],
-      refresh_enqueued: true,
-    };
-  }
   const rows = [
     ...(includeWorkbenchRelationEvidence ? [inputInvoiceUsageWorkbenchRelationRow(relationConfirmed)] : []),
     ...(includeInvoiceImportRows
@@ -2533,8 +2384,6 @@ function inputInvoiceUsageRowsPayload(
       { field: "payment_status", label: "支付状态", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
     ],
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
@@ -2896,8 +2745,6 @@ function inputInvoiceUsageFilterSortOptionsPayload() {
       ...config,
       options: inputInvoiceUsageOptionsForRows(rows, config.field),
     })),
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
@@ -2911,21 +2758,10 @@ function inputInvoiceUsageFilterSortRowsPayload(url?: URL) {
     rows: filteredRows.slice(offset, offset + pageSize),
     pagination: { page, page_size: pageSize, total: filteredRows.length },
     filter_config: inputInvoiceUsageFilterConfig(),
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
-function inputInvoiceUsageFilterOptionsPayload(readModelStatus: InputInvoiceUsageReadModelMockStatus = "fresh") {
-  if (readModelStatus !== "fresh") {
-    return {
-      fields: [],
-      read_model_status: "refreshing",
-      read_model_scope_key: "all",
-      read_model_stale_reasons: [`input_invoice_usage_${readModelStatus}`],
-      refresh_enqueued: true,
-    };
-  }
+function inputInvoiceUsageFilterOptionsPayload() {
   return {
     fields: [
       {
@@ -2953,30 +2789,26 @@ function inputInvoiceUsageFilterOptionsPayload(readModelStatus: InputInvoiceUsag
         options: [{ value: "陈秀云", label: "陈秀云", count: 1 }],
       },
     ],
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
 function inputInvoiceUsageRelationDetailPayload(
   kind: string,
-  readModelStatus: InputInvoiceUsageReadModelMockStatus = "fresh",
+  detailStatus: InputInvoiceUsageRelationDetailMockStatus = "ready",
 ) {
   const relationLabel = kind === "bank" ? "银行流水" : kind === "invoice" ? "发票" : "OA";
-  if (readModelStatus !== "fresh") {
+  if (detailStatus !== "ready") {
     return {
       row_id: "input-usage-row-e2e-001",
       invoice_id: "input-invoice-row-e2e-001",
       kind,
       title: `${relationLabel}关联明细`,
+      detailAvailable: false,
+      unavailableReason: "进项发票使用情况关联明细正在刷新，完成后请重新打开详情。",
       relation_count: 0,
       has_multiple: false,
       summaries: [],
       sections: [],
-      read_model_status: "refreshing",
-      read_model_scope_key: "all",
-      read_model_stale_reasons: [`input_invoice_usage_relation_detail_${readModelStatus}`],
-      refresh_enqueued: true,
     };
   }
   return {
@@ -2987,25 +2819,10 @@ function inputInvoiceUsageRelationDetailPayload(
     relation_count: 2,
     has_multiple: true,
     summaries: ["陈秀云 88.00", "刘际涛 100.00"],
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
-function inputInvoiceUsageExportPreviewPayload(readModelStatus: InputInvoiceUsageReadModelMockStatus = "fresh") {
-  if (readModelStatus !== "fresh") {
-    return {
-      file_name: "input-invoice-usage.xlsx",
-      row_count: 0,
-      scope_label: "当前筛选",
-      columns: [],
-      sample_rows: [],
-      read_model_status: "refreshing",
-      readModelStatus: "refreshing",
-      message: "进项发票使用情况数据正在刷新，请稍后重试导出。",
-      refresh_enqueued: true,
-    };
-  }
+function inputInvoiceUsageExportPreviewPayload() {
   return {
     file_name: "input-invoice-usage.xlsx",
     row_count: 1,
@@ -3034,7 +2851,6 @@ function inputInvoiceUsageExportPreviewPayload(readModelStatus: InputInvoiceUsag
         关系状态: "linked",
       },
     ],
-    read_model_status: "fresh",
   };
 }
 
@@ -3305,7 +3121,7 @@ function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceI
           paymentStatus: {
             code: "paid",
             label: "已支付",
-            reason: "发票导入后 OA 待付款 read model 已刷新。",
+            reason: "发票导入后 OA 待付款证据已更新。",
             severity: "success",
           },
           bankTransaction: {
@@ -3373,9 +3189,6 @@ function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceI
       { field: "seller_name", label: "发票方", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
     ],
-    readModelStatus: "fresh",
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
@@ -3470,11 +3283,6 @@ function oaPendingPaymentConfirmPaidRowsPayload(confirmed: boolean) {
       { field: "seller_name", label: "发票方", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
     ],
-    readModelStatus: "fresh",
-    read_model_status: "fresh",
-    read_model_scope_key: "oa_pending_payment:in_progress",
-    sourceVersions: { oa_pending_payment: confirmed ? 2 : 1, workbench: 1 },
-    source_versions: { oa_pending_payment: confirmed ? 2 : 1, workbench: 1 },
     viewMode: "in_progress",
     view_mode: "in_progress",
   };
@@ -3609,11 +3417,6 @@ function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
       { field: "seller_name", label: "发票方", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
     ],
-    readModelStatus: "fresh",
-    read_model_status: "fresh",
-    read_model_scope_key: "oa_pending_payment:in_progress",
-    sourceVersions: { oa_pending_payment: linked ? 2 : 1, workbench: linked ? 2 : 1 },
-    source_versions: { oa_pending_payment: linked ? 2 : 1, workbench: linked ? 2 : 1 },
     viewMode: "in_progress",
     view_mode: "in_progress",
   };
@@ -3774,29 +3577,10 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
       { field: "seller_name", label: "发票方", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
     ],
-    readModelStatus: "fresh",
-    read_model_status: "fresh",
-    read_model_scope_key: "all",
   };
 }
 
-function oaPendingPaymentNonFreshRowsPayload(readModelStatus: OaPendingPaymentReadModelMockStatus) {
-  const payload = oaPendingPaymentRowsPayload(false);
-  return {
-    ...payload,
-    rows: [],
-    pagination: { page: 1, pageSize: 20, total: 0 },
-    summary: { rowCount: 0, viewCounts: { completed: 0, in_progress: 0 } },
-    readModelStatus,
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : ["oa_pending_payment_source_version_missing"],
-    read_model_scope_key: "oa_pending_payment:all",
-    sourceVersions: { oa_pending_payment: 1, workbench: 1 },
-    source_versions: { oa_pending_payment: 1, workbench: 1 },
-  };
-}
-
-function oaPendingPaymentFilterOptionsPayload(readModelStatus: OaPendingPaymentReadModelMockStatus = "fresh") {
+function oaPendingPaymentFilterOptionsPayload() {
   return {
     fields: [
       {
@@ -3858,10 +3642,6 @@ function oaPendingPaymentFilterOptionsPayload(readModelStatus: OaPendingPaymentR
       },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"], options: [] },
     ],
-    readModelStatus,
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : ["oa_pending_payment_source_version_missing"],
-    read_model_scope_key: "all",
   };
 }
 
@@ -3872,7 +3652,6 @@ function oaPendingPaymentUnavailableDetailPayload() {
     detailAvailable: false,
     unavailableReason: "详情数据正在刷新，请稍后重试。",
     sections: [],
-    read_model_status: "refreshing",
   };
 }
 
@@ -3930,17 +3709,14 @@ function oaPendingPaymentDetailPayload(kind: "oa" | "bank" | "invoice") {
 
 function pendingInvoiceExpenseRulesPayload({
   canSave = false,
-  readModelStatus = "fresh",
   version = 1,
 }: {
   canSave?: boolean;
-  readModelStatus?: "fresh" | "refreshing";
   version?: number;
 } = {}) {
   return {
     version,
     direction: "expense",
-    read_model_status: readModelStatus,
     available_tags: [
       {
         code: "equipment_payment",
@@ -4321,7 +4097,6 @@ function costStatisticsExplorerPayload(
   includeBankImportEvidence = false,
   includeNoOaCostEvidence = false,
   includeTurnoverCostEvidence = false,
-  readModelStatus: CostStatisticsReadModelMockStatus = "fresh",
   completedProjectNames = completedCostProjectNames,
   includeLargeCostDataset = false,
 ) {
@@ -4375,10 +4150,6 @@ function costStatisticsExplorerPayload(
       transaction_count: bucket.transactionCount,
       project_count: bucket.projects.size,
     })),
-    read_model_status: readModelStatus,
-    read_model_scope_key: `${projectScope ?? "active"}:${month}`,
-    read_model_generated_at: "2026-06-17T09:30:00+08:00",
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`cost_statistics_${readModelStatus}`],
   };
 }
 
@@ -4684,7 +4455,6 @@ function noOaBankBatchSummary(status: NoOaBrowserBatchStatus, batches = noOaBatc
 function noOaBankBatchesPayload(
   status: NoOaBrowserBatchStatus,
   bucket: string | null,
-  readModelStatus: NoOaBankBatchReadModelMockStatus = "fresh",
   scenario: NoOaBankBatchMockScenario = "single",
 ) {
   const batches = noOaBatchesForScenario(status, scenario);
@@ -4707,8 +4477,6 @@ function noOaBankBatchesPayload(
       page_size: 200,
       total: visibleBatches.length,
     },
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`no_oa_bank_batch_${readModelStatus}`],
   };
 }
 
@@ -4870,37 +4638,9 @@ function outputInvoiceCollectionRowsPayload(
   receiptCreated: boolean,
   redRelationConfirmed = false,
   includeRedRelationCandidate = false,
-  readModelStatus: OutputInvoiceCollectionReadModelMockStatus = "fresh",
   url?: URL,
   includeInvoiceImportRows = false,
 ) {
-  if (readModelStatus !== "fresh") {
-    return {
-      rows: [],
-      summary: {
-        invoice_count: 0,
-        total_with_tax: "0.00",
-        collected_amount: "0.00",
-        pending_amount: "0.00",
-        pending_collection_count: 0,
-        partial_collection_count: 0,
-        receipt_pending_count: 0,
-      },
-      pagination: { page: 1, page_size: 20, total: 0 },
-      filter_config: [
-        { field: "invoice_no", label: "发票号码", mode: "text", sortable: true, operators: ["contains", "equals"] },
-        { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
-        { field: "receipt_status", label: "收据情况", mode: "enum_multi", sortable: true, operators: ["in"] },
-      ],
-      read_model_status: "refreshing",
-      read_model_scope_key: "2026-05",
-      read_model_stale_reasons: [`output_invoice_collection_${readModelStatus}`],
-      refresh_enqueued: true,
-      generated_at: null,
-      source_version: "output-invoice-collections:e2e-nonfresh",
-    };
-  }
-
   const rows: Array<Record<string, unknown>> = [
     {
       id: "output-collection-row-e2e-001",
@@ -5104,8 +4844,6 @@ function outputInvoiceCollectionRowsPayload(
       { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "receipt_status", label: "收据情况", mode: "enum_multi", sortable: true, operators: ["in"] },
     ],
-    read_model_status: "fresh",
-    read_model_scope_key: "2026-05",
     generated_at: "2026-06-17T01:00:00Z",
     source_version: "output-invoice-collections:e2e-v1",
   };
@@ -5205,18 +4943,7 @@ function applyOutputInvoiceCollectionListQuery(rows: Array<Record<string, unknow
 function outputInvoiceCollectionFilterOptionsPayload(
   statusSaved: boolean,
   receiptCreated: boolean,
-  readModelStatus: OutputInvoiceCollectionReadModelMockStatus = "fresh",
 ) {
-  if (readModelStatus !== "fresh") {
-    return {
-      fields: [],
-      read_model_status: "refreshing",
-      read_model_scope_key: "2026-05",
-      read_model_stale_reasons: [`output_invoice_collection_${readModelStatus}`],
-      refresh_enqueued: true,
-    };
-  }
-
   return {
     fields: [
       {
@@ -5256,8 +4983,6 @@ function outputInvoiceCollectionFilterOptionsPayload(
         ],
       },
     ],
-    read_model_status: "fresh",
-    read_model_scope_key: "2026-05",
   };
 }
 
@@ -5292,7 +5017,6 @@ function outputInvoiceCollectionExportPreviewPayload(redRelationConfirmed = fals
         收据状态: "待出收据",
       },
     ],
-    read_model_status: "fresh",
   };
 }
 
@@ -5445,12 +5169,6 @@ function confirmResultPayload() {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
     operation_projection: {
       after: {
         paired_groups: [buildWorkbenchGroup("paired", true)],
@@ -5491,12 +5209,6 @@ function withdrawResultPayload() {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
     operation_projection: {
       after: {
         paired_groups: [],
@@ -5533,12 +5245,6 @@ function splitCandidateResultPayload() {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
     operation_projection: {
       after: {
         paired_groups: [],
@@ -5611,12 +5317,6 @@ function workbenchExceptionApplyResultPayload() {
     updated_rows: [],
     affected_row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
     workbench_refresh_required: true,
     message: "已提交统一异常处理。",
   };
@@ -5639,12 +5339,6 @@ function workbenchExceptionActionResultPayload(action: "cancel_exception" | "ign
     exception_case_id: "WEX-BROWSER-001",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
     message: messages[action],
   };
 }
@@ -5668,12 +5362,6 @@ function workbenchCashSpecialResultPayload(action: WorkbenchCashSpecialAction) {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
     operation_projection: {
       after: {
         paired_groups: [buildWorkbenchGroup("paired", true, true)],
@@ -5681,30 +5369,6 @@ function workbenchCashSpecialResultPayload(action: WorkbenchCashSpecialAction) {
       },
     },
     message: messages[action],
-  };
-}
-
-function operationBarrierPayload(mode: OperationBarrierMockMode = "fresh") {
-  const fresh = mode === "fresh";
-  const blocked = mode === "blocked";
-  const target = {
-    read_model_key: "workbench_relation",
-    scope_type: "",
-    scope_key: "2026-03",
-    status: fresh ? "fresh" : blocked ? "blocked" : "refreshing",
-    raw_status: fresh ? "fresh" : blocked ? "failed" : "processing",
-    fresh,
-    blocking: blocked,
-    reason: blocked ? "browser relation refresh blocked" : mode === "refreshing" ? "browser relation refresh pending" : "",
-    last_error: blocked ? "browser relation refresh blocked" : null,
-    generated_at: "2026-06-17T01:00:00Z",
-  };
-  return {
-    status: fresh ? "fresh" : blocked ? "blocked" : "refreshing",
-    fresh,
-    targets: [target],
-    blocked_targets: blocked ? [target] : [],
-    refreshing_targets: mode === "refreshing" ? [target] : [],
   };
 }
 
@@ -5852,10 +5516,7 @@ function turnoverFlowRow(
   };
 }
 
-function turnoverLedgerPayload(
-  relationClosed: boolean,
-  readModelStatus: TurnoverLedgerReadModelMockStatus = "fresh",
-) {
+function turnoverLedgerPayload(relationClosed: boolean) {
   const summaryRow = turnoverSummaryRow(relationClosed);
   const flowRows = [
     turnoverFlowRow(turnoverBankRows.expense, "expense", relationClosed, turnoverBankRowVersions[turnoverBankRows.expense]),
@@ -5909,8 +5570,6 @@ function turnoverLedgerPayload(
       },
     ],
     pagination: { page: 1, page_size: 50, total: 1 },
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`turnover_ledger_${readModelStatus}`],
   };
 }
 
@@ -5930,17 +5589,6 @@ function parseJsonBody(postData: string | null): Record<string, unknown> {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function sequencedReadModelStatus(
-  sequence: BankDetailReadModelMockStatus[] | undefined,
-  requestIndex: number,
-  fallback: BankDetailReadModelMockStatus | undefined,
-) {
-  if (!sequence?.length) {
-    return fallback ?? "fresh";
-  }
-  return sequence[Math.min(requestIndex, sequence.length - 1)] ?? fallback ?? "fresh";
 }
 
 function turnoverClosureExpectedVersions() {
@@ -5984,16 +5632,10 @@ function turnoverClosureMutationPayload() {
       relation_mode: "turnover_manual_closure",
     },
     affected_months: ["2026-05"],
-    freshness_targets: [
-      { read_model_key: "turnover_ledger", scope_key: "all" },
-      { read_model_key: "workbench_relation", scope_key: "2026-05" },
-      { read_model_key: "workbench", scope_key: "2026-05" },
-      { read_model_key: "workbench", scope_key: "all" },
-    ],
   };
 }
 
-function bankAccountsPayload(readModelStatus: BankDetailReadModelMockStatus = "fresh") {
+function bankAccountsPayload() {
   return {
     accounts: [
       {
@@ -6010,8 +5652,6 @@ function bankAccountsPayload(readModelStatus: BankDetailReadModelMockStatus = "f
     total_balance: "130500.50",
     balance_account_count: 1,
     missing_balance_account_count: 0,
-    read_model_status: readModelStatus,
-    balance_read_model_status: readModelStatus,
   };
 }
 
@@ -6024,7 +5664,6 @@ function bankTransactionsPayload(
     largeDataset?: boolean;
     page?: number;
     pageSize?: number;
-    readModelStatus?: BankDetailReadModelMockStatus;
     rowsEmpty?: boolean;
     total?: number;
   } = {},
@@ -6314,7 +5953,6 @@ function bankTransactionsPayload(
         },
       ],
     },
-    read_model_status: options.readModelStatus ?? "fresh",
   };
 }
 
@@ -6421,7 +6059,6 @@ function bankAutoTagRulesPayload(canSave = true, options: BankAutoTagRulesPayloa
     turnover_third_label_options: [],
     turnover_action_type_options: [],
     permissions: { can_save: canSave },
-    read_model_status: options.readModelStatus ?? "fresh",
   };
 }
 
@@ -6671,7 +6308,7 @@ function pendingInvoiceImportFanoutRow() {
     invoice_acquisition_status: {
       code: "paid_invoiced",
       label: "已支付已开票",
-      reason: "发票导入后待找发票 read model 已刷新。",
+      reason: "发票导入后待找发票证据已更新。",
       severity: "success",
       primary_action: "view_relation",
     },
@@ -6706,7 +6343,6 @@ function pendingInvoiceImportFanoutRow() {
 function pendingInvoiceRowsPayload(
   relationConfirmed: boolean,
   candidateRelations = false,
-  readModelStatus: PendingInvoiceReadModelMockStatus = "fresh",
   rowsEmpty = false,
   includeAttachExistingBatchRows = false,
   includeIncomeSummaryRows = false,
@@ -6738,8 +6374,6 @@ function pendingInvoiceRowsPayload(
           excluded_direction_rows: includeIncomeSummaryRows ? 2 : 0,
         },
       },
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : ["workbench_relation_not_fresh"],
     tag_dictionary: {
       version: 1,
       tags: [
@@ -6783,7 +6417,6 @@ function pendingInvoiceFilterValues(filters: Array<Record<string, unknown>>, fie
 function pendingInvoiceFilterSortRowsPayload(
   url: URL,
   relationConfirmed: boolean,
-  readModelStatus: PendingInvoiceReadModelMockStatus = "fresh",
 ) {
   const filters = pendingInvoiceFiltersFromUrl(url);
   const selectedStatuses = pendingInvoiceFilterValues(filters, "status_code");
@@ -6827,7 +6460,6 @@ function pendingInvoiceFilterSortRowsPayload(
   const payload = pendingInvoiceRowsPayload(
     relationConfirmed,
     false,
-    readModelStatus,
     false,
     true,
   );
@@ -6929,7 +6561,7 @@ function pendingInvoiceIncomeRow(id: string, counterpartyName: string, amount: s
   };
 }
 
-function pendingInvoiceIncomeRowsPayload(statusCode: "income_pending_invoice" | "income_no_invoice_required" | "cash_income", readModelStatus: PendingInvoiceReadModelMockStatus = "fresh") {
+function pendingInvoiceIncomeRowsPayload(statusCode: "income_pending_invoice" | "income_no_invoice_required" | "cash_income") {
   const rows = [
     pendingInvoiceIncomeRow("income-batch-a", "收入批量客户A", "300.00", statusCode),
     pendingInvoiceIncomeRow("income-batch-b", "收入批量客户B", "200.00", statusCode),
@@ -6951,8 +6583,6 @@ function pendingInvoiceIncomeRowsPayload(statusCode: "income_pending_invoice" | 
         excluded_direction_rows: 1,
       },
     },
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : ["income_status_not_fresh"],
     tag_dictionary: {
       version: 1,
       tags: [
@@ -7260,11 +6890,7 @@ function batchAccountingPagination(url: URL, bucket: BatchAccountingBucket, bank
   return pagination;
 }
 
-function batchAccountingPayload(
-  url: URL,
-  relationSubmitted: boolean,
-  readModelStatus: BatchAccountingReadModelMockStatus = "fresh",
-) {
+function batchAccountingPayload(url: URL, relationSubmitted: boolean) {
   const bucket: BatchAccountingBucket = url.searchParams.get("bucket") === "submitted" ? "submitted" : "unsubmitted";
   const oaRows = batchAccountingOaRows();
   const bankRow = batchAccountingBankRow(relationSubmitted);
@@ -7298,10 +6924,6 @@ function batchAccountingPayload(
       },
     } : {},
     pagination: batchAccountingPagination(url, bucket, bankRows.length, visibleOaRows.length),
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`batch_accounting_${readModelStatus}`],
-    read_model_scope_keys: ["2026-04"],
-    refresh_enqueued: readModelStatus !== "fresh",
   };
 }
 
@@ -7340,7 +6962,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let workbenchExceptionApplied = options.workbenchInitialExceptionApplied === true;
   let workbenchRowIgnored = options.workbenchInitialRowIgnored === true;
   let workbenchConfirmSubmitAttempts = 0;
-  const workbenchPageStatus = options.workbenchPageStatus ?? "fresh";
   let bankDetailsCategoryOverride: BankDetailCategoryOverride | null = null;
   let bankAutoTagRulesVersion = 1;
   let bankAutoTagRulesSalarySubLabel = "工资";
@@ -7491,14 +7112,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/oa-sync/status") {
       return json(route, oaSyncPayload(options.oaSyncMode));
-    }
-
-    if (path === "/api/workbench/refresh-status") {
-      return json(route, workbenchRefreshStatusPayload(options.workbenchRefreshStatus));
-    }
-
-    if (path === "/api/operation-barrier/status") {
-      return json(route, operationBarrierPayload(options.operationBarrierMode));
     }
 
     if (path === "/api/workbench/settings") {
@@ -7773,18 +7386,14 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/tax-offset") {
       taxOffsetRequestCount += 1;
-      const taxOffsetReadModelStatus = options.taxOffsetReadModelStatuses?.[
-        Math.min(taxOffsetRequestCount - 1, options.taxOffsetReadModelStatuses.length - 1)
-      ] ?? options.taxOffsetReadModelStatus ?? "fresh";
       return json(route, taxOffsetPayload(
         taxSelectedInputIds,
         taxCertifiedImported,
         (relationConfirmed && Boolean(options.taxOffsetRelationFanout)) || outputInvoiceDownstreamConfirmed,
         invoiceImportDownstreamConfirmed,
         etcImportDownstreamConfirmed,
-        taxOffsetReadModelStatus,
         Boolean(options.taxOffsetLargeDataset),
-      ), taxOffsetReadModelStatus === "fresh" ? 200 : 202);
+      ));
     }
 
     if (path === "/api/tax-offset/calculate") {
@@ -7806,10 +7415,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (taxOffsetPlanSaveConflictRemaining) {
         taxOffsetPlanSaveConflictRemaining = false;
         return json(route, {
-          error: "tax_offset_read_model_version_conflict",
+          error: "tax_offset_source_version_conflict",
           message: "税金抵扣数据已变化，请刷新后重新保存。",
-          read_model_status: "stale",
-          read_model_scope_key: "2026-03",
         }, 409);
       }
       const body = JSON.parse(request.postData() || "{}") as { selected_input_ids?: string[] };
@@ -7828,7 +7435,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             invoiceImportDownstreamConfirmed,
             etcImportDownstreamConfirmed,
           ),
-          read_model_scope_key: "2026-03",
           source_versions: taxSourceVersions("2026-03"),
           updated_at: "2026-06-17T01:00:00Z",
         },
@@ -7856,36 +7462,29 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.inputInvoiceUsageFilterSortRows) {
         return json(route, inputInvoiceUsageFilterSortRowsPayload(url));
       }
-      const readModelStatus = options.inputInvoiceUsageReadModelStatus ?? "fresh";
       return json(route, inputInvoiceUsageRowsPayload(
         relationConfirmed,
         Boolean(options.inputInvoiceUsageRelationFanout),
-        readModelStatus,
-        Boolean(options.inputInvoiceUsageRelationDetailReadModelStatus),
+        Boolean(options.inputInvoiceUsageRelationDetailStatus),
         inputInvoicePaymentRulesSaved,
         Boolean(options.inputInvoiceUsagePaymentRulesSaveFlow),
         invoiceImportDownstreamConfirmed,
-      ), readModelStatus === "fresh" ? 200 : 202);
+      ));
     }
 
     if (path === "/api/input-invoice-usage/filter-options") {
       if (options.inputInvoiceUsageFilterSortRows) {
         return json(route, inputInvoiceUsageFilterSortOptionsPayload());
       }
-      const readModelStatus = options.inputInvoiceUsageReadModelStatus ?? "fresh";
-      return json(
-        route,
-        inputInvoiceUsageFilterOptionsPayload(readModelStatus),
-        readModelStatus === "fresh" ? 200 : 202,
-      );
+      return json(route, inputInvoiceUsageFilterOptionsPayload());
     }
 
     if (path.startsWith("/api/input-invoice-usage/rows/") && path.endsWith("/relation-details")) {
-      const readModelStatus = options.inputInvoiceUsageRelationDetailReadModelStatus ?? "fresh";
+      const detailStatus = options.inputInvoiceUsageRelationDetailStatus ?? "ready";
       return json(
         route,
-        inputInvoiceUsageRelationDetailPayload(url.searchParams.get("kind") ?? "oa", readModelStatus),
-        readModelStatus === "fresh" ? 200 : 202,
+        inputInvoiceUsageRelationDetailPayload(url.searchParams.get("kind") ?? "oa", detailStatus),
+        detailStatus === "ready" ? 200 : 202,
       );
     }
 
@@ -7899,27 +7498,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
         }, 400);
       }
-      const readModelStatus = options.inputInvoiceUsageExportReadModelStatus
-        ?? options.inputInvoiceUsageReadModelStatus
-        ?? "fresh";
-      return json(
-        route,
-        inputInvoiceUsageExportPreviewPayload(readModelStatus),
-        readModelStatus === "fresh" ? 200 : 202,
-      );
+      return json(route, inputInvoiceUsageExportPreviewPayload());
     }
 
     if (path === "/api/input-invoice-usage/export") {
-      const readModelStatus = options.inputInvoiceUsageExportReadModelStatus
-        ?? options.inputInvoiceUsageReadModelStatus
-        ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          read_model_status: "refreshing",
-          readModelStatus: "refreshing",
-          message: "进项发票使用情况数据正在刷新，请稍后重试导出。",
-        }, 202);
-      }
       if (options.inputInvoiceUsageExportRowLimitError) {
         return json(route, {
           error: {
@@ -8027,14 +7609,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "OA 待付款核对加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatus = options.oaPendingPaymentReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(
-          route,
-          oaPendingPaymentNonFreshRowsPayload(readModelStatus),
-          readModelStatus === "refreshing" ? 202 : 200,
-        );
-      }
       if (options.oaPendingPaymentBankLinkFlow && url.searchParams.get("view_mode") === "in_progress") {
         return json(route, oaPendingPaymentBankLinkRowsPayload(oaPendingPaymentBankLinked));
       }
@@ -8051,12 +7625,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/oa-pending-payments/filter-options") {
-      const readModelStatus = options.oaPendingPaymentReadModelStatus ?? "fresh";
-      return json(
-        route,
-        oaPendingPaymentFilterOptionsPayload(readModelStatus),
-        readModelStatus === "refreshing" ? 202 : 200,
-      );
+      return json(route, oaPendingPaymentFilterOptionsPayload());
     }
 
     if (path === "/api/oa-pending-payments/bank-transaction-candidates") {
@@ -8071,7 +7640,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "支出流水关联校验失败，未创建关联关系。",
           affected_oa_row_ids: [],
           affected_bank_transaction_ids: [],
-          readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
         }, 409);
       }
       oaPendingPaymentBankLinked = true;
@@ -8088,7 +7656,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         oaPaymentWritebacks: [
           { code: "written", label: "已写回", flowIds: ["flow-bank-link-e2e-001"], syncStatus: "ready" },
         ],
-        readModelRefresh: { scopeKeys: ["oa_pending_payment:in_progress", "workbench:all"], enqueued: true, targetSeconds: 2 },
       });
     }
 
@@ -8100,7 +7667,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "OA 自动匹配和写回校验失败，未写入支付状态。",
           affected_oa_row_ids: [],
           affected_bank_transaction_ids: [],
-          read_model_refresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
         }, 409);
       }
       if (options.oaPendingPaymentAutoReconcileFlow ?? options.oaPendingPaymentConfirmPaidFlow) {
@@ -8126,7 +7692,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
               syncStatus: "ready",
             },
           ],
-          readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
         });
       }
       return json(route, {
@@ -8137,7 +7702,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         writebackCount: 0,
         autoMatchedRelations: [],
         oaPaymentWritebacks: [],
-        readModelRefresh: { scopeKeys: ["all"], enqueued: false, targetSeconds: 2 },
       });
     }
 
@@ -8149,7 +7713,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "OA 写回校验失败，未写入支付状态。",
           affected_oa_row_ids: [],
           affected_bank_transaction_ids: [],
-          read_model_refresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
         }, 409);
       }
       oaPendingPaymentConfirmPaidConfirmed = true;
@@ -8170,7 +7733,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           flowIds: ["flow-confirm-paid-e2e-001"],
           syncStatus: "ready",
         },
-        readModelRefresh: { scopeKeys: ["oa_pending_payment:in_progress", "workbench:all"], enqueued: true, targetSeconds: 2 },
       });
     }
 
@@ -8202,13 +7764,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         pendingInvoiceRulesSaved = true;
         return json(route, pendingInvoiceExpenseRulesPayload({
           canSave: Boolean(options.pendingInvoiceRulesSaveFlow),
-          readModelStatus: "refreshing",
           version: pendingInvoiceRulesVersion,
         }));
       }
       return json(route, pendingInvoiceExpenseRulesPayload({
         canSave: Boolean(options.pendingInvoiceRulesSaveFlow),
-        readModelStatus: pendingInvoiceRulesSaved ? "refreshing" : "fresh",
         version: pendingInvoiceRulesVersion,
       }));
     }
@@ -8223,7 +7783,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "成本统计数据加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatus = options.costStatisticsReadModelStatus ?? "fresh";
       const payload = costStatisticsExplorerPayload(
         explorerMonth,
         explorerProjectScope,
@@ -8234,29 +7793,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         bankImportDownstreamConfirmed,
         noOaCostConfirmed,
         turnoverCostConfirmed,
-        readModelStatus,
         costCompletedProjectNames,
         Boolean(options.costStatisticsLargeDataset),
       );
-      if (readModelStatus !== "fresh") {
-        payload.summary = { row_count: 0, transaction_count: 0, total_amount: "0.00" };
-        payload.time_rows = [];
-        payload.project_rows = [];
-        payload.expense_type_rows = [];
-      }
-      return json(route, payload, readModelStatus === "refreshing" ? 202 : 200);
+      return json(route, payload);
     }
 
     if (path === "/api/cost-statistics/export-preview") {
-      const exportReadModelStatus = options.costStatisticsExportReadModelStatus ?? "fresh";
-      if (exportReadModelStatus !== "fresh") {
-        return json(route, {
-          error: "cost_statistics_read_model_not_fresh",
-          message: "成本统计数据正在刷新，请稍后重试导出。",
-          read_model_status: exportReadModelStatus,
-          refresh_enqueued: true,
-        }, exportReadModelStatus === "refreshing" ? 202 : 409);
-      }
       return json(route, costStatisticsExportPreviewPayload(
         url,
         relationConfirmed || outputInvoiceDownstreamConfirmed,
@@ -8270,15 +7813,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/cost-statistics/export") {
-      const exportReadModelStatus = options.costStatisticsExportReadModelStatus ?? "fresh";
-      if (exportReadModelStatus !== "fresh") {
-        return json(route, {
-          error: "cost_statistics_read_model_not_fresh",
-          message: "成本统计数据正在刷新，请稍后重试导出。",
-          read_model_status: exportReadModelStatus,
-          refresh_enqueued: true,
-        }, exportReadModelStatus === "refreshing" ? 202 : 409);
-      }
       if (options.costStatisticsExportDownloadSuccess) {
         return route.fulfill({
           status: 200,
@@ -8307,14 +7841,12 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     const costTransactionDetailMatch = path.match(/^\/api\/cost-statistics\/transactions\/([^/]+)$/);
     if (costTransactionDetailMatch) {
-      const detailReadModelStatus = options.costStatisticsTransactionDetailReadModelStatus ?? "fresh";
-      if (detailReadModelStatus !== "fresh") {
+      const detailStatus = options.costStatisticsTransactionDetailStatus ?? "ready";
+      if (detailStatus !== "ready") {
         return json(route, {
-          error: "cost_statistics_transaction_detail_not_fresh",
+          error: "cost_statistics_transaction_detail_unavailable",
           message: "成本统计流水详情正在刷新，请稍后重试。",
-          read_model_status: detailReadModelStatus,
-          refresh_enqueued: true,
-        }, detailReadModelStatus === "refreshing" ? 202 : 409);
+        }, detailStatus === "refreshing" ? 202 : 409);
       }
       return json(route, costTransactionPayload(
         decodeURIComponent(costTransactionDetailMatch[1] ?? ""),
@@ -8369,15 +7901,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "免OA流水批次加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatuses = options.noOaBankBatchReadModelStatuses;
-      const readModelStatus = readModelStatuses?.[
-        Math.min(noOaBankBatchesRequestCount, readModelStatuses.length - 1)
-      ] ?? options.noOaBankBatchReadModelStatus ?? "fresh";
       noOaBankBatchesRequestCount += 1;
       return json(route, noOaBankBatchesPayload(
         noOaBankBatchStatus,
         url.searchParams.get("bucket"),
-        readModelStatus,
         options.noOaBankBatchScenario ?? "single",
       ));
     }
@@ -8411,14 +7938,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
         }, 400);
       }
-      const readModelStatus = options.outputInvoiceCollectionReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          read_model_status: "refreshing",
-          readModelStatus: "refreshing",
-          message: "销项发票收款情况数据正在刷新，请稍后重试导出。",
-        }, 202);
-      }
       return json(route, outputInvoiceCollectionExportPreviewPayload(outputInvoiceRedRelationConfirmed));
     }
 
@@ -8431,15 +7950,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             details: { total: 20001, limit: 20000 },
           },
         }, 400);
-      }
-      const readModelStatus = options.outputInvoiceCollectionReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          error: {
-            code: "output_invoice_collection_read_model_refreshing",
-            message: "销项发票收款情况数据正在刷新，请稍后重试导出。",
-          },
-        }, 409);
       }
       return route.fulfill({
         status: 200,
@@ -8459,25 +7969,21 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "销项发票收款情况加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatus = options.outputInvoiceCollectionReadModelStatus ?? "fresh";
       return json(route, outputInvoiceCollectionRowsPayload(
         outputInvoiceStatusSaved,
         outputInvoiceReminderSaved,
         outputInvoiceReceiptState !== "none",
         outputInvoiceRedRelationConfirmed,
         Boolean(options.outputInvoiceRedRelationCandidate || options.outputInvoiceCollectionListInteractions),
-        readModelStatus,
         options.outputInvoiceCollectionListInteractions ? url : undefined,
         invoiceImportDownstreamConfirmed,
-      ), readModelStatus === "fresh" ? 200 : 202);
+      ));
     }
 
     if (path === "/api/output-invoice-collections/filter-options") {
-      const readModelStatus = options.outputInvoiceCollectionReadModelStatus ?? "fresh";
       return json(
         route,
-        outputInvoiceCollectionFilterOptionsPayload(outputInvoiceStatusSaved, outputInvoiceReceiptState !== "none", readModelStatus),
-        readModelStatus === "fresh" ? 200 : 202,
+        outputInvoiceCollectionFilterOptionsPayload(outputInvoiceStatusSaved, outputInvoiceReceiptState !== "none"),
       );
     }
 
@@ -8648,7 +8154,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         candidateSplitSuppressed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
-        workbenchPageStatus,
         options.workbenchPageEmpty === true,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
@@ -8740,12 +8245,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "往来款台账加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatuses = options.turnoverLedgerReadModelStatuses;
-      const readModelStatus = readModelStatuses?.[
-        Math.min(turnoverLedgerRequestCount, readModelStatuses.length - 1)
-      ] ?? options.turnoverLedgerReadModelStatus ?? "fresh";
       turnoverLedgerRequestCount += 1;
-      return json(route, turnoverLedgerPayload(turnoverClosureConfirmed, readModelStatus));
+      return json(route, turnoverLedgerPayload(turnoverClosureConfirmed));
     }
 
     if (path === "/api/turnover-ledger/closures/confirm") {
@@ -8772,7 +8273,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         candidateSplitSuppressed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
-        workbenchPageStatus,
         options.workbenchPageEmpty === true,
         options.workbenchLargeDataset === true,
       ));
@@ -8794,7 +8294,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         candidateSplitSuppressed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
-        workbenchPageStatus,
         options.workbenchPageEmpty === true,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
@@ -8951,26 +8450,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/bank-details/accounts") {
-      const readModelStatus = sequencedReadModelStatus(
-        options.bankDetailsAccountReadModelStatuses,
-        bankDetailsAccountsRequestCount,
-        options.bankDetailsAccountReadModelStatus,
-      );
       bankDetailsAccountsRequestCount += 1;
-      return json(route, bankAccountsPayload(readModelStatus));
+      return json(route, bankAccountsPayload());
     }
 
     if (path === "/api/bank-details/transactions/export") {
-      const exportReadModelStatus = options.bankDetailsExportReadModelStatus
-        ?? options.bankDetailsTransactionReadModelStatus
-        ?? "fresh";
-      if (exportReadModelStatus !== "fresh") {
-        return json(route, {
-          error: "bank_detail_read_model_not_fresh",
-          message: "银行明细正在刷新，请稍后重试导出。",
-          read_model_status: exportReadModelStatus,
-        }, 409);
-      }
       const filename = `银行明细_${url.searchParams.get("mode") === "account" ? "当前账户" : "全部银行"}_${url.searchParams.get("date_from") ?? "全部"}_${url.searchParams.get("date_to") ?? "全部"}.xlsx`;
       return route.fulfill({
         status: 200,
@@ -8990,11 +8474,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "银行流水暂时无法加载，请稍后重试。",
         }, 503);
       }
-      const readModelStatus = sequencedReadModelStatus(
-        options.bankDetailsTransactionReadModelStatuses,
-        bankDetailsTransactionsRequestCount,
-        options.bankDetailsTransactionReadModelStatus,
-      );
       bankDetailsTransactionsRequestCount += 1;
       const page = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
       const pageSize = Number.parseInt(url.searchParams.get("page_size") ?? "100", 10);
@@ -9007,7 +8486,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           largeDataset: options.bankDetailsLargeDataset,
           page: Number.isFinite(page) ? page : 1,
           pageSize: Number.isFinite(pageSize) ? pageSize : 100,
-          readModelStatus,
           rowsEmpty: options.bankDetailsTransactionsEmpty
             || settingsDataResetCompletedAction === "reset_bank_transactions",
           total: options.bankDetailsTransactionsTotal,
@@ -9042,7 +8520,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         transaction_id: decodeURIComponent(bankCategoryConfirmationMatch[1] ?? ""),
         selected_category_code: bankDetailsCategoryOverride.categoryCode,
         affected_months: ["2026-03"],
-        freshness_targets: [{ read_model_key: "bank_detail", scope_key: "2026-03" }],
       });
     }
 
@@ -9078,7 +8555,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         previous_resolution_status: "unmatched",
         assignment_source: "manual",
         affected_months: ["2026-03"],
-        freshness_targets: [{ read_model_key: "bank_detail", scope_key: "2026-03" }],
       });
     }
 
@@ -9087,7 +8563,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/bank-details/auto-tag-rules/reapply") {
       return json(route, bankAutoTagRulesPayload(canSaveBankAutoTagRules, {
         version: bankAutoTagRulesVersion,
-        readModelStatus: "refreshing",
         salarySubLabel: bankAutoTagRulesSalarySubLabel,
       }), 202);
     }
@@ -9124,20 +8599,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.pendingInvoiceIncomeBatchRows && url.searchParams.get("direction") === "income") {
         return json(route, pendingInvoiceIncomeRowsPayload(
           pendingInvoiceIncomeStatus,
-          options.pendingInvoiceReadModelStatus ?? "fresh",
         ));
       }
       if (options.pendingInvoiceFilterSortRows) {
         return json(route, pendingInvoiceFilterSortRowsPayload(
           url,
           relationConfirmed,
-          options.pendingInvoiceReadModelStatus ?? "fresh",
         ));
       }
       return json(route, pendingInvoiceRowsPayload(
         relationConfirmed,
         Boolean(options.pendingInvoiceCandidateRelations),
-        options.pendingInvoiceReadModelStatus ?? "fresh",
         Boolean(options.pendingInvoiceRowsEmpty),
         Boolean(options.pendingInvoiceAttachExistingBatchRows),
         Boolean(options.pendingInvoiceIncomeBatchRows),
@@ -9229,26 +8701,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/pending-invoices/export-preview") {
-      const readModelStatus = options.pendingInvoiceReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          error: "pending_invoice_read_model_not_fresh",
-          message: "待找发票正在刷新，请稍后重试导出。",
-          read_model_status: readModelStatus,
-        }, 409);
-      }
       return json(route, pendingInvoiceExportPreviewPayload(relationConfirmed));
     }
 
     if (path === "/api/pending-invoices/export") {
-      const readModelStatus = options.pendingInvoiceReadModelStatus ?? "fresh";
-      if (readModelStatus !== "fresh") {
-        return json(route, {
-          error: "pending_invoice_read_model_not_fresh",
-          message: "待找发票正在刷新，请稍后重试导出。",
-          read_model_status: readModelStatus,
-        }, 409);
-      }
       if (options.pendingInvoiceExportRowLimitError) {
         return json(route, {
           error: "pending_invoice_export_row_limit_exceeded",
@@ -9274,12 +8730,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "批量账务数据加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatuses = options.batchAccountingReadModelStatuses;
-      const readModelStatus = readModelStatuses?.[
-        Math.min(batchAccountingRequestCount, readModelStatuses.length - 1)
-      ] ?? options.batchAccountingReadModelStatus ?? "fresh";
       batchAccountingRequestCount += 1;
-      return json(route, batchAccountingPayload(url, batchAccountingSubmitted, readModelStatus));
+      return json(route, batchAccountingPayload(url, batchAccountingSubmitted));
     }
 
     if (path === "/api/batch-accounting/submit") {

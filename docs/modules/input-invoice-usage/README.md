@@ -26,11 +26,11 @@
 
 ## 当前边界
 
-关注进项发票使用状态、筛选、导出、OA 反查、以发票反提 OA 和 invoice usage read model。
+关注进项发票使用状态、筛选、导出、OA 反查、以发票反提 OA 和 direct API 读路径。invoice usage read model/projection 只作为后端过渡事实源和 worker 下线对象记录，不再作为页面架构合同。
 
 `以发票反提 OA` 的当前目标是：操作人在 FinOps 中选择目标 OA 申请人与发票，FinOps 后端使用目标 OA 申请人的已配置凭据创建 OA 暂存草稿；OA 提交流程由用户在 OA 系统中手动完成。草稿创建成功后本地 batch 立即进入 `暂存`，用户可以稍后选择 `我已在OA系统提交该草稿 / OA正在进行中` 或 `OA提交内容需修改 / 删除本次提交内容`；FinOps 只记录本地确认后的已提交历史。
 
-OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须通过 `WorkbenchRelationCommandService` 写入 `input_invoice_oa_reverse` 并由 `workbench_relation` read model 分发给相关页面。
+OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须通过 `WorkbenchRelationCommandService` 写入 `input_invoice_oa_reverse`，相关页面通过 direct relation/query boundary 重新读取，不再由 OA reverse 服务 enqueue `input_invoice_usage` page read-model refresh。
 
 进项发票使用情况的列表和关系详情是读路径：关系证据来自 `WorkbenchRelationReadFacade` / `DistributedInvoiceRelationContext`，不直接调用 `WorkbenchRelationCommandService`。关联台未配对区 open/proposed 候选也必须通过同一个 facade 进入本页展示，不能由本页直接读取关联台候选表或自行拼候选。
 
@@ -42,24 +42,24 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 
 同一 linked 或 candidate relation 中存在多条 OA、银行流水或进项发票时，rows DTO 必须聚合为一条使用情况行，金额展示各自合计，并用 `relationCount`、`detailMode=list`、`summaries` 和 `invoiceRelations` 支持前端显示 `+N` 后打开关系明细。`relationStatus='candidate'` 只能作为候选证据展示；支付状态、已支付判断和已确认关系判断只能使用 `relationStatus='linked'` 的关系。
 
-`/api/input-invoice-usage/rows/{row_id}/relation-details` 在 SQL read model 可用时必须按 `row_id` 读取单行 payload 并展开已有 summaries，不能为了打开 `+N` 详情触发全量 live rebuild；read model missing/stale/source mismatch 时返回 refreshing 状态并入队刷新。
+页面首屏、筛选、导出预览和导出直接消费业务 API 返回的 rows、filter-options、export-preview 和 xlsx 文件。页面 API 不返回 `readModelStatus`、`read_model_status`、`readModelScopeKey`、`read_model_scope_key` 或 refresh flags；页面不自动轮询 freshness，不因 legacy 诊断字段隐藏表格或禁用导出。
 
-生产 PostgreSQL runtime 下，`/api/input-invoice-usage/rows` 和 filter/export 相关 all-rows helper 必须依赖 SQL read model repository。repository 缺失、SQL view miss、schema/source version mismatch 或 refresh_status 非 fresh 时都返回 `202`/`read_model_status=refreshing` 并 enqueue `input_invoice_usage` 对应 month/all scope；不得回退 `InputInvoiceUsageQueryService.list_rows(...)` 进行 live scan 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
+支付规则保存和 OA reverse 写成功后只持久化设置、本地 batch、audit/relation facts，并由前端直接重新请求 rows/detail；后端不再通过 app-level callback enqueue `input_invoice_usage`、`invoice_lifecycle` 或其它页面 read-model refresh。
 
-页面首屏和筛选态由 rows 与 filter-options 两个读接口共同证明 fresh。前端必须合并两者的 `readModelStatus` / `read_model_status`：任一接口返回 `stale`、`missing`、`schema_mismatch`、`refreshing` 或等价非 fresh 状态时，页面整体进入刷新诊断，不展示普通空态，不启用导出，也不把另一接口的 fresh 空 rows 当成最终事实。
+`/api/input-invoice-usage/rows/{row_id}/relation-details` 在明细暂不可用时返回 `200` 和 `detailAvailable=false`，用于 `+N` 详情 drawer 说明当前明细不可用；该局部诊断不能携带 direct payload freshness 字段或扩展为页面级 freshness gate。
 
-`input_invoice_usage:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
+`input_invoice_usage:all` 在 legacy refresh 链路中是 fan-out 到月份 shard 的控制 scope；该规则只约束后端过渡 projection/worker，不作为页面 direct API 的 freshness 证明。month scope 在 legacy projection 内仍必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会让旧 projection 反复入队。
 
-`input_invoice_usage:all` fan-out 发现当前月份 shard 后，必须清理不再属于当前进项发票事实集的旧月份 rows/scopes。否则旧 month scope 的基础 source versions 会继续参与 all 查询 freshness 聚合，导致 `oa_projection_sync_version_missing` 等 stale reason 反复出现，页面长期显示“正在刷新”。
+`input_invoice_usage:all` fan-out 发现当前月份 shard 后，必须清理不再属于当前进项发票事实集的旧月份 rows/scopes。否则旧 month scope 的基础 source versions 会继续参与 legacy all 查询聚合，导致 `oa_projection_sync_version_missing` 等 stale reason 反复出现。
 
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
 - 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
+- API contract、DTO shape、错误字段、权限校验、状态值或 legacy sync 字段删除变化。
+- 业务状态、UI 状态、legacy derived data/worker 下线状态或状态流转变化。
+- 跨页面 direct refetch、domain event、derived lifecycle、affected scope、outbox 或缓存边界变化。
 - 测试入口、回归范围、验证命令或未测风险变化。
 
 ## 本目录文件

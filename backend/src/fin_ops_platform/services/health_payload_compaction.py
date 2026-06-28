@@ -9,19 +9,12 @@ MAX_READY_SAMPLE_STRING_LENGTH = 500
 
 _RUNTIME_KEEP_KEYS = (
     "queue_backlog",
-    "dirty_scopes",
     "oldest_pending_event_age_seconds",
     "worker_heartbeat_lag_seconds",
     "missing_required_worker_count",
     "stale_required_worker_count",
     "mismatched_required_worker_count",
     "failed_jobs",
-    "stale_dirty_scope_count",
-    "read_model_refresh_duration_ms",
-    "read_model_refresh_enqueue_to_fresh_ms",
-    "read_model_refresh_sample_count",
-    "read_model_refresh_failure_rate",
-    "read_model_refresh_current_windows",
     "rabbitmq_publish_status",
     "rabbitmq_unpublished_backlog",
     "rabbitmq_publish_failed_backlog",
@@ -38,12 +31,6 @@ _RUNTIME_KEEP_KEYS = (
 
 _RUNTIME_SUMMARY_KEYS = (
     "worker_metrics",
-    "read_model_refresh_by_key",
-    "read_model_refresh_by_key_current_windows",
-    "read_model_refresh_slow_events",
-    "read_model_refresh_current_slow_events",
-    "stale_dirty_scopes",
-    "dirty_scopes_by_scope",
     "pending_outbox_events_by_scope",
     "rabbitmq_queues",
 )

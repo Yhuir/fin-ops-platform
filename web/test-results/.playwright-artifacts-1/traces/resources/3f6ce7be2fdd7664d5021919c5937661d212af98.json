@@ -1,1 +1,0 @@
-{"user":{"user_id":"e2e-user","username":"YNSYLP005","nickname":"管理员","display_name":"管理员","dept_id":"finance","dept_name":"财务部","avatar":null},"roles":["fin_ops_admin"],"permissions":["finops:app:view"],"allowed":true,"access_tier":"admin","can_access_app":true,"can_mutate_data":true,"can_admin_access":true}

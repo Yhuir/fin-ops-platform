@@ -129,7 +129,6 @@
 | `inputInvoiceUsage/api.ts` | `input-invoice-usage` | 支付规则、OA reverse 草稿/批次/状态写入口。 |
 | `noOaBankBatches/api.ts` | `no-oa-bank-batches` | 免 OA 标签、提交、撤回和内部往来写入口。 |
 | `oaPendingPayments/api.ts` | `oa-pending-payments` | OA 待付款确认写回和关联支出流水。 |
-| `operationBarrier/api.ts` | `app-health-operations` | 写操作后置 freshness barrier，用于运维/写安全闭环。 |
 | `outputInvoiceCollections/api.ts` | `output-invoice-collections` | 销项收款状态、红蓝票、收据和编号设置写入口。 |
 | `pendingInvoices/api.ts` | `pending-invoices` | 待找发票规则、选择发票和收入状态写入口。 |
 | `tax/api.ts` | `tax-offset` | 税金计划保存和已认证发票导入。 |
@@ -174,8 +173,8 @@
 | `imports-bank-transactions` | 导入页写入口集中在首屏上传、开始预览和确认导入控件，不需要额外抽屉 opener。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下打开该 route，断言文件 input、开始预览和确认导入禁用且零 mutation；`imports-bank-transactions-flow.spec.ts` 覆盖 full-access 主链路。 |
 | `imports-invoices` | 导入页写入口集中在首屏上传、开始预览和确认导入控件，不需要额外抽屉 opener。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下打开该 route，断言文件 input、开始预览和确认导入禁用且零 mutation；`imports-invoices-flow.spec.ts` 覆盖 full-access 主链路。 |
 | `imports-etc-invoices` | 导入页写入口集中在首屏上传、开始预览和确认导入控件，不需要额外抽屉 opener。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下打开该 route，断言文件 input、开始预览和确认导入禁用且零 mutation；`imports-etc-invoices-flow.spec.ts` 覆盖 full-access 主链路。 |
-| `tax-offset` | read-export 下保存计划和已认证发票导入入口在页面首屏直接可判定，深层导入流程由 full-access Browser flow 覆盖。 | `permissions-role-matrix.spec.ts` 直接断言 read-export 下无保存计划/已认证发票导入入口；`tax-offset-flow.spec.ts` 覆盖 full-access 保存、导入、冲突和 read model 非 fresh。 |
-| `cost-statistics` | 页面没有普通 mutation，read-export 导出是允许能力；风险在下载和 read model freshness，不在动态写入口。 | `permissions-role-matrix.spec.ts` 打开页面并扫描 enabled 写控件候选；`cost-statistics-flow.spec.ts` 覆盖 read-export download、row-limit 和非 fresh 禁用。 |
+| `tax-offset` | read-export 下保存计划和已认证发票导入入口在页面首屏直接可判定，深层导入流程由 full-access Browser flow 覆盖。 | `permissions-role-matrix.spec.ts` 直接断言 read-export 下无保存计划/已认证发票导入入口；`tax-offset-flow.spec.ts` 覆盖 full-access 保存、导入、冲突和 direct payload unavailable。 |
+| `cost-statistics` | 页面没有普通 mutation，read-export 导出是允许能力；风险在下载和 direct payload unavailable，不在动态写入口。 | `permissions-role-matrix.spec.ts` 打开页面并扫描 enabled 写控件候选；`cost-statistics-flow.spec.ts` 覆盖 read-export download、row-limit 和 unavailable 禁用。 |
 | `settings` | read-export、full-access、admin 的关键写入口在 role matrix 顶层测试中逐项断言，不通过动态 opener registry 执行。 | `permissions-role-matrix.spec.ts` 断言 read-export 保存禁用且 admin-only 区隐藏，full-access 普通保存 POST/200，admin 访问账户、OA 凭据保存/清空密码，并打开数据重置影响确认和 OA 密码复核弹窗但取消在创建 reset job 之前。 |
 | `app-health-operations` | AppHealth 是 admin-only 只读运维页面，本地 Browser 权限风险是 route gate 和 dashboard API 零误调用，不是页面写入口。 | `app-shell.spec.ts` 与 `permissions-role-matrix.spec.ts` 覆盖 admin dashboard、read-export/forbidden/expired gate 和 dashboard protected API 零调用。 |
 

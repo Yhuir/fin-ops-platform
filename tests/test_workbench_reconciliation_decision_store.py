@@ -137,7 +137,7 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
         self.assertNotIn("to_char(scope_month", expire_sql)
         self.assertEqual(expire_params[1], ["2026-05-01"])
 
-    def test_repository_upsert_enqueues_relation_and_workbench_refresh_for_decision_scope(self) -> None:
+    def test_repository_upsert_enqueues_workbench_refresh_for_decision_scope(self) -> None:
         connection = RepositoryRecordingConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -152,34 +152,16 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
                 for sql, _params in connection.execute_calls
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             any(
                 "insert into job.outbox_events" in sql
                 and "'workbench_relation.read_model.refresh'" in sql
-                and params[1] == "workbench_relation:2026-05"
-                for sql, params in connection.execute_calls
+                for sql, _params in connection.execute_calls
             )
         )
-        self.assertTrue(
-            any(
-                "insert into job.read_model_dirty_scopes" in sql
-                and params[1] == "workbench"
-                and params[2] == "2026-05"
-                and params[3] == "workbench_reconciliation_decision_changed"
-                for sql, params in connection.fetch_one_calls
-            )
-        )
-        self.assertTrue(
-            any(
-                "insert into job.outbox_events" in sql
-                and params[1] == "workbench.read_model.refresh"
-                and params[3] == "workbench"
-                and params[4] == "2026-05"
-                for sql, params in connection.fetch_one_calls
-            )
-        )
+        self.assertFalse(connection.fetch_one_calls)
 
-    def test_repository_expire_stale_enqueues_relation_and_workbench_refresh_for_scope(self) -> None:
+    def test_repository_expire_stale_enqueues_workbench_refresh_for_scope(self) -> None:
         connection = RepositoryRecordingConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -191,25 +173,16 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
             )
 
         self.assertEqual(affected, 1)
-        self.assertTrue(
+        self.assertFalse(
             any(
                 "insert into job.outbox_events" in sql
                 and "'workbench_relation.read_model.refresh'" in sql
-                and params[1] == "workbench_relation:2026-05"
-                for sql, params in connection.execute_calls
+                for sql, _params in connection.execute_calls
             )
         )
-        self.assertTrue(
-            any(
-                "insert into job.read_model_dirty_scopes" in sql
-                and params[1] == "workbench"
-                and params[2] == "2026-05"
-                and params[3] == "workbench_reconciliation_decision_expired"
-                for sql, params in connection.fetch_one_calls
-            )
-        )
+        self.assertFalse(connection.fetch_one_calls)
 
-    def test_repository_expire_missing_enqueues_relation_and_workbench_refresh_for_scope(self) -> None:
+    def test_repository_expire_missing_enqueues_workbench_refresh_for_scope(self) -> None:
         connection = RepositoryRecordingConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -220,23 +193,14 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
         )
 
         self.assertEqual(affected, 1)
-        self.assertTrue(
+        self.assertFalse(
             any(
                 "insert into job.outbox_events" in sql
                 and "'workbench_relation.read_model.refresh'" in sql
-                and params[1] == "workbench_relation:2026-05"
-                for sql, params in connection.execute_calls
+                for sql, _params in connection.execute_calls
             )
         )
-        self.assertTrue(
-            any(
-                "insert into job.read_model_dirty_scopes" in sql
-                and params[1] == "workbench"
-                and params[2] == "2026-05"
-                and params[3] == "workbench_reconciliation_decision_expired"
-                for sql, params in connection.fetch_one_calls
-            )
-        )
+        self.assertFalse(connection.fetch_one_calls)
 
     def test_repository_cleanup_audit_lists_active_relation_overlaps_in_matching_window(self) -> None:
         connection = RepositoryRecordingConnection(
@@ -304,7 +268,7 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
         self.assertEqual(params[0], "tenant-a")
         self.assertEqual(params[1], ["2026-02-01"])
 
-    def test_repository_cleanup_execute_expires_by_key_and_enqueues_relation_refresh(self) -> None:
+    def test_repository_cleanup_execute_expires_by_key_and_enqueues_workbench_refresh(self) -> None:
         connection = RepositoryRecordingConnection(
             fetch_all_rows=[{"scope_key": "2026-02", "expired_count": 1}]
         )
@@ -327,30 +291,7 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
         self.assertEqual(expire_params[0], "unit-test")
         self.assertEqual(expire_params[2], "tenant-a")
         self.assertEqual(expire_params[3], ["decision-bad"])
-        self.assertTrue(
-            any(
-                params[1] == "2026-02" and params[2] == "workbench_reconciliation_decision_expired"
-                for _sql, params in connection.fetch_one_calls
-            )
-        )
-        self.assertTrue(
-            any(
-                "insert into job.read_model_dirty_scopes" in sql
-                and params[1] == "workbench"
-                and params[2] == "2026-02"
-                and params[3] == "workbench_reconciliation_decision_expired"
-                for sql, params in connection.fetch_one_calls
-            )
-        )
-        self.assertTrue(
-            any(
-                "insert into job.outbox_events" in sql
-                and params[1] == "workbench.read_model.refresh"
-                and params[3] == "workbench"
-                and params[4] == "2026-02"
-                for sql, params in connection.fetch_one_calls
-            )
-        )
+        self.assertFalse(connection.fetch_one_calls)
 
 
 class RepositoryRecordingConnection:

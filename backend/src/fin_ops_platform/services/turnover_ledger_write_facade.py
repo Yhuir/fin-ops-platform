@@ -313,11 +313,6 @@ class TurnoverLedgerWriteFacade:
                     "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },
-                {
-                    "scope_type": "search",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
             ],
             actor_id=actor_id,
             tenant_id=tenant_id,
@@ -420,11 +415,6 @@ class TurnoverLedgerWriteFacade:
                     "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },
-                {
-                    "scope_type": "search",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
             ],
             actor_id=actor_id,
             tenant_id=tenant_id,
@@ -516,11 +506,6 @@ class TurnoverLedgerWriteFacade:
                 },
                 {
                     "scope_type": "cost_statistics",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "search",
                     "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },

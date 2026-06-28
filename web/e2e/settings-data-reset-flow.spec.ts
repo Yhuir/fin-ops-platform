@@ -31,8 +31,7 @@ function responsePathMatches(responseUrl: string, pathname: string) {
   return new URL(responseUrl).pathname === pathname;
 }
 
-type RowsReadModelPayload = {
-  read_model_status?: string;
+type RowsPayload = {
   rows?: unknown[];
 };
 
@@ -84,8 +83,8 @@ test.describe("settings data reset browser flow", () => {
       && response.status() === 200);
     await page.getByRole("link", { name: "银行明细" }).click();
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
-    const bankRowsAfterReset = await (await bankRowsAfterResetResponse).json() as RowsReadModelPayload;
-    expect(bankRowsAfterReset.read_model_status).toBe("fresh");
+    const bankRowsAfterReset = await (await bankRowsAfterResetResponse).json() as RowsPayload & Record<string, unknown>;
+    expect("read_model_status" in bankRowsAfterReset).toBe(false);
     expect(bankRowsAfterReset.rows).toEqual([]);
     await expect(page.getByText("当前时间范围内没有流水。")).toBeVisible();
     await expect(page.getByText("智能工厂设备商")).toHaveCount(0);
@@ -97,8 +96,8 @@ test.describe("settings data reset browser flow", () => {
       && response.status() === 200);
     await page.getByRole("link", { name: "待找发票" }).click();
     await expect(page.getByTestId("pending-invoices-page")).toBeVisible();
-    const pendingRowsAfterReset = await (await pendingRowsAfterResetResponse).json() as RowsReadModelPayload;
-    expect(pendingRowsAfterReset.read_model_status).toBe("fresh");
+    const pendingRowsAfterReset = await (await pendingRowsAfterResetResponse).json() as RowsPayload & Record<string, unknown>;
+    expect("read_model_status" in pendingRowsAfterReset).toBe(false);
     expect(pendingRowsAfterReset.rows?.length).toBeGreaterThan(0);
     await expect(page.getByText("智能工厂设备商").first()).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -149,8 +148,8 @@ test.describe("settings data reset browser flow", () => {
     });
     await page.getByRole("link", { name: "成本统计" }).click();
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    const activePayload = await (await activeCostExplorerResponse).json() as { read_model_status?: string };
-    expect(activePayload.read_model_status).toBe("fresh");
+    const activePayload = await (await activeCostExplorerResponse).json() as Record<string, unknown>;
+    expect("read_model_status" in activePayload).toBe(false);
     await page.getByRole("button", { name: "按项目" }).click();
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     await expect(page.getByText(projectName)).toHaveCount(0);
@@ -164,8 +163,8 @@ test.describe("settings data reset browser flow", () => {
         && response.status() === 200;
     });
     await page.getByRole("button", { name: "项目范围：进行中" }).click();
-    const allPayload = await (await allScopeResponse).json() as { read_model_status?: string };
-    expect(allPayload.read_model_status).toBe("fresh");
+    const allPayload = await (await allScopeResponse).json() as Record<string, unknown>;
+    expect("read_model_status" in allPayload).toBe(false);
     await expect(page.getByRole("button", { name: "项目范围：所有项目" })).toBeVisible();
     const allProject = page.getByRole("button", { name: new RegExp(projectName) });
     await expect(allProject).toBeVisible();

@@ -21,8 +21,7 @@ const globalAppStatus = {
       level: "ok",
       status: "ready",
       reason: "银行明细已同步",
-      details: ["bank_detail readiness fresh, schema v1"],
-      read_models: ["bank_detail"],
+      details: [],
       workers: ["bank-detail"],
       job_ids: [],
       updated_at: "2026-06-04T10:00:00+08:00",
@@ -35,7 +34,6 @@ const globalAppStatus = {
       status: "refreshing",
       reason: "ETC发票导入正在同步",
       details: [],
-      read_models: [],
       workers: ["import"],
       job_ids: ["job_etc_001"],
       updated_at: "2026-06-04T10:00:00+08:00",
@@ -47,8 +45,7 @@ const globalAppStatus = {
       level: "busy",
       status: "missing",
       reason: "税金抵扣正在同步",
-      details: ["readiness record missing"],
-      read_models: ["tax_offset"],
+      details: [],
       workers: ["cost-tax"],
       job_ids: [],
       updated_at: "2026-06-04T10:00:00+08:00",
@@ -61,41 +58,12 @@ const globalAppStatus = {
       status: "failed",
       reason: "成本统计局部分片需要重试",
       details: ["active:2026-05: projection failed"],
-      read_models: ["cost_statistics"],
-      read_model_scopes: [
-        {
-          read_model_key: "cost_statistics",
-          scope_type: "cost_statistics",
-          scope_key: "active:all",
-          status: "fresh",
-          updated_at: "2026-06-04T10:03:00+08:00",
-        },
-        {
-          read_model_key: "cost_statistics",
-          scope_type: "cost_statistics",
-          scope_key: "active:2026-05",
-          status: "failed",
-          last_error: "projection failed",
-          updated_at: "2026-06-04T10:05:00+08:00",
-        },
-      ],
       workers: ["cost-tax"],
       job_ids: [],
       updated_at: "2026-06-04T10:05:00+08:00",
     },
   ],
   runtime_summary: {
-    read_models: {
-      total: 4,
-      fresh: 1,
-      refreshing: 1,
-      stale: 0,
-      missing: 1,
-      failed: 1,
-      unavailable: 0,
-      issue_count: 3,
-      scope_issue_count: 1,
-    },
     workers: {
       total: 4,
       required: 3,
@@ -164,7 +132,6 @@ describe("global app status indicator", () => {
         generated_at: "2026-06-04T10:00:00+08:00",
         session: { status: "authenticated" },
         oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
-        workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
         background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
         dependencies: {},
         app_status: globalAppStatus,
@@ -187,8 +154,6 @@ describe("global app status indicator", () => {
     expect(within(statusDialog).getByText("正在导入ETC发票 3/31")).toBeInTheDocument();
     expect(within(statusDialog).getByText("正在导入发票 210/500")).toBeInTheDocument();
     const runtimeSummary = within(statusDialog).getByTestId("app-status-runtime-summary");
-    expect(runtimeSummary).toHaveTextContent("Read model");
-    expect(runtimeSummary).toHaveTextContent("1 失败 / 0 不可用");
     expect(runtimeSummary).toHaveTextContent("Worker");
     expect(runtimeSummary).toHaveTextContent("1 stale / 1 missing / 0 mismatch");
     expect(runtimeSummary).toHaveTextContent("Queue");
@@ -197,8 +162,8 @@ describe("global app status indicator", () => {
     expect(within(statusDialog).getByRole("link", { name: "银行明细 已同步" })).toBeInTheDocument();
     expect(within(statusDialog).getByText("税金抵扣")).toBeInTheDocument();
     expect(within(statusDialog).getByText("成本统计")).toBeInTheDocument();
-    expect(within(statusDialog).getByText("active:2026-05")).toBeInTheDocument();
-    expect(within(statusDialog).getByText("projection failed")).toBeInTheDocument();
+    expect(within(statusDialog).queryByText("active:2026-05")).not.toBeInTheDocument();
+    expect(within(statusDialog).queryByText("projection failed")).not.toBeInTheDocument();
     expect(within(statusDialog).queryByText("就绪")).not.toBeInTheDocument();
     expect(screen.queryByText("银行明细已同步")).not.toBeInTheDocument();
     expect(screen.queryByText("bank_detail readiness fresh, schema v1")).not.toBeInTheDocument();
@@ -233,7 +198,6 @@ describe("global app status indicator", () => {
         generated_at: "2026-06-04T10:00:00+08:00",
         session: { status: "authenticated" },
         oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
-        workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
         background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
         dependencies: {},
         app_status: globalAppStatus,

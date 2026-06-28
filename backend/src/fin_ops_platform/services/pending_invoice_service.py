@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 from http import HTTPStatus
 import json
+import re
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import BatchType, ImportDecision, InvoiceType, TransactionDirection
@@ -31,7 +32,6 @@ from fin_ops_platform.services.pending_invoice_relation_identity import (
     is_valid_pending_invoice_oa_row_id,
     pending_invoice_relation_identity,
 )
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
@@ -41,6 +41,18 @@ PENDING_INVOICE_RELATION_MODE = "pending_invoice_manual_invoice"
 ATTACH_EXISTING_INVOICE_RELATION_MODE = "pending_invoice_attach_existing_invoice"
 MANUAL_INVOICE_SOURCE_NAME = "pending_invoice_manual_entry"
 MANUAL_INVOICE_SOURCE_TYPE = "manual_invoice_import"
+PENDING_INVOICE_BASE_SCOPE_KEYS = (
+    "expense:all",
+    "expense:requires_invoice",
+    "expense:bank_statement_as_invoice",
+    "expense:no_invoice_required",
+    "income:all",
+    "income:requires_invoice",
+    "income:no_invoice_required",
+    "income:cash_income",
+)
+PENDING_INVOICE_IMPORT_STATE_BASE_SCOPE_KEYS = ("expense:all", "income:all", "income:cash_income")
+_MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 EXPENSE_FILTERS = {"requires_invoice", "bank_statement_as_invoice", "no_invoice_required"}
 INCOME_FILTERS = {"requires_invoice", "no_invoice_required", "cash_income"}
 VALID_FILTERS = {"all", *EXPENSE_FILTERS, *INCOME_FILTERS}
@@ -75,15 +87,28 @@ PENDING_INVOICE_SORT_FIELDS = {
 
 
 def _with_pending_invoice_write_targets(result: dict[str, Any]) -> dict[str, Any]:
-    affected_months = result.get("affected_months")
-    result.update(
-        write_target_envelope(
-            read_model_key="pending_invoice",
-            scope_keys=affected_months,
-            fallback_scope_key="all",
-        )
-    )
+    scope_keys = [str(item).strip() for item in list(result.get("affected_months") or []) if str(item).strip()]
+    result["affected_scope_keys"] = scope_keys or ["all"]
     return result
+
+
+def pending_invoice_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
+    month_scope_keys = [
+        str(scope_key).strip()
+        for scope_key in list(scope_keys or [])
+        if _MONTH_SCOPE_RE.match(str(scope_key).strip())
+    ]
+    if not month_scope_keys:
+        return list(PENDING_INVOICE_IMPORT_STATE_BASE_SCOPE_KEYS)
+    return [
+        scoped_key
+        for month in month_scope_keys
+        for scoped_key in (
+            f"expense:all:{month}",
+            f"income:all:{month}",
+            f"income:cash_income:{month}",
+        )
+    ]
 
 
 INVOICE_CANDIDATE_SORT_FIELDS = {"issue_date", "total_with_tax", "seller_name", "amount_difference_abs"}
@@ -2186,7 +2211,7 @@ class PendingInvoiceApplicationService:
             self._mark_command(command, "completed")
             return result
         except PendingInvoiceError as exc:
-            self._mark_relation_precondition_error(command, exc)
+            self._mark_relation_conflict(command, exc)
             raise
         except Exception as exc:
             command["error"] = str(exc)
@@ -2369,7 +2394,7 @@ class PendingInvoiceApplicationService:
             self._mark_command(command, "completed")
             return result
         except PendingInvoiceError as exc:
-            self._mark_relation_precondition_error(command, exc)
+            self._mark_relation_conflict(command, exc)
             raise
         except Exception as exc:
             command["error"] = str(exc)
@@ -2482,7 +2507,7 @@ class PendingInvoiceApplicationService:
             self._mark_command(command, "completed")
             return result
         except PendingInvoiceError as exc:
-            self._mark_relation_precondition_error(command, exc)
+            self._mark_relation_conflict(command, exc)
             raise
         except Exception as exc:
             command["error"] = str(exc)
@@ -2901,13 +2926,6 @@ class PendingInvoiceApplicationService:
 
     @staticmethod
     def _command_error(exc: WorkbenchRelationCommandError) -> PendingInvoiceError:
-        if exc.error_code == "workbench_relation_read_model_not_fresh":
-            return PendingInvoiceError(
-                "pending_invoice_relation_read_model_not_fresh",
-                "关联台关系读模型不是 fresh，请刷新后再处理。",
-                status_code=HTTPStatus.CONFLICT,
-                details=dict(exc.payload),
-            )
         if exc.error_code == "workbench_relation_active_row_conflict":
             return PendingInvoiceError(
                 "active_relation_conflict",
@@ -3501,8 +3519,8 @@ class PendingInvoiceApplicationService:
         if self._fault_injector is not None:
             self._fault_injector(phase, command)
 
-    def _mark_relation_precondition_error(self, command: dict[str, Any], exc: PendingInvoiceError) -> None:
-        if exc.error_code != "pending_invoice_relation_read_model_not_fresh":
+    def _mark_relation_conflict(self, command: dict[str, Any], exc: PendingInvoiceError) -> None:
+        if exc.error_code != "active_relation_conflict":
             return
         command["error"] = str(exc)
         command["error_code"] = exc.error_code

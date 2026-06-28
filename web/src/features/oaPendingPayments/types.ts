@@ -176,24 +176,12 @@ export type OaPendingPaymentRowsResponse = {
   pagination: { page: number; pageSize: number; total: number };
   summary: OaPendingPaymentSummary;
   filterConfig: OaPendingPaymentFieldConfig[];
-  readModelStatus?: string;
-  read_model_status?: string;
-  read_model_stale_reasons?: string[];
-  read_model_scope_key?: string;
-  sourceVersions?: Record<string, unknown>;
-  source_versions?: Record<string, unknown>;
   viewMode?: OaPendingPaymentViewMode;
   view_mode?: OaPendingPaymentViewMode;
 };
 
 export type OaPendingPaymentFilterOptionsResponse = {
   fields: Array<OaPendingPaymentFieldConfig & { options?: OaPendingPaymentFilterOption[] }>;
-  readModelStatus?: string;
-  read_model_status?: string;
-  read_model_stale_reasons?: string[];
-  read_model_scope_key?: string;
-  sourceVersions?: Record<string, unknown>;
-  source_versions?: Record<string, unknown>;
   viewMode?: OaPendingPaymentViewMode;
   view_mode?: OaPendingPaymentViewMode;
 };
@@ -231,11 +219,6 @@ export type AutoReconcileOaPendingPaymentBankTransactionsResponse = {
     details?: Record<string, unknown>;
   }>;
   oaPaymentWritebacks?: OaPendingPaymentWritebackStatus[];
-  readModelRefresh?: {
-    scopeKeys?: string[];
-    enqueued?: boolean;
-    targetSeconds?: number;
-  };
 };
 
 export type OaPendingPaymentBankCandidateRelationStatus = "all" | "unmatched" | "matched" | "linked_in_progress";
@@ -289,11 +272,6 @@ export type LinkOaPendingPaymentBankTransactionsResponse = {
   };
   oaPaymentWriteback?: OaPendingPaymentWritebackStatus | null;
   oaPaymentWritebacks?: OaPendingPaymentWritebackStatus[];
-  readModelRefresh?: {
-    scopeKeys?: string[];
-    enqueued?: boolean;
-    targetSeconds?: number;
-  };
 };
 
 export type OaPendingPaymentDetailTarget = {

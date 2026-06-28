@@ -19,20 +19,20 @@
 
 ## 当前边界
 
-关注项目范围、费用归因、导出 shape 和 cost read model freshness。成本统计 read model refresh scope 必须是 `active:YYYY-MM`、`all:YYYY-MM`、`active:all` 或 `all:all`；旧的裸月份/裸 `all` 只能在统一 read model refresh scope gateway 中归一化，不能直接进入 durable queue。生产旧 readiness、dirty scope 或 outbox 中残留的裸 scope 使用 `scripts/check-read-model-scope-contracts.py` 检查和受控清理。
+关注项目范围、费用归因、导出 shape 和 direct API 页面读路径。成本统计页面不再生产旧成本统计刷新事件，不绑定 `cost-statistics` / `cost-tax` 页面派生 worker，也不通过旧就绪记录证明页面数据可读。旧 cost/tax SQL projection 已删除；历史 `read_model.cost_statistics_*` 表仅作为迁移清理对象存在。
 
-生产刷新由专用 `cost-statistics` RabbitMQ consumer 承担独立性能 lane；旧 `cost-tax` combined worker 保留为兼容消费者，不再是唯一性能 lane。当前 P2/P3 closure 按首屏 API 或 direct refresh p95 <= 1000ms 验收，写操作链路还要求 operation-to-fresh p99 <= 3000ms。`cost_statistics` freshness 仍以 PostgreSQL dirty scope/outbox/readiness 为事实源，不能为了达标把 stale 伪装成 fresh。
+当前 P2/P3 closure 按 direct API 首屏 p95 <= 1000ms 验收。写操作链路通过 direct refetch / cache warmup 影响页面，不再等待旧成本统计页面派生 worker；页面不消费 explorer/export 的旧同步诊断字段。
 
-月度 scope projection 必须把对应 `read_model.workbench_generations` active generation 的 `source_versions` 纳入自身 `source_versions`。当 SQL read model 已经 fresh 且 `source_versions` 完全一致时，worker 可以返回 `skipped/source_versions_unchanged`，不得扫描 `read_model.workbench_groups` 或重写 payload；缺少读取接口、状态非 fresh 或版本不一致时必须按原路径重建。
+历史月度 SQL projection/source-version 规则已退出当前架构；新页面读取不得依赖该旧同步结果。
 
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
 - 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
+- API contract、DTO shape、错误字段、权限校验、状态值或旧同步诊断字段删除变化。
+- 业务状态、UI 状态、legacy projection/worker 下线状态或状态流转变化。
+- 跨页面刷新、domain event、derived lifecycle、affected scope、outbox 或缓存边界变化。
 - 测试入口、回归范围、验证命令或未测风险变化。
 
 ## 本目录文件

@@ -32,7 +32,6 @@ import type {
   AutoReconcileOaPendingPaymentBankTransactionsResponse,
   LinkOaPendingPaymentBankTransactionsResponse,
 } from "../features/oaPendingPayments/types";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import { fetchPendingInvoiceRules, savePendingInvoiceRules } from "../features/pendingInvoices/api";
 
 const initialQuery: OaPendingPaymentQuery = {
@@ -59,83 +58,6 @@ function filterConfigsFromOptions(fields: Array<OaPendingPaymentFieldConfig & { 
   return fields.map(({ options: _options, ...field }) => field);
 }
 
-const readModelStatusPriority = ["unavailable", "schema_mismatch", "missing", "failed", "stale", "refreshing", "fresh"];
-
-type ReadModelStatusPayload = {
-  readModelStatus?: string | null;
-  read_model_status?: string | null;
-};
-
-function readModelStatusFromPayloads(...payloads: ReadModelStatusPayload[]): string {
-  const statuses = payloads
-    .map((payload) => (payload.readModelStatus ?? payload.read_model_status ?? "").trim().toLowerCase())
-    .filter(Boolean);
-  if (statuses.length === 0) {
-    return "refreshing";
-  }
-  const knownStatuses = statuses.filter((status) => readModelStatusPriority.includes(status));
-  if (knownStatuses.length > 0) {
-    return knownStatuses.sort((left, right) => (
-      readModelStatusPriority.indexOf(left) - readModelStatusPriority.indexOf(right)
-    ))[0];
-  }
-  return statuses.find((status) => status !== "fresh") ?? "refreshing";
-}
-
-function isReadModelFresh(status: string) {
-  return status === "fresh";
-}
-
-type OaPendingPaymentReadModelRefresh = {
-  scopeKeys?: string[];
-};
-
-function normalizedRefreshScopeKeys(refresh: OaPendingPaymentReadModelRefresh | undefined) {
-  return Array.from(new Set(
-    (refresh?.scopeKeys ?? [])
-      .map((scopeKey) => String(scopeKey).trim())
-      .filter(Boolean),
-  ));
-}
-
-function oaPendingPaymentBarrierTargets(refresh: OaPendingPaymentReadModelRefresh | undefined, currentScopeKey: string) {
-  const visibleScopeKey = currentScopeKey.trim() || "all";
-  const refreshScopeKeys = normalizedRefreshScopeKeys(refresh);
-  const concreteRefreshScopeKeys = refreshScopeKeys.filter((scopeKey) => scopeKey !== "all");
-  if (visibleScopeKey === "all" && concreteRefreshScopeKeys.length > 0) {
-    return operationBarrierTargets("oa_pending_payment", concreteRefreshScopeKeys);
-  }
-  if (refreshScopeKeys.includes(visibleScopeKey)) {
-    return operationBarrierTargets("oa_pending_payment", [visibleScopeKey]);
-  }
-  if (visibleScopeKey === "all" && refreshScopeKeys.length > 0) {
-    return operationBarrierTargets("oa_pending_payment", refreshScopeKeys);
-  }
-  return operationBarrierTargets("oa_pending_payment", [visibleScopeKey]);
-}
-
-async function waitForOaPendingPaymentBarrier(
-  refresh: OaPendingPaymentReadModelRefresh | undefined,
-  currentScopeKey: string,
-) {
-  try {
-    await waitForOperationFreshness(oaPendingPaymentBarrierTargets(refresh, currentScopeKey));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function readModelStatusTitle(status: string) {
-  if (status === "stale") {
-    return "OA 待付款核对数据不是最新";
-  }
-  if (status === "failed" || status === "unavailable") {
-    return "OA 待付款核对数据暂不可用";
-  }
-  return "OA 待付款核对数据正在刷新";
-}
-
 function finiteCount(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -155,7 +77,6 @@ export default function OaPendingPaymentsPage() {
   const [summary, setSummary] = useState<OaPendingPaymentSummary>({ rowCount: 0 });
   const [filterConfigs, setFilterConfigs] = useState<OaPendingPaymentFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OaPendingPaymentFilterOption[]>>({});
-  const [readModelStatus, setReadModelStatus] = useState("refreshing");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -207,7 +128,6 @@ export default function OaPendingPaymentsPage() {
         setSummary(normalizeSummary(payload.summary, payloadTotal));
         setFilterConfigs((payload.filterConfig?.length ?? 0) > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields ?? []));
         setFilterOptions(filterOptionsByField(optionsPayload.fields ?? []));
-        setReadModelStatus(readModelStatusFromPayloads(payload, optionsPayload));
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -216,7 +136,6 @@ export default function OaPendingPaymentsPage() {
         setRows([]);
         setTotal(0);
         setSummary({ rowCount: 0 });
-        setReadModelStatus("unavailable");
         setError(caught instanceof Error ? caught.message : "OA 待付款核对加载失败。");
       })
       .finally(() => {
@@ -241,7 +160,7 @@ export default function OaPendingPaymentsPage() {
     if (!canMutateData) {
       return undefined;
     }
-    if (loading || refreshing || error || !isReadModelFresh(readModelStatus)) {
+    if (loading || refreshing || error) {
       return undefined;
     }
     const scopeKey = query.month || "all";
@@ -270,16 +189,11 @@ export default function OaPendingPaymentsPage() {
         if (!autoReconcileChanged(result)) {
           return;
         }
-        const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, scopeKey);
         if (!active) {
           return;
         }
-        if (synced) {
-          setFeedback(autoReconcileFeedback(result));
-          loadRowsRef.current("refresh");
-        } else {
-          setFeedback("自动匹配和写回已提交，后台同步尚未完成，请稍后刷新。");
-        }
+        setFeedback(autoReconcileFeedback(result));
+        loadRowsRef.current("refresh");
       } catch (caught: unknown) {
         if (active) {
           autoReconcileFailedKeysRef.add(scopeKey);
@@ -298,7 +212,6 @@ export default function OaPendingPaymentsPage() {
     error,
     loading,
     query.month,
-    readModelStatus,
     refreshing,
   ]);
 
@@ -358,16 +271,13 @@ export default function OaPendingPaymentsPage() {
 
   const handleBankLinkSuccess = useCallback(async (
     message: string,
-    result: LinkOaPendingPaymentBankTransactionsResponse,
+    _result: LinkOaPendingPaymentBankTransactionsResponse,
   ) => {
-    const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, query.month || "all");
-    setFeedback(synced ? message : "已关联支出流水，后台同步尚未完成，请稍后刷新。");
+    setFeedback(message);
     setSelectedOaRowIds(new Set());
     setBankLinkDrawerOpen(false);
-    if (synced) {
-      loadRows("refresh");
-    }
-  }, [loadRows, query.month]);
+    loadRows("refresh");
+  }, [loadRows]);
 
   const loadExpensePendingInvoiceRules = useCallback(() => fetchPendingInvoiceRules("expense"), []);
 
@@ -377,13 +287,8 @@ export default function OaPendingPaymentsPage() {
   );
 
   const handleRulesSaved = useCallback(async () => {
-    const synced = await waitForOaPendingPaymentBarrier(undefined, query.month || "all");
-    if (synced) {
-      loadRows("refresh");
-    } else {
-      setFeedback("规则已保存，OA 待付款核对后台同步尚未完成，请稍后刷新。");
-    }
-  }, [loadRows, query.month]);
+    loadRows("refresh");
+  }, [loadRows]);
 
   const actions = useMemo(() => (
     <div className="oa-pending-payments-actions">
@@ -422,7 +327,6 @@ export default function OaPendingPaymentsPage() {
   ), [canMutateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
   const visibleError = error ?? actionError;
   const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
-  const showReadModelState = isEmpty && !isReadModelFresh(readModelStatus);
   const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
   const inProgressCountLabel = formatViewCount(summary.viewCounts?.in_progress);
 
@@ -487,12 +391,7 @@ export default function OaPendingPaymentsPage() {
                     当前账号仅支持查看和导出，不能自动写回 OA 或关联支出流水。
                   </StatePanel>
                 ) : null}
-                {showReadModelState ? (
-                  <StatePanel tone={readModelStatus === "refreshing" ? "loading" : "warning"} title={readModelStatusTitle(readModelStatus)} compact>
-                    当前数据仍在刷新或等待后台任务完成，请稍后重试。
-                  </StatePanel>
-                ) : null}
-                {isEmpty && !showReadModelState ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
+                {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
                 <OaPendingPaymentsTable
                   rows={rows}
                   page={query.page}

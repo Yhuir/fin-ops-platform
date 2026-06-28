@@ -65,7 +65,6 @@ class ExistingEtcBatchLinkService:
         link_etc_invoices_to_existing_invoices: Callable[[list[Any]], list[str]] | None = None,
         refresh_after_etc_invoice_link: Callable[[list[str], str], None] | None = None,
         persist_pair_relations: Callable[[list[str]], None] | None = None,
-        invalidate_workbench_scopes: Callable[[list[str]], None] | None = None,
         persist_etc_state: Callable[[], None] | None = None,
     ) -> None:
         self._etc_service = etc_service
@@ -76,7 +75,6 @@ class ExistingEtcBatchLinkService:
         self._link_etc_invoices_to_existing_invoices = link_etc_invoices_to_existing_invoices or (lambda _invoices: [])
         self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link or (lambda _months, _reason: None)
         self._persist_pair_relations = persist_pair_relations or (lambda _case_ids: None)
-        self._invalidate_workbench_scopes = invalidate_workbench_scopes or (lambda _scopes: None)
         self._persist_etc_state = persist_etc_state or (lambda: None)
 
     def link_existing_invoices(self, spec: ExistingEtcBatchLinkSpec) -> ExistingEtcBatchLinkResult:
@@ -181,7 +179,6 @@ class ExistingEtcBatchLinkService:
             updated_relation = {"case_id": spec.case_id}
         relation_case_id = str(updated_relation.get("case_id") or spec.case_id)
         self._persist_pair_relations([relation_case_id])
-        self._invalidate_workbench_scopes(["all", *changed_months])
         self._persist_etc_state()
 
         return ExistingEtcBatchLinkResult(

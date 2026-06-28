@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from http import HTTPStatus
-from typing import Any, Callable
+from typing import Any
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
@@ -22,12 +22,11 @@ from fin_ops_platform.services.oa_pending_payment_service import (
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
     OaPendingPaymentRelationRepositoryError,
 )
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+from fin_ops_platform.services.scope_keys import normalized_scope_keys
 from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
-RefreshCallback = Callable[[str], object]
 AUTO_OA_BANK_RULE_CODES = {"oa_bank_exact_amount", "oa_bank_exact_sum"}
 
 
@@ -43,8 +42,6 @@ class OaPendingPaymentCommandService:
         completed_oa_projection: Any | None = None,
         lifecycle_policy: InvoiceLifecyclePolicy | None = None,
         matching_rules: WorkbenchMatchingRules | None = None,
-        enqueue_workbench_refresh: Callable[..., object] | None = None,
-        enqueue_oa_pending_payment_refresh: Callable[..., object] | None = None,
     ) -> None:
         self._import_service = import_service
         self._oa_projection = oa_projection
@@ -54,8 +51,6 @@ class OaPendingPaymentCommandService:
         self._payment_status_repository = payment_status_repository
         self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy()
         self._matching_rules = matching_rules or WorkbenchMatchingRules(include_special_rules=False)
-        self._enqueue_workbench_refresh = enqueue_workbench_refresh
-        self._enqueue_oa_pending_payment_refresh = enqueue_oa_pending_payment_refresh
 
     def confirm_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         oa_row_id = _payload_text(payload, "oa_row_id", "oaRowId")
@@ -126,8 +121,7 @@ class OaPendingPaymentCommandService:
             },
             "oaPaymentWriteback": writeback,
             "relation": relation_result,
-            "readModelRefresh": refresh,
-            **_oa_pending_payment_write_target_envelope(refresh),
+            **_oa_pending_payment_affected_scope_payload(refresh),
         }
 
     def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
@@ -193,8 +187,7 @@ class OaPendingPaymentCommandService:
             },
             "oaPaymentWriteback": writebacks[0] if len(writebacks) == 1 else None,
             "oaPaymentWritebacks": writebacks,
-            "readModelRefresh": refresh,
-            **_oa_pending_payment_write_target_envelope(refresh),
+            **_oa_pending_payment_affected_scope_payload(refresh),
         }
 
     def auto_reconcile_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
@@ -229,8 +222,7 @@ class OaPendingPaymentCommandService:
             "autoMatchedRelations": auto_match_result["relations"],
             "skippedAutoMatches": auto_match_result["skipped"],
             "oaPaymentWritebacks": [_public_writeback(item) for item in writebacks],
-            "readModelRefresh": refresh,
-            **_oa_pending_payment_write_target_envelope(refresh),
+            **_oa_pending_payment_affected_scope_payload(refresh),
         }
 
     def bank_transaction_candidates(self, query: dict[str, list[str]] | None = None) -> dict[str, Any]:
@@ -593,28 +585,10 @@ class OaPendingPaymentCommandService:
 
     def _enqueue_refreshes(self, record: OAApplicationRecord) -> dict[str, Any]:
         scope_keys = _refresh_scope_keys(record.month)
-        metadata = {"oa_row_id": record.id, "reason": "oa_pending_payment_confirm_paid"}
-        refreshed: list[str] = []
-        for scope_key in scope_keys:
-            if callable(self._enqueue_workbench_refresh):
-                self._enqueue_workbench_refresh(
-                    scope_key,
-                    reason="oa_pending_payment_confirm_paid",
-                    metadata=metadata,
-                )
-                refreshed.append(f"workbench:{scope_key}")
-            if callable(self._enqueue_oa_pending_payment_refresh):
-                self._enqueue_oa_pending_payment_refresh(
-                    scope_key,
-                    reason="oa_pending_payment_confirm_paid",
-                    metadata=metadata,
-                )
-                refreshed.append(f"oa_pending_payment:{scope_key}")
         return {
             "scopeKeys": scope_keys,
-            "targets": refreshed,
-            "enqueued": bool(refreshed),
-            "targetSeconds": 2,
+            "targets": [],
+            "enqueued": False,
         }
 
     def _enqueue_refreshes_for_records(
@@ -628,28 +602,10 @@ class OaPendingPaymentCommandService:
             for scope_key in _refresh_scope_keys(record.month):
                 if scope_key not in scope_keys:
                     scope_keys.append(scope_key)
-        metadata = {"oa_row_ids": [record.id for record in records], "reason": reason}
-        refreshed: list[str] = []
-        for scope_key in scope_keys:
-            if callable(self._enqueue_workbench_refresh):
-                self._enqueue_workbench_refresh(
-                    scope_key,
-                    reason=reason,
-                    metadata=metadata,
-                )
-                refreshed.append(f"workbench:{scope_key}")
-            if callable(self._enqueue_oa_pending_payment_refresh):
-                self._enqueue_oa_pending_payment_refresh(
-                    scope_key,
-                    reason=reason,
-                    metadata=metadata,
-                )
-                refreshed.append(f"oa_pending_payment:{scope_key}")
         return {
             "scopeKeys": scope_keys,
-            "targets": refreshed,
-            "enqueued": bool(refreshed),
-            "targetSeconds": 2,
+            "targets": [],
+            "enqueued": False,
         }
 
     def _relation_status_by_bank_id(self, bank_transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -1094,19 +1050,14 @@ def _empty_refresh_payload() -> dict[str, Any]:
         "scopeKeys": [],
         "targets": [],
         "enqueued": False,
-        "targetSeconds": 2,
     }
 
 
-def _oa_pending_payment_write_target_envelope(refresh: dict[str, Any]) -> dict[str, object]:
+def _oa_pending_payment_affected_scope_payload(refresh: dict[str, Any]) -> dict[str, object]:
     scope_keys = _payload_list(refresh, "scopeKeys", "scope_keys")
-    if not scope_keys and not bool(refresh.get("enqueued")):
-        return write_target_envelope(scope_keys=[], targets=[])
-    targets: list[dict[str, str]] = []
-    for scope_key in scope_keys or ["all"]:
-        targets.append({"read_model_key": "oa_pending_payment", "scope_key": scope_key})
-        targets.append({"read_model_key": "workbench_relation", "scope_key": scope_key})
-    return write_target_envelope(scope_keys=scope_keys, targets=targets, fallback_scope_key="all")
+    if not scope_keys:
+        return {"affected_scope_keys": []}
+    return {"affected_scope_keys": normalized_scope_keys(scope_keys, fallback="all")}
 
 
 def _confirm_paid_case_id(oa_row_ids: list[str], bank_transaction_ids: list[str]) -> str:

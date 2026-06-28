@@ -66,7 +66,6 @@ def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[
     relation_rows = _fetch_relation_rows(connection)
     history_rows = _fetch_history_rows(connection)
     history_counts = _history_counts(history_rows)
-    readiness_rows = _fetch_readiness_rows(connection, tenant_id=tenant_id)
     issues: list[RelationReplayIssue] = []
 
     normalized_relations = [_normalize_relation_row(row) for row in relation_rows]
@@ -79,7 +78,6 @@ def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[
     issues.extend(_history_issues(relation_case_ids, history_counts))
     issues.extend(_history_display_only_relation_issues(history_rows))
     issues.extend(_history_non_restorable_relation_issues(history_rows))
-    issues.extend(_readiness_issues(readiness_rows))
 
     issue_payloads = [asdict(issue) for issue in issues]
     error_count = sum(1 for issue in issues if issue.severity == "error")
@@ -102,7 +100,6 @@ def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[
             "relation_count": len(normalized_relations),
             "active_relation_count": len(active_relations),
             "history_case_count": len(history_counts),
-            "readiness_row_count": len(readiness_rows),
             "issue_count": len(issues),
             "error_count": error_count,
             "warning_count": warning_count,
@@ -110,7 +107,6 @@ def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[
             "non_restorable_history_before_relation_count": non_restorable_history_before_relation_count,
         },
         "issues": issue_payloads,
-        "readiness": readiness_rows,
     }
 
 
@@ -164,36 +160,6 @@ def _history_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
             continue
         result[case_id] = int(result.get(case_id) or 0) + 1
     return result
-
-
-def _fetch_readiness_rows(connection: Any, *, tenant_id: str) -> list[dict[str, Any]]:
-    try:
-        return connection.fetch_all(
-            """
-            select
-              read_model_key,
-              scope_type,
-              scope_key,
-              status,
-              schema_version,
-              row_count,
-              generated_at::text as generated_at,
-              last_error
-            from read_model.app_status_readiness
-            where tenant_id = %s
-              and read_model_key = 'workbench_relation'
-            order by scope_key
-            """,
-            (tenant_id,),
-        )
-    except Exception as exc:
-        return [
-            {
-                "read_model_key": "workbench_relation",
-                "status": "unavailable",
-                "last_error": str(exc) or exc.__class__.__name__,
-            }
-        ]
 
 
 def _normalize_relation_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -478,33 +444,6 @@ def _is_non_restorable_display_only_relation(relation: Any) -> bool:
     if relation_mode not in DISPLAY_ONLY_WORKBENCH_RELATION_MODES:
         return False
     return not relation_has_withdraw_restore_marker(relation)
-
-
-def _readiness_issues(readiness_rows: list[dict[str, Any]]) -> list[RelationReplayIssue]:
-    issues: list[RelationReplayIssue] = []
-    if not readiness_rows:
-        return [
-            RelationReplayIssue(
-                severity="warning",
-                code="workbench_relation_readiness_missing",
-                message="No app_status_readiness row exists for workbench_relation.",
-                case_ids=[],
-            )
-        ]
-    for row in readiness_rows:
-        status = str(row.get("status") or "").strip()
-        if status == "fresh":
-            continue
-        issues.append(
-            RelationReplayIssue(
-                severity="warning",
-                code="workbench_relation_readiness_not_fresh",
-                message="workbench_relation read model readiness is not fresh.",
-                case_ids=[],
-                details={key: value for key, value in row.items() if key in {"scope_key", "status", "last_error"}},
-            )
-        )
-    return issues
 
 
 def _json_default(value: Any) -> Any:

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -104,7 +104,6 @@ function installInputInvoiceUsageFetch(
   payload: unknown = rowsPayload,
   options: {
     exportDownloadResponse?: (url: URL) => Response;
-    operationBarrierDelay?: Promise<void>;
   } = {},
 ) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -239,7 +238,6 @@ function installInputInvoiceUsageFetch(
         scope_label: "当前筛选",
         columns: ["序号", "发票号码", "销方名称"],
         sample_rows: [{ "序号": 1, "发票号码": "SD-INV-2026-0001", "销方名称": "云南长文本供应商科技发展有限公司第一分公司" }],
-        readModelStatus: "fresh",
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -336,29 +334,6 @@ function installInputInvoiceUsageFetch(
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (url.pathname === "/api/operation-barrier/status") {
-      if (options.operationBarrierDelay) {
-        await options.operationBarrierDelay;
-      }
-      return new Response(JSON.stringify({
-        status: "fresh",
-        fresh: true,
-        targets: [{
-          read_model_key: "input_invoice_usage",
-          scope_type: "input_invoice_usage",
-          scope_key: "all",
-          status: "fresh",
-          raw_status: "fresh",
-          fresh: true,
-          blocking: false,
-        }],
-        blocked_targets: [],
-        refreshing_targets: [],
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
     return new Response(JSON.stringify({}), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -372,21 +347,6 @@ function rowsRequests(fetchMock: ReturnType<typeof installInputInvoiceUsageFetch
   return fetchMock.mock.calls
     .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
     .filter((url) => url.pathname === "/api/input-invoice-usage/rows");
-}
-
-function operationBarrierRequests(fetchMock: ReturnType<typeof installInputInvoiceUsageFetch>) {
-  return fetchMock.mock.calls.filter(([input]) => {
-    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-    return url.pathname === "/api/operation-barrier/status";
-  });
-}
-
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
 }
 
 afterEach(() => {
@@ -481,7 +441,7 @@ describe("Input invoice usage page", () => {
     expect(compositeFilter).toContain("grid-template-columns: repeat(2, minmax(160px, 1fr))");
   });
 
-  test("shows refreshing diagnostics instead of a true empty state while read model details stay hidden", async () => {
+  test("renders direct rows and filters without read model freshness fields", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/input-invoice-usage/rows") {
@@ -489,51 +449,14 @@ describe("Input invoice usage page", () => {
           rows: [],
           pagination: { page: 1, pageSize: 20, total: 0 },
           filterConfig: [],
-          read_model_status: "refreshing",
-        }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      if (url.pathname === "/api/input-invoice-usage/filter-options") {
-        return new Response(JSON.stringify({ fields: [], read_model_status: "refreshing" }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({}), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/input-invoice-usage");
-
-    const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).getByText("进项发票使用情况读模型不是最新，完成后页面会自动重新加载。")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下没有进项发票使用记录。")).not.toBeInTheDocument();
-  });
-
-  test("treats stale filter options as non-fresh instead of showing a fresh empty state", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/input-invoice-usage/rows") {
-        return new Response(JSON.stringify({
-          rows: [],
-          pagination: { page: 1, pageSize: 20, total: 0 },
-          filterConfig: [],
-          read_model_status: "fresh",
         }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
       }
       if (url.pathname === "/api/input-invoice-usage/filter-options") {
-        return new Response(JSON.stringify({ fields: [], read_model_status: "stale" }), {
-          status: 202,
+        return new Response(JSON.stringify({ fields: [] }), {
+          status: 200,
           headers: { "Content-Type": "application/json" },
         });
       }
@@ -547,60 +470,16 @@ describe("Input invoice usage page", () => {
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下没有进项发票使用记录。")).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
-  });
-
-  test("unmounts the page while away and retries after route remount", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/input-invoice-usage/rows") {
-        return new Response(JSON.stringify({
-          rows: [],
-          pagination: { page: 1, pageSize: 20, total: 0 },
-          filterConfig: [],
-          read_model_status: "refreshing",
-        }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      if (url.pathname === "/api/input-invoice-usage/filter-options") {
-        return new Response(JSON.stringify({ fields: [], read_model_status: "refreshing" }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({}), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/input-invoice-usage");
-    const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(within(page).queryByText("进项发票使用情况数据正在刷新")).not.toBeInTheDocument();
+    expect(within(page).queryByText("进项发票使用情况读模型不是最新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
+    expect(within(page).getByText("当前条件下没有进项发票使用记录。")).toBeInTheDocument();
     expect(rowsRequests(fetchMock)).toHaveLength(1);
-
-    fireEvent.click(screen.getByRole("link", { name: "设置" }));
-    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(screen.queryByTestId("input-invoice-usage-page")).not.toBeInTheDocument();
     vi.useFakeTimers();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
-    });
-
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(rowsRequests(fetchMock)).toHaveLength(1);
-
     vi.useRealTimers();
-    fireEvent.click(screen.getByRole("link", { name: "进项发票使用情况" }));
-    expect(await screen.findByTestId("input-invoice-usage-page")).toBeInTheDocument();
-
-    expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
+    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeEnabled();
   });
 
   test("adds sidebar route and renders the project dense table contract", async () => {
@@ -947,10 +826,9 @@ describe("Input invoice usage page", () => {
     expect(screen.queryByText("oa_reverse_batch_page")).not.toBeInTheDocument();
   });
 
-  test("waits for input invoice usage barrier before reloading rows after OA reverse draft creation", async () => {
+  test("reloads rows directly after OA reverse draft creation without operation barrier polling", async () => {
     const user = userEvent.setup();
-    const gate = deferred();
-    const fetchMock = installInputInvoiceUsageFetch(rowsPayload, { operationBarrierDelay: gate.promise });
+    const fetchMock = installInputInvoiceUsageFetch();
 
     renderAuthenticatedAppAt("/input-invoice-usage");
 
@@ -969,13 +847,6 @@ describe("Input invoice usage page", () => {
     const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
     expect(within(confirmDialog).getByRole("link", { name: "打开 OA 草稿" })).toBeInTheDocument();
 
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    expect(JSON.parse(String(operationBarrierRequests(fetchMock)[0][1]?.body))).toEqual({
-      targets: [{ read_model_key: "input_invoice_usage", scope_key: "all" }],
-    });
-    expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequests);
-
-    gate.resolve();
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(initialRowsRequests));
   });
 

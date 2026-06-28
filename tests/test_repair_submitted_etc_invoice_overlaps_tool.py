@@ -113,14 +113,6 @@ class _TransactionalOverlapConnection(_OverlapConnection):
         yield self
 
 
-class _QueueRepository:
-    def __init__(self) -> None:
-        self.enqueued: list[dict[str, object]] = []
-
-    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-        self.enqueued.append(dict(kwargs))
-
-
 class RepairSubmittedEtcInvoiceOverlapsToolTests(unittest.TestCase):
     def test_dry_run_classifies_auto_manual_and_no_action_candidates(self) -> None:
         report = audit_submitted_etc_invoice_overlaps(connection=_OverlapConnection())
@@ -144,9 +136,9 @@ class RepairSubmittedEtcInvoiceOverlapsToolTests(unittest.TestCase):
         self.assertEqual(report["manual_review_candidates"], [])
         self.assertEqual(report["no_action_candidates"], [])
 
-    def test_apply_updates_only_auto_candidates_and_enqueues_workbench_refresh(self) -> None:
+    def test_apply_updates_only_auto_candidates_without_workbench_refresh_enqueue(self) -> None:
         connection = _TransactionalOverlapConnection()
-        queue = _QueueRepository()
+        queue = object()
         report = audit_submitted_etc_invoice_overlaps(connection=connection)
 
         result = apply_submitted_etc_invoice_overlap_repair(
@@ -159,13 +151,9 @@ class RepairSubmittedEtcInvoiceOverlapsToolTests(unittest.TestCase):
 
         self.assertEqual(result["updated_count"], 1)
         self.assertEqual(result["affected_workbench_scopes"], ["2026-02", "all"])
-        self.assertEqual(result["enqueued_workbench_scopes"], ["2026-02", "all"])
+        self.assertEqual(result["enqueued_workbench_scopes"], [])
         self.assertEqual(len(connection.executed), 1)
         self.assertEqual(connection.executed[0][1][-1], "a6181d79-c3eb-4e20-bbd2-719215ed161d")
-        self.assertEqual(
-            [(item["scope_type"], item["scope_key"], item["priority"]) for item in queue.enqueued],
-            [("workbench", "2026-02", "high"), ("workbench", "all", "high")],
-        )
 
     def test_apply_requires_reason_and_operator(self) -> None:
         with self.assertRaises(ValueError):

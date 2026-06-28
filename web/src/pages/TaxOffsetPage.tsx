@@ -12,11 +12,9 @@ import TaxSummaryCards from "../components/tax/TaxSummaryCards";
 import TaxTable from "../components/tax/TaxTable";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
-import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { ApiClientError } from "../features/apiClient";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import { calculateTaxOffset, fetchTaxOffsetMonth, saveTaxOffsetPlan } from "../features/tax/api";
 import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
@@ -64,8 +62,6 @@ export default function TaxOffsetPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
   const { canMutateData } = useSessionPermissions();
-  const { active } = useOptionalPageActivation("tax-offset");
-  const pageActiveRef = useRef(active);
   const currentMonthSession = usePageSessionState({
     pageKey: "tax-offset",
     stateKey: "currentMonth",
@@ -202,15 +198,11 @@ export default function TaxOffsetPage() {
   }, [loadMonthData]);
 
   const handleRefreshTrigger = useCallback(() => {
-    if (!pageActiveRef.current || document.visibilityState === "hidden") {
+    if (document.visibilityState === "hidden") {
       return;
     }
     void loadMonthData("refresh");
   }, [loadMonthData]);
-
-  useEffect(() => {
-    pageActiveRef.current = active;
-  }, [active]);
 
   useEffect(() => {
     window.addEventListener("focus", handleRefreshTrigger);
@@ -264,28 +256,6 @@ export default function TaxOffsetPage() {
       cancelled = true;
     };
   }, [currentMonth, monthData, selectedInputIds]);
-
-  const readModelStatus = monthData?.readModelStatus?.trim().toLowerCase();
-  const isReadModelRefreshing = readModelStatus === "refreshing" || readModelStatus === "stale" || readModelStatus === "missing";
-  const isReadModelUnavailable = readModelStatus === "failed"
-    || readModelStatus === "unavailable"
-    || readModelStatus === "schema_mismatch";
-  const isReadModelNonFresh = Boolean(readModelStatus && readModelStatus !== "fresh");
-  const readModelStatusMessage = isReadModelRefreshing
-    ? "税金抵扣读模型正在刷新，完成后页面会自动重试。"
-    : isReadModelUnavailable
-      ? "税金抵扣读模型暂不可用，请稍后刷新或检查系统状态。"
-      : null;
-
-  useEffect(() => {
-    if (!isReadModelRefreshing || isLoading || isRefreshing) {
-      return undefined;
-    }
-    const timeoutId = window.setTimeout(() => {
-      void loadMonthData("refresh");
-    }, 1000);
-    return () => window.clearTimeout(timeoutId);
-  }, [isLoading, isReadModelRefreshing, isRefreshing, loadMonthData]);
 
   useEffect(() => {
     const tableWraps = [outputTableWrapRef.current, inputTableWrapRef.current].filter(
@@ -353,7 +323,7 @@ export default function TaxOffsetPage() {
     };
   }, [monthData]);
 
-  const isEmpty = !isReadModelNonFresh && !isLoading && !loadError && monthData
+  const isEmpty = !isLoading && !loadError && monthData
     ? monthData.outputInvoices.length === 0
       && monthData.inputPlanInvoices.length === 0
       && monthData.certifiedMatchedInvoices.length === 0
@@ -365,32 +335,14 @@ export default function TaxOffsetPage() {
     ?? planFeedback
     ?? null;
 
-  const waitForTaxOffsetBarrier = useCallback(async () => {
-    try {
-      await waitForOperationFreshness(operationBarrierTargets("tax_offset", [currentMonth]));
-      return true;
-    } catch {
-      return false;
-    }
-  }, [currentMonth]);
-
   const handleCertifiedImportComplete = useCallback(
     async (result: TaxCertifiedImportConfirmedResult) => {
       setIsCertifiedImportModalOpen(false);
-      const barrierTargets = result.operationBarrierTargets.filter((target) => target.scopeKey);
-      const synced = barrierTargets.length > 0
-        ? await waitForOperationFreshness(barrierTargets).then(() => true).catch(() => false)
-        : await waitForTaxOffsetBarrier();
-      if (!synced) {
-        setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，后台同步尚未完成，请稍后刷新。`);
-        setPlanFeedback(null);
-        return;
-      }
       await loadMonthData("refresh");
       setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，并已刷新当前税金抵扣页面。`);
       setPlanFeedback(null);
     },
-    [loadMonthData, waitForTaxOffsetBarrier],
+    [loadMonthData],
   );
 
   const handleSavePlan = useCallback(async () => {
@@ -402,22 +354,13 @@ export default function TaxOffsetPage() {
     setImportFeedback(null);
     setPlanFeedback(null);
     try {
-      const saveResult = await saveTaxOffsetPlan({
+      await saveTaxOffsetPlan({
         month: currentMonth,
         selectedOutputIds: monthData.defaultSelectedOutputIds,
         selectedInputIds,
-        expectedReadModelScopeKey: monthData.readModelScopeKey,
         expectedSourceVersions: monthData.sourceVersions,
-        idempotencyKey: `tax-offset-plan:${currentMonth}:${monthData.readModelScopeKey ?? "scope"}:${selectedInputIds.join(",")}`,
+        idempotencyKey: `tax-offset-plan:${currentMonth}:${selectedInputIds.join(",")}`,
       });
-      const barrierTargets = saveResult.operationBarrierTargets.filter((target) => target.scopeKey);
-      const synced = barrierTargets.length > 0
-        ? await waitForOperationFreshness(barrierTargets).then(() => true).catch(() => false)
-        : await waitForTaxOffsetBarrier();
-      if (!synced) {
-        setPlanFeedback("已保存本月税金抵扣计划，后台同步尚未完成，请稍后刷新。");
-        return;
-      }
       setPlanFeedback("已保存本月税金抵扣计划。");
       await loadMonthData("refresh");
     } catch (error) {
@@ -431,12 +374,12 @@ export default function TaxOffsetPage() {
         setIsSavingPlan(false);
       }
     }
-  }, [currentMonth, isSavingPlan, loadMonthData, monthData, selectedInputIds, summary, waitForTaxOffsetBarrier]);
+  }, [currentMonth, isSavingPlan, loadMonthData, monthData, selectedInputIds, summary]);
 
   return (
     <PageScaffold
       title="税金抵扣计划与试算"
-      description="围绕进项票认证计划与已认证结果，做本月税金抵扣试算、导入核对与读模型状态展示。"
+      description="围绕进项票认证计划与已认证结果，做本月税金抵扣试算、导入核对与计划保存。"
       actions={(
         <div className="tax-page-actions">
           {headerStatusMessage ? (
@@ -455,9 +398,6 @@ export default function TaxOffsetPage() {
       {!hasVisibleMonthData && isLoading ? (
         <StatePanel tone="loading">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</StatePanel>
       ) : null}
-      {!isLoading && readModelStatusMessage ? (
-        <StatePanel tone={isReadModelRefreshing ? "loading" : "warning"}>{readModelStatusMessage}</StatePanel>
-      ) : null}
       {isEmpty ? <StatePanel tone="empty">当前月份没有可用于计划与试算的发票数据。</StatePanel> : null}
 
       {summary ? <TaxSummaryCards summary={summary} /> : null}
@@ -471,7 +411,7 @@ export default function TaxOffsetPage() {
           resultLabel={summary.resultLabel}
           canSave={canMutateData}
           isSaving={isSavingPlan}
-          saveDisabled={isReadModelNonFresh || isCalculating || isLoading || isRefreshing}
+          saveDisabled={isCalculating || isLoading || isRefreshing}
           onSave={handleSavePlan}
         />
       ) : null}

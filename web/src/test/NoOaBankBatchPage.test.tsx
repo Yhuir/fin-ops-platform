@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -11,7 +11,6 @@ import { SessionContext, type SessionContextValue } from "../contexts/SessionCon
 import type { SessionAccessTier, SessionPayload } from "../features/session/api";
 import NoOaBankBatchPage from "../pages/NoOaBankBatchPage";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
-import { renderAuthenticatedAppAt } from "./renderHelpers";
 
 const tagSelectionPayload = {
   version: 3,
@@ -444,22 +443,10 @@ function installFetchMock(payload = listPayload, options: { listFailuresBeforeSu
     if (url.pathname === "/api/no-oa-bank-batches/batch-submitted-salary/withdraw") {
       return jsonResponse({ batch: payload.batches[2], affected_months: ["2026-05"], workbench_rebuild_queued: true, results: [] });
     }
-    if (url.pathname === "/api/operation-barrier/status") {
-      return jsonResponse({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
-    }
     return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
-}
-
-function operationBarrierRequests(fetchMock: ReturnType<typeof installFetchMock>) {
-  return fetchMock.mock.calls
-    .filter(([input, init]) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST";
-    })
-    .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
 }
 
 afterEach(() => {
@@ -820,11 +807,6 @@ describe("NoOaBankBatchPage", () => {
         }),
       );
     });
-    expect(operationBarrierRequests(fetchMock).at(-1)).toMatchObject({
-      targets: [
-        { read_model_key: "no_oa_bank_batch", scope_key: "all" },
-      ],
-    });
     expect(await screen.findByText("免OA流水标签范围已保存")).toBeInTheDocument();
   });
 
@@ -1056,9 +1038,6 @@ describe("NoOaBankBatchPage", () => {
       if (url.pathname === "/api/no-oa-bank-batches/submit-selection") {
         return jsonResponse({ affected_case_ids: [], affected_months: ["2026-05"] });
       }
-      if (url.pathname === "/api/operation-barrier/status") {
-        return jsonResponse({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
-      }
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1268,7 +1247,7 @@ describe("NoOaBankBatchPage", () => {
     });
   });
 
-  test("shows read model stale state and reloads until the no OA read model is fresh", async () => {
+  test("keeps visible rows without page-level read model polling", async () => {
     let listCallCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -1280,104 +1259,6 @@ describe("NoOaBankBatchPage", () => {
         return jsonResponse({
           ...listPayload,
           batches: batchesForBucket(listPayload, url.searchParams.get("bucket")),
-          read_model_status: listCallCount === 1 ? "stale" : "fresh",
-          read_model_stale_reasons: listCallCount === 1 ? ["bank_auto_tag_rules_version_mismatch"] : [],
-        });
-      }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
-        return jsonResponse(feeDetailPayload);
-      }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-holiday") {
-        return jsonResponse({ batch: listPayload.batches[1], tag_counts: { holiday_bonus: 5 }, direction_counts: { expense: 5 }, rows: [] });
-      }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-conflict-transfer") {
-        return jsonResponse({ batch: listPayload.batches[3], tag_counts: { internal_transfer: 3 }, direction_counts: { income: 1, expense: 2 }, rows: [] });
-      }
-      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-
-    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
-    expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
-    await waitFor(() => {
-      expect(listCallCount).toBeGreaterThan(1);
-    }, { timeout: 2500 });
-    await waitFor(() => {
-      expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
-    });
-  });
-
-  test("cleans up stale read model retry reload after route unmount", async () => {
-    let listCallCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
-        return jsonResponse(tagSelectionPayload);
-      }
-      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
-        listCallCount += 1;
-        return jsonResponse({
-          ...listPayload,
-          batches: batchesForBucket(listPayload, url.searchParams.get("bucket")),
-          read_model_status: "stale",
-          read_model_stale_reasons: ["bank_auto_tag_rules_version_mismatch"],
-        });
-      }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
-        return jsonResponse(feeDetailPayload);
-      }
-      return jsonResponse({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/no-oa-bank-batches");
-
-    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(listCallCount).toBe(1);
-    });
-
-    fireEvent.click(screen.getByRole("link", { name: "设置" }));
-    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "免OA流水批量处理" })).not.toBeInTheDocument();
-    vi.useFakeTimers();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
-
-    expect(listCallCount).toBe(1);
-
-    vi.useRealTimers();
-    fireEvent.click(screen.getByRole("link", { name: "免OA流水批量处理" }));
-    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
-
-    expect(listCallCount).toBeGreaterThan(1);
-  });
-
-  test("keeps visible transaction rows while stale read model polling runs in the background", async () => {
-    let listCallCount = 0;
-    const secondListStarted = vi.fn();
-    let resolveSecondList: ((response: Response) => void) | null = null;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
-        return jsonResponse(tagSelectionPayload);
-      }
-      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
-        listCallCount += 1;
-        if (listCallCount === 1) {
-          return jsonResponse({
-            ...listPayload,
-            batches: batchesForBucket(listPayload, url.searchParams.get("bucket")),
-            read_model_status: "stale",
-            read_model_stale_reasons: ["bank_auto_tag_rules_version_mismatch"],
-          });
-        }
-        secondListStarted();
-        return new Promise<Response>((resolve) => {
-          resolveSecondList = resolve;
         });
       }
       if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
@@ -1396,26 +1277,16 @@ describe("NoOaBankBatchPage", () => {
     renderPage();
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
+    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
     expect(await within(transactionRegion).findByText("网银手续费")).toBeInTheDocument();
-
-    await waitFor(() => {
-      expect(secondListStarted).toHaveBeenCalled();
-    }, { timeout: 2500 });
-
     expect(within(transactionRegion).queryByText("流水加载中")).not.toBeInTheDocument();
-    expect(within(transactionRegion).getByText("网银手续费")).toBeInTheDocument();
-
-    act(() => {
-      resolveSecondList?.(jsonResponse({
-        ...listPayload,
-        batches: batchesForBucket(listPayload, "unsubmitted"),
-        read_model_status: "fresh",
-        read_model_stale_reasons: [],
-      }));
+    expect(screen.queryByText("当前标签下暂无流水")).not.toBeInTheDocument();
+    vi.useFakeTimers();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
     });
-    await waitFor(() => {
-      expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
-    });
+    expect(listCallCount).toBe(1);
+    vi.useRealTimers();
   });
 
   test("sidebar exposes the no OA bank batch entry", () => {

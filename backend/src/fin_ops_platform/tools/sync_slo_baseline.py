@@ -14,70 +14,12 @@ from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringReposi
 DEFAULT_LIMIT = 20
 
 
-EXPLAIN_PROBES: tuple[tuple[str, str], ...] = (
-    (
-        "active_read_model_dirty_scopes",
-        """
-        select count(*)::bigint
-        from job.read_model_dirty_scopes
-        where tenant_id = 'default'
-          and status in ('pending', 'processing', 'failed')
-        """,
-    ),
-    (
-        "active_read_model_outbox",
-        """
-        select count(*)::bigint
-        from job.outbox_events
-        where event_type like '%%.read_model.refresh'
-          and status in ('pending', 'processing', 'failed', 'dead_lettered')
-        """,
-    ),
-    (
-        "non_fresh_app_status_readiness",
-        """
-        select count(*)::bigint
-        from read_model.app_status_readiness
-        where tenant_id = 'default'
-          and status <> 'fresh'
-        """,
-    ),
-    (
-        "workbench_groups_all_scope_count",
-        """
-        select count(*)::bigint
-        from read_model.workbench_groups
-        where scope_key = 'all'
-        """,
-    ),
-    (
-        "workbench_group_rows_all_scope_count",
-        """
-        select count(*)::bigint
-        from read_model.workbench_group_rows
-        where scope_key = 'all'
-        """,
-    ),
-)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Collect a read-only production sync SLO baseline from PostgreSQL runtime facts.",
+        description="Collect a read-only production runtime baseline from PostgreSQL facts.",
     )
     parser.add_argument("--json", action="store_true", help="Print JSON output. This is the default output shape.")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="Maximum rows for table/index/top SQL lists.")
-    parser.add_argument(
-        "--include-explain",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Collect EXPLAIN FORMAT JSON for fixed sync hot-path probes.",
-    )
-    parser.add_argument(
-        "--analyze-explain",
-        action="store_true",
-        help="Use EXPLAIN ANALYZE. Default is plain EXPLAIN to keep the collector read-only and low impact.",
-    )
     return parser
 
 
@@ -88,8 +30,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     payload = collect_baseline(
         connection,
         limit=max(1, int(args.limit)),
-        include_explain=bool(args.include_explain),
-        analyze_explain=bool(args.analyze_explain),
     )
     print(json.dumps(payload, default=str, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0
@@ -99,23 +39,18 @@ def collect_baseline(
     connection: Any,
     *,
     limit: int = DEFAULT_LIMIT,
-    include_explain: bool = True,
-    analyze_explain: bool = False,
 ) -> dict[str, Any]:
     runtime = RuntimeMonitoringRepository(connection)
     normalized_limit = max(1, int(limit))
     return {
         "version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
-        "mode": "read_only" if not analyze_explain else "read_only_with_explain_analyze",
+        "mode": "read_only",
         "slo_targets": {
             "page_first_response_p95_ms": 1000,
-            "light_read_model_enqueue_to_fresh_p95_ms": 3000,
-            "heavy_workbench_local_convergence_p95_ms": [10000, 15000],
         },
         "runtime_health": _safe_section(lambda: runtime.health_summary()),
         "runtime_snapshot": _runtime_attention_snapshot(runtime),
-        "dashboard_read_models": _safe_section(runtime.dashboard_read_model_metrics),
         "dashboard_workers": _safe_section(runtime.dashboard_worker_metrics),
         "dashboard_queues": _safe_section(runtime.dashboard_queue_metrics),
         "dashboard_outbox": _safe_section(runtime.dashboard_outbox_metric),
@@ -123,11 +58,6 @@ def collect_baseline(
         "postgres_table_sizes": _safe_section(lambda: _postgres_table_sizes(connection, limit=normalized_limit)),
         "postgres_index_usage": _safe_section(lambda: _postgres_index_usage(connection, limit=normalized_limit)),
         "pg_stat_statements": _safe_section(lambda: _pg_stat_statements(connection, limit=normalized_limit)),
-        "explain_probes": (
-            _safe_section(lambda: _explain_probes(connection, analyze=analyze_explain))
-            if include_explain
-            else {"status": "skipped", "reason": "include_explain_false"}
-        ),
         "api_performance": {
             "status": "not_collected",
             "reason": "api p95 is process-local dashboard/authenticated endpoint data; collect with logged-in HTTP sampling.",
@@ -150,7 +80,6 @@ def _runtime_attention_snapshot(runtime: RuntimeMonitoringRepository) -> dict[st
     return {
         "status": "available",
         "data": {
-            "read_model_attention": _attention_items(snapshot.get("read_model_statuses")),
             "outbox_attention": _attention_items(snapshot.get("outbox_statuses")),
             "worker_attention": _attention_items(snapshot.get("worker_statuses")),
         },
@@ -303,38 +232,6 @@ def _pg_stat_statement_row(row: dict[str, Any]) -> dict[str, Any]:
     query = " ".join(str(normalized.get("query") or "").split())
     normalized["query"] = query[:500]
     return normalized
-
-
-def _explain_probes(connection: Any, *, analyze: bool) -> list[dict[str, Any]]:
-    return [
-        {
-            "name": name,
-            **_explain_one(connection, sql=sql, analyze=analyze),
-        }
-        for name, sql in EXPLAIN_PROBES
-    ]
-
-
-def _explain_one(connection: Any, *, sql: str, analyze: bool) -> dict[str, Any]:
-    mode = "analyze, buffers, format json" if analyze else "buffers, format json"
-    row = connection.fetch_one(f"explain ({mode}) {sql}") or {}
-    raw_plan = row.get("QUERY PLAN") or row.get("query_plan")
-    if raw_plan is None and row:
-        raw_plan = next(iter(row.values()))
-    plan_document = raw_plan[0] if isinstance(raw_plan, list) and raw_plan else raw_plan
-    if not isinstance(plan_document, dict):
-        return {"plan": raw_plan}
-    root_plan = plan_document.get("Plan") if isinstance(plan_document.get("Plan"), dict) else {}
-    return {
-        "planning_time_ms": plan_document.get("Planning Time"),
-        "execution_time_ms": plan_document.get("Execution Time"),
-        "node_type": root_plan.get("Node Type"),
-        "startup_cost": root_plan.get("Startup Cost"),
-        "total_cost": root_plan.get("Total Cost"),
-        "plan_rows": root_plan.get("Plan Rows"),
-        "plan_width": root_plan.get("Plan Width"),
-        "plan": plan_document,
-    }
 
 
 def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:

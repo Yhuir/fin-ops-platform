@@ -165,19 +165,16 @@ def _runtime_blockers(payload: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(runtime, dict):
         for key in (
             "queue_backlog",
-            "dirty_scopes",
             "failed_jobs",
-            "stale_dirty_scope_count",
             "missing_required_worker_count",
             "stale_required_worker_count",
             "mismatched_required_worker_count",
             "rabbitmq_queue_depth",
             "rabbitmq_unacked_messages",
             "rabbitmq_dlq_count",
-            "read_model_refresh_failure_rate",
         ):
             value = runtime.get(key)
-            if key in {"queue_backlog", "dirty_scopes"}:
+            if key == "queue_backlog":
                 status_blockers = _status_count_blockers(value)
                 if status_blockers:
                     blockers[key] = status_blockers
@@ -204,7 +201,7 @@ def _runtime_blockers(payload: Mapping[str, Any]) -> dict[str, Any]:
         blockers["production_runtime_guard_problems"] = production_guard.get("problems")
     workbench_relation = payload.get("workbench_relation_read_model")
     if isinstance(workbench_relation, dict) and workbench_relation.get("status") not in {None, "ready"}:
-        blockers["workbench_relation_read_model_status"] = workbench_relation.get("status")
+        blockers["workbench_relation_distribution_status"] = workbench_relation.get("status")
     storage = payload.get("storage")
     if isinstance(storage, dict):
         postgres_status = storage.get("postgres_status")

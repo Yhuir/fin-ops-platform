@@ -66,14 +66,7 @@ OPS_TAX_ETC_SOURCES = {
     "turnover_ledger_extras",
 }
 
-READ_MODEL_SOURCES = {
-    "workbench_read_models",
-    "workbench_candidate_matches",
-    "cost_statistics_read_models",
-    "tax_offset_read_models",
-}
-
-ALL_DOMAINS = ("core", "workbench", "ops_tax_etc", "read_models")
+ALL_DOMAINS = ("core", "workbench", "ops_tax_etc")
 
 TARGET_TABLE_ORDER = [
     ("audit", "events"),
@@ -118,11 +111,6 @@ TARGET_TABLE_ORDER = [
     ("app", "turnover_relations"),
     ("app", "turnover_relation_events"),
     ("app", "turnover_ledger_extras"),
-    ("read_model", "workbench_snapshots"),
-    ("read_model", "workbench_candidate_matches"),
-    ("read_model", "cost_statistics_read_models"),
-    ("read_model", "tax_offset_read_models"),
-    ("read_model", "search_index_rows"),
 ]
 
 TARGET_TABLES = tuple(TARGET_TABLE_ORDER)
@@ -256,8 +244,6 @@ def domain_for_source(source_collection: str) -> str | None:
         return "workbench"
     if source_collection in OPS_TAX_ETC_SOURCES:
         return "ops_tax_etc"
-    if source_collection in READ_MODEL_SOURCES:
-        return "read_models"
     if source_collection == "gridfs_files_manifest":
         return None
     return None
@@ -290,7 +276,6 @@ def build_transform_plan(
             continue
         rows.extend(build_rows_for_record(record, domain, warnings))
 
-    rows.extend(build_generated_read_model_rows(records, only_domains=only_domains, skip_domains=skip_domains, warnings=warnings))
     sanitize_optional_foreign_keys(rows, warnings)
     sanitize_optional_unique_values(rows, warnings)
     rows.sort(key=lambda row: (TABLE_ORDER_INDEX.get(row.table_key, 10_000), row.target_id))
@@ -661,14 +646,6 @@ def build_generic_rows(record: StagingRecord, domain: str, warnings: list[str]) 
         return [generic_event(domain, record, "app", "turnover_relation_events", "relation_id", text(first(p, "action", "event_type", default="audit")))]
     if sc == "turnover_ledger_extras":
         return [generic_row(domain, record, "app", "turnover_ledger_extras", {"ledger_key": one(p, record.legacy_mongo_id, "ledger_key", "relation_id", "bank_transaction_id", "id"), "scope_month": month_start(first(p, "scope_month", "month")), "extra_payload": JsonValue(first(p, "extra_payload", default=p)), "updated_by": text(first(p, "updated_by")), "updated_at": timestamp(first(p, "updated_at"))})]
-    if sc == "workbench_read_models":
-        return [generic_row(domain, record, "read_model", "workbench_snapshots", {"scope_key": one(p, record.legacy_mongo_id, "scope_key", "id"), "scope_month": month_start(first(p, "scope_month", "month")), "source_versions": JsonValue(first(p, "source_versions", default={})), "generated_at": timestamp(first(p, "generated_at", "updated_at")), "cache_status": text(first(p, "cache_status", default="fresh")), "row_count": integer(first(p, "row_count", default=0)), "payload": JsonValue(p)})]
-    if sc == "workbench_candidate_matches":
-        return [generic_row(domain, record, "read_model", "workbench_candidate_matches", {"candidate_key": one(p, record.legacy_mongo_id, "candidate_key", "id"), "scope_month": month_start(first(p, "scope_month", "month")), "status": text(first(p, "status", default="active")), "row_ids": TextArray(text_list(first(p, "row_ids", default=[]))), "confidence": decimal_value(first(p, "confidence")), "source_versions": JsonValue(first(p, "source_versions", default={})), "generated_at": timestamp(first(p, "generated_at", "updated_at")), "cache_status": text(first(p, "cache_status", default="fresh")), "payload": JsonValue(p)})]
-    if sc == "cost_statistics_read_models":
-        return [generic_row(domain, record, "read_model", "cost_statistics_read_models", {"scope_key": one(p, record.legacy_mongo_id, "scope_key", "id"), "project_scope": text(first(p, "project_scope", "project_id", default="all")), "scope_month": month_start(first(p, "scope_month", "month")), "generated_at": timestamp(first(p, "generated_at", "updated_at")), "entry_count": integer(first(p, "entry_count", default=0)), "source_counts": JsonValue(first(p, "source_counts", default={})), "source_versions": JsonValue(first(p, "source_versions", default={})), "payload": JsonValue(p)})]
-    if sc == "tax_offset_read_models":
-        return [generic_row(domain, record, "read_model", "tax_offset_read_models", {"scope_key": one(p, record.legacy_mongo_id, "scope_key", "id"), "scope_month": month_start(first(p, "scope_month", "month")), "generated_at": timestamp(first(p, "generated_at", "updated_at")), "entry_count": integer(first(p, "entry_count", default=0)), "source_counts": JsonValue(first(p, "source_counts", default={})), "source_versions": JsonValue(first(p, "source_versions", default={})), "payload": JsonValue(p)})]
     warnings.append(f"unhandled_transform_record:{sc}:{record.legacy_mongo_id}")
     return []
 
@@ -690,58 +667,6 @@ def build_etc_reconciliation_rows(record: StagingRecord, domain: str, p: dict[st
     if record.source_collection.endswith(":etc_reconciliation_tasks"):
         return child_rows(record, domain, "app", "etc_reconciliation_tasks", p, "tasks", lambda c, legacy: {"legacy_mongo_id": legacy, "task_id": one(c, legacy, "task_id", "id"), "status": text(first(c, "status", default="unknown")), "scope_month": month_start(first(c, "scope_month", "month")), "source_file_id": text(first(c, "source_file_id")), "result_summary": JsonValue(first(c, "result_summary", default={})), "version": integer(first(c, "version", default=1))})
     return child_rows(record, domain, "app", "etc_reconciliation_files", p, "files", lambda c, legacy: {"legacy_mongo_id": legacy, "task_id": text(first(c, "task_id")), "file_id": one(c, legacy, "file_id", "id", "stored_file_path"), "file_kind": text(first(c, "file_kind", "kind", default="unknown")), "status": text(first(c, "status", default="stored")), "file_path": text(first(c, "file_path", "stored_file_path")), "file_sha256": text(first(c, "file_sha256", "sha256"))})
-
-
-def build_generated_read_model_rows(
-    records: list[StagingRecord],
-    *,
-    only_domains: set[str] | None,
-    skip_domains: set[str] | None,
-    warnings: list[str],
-) -> list[TargetRow]:
-    if only_domains and "read_models" not in only_domains:
-        return []
-    if skip_domains and "read_models" in skip_domains:
-        return []
-    rows: list[TargetRow] = []
-    for record in records:
-        if record.source_collection not in {"invoices", "bank_transactions"}:
-            continue
-        p = record.normalized_payload or {}
-        source_kind = "invoice" if record.source_collection == "invoices" else "bank_transaction"
-        row_id = f"{source_kind}:{record.legacy_mongo_id}"
-        title = text(first(p, "invoice_no", "bank_serial_no", default=record.legacy_mongo_id))
-        counterparty = text(first(p, "counterparty_name", "counterparty_name_raw", "buyer_name", "seller_name"))
-        searchable = " ".join(item for item in [title, counterparty, text(first(p, "summary", "remark"))] if item) or row_id
-        target_id = stable_target_id(record.source_collection, record.legacy_mongo_id, "read_model", "search_index_rows")
-        rows.append(
-            TargetRow(
-                domain="read_models",
-                source_collection=record.source_collection,
-                legacy_mongo_id=record.legacy_mongo_id,
-                target_schema="read_model",
-                target_table="search_index_rows",
-                target_id=target_id,
-                columns={
-                    "row_id": row_id,
-                    "source_kind": source_kind,
-                    "scope_month": month_start(first(p, "invoice_month", "txn_month", "scope_month")),
-                    "status": text(first(p, "status")),
-                    "title": title,
-                    "subtitle": counterparty,
-                    "searchable_text": searchable,
-                    "project_name": text(first(p, "project_name")),
-                    "counterparty_name": counterparty,
-                    "amount": decimal_value(first(p, "amount")),
-                    "source_versions": JsonValue(first(p, "source_versions", default={})),
-                    "generated_at": now_iso(),
-                    "payload": JsonValue(p),
-                    "raw_payload": JsonValue(full_raw(record)),
-                },
-                raw_payload=full_raw(record),
-            )
-        )
-    return rows
 
 
 def row(domain: str, record: StagingRecord, target_schema: str, target_table: str, columns: dict[str, Any]) -> TargetRow:

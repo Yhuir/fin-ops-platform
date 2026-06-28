@@ -10,9 +10,18 @@
 - 销项收款状态由 `InvoiceLifecyclePolicy` 统一判定，页面和 query service 不各自维护业务状态口径。
 - 手动状态、提醒、红蓝票关系和正式收据写入必须经过 lifecycle/receipt service；service 只接收 route 传入的 actor/tenant/权限结果，不读取 HTTP header/cookie。
 - PostgreSQL 写路径必须使用 transaction-bound queue writer 或等价 gateway，把事实写入和 `output_invoice_collection` dirty/outbox 收敛在同一边界。
-- 手动状态、提醒、红蓝票关系和正式收据写入成功后，API 必须返回 `read_model_scope_keys` 与 `freshness_targets`；页面必须优先等待返回的具体月份 `output_invoice_collection:<YYYY-MM>` operation barrier fresh，再刷新 rows。只有无法定位具体月份时才 fallback 到当前可见 scope 或 fan-out-only `all`；barrier blocked/timeout 时不得提前读取旧投影。
+- 手动状态、提醒、红蓝票关系和正式收据写入成功后，后端 API 可继续返回 legacy target envelope 作为诊断；当前前端 mapper 不暴露 target arrays，页面写成功后直接重新请求 rows，不再请求 operation barrier。
 - 正式收据 history 只返回真实 lifecycle facts；不得为了 UI 方便伪造历史。
 - OA、收入流水和销项发票项统一走 `workbench_relation` 分发事实源；多项时 UI 使用 `+N`，其中 `N=relationCount-1` 表示额外项数。销项发票栏多项时仍展示当前行发票主信息和多张发票价税合计，再显示 `+N` 展开全部发票 summaries。
+
+## 2026-06-26 - 写后直接刷新 rows，移除前端 operation barrier 等待
+
+- 目标：执行移除 read model 架构主控闭环中的销项收款页面 slice，切断 `OutputInvoiceCollectionsPage` 对 operation barrier polling 的硬依赖。
+- 影响范围：`OutputInvoiceCollectionsPage`、`OutputInvoiceCollectionsPage.test.tsx` 和本模块 E2E/测试/边界文档；后端 lifecycle/receipt API response shape 暂不改变。
+- 关键决策：`handleLifecycleChanged` 不再解析或接收 target arrays，写成功后直接调用 `loadRows("refresh")`；红蓝票关系确认和正式收据创建的 Vitest 回归锁定不请求 `/api/operation-barrier/status`。
+- 测试覆盖：更新 `web/src/test/OutputInvoiceCollectionsPage.test.tsx`，覆盖红蓝票确认和 receipt 创建成功后直接 rows reload，且 operation barrier 请求数为 0。
+- 验证命令：本轮执行 `cd web && npm test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx`、`bash scripts/verify.sh docs`、`git diff --check`。
+- 未测风险：本 slice 不连接真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；后端 read model refresh 字段和 read model service 仍在，需后续 GSD slice 继续删除。
 
 ## 2026-06-23 - 统一关系 OA/流水/发票项 +N 展示
 
@@ -30,7 +39,7 @@
 - 影响范围：`OutputInvoiceCollectionsPage`、状态/提醒 drawer、收据 preview/history drawer、operation barrier label、`OutputInvoiceCollectionsPage.test.tsx` 和本模块测试矩阵；后端 API contract 不变。
 - 关键决策：页面统一在 `handleLifecycleChanged` 中等待 `output_invoice_collection:{当前月份或 all}` operation barrier；相关 drawer 的 `onChanged` 支持异步等待。barrier 未 fresh 时不立即刷新 rows，避免旧投影覆盖用户刚完成的写入。
 - 测试覆盖：新增 Vitest 回归，锁定红蓝票确认 POST 成功后先请求 `output_invoice_collection:all` barrier，barrier resolve 前 rows 请求数不增加。
-- 验证命令：`cd web && npm test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx src/test/OperationBarrierApi.test.ts`。
+- 验证命令：`cd web && npm test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx`。
 
 ## 记录模板
 

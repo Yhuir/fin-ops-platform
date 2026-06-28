@@ -14,11 +14,11 @@ FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
 
 运行口径：
 
-- app 业务事实、设置、任务状态、read model 主读写使用 PostgreSQL。
+- app 业务事实、设置、任务状态、真实后台任务和 direct API 读路径使用 PostgreSQL。
 - OA MongoDB 继续作为外部只读源，不写入、不建索引、不修复源集合。
 - app Mongo 旧路径只作为迁移观察期回滚、shadow-read 和审计参考，不作为当前开发入口。
-- PostgreSQL schema 使用 `app`、`read_model`、`job`、`audit` 等 schema。
-- Read model refresh 事实源为 `job.outbox_events` 与 `job.read_model_dirty_scopes`。
+- PostgreSQL schema 当前使用 `app`、`job`、`audit` 等运行 schema；`read_model` schema 仅保留为 legacy migration/diagnostic/delete inventory，不作为页面读取事实源。
+- 页面 read model refresh 已下线；`job.outbox_events` 只作为真实后台任务事实源。
 
 ## 账号和权限
 
@@ -28,23 +28,20 @@ FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
 | --- | --- |
 | migrator | schema migration 和 DDL。 |
 | API/runtime | HTTP API 主读写。 |
-| worker | worker、read model refresh、job queue。 |
+| worker | worker 和 job queue。 |
 | readonly | 备份、审计、只读排障。 |
 
 密码和 `DATABASE_URL` 只能放在服务器 root-only env file 或密钥系统，不写入 git。
 
-## Queue 和 Read Model
+## Queue 和后台任务
 
-- 所有 refresh 请求必须通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或事务内 writer。
-- 业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。
-- Worker 从 durable queue claim event，重建 SQL projection 后 complete dirty scope。
-- Redis 只缓存 freshness gate 后的 payload。
-- RabbitMQ 只能作为可选 transport/wakeup，不能替代 PostgreSQL dirty scope 状态。
-- Workbench read model generation 有保留策略：发布新 active generation 后自动 bounded prune 旧的
-  非 active generation；生产同时使用 `finops-prune-workbench-generations.timer` 兜底，避免
-  `read_model.workbench_*` 历史 generation 长期堆积。
+- 当前 page read-model refresh registry 为空；未登记 `.read_model.refresh` 请求在 `RuntimeQueueRepository` 边界 no-op，仅作为兼容防线，不再写 dirty scope/outbox。
+- 业务 service 不直接 SQL 写 `job.outbox_events`；`job.read_model_dirty_scopes` 是 legacy migration/delete inventory，不得作为新的页面同步机制恢复。
+- Worker 只处理 registry 中仍登记的真实 runtime events；页面数据同步不依赖 read-model worker drain。
+- Redis 只能作为可删除短 TTL response cache，不能证明页面 direct payload 可读。
+- RabbitMQ 只能作为可选 transport/wakeup，不能替代 PostgreSQL job/background facts。
 
-Workbench read model 表空间排障边界：
+Workbench legacy 表空间排障边界：
 
 ```sql
 select status, count(*)
@@ -64,8 +61,7 @@ order by pg_total_relation_size(c.oid) desc;
 
 普通 `delete`/`vacuum` 只能让 PostgreSQL 复用空间，不保证把空间还给文件系统。只有
 `TRUNCATE`、`VACUUM FULL`、`pg_repack` 或表重建会降低 `df` 看到的占用；其中 `VACUUM FULL` 和
-`pg_repack` 需要额外重写空间。Workbench read model 属于可重建投影，执行清空/重建必须进入维护
-窗口、停止 API/worker、使用精确白名单表名且不使用 `CASCADE`，并通过 rehydrate 验证 fresh。
+`pg_repack` 需要额外重写空间。Workbench legacy 表属于迁移/审计对象，不是页面读取事实源；执行清空/重建必须进入维护窗口、停止 API/worker、使用精确白名单表名且不使用 `CASCADE`，并通过 direct API smoke 验证业务页面可读。
 
 ## 部署和回滚
 
@@ -97,7 +93,7 @@ App Mongo 旧数据可以在迁移观察期继续保留，用于回滚参考、s
 
 移除或停用 App Mongo 前必须完成：
 
-- 确认生产 API、worker、read model refresh、维护脚本和导出工具均使用 PostgreSQL primary。
+- 确认生产 API、worker、维护脚本和导出工具均使用 PostgreSQL primary。
 - 导出并归档 app Mongo 旧集合或 snapshot，记录归档位置、时间和负责人。
 - 先禁用 `FIN_OPS_APP_MONGO_*` 与 `.runtime/fin_ops_platform/app_mongo_config.json`，观察 `runtime-check`、`/health`、worker、关键页面和导出。
 - 禁止用 app Mongo 旧 snapshot 回写 PostgreSQL；差异只能通过审计 repair、补偿脚本或 outbox 重投递修复。
@@ -109,7 +105,7 @@ App Mongo 旧数据可以在迁移观察期继续保留，用于回滚参考、s
 
 - 定期 `pg_dump` 逻辑备份，用于表级恢复和迁移验证。
 - 生产建议接入 WAL 归档和 PITR。
-- staging 定期恢复演练，验证 schema、关键表数量、read model rebuild 和 worker drain。
+- staging 定期恢复演练，验证 schema、关键表数量、direct API smoke 和真实 worker/job 状态。
 - 备份状态纳入监控。
 
 更多备份规则见 `backup-and-recovery.md`。
@@ -128,7 +124,7 @@ bash scripts/verify.sh backend
 bash scripts/verify.sh runtime-check
 ```
 
-运行时 SQL/read-model 收敛报告：
+运行时 SQL/direct API/后台任务收敛报告：
 
 ```bash
 PYTHONPATH=backend/src \
@@ -165,8 +161,8 @@ optional worker，再加 `--include-optional-workers`，并先补齐对应 depen
 
 2026-06-13 生产 Stage 9 已把 required RabbitMQ eligible worker 切到 real consumers。验收时
 `/health/ready` 中 `rabbitmq_consumer_count=15`、`rabbitmq_queue_depth=0`、`rabbitmq_dlq_count=0`、
-`rabbitmq_metric_error=null`，PostgreSQL dirty/outbox/readiness 同时保持收敛。回滚时只需要恢复
+`rabbitmq_metric_error=null`，PostgreSQL outbox/background job facts 同时保持收敛。回滚时只需要恢复
 per-worker env 到 `FIN_OPS_QUEUE_BACKEND=postgres` 并重启 worker；不要把 RabbitMQ 队列作为
-read model 状态事实源。
+页面状态事实源。
 
 一次性报告不要写入长期文档树。需要长期保留的结论应提炼到本文或对应运维文档。

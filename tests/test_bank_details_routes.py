@@ -23,11 +23,9 @@ class FakeBankDetailsApplicationService:
         self.confirm_category_error: BankTransactionCategoryValidationError | None = None
         self.accounts_result: dict[str, object] = {
             "accounts": [],
-            "read_model_status": "fresh",
         }
         self.transactions_result: dict[str, object] = {
             "rows": [],
-            "read_model_status": "fresh",
         }
 
     def accounts_payload(self, *, date_from: str | None, date_to: str | None) -> dict[str, object]:
@@ -52,7 +50,7 @@ class FakeBankDetailsApplicationService:
 
     def reapply_auto_tag_rules(self, *, actor_id: str, can_save: bool) -> dict[str, object]:
         self.calls.append(("reapply_auto_tag_rules", {"actor_id": actor_id, "can_save": can_save}))
-        return {"version": 4, "read_model_status": "refreshing"}
+        return {"version": 4}
 
     def confirm_category(self, transaction_id: str, payload: dict[str, object], *, actor_id: str) -> dict[str, object]:
         self.calls.append(("confirm_category", {"transaction_id": transaction_id, "payload": payload, "actor_id": actor_id}))
@@ -85,12 +83,10 @@ class BankDetailsRoutesTests(unittest.TestCase):
             can_mutate_data=can_mutate_data,
         )
 
-    def test_routes_facade_delegates_reads_and_preserves_stale_rows_as_200(self) -> None:
+    def test_routes_facade_delegates_reads_without_read_model_gate(self) -> None:
         service = FakeBankDetailsApplicationService()
         service.accounts_result = {
             "accounts": [{"account_key": "icbc:0001"}],
-            "read_model_status": "refreshing",
-            "read_model_scope_keys": ["2026-05"],
         }
         routes = BankDetailsApiRoutes(application_service=service)
 
@@ -163,12 +159,10 @@ class BankDetailsRoutesTests(unittest.TestCase):
             ],
         )
 
-    def test_routes_facade_returns_202_only_when_refreshing_payload_has_no_rows(self) -> None:
+    def test_routes_facade_keeps_direct_payload_status_ok_without_read_model_gate(self) -> None:
         service = FakeBankDetailsApplicationService()
         service.transactions_result = {
             "rows": [],
-            "read_model_status": "refreshing",
-            "read_model_scope_keys": ["2026-05"],
         }
         routes = BankDetailsApiRoutes(application_service=service)
 
@@ -185,8 +179,8 @@ class BankDetailsRoutesTests(unittest.TestCase):
             page_size="50",
         )
 
-        self.assertEqual(status, HTTPStatus.ACCEPTED)
-        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload["rows"], [])
         self.assertEqual(service.calls[0][0], "transactions")
         self.assertEqual(service.calls[0][1]["page"], 2)
         self.assertEqual(service.calls[0][1]["page_size"], 50)

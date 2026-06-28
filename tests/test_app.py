@@ -68,15 +68,6 @@ class AppTests(unittest.TestCase):
     def test_health_endpoint_does_not_run_workbench_api_self_test(self) -> None:
         app = build_application()
 
-        class FailingWorkbenchRepository:
-            def get_workbench_summary(self, *, scope_key: str):
-                raise AssertionError("/health must stay a lightweight liveness endpoint")
-
-            def get_workbench_groups_page(self, **kwargs):
-                raise AssertionError("/health must stay a lightweight liveness endpoint")
-
-        app._workbench_sql_read_repository = FailingWorkbenchRepository()
-
         response = app.handle_request("GET", "/health")
         payload = json.loads(response.body)
 
@@ -86,15 +77,6 @@ class AppTests(unittest.TestCase):
 
     def test_ready_endpoint_reports_readiness_without_workbench_api_self_test(self) -> None:
         app = build_application()
-
-        class FailingWorkbenchRepository:
-            def get_workbench_summary(self, *, scope_key: str):
-                raise AssertionError("/health/ready must not run deep workbench self-test")
-
-            def get_workbench_groups_page(self, **kwargs):
-                raise AssertionError("/health/ready must not run deep workbench self-test")
-
-        app._workbench_sql_read_repository = FailingWorkbenchRepository()
 
         response = app.handle_request("GET", "/health/ready")
         payload = json.loads(response.body)
@@ -154,15 +136,6 @@ class AppTests(unittest.TestCase):
     def test_metrics_endpoint_exports_prometheus_text_without_workbench_api_self_test(self) -> None:
         app = build_application()
 
-        class FailingWorkbenchRepository:
-            def get_workbench_summary(self, *, scope_key: str):
-                raise AssertionError("/metrics must not run deep workbench self-test")
-
-            def get_workbench_groups_page(self, **kwargs):
-                raise AssertionError("/metrics must not run deep workbench self-test")
-
-        app._workbench_sql_read_repository = FailingWorkbenchRepository()
-
         response = app.handle_request("GET", "/metrics", headers={"Authorization": "Bearer metric-token"})
         body = response.body.decode("utf-8") if isinstance(response.body, bytes) else str(response.body)
 
@@ -205,49 +178,21 @@ class AppTests(unittest.TestCase):
         self.assertIn("package_import_path_mismatch", runtime_release["problems"])
         self.assertIn("release_metadata_missing_or_invalid", runtime_release["problems"])
 
-    def test_deep_health_endpoint_reports_workbench_api_self_test_counts(self) -> None:
+    def test_deep_health_endpoint_does_not_run_workbench_api_self_test(self) -> None:
         app = build_application()
-
-        class WorkbenchRepository:
-            def get_workbench_summary(self, *, scope_key: str):
-                self.summary_scope_key = scope_key
-                return {
-                    "read_model_status": "fresh",
-                    "summary": {"paired_count": 2, "open_count": 3},
-                }
-
-            def get_workbench_groups_page(self, **kwargs):
-                self.last_page_size = kwargs["page_size"]
-                zone = kwargs["zone"]
-                return {
-                    "read_model_status": "fresh",
-                    "zone": zone,
-                    "total": 10 if zone == "paired" else 20,
-                    "groups": [{"id": f"{zone}-1"}],
-                }
-
-        repository = WorkbenchRepository()
-        app._workbench_sql_read_repository = repository
 
         response = app.handle_request("GET", "/health/deep")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(repository.last_page_size, 200)
-        self.assertEqual(
-            payload["workbench_api_self_test"],
-            {
-                "scope_key": "all",
-                "status": "ok",
-                "summary_status": "fresh",
-                "summary_counts": {"paired_count": 2, "open_count": 3},
-                "groups": {
-                    "paired": {"status": "fresh", "total": 10, "returned_count": 1},
-                    "open": {"status": "fresh", "total": 20, "returned_count": 1},
-                },
-                "errors": [],
-            },
-        )
+        self.assertNotIn("workbench_api_self_test", payload)
+
+    def test_server_no_longer_defines_workbench_read_model_status_metric(self) -> None:
+        source = Path("backend/src/fin_ops_platform/app/server.py").read_text()
+
+        self.assertNotIn("_emit_workbench_read_model_status_metric", source)
+        self.assertNotIn("workbench_read_model_status_metric", source)
+        self.assertNotIn("workbench.read_model.status.count", source)
 
 
 if __name__ == "__main__":

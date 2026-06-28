@@ -5,7 +5,6 @@ import type {
   ApiOaSyncStatus,
   AppHealthBackgroundJobsSource,
   AppHealthOaSyncSource,
-  AppHealthWorkbenchSource,
   OperationsDashboardPayload,
 } from "./types";
 
@@ -59,23 +58,6 @@ export function mapAppHealthBackgroundJobsSource(payload: ApiAppHealthPayload | 
     return "attention";
   }
   return "idle";
-}
-
-export function mapAppHealthWorkbenchSource(payload: ApiAppHealthPayload | null | undefined): AppHealthWorkbenchSource {
-  const status = String(payload?.workbench_read_model?.status ?? "").trim();
-  if (status === "error") {
-    return "error";
-  }
-  if (status === "rebuilding") {
-    return "stale";
-  }
-  if (status === "stale") {
-    return "stale";
-  }
-  if (status === "ready") {
-    return "ready";
-  }
-  return "unknown";
 }
 
 export async function fetchOaSyncStatus(signal?: AbortSignal): Promise<ApiOaSyncStatus> {

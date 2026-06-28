@@ -9,6 +9,7 @@
 - 新页面路径使用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/{session_id}`；legacy `/imports/preview`、`/imports/confirm` 仍作为旧 API/程序化导入回归入口。
 - preview 是可失效的临时判断；confirm 前必须通过后端 `assert_session_preview_current` 防 stale。
 - confirm 是异步导入动作；返回 `job` / `import_job` 只能说明已开始处理，不能说明银行明细、关联台、成本统计等下游已 fresh。
+- 共享导入页确认成功后直接请求 Workbench 当前月，不再消费 `operation_barrier_targets` 或等待 `/api/operation-barrier/status`。
 - 银行导入的跨页一致性以后端 lifecycle、dirty scope、read model worker 和 App Status 为准，前端只展示 job feedback 和刷新提示。
 
 ## 记录模板

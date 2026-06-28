@@ -3,19 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.pending_invoice_relation_identity import is_valid_pending_invoice_oa_row_id
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-
-
-PENDING_INVOICE_BASE_SCOPE_KEYS = (
-    "expense:all",
-    "expense:requires_invoice",
-    "expense:bank_statement_as_invoice",
-    "expense:no_invoice_required",
-    "income:all",
-    "income:requires_invoice",
-    "income:no_invoice_required",
-    "income:cash_income",
-)
 
 
 class PendingInvoiceOaIdentityBackfillService:
@@ -34,16 +21,6 @@ class PendingInvoiceOaIdentityBackfillService:
             "affected_scope_keys": self._affected_scope_keys(invalid_read_model_rows),
             "manual_repair_required": bool(invalid_relation_rows or missing_oa_relation_rows),
         }
-
-    def enqueue_affected_scopes(self, *, reason: str = "pending_invoice_oa_identity_backfill") -> list[str]:
-        report = self.inspect()
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not refresh_gateway.can_enqueue():
-            return []
-        scope_keys = list(report.get("affected_scope_keys") or [])
-        if report.get("manual_repair_required"):
-            scope_keys = list(dict.fromkeys([*scope_keys, *PENDING_INVOICE_BASE_SCOPE_KEYS]))
-        return refresh_gateway.enqueue_many("pending_invoice", scope_keys, reason=reason)
 
     def _invalid_read_model_rows(self) -> list[dict[str, Any]]:
         rows = self._repository.invalid_read_model_rows()

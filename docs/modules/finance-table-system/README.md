@@ -22,8 +22,8 @@
 
 ## 当前边界
 
-- 共享 `FinanceTable` 只提供 presentation primitives，不拥有业务查询、read model freshness、导出 API、权限或业务状态。
-- 页面级表格仍由各页面维护自己的筛选、排序、分页、search、drawer/dialog、导出和 loading/error/stale 状态；共享表格不强行抽象这些业务差异。
+- 共享 `FinanceTable` 只提供 presentation primitives，不拥有业务查询、direct API 可用性、导出 API、权限或业务状态。
+- 页面级表格仍由各页面维护自己的筛选、排序、分页、search、drawer/dialog、导出和 loading/error/unavailable 状态；共享表格不强行抽象这些业务差异。
 - 表格 session 只保存轻量 UI 状态，不保存 read model payload、rows、业务事实、权限事实、loading/error/toast 或失败中的提交。
 - `useFinanceTableSession` 当前主要由专项测试覆盖；并非所有页面都已统一接入该 hook。已经接入或自行实现 session 的页面必须在页面模块测试中保护恢复语义。
 - 列对齐由 `columnRole` 决定：金额/数量右对齐，日期/状态/方向/选择居中，主体/账户/说明左对齐。禁止全局把所有 cell 居中。
@@ -52,9 +52,9 @@
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
 - 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
+- API contract、DTO shape、错误字段、权限校验、状态值或 legacy freshness 字段删除变化。
+- 业务状态、UI 状态、页面 data 状态或后台任务状态变化。
+- 跨页面刷新、domain event、derived lifecycle、outbox、真实后台任务或缓存边界变化。
 - 测试入口、回归范围、验证命令或未测风险变化。
 
 ## 本目录文件

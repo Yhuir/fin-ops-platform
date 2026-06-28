@@ -6,7 +6,7 @@
 
 - 状态：partial
 - 当前边界可信度：high
-- 目标边界：领域事件和 derived lifecycle 负责把业务写操作转成明确 downstream dirty scopes/jobs，不直接承载页面业务逻辑。
+- 目标边界：领域事件和 derived lifecycle 负责把业务写操作转成明确 downstream affected scopes / real jobs，不直接承载页面业务逻辑。
 - 当前缺口：include_all/reset 类事件影响面大，新增事件必须有 scope contract 和测试。
 - 旧代码删除条件：旧手写 fan-out 逻辑被 lifecycle/gateway 取代且测试覆盖。
 
@@ -14,13 +14,13 @@
 
 ### 负责
 
-- 领域事件类型、derived lifecycle 执行、跨 read model/worker dirty fan-out。
+- 领域事件类型、derived lifecycle 执行、跨派生数据/worker affected-scope fan-out。
 - 前端 domain event hook/API 的轻量提示和刷新协调。
 
 ### 不负责
 
 - 不拥有源业务状态。
-- 不直接写页面 read model payload。
+- 不直接写页面 payload 或投影结果。
 - 不替代各模块 service 的业务校验。
 
 ## 输入 I/O
@@ -35,14 +35,14 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| Dirty scope/outbox | runtime queue | 经 gateway 或等价事务合同 |
+| Affected scope/outbox | runtime queue | 经业务 executor 或等价事务合同 |
 | Derived job | runtime worker/background job | 可观察、可失败恢复 |
 | Frontend refresh signal | pages | 不伪装 fresh |
 
 ## 持久化与投影
 
-- Own read model：无。
-- 影响 read model：可能影响全部 manifest read models。
+- Own page read model：无。
+- 影响派生数据：可能影响多数页面 direct payload、cache warmup 或真实后台任务。
 - Service owner：`DerivedDataLifecycleService`。
 
 ## 文件范围
@@ -52,7 +52,7 @@
 | Frontend | `web/src/features/domainEvents.ts`、`web/src/hooks/useActiveFinanceDomainEvent.ts` |
 | Backend service | `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py` |
 | Executors | `*_derived_lifecycle_executor.py` files |
-| Runtime | `runtime_queue.py`、`read_model_refresh_gateway.py`、`runtime_worker_registry.py` |
+| Runtime | `runtime_queue.py`、`runtime_worker_registry.py` |
 | Tests | `tests/test_derived_data_lifecycle_service.py`、`tests/test_*_derived_lifecycle_executor.py`、`web/src/test/domainEvents.test.ts` |
 
 ## 依赖方向
@@ -69,4 +69,4 @@
 
 ## 当前缺口和删除条件
 
-- 新增 lifecycle event 必须列出影响 read models 和 scope fan-out。
+- 新增 lifecycle event 必须列出影响 direct payload domains、affected scopes 和 real job fan-out。

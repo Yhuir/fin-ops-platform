@@ -19,9 +19,6 @@ type MockFetchHandler = (request: {
 type MockApiOptions = {
   workbenchErrorMonths?: string[];
   workbenchEmptyPayload?: boolean;
-  workbenchReadModelStatus?: "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
-  workbenchRefreshStatus?: Record<string, unknown>;
-  workbenchRefreshStatusSequence?: Array<Record<string, unknown>>;
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
   costExplorerFailuresBeforeSuccess?: number;
@@ -38,8 +35,6 @@ type MockApiOptions = {
   workbenchPrimaryDelayMs?: number;
   workbenchIgnoredDelayMs?: number;
   workbenchSettingsDelayMs?: number;
-  operationBarrierDelay?: Promise<void>;
-  operationBarrierStatus?: Record<string, unknown>;
   importPreviewDelayMs?: number;
   etcImportPreviewDelayMs?: number;
   importConfirmPreviewStale?: boolean;
@@ -87,12 +82,7 @@ type MockApiOptions = {
   includeOaAttachmentPaymentReceipt?: boolean;
   initialImportPreviewFileNames?: string[];
   initialImportPreviewOverrides?: Array<Record<string, string | null | undefined>>;
-  bankDetailAccountReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
-  bankDetailTransactionReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
-  bankDetailInitialAccountReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
-  bankDetailInitialTransactionReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
   bankDetailPostSaveAccountsTotalBalance?: string;
-  bankDetailRefreshingTransactionsEmpty?: boolean;
 };
 
 const templateRegistry = [
@@ -4474,7 +4464,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailPostSaveAccountRequestCount = 0;
   let bankDetailPostSaveTransactionRequestCount = 0;
   let workbenchWriteActionCount = 0;
-  let workbenchRefreshStatusIndex = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
@@ -4645,20 +4634,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         templates: templateRegistry,
       },
     }),
-    "/api/operation-barrier/status": async () => {
-      if (options.operationBarrierDelay) {
-        await options.operationBarrierDelay;
-      }
-      return {
-        body: options.operationBarrierStatus ?? {
-          status: "fresh",
-          fresh: true,
-          targets: [],
-          blocked_targets: [],
-          refreshing_targets: [],
-        },
-      };
-    },
     "/api/workbench": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       if (options.workbenchErrorMonths?.includes(month)) {
@@ -4678,7 +4653,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             summary: payload.summary,
             oa_status: payload.oa_status,
             invoice_inventory: payload.invoice_inventory,
-            read_model_status: options.workbenchReadModelStatus ?? "fresh",
             generated_at: "2026-05-22T09:30:00+08:00",
           },
       };
@@ -4713,28 +4687,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           row_counts: rowCounts,
           has_more: offset + pageSize < groups.length,
           groups: groups.slice(offset, offset + pageSize),
-          read_model_status: options.workbenchReadModelStatus ?? "fresh",
         },
-      };
-    },
-    "/api/workbench/refresh-status": ({ url }) => {
-      const month = url.searchParams.get("month") ?? "all";
-      const statusSequence = options.workbenchRefreshStatusSequence ?? [];
-      if (statusSequence.length > 0) {
-        const status = statusSequence[Math.min(workbenchRefreshStatusIndex, statusSequence.length - 1)];
-        workbenchRefreshStatusIndex += 1;
-        return { body: cloneJson(status) };
-      }
-      return {
-        body: options.workbenchRefreshStatus
-          ? cloneJson(options.workbenchRefreshStatus)
-          : {
-              scope_key: month,
-              read_model_status: "fresh",
-              generated_at: "2026-05-22T09:30:00+08:00",
-              dirty_scopes: [],
-              retryable: false,
-            },
       };
     },
     "/api/oa-sync/status": () => {
@@ -4776,12 +4729,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             status: "synced",
             message: "OA 已同步",
             dirty_scopes: [],
-          },
-          workbench_read_model: {
-            status: "ready",
-            dirty_scopes: [],
-            stale_scopes: [],
-            rebuilding_scopes: [],
           },
           background_jobs: {
             active: backgroundJobs.length,
@@ -4891,15 +4838,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 unacked: 1,
                 consumers: 1,
                 dlq_messages: 0,
-                status: "available",
-              },
-            ],
-            read_models: [
-              {
-                key: "workbench",
-                refresh_duration_ms: { p50: 110, p95: 450, p99: 700 },
-                stale_count: 1,
-                unavailable_count: 0,
                 status: "available",
               },
             ],
@@ -5096,10 +5034,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         body: {
           action: String(jsonBody.action ?? ""),
           status: "completed",
-          cleared_collections: ["workbench_read_models"],
-          deleted_counts: {
-            workbench_read_models: 1,
-          },
+          cleared_collections: [],
+          deleted_counts: {},
           protected_targets: ["form_data_db.form_data"],
           rebuild_status: jsonBody.action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
           message: "已完成数据重置。",
@@ -5135,8 +5071,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return { status: 500, body: { message: "tax failed" } };
       }
       const payload = taxOffsetStateStore.get(month) as Record<string, unknown>;
-      payload.read_model_status = payload.read_model_status ?? "fresh";
-      payload.read_model_scope_key = payload.read_model_scope_key ?? month;
       payload.source_versions = payload.source_versions ?? {
         tax_offset_read_model_schema_version: "mock-tax-offset-v1",
         invoice_fact_source_version: `mock-invoice-facts:${month}`,
@@ -5245,8 +5179,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             time_rows: [],
             project_rows: [],
             expense_type_rows: [],
-            read_model_status: "refreshing",
-            read_model_scope_key: `${projectScope}:${month}`,
           },
         };
       }
@@ -5349,7 +5281,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             selected_output_ids: selectedOutputIds,
             selected_input_ids: selectedInputIds,
             summary: calculateTaxPayload(month, selectedOutputIds, selectedInputIds, taxOffsetStateStore.get(month)).summary,
-            read_model_scope_key: String(jsonBody?.expected_read_model_scope_key ?? month),
             source_versions: jsonBody?.expected_source_versions ?? {},
             updated_at: "2026-06-01T10:00:00+08:00",
           },
@@ -5478,11 +5409,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
       const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
-      const readModelStatus = bankDetailAutoTagRulesSaved && options.bankDetailAccountReadModelStatuses?.length
-        ? options.bankDetailAccountReadModelStatuses[
-          Math.min(bankDetailPostSaveAccountRequestCount++, options.bankDetailAccountReadModelStatuses.length - 1)
-        ]
-        : options.bankDetailInitialAccountReadModelStatus ?? "fresh";
       const totalBalance = bankDetailAutoTagRulesSaved && options.bankDetailPostSaveAccountsTotalBalance
         ? options.bankDetailPostSaveAccountsTotalBalance
         : "130500.50";
@@ -5513,7 +5439,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               transaction_count: 0,
             },
           ],
-          read_model_status: readModelStatus,
         },
       };
     },
@@ -5600,9 +5525,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             { value: "repaid", label: "已还款" },
           ],
           permissions: { can_save: true },
-          read_model_status: "refreshing",
-          read_model_scope_keys: ["2026-01"],
-          enqueued_jobs: ["bank_detail.read_model.refresh"],
         },
       };
     },
@@ -5777,11 +5699,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
     },
     "/api/bank-details/transactions": ({ url }) => {
-      const readModelStatus = bankDetailAutoTagRulesSaved && options.bankDetailTransactionReadModelStatuses?.length
-        ? options.bankDetailTransactionReadModelStatuses[
-          Math.min(bankDetailPostSaveTransactionRequestCount++, options.bankDetailTransactionReadModelStatuses.length - 1)
-        ]
-        : options.bankDetailInitialTransactionReadModelStatus ?? "fresh";
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
@@ -6097,37 +6014,36 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const rows = !accountKey || accountKey === "icbc:6386"
         ? (matchedRows ?? (hasCategoryFilter ? defaultFilterDataset : [visibleRow])).filter(categoryMatches)
         : [];
-      const responseRows = readModelStatus === "refreshing" && options.bankDetailRefreshingTransactionsEmpty ? [] : rows;
       const baseCategoryCounts = {
         borrow_in_company_pending_repayment: 2,
         business_warranty_pending_collection: 1,
         borrow_out_personal_pending_collection: 0,
-        salary: responseRows.length && (!accountKey || accountKey === "icbc:6386") ? 1 : 0,
+        salary: rows.length && (!accountKey || accountKey === "icbc:6386") ? 1 : 0,
         fee: 0,
-        internal_transfer: responseRows.length && (!accountKey || accountKey === "icbc:6386") ? 2 : 0,
+        internal_transfer: rows.length && (!accountKey || accountKey === "icbc:6386") ? 2 : 0,
         holiday_bonus: 0,
         bonus: 0,
-        uncategorized: responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : responseRows.length,
+        uncategorized: rows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : rows.length,
       };
       const visibleCategoryCounts = {
         borrow_in_company_pending_repayment: 0,
         business_warranty_pending_collection: 0,
         borrow_out_personal_pending_collection: 0,
-        salary: responseRows.filter((row) => row.effective_category_code === "salary").length,
-        fee: responseRows.filter((row) => row.effective_category_code === "fee").length,
-        internal_transfer: responseRows.filter((row) => row.effective_category_code === "internal_transfer").length,
+        salary: rows.filter((row) => row.effective_category_code === "salary").length,
+        fee: rows.filter((row) => row.effective_category_code === "fee").length,
+        internal_transfer: rows.filter((row) => row.effective_category_code === "internal_transfer").length,
         holiday_bonus: 0,
         bonus: 0,
         uncategorized: categoryCode === "uncategorized" && (!accountKey || accountKey === "icbc:6386") && isCurrentYear
           ? 295
-          : responseRows.filter((row) => !row.effective_category_code).length,
+          : rows.filter((row) => !row.effective_category_code).length,
       };
       return {
         body: {
           account_key: accountKey,
           date_from: dateFrom,
           date_to: dateTo,
-          rows: responseRows,
+          rows,
           category_counts: keyword || hasCategoryFilter ? visibleCategoryCounts : baseCategoryCounts,
           pagination: {
             page,
@@ -6135,8 +6051,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             total: categoryCode === "uncategorized" && (!accountKey || accountKey === "icbc:6386") && isCurrentYear
               ? 295
               : keyword || hasCategoryFilter
-              ? responseRows.length
-              : responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : responseRows.length,
+              ? rows.length
+              : rows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : rows.length,
           },
           bank_transaction_tags: {
             version: 1,
@@ -6150,7 +6066,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               status: "active",
             })),
           },
-          read_model_status: readModelStatus,
         },
       };
     },
@@ -6665,9 +6580,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
         affected_months: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        freshness_targets: Array.from(touchedMonths).map((scopeKey) => (
-          { read_model_key: "workbench_relation", scope_key: scopeKey }
-        )),
         operation_projection: operationProjection,
         message: `已确认 ${rowIds.length} 条记录关联。`,
       };
@@ -6721,9 +6633,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         restored_relations: [],
         changed_scopes: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        freshness_targets: Array.from(touchedMonths).map((scopeKey) => (
-          { read_model_key: "workbench_relation", scope_key: scopeKey }
-        )),
         operation_projection: operationProjection,
         message: "已撤回 1 组关联。",
       };
@@ -7523,10 +7432,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         result: {
           action,
           status: "completed",
-          cleared_collections: ["workbench_read_models"],
-          deleted_counts: {
-            workbench_read_models: 1,
-          },
+          cleared_collections: [],
+          deleted_counts: {},
           protected_targets: ["form_data_db.form_data"],
           rebuild_status: action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
           message: "已完成数据重置。",

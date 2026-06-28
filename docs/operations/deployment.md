@@ -5,9 +5,9 @@
 本地开发可以使用轻量依赖，但生产部署必须保持运行时语义一致：
 
 - 前端 base path、后端 API prefix、OA iframe/session、Nginx 代理路径必须和服务器一致。
-- PostgreSQL durable queue、read model freshness、worker registry 和 App Health 状态不能在服务器上被旁路。
+- PostgreSQL durable queue、worker registry、background job facts 和 App Health 状态不能在服务器上被旁路。
 - SSH tunnel 或本地代理只用于调试，不作为生产路径。
-- 部署 smoke 必须验证 API 返回 JSON、页面能加载、App Health 可读、关键 read model 不被伪装为 fresh。
+- 部署 smoke 必须验证 API 返回 JSON、页面能加载、App Health 可读、required workers/background jobs/dependencies 不被伪装为 healthy。
 
 ## 推荐路径
 
@@ -64,7 +64,7 @@ python3 scripts/package_production_browser_smoke.py \
   --output /tmp/fin-ops-production-browser-smoke.tar.gz
 ```
 
-该命令只在本地生成包含批准文件和 manifest 的 tarball，不会上传、部署、安装浏览器、下载依赖、登录 OA 或执行生产浏览器测试。正常 release archive 仍只包含 backend、`web/dist`、scripts、deploy helpers 和选定根文档；不要把 `web/e2e`、`node_modules` 或浏览器二进制加入 `scripts/deploy_oa.py` 的 release 打包路径。真正执行生产 browser evidence 前，还必须有独立 runner runtime、内存 token broker、脱敏 artifact contract，以及执行前后的 `/health/ready`、dirty scope、App Status readiness、read-model outbox 和 dead-letter 聚合检查。
+该命令只在本地生成包含批准文件和 manifest 的 tarball，不会上传、部署、安装浏览器、下载依赖、登录 OA 或执行生产浏览器测试。正常 release archive 仍只包含 backend、`web/dist`、scripts、deploy helpers 和选定根文档；不要把 `web/e2e`、`node_modules` 或浏览器二进制加入 `scripts/deploy_oa.py` 的 release 打包路径。真正执行生产 browser evidence 前，还必须有独立 runner runtime、内存 token broker、脱敏 artifact contract，以及执行前后的 `/health/ready`、durable outbox、worker heartbeat、App Status 和 dead-letter 聚合检查。
 
 release 目录会占用磁盘。默认保留最近 8 个 release，同时永远保护 deploy-control status 中仍被引用的 active release。旧 root-owned 历史 release 如果当前部署用户没有权限删除，会被跳过并输出原因，需要单独做一次 root 清理。可按磁盘容量调整：
 
@@ -80,28 +80,12 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 
 ## Worker 进程矩阵
 
-生产环境按职责拆分 worker 进程，所有进程都连接同一个 PostgreSQL durable queue。不要用 API in-process thread 作为生产刷新机制。
+生产环境按职责拆分 worker 进程，所有进程都连接同一个 PostgreSQL durable queue。不要用 API in-process thread 作为生产刷新机制。页面级 read-model refresh worker 已下线，不得恢复到部署矩阵。
 
 | 进程 | 推荐事件类型 | 启动参数 |
 | --- | --- | --- |
 | `worker-oa-sync` | `oa.sync` | `--enable-oa-sync --event-type oa.sync` |
-| `worker-workbench` | `workbench.read_model.refresh` | `--enable-workbench-read-model-refresh --event-type workbench.read_model.refresh` |
-| `worker-workbench-relation` | `workbench_relation.read_model.refresh` | `--enable-workbench-relation-read-model-refresh --event-type workbench_relation.read_model.refresh` |
-| `worker-invoice-lifecycle` | `invoice_lifecycle.read_model.refresh` | `--enable-invoice-lifecycle-read-model-refresh --event-type invoice_lifecycle.read_model.refresh` |
-| `worker-bank-detail` | `bank_detail.read_model.refresh` | `--enable-bank-detail-read-model-refresh --event-type bank_detail.read_model.refresh --max-events-per-iteration 24` |
-| `worker-no-oa-bank-batch` | `no_oa_bank_batch.read_model.refresh` | `--enable-no-oa-bank-batch-read-model-refresh --event-type no_oa_bank_batch.read_model.refresh --max-events-per-iteration 24` |
-| `worker-turnover-ledger` | `turnover_ledger.read_model.refresh` | `--enable-turnover-ledger-read-model-refresh --event-type turnover_ledger.read_model.refresh --max-events-per-iteration 12` |
-| `worker-search-pending` | `search.read_model.refresh`, `pending_invoice.read_model.refresh` | `--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh --event-type search.read_model.refresh --event-type pending_invoice.read_model.refresh` |
-| `worker-search` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
-| `worker-search-secondary` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
-| `worker-search-tertiary` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
-| `worker-pending-invoice` | `pending_invoice.read_model.refresh` | `--enable-pending-invoice-read-model-refresh --event-type pending_invoice.read_model.refresh` |
-| `worker-invoice-usage-collection` | `input_invoice_usage.read_model.refresh`, `output_invoice_collection.read_model.refresh` | `--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh` |
-| `worker-invoice-lifecycle-secondary` | `invoice_lifecycle.read_model.refresh` | `--enable-invoice-lifecycle-read-model-refresh --event-type invoice_lifecycle.read_model.refresh` |
-| `worker-cost-tax` | `cost_statistics.read_model.refresh`, `tax_offset.read_model.refresh` | `--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh` |
-| `worker-cost-statistics` | `cost_statistics.read_model.refresh` | `--enable-cost-statistics-read-model-refresh --event-type cost_statistics.read_model.refresh` |
-| `worker-tax-offset` | `tax_offset.read_model.refresh` | `--enable-tax-offset-read-model-refresh --event-type tax_offset.read_model.refresh` |
-| `worker-import` | `import.process.requested` | `--enable-import-job-processing --event-type import.process.requested` |
+| `worker-import` | `import.process.requested`, `import.fact.changed` | `--enable-import-job-processing --event-type import.process.requested --event-type import.fact.changed` |
 | `worker-workbench-matching` | `job.workbench_matching_dirty_scopes` | `--enable-workbench-matching` |
 | `worker-file-migration` | `file_object.gridfs_migration` | 可选迁移 worker；只有 legacy GridFS 与对象存储 secret 已配置时才启用 |
 
@@ -117,23 +101,7 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 - `deploy/oa/env/fin-ops.secrets.env.example`
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`
 - `deploy/oa/env/fin-ops.worker.oa-sync.env.example`
-- `deploy/oa/env/fin-ops.worker.workbench.env.example`
-- `deploy/oa/env/fin-ops.worker.workbench-relation.env.example`
-- `deploy/oa/env/fin-ops.worker.invoice-lifecycle.env.example`
 - `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
-- `deploy/oa/env/fin-ops.worker.bank-detail.env.example`
-- `deploy/oa/env/fin-ops.worker.no-oa-bank-batch.env.example`
-- `deploy/oa/env/fin-ops.worker.turnover-ledger.env.example`
-- `deploy/oa/env/fin-ops.worker.search-pending.env.example`
-- `deploy/oa/env/fin-ops.worker.search.env.example`
-- `deploy/oa/env/fin-ops.worker.search-secondary.env.example`
-- `deploy/oa/env/fin-ops.worker.search-tertiary.env.example`
-- `deploy/oa/env/fin-ops.worker.pending-invoice.env.example`
-- `deploy/oa/env/fin-ops.worker.invoice-usage-collection.env.example`
-- `deploy/oa/env/fin-ops.worker.invoice-lifecycle-secondary.env.example`
-- `deploy/oa/env/fin-ops.worker.cost-tax.env.example`
-- `deploy/oa/env/fin-ops.worker.cost-statistics.env.example`
-- `deploy/oa/env/fin-ops.worker.tax-offset.env.example`
 - `deploy/oa/env/fin-ops.worker.import.env.example`
 - `deploy/oa/env/fin-ops.worker.file-migration.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
@@ -164,26 +132,11 @@ sudo visudo -cf /etc/sudoers.d/finops-runtime-workers
 
 ```bash
 fin-ops-worker@oa-sync.service
-fin-ops-worker@workbench.service
-fin-ops-worker@workbench-relation.service
-fin-ops-worker@invoice-lifecycle.service
 fin-ops-worker@workbench-matching.service
-fin-ops-worker@bank-detail.service
-fin-ops-worker@bank-account-balance.service
-fin-ops-worker@no-oa-bank-batch.service
-fin-ops-worker@turnover-ledger.service
-fin-ops-worker@search-pending.service
-fin-ops-worker@search.service
-fin-ops-worker@search-secondary.service
-fin-ops-worker@search-tertiary.service
-fin-ops-worker@pending-invoice.service
-fin-ops-worker@invoice-usage-collection.service
-fin-ops-worker@invoice-lifecycle-secondary.service
-fin-ops-worker@cost-tax.service
-fin-ops-worker@cost-statistics.service
-fin-ops-worker@tax-offset.service
 fin-ops-worker@import.service
 ```
+
+`file-migration` 是可选迁移 worker，只在 legacy GridFS 与对象存储 secret 已配置时启用。
 
 如果需要手动修复一台历史服务器，可以执行等价命令：
 
@@ -199,23 +152,16 @@ sudo /usr/local/sbin/finops-ensure-runtime-workers "$(pwd)"
 ```bash
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
   --enable-oa-sync \
-  --enable-workbench-read-model-refresh \
-  --enable-bank-detail-read-model-refresh \
-  --enable-search-read-model-refresh \
-  --enable-pending-invoice-read-model-refresh \
-  --enable-input-invoice-usage-read-model-refresh \
-  --enable-output-invoice-collection-read-model-refresh \
-  --enable-cost-statistics-read-model-refresh \
-  --enable-tax-offset-read-model-refresh \
   --enable-import-job-processing \
+  --enable-workbench-matching \
   --check
 ```
 
 ## Worker 运行边界
 
-- read model refresh worker 使用 SQL-native projection builder，不构造完整 `Application`，也不调用 `StateStore.load()`。
-- `all` scope 只展开为 month/entity shard 子任务；不在单个 worker 事件中做全量同步构建。
-- `job.outbox_events` 和 `job.read_model_dirty_scopes` 是权威恢复点；Redis 只用于短 TTL cache、唤醒和辅助锁。
+- 当前 worker 只处理 OA 同步、导入、文件迁移和 workbench matching；页面 read-model refresh worker 不再部署。
+- 不得新增页面 read-model `all` scope refresh；真实后台任务必须有明确业务队列和 owner。
+- `job.outbox_events` 是真实后台任务权威恢复点；Redis 只用于短 TTL cache、唤醒和辅助锁。
 - worker 可水平扩容；PostgreSQL claim 使用 row lock 语义，重复任务通过 dedupe key 和 scope 状态合并。
 - 每个 worker 事件都必须设置 `--task-timeout-seconds` 和 `--statement-timeout-seconds`，并通过 `--lock-timeout-seconds` 释放 crash 或卡死后遗留的 `processing` 事件。
 - 失败任务必须保留 `last_error` 并进入 retry 或 failed 状态，不能静默 fallback 到旧 snapshot、App Mongo 或 GridFS。
@@ -230,35 +176,23 @@ RabbitMQ 是 outbox envelope transport，不是业务事实源。生产切换必
 4. 观察 outbox unpublished backlog、publish failed backlog、dispatcher lag、RabbitMQ per-queue depth、DLQ count。同步 SLO 场景下
    dispatcher idle poll 默认应为 `RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5`；如果仍是 5 秒，单个新事件可能在
    投递前就消耗完整页面同步预算。
-5. 按 worker 族逐个切到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`：workbench、search/pending、cost/tax、oa-sync、file-migration、import-job。RabbitMQ consumer 仍会按 heartbeat 间隔低频 drain PostgreSQL durable queue，RabbitMQ 只作为唤醒层。
+5. 按 worker 族逐个切到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`：oa-sync、import-job、file-migration。`workbench-matching` 继续使用 PostgreSQL polling。RabbitMQ consumer 仍会按 heartbeat 间隔低频 drain PostgreSQL durable queue，RabbitMQ 只作为唤醒层。
 6. 每切一组都要触发受控事件验证 PostgreSQL publish/ack 与 RabbitMQ queue/DLQ，再扩 worker 数量和 prefetch。
 
-回滚路径是停止 dispatcher 和 RabbitMQ consumer worker，恢复 worker env 为 `FIN_OPS_QUEUE_BACKEND=postgres`，再启动 PostgreSQL polling worker。详细 runbook 见 `docs/operations/runtime-read-model-hardening.md`。
+回滚路径是停止 dispatcher 和 RabbitMQ consumer worker，恢复 worker env 为 `FIN_OPS_QUEUE_BACKEND=postgres`，再启动 PostgreSQL polling worker。详细 worker 运维口径见 `docs/operations/runtime-worker-governance.md`。
 
-## 全量 Backfill / Drain
+## Runtime Repair / Drain
 
-发布 PostgreSQL read model 或 OA projection 变更后，先补结构化 OA 子表并 enqueue 缺失 scope，再由独立 worker drain：
+发布 OA projection、import job、file migration 或 matching worker 变更后，优先使用对应业务 repair 工具、direct API smoke 和 worker manifest 自检。页面级 read-model backfill 已下线，不作为发布、页面可见性或 App Status 收敛入口：
 
 ```bash
-set -a
-source .runtime/fin_ops_platform/local-postgres.env
-set +a
-
-/opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
-  --backfill-oa-children \
-  --enqueue-missing \
-  --json
-
-/opt/miniconda3/bin/python3 scripts/backfill-runtime-read-models.py \
-  --run-worker \
-  --max-iterations 200 \
-  --lock-timeout-seconds 30 \
-  --task-timeout-seconds 60 \
-  --statement-timeout-seconds 30 \
-  --json
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest --json
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check --registration oa-sync
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check --registration import
+PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check --registration workbench-matching
 ```
 
-如果上一次 worker 异常退出留下 `processing` 事件，确认没有同名 worker 仍在运行后，可临时把 `--lock-timeout-seconds` 降到 `1` 重新 drain。这个操作只回收超过 lock timeout 的 PostgreSQL queue 事件，不读取旧 snapshot fallback。
+如果上一次 worker 异常退出留下 `processing` 事件，确认没有同名 worker 仍在运行后，可临时把 `--lock-timeout-seconds` 降到 `1` 重新 drain。这个操作只回收超过 lock timeout 的 PostgreSQL queue 事件，不读取旧 snapshot fallback，也不恢复页面 read-model refresh。
 
 ## 发布后检查
 
@@ -267,4 +201,4 @@ set +a
 - 只读/全操作/管理员/不可见账户分层。
 - 工作台、导入、税金、成本统计、银行明细、设置页。
 - App health 状态和后台任务。
-- `job.outbox_events` pending/failed、`job.read_model_dirty_scopes` pending/failed/stale 数量在预期范围内。
+- `job.outbox_events` pending/failed 数量在预期范围内；legacy runtime tables 不作为页面可读证明。

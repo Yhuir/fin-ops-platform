@@ -494,7 +494,7 @@ class WorkbenchExceptionApplicationService:
         return WorkbenchRelationCommandError(
             "workbench_relation_command_unavailable",
             "Workbench relation command service is not configured.",
-            payload={"read_model_status": "unavailable"},
+            payload={"status": "unavailable"},
         )
 
     def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:

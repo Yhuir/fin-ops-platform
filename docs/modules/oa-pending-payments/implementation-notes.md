@@ -3,6 +3,25 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-27 - 删除 OA pending payment 专用 read model enqueue wrapper
+
+- 目标：继续 remove-read-models 主控闭环，删除 `Application._enqueue_oa_pending_payment_read_model_refresh(...)` 这一层仅转发到 refresh gateway 的 app helper。
+- 影响范围：`OaPendingPaymentCommandService` wiring 和相关 API tests；不改变自动匹配、OA MySQL 写回、pending relation、rows/filter/detail API shape 或 worker event schema。
+- 关键决策：command service refresh callback 直接复用 `_enqueue_generic_read_model_refreshes("oa_pending_payment", [scope_key], ...)`；测试改为 fake refresh gateway，不再 monkeypatch 已删除 app helper。
+- 文档影响：本实施记录同步；长期页面 contract 不变，写后 direct rows reload 方向不变。
+- 测试覆盖：更新 `tests/test_oa_pending_payment_api.py` 和 `tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_oa_pending_payment_app_level_refresh_helper_does_not_return`。
+- 验证命令：见 remove-read-models Loop 119 执行状态。
+- 未测风险：真实 PostgreSQL/OA/worker/App Status/browser evidence 仍 deferred；本轮不删除 shared generic refresh gateway、worker 或 dirty scope 表。
+
+## 2026-06-26 - 写后直接刷新 rows，移除前端 operation barrier 等待
+
+- 目标：执行移除 read model 架构主控闭环中的 OA 待付款页面 slice，先切断 `OaPendingPaymentsPage` 对 operation barrier polling 的硬依赖。
+- 影响范围：`OaPendingPaymentsPage`、`OaPendingPaymentsPage.test.tsx` 和本模块 E2E/测试/边界文档；后端 command/API response shape 暂不改变，仍可返回旧 refresh/barrier 字段。
+- 关键决策：auto-reconcile、link-bank 和规则保存成功后，页面直接 `loadRows("refresh")` 重新请求 rows/filter-options，不再构造 `oa_pending_payment` barrier target，也不请求 `/api/operation-barrier/status`。这是过渡 slice：页面仍保留现有 rows non-fresh 诊断，后续 slice 继续拆 read model/freshness 语义。
+- 测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，锁定三条写后路径都会直接增加 rows 请求，并断言 operation barrier 请求数为 0。
+- 验证命令：本轮执行 `cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`、`bash scripts/verify.sh docs`、`git diff --check`。
+- 未测风险：本 slice 不连接真实 OA MySQL/PostgreSQL/RabbitMQ/Redis/systemd worker drain；后端 read model refresh 字段和 read model service 仍在，需后续 GSD slice 继续删除。
+
 ## 2026-06-25 - route-owner local server.py audit
 
 - 目标：在 `/api/oa-pending-payments*` route callback collapse 后，审计 OA 待付款剩余 `Application` 表面是否还有本地 implementation gap。

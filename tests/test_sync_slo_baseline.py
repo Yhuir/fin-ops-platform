@@ -19,28 +19,15 @@ class FakeRuntimeMonitoringRepository:
 
     def app_status_runtime_snapshot(self):
         return {
-            "read_model_statuses": {
-                "workbench": {"status": "fresh"},
-                "cost_statistics": {"status": "failed", "last_error": "projection failed"},
-            },
-            "outbox_statuses": {"workbench.read_model.refresh": {"status": "ready"}},
-            "worker_statuses": {"workbench": {"status": "ready"}},
+            "outbox_statuses": {"oa.sync": {"status": "ready"}},
+            "worker_statuses": {"oa-sync": {"status": "ready"}},
         }
 
-    def dashboard_read_model_metrics(self):
-        return [
-            {
-                "key": "workbench",
-                "refresh_duration_ms": {"p95": 1200.0},
-                "historical_refresh_duration_ms": {"p95": 24000.0},
-            }
-        ]
-
     def dashboard_worker_metrics(self):
-        return [{"worker_instance": "workbench", "status": "ready"}]
+        return [{"worker_instance": "oa-sync", "status": "ready"}]
 
     def dashboard_queue_metrics(self):
-        return [{"event_type": "workbench.read_model.refresh", "messages": 0, "dlq_messages": 0}]
+        return [{"event_type": "oa.sync", "messages": 0, "dlq_messages": 0}]
 
     def dashboard_outbox_metric(self):
         return {"pending_count": 0, "failed_count": 0, "status": "available"}
@@ -70,21 +57,6 @@ class FakeConnection:
             }
         if "from pg_extension" in normalized:
             return {"installed": True}
-        if normalized.startswith("explain"):
-            return {
-                "QUERY PLAN": [
-                    {
-                        "Plan": {
-                            "Node Type": "Aggregate",
-                            "Startup Cost": 1.0,
-                            "Total Cost": 2.0,
-                            "Plan Rows": 1,
-                            "Plan Width": 8,
-                        },
-                        "Planning Time": 0.1,
-                    }
-                ]
-            }
         raise AssertionError(sql)
 
     def fetch_all(self, sql: str, params: tuple = ()):
@@ -153,18 +125,18 @@ class FakeConnection:
 
 
 class SyncSloBaselineTests(unittest.TestCase):
-    def test_collect_baseline_combines_runtime_database_and_explain_sections(self) -> None:
+    def test_collect_baseline_combines_runtime_and_database_sections(self) -> None:
         with patch.object(sync_slo_baseline, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository):
             payload = sync_slo_baseline.collect_baseline(FakeConnection(), limit=5)
 
         self.assertEqual(payload["mode"], "read_only")
         self.assertEqual(payload["runtime_health"]["data"]["failed_jobs"], 0)
-        self.assertIn("cost_statistics", payload["runtime_snapshot"]["data"]["read_model_attention"])
+        self.assertNotIn("read_model_attention", payload["runtime_snapshot"]["data"])
+        self.assertNotIn("dashboard_read_models", payload)
         self.assertEqual(payload["postgres_connections"]["data"]["max_connections"], 100)
         self.assertEqual(payload["postgres_table_sizes"]["data"][0]["table_name"], "workbench_groups")
         self.assertTrue(payload["pg_stat_statements"]["data"]["installed"])
-        self.assertEqual(payload["explain_probes"]["status"], "available")
-        self.assertEqual(payload["explain_probes"]["data"][0]["node_type"], "Aggregate")
+        self.assertNotIn("explain_probes", payload)
         self.assertEqual(payload["api_performance"]["status"], "not_collected")
 
     def test_pg_stat_statements_falls_back_to_legacy_time_columns(self) -> None:

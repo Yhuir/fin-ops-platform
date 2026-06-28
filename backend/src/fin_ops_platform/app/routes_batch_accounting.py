@@ -4,7 +4,6 @@ from http import HTTPStatus
 from typing import Any, Callable
 
 from fin_ops_platform.app.auth import OARequestSession
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 
 
@@ -16,7 +15,6 @@ class BatchAccountingApiRoutes:
         scope_keys_for_row_ids: Callable[..., set[str]],
         schedule_pair_relation_persist: Callable[..., Any],
         execute_derived_data_lifecycle_event: Callable[..., Any],
-        schedule_read_model_persist: Callable[..., Any],
         pair_relation_snapshot: Callable[[], dict[str, Any]],
         restore_pair_relation_snapshot: Callable[[dict[str, Any]], None],
     ) -> None:
@@ -24,7 +22,6 @@ class BatchAccountingApiRoutes:
         self._scope_keys_for_row_ids = scope_keys_for_row_ids
         self._schedule_pair_relation_persist = schedule_pair_relation_persist
         self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
-        self._schedule_read_model_persist = schedule_read_model_persist
         self._pair_relation_snapshot = pair_relation_snapshot
         self._restore_pair_relation_snapshot = restore_pair_relation_snapshot
 
@@ -34,7 +31,7 @@ class BatchAccountingApiRoutes:
         oa_year = (query.get("oa_year") or [year])[0]
         bucket = (query.get("bucket") or ["unsubmitted"])[0] or "unsubmitted"
         try:
-            payload = self._service_factory(use_sql_read_model=True).build_payload(
+            payload = self._service_factory().build_payload(
                 year=year,
                 bank_year=bank_year,
                 oa_year=oa_year,
@@ -90,7 +87,7 @@ class BatchAccountingApiRoutes:
         return HTTPStatus.OK, {
             **result,
             "affected_months": changed_scope_keys,
-            **write_target_envelope(read_model_key="workbench_relation", scope_keys=changed_scope_keys),
+            "affected_scope_keys": changed_scope_keys,
         }
 
     def withdraw(
@@ -128,7 +125,7 @@ class BatchAccountingApiRoutes:
         return HTTPStatus.OK, {
             **result,
             "affected_months": changed_scope_keys,
-            **write_target_envelope(read_model_key="workbench_relation", scope_keys=changed_scope_keys),
+            "affected_scope_keys": changed_scope_keys,
         }
 
     @staticmethod
@@ -159,10 +156,6 @@ class BatchAccountingApiRoutes:
             "batch_accounting_relation_changed",
             scope_keys=changed_scope_keys,
             metadata={"source": action_name},
-        )
-        self._schedule_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            action_name=action_name,
         )
 
     @staticmethod

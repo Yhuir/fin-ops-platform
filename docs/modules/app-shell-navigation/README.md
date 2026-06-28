@@ -34,10 +34,10 @@
 - `PageRouteHost` 每次只挂载当前匹配 route。离开页面会卸载旧页面 React tree，不保留隐藏 DOM frame、mounted cache、TTL/LRU snapshot 或旧页面 data payload。
 - `PageRuntimeProvider` 对当前页面提供 `active: true` 和 `pageKey`。inactive 页面不被保留；跨页面事件不 replay 给旧页面，依赖卸载时 listener cleanup。
 - `AppPageRoute.preload()` 和 sidebar item `preload()` 只预加载 lazy route chunk。预加载失败不能改变当前 route，也不能阻塞点击导航。
-- 页面 session state 只保存当前浏览器标签页内的轻量 UI 状态，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存 read model payload、业务事实、权限事实、loading/error/toast 或失败中的提交。
+- 页面 session state 只保存当前浏览器标签页内的轻量 UI 状态，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存业务 payload、业务事实、权限事实、loading/error/toast 或失败中的提交。
 - `SessionGate` 是 shell 级入口。会话 loading/forbidden/expired/error 会阻止业务 route 渲染，但侧栏和全局 shell 仍按现有布局显示。
 - `AppStatusIndicator` 在 shell 中消费后端 app status projection；路由切换不能改变全局状态事实。
-- `GlobalOperationOverlayProvider` 是 shell 级交互保护层。它只承载写操作后的短暂等待和错误反馈，不保存业务 payload，不决定 freshness，不替代 App Status 或页面 read boundary。页面不得各自实现第二套全屏操作阻塞层。
+- `GlobalOperationOverlayProvider` 是 shell 级交互保护层。它只承载写操作后的短暂等待和错误反馈，不保存业务 payload，不决定页面 direct-read availability，不替代 App Status 或页面 read boundary。页面不得各自实现第二套全屏操作阻塞层。
 - import pages 是独立 route，但其侧栏入口设置 `active: false`，避免进入导入页时误把导入入口高亮为当前业务页面。
 
 ## 影响面
@@ -50,7 +50,7 @@
 | `App.tsx` provider 顺序 | session、page session、import draft、background jobs、App Health、MonthProvider |
 | `GlobalOperationOverlayContext.tsx` 语义 | 所有接入页面的写操作 loading/error 体验；不能污染普通页面 loading、App Status 或业务事实 |
 | `PageSessionStateContext.tsx` key/scope/TTL | 所有页面筛选/分页/排序/选中状态恢复、用户切换隔离 |
-| `PageRuntimeContext.tsx` event activation | 跨页面刷新提示、旧页面卸载后的事件清理 |
+| `PageRuntimeContext.tsx` event activation | 跨页面 refetch 提示、旧页面卸载后的事件清理 |
 
 ## 测试入口
 
@@ -68,9 +68,9 @@
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
 - 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
+- API contract、DTO shape、错误字段、权限校验、状态值或旧同步诊断字段变化。
+- 业务状态、UI 状态、legacy projection/worker 下线状态或状态流转变化。
+- 跨页面 direct refetch、domain event、derived lifecycle、affected scope、outbox 或缓存边界变化。
 - 测试入口、回归范围、验证命令或未测风险变化。
 
 ## 本目录文件

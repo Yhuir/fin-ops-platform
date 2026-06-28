@@ -13,48 +13,20 @@ from fin_ops_platform.services.app_settings_service import (
     DEFAULT_OA_IMPORT_STATUSES,
     DEFAULT_OA_RETENTION_CUTOFF_DATE,
 )
-from fin_ops_platform.services.bank_account_balance_projection import BankAccountBalanceProjectionBuilder
-from fin_ops_platform.services.bank_account_balance_read_model_refresh import BankAccountBalanceReadModelRefreshService
-from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
-from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.bank_transaction_effective_category_provider import BankTransactionEffectiveCategoryProvider
-from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
-from fin_ops_platform.services.cost_tax_sql_projection import (
-    CostStatisticsSqlProjectionBuilder,
-    TaxOffsetSqlProjectionBuilder,
-)
 from fin_ops_platform.services.postgres_connection import (
     PostgresConfigurationError,
     PostgresConnection,
     PostgresSettings,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
 from fin_ops_platform.services.file_object_migration import GridFSObjectMigrationService
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT
 from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.invoice_usage_collection_read_model_refresh import (
-    InvoiceUsageCollectionReadModelRefreshService,
-)
-from fin_ops_platform.services.invoice_usage_collection_sql_projection import InvoiceUsageCollectionSqlProjectionBuilder
-from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
-from fin_ops_platform.services.invoice_lifecycle_read_model_refresh import (
-    INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE,
-    InvoiceLifecycleReadModelRefreshService,
-)
-from fin_ops_platform.services.invoice_lifecycle_sql_projection import InvoiceLifecycleSqlProjectionBuilder
 from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
-from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
-    NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE,
-    NoOaBankBatchReadModelPersistencePort,
-    NoOaBankBatchReadModelRefreshService,
-)
-from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
-from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
-from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
 from fin_ops_platform.services.oa_pending_payment_relation_promotion_service import OaPendingPaymentRelationPromotionService
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
@@ -66,9 +38,6 @@ from fin_ops_platform.services.postgres_repositories.workbench_relation import P
 from fin_ops_platform.services.postgres_state_store import LegacyGridFSFileReader, PostgresStateStore
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-from fin_ops_platform.services.read_model_readiness import ReadModelReadinessReporter
-from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
 from fin_ops_platform.services.runtime_worker_handlers import (
@@ -85,37 +54,14 @@ from fin_ops_platform.services.runtime_worker_registry import (
     worker_claim_event_types,
     worker_registrations,
 )
-from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
-from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
-from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
-from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.state_store import default_data_dir
-from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
-from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
-from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
-from fin_ops_platform.services.turnover_ledger_sql_projection import TurnoverLedgerSqlProjectionBuilder
-from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
-from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
-from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
-from fin_ops_platform.services.workbench_relation_read_model_refresh import (
-    WORKBENCH_RELATION_REFRESH_EVENT_TYPE,
-    WorkbenchRelationReadModelRefreshService,
-)
-from fin_ops_platform.services.workbench_relation_sql_projection import WorkbenchRelationSqlProjectionBuilder
 from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-from fin_ops_platform.services.workbench_groups_page_cache import (
-    WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
-    WorkbenchGroupsPageCacheWarmer,
-    workbench_groups_sync_cache_warmup_enabled_from_env,
-    workbench_groups_redis_ttl_seconds_from_env,
-)
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
-from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION, WorkbenchSqlProjectionBuilder
+from fin_ops_platform.services.workbench_projection_versions import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
 APP_SETTINGS_KEY = "app_settings"
@@ -138,20 +84,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-iterations", type=int, default=None, help="Testing/smoke limit. Omit to run continuously.")
     parser.add_argument("--max-events-per-iteration", type=int, default=1, help="Maximum events to drain before an idle sleep.")
     parser.add_argument("--enable-file-object-migration", action="store_true", help="Register GridFS to object storage migration handler.")
-    parser.add_argument("--enable-workbench-read-model-refresh", action="store_true", help="Register workbench SQL read model refresh handler.")
-    parser.add_argument("--enable-workbench-relation-read-model-refresh", action="store_true", help="Register workbench relation distribution read model refresh handler.")
-    parser.add_argument("--enable-cost-statistics-read-model-refresh", action="store_true", help="Register cost statistics SQL read model refresh handler.")
-    parser.add_argument("--enable-tax-offset-read-model-refresh", action="store_true", help="Register tax offset SQL read model refresh handler.")
-    parser.add_argument("--enable-search-read-model-refresh", action="store_true", help="Register search SQL read model refresh handler.")
-    parser.add_argument("--enable-pending-invoice-read-model-refresh", action="store_true", help="Register pending invoice SQL read model refresh handler.")
-    parser.add_argument("--enable-invoice-lifecycle-read-model-refresh", action="store_true", help="Register invoice lifecycle SQL read model refresh handler.")
-    parser.add_argument("--enable-bank-account-balance-read-model-refresh", action="store_true", help="Register bank account balance SQL read model refresh handler.")
-    parser.add_argument("--enable-bank-detail-read-model-refresh", action="store_true", help="Register bank detail SQL read model refresh handler.")
-    parser.add_argument("--enable-no-oa-bank-batch-read-model-refresh", action="store_true", help="Register no-OA bank batch SQL read model refresh handler.")
-    parser.add_argument("--enable-turnover-ledger-read-model-refresh", action="store_true", help="Register turnover ledger SQL read model refresh handler.")
-    parser.add_argument("--enable-input-invoice-usage-read-model-refresh", action="store_true", help="Register input invoice usage SQL read model refresh handler.")
-    parser.add_argument("--enable-output-invoice-collection-read-model-refresh", action="store_true", help="Register output invoice collection SQL read model refresh handler.")
-    parser.add_argument("--enable-oa-pending-payment-read-model-refresh", action="store_true", help="Register OA pending payment SQL read model refresh handler.")
     parser.add_argument("--enable-oa-sync", action="store_true", help="Register OA Mongo to PostgreSQL projection sync handler.")
     parser.add_argument("--enable-import-job-processing", action="store_true", help="Register import job worker handler.")
     parser.add_argument("--enable-workbench-matching", action="store_true", help="Poll DB-backed workbench matching dirty scopes.")
@@ -177,22 +109,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     connection = PostgresConnection(settings) if settings is not None else None
     queue = RuntimeQueueRepository(connection) if connection is not None else SimpleNamespace()
     read_model_repository = PostgresReadModelRepository(connection) if connection is not None else None
-    bank_transaction_tag_read_facade = (
-        BankTransactionTagReadFacade(
-            read_model_repository=read_model_repository,
-            queue_repository=queue,
-        )
-        if read_model_repository is not None
-        else None
-    )
-    workbench_relation_read_facade = (
-        WorkbenchRelationReadFacade(
-            read_model_repository=read_model_repository,
-            queue_repository=queue,
-        )
-        if read_model_repository is not None
-        else None
-    )
     redis_helper = RuntimeRedisHelper.from_settings(RuntimeRedisSettings.from_env())
     config = RuntimeWorkerConfig(
         worker_id=args.worker_id or RuntimeWorkerConfig().worker_id,
@@ -209,15 +125,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_attempts=args.max_attempts,
         worker_kind=args.worker_kind or _infer_worker_kind(args),
     )
-    readiness_reporter = (
-        ReadModelReadinessReporter(readiness_repository=RuntimeMonitoringRepository(connection))
-        if connection is not None
-        else None
-    )
-
-    def _read_model_handler(handler: Any) -> Any:
-        return readiness_reporter.wrap_handler(handler) if readiness_reporter is not None else handler
-
     oa_payment_source_adapter: MongoOAAdapter | None = None
 
     def _oa_payment_source_adapter() -> MongoOAAdapter | None:
@@ -283,225 +190,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             queue_repository=queue,
             retention_cutoff_date_provider=lambda: str(oa_runtime_settings["cutoff_date"]),
             pending_payment_relation_promoter=pending_relation_promoter,
-            search_read_model_refresh_producer=SearchReadModelRefreshProducer(
-                refresh_gateway_provider=lambda: ReadModelRefreshGateway(queue_repository=queue)
-            ),
         )
         handlers["oa.sync"] = sync_service.handle_runtime_event
         if "oa.sync" not in config.event_types:
             config.event_types.append("oa.sync")
-    if args.enable_workbench_read_model_refresh:
-        projection_builder = WorkbenchSqlProjectionBuilder(connection=connection)
-        page_cache_warmer = (
-            WorkbenchGroupsPageCacheWarmer(
-                repository=read_model_repository,
-                redis_helper=redis_helper,
-                schema_version=WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
-                ttl_seconds=workbench_groups_redis_ttl_seconds_from_env(),
-            )
-            if workbench_groups_sync_cache_warmup_enabled_from_env()
-            else None
-        )
-        refresh_service = WorkbenchReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-            post_refresh_warmer=page_cache_warmer.warm_scope if page_cache_warmer is not None else None,
-        )
-        handlers["workbench.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-        if "workbench.read_model.refresh" not in config.event_types:
-            config.event_types.append("workbench.read_model.refresh")
-    if args.enable_workbench_relation_read_model_refresh:
-        projection_builder = WorkbenchRelationSqlProjectionBuilder(
-            connection=connection,
-            read_model_repository=WorkbenchRelationReadModelRepositoryPort(read_model_repository),
-        )
-        refresh_service = WorkbenchRelationReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
-        if WORKBENCH_RELATION_REFRESH_EVENT_TYPE not in config.event_types:
-            config.event_types.append(WORKBENCH_RELATION_REFRESH_EVENT_TYPE)
-    if args.enable_cost_statistics_read_model_refresh:
-        projection_builder = CostStatisticsSqlProjectionBuilder(connection=connection, redis_helper=redis_helper)
-        refresh_service = CostStatisticsReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers["cost_statistics.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-        if "cost_statistics.read_model.refresh" not in config.event_types:
-            config.event_types.append("cost_statistics.read_model.refresh")
-    if args.enable_tax_offset_read_model_refresh:
-        projection_builder = TaxOffsetSqlProjectionBuilder(connection=connection, redis_helper=redis_helper)
-        refresh_service = TaxOffsetReadModelRefreshService(projection_builder=projection_builder, queue_repository=queue)
-        handlers["tax_offset.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-        if "tax_offset.read_model.refresh" not in config.event_types:
-            config.event_types.append("tax_offset.read_model.refresh")
-    if args.enable_search_read_model_refresh or args.enable_pending_invoice_read_model_refresh:
-        projection_builder = SearchPendingSqlProjectionBuilder(
-            connection=connection,
-            read_model_repository=read_model_repository,
-            pending_invoice_read_model_repository=(
-                PendingInvoiceReadModelRepositoryPort(read_model_repository)
-                if read_model_repository is not None
-                else None
-            ),
-            bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
-            workbench_relation_read_facade=workbench_relation_read_facade,
-        )
-        refresh_service = SearchPendingReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        if args.enable_search_read_model_refresh:
-            handlers["search.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-            if "search.read_model.refresh" not in config.event_types:
-                config.event_types.append("search.read_model.refresh")
-        if args.enable_pending_invoice_read_model_refresh:
-            handlers["pending_invoice.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-            if "pending_invoice.read_model.refresh" not in config.event_types:
-                config.event_types.append("pending_invoice.read_model.refresh")
-    if args.enable_bank_detail_read_model_refresh:
-        projection_builder = BankDetailSqlProjectionBuilder(
-            connection=connection,
-            workbench_relation_read_facade=workbench_relation_read_facade,
-        )
-        refresh_service = BankDetailReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers["bank_detail.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-        if "bank_detail.read_model.refresh" not in config.event_types:
-            config.event_types.append("bank_detail.read_model.refresh")
-    if args.enable_no_oa_bank_batch_read_model_refresh:
-        state_store = PostgresStateStore(data_dir=default_data_dir(), connection=connection) if connection is not None else None
-        category_service = BankTransactionCategoryService.from_snapshot(
-            state_store.load_bank_transaction_categories() if state_store is not None else {}
-        )
-        auto_category_service = BankTransactionAutoCategoryService(category_service=category_service)
-        app_settings_service = AppSettingsService(
-            state_store,
-            SimpleNamespace(restore_manual_projects=lambda _projects: None, list_projects=lambda: []),
-            bank_transaction_category_service=category_service,
-            bank_transaction_auto_category_service=auto_category_service,
-        )
-        pair_relation_service = WorkbenchPairRelationService.from_snapshot(
-            state_store.load_workbench_pair_relations() if state_store is not None else {}
-        )
-        no_oa_service = NoOaBankBatchService.from_snapshot(
-            state_store.load_no_oa_bank_batches() if state_store is not None else {},
-            pair_relation_service=pair_relation_service,
-        )
-        refresh_service = NoOaBankBatchReadModelRefreshService(
-            import_service=ImportNormalizationService(
-                fact_repository=state_store.import_fact_repository if state_store is not None else None
-            ),
-            effective_category_provider=bank_transaction_tag_read_facade
-            or BankTransactionEffectiveCategoryProvider(
-                category_service=category_service,
-                auto_category_service=auto_category_service,
-            ),
-            no_oa_bank_batch_service=no_oa_service,
-            app_settings_service=app_settings_service,
-            bank_transaction_category_service=category_service,
-            pair_relation_service=pair_relation_service,
-            workbench_read_model_service=WorkbenchReadModelService.from_snapshot(
-                {}
-            ),
-            state_store=state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None),
-            read_model_persistence=NoOaBankBatchReadModelPersistencePort(
-                state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None)
-            ),
-            queue_repository=queue,
-            workbench_matching_source_versions_provider=lambda: _no_oa_workbench_matching_source_versions(
-                app_settings_service
-            ),
-            relation_facade=workbench_relation_read_facade,
-        )
-        handlers[NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
-        if NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE not in config.event_types:
-            config.event_types.append(NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE)
-    if args.enable_turnover_ledger_read_model_refresh:
-        projection_builder = TurnoverLedgerSqlProjectionBuilder(
-            connection=connection,
-            read_repository=(
-                TurnoverLedgerReadModelRepositoryPort(read_model_repository)
-                if read_model_repository is not None
-                else None
-            ),
-            bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
-            workbench_relation_read_facade=workbench_relation_read_facade,
-        )
-        refresh_service = TurnoverLedgerReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers["turnover_ledger.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-        if "turnover_ledger.read_model.refresh" not in config.event_types:
-            config.event_types.append("turnover_ledger.read_model.refresh")
-    if args.enable_bank_account_balance_read_model_refresh:
-        projection_builder = BankAccountBalanceProjectionBuilder(connection=connection)
-        refresh_service = BankAccountBalanceReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers["bank_account_balance.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-        if "bank_account_balance.read_model.refresh" not in config.event_types:
-            config.event_types.append("bank_account_balance.read_model.refresh")
-    if args.enable_invoice_lifecycle_read_model_refresh:
-        oa_payment_status_repository = MySQLOAPaymentStatusRepository.from_environment()
-        projection_builder = InvoiceLifecycleSqlProjectionBuilder(
-            connection=connection,
-            read_model_repository=read_model_repository,
-            workbench_relation_read_facade=workbench_relation_read_facade,
-            payment_status_repository=oa_payment_status_repository,
-            oa_source_adapter=_oa_payment_source_adapter(),
-        )
-        refresh_service = InvoiceLifecycleReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers[INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
-        if INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE not in config.event_types:
-            config.event_types.append(INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE)
-    if (
-        args.enable_input_invoice_usage_read_model_refresh
-        or args.enable_output_invoice_collection_read_model_refresh
-        or args.enable_oa_pending_payment_read_model_refresh
-    ):
-        oa_payment_status_repository = MySQLOAPaymentStatusRepository.from_environment()
-        projection_builder = InvoiceUsageCollectionSqlProjectionBuilder(
-            connection=connection,
-            workbench_relation_read_facade=workbench_relation_read_facade,
-            payment_status_repository=oa_payment_status_repository,
-            oa_source_adapter=_oa_payment_source_adapter(),
-            input_invoice_usage_read_model_repository=(
-                InputInvoiceUsageReadModelRepositoryPort(read_model_repository)
-                if read_model_repository is not None
-                else None
-            ),
-            oa_pending_payment_read_model_repository=(
-                OaPendingPaymentReadModelRepositoryPort(read_model_repository)
-                if read_model_repository is not None
-                else None
-            ),
-        )
-        refresh_service = InvoiceUsageCollectionReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        if args.enable_input_invoice_usage_read_model_refresh:
-            handlers["input_invoice_usage.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-            if "input_invoice_usage.read_model.refresh" not in config.event_types:
-                config.event_types.append("input_invoice_usage.read_model.refresh")
-        if args.enable_output_invoice_collection_read_model_refresh:
-            handlers["output_invoice_collection.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-            if "output_invoice_collection.read_model.refresh" not in config.event_types:
-                config.event_types.append("output_invoice_collection.read_model.refresh")
-        if args.enable_oa_pending_payment_read_model_refresh:
-            handlers["oa_pending_payment.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-            if "oa_pending_payment.read_model.refresh" not in config.event_types:
-                config.event_types.append("oa_pending_payment.read_model.refresh")
     if args.enable_import_job_processing:
         import_processors = (
             check_import_job_processors()

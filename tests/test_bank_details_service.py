@@ -75,7 +75,7 @@ class _RelationDistributionFacade:
             "rows": [dict(row) for row in self._rows if str(row.get("row_id") or "") in wanted],
             "groups": [],
             "source_versions": {"schema_version": 52},
-            "read_model_scope_keys": ["2026-04"],
+            "scope_keys": ["2026-04"],
         }
 
 

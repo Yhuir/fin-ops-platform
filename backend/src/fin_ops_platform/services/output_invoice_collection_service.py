@@ -366,7 +366,7 @@ class OutputInvoiceCollectionQueryService:
         lifecycle_repository: Any | None = None,
         status_overlay_service: OutputInvoiceCollectionStatusOverlayService | None = None,
         lifecycle_policy: Any | None = None,
-        require_fresh_relations: bool = True,
+        require_fresh_relations: bool = False,
     ) -> None:
         self._import_service = import_service
         self._relation_facade = relation_facade
@@ -421,7 +421,6 @@ class OutputInvoiceCollectionQueryService:
             "appliedFilters": {"filters": parsed_filters},
             "sort": {"field": normalized_sort_field, "direction": normalized_sort_direction},
             "filterConfig": self._filter_config(),
-            "readModelStatus": READ_MODEL_STATUS,
             "generatedAt": _now_iso(),
             "sourceVersion": SOURCE_VERSION,
         }
@@ -470,7 +469,6 @@ class OutputInvoiceCollectionQueryService:
                 "month": month,
                 "filters": parsed_filters,
             },
-            "readModelStatus": READ_MODEL_STATUS,
             "generatedAt": _now_iso(),
             "sourceVersion": SOURCE_VERSION,
         }
@@ -512,7 +510,6 @@ class OutputInvoiceCollectionQueryService:
                 "month": month,
                 "filters": parsed_filters,
             },
-            "readModelStatus": READ_MODEL_STATUS,
             "generatedAt": _now_iso(),
             "sourceVersion": SOURCE_VERSION,
         }
@@ -579,8 +576,6 @@ class OutputInvoiceCollectionQueryService:
             "columns": list(OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS),
             "sample_rows": sample_rows,
             "sampleRows": sample_rows,
-            "read_model_status": "fresh",
-            "readModelStatus": "fresh",
         }
 
     def export_for_rows(self, rows: list[dict[str, Any]]) -> tuple[str, bytes]:

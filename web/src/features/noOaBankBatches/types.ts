@@ -17,7 +17,6 @@ export type NoOaBankBatchStatus =
 
 export type NoOaBankBatchStatusFilter = "all" | NoOaBankBatchStatus;
 export type NoOaBankBatchStatusBucket = "unsubmitted" | "submitted" | "withdrawn" | "all";
-export type NoOaBankBatchReadModelStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
 
 export type NoOaBankBatchCountMap = Record<string, number>;
 
@@ -95,8 +94,6 @@ export type NoOaBankBatchesResponse = {
   summary: NoOaBankBatchSummary;
   batches: NoOaBankBatch[];
   pagination?: NoOaBankBatchesPageInfo;
-  readModelStatus: NoOaBankBatchReadModelStatus;
-  readModelStaleReasons: string[];
 };
 
 export type NoOaBankBatchDirection = "income" | "expense" | string;
@@ -133,12 +130,6 @@ export type NoOaBankBatchDetail = {
   directionCounts: NoOaBankBatchCountMap;
 };
 
-export type ReadModelOperationBarrierTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
-};
-
 export type SubmitNoOaBankBatchRequest = {
   batchId: string;
   expectedVersion: number | null;
@@ -165,9 +156,6 @@ export type NoOaBankBatchMutationResult = {
   batch: NoOaBankBatch | null;
   affectedMonths: string[];
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: ReadModelOperationBarrierTarget[];
-  operationBarrierTargets: ReadModelOperationBarrierTarget[];
   workbenchRebuildQueued: boolean;
   results: Array<Record<string, unknown>>;
 };

@@ -10,7 +10,6 @@ from fin_ops_platform.services.app_settings_service import (
 )
 from fin_ops_platform.services.bank_details_application_service import (
     BankDetailsApplicationService,
-    BankDetailsReadModelRefreshingError,
 )
 from fin_ops_platform.services.bank_details_export_service import BankDetailsExportError
 from fin_ops_platform.services.bank_transaction_category_service import (
@@ -197,8 +196,6 @@ class BankDetailsApiRoutes:
                 category_third_label=category_third_label,
                 actor_id=self._actor(session, "bank_detail_export"),
             )
-        except BankDetailsReadModelRefreshingError as exc:
-            return HTTPStatus.ACCEPTED, exc.payload
         except BankDetailsExportError as exc:
             return HTTPStatus.BAD_REQUEST, {"error": exc.error_code, "message": str(exc)}
         except ValueError as exc:
@@ -349,8 +346,6 @@ class BankDetailsApiRoutes:
 
     @staticmethod
     def _status_for_payload(payload: dict[str, Any], *, item_key: str) -> HTTPStatus:
-        if str(payload.get("read_model_status") or "") == "refreshing" and not list(payload.get(item_key) or []):
-            return HTTPStatus.ACCEPTED
         return HTTPStatus.OK
 
     @staticmethod

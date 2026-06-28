@@ -188,7 +188,6 @@ describe("pending invoices and tag settings API mapping", () => {
           excluded_direction_rows: 75,
         },
       },
-      read_model_status: "fresh",
       tag_dictionary: {
         version: 9,
         tags: [{ code: "fee", label: "手续费", path: ["自动识别", "手续费"], status: "active", source: "system" }],
@@ -291,7 +290,6 @@ describe("pending invoices and tag settings API mapping", () => {
         excludedDirectionRows: 75,
       },
     });
-    expect(payload.readModelStatus).toBe("fresh");
     expect(payload.tagDictionary?.version).toBe(9);
   });
 
@@ -765,7 +763,7 @@ describe("pending invoices and tag settings API mapping", () => {
         difference_amount_after: "0.00",
       },
       affected_months: ["2026-05"],
-      warnings: ["读模型已刷新，请确认后再提交"],
+      warnings: ["关系状态已更新，请确认后再提交"],
       conflicts: [{
         relation_case_id: "case_conflict",
         relation_mode: "manual_confirmed",
@@ -782,7 +780,7 @@ describe("pending invoices and tag settings API mapping", () => {
 
     expect(preview.canConfirm).toBe(false);
     expect(preview.conflicts).toEqual(["关系 case_conflict，模式 manual_confirmed，对象 claim_001, inv_001"]);
-    expect(preview.warnings).toEqual(["读模型已刷新，请确认后再提交"]);
+    expect(preview.warnings).toEqual(["关系状态已更新，请确认后再提交"]);
   });
 
   test("batch marks income invoice status with generated request id", async () => {

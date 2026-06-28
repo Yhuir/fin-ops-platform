@@ -10,7 +10,7 @@ const workbenchRowIds = [
 ];
 
 test.describe("workbench automatic candidate split browser flow", () => {
-  test("splits an open automatic candidate through preview, freshness barrier, and fresh refetch", async ({ page }) => {
+  test("splits an open automatic candidate through preview and direct refresh", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
     await page.goto("/");
@@ -39,8 +39,6 @@ test.describe("workbench automatic candidate split browser flow", () => {
     expect(previewBody).toMatchObject({ month: "all" });
     expect(previewBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(previewBody.row_ids).toHaveLength(workbenchRowIds.length);
-
-    const barrierCallsBeforeSplit = api.count("POST /api/operation-barrier/status");
     const workbenchGroupCallsBeforeSplit = api.count("GET /api/workbench/groups");
     await previewDialog.getByRole("textbox", { name: "备注" }).fill("浏览器拆分候选主链路回归");
     await previewDialog.getByRole("button", { name: "确认拆分" }).click();
@@ -71,7 +69,6 @@ test.describe("workbench automatic candidate split browser flow", () => {
     expect(submitBody.row_ids).toHaveLength(workbenchRowIds.length);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(1);
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeSplit);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(workbenchGroupCallsBeforeSplit);
     await expectNoUnexpectedSuccessUiErrors(page);
   });

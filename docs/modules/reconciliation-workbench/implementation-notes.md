@@ -515,7 +515,7 @@
 - 关键决策：确认/撤回带 operation projection 的路径继续只等受影响月份 `workbench_relation`，但前端等待窗口改为覆盖生产 worker 尾延迟；完整 Workbench active generation fallback 使用独立预算。后端 runtime snapshot 保留 event_type 总览，同时暴露 `scopes[]`；operation barrier 只采纳目标 scope 的 outbox pending/failed，`all` scope 仍使用聚合状态。
 - 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md`、本实施记录，并同步 `docs/app-architecture/runtime-and-ownership.md`。
 - 测试覆盖：新增/更新 operation barrier service、runtime snapshot 和 Workbench 前端交互测试，覆盖目标 scope pending、其他 scope pending 不阻断、snapshot scopes 明细，以及前端 pending 超过 2s 后仍等待最终 fresh。
-- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_operation_freshness_barrier tests.test_app_status_overview_service.AppStatusRuntimeRepositoryTests -v`；`cd web && npm test -- --run src/test/OperationBarrierApi.test.ts src/test/WorkbenchSelection.test.tsx`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_operation_freshness_barrier tests.test_app_status_overview_service.AppStatusRuntimeRepositoryTests -v`；`cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx`。
 - 未测风险：本地测试不执行真实生产写入；发布后仍需用受控撤回/确认或只读队列观察验证生产 overlay 不再在 2s 报错，且 App Status scoped outbox payload 正常。
 
 ## 2026-06-17 - 确认预览金额方向核对与确认按钮可见性
@@ -597,7 +597,7 @@
 - 影响范围：`ReconciliationWorkbenchPage` 写操作 gate、`GlobalOperationOverlayProvider`、`web/src/features/operationBarrier/api.ts`、`/api/operation-barrier/status`、`OperationFreshnessBarrierService`。
 - 关键决策：前端不再用本地 `applyLocal*` / `updateWorkbenchAfter*` 逻辑伪造 paired/open 结果；写操作统一进入全屏 overlay，先等待 `workbench_relation` barrier，再重新读取 Workbench active generation，只有页面 payload fresh 后释放。barrier 只读 runtime snapshot，不写 readiness、不重建 read model。
 - 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md`、`implementation-notes.md`，并同步 read-models、app-shell、app-architecture、批量账务、免 OA、往来款模块文档。
-- 测试覆盖：新增 `GlobalOperationOverlayContext.test.tsx`、`OperationBarrierApi.test.ts`、`test_operation_freshness_barrier.py`；更新 `WorkbenchSelection.test.tsx` 覆盖写操作后等待 barrier 与 fresh reload，不再依赖本地 optimistic 重排。
+- 测试覆盖：新增 `GlobalOperationOverlayContext.test.tsx`、`test_operation_freshness_barrier.py`；更新 `WorkbenchSelection.test.tsx` 覆盖写操作后等待 barrier 与 fresh reload，不再依赖本地 optimistic 重排。
 - 验证命令：见本轮最终执行记录。
 - 未测风险：真实生产登录态下的 P50/P95/P99 operation-to-fresh latency 仍需发布后用 approved mutating scenario 或安全 synthetic fixture 度量。
 
@@ -642,7 +642,7 @@
 - 附带修复：撤回 active relation 但没有历史 relation 快照时，提交路径先使用命令结果、预览和 active relation 的 affected row ids 推导 refresh scope；只有仍推不出时才解析 rows，避免写入已完成后因 scope 反推失败把请求误报为 400/500。
 - 状态展示修复：Workbench refresh-status 中同一 scope 旧 failed 已被重新 pending/processing 覆盖时，当前状态必须是 `refreshing`，不再显示旧 `workbench_all_scope_parent_inconsistent` last_error。
 - 测试覆盖：新增 `tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_refreshing`、`test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_failed`、`test_workbench_refresh_status_api_treats_requeued_failed_scope_as_refreshing`；补齐 Workbench v2 API mismatch 请求备注合同，并覆盖 `test_withdraw_link_without_history_falls_back_to_cancelling_active_relation`；前端新增 requeued refresh failure 不显示旧失败 banner 的回归。
-- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -q`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api -q`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_repository tests.test_runtime_worker tests.test_turnover_workbench_integration tests.test_workbench_turnover_grouping tests.test_workbench_auth_context_idempotency -q`；`npm --prefix web test -- --run src/test/WorkbenchSelection.test.tsx src/test/OperationBarrierApi.test.ts src/test/GlobalOperationOverlayContext.test.tsx`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -q`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api -q`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_repository tests.test_runtime_worker tests.test_turnover_workbench_integration tests.test_workbench_turnover_grouping tests.test_workbench_auth_context_idempotency -q`；`npm --prefix web test -- --run src/test/WorkbenchSelection.test.tsx src/test/GlobalOperationOverlayContext.test.tsx`。
 - 未测风险：未连接真实生产 PostgreSQL 回放用户截图中的具体 case；发布后如仍存在旧 failed `workbench:all` outbox/generation，需要按 runtime worker runbook requeue/归档已覆盖历史 failure，并重跑 Workbench display audit。
 
 ## 2026-06-12 - 关联台撤回 preview 分组与后台刷新交互收敛

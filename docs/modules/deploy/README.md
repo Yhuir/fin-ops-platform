@@ -69,7 +69,7 @@ bash scripts/verify.sh all
 - worker：required/optional worker 矩阵来自 registry/manifest，不能在 runbook 维护第二份清单。
 - Nginx：`/fin-ops/` SPA、`/fin-ops-api/` API、`/fin-ops/api/` relative API、assets cache、index no-store。
 - readiness：`/health/ready` 是发布 readiness 边界；systemd active 不等于 release ready。
-- App Health：worker missing/stale/mismatch、dirty scopes、RabbitMQ backlog、PostgreSQL runtime unavailable 必须可观测。
+- App Health：worker missing/stale/mismatch、background job/outbox backlog、RabbitMQ backlog、PostgreSQL runtime unavailable 必须可观测。
 - 权限/session：发布后 `/api/session/me` 必须保持 JSON API，不能被 SPA fallback 吃掉。
 - 数据安全：发布前备份、migration、rollback/PITR、runtime config 需要 staging 或生产 runbook，不能只靠 unittest。
 
@@ -79,7 +79,7 @@ bash scripts/verify.sh all
 
 - 修改 `scripts/deploy_oa.py`、`scripts/deploy-oa.sh`、`scripts/verify.sh` 或 nightly workflow。
 - 修改 `finops-deploy-control`、`finops-ensure-runtime-workers`、systemd/env/Nginx 模板。
-- 新增 worker、read model refresh event、RabbitMQ dispatch event、runtime dependency 或 required env。
+- 新增 worker、background job/outbox event、RabbitMQ dispatch event、runtime dependency 或 required env。
 - 修改 `/health`、`/health/ready`、App Health/App Status、session route 或 OA 同域路径。
 - 修改 PostgreSQL migration、backup/rollback、runtime secret、部署用户 sudo contract。
 - 线上或手工发现部署、CI、worker readiness、Nginx proxy/cache、release rollback 相关 bug。

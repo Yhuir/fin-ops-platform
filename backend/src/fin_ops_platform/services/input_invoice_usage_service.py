@@ -101,7 +101,7 @@ class InputInvoiceUsageQueryService:
         oa_projection: Any | None = None,
         payment_rules_provider: InputInvoiceUsagePaymentRulesProvider | None = None,
         lifecycle_policy: Any | None = None,
-        require_fresh_relations: bool = True,
+        require_fresh_relations: bool = False,
     ) -> None:
         self._import_service = import_service
         self._relation_facade = relation_facade

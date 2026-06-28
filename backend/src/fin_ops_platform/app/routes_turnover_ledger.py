@@ -759,15 +759,13 @@ class TurnoverLedgerApiRoutes:
                 )
                 if isinstance(payload.get("groups"), list):
                     return self._normalize_grouped_payload(payload)
-                if "read_model_status" not in payload:
-                    return self.list_grouped_ledger(
-                        family=family,
-                        direction=direction,
-                        status=status,
-                        page=page,
-                        page_size=page_size,
-                    )
-                return self._normalize_grouped_payload(self._flat_payload_to_grouped(payload))
+                return self.list_grouped_ledger(
+                    family=family,
+                    direction=direction,
+                    status=status,
+                    page=page,
+                    page_size=page_size,
+                )
             return self._query_service.list_ledger(
                 view=view,
                 family=family,

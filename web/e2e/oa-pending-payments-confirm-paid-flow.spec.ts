@@ -37,7 +37,7 @@ async function openInProgressView(page: Page) {
 }
 
 test.describe("OA pending payments in-progress auto reconcile browser flow", () => {
-  test("auto matches an eligible in-progress OA payment once and refreshes the writeback read model", async ({ page }) => {
+  test("auto matches an eligible in-progress OA payment once and reloads direct rows", async ({ page }) => {
     const runtimeErrors = collectRuntimeErrors(page);
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentAutoReconcileDelayMs: 300,

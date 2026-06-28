@@ -48,7 +48,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
 
         with (
             patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
         ):
             confirm_response = self._post(
                 app,
@@ -85,7 +84,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
 
         with (
             patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
         ):
             confirm_response = self._post(
                 app,

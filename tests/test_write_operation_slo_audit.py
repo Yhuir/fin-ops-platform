@@ -31,7 +31,7 @@ def _event(
     return {
         "event_id": event_id or f"{scope_type}-{reason}",
         "tenant_id": "default",
-        "event_type": event_type or f"{scope_type}.read_model.refresh",
+        "event_type": event_type or f"{scope_type}.outbox.changed",
         "scope_type": scope_type,
         "scope_key": "all",
         "reason": reason,
@@ -43,8 +43,6 @@ def _event(
         "updated_at": created_at + timedelta(seconds=seconds),
         "event_last_error": None,
         "raw_payload": {},
-        "dirty_status": dirty_status,
-        "dirty_last_error": None,
     }
 
 
@@ -58,8 +56,8 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["event_sample_count"], 0)
-        self.assertEqual(report["expectation_count"], 5)
-        self.assertEqual(report["missing_expectation_count"], 5)
+        self.assertEqual(report["expectation_count"], 4)
+        self.assertEqual(report["missing_expectation_count"], 4)
         self.assertTrue(all(result["status"] == "missing" for result in report["results"]))
 
     def test_turnover_relation_profile_passes_only_with_all_required_refresh_scopes(self) -> None:
@@ -88,12 +86,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
                 action_name="withdraw_relation",
                 seconds=0.9,
             ),
-            _event(
-                scope_type="search",
-                reason="turnover_relation_changed",
-                action_name="withdraw_relation",
-                seconds=1.3,
-            ),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
@@ -104,7 +96,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["failed_expectation_count"], 0)
-        self.assertEqual(report["expectation_count"], 5)
+        self.assertEqual(report["expectation_count"], 4)
 
     def test_missing_required_scope_fails_instead_of_claiming_write_chain_closed(self) -> None:
         rows = [
@@ -123,11 +115,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
                 reason="turnover_relation_changed",
                 action_name="withdraw_relation",
             ),
-            _event(
-                scope_type="cost_statistics",
-                reason="turnover_relation_changed",
-                action_name="withdraw_relation",
-            ),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
@@ -139,8 +126,8 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["missing_expectation_count"], 1)
         missing = [result for result in report["results"] if result["status"] == "missing"]
-        self.assertEqual(missing[0]["scope_type"], "search")
-        self.assertEqual(missing[0]["latest_error"], "no_recent_required_write_refresh_event")
+        self.assertEqual(missing[0]["scope_type"], "cost_statistics")
+        self.assertEqual(missing[0]["latest_error"], "no_recent_required_write_operation_event")
 
     def test_slow_done_event_fails_target(self) -> None:
         rows = [
@@ -259,7 +246,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
             _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
             _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
-            _event(scope_type="search", reason="workbench_relation_changed"),
             _event(scope_type="tax_offset", reason="workbench_relation_changed"),
         ]
 
@@ -270,7 +256,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 9)
+        self.assertEqual(report["expectation_count"], 8)
 
     def test_workbench_relation_confirm_profile_requires_only_operation_blocking_relation_scope(self) -> None:
         rows = [
@@ -298,7 +284,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
             _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
             _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
-            _event(scope_type="search", reason="workbench_relation_changed"),
             _event(scope_type="tax_offset", reason="workbench_relation_changed"),
         ]
 
@@ -309,7 +294,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 9)
+        self.assertEqual(report["expectation_count"], 8)
 
     def test_workbench_relation_bank_invoice_cross_page_profile_excludes_cost_statistics(self) -> None:
         rows = [
@@ -319,7 +304,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
             _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
             _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
-            _event(scope_type="search", reason="workbench_relation_changed"),
             _event(scope_type="tax_offset", reason="workbench_relation_changed"),
         ]
 
@@ -330,7 +314,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 8)
+        self.assertEqual(report["expectation_count"], 7)
         self.assertNotIn(
             "cost_statistics",
             {result["scope_type"] for result in report["results"]},
@@ -344,7 +328,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
             _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
             _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
-            _event(scope_type="search", reason="workbench_relation_changed"),
             _event(scope_type="tax_offset", reason="workbench_relation_changed"),
         ]
 
@@ -355,7 +338,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 8)
+        self.assertEqual(report["expectation_count"], 7)
         self.assertNotIn(
             "cost_statistics",
             {result["scope_type"] for result in report["results"]},
@@ -368,7 +351,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="bank_detail", reason="workbench_relation_changed"),
             _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
             _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
-            _event(scope_type="search", reason="workbench_relation_changed"),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
@@ -379,10 +361,10 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
         scope_types = {result["scope_type"] for result in report["results"]}
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 6)
+        self.assertEqual(report["expectation_count"], 5)
         self.assertEqual(
             scope_types,
-            {"workbench", "workbench_relation", "bank_detail", "pending_invoice", "cost_statistics", "search"},
+            {"workbench", "workbench_relation", "bank_detail", "pending_invoice", "cost_statistics"},
         )
         self.assertNotIn("invoice_lifecycle", scope_types)
         self.assertNotIn("input_invoice_usage", scope_types)
@@ -405,7 +387,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         self.assertEqual(confirm_scopes, withdraw_scopes)
         self.assertEqual(
             confirm_scopes,
-            {"workbench", "workbench_relation", "bank_detail", "pending_invoice", "cost_statistics", "search"},
+            {"workbench", "workbench_relation", "bank_detail", "pending_invoice", "cost_statistics"},
         )
 
     def test_invoice_import_confirmed_profile_requires_actual_file_import_refresh_scopes(self) -> None:
@@ -413,7 +395,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="workbench", reason="import_state_changed"),
             _event(scope_type="workbench_relation", reason="import_state_changed"),
             _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
             _event(scope_type="pending_invoice", reason="import_state_changed"),
             _event(scope_type="input_invoice_usage", reason="import_state_changed"),
             _event(scope_type="output_invoice_collection", reason="import_state_changed"),
@@ -429,7 +410,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 10)
+        self.assertEqual(report["expectation_count"], 9)
         self.assertEqual(report["failed_expectation_count"], 0)
         self.assertEqual(
             {result["scope_type"] for result in report["results"]},
@@ -437,7 +418,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
                 "workbench",
                 "workbench_relation",
                 "invoice_lifecycle",
-                "search",
                 "pending_invoice",
                 "input_invoice_usage",
                 "output_invoice_collection",
@@ -452,7 +432,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="workbench", reason="import_state_changed"),
             _event(scope_type="workbench_relation", reason="import_state_changed"),
             _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
             _event(scope_type="pending_invoice", reason="import_state_changed"),
             _event(scope_type="input_invoice_usage", reason="import_state_changed"),
             _event(scope_type="output_invoice_collection", reason="import_state_changed"),
@@ -477,7 +456,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="workbench", reason="import_state_changed"),
             _event(scope_type="workbench_relation", reason="import_state_changed"),
             _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
             _event(scope_type="pending_invoice", reason="import_state_changed"),
             _event(scope_type="input_invoice_usage", reason="import_state_changed"),
             _event(scope_type="oa_pending_payment", reason="import_state_changed"),
@@ -501,12 +479,10 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="workbench", reason="import_state_changed"),
             _event(scope_type="workbench_relation", reason="import_state_changed"),
             _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
             _event(scope_type="pending_invoice", reason="import_state_changed"),
             _event(scope_type="input_invoice_usage", reason="import_state_changed"),
             _event(scope_type="output_invoice_collection", reason="import_state_changed"),
             _event(scope_type="oa_pending_payment", reason="import_state_changed"),
-            _event(scope_type="bank_account_balance", reason="import_state_changed"),
             _event(scope_type="cost_statistics", reason="import_state_changed"),
             _event(scope_type="bank_detail", reason="import_facts_changed"),
         ]
@@ -518,21 +494,19 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 11)
+        self.assertEqual(report["expectation_count"], 9)
         bank_detail_result = next(result for result in report["results"] if result["scope_type"] == "bank_detail")
-        self.assertEqual(bank_detail_result["event_type"], "bank_detail.read_model.refresh")
+        self.assertEqual(bank_detail_result["event_type"], "bank_detail.outbox.changed")
 
     def test_bank_import_confirmed_profile_fails_when_cost_scope_is_missing(self) -> None:
         rows = [
             _event(scope_type="workbench", reason="import_state_changed"),
             _event(scope_type="workbench_relation", reason="import_state_changed"),
             _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
             _event(scope_type="pending_invoice", reason="import_state_changed"),
             _event(scope_type="input_invoice_usage", reason="import_state_changed"),
             _event(scope_type="output_invoice_collection", reason="import_state_changed"),
             _event(scope_type="oa_pending_payment", reason="import_state_changed"),
-            _event(scope_type="bank_account_balance", reason="import_state_changed"),
             _event(scope_type="bank_detail", reason="import_facts_changed"),
         ]
 
@@ -553,10 +527,8 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="workbench", reason="import_state_changed"),
             _event(scope_type="workbench_relation", reason="import_state_changed"),
             _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
             _event(scope_type="pending_invoice", reason="import_state_changed"),
             _event(scope_type="oa_pending_payment", reason="import_state_changed"),
-            _event(scope_type="bank_account_balance", reason="import_state_changed"),
             _event(scope_type="cost_statistics", reason="import_state_changed"),
             _event(scope_type="bank_detail", reason="import_facts_changed"),
         ]
@@ -575,43 +547,15 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
         self.assertEqual(report["missing_expectation_count"], 0)
 
-    def test_bank_import_confirmed_profile_fails_when_account_balance_scope_is_missing(self) -> None:
+    def test_bank_import_confirmed_profile_accepts_import_fact_ack(self) -> None:
         rows = [
             _event(scope_type="workbench", reason="import_state_changed"),
             _event(scope_type="workbench_relation", reason="import_state_changed"),
             _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
             _event(scope_type="pending_invoice", reason="import_state_changed"),
             _event(scope_type="input_invoice_usage", reason="import_state_changed"),
             _event(scope_type="output_invoice_collection", reason="import_state_changed"),
             _event(scope_type="oa_pending_payment", reason="import_state_changed"),
-            _event(scope_type="cost_statistics", reason="import_state_changed"),
-            _event(scope_type="bank_detail", reason="import_facts_changed"),
-        ]
-
-        report = write_operation_slo_audit.audit_write_operation_slo(
-            FakeConnection(rows),
-            operations=["bank_import_confirmed"],
-            target_ms=5_000,
-        )
-
-        self.assertEqual(report["status"], "fail")
-        self.assertEqual(report["missing_expectation_count"], 1)
-        missing = [result for result in report["results"] if result["status"] == "missing"]
-        self.assertEqual(missing[0]["scope_type"], "bank_account_balance")
-        self.assertEqual(missing[0]["reason"], "import_state_changed")
-
-    def test_bank_import_confirmed_profile_requires_real_bank_detail_refresh_not_import_fact_ack(self) -> None:
-        rows = [
-            _event(scope_type="workbench", reason="import_state_changed"),
-            _event(scope_type="workbench_relation", reason="import_state_changed"),
-            _event(scope_type="invoice_lifecycle", reason="import_state_changed"),
-            _event(scope_type="search", reason="import_state_changed"),
-            _event(scope_type="pending_invoice", reason="import_state_changed"),
-            _event(scope_type="input_invoice_usage", reason="import_state_changed"),
-            _event(scope_type="output_invoice_collection", reason="import_state_changed"),
-            _event(scope_type="oa_pending_payment", reason="import_state_changed"),
-            _event(scope_type="bank_account_balance", reason="import_state_changed"),
             _event(scope_type="cost_statistics", reason="import_state_changed"),
             _event(scope_type="bank_detail", reason="import_facts_changed", event_type="import.fact.changed"),
         ]
@@ -622,11 +566,9 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             target_ms=5_000,
         )
 
-        self.assertEqual(report["status"], "fail")
-        missing = [result for result in report["results"] if result["status"] == "missing"]
-        self.assertEqual(len(missing), 1)
-        self.assertEqual(missing[0]["scope_type"], "bank_detail")
-        self.assertEqual(missing[0]["event_type"], "bank_detail.read_model.refresh")
+        self.assertEqual(report["status"], "pass")
+        bank_detail = next(result for result in report["results"] if result["scope_type"] == "bank_detail")
+        self.assertEqual(bank_detail["event_type"], "import.fact.changed")
 
     def test_etc_import_confirmed_profile_requires_derived_lifecycle_refresh_scopes(self) -> None:
         rows = [
@@ -635,7 +577,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="invoice_lifecycle", reason="etc_invoice_import_confirm"),
             _event(scope_type="tax_offset", reason="etc_invoice_import_confirm"),
             _event(scope_type="cost_statistics", reason="etc_invoice_import_confirm"),
-            _event(scope_type="search", reason="etc_invoice_import_confirm"),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
@@ -690,11 +631,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
                 reason="no_oa_bank_batch_changed",
                 action_name="no_oa_bank_batch_withdraw",
             ),
-            _event(
-                scope_type="search",
-                reason="no_oa_bank_batch_changed",
-                action_name="no_oa_bank_batch_withdraw",
-            ),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
@@ -704,7 +640,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 5)
+        self.assertEqual(report["expectation_count"], 4)
 
     def test_unknown_operation_profile_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unknown write-operation SLO profiles"):
@@ -724,7 +660,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
                 _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
                 _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
                 _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
-                _event(scope_type="search", reason="workbench_relation_changed"),
                 _event(scope_type="tax_offset", reason="workbench_relation_changed"),
             ]
         )
@@ -742,7 +677,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         self.assertIn("e.created_at >= %s", sql)
         self.assertEqual(params, ("default", since, 2000))
 
-    def test_query_joins_import_fact_dirty_scope_with_default_source_version(self) -> None:
+    def test_write_operation_query_does_not_filter_to_read_model_refresh_events(self) -> None:
         connection = FakeConnection([])
 
         report = write_operation_slo_audit.audit_write_operation_slo(
@@ -753,8 +688,10 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "fail")
         sql, params = connection.fetch_all_calls[0]
-        self.assertIn("e.event_type = 'import.fact.changed'", sql)
-        self.assertIn("d.source_version = coalesce(e.source_version, 0)", sql)
+        self.assertNotIn(".read_model.refresh", sql)
+        self.assertNotIn("e.event_type = 'import.fact.changed'", sql)
+        self.assertNotIn("job.read_model_dirty_scopes", sql)
+        self.assertNotIn("d.source_version", sql)
         self.assertEqual(params, ("default", 24.0, 2000))
 
 

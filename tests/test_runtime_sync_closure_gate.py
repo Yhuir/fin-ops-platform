@@ -15,9 +15,7 @@ class FakeRuntimeMonitoringRepository:
     def health_summary(self) -> dict[str, object]:
         return {
             "queue_backlog": {},
-            "dirty_scopes": {},
             "failed_jobs": 0,
-            "stale_dirty_scope_count": 0,
             "missing_required_worker_count": 0,
             "stale_required_worker_count": 0,
             "mismatched_required_worker_count": 0,
@@ -25,7 +23,6 @@ class FakeRuntimeMonitoringRepository:
             "rabbitmq_queue_depth": 0,
             "rabbitmq_unacked_messages": 0,
             "rabbitmq_dlq_count": 0,
-            "read_model_refresh_failure_rate": 0.0,
         }
 
 
@@ -35,24 +32,6 @@ class EmptyRuntimeMonitoringRepository:
 
     def health_summary(self) -> dict[str, object]:
         return {}
-
-
-def read_model_pass_report() -> dict[str, object]:
-    return {
-        "status": "pass",
-        "planned_scope_count": 1,
-        "result_count": 1,
-        "failed_count": 0,
-        "results": [
-            {
-                "status": "pass",
-                "read_model_key": "workbench",
-                "scope_type": "workbench",
-                "scope_key": "all",
-                "enqueue_to_fresh_ms": 500.0,
-            }
-        ],
-    }
 
 
 def http_pass_report() -> dict[str, object]:
@@ -78,10 +57,10 @@ def sse_pass_report() -> dict[str, object]:
         "summary": {"probe_count": 1, "failed_probe_count": 0, "max_first_event_ms": 500.0},
         "probes": [
             {
-                "name": "workbench_events_all",
+                "name": "app_health_stream",
                 "status": "pass",
                 "first_event_ms": 500.0,
-                "event_names": ["workbench.read_model.completed"],
+                "event_names": ["app_health"],
             }
         ],
     }
@@ -134,10 +113,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", EmptyRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -169,7 +144,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -183,10 +157,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
 
     def test_gate_fails_without_authenticated_http_and_write_scenario(self) -> None:
         with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-            gate.read_model_slo_smoke,
-            "run_smoke",
-            return_value={"status": "dry_run", "planned_scope_count": 14},
-        ), patch.object(
             gate.write_operation_slo_audit,
             "audit_write_operation_slo",
             return_value={
@@ -202,10 +172,9 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 object(),
                 base_url="https://example.test",
                 headers={},
-            )
+        )
 
         self.assertEqual(report["status"], gate.FAIL)
-        self.assertIn("read_model_direct_smoke", report["failed_checks"])
         self.assertIn("authenticated_http_slo", report["failed_checks"])
         self.assertIn("sse_first_event_smoke", report["failed_checks"])
         self.assertIn("write_operation_e2e", report["failed_checks"])
@@ -223,10 +192,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -258,7 +223,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -277,10 +241,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -313,7 +273,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer user-token"},
                     admin_headers={"Authorization": "Bearer admin-token", "Cookie": "Admin-Token=admin-token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -331,10 +290,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -384,7 +339,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     base_url="https://example.test",
                     api_prefix="/fin-ops-api",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -402,10 +356,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value={"status": "pass", "auth_configured": True, "summary": {"probe_count": 0, "sample_count": 0, "failed_probe_count": 0}, "probes": []},
@@ -437,7 +387,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -453,10 +402,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -488,7 +433,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -499,66 +443,11 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         sse_check = next(check for check in report["checks"] if check["name"] == "sse_first_event_smoke")
         self.assertEqual(sse_check["payload"]["error"], "sse_smoke_empty_samples")
 
-    def test_read_model_smoke_zero_samples_prevents_closure_pass(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            scenario_path = Path(temp_dir) / "scenario.json"
-            scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
-            with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value={"status": "pass", "planned_scope_count": 0, "result_count": 0, "failed_count": 0, "results": []},
-            ), patch.object(
-                gate.http_slo_probe,
-                "collect_http_slo",
-                return_value=http_pass_report(),
-            ), patch.object(
-                gate.sse_smoke_probe,
-                "collect_sse_smoke",
-                return_value=sse_pass_report(),
-            ), patch.object(
-                gate.write_operation_slo_audit,
-                "audit_write_operation_slo",
-                return_value={
-                    "status": "pass",
-                    "event_sample_count": 13,
-                    "expectation_count": 13,
-                    "failed_expectation_count": 0,
-                    "missing_expectation_count": 0,
-                    "results": [],
-                },
-            ), patch.object(
-                gate.write_operation_e2e_smoke,
-                "load_scenarios",
-                return_value=[object()],
-            ), patch.object(
-                gate.write_operation_e2e_smoke,
-                "run_write_operation_e2e_smoke",
-                return_value=write_e2e_pass_report(),
-            ):
-                report = gate.run_closure_gate(
-                    object(),
-                    base_url="https://example.test",
-                    headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
-                    write_scenario=scenario_path,
-                    apply_write_scenarios=True,
-                    write_approval_ticket="TEST-APPROVAL",
-                )
-
-        self.assertEqual(report["status"], gate.FAIL)
-        self.assertIn("read_model_direct_smoke", report["failed_checks"])
-        read_model_check = next(check for check in report["checks"] if check["name"] == "read_model_direct_smoke")
-        self.assertEqual(read_model_check["payload"]["error"], "read_model_smoke_empty_samples")
-
     def test_write_audit_zero_samples_prevents_closure_pass(self) -> None:
         with TemporaryDirectory() as temp_dir:
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -590,7 +479,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -606,10 +494,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -641,7 +525,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -671,10 +554,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 }
 
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -695,7 +574,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -709,10 +587,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -744,7 +618,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=False,
                 )
@@ -764,10 +637,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -799,7 +668,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                 )
@@ -819,10 +687,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[]}', encoding="utf-8")
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -843,7 +707,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",
@@ -866,10 +729,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             scenario_path = Path(temp_dir) / "scenario.json"
             scenario_path.write_text('{"scenarios":[{"name":"ok","operation":"turnover_manual_closure_or_withdraw","steps":[{"path":"/api/x"}]}]}')
             with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
-                gate.read_model_slo_smoke,
-                "run_smoke",
-                return_value=read_model_pass_report(),
-            ), patch.object(
                 gate.http_slo_probe,
                 "collect_http_slo",
                 return_value=http_pass_report(),
@@ -882,7 +741,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     "summary": {"failed_probe_count": 1},
                     "probes": [
                         {
-                            "name": "workbench_events_all",
+                            "name": "app_health_stream",
                             "status": "fail",
                             "first_event_ms": 1500.0,
                             "errors": ["sse_first_event_slo_miss"],
@@ -913,7 +772,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                     object(),
                     base_url="https://example.test",
                     headers={"Authorization": "Bearer token"},
-                    apply_read_model_smoke=True,
                     write_scenario=scenario_path,
                     apply_write_scenarios=True,
                     write_approval_ticket="TEST-APPROVAL",

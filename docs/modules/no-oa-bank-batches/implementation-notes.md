@@ -23,6 +23,14 @@
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
 - 2026-06-24 起，本模块是 modular IO read model 主线的第十一个非 Go pilot。下一步先审计 read model repository/state-store/public-snapshot/refresh-worker ownership，再决定首个实现抽取边界；不直接跳 Go/Fiber/Go Worker。
 
+## 2026-06-27 - no-OA direct fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 no-OA bank batch service fixture 中旧 `read_model_scope_keys` / `refresh_enqueued` 字段。
+- 影响范围：`tests/test_no_oa_bank_batch_service.py`；不改变运行时代码、API shape、worker 或 projection。
+- 关键决策：fake relation facade 返回 direct `scope_keys`，不再模拟 page-level read-model freshness fields。
+- 测试覆盖：完整 `tests.test_no_oa_bank_batch_service` 通过。
+- 未测风险：no-OA legacy projection/worker/manifest/dirty scopes 仍留待后续 family inventory。
+
 ## 2026-06-26 - submitted/cancelled relation lifecycle repair
 
 - 目标：修复生产历史 no-OA 批次中 `submitted` 状态与已取消 no-OA Workbench relation 不一致的问题，避免页面把已取消关系误显示为可撤回的已提交批次。
@@ -115,7 +123,7 @@
 
 - 目标：执行 `server-py:no-oa-bank-batch-route-owner-local-closure-audit`，复审 route callback collapse 后 no-OA `server.py` 是否还能局部闭合。
 - 影响范围：modular IO analysis/state/queue/next prompt、主控 prompt、本实施记录；不改变运行时代码、API response shape、权限、审计、read model freshness、worker 或前端。
-- 关键决策：no-OA route callbacks 已清完；但 `_enqueue_no_oa_bank_batch_read_model_refreshes(...)` 仍在 `Application` 拥有 scope normalize 和 direct gateway enqueue，不能声明 no-OA local support closure。下一实现边界选择 no-OA refresh producer extraction。
+- 关键决策：no-OA route callbacks 已清完；后续 refresh producer extraction 已删除 `_enqueue_no_oa_bank_batch_read_model_refreshes(...)`，scope normalize 和 gateway enqueue 由 `NoOaBankBatchReadModelRefreshProducer` 负责。no-OA local support 剩余风险集中在 mutation persistence fallback 和生产证据。
 - 文档影响：新增 modular IO route-owner closure audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、本实施记录和测试矩阵；长期事实源不变。
 - 测试覆盖：本轮 analysis-only，不新增运行时测试；下一实现 slice 必须补 service/static Guard 测试。
 - 验证命令：`bash scripts/verify.sh docs`；`git diff --check`。
@@ -168,8 +176,8 @@
 
 - 目标：审计 no-OA read model 在 persistence/repository port 抽取后的 refresh enqueue、scope policy、App Status/worker registration、operation barrier、derived lifecycle 和剩余旧链路污染面。
 - 结论：refresh enqueue 已通过 `ReadModelRefreshGateway`/scope policy；manifest、runtime worker registry、App Status read model/domain registry 和前端 operation barrier 目标已有本地证据。未发现页面把 stale no-OA read model payload 伪装为 fresh 的新增问题。
-- 未闭合 gap：`Application._derived_lifecycle_no_oa_bank_batch_executor(...)` 仍拥有 no-OA derived lifecycle target scope 选择和 enqueue result assembly；`NoOaBankBatchApplicationService.persist_mutation(...)` 仍保留缺少 atomic mutation boundary 时的 broad state-store fallback。
-- 下一边界：先执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`；之后再执行 `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine`。
+- 未闭合 gap：derived lifecycle target scope 选择和 enqueue result assembly 已收敛到 `NoOaBankBatchDerivedLifecycleExecutor`；`NoOaBankBatchApplicationService.persist_mutation(...)` 仍保留缺少 atomic mutation boundary 时的 broad state-store fallback。
+- 下一边界：derived lifecycle executor extraction 已完成；之后继续执行 `read-models:no-oa-bank-batch-mutation-persistence-fallback-quarantine`。
 - 文档影响：本轮不改变业务状态、UI 状态、API shape、worker event、queue schema、operation barrier 状态、权限或审计含义；`state-machine.md` 定义不变。
 - 测试决策：本轮是 analysis/accounting only；下一实现 slice 必须新增 executor service-layer/static guard，并复跑 no-OA application/read model/workbench integration 与相关 lifecycle 回归。
 
@@ -501,7 +509,7 @@
 - 影响范围：`NoOaBankBatchPage` 写操作、`GlobalOperationOverlayProvider`、`operationBarrier` API client。
 - 关键决策：写 API 成功后等待 `no_oa_bank_batch` barrier 对 affected months/current scope fresh，再重新加载 list/detail/tag selection。前端 domain event 仍只做刷新提示，不作为同步完成证据。
 - 文档影响：更新本模块 `README.md`、`tests.md`、`implementation-notes.md`。
-- 测试覆盖：更新 `web/src/test/NoOaBankBatchPage.test.tsx`，并由 `GlobalOperationOverlayContext.test.tsx`、`OperationBarrierApi.test.ts` 覆盖共享 overlay/barrier 行为。
+- 测试覆盖：更新 `web/src/test/NoOaBankBatchPage.test.tsx`，并由 `GlobalOperationOverlayContext.test.tsx` 覆盖共享 overlay 行为。
 - 验证命令：见本轮最终执行记录。
 - 未测风险：真实生产登录态 operation-to-fresh latency 需要发布后度量。
 
@@ -545,12 +553,12 @@
   - 如果免 OA 页面已经提交同一组 `row_ids`，关联台再次 confirm-link 复用 existing submitted batch 和同一个 `case_id`，保持幂等。
   - 存量两行、全银行流水、同金额、不同账户、收支成对且有效分类均为 `internal_transfer` 的 `manual_confirmed` active relation，刷新时迁移为 submitted no-OA internal transfer batch。
   - Workbench pair relation service 增加 active row 独占保护，不同 active case 不能共享同一 row。
-  - PostgreSQL no-OA snapshot 保存必须删除新 snapshot 中缺席的旧 batch row，防止 SQL read model 继续返回旧 unsubmitted/conflict。
+  - PostgreSQL no-OA canonical snapshot 保存必须删除新 snapshot 中缺席的旧 batch row，防止 direct list 继续返回旧 unsubmitted/conflict。
 - 验收测试：
   - `test_manual_confirmed_internal_transfer_relation_migrates_to_submitted_no_oa_batch`
   - `test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact`
   - `test_create_active_relation_rejects_active_row_reuse_by_different_case_id`
-  - `test_save_no_oa_bank_batches_replaces_absent_read_model_rows`
+  - `test_save_no_oa_bank_batches_replaces_absent_canonical_batches`
 
 ## 2026-06-12 - Relation command service 写入口收敛
 

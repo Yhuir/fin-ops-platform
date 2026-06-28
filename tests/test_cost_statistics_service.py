@@ -42,8 +42,6 @@ class FakeCostRelationFacade:
             ],
             "groups": [],
             "source_versions": self.last_source_versions,
-            "read_model_scope_keys": ["2026-03"],
-            "refresh_enqueued": False,
             "stale_reasons": [],
         }
 

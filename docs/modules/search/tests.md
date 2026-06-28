@@ -5,133 +5,41 @@
 | 类别 | 适用性 | 当前入口 / 要求 |
 | --- | --- | --- |
 | 1. Business core unit tests | 条件适用 | 改 search ranking、group context、source fact selection 或匹配规则时适用。 |
-| 2. Service-layer tests | 适用 | repository port、projection builder、worker handler、freshness/source-version 变化必须覆盖。 |
-| 3. API contract tests | 适用 | `/api/search` response shape、status、filter、permission 或 stale/refreshing 行为变化必须覆盖。 |
-| 4. Read model/cache/background job tests | 适用 | `search.read_model.refresh`、`search:all` fan-out、dirty/outbox/readiness、source-version stale skip 必须覆盖。 |
+| 2. Service-layer tests | 适用 | `SearchService` direct payload 变化必须覆盖；不得新增 Search SQL repository port。 |
+| 3. API contract tests | 适用 | `/api/search` response shape、status、filter、permission 或 direct payload 行为变化必须覆盖；页面合同不得重新暴露 read-model freshness 字段。 |
+| 4. Read model/cache/background job tests | 条件适用 | 仅在确认 Search read-model storage/refresh 不回流时做负向 guard；Search refresh/freshness/worker 和 Search SQL storage 已删除。 |
 | 5. Frontend component and interaction tests | 当前不适用 | 当前没有独立 search 页面；若新增全局搜索 UI，必须补 Vitest/Browser e2e。 |
-| 6. End-to-end business-flow integration tests | 条件适用 | Workbench relation/import/tax/cost/lifecycle 写入影响 search 时适用。 |
-| 7. Existing feature regression tests | 适用 | 保持 pending invoice/search compatibility、worker lanes、manifest contract 和 API fallback 行为。 |
+| 6. End-to-end business-flow integration tests | 条件适用 | Workbench relation/import/tax/cost/lifecycle 写入影响 search direct payload 时适用。 |
+| 7. Existing feature regression tests | 适用 | 保持 Search worker/manifest/SQL storage 不回流和 `/api/search` direct API 行为。 |
 
 ## 当前测试入口
 
-- `tests/test_search_pending_sql_runtime.py`
 - `tests/test_search_api.py`
+- `tests/test_search_service.py`
 - `tests/test_read_model_manifest.py`
 - `tests/test_runtime_worker_registry.py`
 - `tests/test_rabbitmq_runtime.py`
+- `tests/test_platform_runtime_boundary_guards.py`
 - `tests/test_workbench_relation_repository.py`
 - `tests/test_derived_data_lifecycle_service.py`
 
-## 2026-06-24 - repository port extraction
+## 当前守卫
 
-- 新增：`tests/test_search_pending_sql_runtime.py::SearchReadModelRepositoryPortTests::test_port_excludes_unrelated_read_model_methods`。
-- 覆盖：search port 只暴露 `search_index(...)` 和 `save_search_index_rows(...)`，不暴露 pending invoice、bank detail、no-OA 或 workbench relation 方法。
-- 验证命令：
+- `/api/search` 直接返回 `SearchService.search(...)` payload。
+- `/api/search` 不返回 `read_model_status`、`read_model_scope_key`、`refresh_enqueued` 或 `read_model_unavailable`。
+- `search.read_model.refresh` 不在 worker registry、manifest、App Status、RabbitMQ dispatcher 或 deploy env。
+- `read_model.search_index_rows`、Search SQL repository/port/projection/state-store property 不回流。
+- 历史 `search_pending_sql_projection.py` 已删除；不得作为 Search 或 pending-invoice projection 恢复。
 
-```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
-```
-
-## 2026-06-24 - app rebuild helper quarantine
-
-- 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_rebuild_helpers_stay_out_of_application`。
-- 覆盖：`server.py` 不再拥有 `rebuild_search_index_scope(...)` / `_build_search_index_rows_for_month(...)`；`SearchPendingSqlProjectionBuilder` 继续拥有 search rebuild，并通过 `SearchReadModelRepositoryPort` 保存。
-- 验证命令：
+## 建议验证
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_rebuild_helpers_stay_out_of_application tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
-```
-
-## 2026-06-24 - query freshness service extraction
-
-- 新增：`tests/test_search_pending_sql_runtime.py::SearchQueryFreshnessServiceTests`。
-- 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_query_freshness_helpers_stay_out_of_application`。
-- 覆盖：SQL miss 返回 refreshing 并入队、fresh SQL payload 不触发 live scan/source-version enqueue、source-version mismatch 标记 stale 并入队；`server.py` 不再拥有 search SQL payload/helper source-version proof。
-- 验证命令：
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_query_freshness_helpers_stay_out_of_application tests.test_search_pending_sql_runtime.SearchQueryFreshnessServiceTests tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
-```
-
-## 2026-06-24 - refresh producer and invalidation extraction
-
-- 新增：`tests/test_search_pending_sql_runtime.py::SearchReadModelRefreshProducerTests`。
-- 新增：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_refresh_producer_helpers_stay_out_of_application`。
-- 覆盖：search refresh producer 通过 gateway enqueue、month/all scope 归一化、invalidation 月份/`all` fallback、gateway unavailable 返回 false；`server.py` 不再拥有 search refresh/invalidation helper。
-- 验证命令：
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application tests.test_search_pending_sql_runtime.SearchReadModelRefreshProducerTests tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest -v
-```
-
-## 2026-06-24 - production repository unavailable fail closed
-
-- 新增：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_api_requires_sql_repository_in_production_without_live_scan`。
-- 覆盖：生产 PostgreSQL runtime 下 `/api/search` 缺少 SQL repository 时返回 unavailable、入队 `api_sql_repository_unavailable`，并且不调用 legacy/local live scan。
-- 验证命令：
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_requires_sql_repository_in_production_without_live_scan tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_miss_enqueues_refresh_without_sync_scan tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_search_api_reads_sql_index tests.test_search_api -v
-```
-
-## 2026-06-24 - OA projection sync Search producer boundary
-
-- 新增：`tests/test_oa_projection_sync_service.py::OaProjectionSyncServiceTests::test_oa_sync_search_refresh_uses_search_producer_boundary`。
-- 更新：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_refresh_producer_helpers_stay_out_of_application` 防止 `OAProjectionSyncService` 重新直接 `enqueue_many("search", ...)`。
-- 覆盖：OA sync 下游 Search refresh fan-out 走 `SearchReadModelRefreshProducer`，同时保持 Workbench/OA pending payment/pending invoice fan-out 和 Search dirty scope 行为。
-- 验证命令：
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_oa_projection_sync_service.OaProjectionSyncServiceTests.test_oa_sync_search_refresh_uses_search_producer_boundary tests.test_oa_projection_sync_service.OaProjectionSyncServiceTests.test_oa_sync_marks_oa_pending_payment_read_model_dirty_for_progress_rows tests.test_oa_projection_sql_runtime.OAProjectionSqlRuntimeTests.test_oa_sync_worker_persists_projection_and_marks_downstream_scopes_dirty tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
-```
-
-## 2026-06-24 - runtime import-state Search producer boundary
-
-- 新增：`tests/test_runtime_worker_read_model_refresh_scopes.py::RuntimeWorkerReadModelRefreshScopeTests::test_import_state_search_refresh_uses_search_producer_boundary`。
-- 更新：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_refresh_producer_helpers_stay_out_of_application` 防止 runtime worker handlers 重新直接 `_enqueue_scopes("search", ...)` 或 `enqueue_many("search", ...)`。
-- 覆盖：import-state 持久化后的 Search refresh fan-out 走 `SearchReadModelRefreshProducer`，同时 Workbench relation 等非 Search fan-out 继续通过原有 queue path。
-- 验证命令：
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_skips_unaffected_invoice_relation_read_models tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
-```
-
-## 2026-06-24 - Search worker all-scope fan-out producer boundary
-
-- 更新：`tests/test_search_pending_sql_runtime.py::SearchReadModelRefreshProducerTests::test_enqueue_returns_false_when_gateway_unavailable` 覆盖 `enqueue_scope_keys(...)` unavailable contract。
-- 新增：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_refresh_handler_expands_search_all_through_search_producer_boundary`。
-- 更新：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_search_refresh_producer_helpers_stay_out_of_application` 防止 `SearchPendingReadModelRefreshService` 重新直接 `enqueue_many("search", ...)`。
-- 覆盖：`search:all` worker shard fan-out 走 `SearchReadModelRefreshProducer.enqueue_scope_keys(...)`，同时保留 existing shard order、payload shape 和 completion behavior。
-- 验证命令：
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime.SearchReadModelRefreshProducerTests tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_refresh_handler_expands_search_all_into_month_shards tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_refresh_handler_expands_search_all_through_search_producer_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
-```
-
-## 2026-06-24 - post-all-scope local closure audit
-
-- 新增测试：无。本 slice 是 analysis/accounting，没有改运行时代码或测试 contract。
-- 复用覆盖：Search repository port、query freshness service、refresh producer、production fail-closed、OA fan-out、runtime import-state fan-out、Search worker all-scope fan-out、manifest、registry 和 static guard 测试。
-- 结论：未发现剩余本地 implementation gap；Search local support 转为 `production-evidence-deferred`，不代表全局模块闭环。
-- 验证命令：
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_oa_projection_sync_service tests.test_oa_projection_sql_runtime tests.test_runtime_worker_read_model_refresh_scopes tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_skips_unaffected_invoice_relation_read_models tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
-bash scripts/verify.sh docs
-git diff --check
-```
-
-## 下一 slice 必跑建议
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_search_api tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_oa_projection_sync_service tests.test_oa_projection_sql_runtime tests.test_runtime_worker_read_model_refresh_scopes tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_skips_unaffected_invoice_relation_read_models tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_search_refresh_producer_helpers_stay_out_of_application -v
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
-bash scripts/verify.sh docs
-git diff --check
+PYTHONPATH=backend/src python3 -m pytest tests/test_search_api.py tests/test_search_service.py -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py -k 'search_sql_index_storage_stays_removed or search_page_read_stays_direct or search_read_model_refresh_path_is_removed' -q
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_runtime_worker_registry tests.test_rabbitmq_runtime -v
 ```
 
 ## 未测风险
 
 - 当前没有独立 Browser `/api/search` 页面入口；用户可见全局搜索 UI 若后续新增，必须补 Spec-first E2E。
-- 真实 PostgreSQL/RabbitMQ/worker drain、high-row search index performance、App Status readiness 和生产页面/用户流 smoke evidence 仍需 staging/production evidence；本地测试不能替代。
+- 真实 PostgreSQL/RabbitMQ/worker drain、high-row search direct payload performance 和生产用户流 smoke evidence 仍需 staging/production evidence；本地测试不能替代。

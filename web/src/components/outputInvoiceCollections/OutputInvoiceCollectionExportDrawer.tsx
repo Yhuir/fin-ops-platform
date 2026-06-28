@@ -75,7 +75,6 @@ export default function OutputInvoiceCollectionExportDrawer({
     }
   }
 
-  const refreshing = preview?.readModelStatus === "refreshing";
   return (
     <AppDrawer
       className="output-invoice-collections-export-drawer"
@@ -87,7 +86,7 @@ export default function OutputInvoiceCollectionExportDrawer({
           </button>
           <button
             className="output-invoice-collections-button output-invoice-collections-button--primary"
-            disabled={!preview || loading || downloading || refreshing}
+            disabled={!preview || loading || downloading}
             onClick={handleDownload}
             type="button"
           >
@@ -109,7 +108,6 @@ export default function OutputInvoiceCollectionExportDrawer({
           </div>
         ) : null}
         {error ? <div className="output-invoice-collections-alert" role="alert">{error}</div> : null}
-        {refreshing ? <div className="output-invoice-collections-alert" role="status">导出数据准备中，请稍后再试。</div> : null}
         {downloadedFileName ? <div className="output-invoice-collections-alert" role="status">已生成 {downloadedFileName}</div> : null}
         {preview ? (
           <>

@@ -26,10 +26,7 @@ class RabbitMqIntegrationTests(unittest.TestCase):
                 "RABBITMQ_URL": rabbitmq_url,
                 "RABBITMQ_EXCHANGE": f"finops.test.events.{suffix}",
                 "RABBITMQ_QUEUE_PREFIX": f"finops.test.{suffix}",
-                "RABBITMQ_WORKBENCH_QUEUE": f"finops.test.workbench.{suffix}",
-                "RABBITMQ_WORKBENCH_ROUTING_KEY": "workbench.read_model.refresh",
                 "RABBITMQ_DEAD_LETTER_EXCHANGE": f"finops.test.events.dlx.{suffix}",
-                "RABBITMQ_WORKBENCH_DEAD_LETTER_QUEUE": f"finops.test.workbench.dlq.{suffix}",
             }
         )
         try:
@@ -45,10 +42,10 @@ class RabbitMqIntegrationTests(unittest.TestCase):
             event = RuntimeQueueEvent(
                 event_id=str(uuid4()),
                 tenant_id="default",
-                event_type="workbench.read_model.refresh",
-                aggregate_type="read_model",
+                event_type="oa.sync",
+                aggregate_type="runtime",
                 aggregate_id="all",
-                scope_type="workbench",
+                scope_type="oa",
                 scope_key="all",
                 dedupe_key=None,
                 payload={"source_version": 1},
@@ -60,7 +57,7 @@ class RabbitMqIntegrationTests(unittest.TestCase):
                 trace_id="trace-rabbitmq-test",
             )
             RabbitMqPublisher(settings, channel=channel).publish(event.to_envelope())
-            _method, _properties, body = channel.basic_get(settings.rabbitmq_workbench_queue, auto_ack=True)
+            _method, _properties, body = channel.basic_get(rabbitmq_event_routes(settings)["oa.sync"].queue, auto_ack=True)
             self.assertIsNotNone(body)
             envelope = json.loads(body.decode("utf-8"))
             self.assertEqual(envelope["event_id"], event.event_id)

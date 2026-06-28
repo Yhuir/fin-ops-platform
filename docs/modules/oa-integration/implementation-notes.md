@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-06-26 - OA 手动导入写后直接重搜
+
+- 目标：让设置页 `OaManualSearchImportTable` 遵循 direct API 读路径，附件刷新和手动导入成功后直接重新搜索当前筛选结果，不再等待 operation barrier。
+- 影响范围：`OaManualSearchImportTable`、`SettingsOaManualSearchImportTable.test.tsx`、OA integration 边界/测试文档；后端 response shape 暂保持兼容。
+- 关键决策：保留现有导入进度状态，但将“等待数据同步”改为“刷新搜索结果”；后端 legacy target envelope 仍作为后续 API contract 收口事项。
+- 文档影响：更新 `boundary-io.md`、`tests.md` 和本实施记录。
+- 测试覆盖：组件测试覆盖附件刷新/导入后通过搜索接口重读新 rows，并断言零 `/api/operation-barrier/status` 请求。
+- 验证命令：见本轮 GSD 状态记录。
+- 未测风险：真实 OA Mongo、真实 worker drain、下游 Workbench/Search/成本/税金页面最终展示仍需 staging/runtime smoke。
+
 ## 2026-06-22 - OA projection 保留真实申请日期
 
 - 目标：修复下游 Workbench SQL active generation 只能拿到 OA 月初日期，导致关联台申请人时间 chip 在部分 OA 行缺失或退化的问题。

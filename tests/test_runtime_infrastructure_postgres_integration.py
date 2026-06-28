@@ -24,12 +24,20 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.runtime_queue = RuntimeQueueRepository(self.connection)
 
     def test_runtime_infrastructure_tables_exist(self) -> None:
-        for table in ("job.read_model_dirty_scopes", "job.runtime_worker_heartbeats"):
+        for table in ("job.runtime_worker_heartbeats",):
             exists = fetch_scalar(
                 self.database_url,
                 f"select to_regclass('{table}') is not null;",
             )
             self.assertEqual(exists, "t", table)
+
+    def test_legacy_read_model_runtime_state_tables_are_removed(self) -> None:
+        for table in ("job.read_model_dirty_scopes", "read_model.app_status_readiness"):
+            exists = fetch_scalar(
+                self.database_url,
+                f"select to_regclass('{table}') is not null;",
+            )
+            self.assertEqual(exists, "f", table)
 
     def test_outbox_events_runtime_columns_exist(self) -> None:
         columns = (
@@ -180,10 +188,14 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertNotIn("processing", predicate)
 
     def test_outbox_envelope_view_exposes_rabbitmq_safe_fields(self) -> None:
-        event = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="workbench",
+        event = self.runtime_queue.enqueue(
+            event_type="import.process.requested",
+            aggregate_type="import",
+            aggregate_id="integration-test",
+            scope_type="import",
             scope_key="all",
-            reason="integration-test",
+            payload={"reason": "integration-test"},
+            source_version=7,
             priority="high",
             trace_id="trace-integration",
         )
@@ -208,8 +220,8 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(row["event_id"], event.event_id)
-        self.assertEqual(row["event_type"], "workbench.read_model.refresh")
-        self.assertEqual(row["scope_type"], "workbench")
+        self.assertEqual(row["event_type"], "import.process.requested")
+        self.assertEqual(row["scope_type"], "import")
         self.assertEqual(row["scope_key"], "all")
         self.assertEqual(row["source_version"], event.source_version)
         self.assertEqual(row["priority"], "high")
@@ -217,7 +229,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["schema_version"], 1)
         self.assertEqual(row["publish_status"], "unpublished")
         self.assertEqual(row["publish_attempt_count"], 0)
-        self.assertEqual(row["payload"]["source_version"], event.source_version)
+        self.assertEqual(row["payload"]["reason"], "integration-test")
 
     def test_0009_backfills_attempts_from_preexisting_attempt_count(self) -> None:
         reset_test_database(self.database_url)

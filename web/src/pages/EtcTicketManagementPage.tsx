@@ -19,7 +19,6 @@ import StatePanel from "../components/common/StatePanel";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
-import { waitForOperationFreshness, type OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   confirmEtcReconciliationTask,
   createEtcBusinessBatch,
@@ -439,20 +438,6 @@ function isEtcBusinessBatchNotFoundError(error: unknown, batchId?: string) {
 function emitEtcBusinessDomainUpdated(detail: { affectedMonths?: string[]; source: string }) {
   emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, detail);
   emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, detail);
-}
-
-function dedupeOperationBarrierTargets(targets: OperationBarrierTarget[]) {
-  const deduped: OperationBarrierTarget[] = [];
-  targets.forEach((target) => {
-    if (!deduped.some((candidate) =>
-      candidate.readModelKey === target.readModelKey
-      && candidate.scopeKey === target.scopeKey
-      && candidate.scopeType === target.scopeType
-    )) {
-      deduped.push(target);
-    }
-  });
-  return deduped;
 }
 
 type UploadBlockProps = {
@@ -888,14 +873,8 @@ export default function EtcTicketManagementPage() {
     }
     completedImportJobs.forEach((job) => refreshedImportJobIdsRef.current.add(job.jobId));
     const affectedMonths = completedImportJobs.flatMap((job) => job.affectedMonths ?? []);
-    const operationTargets = dedupeOperationBarrierTargets(
-      completedImportJobs.flatMap((job) => job.operationBarrierTargets ?? []),
-    );
     void (async () => {
       try {
-        if (operationTargets.length > 0) {
-          await waitForOperationFreshness(operationTargets);
-        }
         emitEtcBusinessDomainUpdated({
           affectedMonths,
           source: "etc_import_job_completed",
@@ -905,7 +884,7 @@ export default function EtcTicketManagementPage() {
           await loadReconciliationTasks();
         }
       } catch {
-        setActionError("ETC发票导入已完成，但数据同步状态检查失败，请稍后刷新。");
+        setActionError("ETC发票导入已完成，但页面刷新失败，请稍后刷新。");
       }
     })();
   }, [activeStatus, jobs, loadBatches, loadReconciliationTasks]);

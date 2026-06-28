@@ -1,5 +1,4 @@
 import type { BackgroundJob } from "../backgroundJobs/types";
-import type { OperationBarrierTarget } from "../operationBarrier/api";
 
 export type ImportBatchType = "input_invoice" | "output_invoice" | "bank_transaction";
 
@@ -140,7 +139,4 @@ export type ImportSessionPayload = {
   matchingRun?: MatchingRunSummary;
   job?: BackgroundJob;
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: OperationBarrierTarget[];
-  operationBarrierTargets: OperationBarrierTarget[];
 };

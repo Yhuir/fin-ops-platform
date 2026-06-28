@@ -5,9 +5,9 @@
 ## GSD 上下文
 
 - Goal：让财务用户理解并维护“已有 OA/流水/发票关系如何映射为支付状态”。
-- Scope：`PaymentStatusRulesDrawer`、对应规则读取/保存 API、保存后的当前页刷新反馈。
+- Scope：`PaymentStatusRulesDrawer`、对应规则读取/保存 API、保存后的当前页 direct refetch 反馈。
 - Design tone：浅色企业后台、信息密度高、低装饰、可扫读、可追溯。
-- Non-goal：本抽屉不负责发现、补全或修正 OA/流水关联；关系事实仍来自 `workbench_relation` distribution 和 `input_invoice_usage` read model。
+- Non-goal：本抽屉不负责发现、补全或修正 OA/流水关联；关系事实仍来自 `workbench_relation` distribution 和进项使用 direct query boundary。
 
 ## 业务定位
 
@@ -38,7 +38,7 @@
 
 - 标题：`发票与支付状态规则设置`
 - 状态标签：`可编辑` / `只读` / `无保存权限`
-- 生效提示：`保存后刷新进项发票使用情况与发票生命周期`
+- 生效提示：`保存后重新读取进项发票使用情况`
 
 不得显示：
 
@@ -63,7 +63,7 @@
 | 现金往来 | 当前规则下命中现金往来的发票数 |
 | 待处理 | 未被任何自动规则闭环的发票数 |
 
-保存前若有草稿变化，显示：`预计影响数据将在保存并刷新后更新`。没有 preview API 前，不显示“预计影响 N 张”。
+保存前若有草稿变化，显示：`预计影响数据将在保存并重新读取后更新`。没有 preview API 前，不显示“预计影响 N 张”。
 
 ### 3. 规则列表
 
@@ -118,16 +118,16 @@
 固定在抽屉底部，包含：
 
 - `还原`
-- `保存并刷新`
+- `保存并重新读取`
 - 保存中状态：`保存中...`
-- 保存成功反馈：`规则已保存，正在刷新进项发票使用情况。`
+- 保存成功反馈：`规则已保存，正在重新读取进项发票使用情况。`
 - 冲突反馈：`规则已被其他人更新，请重新打开后再编辑。`
 - 权限反馈：`当前账户没有保存权限。`
 
 按钮规则：
 
 - 只读或无保存权限时，不显示保存按钮。
-- 没有草稿变化时，`保存并刷新` 禁用。
+- 没有草稿变化时，`保存并重新读取` 禁用。
 - 保存成功后关闭或不关闭抽屉都可以；第一阶段推荐不自动关闭，保留成功反馈。
 
 ## 视觉约束
@@ -145,9 +145,9 @@
 | loading | 抽屉主体显示规则加载中，底部按钮禁用 |
 | read-only | 显示规则和处理方向，不显示保存动作 |
 | editable | 显示可编辑控件和保存动作 |
-| dirty | `保存并刷新` 可点击，`还原` 可点击 |
+| dirty | `保存并重新读取` 可点击，`还原` 可点击 |
 | saving | 禁用所有编辑控件和底部动作 |
-| saved | 显示成功反馈，并触发当前页 rows refresh |
+| saved | 显示成功反馈，并触发当前页 rows direct refetch |
 | version conflict | 显示冲突错误，引导重新打开抽屉 |
 | validation error | 行内标记具体错误字段，顶部显示摘要错误 |
 
@@ -161,8 +161,8 @@
 保存规则：
 
 - 请求继续携带 `expectedVersion` 和 `idempotencyKey`。
-- 保存成功后触发 `input_invoice_usage` 当前查询刷新。
-- 后端继续负责审计、版本冲突、幂等冲突和 read model refresh 入队。
+- 保存成功后触发 `input_invoice_usage` 当前查询 direct refetch。
+- 后端继续负责审计、版本冲突、幂等冲突和真实派生数据后台任务。
 
 ## 验收标准
 
@@ -170,7 +170,7 @@
 - 用户能看懂每个支付状态由哪些条件触发。
 - 用户不会误以为本抽屉能补全 OA/流水关联。
 - 只读用户能查看规则，不能保存。
-- 可编辑用户修改后可以还原、保存并触发当前页刷新。
+- 可编辑用户修改后可以还原、保存并触发当前页 direct refetch。
 - 保存冲突、权限不足、校验失败都有明确反馈。
 - `candidate` 关系不会被规则算成已付款或冲抵。
 
@@ -179,11 +179,11 @@
 按七类测试中适用部分覆盖：
 
 - Business core：规则优先级、启用状态、fallback、candidate 不参与自动闭环。
-- Service-layer：保存规则后的 app settings、审计、read model refresh 入队。
+- Service-layer：保存规则后的 app settings、审计、派生数据后台任务。
 - API contract：GET/PUT shape、权限、版本冲突、幂等冲突、校验错误。
-- Read model/background job：规则版本变化后 `input_invoice_usage` 与 `invoice_lifecycle` freshness。
+- Read model/background job：规则版本变化后不得恢复 `input_invoice_usage` / `invoice_lifecycle` 页面 read-model freshness；真实后台任务只覆盖保留的派生数据。
 - Frontend interaction：只读、可编辑、dirty、保存成功、冲突、无版本号展示。
-- E2E business flow：保存规则 -> 当前页刷新 -> 支付状态更新。
+- E2E business flow：保存规则 -> 当前页 direct refetch -> 支付状态更新。
 - Regression：既有 OA/流水 relation 展示、`+N` 明细、OA reverse drawer 不受本抽屉误影响。
 
 ## 后续待决

@@ -21,238 +21,9 @@ READ_MODEL_PRODUCTION_EVIDENCE_RUNBOOK = (
     REPO_ROOT / "docs" / "operations" / "read-model-production-evidence-runbook.md"
 )
 
-DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
-    (
-        "backend/src/fin_ops_platform/app/routes_output_invoice_collections.py",
-        "OutputInvoiceCollectionApiRoutes.filter_options",
-        "read_model_status=fresh",
-    ): (1, "filter options are derived only after sql_all_rows_provider returned a fresh rows payload."),
-    (
-        "backend/src/fin_ops_platform/app/routes_output_invoice_collections.py",
-        "OutputInvoiceCollectionApiRoutes.filter_options",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated filter-options response."),
-    (
-        "backend/src/fin_ops_platform/app/routes_pending_invoices.py",
-        "PendingInvoiceApiRoutes.filter_options",
-        "read_model_status=fresh",
-    ): (1, "filter options are derived only after PendingInvoiceReadModelService.filter_options returned fresh."),
-    (
-        "backend/src/fin_ops_platform/app/routes_input_invoice_usage.py",
-        "InputInvoiceUsageApiRoutes.filter_options",
-        "read_model_status=fresh",
-    ): (1, "filter options are derived only after sql_all_rows_provider returned a fresh rows payload."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py",
-        "InputInvoiceUsageReadModelFreshGateService.all_rows",
-        "dict read_model_status=fresh",
-    ): (1, "all-rows helper returns fresh only after every paged SQL read-model payload is fresh."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
-        "OutputInvoiceCollectionReadModelFreshGateService.all_rows",
-        "dict read_model_status=fresh",
-    ): (1, "shared output-collection all-rows helper returns fresh only after every paged SQL read-model payload is fresh."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py",
-        "InputInvoiceUsageReadModelFreshGateService.rows",
-        "read_model_status=fresh",
-    ): (1, "input usage service performs schema/status/source-version checks before marking the SQL payload fresh."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
-        "OutputInvoiceCollectionReadModelFreshGateService.rows",
-        "read_model_status=fresh",
-    ): (1, "legacy query path performs schema/status/source-version checks before marking the SQL payload fresh."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
-        "OutputInvoiceCollectionReadModelFreshGateService.rows",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated output invoice collection payload."),
-    (
-        "backend/src/fin_ops_platform/services/tax_offset_worker_rebuild_executor.py",
-        "TaxOffsetWorkerRebuildExecutor._publish_fresh_cache",
-        "read_model_status=fresh",
-    ): (1, "worker rebuild publishes a freshly generated payload before writing a fresh cache envelope."),
-    (
-        "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
-        "CostStatisticsRuntimeService._cache_fresh_explorer_payload",
-        "read_model_status=fresh",
-    ): (1, "runtime helper caches only freshly built cost-statistics explorer payloads."),
-    (
-        "backend/src/fin_ops_platform/services/cost_tax_sql_projection.py",
-        "CostStatisticsSqlProjectionBuilder._publish_cost_statistics_scope",
-        "dict read_model_status=fresh",
-    ): (1, "projection builder publishes the read model it just rebuilt."),
-    (
-        "backend/src/fin_ops_platform/services/cost_tax_sql_projection.py",
-        "TaxOffsetSqlProjectionBuilder.rebuild_tax_offset_read_model_scope",
-        "dict read_model_status=fresh",
-    ): (1, "projection builder publishes the read model it just rebuilt."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_export_service.py",
-        "InputInvoiceUsageExportService.export_preview",
-        "dict readModelStatus=fresh",
-    ): (1, "export preview first collects pages and rejects non-fresh read-model payloads."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_export_service.py",
-        "InputInvoiceUsageExportService.export_preview",
-        "dict read_model_status=fresh",
-    ): (1, "export preview first collects pages and rejects non-fresh read-model payloads."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_service.py",
-        "OutputInvoiceCollectionQueryService.export_preview_for_rows",
-        "dict readModelStatus=fresh",
-    ): (1, "export preview is built from rows supplied by the fresh-gated all-rows read-model path."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_service.py",
-        "OutputInvoiceCollectionQueryService.export_preview_for_rows",
-        "dict read_model_status=fresh",
-    ): (1, "export preview is built from rows supplied by the fresh-gated all-rows read-model path."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_detail_service.py",
-        "OutputInvoiceCollectionReadModelDetailService.relation_details",
-        "read_model_status=fresh",
-    ): (1, "relation details are emitted fresh only after repository status and source-version checks pass."),
-    (
-        "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_detail_service.py",
-        "OutputInvoiceCollectionReadModelDetailService.relation_details",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated output invoice collection detail payload."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py",
-        "InputInvoiceUsageReadModelDetailService.relation_details",
-        "read_model_status=fresh",
-    ): (1, "detail service checks refresh_status and source versions before returning detail payload fresh."),
-    (
-        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_detail_service.py",
-        "InputInvoiceUsageReadModelDetailService.relation_details",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated detail payload."),
-    (
-        "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py",
-        "NoOaBankBatchApplicationService.list_batches_payload",
-        "dict read_model_status=fresh",
-    ): (2, "read-model rows are source-version checked; legacy live fallback is not a read-model projection."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.rows",
-        "read_model_status=fresh",
-    ): (1, "service checks refresh_status and source versions before marking rows fresh."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.rows",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated rows payload."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.all_rows",
-        "dict read_model_status=fresh",
-    ): (1, "all-rows helper returns fresh only after each page is fresh."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.all_rows",
-        "dict readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated all-rows payload."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.filter_options",
-        "read_model_status=fresh",
-    ): (1, "filter options are derived only after all_rows returned fresh."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.filter_options",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated filter-options payload."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService._detail",
-        "read_model_status=fresh",
-    ): (1, "detail service checks refresh_status and source versions before returning detail payload fresh."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService._detail",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated detail payload."),
-    (
-        "backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py",
-        "PendingInvoiceReadModelService.all_rows",
-        "dict read_model_status=fresh",
-    ): (1, "all-rows helper returns fresh only after every page is fresh."),
-    (
-        "backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py",
-        "PendingInvoiceReadModelService.filter_options",
-        "read_model_status=fresh",
-    ): (1, "filter options are derived only after rows gate returned fresh."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresBankReadModelRepository.get_bank_detail_tagged_rows_by_transaction_ids",
-        "dict read_model_status=fresh",
-    ): (1, "repository fact lookup exposes current read-model query result to downstream freshness facade."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresPendingInvoiceLifecycleReadModelRepository.get_invoice_lifecycle_rows_by_subject_ids",
-        "dict read_model_status=fresh",
-    ): (1, "repository fact lookup exposes matched rows from an already materialized read model."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresPendingInvoiceLifecycleReadModelRepository.get_invoice_lifecycle_rows_by_identity_keys",
-        "dict read_model_status=fresh",
-    ): (1, "repository fact lookup exposes matched rows from an already materialized read model."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresSearchWorkbenchRelationReadModelRepository.get_workbench_relation_rows_by_ids",
-        "dict read_model_status=fresh",
-    ): (1, "repository fact lookup exposes current relation rows to downstream freshness facade."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresSearchWorkbenchRelationReadModelRepository.get_workbench_relation_groups_by_ids",
-        "dict read_model_status=fresh",
-    ): (1, "repository fact lookup exposes current relation groups to downstream freshness facade."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresReadModelRepository._workbench_summary_from_payload",
-        "dict read_model_status=fresh",
-    ): (1, "repository shaper mirrors fresh workbench summary payload read from active generation metadata."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresSummaryReadModelRepository.list_turnover_ledger_view",
-        "dict read_model_status=fresh",
-    ): (1, "repository returns the turnover ledger view; query service applies source-version freshness gate."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresSummaryReadModelRepository.no_oa_bank_batch_source_versions_summary",
-        "dict read_model_status=fresh",
-    ): (1, "repository summary exposes source_versions metadata only after no-OA readiness is fresh."),
-    (
-        "backend/src/fin_ops_platform/services/read_model_query_gateway.py",
-        "build_fresh_cache_envelope",
-        "dict read_model_status=fresh",
-    ): (1, "shared helper is the only generic fresh cache envelope writer."),
-    (
-        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
-        "WorkbenchQueryFacade.group_detail",
-        "dict read_model_status=fresh",
-    ): (1, "facade returns group detail only after SQL active generation source/status gate passes."),
-    (
-        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
-        "WorkbenchQueryFacade._cached_groups_payload",
-        "read_model_status=fresh",
-    ): (1, "workbench groups page cache is separately gated by active generation cache version before use."),
-}
+DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {}
 
-SAFE_EXPECTED_SOURCE_VERSION_METHOD_CALLS = {
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.rows",
-    ),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService._detail",
-    ),
-    (
-        "backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py",
-        "PendingInvoiceReadModelService.rows",
-    ),
-}
+SAFE_EXPECTED_SOURCE_VERSION_METHOD_CALLS: set[tuple[str, str]] = set()
 
 SHARED_SOURCE_VERSION_COMPARATORS = {
     (
@@ -263,38 +34,9 @@ SHARED_SOURCE_VERSION_COMPARATORS = {
         "backend/src/fin_ops_platform/services/read_model_freshness.py",
         "resolve_read_model_freshness",
     ),
-    (
-        "backend/src/fin_ops_platform/services/read_model_query_gateway.py",
-        "_cached_payload_passes_fresh_gate",
-    ),
 }
 
-DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
-    (
-        "backend/src/fin_ops_platform/app/server.py",
-        "Application._enqueue_cost_statistics_read_model_refresh",
-    ): "legacy HTTP/app wrapper delegates to CostStatisticsRuntimeService, which uses ReadModelRefreshGateway.",
-    (
-        "backend/src/fin_ops_platform/app/server.py",
-        "Application._enqueue_tax_offset_read_model_refresh",
-    ): "legacy HTTP/app wrapper delegates to TaxOffsetRuntimeService, which uses ReadModelRefreshGateway.",
-    (
-        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
-        "CostStatisticsQueryService.get_explorer",
-    ): "production SQL repository miss delegates to CostStatisticsRuntimeService gateway wrapper.",
-    (
-        "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
-        "CostStatisticsRuntimeService.enqueue_refresh_for_months",
-    ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",
-    (
-        "backend/src/fin_ops_platform/services/tax_offset_query_service.py",
-        "TaxOffsetQueryService.get_month_payload",
-    ): "production SQL repository miss delegates to TaxOffsetRuntimeService gateway wrapper.",
-    (
-        "backend/src/fin_ops_platform/services/tax_offset_runtime_service.py",
-        "TaxOffsetRuntimeService.enqueue_refresh_for_months",
-    ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",
-}
+DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {}
 
 FRONTEND_DEFAULT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {}
 
@@ -302,7 +44,6 @@ REQUIRED_WRITE_TARGET_INVENTORY_MODULES = {
     "workbench",
     "batch-accounting",
     "bank-details",
-    "bank-account-balance",
     "pending-invoices",
     "input-invoice-usage",
     "oa-pending-payments",
@@ -322,9 +63,75 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
             "def list_input_invoice_usage_scope_shards(",
             "def mark_input_invoice_usage_scope_empty(",
             "def rebuild_input_invoice_usage_read_model_scope(",
+            "def _enqueue_input_invoice_usage_read_model_refresh(",
+            "def _invalidate_input_invoice_usage_oa_reverse_read_models(",
+            "def _enqueue_input_invoice_usage_payment_rules_refreshes(",
         }
 
         self.assertEqual([helper for helper in sorted(forbidden_helpers) if helper in server_source], [])
+
+    def test_oa_pending_payment_app_level_refresh_helper_does_not_return(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("def _enqueue_oa_pending_payment_read_model_refresh(", server_source)
+
+    def test_application_generic_read_model_refresh_gateway_does_not_return(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+
+        forbidden_snippets = {
+            "ReadModelRefreshGateway",
+            "def _read_model_refresh_gateway(",
+            "def _enqueue_generic_read_model_refreshes(",
+        }
+        self.assertEqual([snippet for snippet in sorted(forbidden_snippets) if snippet in server_source], [])
+
+    def test_runtime_worker_handler_generic_read_model_refresh_gateway_does_not_return(self) -> None:
+        source = (SOURCE_ROOT / "services" / "runtime_worker_handlers.py").read_text(encoding="utf-8")
+
+        forbidden_snippets = {
+            "ReadModelRefreshGateway",
+            "def _enqueue_scopes(",
+            "def _enqueue_domain(",
+        }
+        self.assertEqual([snippet for snippet in sorted(forbidden_snippets) if snippet in source], [])
+
+    def test_runtime_worker_dependency_refresh_gateway_does_not_return(self) -> None:
+        source = (SOURCE_ROOT / "services" / "runtime_worker.py").read_text(encoding="utf-8")
+
+        forbidden_snippets = {
+            "ReadModelRefreshGateway",
+            "_read_model_refresh_gateway",
+            "_enqueue_dependency_refreshes",
+            "read_model_refresh_is_active",
+            "read_model_refresh_is_fresh",
+            "enqueue_read_model_refresh(",
+            "dependency_refreshes",
+        }
+        self.assertEqual([snippet for snippet in sorted(forbidden_snippets) if snippet in source], [])
+
+    def test_read_model_refresh_gateway_module_is_removed(self) -> None:
+        self.assertFalse((SOURCE_ROOT / "services" / "read_model_refresh_gateway.py").exists())
+
+    def test_runtime_queue_read_model_refresh_methods_are_removed(self) -> None:
+        from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+
+        forbidden_methods = {
+            "enqueue_read_model_refresh",
+            "enqueue_read_model_refresh_in_transaction",
+            "complete_read_model_refresh",
+            "read_model_refresh_is_current",
+            "read_model_refresh_is_active",
+            "read_model_refresh_is_fresh",
+        }
+        self.assertEqual(
+            [name for name in sorted(forbidden_methods) if hasattr(RuntimeQueueRepository, name)],
+            [],
+        )
+
+    def test_pending_invoice_app_level_scope_list_helper_does_not_return(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("def _pending_invoice_read_model_scope_keys(", server_source)
 
     def test_output_invoice_collection_app_level_projection_helpers_do_not_return(self) -> None:
         server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
@@ -346,7 +153,7 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
             "upsert_read_model(",
             "_persist_tax_offset_read_models_best_effort(",
             "build_fresh_cache_envelope(",
-            "_runtime_redis_set_json_best_effort(",
+            "redis_set_json_best_effort(",
             "read_model_status",
         }
         self.assertEqual([snippet for snippet in sorted(forbidden_snippets) if snippet in helper_body], [])
@@ -375,6 +182,7 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         }
         self.assertEqual([snippet for snippet in sorted(forbidden_server_snippets) if snippet in helper_body], [])
         self.assertNotIn("def _run_tax_offset_cache_warmup_job(", server_source)
+        self.assertNotIn("def _invalidate_tax_offset_read_model_scopes(", server_source)
         self.assertNotIn("def _tax_offset_cache_warmup_enabled(", server_source)
         self.assertIn("TaxOffsetCacheWarmupExecutor(", server_source)
         self.assertIn("_tax_offset_cache_warmup_executor.schedule(months, reason=reason)", helper_body)
@@ -384,16 +192,24 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
             "def schedule(",
             "def run_job(",
             'job_type="tax_offset_cache_warmup"',
-            'operation="tax_offset_cache_warmup"',
             "FIN_OPS_TAX_OFFSET_CACHE_WARMUP_ENABLED",
             "create_or_get_idempotent_job_with_created(",
-            "upsert_read_model(",
-            "snapshot_scope_keys(",
             "succeed_job(",
             "update_progress(",
         }
         self.assertEqual(
             [snippet for snippet in sorted(required_executor_snippets) if snippet not in executor_source],
+            [],
+        )
+        forbidden_executor_snippets = {
+            "read_model_service:",
+            "self._read_model_service",
+            "upsert_legacy_read_model(",
+            "upsert_read_model(",
+            "snapshot_scope_keys(",
+        }
+        self.assertEqual(
+            [snippet for snippet in sorted(forbidden_executor_snippets) if snippet in executor_source],
             [],
         )
 
@@ -404,11 +220,17 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         helper_body = server_source[start:end]
 
         self.assertNotIn("cost_statistics_read_models", helper_body)
-        self.assertNotIn("_cost_statistics_read_model_service.snapshot()", helper_body)
+        self.assertNotIn("_cost_statistics_local_store.snapshot()", helper_body)
         self.assertNotIn("tax_offset_read_models", helper_body)
-        self.assertNotIn("_tax_offset_read_model_service.snapshot()", helper_body)
-        self.assertIn("def _persist_cost_statistics_read_models_best_effort(", server_source)
-        self.assertIn("def _persist_tax_offset_read_models_best_effort(", server_source)
+        self.assertNotIn("_tax_offset_local_store.snapshot()", helper_body)
+        self.assertNotIn("def _persist_cost_statistics_read_models_best_effort(", server_source)
+        self.assertNotIn("def _persist_tax_offset_read_models_best_effort(", server_source)
+
+    def test_cost_statistics_app_level_invalidation_wrappers_do_not_return(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("def _invalidate_cost_statistics_read_models(", server_source)
+        self.assertNotIn("def _invalidate_cost_statistics_read_model_scopes(", server_source)
 
     def test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist(self) -> None:
         server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
@@ -419,27 +241,21 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertNotIn('"no_oa_bank_batches"', helper_body)
         self.assertNotIn("_no_oa_bank_batch_service.snapshot()", helper_body)
 
-        service_source = (SOURCE_ROOT / "services" / "no_oa_bank_batch_read_model_refresh.py").read_text(encoding="utf-8")
         state_store_source = (SOURCE_ROOT / "services" / "state_store.py").read_text(encoding="utf-8")
         postgres_state_store_source = (SOURCE_ROOT / "services" / "postgres_state_store.py").read_text(encoding="utf-8")
-        self.assertIn("class NoOaBankBatchReadModelPersistencePort", service_source)
+        self.assertFalse((SOURCE_ROOT / "services" / "no_oa_bank_batch_read_model_refresh.py").exists())
         self.assertIn("def save_no_oa_bank_batch_mutation(", state_store_source)
         self.assertIn("def save_no_oa_bank_batch_mutation(", postgres_state_store_source)
 
-    def test_read_model_query_gateway_load_call_sites_declare_freshness_contract(self) -> None:
-        offenders: list[str] = []
-        for path in SOURCE_ROOT.rglob("*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                if not self._is_read_model_query_gateway_load(node.func):
-                    continue
-                keyword_names = {keyword.arg for keyword in node.keywords if keyword.arg}
-                if not {"expected_source_versions", "expected_schema_version"}.intersection(keyword_names):
-                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+    def test_read_model_query_gateway_is_removed(self) -> None:
+        self.assertFalse((SOURCE_ROOT / "services" / "read_model_query_gateway.py").exists())
 
-        self.assertEqual(offenders, [])
+    def test_oa_pending_payment_read_model_service_is_removed(self) -> None:
+        self.assertFalse((SOURCE_ROOT / "services" / "oa_pending_payment_read_model_service.py").exists())
+        self.assertFalse((SOURCE_ROOT / "services" / "oa_pending_payment_read_model_details.py").exists())
+
+    def test_pending_invoice_read_model_service_is_removed(self) -> None:
+        self.assertFalse((SOURCE_ROOT / "services" / "pending_invoice_read_model_service.py").exists())
 
     def test_read_model_services_do_not_default_source_version_contract_to_empty(self) -> None:
         offenders: list[str] = []
@@ -550,7 +366,7 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
             "exact predicate",
             "单事务",
             "post-restore verification",
-            "operation barrier",
+            "direct refetch",
             "PSCIP-L4",
             "./scripts/deploy-oa.sh",
         ]
@@ -640,19 +456,6 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
     @staticmethod
     def _is_expected_source_versions_method_call(node: ast.AST) -> bool:
         return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "expected_source_versions"
-
-    @staticmethod
-    def _is_read_model_query_gateway_load(func: ast.AST) -> bool:
-        if not isinstance(func, ast.Attribute) or func.attr != "load":
-            return False
-        value = func.value
-        if isinstance(value, ast.Call):
-            return _call_name(value.func) == "ReadModelQueryGateway"
-        if isinstance(value, ast.Attribute):
-            return value.attr in {"_read_model_query_gateway", "read_model_query_gateway"}
-        if isinstance(value, ast.Name):
-            return value.id in {"read_model_query_gateway"}
-        return False
 
     @staticmethod
     def _is_frontend_test_file(path: Path) -> bool:

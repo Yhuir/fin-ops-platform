@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from decimal import Decimal
 from http import HTTPStatus
 from io import BytesIO
@@ -17,28 +16,8 @@ from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.invoice_usage_collection_source_versions import output_invoice_collection_source_versions
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-
-
-class FailingOutputInvoiceCollectionQueryService:
-    def row_relation_details(self, *_args: object, **_kwargs: object) -> dict[str, object]:
-        raise AssertionError("relation detail must be served from output_invoice_collection read model")
-
-
-class RecordingReadModelRefreshQueue:
-    def __init__(self) -> None:
-        self.refreshes: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-        self.refreshes.append(
-            (
-                str(kwargs.get("scope_type") or ""),
-                str(kwargs.get("scope_key") or ""),
-                str(kwargs.get("reason") or ""),
-            )
-        )
 
 
 class FakeOutputRelationFacade:
@@ -60,7 +39,7 @@ class FakeOutputRelationFacade:
             payload = group["payload"]
             for row_id, row_type in zip(payload["row_ids"], payload["row_types"]):
                 rows.append({"row_id": row_id, "row_type": row_type, "relation_status": "linked", "group_ids": [group_id]})
-        return {"status": "fresh", "rows": rows, "groups": groups, "source_versions": {}, "read_model_scope_keys": []}
+        return {"status": "fresh", "rows": rows, "groups": groups, "source_versions": {}}
 
     @staticmethod
     def _group(relation: dict[str, Any]) -> dict[str, Any]:
@@ -86,7 +65,7 @@ class FakeOutputRelationFacade:
 
 
 class OutputInvoiceCollectionApiTests(unittest.TestCase):
-    def test_rows_route_returns_output_invoice_collection_read_model(self) -> None:
+    def test_rows_route_returns_direct_output_invoice_collection_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             self._install_service(
@@ -106,7 +85,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["readModelStatus"], "live_query")
+        self.assertNotIn("readModelStatus", payload)
         self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 1, "total": 2})
         self.assertEqual(payload["rows"][0]["invoiceId"], "out-api-1")
         self.assertEqual(payload["rows"][0]["invoice"]["buyerName"], "甲客户")
@@ -152,70 +131,6 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(sheet.cell(row=2, column=4).value, "甲客户")
         self.assertEqual(sheet.cell(row=3, column=2).value, "9003")
         self.assertIsNone(sheet.cell(row=4, column=2).value)
-
-    def test_export_rejects_row_count_over_contract_limit(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._install_service(app, invoices=[self._invoice("out-limit", "9101", "超量客户")])
-            row = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"][0]
-
-            def too_many_rows(_query: dict[str, list[str]]) -> dict[str, object]:
-                return {
-                    "rows": [deepcopy(row) for _index in range(20001)],
-                    "pagination": {"page": 1, "pageSize": 200, "total": 20001},
-                    "summary": {},
-                    "read_model_status": "fresh",
-                }
-
-            app._get_output_invoice_collection_all_rows_from_sql_read_model = too_many_rows
-            preview_response = app.handle_request("GET", "/api/output-invoice-collections/export-preview")
-            download_response = app.handle_request("GET", "/api/output-invoice-collections/export")
-
-        self.assertEqual(preview_response.status_code, 400)
-        self.assertEqual(
-            json.loads(preview_response.body)["error"]["code"],
-            "output_invoice_collection_export_row_limit_exceeded",
-        )
-        self.assertEqual(download_response.status_code, 400)
-        self.assertEqual(
-            json.loads(download_response.body)["error"]["details"]["limit"],
-            20000,
-        )
-
-    def test_export_and_filter_routes_preserve_refreshing_sql_read_model_payload(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._install_service(app, invoices=[self._invoice("out-refresh", "9201", "刷新客户")])
-
-            def refreshing_rows(_query: dict[str, list[str]]) -> dict[str, object]:
-                return {
-                    "rows": [],
-                    "pagination": {"page": 1, "pageSize": 50, "total": 0},
-                    "summary": {},
-                    "read_model_status": "refreshing",
-                    "read_model_scope_key": "all",
-                }
-
-            app._get_output_invoice_collection_all_rows_from_sql_read_model = refreshing_rows
-            filter_response = app.handle_request("GET", "/api/output-invoice-collections/filter-options")
-            preview_response = app.handle_request("GET", "/api/output-invoice-collections/export-preview")
-            download_response = app.handle_request("GET", "/api/output-invoice-collections/export")
-
-        filter_payload = json.loads(filter_response.body)
-        preview_payload = json.loads(preview_response.body)
-        download_payload = json.loads(download_response.body)
-        self.assertEqual(filter_response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(filter_payload["read_model_status"], "refreshing")
-        self.assertEqual(filter_payload["readModelStatus"], "refreshing")
-        self.assertEqual(preview_response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(preview_payload["read_model_status"], "refreshing")
-        self.assertEqual(preview_payload["readModelStatus"], "refreshing")
-        self.assertEqual(download_response.status_code, int(HTTPStatus.CONFLICT))
-        self.assertEqual(
-            download_payload["error"]["code"],
-            "output_invoice_collection_read_model_refreshing",
-        )
-        self.assertEqual(download_payload["error"]["details"]["readModelStatus"], "refreshing")
 
     def test_detail_rules_preview_history_and_relation_routes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -264,7 +179,11 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(json.loads(rules_response.body)["rules"][0]["label"], "开票已收款，冲红并退款")
         self.assertEqual(json.loads(invoice_response.body)["id"], "out-detail")
         self.assertEqual(json.loads(bank_response.body)["id"], "bank-detail")
-        self.assertEqual(json.loads(relation_response.body)["kind"], "bank")
+        relation_payload = json.loads(relation_response.body)
+        self.assertEqual(relation_payload["kind"], "bank")
+        self.assertNotIn("read_model_status", relation_payload)
+        self.assertNotIn("read_model_scope_keys", relation_payload)
+        self.assertNotIn("refresh_enqueued", relation_payload)
         self.assertTrue(json.loads(preview_response.body)["canPreview"])
         self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
         self.assertEqual(json.loads(history_response.body)["receipts"], [])
@@ -304,90 +223,6 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(
             {summary["invoiceId"] for summary in payload["summaries"]},
             {"out-relation-a", "out-relation-b", "out-relation-c"},
-        )
-
-    def test_relation_details_require_sql_repository_in_production_without_live_rebuild(self) -> None:
-        queue = RecordingReadModelRefreshQueue()
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._install_service(app, invoices=[self._invoice("out-prod-detail", "3101", "生产客户")])
-            app._bootstrap_mode = "production"
-            app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
-            app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
-            app._output_invoice_collection_sql_read_repository = None
-            app._output_invoice_collection_query_service.row_relation_details = (  # type: ignore[method-assign]
-                FailingOutputInvoiceCollectionQueryService().row_relation_details
-            )
-
-            response = app.handle_request(
-                "GET",
-                "/api/output-invoice-collections/rows/output-row-missing-repository/relation-details?kind=invoice",
-            )
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["readModelStatus"], "refreshing")
-        self.assertEqual(payload["detailAvailable"], False)
-        self.assertEqual(payload["read_model_scope_key"], "all")
-        self.assertEqual(
-            queue.refreshes,
-            [("output_invoice_collection", "all", "api_detail_sql_repository_unavailable")],
-        )
-
-    def test_relation_details_use_fresh_sql_read_model_row_without_live_rebuild(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._install_service(app, invoices=[self._invoice("out-prod-detail", "3101", "生产客户")])
-            app._bootstrap_mode = "production"
-            app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
-            app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": RecordingReadModelRefreshQueue()})()
-            app._output_invoice_collection_query_service.row_relation_details = (  # type: ignore[method-assign]
-                FailingOutputInvoiceCollectionQueryService().row_relation_details
-            )
-            app._output_invoice_collection_sql_read_repository = type(
-                "OutputCollectionReadRepository",
-                (),
-                {
-                    "get_output_invoice_collection_row_by_row_id": lambda _self, _row_id: {
-                        "row": {
-                            "id": "output-row-read-model",
-                            "invoiceId": "out-relation-read-model",
-                            "oa": {"relationCount": 0, "hasMultiple": False, "summaries": []},
-                            "bankTransactions": {"relationCount": 0, "hasMultiple": False, "summaries": []},
-                            "invoiceRelations": {
-                                "relationCount": 2,
-                                "hasMultiple": True,
-                                "detailMode": "list",
-                                "summaries": [
-                                    {"invoiceId": "out-related-a", "digitalInvoiceNo": "3001"},
-                                    {"invoiceId": "out-related-b", "digitalInvoiceNo": "3002"},
-                                ],
-                            },
-                            "redInvoiceRelation": {"relationCount": 0, "hasMultiple": False, "summaries": []},
-                            "receipt": {"sourceAvailable": False},
-                        },
-                        "refresh_status": "fresh",
-                        "source_versions": output_invoice_collection_source_versions(),
-                        "read_model_scope_key": "2026-05",
-                    },
-                },
-            )()
-
-            response = app.handle_request(
-                "GET",
-                "/api/output-invoice-collections/rows/output-row-read-model/relation-details?kind=invoice",
-            )
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(payload["read_model_scope_key"], "2026-05")
-        self.assertEqual(payload["rowId"], "output-row-read-model")
-        self.assertEqual(payload["relationCount"], 2)
-        self.assertEqual(
-            [summary["invoiceId"] for summary in payload["summaries"]],
-            ["out-related-a", "out-related-b"],
         )
 
     def test_detail_routes_require_output_collection_read_session(self) -> None:
@@ -529,10 +364,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
             )
             refreshed_row = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"][0]
 
-        expected_freshness = {
-            "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
-        }
+        expected_scope = ["2026-05"]
         status_payload = json.loads(status_response.body)
         reminder_payload = json.loads(reminder_response.body)
         red_relation_payload = json.loads(red_relation_response.body)
@@ -560,71 +392,20 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
             void_payload,
             reissue_payload,
         ]:
-            self.assertEqual({key: payload[key] for key in expected_freshness}, expected_freshness)
-        self.assertEqual(red_relation_delete_payload["read_model_scope_keys"], ["all"])
-        self.assertEqual(
-            red_relation_delete_payload["freshness_targets"],
-            [{"read_model_key": "output_invoice_collection", "scope_key": "all"}],
-        )
+            self.assertEqual(payload["affected_scope_keys"], expected_scope)
+            self.assertNotIn("read_model_scope_keys", payload)
+            self.assertNotIn("freshness_targets", payload)
+            self.assertNotIn("operation_barrier_targets", payload)
+        self.assertEqual(red_relation_delete_payload["affected_scope_keys"], ["all"])
+        self.assertNotIn("read_model_scope_keys", red_relation_delete_payload)
+        self.assertNotIn("freshness_targets", red_relation_delete_payload)
+        self.assertNotIn("operation_barrier_targets", red_relation_delete_payload)
         self.assertEqual(refreshed_row["collectionStatus"]["code"], "pending_red_invoice")
         self.assertIsNone(refreshed_row["collectionStatus"]["reminder"])
         self.assertFalse(any(item["source"] == "manual" for item in refreshed_row["redInvoiceRelation"]["summaries"]))
         self.assertEqual(refreshed_row["receipt"]["status"], "issued")
         self.assertTrue(json.loads(history_response.body)["sourceAvailable"])
         self.assertEqual([item["status"] for item in json.loads(history_response.body)["receipts"]], ["issued", "voided"])
-
-    def test_sql_fresh_rows_route_applies_lifecycle_overlay_before_response(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            invoice = self._invoice("out-sql-overlay", "4001", "SQL 覆盖客户", total_with_tax="100.00")
-            red_invoice = self._invoice("out-sql-red", "4002", "SQL 覆盖客户", total_with_tax="-100.00")
-            self._install_service(app, invoices=[invoice, red_invoice])
-            live_rows = json.loads(app.handle_request("GET", "/api/output-invoice-collections/rows").body)["rows"]
-            row = next(item for item in live_rows if item["invoiceId"] == "out-sql-overlay")
-            stale_sql_row = deepcopy(row)
-            stale_sql_row["invoiceIdentityKey"] = f"id:{row['invoiceId']}"
-
-            status_response = app.handle_request(
-                "PUT",
-                f"/api/output-invoice-collections/rows/{row['id']}/collection-status",
-                body=json.dumps(
-                    {
-                        "statusCode": "pending_red_invoice",
-                        "expectedCollectionDate": "2026-06-20",
-                        "note": "SQL fresh 路径也必须展示人工状态",
-                        "expectedVersion": 0,
-                    }
-                ),
-            )
-            relation_response = app.handle_request(
-                "POST",
-                f"/api/output-invoice-collections/rows/{row['id']}/red-invoice-relations",
-                body=json.dumps(
-                    {
-                        "relatedInvoiceIdentityKey": "id:out-sql-red",
-                        "relatedInvoiceId": "out-sql-red",
-                        "relationType": "red_invoice",
-                        "evidence": "SQL overlay 验证",
-                    }
-                ),
-            )
-            app._output_invoice_collection_sql_read_repository = _FreshOutputInvoiceCollectionSqlRepository([stale_sql_row])
-
-            response = app.handle_request("GET", "/api/output-invoice-collections/rows?month=2026-05")
-
-        payload = json.loads(response.body)
-        self.assertEqual(status_response.status_code, 200)
-        self.assertEqual(relation_response.status_code, 200)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["readModelStatus"], "fresh")
-        self.assertEqual(payload["rows"][0]["collectionStatus"]["manualOverride"]["note"], "SQL fresh 路径也必须展示人工状态")
-        red_relation_summaries = payload["rows"][0]["redInvoiceRelation"]["summaries"]
-        self.assertTrue(
-            any(
-                item.get("source") == "manual" and item.get("relatedInvoiceId") == "out-sql-red"
-                for item in red_relation_summaries
-            )
-        )
 
     @staticmethod
     def _install_service(
@@ -690,28 +471,3 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
             imported_bank_last4="1234",
             summary="服务费",
         )
-
-
-class _FreshOutputInvoiceCollectionSqlRepository:
-    def __init__(self, rows: list[dict[str, object]]) -> None:
-        self._rows = rows
-
-    def list_output_invoice_collection_rows(self, **kwargs: object) -> dict[str, object]:
-        page = int(kwargs.get("page") or 1)
-        page_size = int(kwargs.get("page_size") or 50)
-        return {
-            "rows": deepcopy(self._rows),
-            "pagination": {"page": page, "pageSize": page_size, "total": len(self._rows)},
-            "summary": {
-                "invoiceCount": len(self._rows),
-                "totalWithTax": "100.00",
-                "collectedAmount": "0.00",
-                "pendingAmount": "100.00",
-                "pendingCollectionCount": 1,
-                "partialCollectionCount": 0,
-                "receiptPendingCount": 0,
-            },
-            "filterConfig": [],
-            "read_model_status": "fresh",
-            "source_versions": output_invoice_collection_source_versions(),
-        }

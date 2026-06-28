@@ -89,6 +89,13 @@ EXPECTED_MIGRATIONS = [
     "0073_oa_pending_payment_bank_relations.sql",
     "0074_etc_batch_invoice_links.sql",
     "0075_etc_batch_invoice_links_runtime_grants.sql",
+    "0076_drop_legacy_workbench_projection_storage.sql",
+    "0077_drop_legacy_cost_tax_read_models.sql",
+    "0078_drop_legacy_no_oa_bank_batch_rows.sql",
+    "0079_drop_legacy_turnover_ledger_rows.sql",
+    "0080_drop_legacy_invoice_lifecycle_read_models.sql",
+    "0081_drop_legacy_workbench_relation_read_models.sql",
+    "0082_drop_legacy_read_model_runtime_state.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -97,7 +104,6 @@ EXPECTED_TABLES = [
     "job.background_jobs",
     "job.import_jobs",
     "job.workbench_matching_dirty_scopes",
-    "job.read_model_dirty_scopes",
     "job.runtime_worker_heartbeats",
     "staging.mongo_exports",
     "staging.mongo_raw_records",
@@ -160,20 +166,8 @@ EXPECTED_TABLES = [
     "app.oa_pending_payment_bank_relations",
     "app.bank_transaction_relation_claims",
     "app.oa_pending_payment_bank_relation_events",
-    "read_model.workbench_rows",
-    "read_model.workbench_groups",
-    "read_model.workbench_group_rows",
-    "read_model.workbench_generations",
-    "read_model.workbench_generation_stats",
-    "read_model.workbench_summary",
-    "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",
     "read_model.workbench_reconciliation_decisions",
-    "read_model.search_index_rows",
-    "read_model.pending_invoice_rows",
-    "read_model.pending_invoice_scopes",
-    "read_model.invoice_lifecycle_rows",
-    "read_model.invoice_lifecycle_scopes",
     "read_model.input_invoice_usage_rows",
     "read_model.input_invoice_usage_scopes",
     "read_model.output_invoice_collection_rows",
@@ -183,39 +177,8 @@ EXPECTED_TABLES = [
     "read_model.bank_detail_rows",
     "read_model.bank_detail_scopes",
     "read_model.bank_account_balances",
-    "read_model.cost_statistics_read_models",
-    "read_model.cost_statistics_rows",
-    "read_model.tax_offset_read_models",
-    "read_model.tax_offset_items",
-    "read_model.no_oa_bank_batch_rows",
-    "read_model.turnover_ledger_rows",
 ]
-READ_MODEL_STORAGE_CONTRACTS = {
-    "workbench": (
-        "read_model.workbench_generations",
-        "read_model.workbench_rows",
-        "read_model.workbench_groups",
-        "read_model.workbench_group_rows",
-        "read_model.workbench_summary",
-        "read_model.workbench_snapshots",
-    ),
-    "workbench_relation": ("read_model.workbench_reconciliation_decisions",),
-    "bank_detail": ("read_model.bank_detail_rows", "read_model.bank_detail_scopes"),
-    "bank_account_balance": ("read_model.bank_account_balances",),
-    "pending_invoice": ("read_model.pending_invoice_rows", "read_model.pending_invoice_scopes"),
-    "search": ("read_model.search_index_rows",),
-    "invoice_lifecycle": ("read_model.invoice_lifecycle_rows", "read_model.invoice_lifecycle_scopes"),
-    "input_invoice_usage": ("read_model.input_invoice_usage_rows", "read_model.input_invoice_usage_scopes"),
-    "output_invoice_collection": (
-        "read_model.output_invoice_collection_rows",
-        "read_model.output_invoice_collection_scopes",
-    ),
-    "oa_pending_payment": ("read_model.oa_pending_payment_rows", "read_model.oa_pending_payment_scopes"),
-    "cost_statistics": ("read_model.cost_statistics_read_models", "read_model.cost_statistics_rows"),
-    "tax_offset": ("read_model.tax_offset_read_models", "read_model.tax_offset_items"),
-    "no_oa_bank_batch": ("read_model.no_oa_bank_batch_rows",),
-    "turnover_ledger": ("read_model.turnover_ledger_rows",),
-}
+READ_MODEL_STORAGE_CONTRACTS: dict[str, tuple[str, ...]] = {}
 
 
 def migration_sql() -> str:
@@ -231,7 +194,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 76)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 83)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -248,12 +211,57 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("workbench_relation_rows_scope_status_type_idx", sql)
         self.assertIn("workbench_relation_groups_tenant_group_idx", sql)
 
-    def test_workbench_unused_write_indexes_are_dropped(self) -> None:
+    def test_legacy_workbench_projection_storage_is_dropped(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
 
+        self.assertIn("drop view if exists read_model.workbench_generation_consistency", sql)
+        for table in (
+            "read_model.workbench_generation_stats",
+            "read_model.workbench_group_rows",
+            "read_model.workbench_groups",
+            "read_model.workbench_rows",
+            "read_model.workbench_summary",
+            "read_model.workbench_snapshots",
+            "read_model.workbench_generations",
+        ):
+            self.assertIn(f"drop table if exists {table} cascade", sql)
         self.assertIn("drop index if exists read_model.workbench_rows_payload_gin", sql)
         self.assertIn("drop index if exists read_model.workbench_groups_searchable_text_trgm", sql)
         self.assertIn("drop index if exists read_model.workbench_group_rows_column_values_gin", sql)
+
+    def test_legacy_cost_tax_read_model_storage_is_dropped(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        for table in (
+            "read_model.cost_statistics_rows",
+            "read_model.cost_statistics_read_models",
+            "read_model.tax_offset_items",
+            "read_model.tax_offset_read_models",
+        ):
+            self.assertIn(f"drop table if exists {table} cascade", sql)
+
+    def test_legacy_no_oa_bank_batch_rows_storage_is_dropped(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("drop table if exists read_model.no_oa_bank_batch_rows cascade", sql)
+
+    def test_legacy_turnover_ledger_rows_storage_is_dropped(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("drop table if exists read_model.turnover_ledger_rows cascade", sql)
+
+    def test_legacy_invoice_lifecycle_read_model_storage_is_dropped(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("drop table if exists read_model.invoice_lifecycle_rows cascade", sql)
+        self.assertIn("drop table if exists read_model.invoice_lifecycle_scopes cascade", sql)
+
+    def test_legacy_workbench_relation_read_model_storage_is_dropped(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("drop table if exists read_model.workbench_relation_rows cascade", sql)
+        self.assertIn("drop table if exists read_model.workbench_relation_groups cascade", sql)
+        self.assertIn("drop table if exists read_model.workbench_relation_scopes cascade", sql)
 
     def test_app_health_dashboard_metrics_indexes_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
@@ -466,7 +474,6 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "oa_applications",
             "schema_migrations",
             "outbox_events_dedupe_uidx",
-            "read_model_dirty_scopes_active_uidx",
             "runtime_worker_heartbeats_worker_uidx",
             "job.sync_outbox_event_attempts()",
             "outbox_events_sync_attempts_trg",
@@ -474,7 +481,6 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "outbox_events_priority_chk",
             "outbox_events_schema_version_chk",
             "outbox_events_max_attempts_chk",
-            "read_model_dirty_scopes_priority_chk",
             "outbox_events_claim_priority_idx",
             "outbox_events_trace_idx",
             "runtime_outbox_envelope_v1",
@@ -506,12 +512,7 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "source_storage_uri",
             "verified_at",
             "tombstoned_at",
-            "grant select, insert, update on job.read_model_dirty_scopes to fin_ops_worker",
             "grant select, insert, update on job.runtime_worker_heartbeats to fin_ops_worker",
-            "grant select, insert, update, delete on read_model.workbench_groups to fin_ops_worker",
-            "grant select, insert, update, delete on read_model.workbench_groups to fin_ops_migrator",
-            "grant select, insert, update, delete on read_model.workbench_group_rows to fin_ops_worker",
-            "grant select, insert, update, delete on read_model.workbench_group_rows to fin_ops_migrator",
             "grant select, insert, update, delete on read_model.input_invoice_usage_rows to fin_ops_app_runtime",
             "grant select, insert, update, delete on read_model.output_invoice_collection_rows to fin_ops_app_runtime",
             "grant select, insert, update, delete on read_model.oa_pending_payment_rows to fin_ops_app_runtime",
@@ -520,31 +521,6 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update on app.matching_runs to fin_ops_app_runtime",
             "grant select, insert, update, delete on app.etc_batch_invoice_links to fin_ops_app_runtime",
             "create extension if not exists pg_stat_statements",
-            "create table if not exists read_model.workbench_summary",
-            "workbench_summary_scope_key_uidx",
-            "workbench_summary_scope_month_idx",
-            "workbench_summary_source_version_idx",
-            "on read_model.workbench_summary (((source_versions->>'source_version')::bigint))",
-            "grant select on read_model.workbench_summary to fin_ops_api",
-            "grant select, insert, update, delete on read_model.workbench_summary to fin_ops_worker",
-            "grant select on read_model.workbench_summary to fin_ops_readonly",
-            "grant select, insert, update, delete on read_model.workbench_summary to fin_ops_migrator",
-            "create table if not exists read_model.workbench_generations",
-            "workbench_generations_status_check",
-            "workbench_generations_consistency_status_check",
-            "create or replace view read_model.workbench_generation_consistency",
-            "create table if not exists read_model.workbench_generation_stats",
-            "workbench_generation_stats_scope_zone_status_uidx",
-            "workbench_generations_build_batch_idx",
-            "workbench_generations_consistency_status_idx",
-            "add column if not exists generation_id text",
-            "workbench_generations_active_scope_uidx",
-            "workbench_snapshots_generation_scope_uidx",
-            "workbench_summary_generation_scope_uidx",
-            "workbench_rows_generation_scope_row_uidx",
-            "workbench_groups_generation_scope_zone_group_uidx",
-            "workbench_group_rows_generation_scope_zone_group_pane_role_row_uidx",
-            "grant select on read_model.workbench_generations to fin_ops_api",
             "workbench_reconciliation_decisions_tenant_key_uidx",
             "workbench_reconciliation_decisions_scope_status_idx",
             "workbench_reconciliation_decisions_row_ids_gin",
@@ -567,6 +543,8 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "oa_applicant_credentials_target_uidx",
             "encrypted_password bytea",
             "grant select, insert, update, delete on app.oa_applicant_credentials to fin_ops_app_runtime",
+            "drop table if exists read_model.app_status_readiness cascade",
+            "drop table if exists job.read_model_dirty_scopes cascade",
         ):
             self.assertIn(required, sql)
 
@@ -845,8 +823,30 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             sql,
             flags=re.S,
         )
+        allowed_drop_tables = (
+            "read_model.workbench_generation_stats",
+            "read_model.workbench_group_rows",
+            "read_model.workbench_groups",
+            "read_model.workbench_rows",
+            "read_model.workbench_summary",
+            "read_model.workbench_snapshots",
+            "read_model.workbench_generations",
+            "read_model.cost_statistics_rows",
+            "read_model.cost_statistics_read_models",
+            "read_model.tax_offset_items",
+            "read_model.tax_offset_read_models",
+            "read_model.no_oa_bank_batch_rows",
+            "read_model.turnover_ledger_rows",
+            "read_model.invoice_lifecycle_rows",
+            "read_model.invoice_lifecycle_scopes",
+            "read_model.workbench_relation_rows",
+            "read_model.workbench_relation_groups",
+            "read_model.workbench_relation_scopes",
+        )
+        for table in allowed_drop_tables:
+            sql = sql.replace(f"drop table if exists {table} cascade", f"allowed_drop_table {table}")
         forbidden_patterns = [
-            r"\bdrop\s+(database|schema|table)\b",
+            r"\bdrop\s+(database|schema)\b",
             r"\btruncate\b",
             r"\bdelete\s+from\b",
             r"\balter\s+system\b",

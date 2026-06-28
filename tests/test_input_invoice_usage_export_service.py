@@ -30,7 +30,8 @@ class InputInvoiceUsageExportServiceTests(unittest.TestCase):
             sort_direction="desc",
         )
 
-        self.assertEqual(preview["readModelStatus"], "fresh")
+        self.assertNotIn("readModelStatus", preview)
+        self.assertNotIn("read_model_status", preview)
         self.assertEqual(preview["row_count"], 2)
         self.assertEqual(preview["columns"][0], "序号")
         self.assertEqual(preview["sample_rows"][0]["发票号码"], "3001")
@@ -56,17 +57,18 @@ class InputInvoiceUsageExportServiceTests(unittest.TestCase):
         self.assertEqual(sheet["F2"].value, "供应商甲")
         self.assertEqual(sheet["N2"].value, "未付")
 
-    def test_preview_returns_refreshing_payload_and_export_rejects_stale_read_model(self) -> None:
+    def test_preview_and_export_do_not_expose_legacy_page_freshness_fields(self) -> None:
         loader = RefreshingPageLoader()
         service = InputInvoiceUsageExportService(row_page_loader=loader)
 
         preview = service.export_preview(month="2026-05")
 
-        self.assertEqual(preview["readModelStatus"], "refreshing")
-        self.assertEqual(preview["read_model_scope_key"], "month:2026-05")
-        with self.assertRaises(InputInvoiceUsageExportError) as context:
-            service.export(month="2026-05")
-        self.assertEqual(context.exception.error_code, "input_invoice_usage_export_read_model_refreshing")
+        self.assertEqual(preview["row_count"], 0)
+        self.assertNotIn("readModelStatus", preview)
+        self.assertNotIn("read_model_scope_key", preview)
+        filename, content = service.export(month="2026-05")
+        self.assertTrue(filename.endswith(".xlsx"))
+        self.assertTrue(content)
 
     def test_row_limit_is_enforced_before_building_workbook(self) -> None:
         service = InputInvoiceUsageExportService(row_page_loader=StaticPageLoader([], total=INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT + 1))
@@ -75,6 +77,16 @@ class InputInvoiceUsageExportServiceTests(unittest.TestCase):
             service.export(month="2026-05")
 
         self.assertEqual(context.exception.error_code, "input_invoice_usage_export_row_limit_exceeded")
+
+    def test_loader_unavailable_error_uses_direct_rows_contract(self) -> None:
+        service = InputInvoiceUsageExportService(row_page_loader=lambda **_kwargs: None)
+
+        with self.assertRaises(InputInvoiceUsageExportError) as context:
+            service.export_preview(month="2026-05")
+
+        self.assertEqual(context.exception.error_code, "input_invoice_usage_export_rows_unavailable")
+        self.assertNotIn("read_model", context.exception.error_code)
+        self.assertNotIn("读模型", str(context.exception))
 
     @staticmethod
     def _row(row_id: str, invoice_id: str, invoice_no: str, seller_name: str, total_with_tax: str) -> dict[str, object]:
@@ -133,8 +145,6 @@ class StaticPageLoader:
         return {
             "rows": page_rows,
             "pagination": {"page": page, "pageSize": page_size, "total": total},
-            "read_model_status": "fresh",
-            "read_model_scope_key": "month:2026-05",
         }
 
 
@@ -142,10 +152,7 @@ class RefreshingPageLoader:
     def __call__(self, **_kwargs: object) -> dict[str, object]:
         return {
             "status": "refreshing",
-            "read_model_status": "refreshing",
-            "readModelStatus": "refreshing",
-            "read_model_scope_key": "month:2026-05",
-            "message": "进项发票使用情况读模型正在刷新。",
+            "message": "进项发票使用情况正在刷新。",
         }
 
 

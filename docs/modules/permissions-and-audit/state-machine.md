@@ -44,7 +44,7 @@
 - loading：SessionGate 显示 OA 会话校验；权限未确认前不渲染业务页面。
 - empty：权限配置列表为空时允许 admin 添加；非 admin 不展示管理入口。
 - error：session 校验失败显示 retry；API 403/401 显示明确权限或会话错误。
-- stale/refreshing：权限本身不走 read model；如果 App Status blocked，`useCanMutateWithHealth` 会阻断写入。
+- backend blocked：权限本身不走 read model；如果 App Status blocked，`useCanMutateWithHealth` 会阻断写入。
 - permission disabled/hidden：readonly 隐藏/禁用写入；full access 隐藏 admin-only；admin 显示高风险入口。
 - export：readonly export 用户可进入导出流程；写入型 drawer/dialog 不可用。
 

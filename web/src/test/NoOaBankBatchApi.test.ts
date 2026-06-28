@@ -198,7 +198,7 @@ describe("no OA bank batch API", () => {
       }),
     ]);
     expect(payload.pagination).toEqual({ page: 2, pageSize: 50, total: 125 });
-    expect(payload.readModelStatus).toBe("refreshing");
+    expect(Object.keys(payload).sort()).toEqual(["batches", "pagination", "summary"]);
   });
 
   test("maps legacy unsubmitted batch status to draft in the unsubmitted bucket", async () => {
@@ -455,9 +455,6 @@ describe("no OA bank batch API", () => {
       },
       affected_months: ["2026-05"],
       affected_scope_keys: ["2026-05"],
-      operation_barrier_targets: [
-        { read_model_key: "no_oa_bank_batch", scope_key: "2026-05" },
-      ],
       workbench_rebuild_queued: true,
       results: [],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
@@ -481,9 +478,6 @@ describe("no OA bank batch API", () => {
       }),
     );
     expect(submit.affectedScopeKeys).toEqual(["2026-05"]);
-    expect(submit.operationBarrierTargets).toEqual([
-      { readModelKey: "no_oa_bank_batch", scopeKey: "2026-05" },
-    ]);
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/no-oa-bank-batches/batch-fee-2026-05/withdraw",
@@ -523,9 +517,6 @@ describe("no OA bank batch API", () => {
         version: 2,
       },
       affected_months: ["2026-05"],
-      operation_barrier_targets: [
-        { read_model_key: "no_oa_bank_batch", scope_key: "2026-05" },
-      ],
       workbench_rebuild_queued: true,
       results: [{ batch_id: "batch-selected-fee", status: "submitted" }],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
@@ -541,9 +532,6 @@ describe("no OA bank batch API", () => {
       }),
     );
     expect(result.batch?.batchId).toBe("batch-selected-fee");
-    expect(result.operationBarrierTargets).toEqual([
-      { readModelKey: "no_oa_bank_batch", scopeKey: "2026-05" },
-    ]);
     expect(result.results).toEqual([{ batch_id: "batch-selected-fee", status: "submitted" }]);
   });
 

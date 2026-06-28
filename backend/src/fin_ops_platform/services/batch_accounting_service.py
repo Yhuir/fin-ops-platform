@@ -17,74 +17,11 @@ BATCH_ACCOUNTING_SOURCE = "batch_accounting"
 BATCH_ACCOUNTING_COUNTERPARTY_NAME = "批量账务集中处理"
 BATCH_ACCOUNTING_RELATION_REPAIR_ACTOR = "batch_accounting_relation_repair"
 
-_READ_MODEL_STATUS_PRIORITY = {
-    "fresh": 0,
-    "refreshing": 1,
-    "stale": 2,
-    "failed": 3,
-    "missing": 4,
-    "schema_mismatch": 5,
-    "unavailable": 6,
-}
-
-
 class BatchAccountingError(ValueError):
     def __init__(self, code: str, message: str | None = None, *, payload: dict[str, Any] | None = None) -> None:
         super().__init__(message or code)
         self.code = code
         self.payload = payload or {}
-
-
-@dataclass
-class _RelationReadModelStatus:
-    status: str = "fresh"
-    stale_reasons: list[str] | None = None
-    read_model_scope_keys: list[str] | None = None
-    refresh_enqueued: bool = False
-
-    def record(self, payload: dict[str, Any] | None) -> None:
-        if not isinstance(payload, dict):
-            return
-        status = str(payload.get("status") or payload.get("read_model_status") or "fresh").strip() or "fresh"
-        refresh_enqueued = bool(payload.get("refresh_enqueued") or payload.get("refreshEnqueued"))
-        stale_reasons = payload.get("stale_reasons") or payload.get("read_model_stale_reasons") or payload.get("readModelStaleReasons")
-        if _READ_MODEL_STATUS_PRIORITY.get(status, -1) > _READ_MODEL_STATUS_PRIORITY.get(self.status, -1):
-            self.status = status
-        self.refresh_enqueued = self.refresh_enqueued or refresh_enqueued
-        self.stale_reasons = _append_unique_strings(
-            self.stale_reasons or [],
-            stale_reasons,
-        )
-        if status != "fresh" or refresh_enqueued or bool(stale_reasons):
-            self.read_model_scope_keys = _append_unique_strings(
-                self.read_model_scope_keys or [],
-                payload.get("read_model_scope_keys") or payload.get("readModelScopeKeys"),
-            )
-
-    def as_payload(self) -> dict[str, Any]:
-        return {
-            "read_model_status": self.status,
-            "read_model_stale_reasons": list(self.stale_reasons or []),
-            "read_model_scope_keys": list(self.read_model_scope_keys or []),
-            "refresh_enqueued": self.refresh_enqueued,
-        }
-
-
-def _append_unique_strings(existing: list[str], values: Any) -> list[str]:
-    result = list(existing)
-    seen = set(result)
-    if isinstance(values, str):
-        iterable: Iterable[Any] = [values]
-    elif isinstance(values, Iterable):
-        iterable = values
-    else:
-        iterable = []
-    for value in iterable:
-        text = str(value or "").strip()
-        if text and text not in seen:
-            seen.add(text)
-            result.append(text)
-    return result
 
 
 @dataclass
@@ -97,7 +34,6 @@ class _WorkbenchContext:
     linked_row_ids: set[str]
     eligible_bank_rows: list[dict[str, Any]]
     eligible_oa_rows: list[dict[str, Any]]
-    relation_read_model_status: _RelationReadModelStatus
 
 
 class BatchAccountingService:
@@ -105,13 +41,11 @@ class BatchAccountingService:
         self,
         *,
         grouped_workbench_loader: Callable[[str], dict[str, Any]],
-        batch_workbench_loader: Callable[[str, str], dict[str, Any] | None] | None = None,
         case_id_provider: Callable[[str], str] | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
         self._grouped_workbench_loader = grouped_workbench_loader
-        self._batch_workbench_loader = batch_workbench_loader
         self._case_id_provider = case_id_provider or self._default_case_id_for_bank_row
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
@@ -250,7 +184,6 @@ class BatchAccountingService:
                 bank_pagination=bank_pagination,
                 oa_pagination=oa_pagination,
             ),
-            **context.relation_read_model_status.as_payload(),
         }
 
     @classmethod
@@ -359,7 +292,6 @@ class BatchAccountingService:
         normalized_bank_row_id = self._required_id(bank_row_id, "bank_row_id")
         normalized_oa_row_ids = self._normalize_ids(oa_row_ids)
         context = self._build_context(bank_year=resolved_bank_year, oa_year=resolved_oa_year)
-        self._ensure_relation_read_model_fresh(context.relation_read_model_status)
         bank_row = context.rows_by_id.get(normalized_bank_row_id)
         if not isinstance(bank_row, dict) or not self._is_batch_bank_row(bank_row, resolved_bank_year, require_unlinked=False):
             raise BatchAccountingError("invalid_batch_accounting_bank_row", "银行流水不符合批量账务提交条件。")
@@ -603,12 +535,6 @@ class BatchAccountingService:
             if relation_version is not None and relation_version != expected_version:
                 raise BatchAccountingError("batch_accounting_version_conflict", "关联版本已变化，请刷新后重试。")
         row_ids = self._normalize_ids(list(active_relation.get("row_ids") or []))
-        relation_read_model_status = self._relation_read_model_status_for_row_ids(
-            row_ids,
-            month_scope=str(active_relation.get("month_scope") or ""),
-            reason="batch_accounting_withdraw_relation_readiness",
-        )
-        self._ensure_relation_read_model_fresh(relation_read_model_status)
         if self._relation_command_service is None:
             raise BatchAccountingError(
                 "batch_accounting_relation_command_unavailable",
@@ -641,11 +567,7 @@ class BatchAccountingService:
         }
 
     def _build_context(self, *, bank_year: str, oa_year: str) -> _WorkbenchContext:
-        payload = None
-        if self._batch_workbench_loader is not None:
-            payload = self._batch_workbench_loader(bank_year=bank_year, oa_year=oa_year)
-        if not isinstance(payload, dict):
-            payload = self._grouped_workbench_loader("all")
+        payload = self._grouped_workbench_loader("all")
         groups = self._groups_from_payload(payload)
         rows_by_id: dict[str, dict[str, Any]] = {}
         bank_rows: list[dict[str, Any]] = []
@@ -654,7 +576,6 @@ class BatchAccountingService:
         seen_bank_row_ids: set[str] = set()
         seen_open_oa_row_ids: set[str] = set()
         seen_invoice_row_ids: set[str] = set()
-        relation_read_model_status = _RelationReadModelStatus()
         for group in groups:
             section = str(group.get("_section") or "")
             for row in list(group.get("bank_rows") or []):
@@ -699,10 +620,7 @@ class BatchAccountingService:
                 unique_invoice_rows.append(row)
             if section == "open":
                 self._index_group_invoice_links(unique_group_oa_rows, unique_invoice_rows, invoice_ids_by_oa_id)
-        linked_row_ids = self._linked_distribution_row_ids(
-            [*bank_rows, *open_oa_rows],
-            read_model_status=relation_read_model_status,
-        )
+        linked_row_ids = self._linked_distribution_row_ids([*bank_rows, *open_oa_rows])
         eligible_bank_rows = [
             row
             for row in bank_rows
@@ -727,7 +645,6 @@ class BatchAccountingService:
             linked_row_ids=linked_row_ids,
             eligible_bank_rows=eligible_bank_rows,
             eligible_oa_rows=eligible_oa_rows,
-            relation_read_model_status=relation_read_model_status,
         )
 
     @staticmethod
@@ -831,8 +748,6 @@ class BatchAccountingService:
     def _linked_distribution_row_ids(
         self,
         rows: list[dict[str, Any]],
-        *,
-        read_model_status: _RelationReadModelStatus,
     ) -> set[str]:
         row_ids = self._dedupe(
             str(row.get("id") or "").strip()
@@ -854,7 +769,6 @@ class BatchAccountingService:
             )
         except TypeError:
             payload = reader(row_ids)
-        read_model_status.record(payload if isinstance(payload, dict) else None)
         if not isinstance(payload, dict):
             return set()
         linked: set[str] = set()
@@ -888,7 +802,6 @@ class BatchAccountingService:
                 )
             except TypeError:
                 payload = list_by_month(month)
-            context.relation_read_model_status.record(payload if isinstance(payload, dict) else None)
             for relation in relation_dicts_from_distribution_payload(payload):
                 case_id = str(relation.get("case_id") or "").strip()
                 if not case_id or case_id in seen_case_ids or not self._is_batch_accounting_relation(relation):
@@ -918,10 +831,7 @@ class BatchAccountingService:
         bank_rows: list[dict[str, Any]] = []
         relations_by_bank_row_id: dict[str, Any] = {}
         bank_row_ids = [self._bank_row_id_for_relation(relation) for relation in relations]
-        distribution_rows = self._distribution_rows_by_bank_id(
-            bank_row_ids,
-            read_model_status=context.relation_read_model_status,
-        )
+        distribution_rows = self._distribution_rows_by_bank_id(bank_row_ids)
         for relation in relations:
             metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
             bank_row_id = self._bank_row_id_for_relation(relation)
@@ -964,8 +874,6 @@ class BatchAccountingService:
     def _distribution_rows_by_bank_id(
         self,
         bank_row_ids: list[str],
-        *,
-        read_model_status: _RelationReadModelStatus,
     ) -> dict[str, dict[str, Any]]:
         normalized_ids = []
         seen: set[str] = set()
@@ -983,7 +891,6 @@ class BatchAccountingService:
             payload = reader(normalized_ids, require_fresh=True, reason="batch_accounting_submitted_relations")
         except TypeError:
             payload = reader(normalized_ids)
-        read_model_status.record(payload if isinstance(payload, dict) else None)
         if not isinstance(payload, dict):
             return {}
         rows: dict[str, dict[str, Any]] = {}
@@ -1113,51 +1020,15 @@ class BatchAccountingService:
             invoice_row_ids.extend(context.invoice_ids_by_oa_id.get(oa_row_id, []))
         return self._dedupe(invoice_row_ids)
 
-    def _relation_read_model_status_for_row_ids(
-        self,
-        row_ids: list[str],
-        *,
-        month_scope: str,
-        reason: str,
-    ) -> _RelationReadModelStatus:
-        status = _RelationReadModelStatus()
-        normalized_row_ids = self._normalize_ids(list(row_ids or []))
-        if self._relation_facade is None:
-            return status
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
-        if not callable(reader):
-            return status
-        normalized_month_scope = str(month_scope or "").strip()
-        scope_keys_hint = [normalized_month_scope] if re.fullmatch(r"20\d{2}-\d{2}", normalized_month_scope) else []
-        try:
-            payload = reader(
-                normalized_row_ids,
-                require_fresh=True,
-                reason=reason,
-                month_hint=normalized_month_scope if scope_keys_hint else None,
-                scope_keys_hint=scope_keys_hint,
-            )
-        except TypeError:
-            payload = reader(normalized_row_ids)
-        status.record(payload if isinstance(payload, dict) else None)
-        return status
-
-    @staticmethod
-    def _ensure_relation_read_model_fresh(status: _RelationReadModelStatus) -> None:
-        if status.status == "fresh":
-            return
-        raise BatchAccountingError(
-            "batch_accounting_read_model_not_fresh",
-            f"关联台关系读模型 {status.status}，请刷新后再处理。",
-            payload=status.as_payload(),
-        )
-
     @staticmethod
     def _command_error(exc: WorkbenchRelationCommandError) -> BatchAccountingError:
-        if exc.error_code == "workbench_relation_read_model_not_fresh":
+        if exc.error_code in {
+            "workbench_relation_context_not_ready",
+            "workbench_relation_context_not_ready",
+        }:
             return BatchAccountingError(
-                "batch_accounting_read_model_not_fresh",
-                "关联台关系读模型不是 fresh，请刷新后再处理。",
+                "batch_accounting_relation_unavailable",
+                "关系状态正在更新，请刷新后重试。",
                 payload=dict(exc.payload),
             )
         if exc.error_code == "workbench_relation_active_row_conflict":

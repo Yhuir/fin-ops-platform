@@ -21,7 +21,7 @@ class FakeBatchRelationFacade:
     def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
         self.calls.append({"month": month, **kwargs})
         if month != "2026-01":
-            return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}, "read_model_scope_keys": [month]}
+            return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}}
         return self._payload()
 
     def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
@@ -71,8 +71,6 @@ class FakeBatchRelationFacade:
                     }
                 ],
                 "source_versions": {"schema_version": 52},
-                "read_model_scope_keys": ["2026-01"],
-                "refresh_enqueued": False,
                 "stale_reasons": [],
             }
         return {
@@ -121,49 +119,13 @@ class FakeBatchRelationFacade:
                 }
             ],
             "source_versions": {"schema_version": 52},
-            "read_model_scope_keys": ["2026-01"],
-            "refresh_enqueued": False,
             "stale_reasons": [],
         }
 
 
-class NonFreshBatchRelationFacade(FakeBatchRelationFacade):
-    def __init__(
-        self,
-        *,
-        status: str,
-        stale_reasons: list[str],
-        read_model_scope_keys: list[str] | None = None,
-        refresh_enqueued: bool | None = True,
-    ) -> None:
+class DirectBatchRelationFacade(FakeBatchRelationFacade):
+    def __init__(self) -> None:
         super().__init__(None)
-        self._status = status
-        self._stale_reasons = stale_reasons
-        self._read_model_scope_keys = read_model_scope_keys or ["2026-01"]
-        self._refresh_enqueued = refresh_enqueued
-
-    def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
-        payload = super().list_by_month(month, **kwargs)
-        if self._refresh_enqueued is None:
-            payload["refresh_enqueued"] = bool(kwargs.get("require_fresh"))
-        return payload
-
-    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
-        payload = super().get_by_row_ids(row_ids, **kwargs)
-        if self._refresh_enqueued is None:
-            payload["refresh_enqueued"] = bool(kwargs.get("require_fresh"))
-        return payload
-
-    def _payload(self) -> dict[str, object]:
-        return {
-            "status": self._status,
-            "rows": [],
-            "groups": [],
-            "source_versions": {},
-            "read_model_scope_keys": list(self._read_model_scope_keys),
-            "refresh_enqueued": bool(self._refresh_enqueued),
-            "stale_reasons": list(self._stale_reasons),
-        }
 
 
 class WriteBlockingPairRelationService(WorkbenchPairRelationService):
@@ -230,10 +192,6 @@ class RecordingBatchRelationCommandService:
             "changed_case_ids": [relation["case_id"]],
             "affected_months": ["2026-01"],
             "version": 1,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": ["2026-01"],
-            "refresh_enqueued": False,
             "idempotent_replay": False,
         }
 
@@ -254,10 +212,6 @@ class RecordingBatchRelationCommandService:
             "affected_row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
             "affected_months": ["2026-01"],
             "version": 2,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": ["2026-01"],
-            "refresh_enqueued": False,
             "idempotent_replay": False,
         }
 
@@ -515,32 +469,21 @@ class BatchAccountingApiTests(unittest.TestCase):
     def _app_with_grouped_payload(self) -> tuple[Application, patch]:
         app = build_application()
         payload_patcher = patch.object(app, "_build_api_workbench_payload", return_value=self._grouped_payload())
-        payload_patcher.start()
+        build_payload = payload_patcher.start()
         self.addCleanup(payload_patcher.stop)
         return app, payload_patcher
 
-    def test_unsubmitted_list_uses_sql_read_model_loader_when_available(self) -> None:
-        class SqlReadModel:
-            def __init__(self, payload: dict[str, object]) -> None:
-                self.payload = payload
-                self.calls: list[tuple[str, str]] = []
-
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str, oa_year: str) -> dict[str, object]:
-                self.calls.append((bank_year, oa_year))
-                return self.payload
-
+    def test_unsubmitted_list_uses_direct_workbench_loader(self) -> None:
         app = build_application()
-        sql_read_model = SqlReadModel(self._grouped_payload())
-        app._workbench_sql_read_repository = sql_read_model
-        payload_patcher = patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("full workbench loader must not run"))
-        payload_patcher.start()
+        payload_patcher = patch.object(app, "_build_api_workbench_payload", return_value=self._grouped_payload())
+        build_payload = payload_patcher.start()
         self.addCleanup(payload_patcher.stop)
 
         response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&oa_year=2025&bucket=unsubmitted")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(sql_read_model.calls, [("2026", "2025")])
+        build_payload.assert_called_once_with("all")
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
         self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-2025", "oa-exp-ba-2025b"])
 
@@ -592,7 +535,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(invalid_payload["error"], "invalid_paging")
         self.assertEqual(invalid_payload["message"], "page_size must be <= 200.")
 
-    def test_unsubmitted_list_deduplicates_sql_read_model_rows_by_row_id(self) -> None:
+    def test_unsubmitted_list_deduplicates_direct_workbench_rows_by_row_id(self) -> None:
         duplicate_payload = self._grouped_payload()
         group = duplicate_payload["open"]["groups"][0]
         group["bank_rows"] = [group["bank_rows"][0], {**group["bank_rows"][0], "version": 2}]
@@ -615,26 +558,16 @@ class BatchAccountingApiTests(unittest.TestCase):
             },
         ]
 
-        class SqlReadModel:
-            def __init__(self) -> None:
-                self.calls: list[tuple[str, str]] = []
-
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str, oa_year: str) -> dict[str, object]:
-                self.calls.append((bank_year, oa_year))
-                return duplicate_payload
-
         app = build_application()
-        sql_read_model = SqlReadModel()
-        app._workbench_sql_read_repository = sql_read_model
-        payload_patcher = patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("SQL loader should be used"))
-        payload_patcher.start()
+        payload_patcher = patch.object(app, "_build_api_workbench_payload", return_value=duplicate_payload)
+        build_payload = payload_patcher.start()
         self.addCleanup(payload_patcher.stop)
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(sql_read_model.calls, [("2026", "2026")])
+        build_payload.assert_called_once_with("all")
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
         self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003"])
 
@@ -715,61 +648,46 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(payload["bank_rows"], [])
         self.assertEqual(payload["summary"]["unsubmitted_count"], 0)
 
-    def test_unsubmitted_list_exposes_relation_read_model_missing_status(self) -> None:
+    def test_unsubmitted_list_omits_relation_freshness_fields(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_relation_facade = NonFreshBatchRelationFacade(
-            status="missing",
-            stale_reasons=["read_model_missing"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=True,
-        )
+        app._workbench_relation_facade = DirectBatchRelationFacade()
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "missing")
-        self.assertEqual(payload["read_model_stale_reasons"], ["read_model_missing"])
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-01"])
-        self.assertIs(payload["refresh_enqueued"], True)
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("refresh_enqueued", payload)
 
-    def test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh(self) -> None:
+    def test_unsubmitted_list_still_requests_relation_context_without_exposing_freshness(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
-        facade = NonFreshBatchRelationFacade(
-            status="missing",
-            stale_reasons=["read_model_missing"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=None,
-        )
+        facade = DirectBatchRelationFacade()
         app._workbench_relation_facade = facade
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "missing")
-        self.assertIs(payload["refresh_enqueued"], True)
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("refresh_enqueued", payload)
         self.assertTrue(
             any(call.get("row_ids") and call.get("require_fresh") is True for call in facade.calls),
             facade.calls,
         )
 
-    def test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh(self) -> None:
+    def test_submitted_list_still_requests_relation_context_without_exposing_freshness(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
-        facade = NonFreshBatchRelationFacade(
-            status="stale",
-            stale_reasons=["dirty_scope:2026-01"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=None,
-        )
+        facade = DirectBatchRelationFacade()
         app._workbench_relation_facade = facade
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertIs(payload["refresh_enqueued"], True)
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("refresh_enqueued", payload)
         self.assertTrue(
             any(call.get("month") == "2026-01" and call.get("require_fresh") is True for call in facade.calls),
             facade.calls,
@@ -955,22 +873,13 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         self.assertEqual(payload["affected_months"], ["2026-01", "all"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-01", "all"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [
-                {"read_model_key": "workbench_relation", "scope_key": "2026-01"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
-            ],
-        )
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
 
-    def test_submit_rejects_when_relation_read_model_is_not_fresh(self) -> None:
+    def test_submit_uses_canonical_command_service_with_relation_context(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_relation_facade = NonFreshBatchRelationFacade(
-            status="missing",
-            stale_reasons=["read_model_missing"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=True,
-        )
+        app._workbench_relation_facade = DirectBatchRelationFacade()
 
         response = app.handle_request(
             "POST",
@@ -986,13 +895,13 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, 400, response.body)
-        self.assertEqual(payload["error"], "batch_accounting_read_model_not_fresh")
-        self.assertEqual(payload["read_model_status"], "missing")
-        self.assertEqual(payload["read_model_stale_reasons"], ["read_model_missing"])
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-01"])
-        self.assertIs(payload["refresh_enqueued"], True)
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001"))
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["action"], "submit_batch_accounting")
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("refresh_enqueued", payload)
+        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001"))
 
     def test_submit_matched_amount_ignores_supplied_difference_note(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -1415,23 +1324,18 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertTrue(month_calls)
         self.assertIn({"row_ids": ["txn_imported_202601_batch_001"], "require_fresh": True, "reason": "batch_accounting_submitted_relations"}, facade.calls)
 
-    def test_submitted_list_exposes_relation_read_model_stale_status(self) -> None:
+    def test_submitted_list_omits_relation_freshness_fields(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
-        app._workbench_relation_facade = NonFreshBatchRelationFacade(
-            status="stale",
-            stale_reasons=["dirty_scope:2026-01"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=True,
-        )
+        app._workbench_relation_facade = DirectBatchRelationFacade()
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertEqual(payload["read_model_stale_reasons"], ["dirty_scope:2026-01"])
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-01"])
-        self.assertIs(payload["refresh_enqueued"], True)
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("refresh_enqueued", payload)
 
     def test_submitted_list_exposes_mismatch_note_and_amount_check(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -1476,13 +1380,9 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(payload["action"], "withdraw_batch_accounting")
         self.assertEqual(payload["affected_scope_keys"], ["2026-01", "all"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [
-                {"read_model_key": "workbench_relation", "scope_key": "2026-01"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
-            ],
-        )
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
         self.assertEqual(payload["restored_relations"], [])
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-ba-001"))
@@ -1603,7 +1503,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400, response.body)
         self.assertEqual(json.loads(response.body)["error"], "batch_accounting_relation_not_found")
 
-    def test_withdraw_rejects_when_relation_read_model_is_not_fresh(self) -> None:
+    def test_withdraw_uses_canonical_command_service_with_relation_context(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
         app._workbench_pair_relation_service.create_active_relation(
             case_id="CASE-BATCH-txn_imported_202601_batch_001",
@@ -1619,12 +1519,7 @@ class BatchAccountingApiTests(unittest.TestCase):
                 "year": "2026",
             },
         )
-        app._workbench_relation_facade = NonFreshBatchRelationFacade(
-            status="stale",
-            stale_reasons=["dirty_scope:2026-01"],
-            read_model_scope_keys=["2026-01"],
-            refresh_enqueued=True,
-        )
+        app._workbench_relation_facade = DirectBatchRelationFacade()
 
         response = app.handle_request(
             "POST",
@@ -1633,13 +1528,13 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, 400, response.body)
-        self.assertEqual(payload["error"], "batch_accounting_read_model_not_fresh")
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertEqual(payload["read_model_stale_reasons"], ["dirty_scope:2026-01"])
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-01"])
-        self.assertIs(payload["refresh_enqueued"], True)
-        self.assertIsNotNone(
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["action"], "withdraw_batch_accounting")
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("refresh_enqueued", payload)
+        self.assertIsNone(
             app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BATCH-txn_imported_202601_batch_001")
         )
 

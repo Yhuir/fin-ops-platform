@@ -13,7 +13,7 @@ class P2P3GateResultClassifierTests(unittest.TestCase):
     def test_classifies_configuration_missing_as_environment_required(self) -> None:
         payload = p2p3_gate_result_classifier.classify_gate_result({
             "status": "configuration_missing",
-            "tool": "read_model_slo_smoke",
+            "tool": "write_operation_slo_audit",
             "error": "postgres_configuration_missing",
             "blocking_condition": "database_url_required",
             "required_env": ["FIN_OPS_POSTGRES_DATABASE_URL"],
@@ -22,7 +22,7 @@ class P2P3GateResultClassifierTests(unittest.TestCase):
         })
 
         self.assertEqual(payload["classification"], "environment-required")
-        self.assertEqual(payload["source_tool"], "read_model_slo_smoke")
+        self.assertEqual(payload["source_tool"], "write_operation_slo_audit")
         self.assertEqual(payload["blocking_condition"], "database_url_required")
         self.assertEqual(payload["next_actions"], ["provide db url"])
         self.assertEqual(payload["forbidden_without_approval"], ["database writes"])
@@ -71,7 +71,7 @@ class P2P3GateResultClassifierTests(unittest.TestCase):
         })
         durable = p2p3_gate_result_classifier.classify_gate_result({
             "status": "fail",
-            "failed_checks": ["read_model_direct_smoke"],
+            "failed_checks": ["write_operation_audit"],
         })
 
         self.assertEqual(runtime["classification"], "runtime-repair-or-deploy-required")

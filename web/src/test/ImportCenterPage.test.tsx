@@ -67,6 +67,10 @@ function getFileOverrides(formData: FormData) {
   return JSON.parse(String(formData.get("file_overrides")));
 }
 
+function fetchCallCount(fetchMock: ReturnType<typeof installMockApiFetch>, path: string) {
+  return fetchMock.mock.calls.filter(([url]) => String(url).startsWith(path)).length;
+}
+
 function expectProjectImportShell() {
   const page = screen.getByTestId("import-workflow-page");
   expect(page).toHaveClass("import-workflow-page");
@@ -329,6 +333,32 @@ describe("Import pages", () => {
     await user.click(screen.getByRole("button", { name: "确认导入" }));
 
     expect(await screen.findByText("预览后数据已变化，请重新预览后再确认。")).toBeInTheDocument();
+  });
+
+  test("file import confirm refreshes workbench directly without operation barrier polling", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderAppAt("/imports/invoices");
+
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
+      new File(["invoice-output"], "一月发票.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        lastModified: 1,
+      }),
+    ]);
+    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+    expect(await screen.findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
+
+    const workbenchCallsBeforeConfirm = fetchCallCount(fetchMock, "/api/workbench?");
+    await user.click(screen.getByRole("button", { name: "确认导入" }));
+
+    expect(await screen.findByText("已确认导入")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, "/api/workbench?")).toBeGreaterThan(workbenchCallsBeforeConfirm);
+    });
   });
 
   test("invoice import keeps selected files and preview when navigating away and back", async () => {

@@ -456,7 +456,7 @@ def _wait_for_write_slo(
     last_results: list[Any] = []
     last_rows: list[dict[str, Any]] = []
     while True:
-        rows = write_operation_slo_audit.recent_read_model_refresh_events_since(
+        rows = write_operation_slo_audit.recent_write_operation_events_since(
             connection,
             tenant_id=tenant_id,
             started_at=started_at,

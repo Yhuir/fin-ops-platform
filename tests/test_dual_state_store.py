@@ -127,7 +127,7 @@ class DualStateStoreTests(unittest.TestCase):
         payload = {"rows": {"case-1": {"case_id": "case-1"}}}
         changed_scope_keys = {"2026-05"}
 
-        store.save_workbench_read_models(payload, changed_scope_keys=changed_scope_keys)
+        store.save_workbench_candidate_matches(payload, changed_scope_keys=changed_scope_keys)
 
         self.assertEqual(primary.calls, mirror.calls)
         self.assertIs(primary.calls[0][1][0], payload)
@@ -147,10 +147,7 @@ class DualStateStoreTests(unittest.TestCase):
             "save_no_oa_bank_batches",
             "save_bank_transaction_categories",
             "save_turnover_relations",
-            "save_workbench_read_models",
             "save_workbench_candidate_matches",
-            "save_cost_statistics_read_models",
-            "save_tax_offset_read_models",
             "save_background_jobs",
             "save_app_health_alerts",
         ]

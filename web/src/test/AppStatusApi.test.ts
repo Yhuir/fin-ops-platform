@@ -112,7 +112,7 @@ describe("app status API mapper", () => {
     });
   });
 
-  test("maps read model scope diagnostics for app status domains", () => {
+  test("maps app status domains without page readiness diagnostics", () => {
     const mapped = mapAppStatusOverview({
       version: 1,
       generated_at: "2026-06-04T10:00:00+08:00",
@@ -131,24 +131,6 @@ describe("app status API mapper", () => {
           status: "failed",
           reason: "成本统计局部分片需要重试",
           details: ["active:2026-05: projection failed"],
-          read_models: ["cost_statistics"],
-          read_model_scopes: [
-            {
-              read_model_key: "cost_statistics",
-              scope_type: "cost_statistics",
-              scope_key: "active:all",
-              status: "fresh",
-              updated_at: "2026-06-04T10:03:00+08:00",
-            },
-            {
-              read_model_key: "cost_statistics",
-              scope_type: "cost_statistics",
-              scope_key: "active:2026-05",
-              status: "failed",
-              last_error: "projection failed",
-              updated_at: "2026-06-04T10:05:00+08:00",
-            },
-          ],
           workers: ["cost-tax"],
           job_ids: [],
           updated_at: "2026-06-04T10:05:00+08:00",
@@ -158,48 +140,31 @@ describe("app status API mapper", () => {
       alerts: [],
     });
 
-    expect(mapped?.domains[0].readModelScopes).toEqual([
-      {
-        readModelKey: "cost_statistics",
-        scopeType: "cost_statistics",
-        scopeKey: "active:all",
-        status: "fresh",
-        lastError: "",
-        updatedAt: "2026-06-04T10:03:00+08:00",
-      },
-      {
-        readModelKey: "cost_statistics",
-        scopeType: "cost_statistics",
-        scopeKey: "active:2026-05",
-        status: "failed",
-        lastError: "projection failed",
-        updatedAt: "2026-06-04T10:05:00+08:00",
-      },
+    expect(Object.keys(mapped?.domains[0] ?? {}).sort()).toEqual([
+      "details",
+      "jobIds",
+      "key",
+      "label",
+      "level",
+      "reason",
+      "route",
+      "status",
+      "updatedAt",
+      "workers",
     ]);
   });
 
-  test("maps runtime summary counts from snake_case app status payload", () => {
+  test("maps worker and queue runtime summary counts from snake_case app status payload", () => {
     const mapped = mapAppStatusOverview({
       version: 1,
       generated_at: "2026-06-04T10:00:00+08:00",
       overall: {
         level: "busy",
         color: "yellow",
-        reason: "Read model 正在刷新",
+        reason: "后台任务处理中",
         blocks_mutations: false,
       },
       runtime_summary: {
-        read_models: {
-          total: 4,
-          fresh: 1,
-          refreshing: 1,
-          stale: 0,
-          missing: 1,
-          failed: 1,
-          unavailable: 0,
-          issue_count: 3,
-          scope_issue_count: 1,
-        },
         workers: {
           total: 4,
           required: 3,
@@ -225,22 +190,7 @@ describe("app status API mapper", () => {
       alerts: [],
     });
 
-    expect(mapped?.runtimeSummary.readModels).toEqual({
-      total: 4,
-      fresh: 1,
-      ready: 0,
-      idle: 0,
-      working: 0,
-      refreshing: 1,
-      stale: 0,
-      missing: 1,
-      failed: 1,
-      unavailable: 0,
-      mismatched: 0,
-      required: 0,
-      issueCount: 3,
-      scopeIssueCount: 1,
-    });
+    expect(Object.keys(mapped?.runtimeSummary ?? {}).sort()).toEqual(["queue", "workers"]);
     expect(mapped?.runtimeSummary.workers).toMatchObject({
       total: 4,
       required: 3,

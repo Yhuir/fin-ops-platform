@@ -27,12 +27,12 @@ def event(**overrides: object) -> RuntimeQueueEvent:
     payload = {
         "event_id": "event-1",
         "tenant_id": "default",
-        "event_type": "workbench.read_model.refresh",
+        "event_type": "oa.sync",
         "aggregate_type": "read_model",
         "aggregate_id": "all",
-        "scope_type": "workbench",
+        "scope_type": "oa",
         "scope_key": "all",
-        "dedupe_key": "workbench.read_model.refresh:workbench:all",
+        "dedupe_key": "oa.sync:oa:all",
         "payload": {"source_version": 3},
         "attempts": 0,
         "status": "pending",
@@ -194,7 +194,6 @@ class RabbitMqRuntimeTests(unittest.TestCase):
                 "FIN_OPS_QUEUE_BACKEND": "rabbitmq",
                 "RABBITMQ_URL": "amqp://rabbitmq.internal",
                 "RABBITMQ_EXCHANGE": "finops.events",
-                "RABBITMQ_WORKBENCH_ROUTING_KEY": "workbench.read_model.refresh",
             }
         )
         channel = FakeChannel()
@@ -203,12 +202,12 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         result = publisher.publish(event().to_envelope())
 
         self.assertEqual(result.exchange, "finops.events")
-        self.assertEqual(result.routing_key, "workbench.read_model.refresh")
+        self.assertEqual(result.routing_key, "oa.sync")
         self.assertEqual(result.message_id, "event-1")
         self.assertTrue(channel.confirmed)
         call = channel.calls[0][1]
         self.assertEqual(call["exchange"], "finops.events")
-        self.assertEqual(call["routing_key"], "workbench.read_model.refresh")
+        self.assertEqual(call["routing_key"], "oa.sync")
         self.assertEqual(call["mandatory"], True)
         self.assertIn(b'"event_id":"event-1"', call["body"])
 
@@ -241,9 +240,8 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(call_names.count("queue_declare"), len(SUPPORTED_EVENT_TYPES) * 2)
         self.assertEqual(call_names.count("queue_bind"), len(SUPPORTED_EVENT_TYPES) * 2)
         declared_queues = [kwargs["queue"] for name, kwargs in channel.calls if name == "queue_declare"]
-        self.assertIn("finops.workbench.read_model.refresh", declared_queues)
-        self.assertIn("finops.search.read_model.refresh", declared_queues)
-        self.assertIn("finops.bank_detail.read_model.refresh", declared_queues)
+        self.assertIn("finops.oa.sync", declared_queues)
+        self.assertNotIn("finops.bank_detail.read_model.refresh", declared_queues)
         self.assertIn("finops.oa.sync.dlq", declared_queues)
         self.assertIn("finops.import.process.requested", declared_queues)
 
@@ -281,28 +279,16 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["event_types"], list(SUPPORTED_EVENT_TYPES))
-        self.assertEqual(payload["event_routes"]["search.read_model.refresh"]["queue"], "finops.search.read_model.refresh")
+        self.assertNotIn("search.read_model.refresh", payload["event_routes"])
 
-    def test_rabbitmq_routes_include_pending_invoice_read_model_refresh(self) -> None:
+    def test_rabbitmq_routes_exclude_pending_invoice_read_model_refresh(self) -> None:
         settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
         routes = rabbitmq_event_routes(settings)
         topology = RabbitMqTopologyManager(settings).plan()
 
-        self.assertIn("pending_invoice.read_model.refresh", SUPPORTED_EVENT_TYPES)
-        self.assertEqual(
-            routes["pending_invoice.read_model.refresh"].queue,
-            "finops.pending_invoice.read_model.refresh",
-        )
-        self.assertIn(
-            {
-                "event_type": "pending_invoice.read_model.refresh",
-                "queue": "finops.pending_invoice.read_model.refresh",
-                "routing_key": "pending_invoice.read_model.refresh",
-                "dead_letter_queue": "finops.pending_invoice.read_model.refresh.dlq",
-                "dead_letter_routing_key": "pending_invoice.read_model.refresh.dead",
-            },
-            topology["queues"],
-        )
+        self.assertNotIn("pending_invoice.read_model.refresh", SUPPORTED_EVENT_TYPES)
+        self.assertNotIn("pending_invoice.read_model.refresh", routes)
+        self.assertFalse(any(item["event_type"] == "pending_invoice.read_model.refresh" for item in topology["queues"]))
 
     def test_consumer_subscribes_to_queues_for_registered_event_types(self) -> None:
         queue = FakeQueue()
@@ -313,13 +299,13 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=FakeWorker(),
             worker_id="worker-1",
-            event_types=["search.read_model.refresh", "pending_invoice.read_model.refresh"],
+            event_types=["oa.sync"],
             lock_timeout_seconds=300,
         )
 
         self.assertEqual(
             consumer._queue_names_for_event_types(),
-            ["finops.search.read_model.refresh", "finops.pending_invoice.read_model.refresh"],
+            ["finops.oa.sync"],
         )
 
     def test_consumer_claims_postgres_event_before_acknowledging_rabbitmq(self) -> None:
@@ -332,7 +318,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=worker,
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["oa.sync"],
             lock_timeout_seconds=300,
         )
 
@@ -355,7 +341,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=worker,
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["oa.sync"],
             lock_timeout_seconds=300,
         )
 
@@ -375,7 +361,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=FakeWorker(),
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["oa.sync"],
             lock_timeout_seconds=45,
         )
 
@@ -392,7 +378,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=FakeQueue(),
             worker=worker,
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["oa.sync"],
             lock_timeout_seconds=45,
         )
 
@@ -419,7 +405,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=FakeQueue(),
             worker=worker,
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["oa.sync"],
             lock_timeout_seconds=45,
         )
 
@@ -458,7 +444,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=FakeQueue(),
             worker=worker,
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["oa.sync"],
             lock_timeout_seconds=300,
         )
 
@@ -466,7 +452,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
 
         self.assertEqual(worker.heartbeats[0][0], "idle")
         self.assertEqual(worker.heartbeats[0][1]["transport"], "rabbitmq")
-        self.assertEqual(worker.heartbeats[0][1]["event_types"], ["workbench.read_model.refresh"])
+        self.assertEqual(worker.heartbeats[0][1]["event_types"], ["oa.sync"])
 
     def test_consumer_exits_cleanly_on_keyboard_interrupt(self) -> None:
         worker = FakeWorker()
@@ -479,7 +465,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=FakeQueue(),
             worker=worker,
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["oa.sync"],
             lock_timeout_seconds=300,
         )
 
@@ -505,7 +491,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=FakeWorker(),
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh"],
+            event_types=["oa.sync"],
             lock_timeout_seconds=300,
         )
 
@@ -517,8 +503,9 @@ class RabbitMqRuntimeTests(unittest.TestCase):
     def test_management_metrics_aggregates_all_supported_queues(self) -> None:
         routes = rabbitmq_event_routes(RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"}))
 
-        self.assertEqual(routes["cost_statistics.read_model.refresh"].routing_key, "cost_statistics.read_model.refresh")
-        self.assertEqual(routes["tax_offset.read_model.refresh"].queue, "finops.tax_offset.read_model.refresh")
+        self.assertNotIn("turnover_ledger.read_model.refresh", routes)
+        self.assertNotIn("workbench_relation.read_model.refresh", routes)
+        self.assertEqual(routes["oa.sync"].queue, "finops.oa.sync")
 
 
 if __name__ == "__main__":

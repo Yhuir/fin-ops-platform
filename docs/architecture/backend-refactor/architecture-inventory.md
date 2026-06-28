@@ -40,7 +40,7 @@ PF-P045 重新校准了 `PF-P044-MG` 后进入 `main` 的新增后端事实。�
 
 | 模块 | 新增事实 | 重构影响 |
 | --- | --- | --- |
-| Turnover Ledger | 新增 `turnover_ledger_query_service.py`、`turnover_ledger_read_model_refresh.py`、`turnover_ledger_source_versions.py`、`turnover_ledger_sql_projection.py`，并强化 `routes_turnover_ledger.py` grouped read model breakdown | Turnover Ledger 已不只是 route/service 组合，后续 Micro-JIT 必须覆盖 query service、SQL projection、source version、read model refresh 和 grouped payload contract |
+| Turnover Ledger | 保留 `turnover_ledger_query_service.py`、`turnover_ledger_source_versions.py` 和 grouped direct payload；`turnover_ledger_sql_projection.py` / read-model refresh 已删除 | Turnover Ledger 已不只是 route/service 组合，后续 Micro-JIT 必须覆盖 direct query service、source version 和 grouped payload contract |
 | Bankdetail / No OA Batch | 新增 `routes_bank_details.py`、`routes_no_oa_bank_batches.py`、`bank_details_application_service.py`、`bank_detail_category_selection.py`、`bank_turnover_tag_semantics.py`、`no_oa_bank_batch_*` 服务和 route tests | Bankdetail 模块边界扩大到外部流水标签语义、免 OA 批次 read model/worker/selection；不能只按旧 `bank_details_service.py` 深挖 |
 | Invoices / Pending Query | 新增 `routes_pending_invoices.py`、`routes_output_invoice_collections.py`、`routes_oa_pending_payments.py`、pending/output/input invoice lifecycle、read model、status、OA reverse services 和 repository | Invoices 需要拆分 Pending Invoice、Output Invoice Collections、Input Invoice Usage、OA Pending Payments 子域，但仍归入 Invoices 顶层模块 |
 | Tax / Cost / ETC | 新增 `routes_cost_statistics.py`、`routes_etc.py`、`cost_statistics_*`、`etc_business_batch_application_service.py`、`tax_offset_*` query/runtime/plan services 和 migration 0050 | Tax / Cost / ETC 的 route facade 和 runtime service 已明显增多，后续 Micro-JIT 必须覆盖 route facade、query service、runtime refresh 和 repository |
@@ -322,12 +322,12 @@ PF-P190 后推荐下一步：
 | Platform / Infrastructure | auth、DB、queue、cache、storage、observability、runtime、OA adapter | `job.outbox_events`、`job.read_model_dirty_scopes`、health/runtime state | `server.py`、`state_store.py`、`runtime_queue.py` 仍过宽 |
 | Workbench | 工作台读写、pair relations、exceptions、reconciliation、read model | `app.workbench_pair_relations`、`read_model.workbench_*` | 与 Turnover/Batch/Invoices/Bankdetail facts 有投影协作 |
 | Workbench Matching Engine 候选 | 候选分组、自由匹配、规则、金额检查 | `read_model.workbench_candidate_matches` / candidate state | 编排层仍依赖 Workbench pair relation、exception、read model invalidation |
-| Turnover Ledger | 流水台账、turnover relation、extra、export | `app.turnover_relations`、`read_model.turnover_ledger_rows` | Bankdetail 分类、Workbench grouping 受影响 |
+| Turnover Ledger | 流水台账、turnover relation、extra、export | `app.turnover_relations`、direct grouped payload；legacy `read_model.turnover_ledger_rows` 已删除 | Bankdetail 分类、Workbench grouping 受影响 |
 | Batch Accounting | 批量记账 list/submit/withdraw | batch relation special metadata / Workbench pair relation | 读取 Workbench payload，写入影响 Workbench |
-| Bankdetail | 银行流水、标签、自动分类、账户余额、免 OA 批次 | `app.bank_transactions`、`read_model.bank_detail_*`、`read_model.no_oa_bank_batch_rows` | 分类变更影响 Workbench/Turnover |
+| Bankdetail | 银行流水、标签、自动分类、账户余额、免 OA 批次 | `app.bank_transactions`、canonical `app.no_oa_bank_batches`；legacy `read_model.bank_detail_*` 待收口 | 分类变更影响 Workbench/Turnover |
 | Invoices | 待找发票、进项使用、销项收款、OA 附件发票 | `app.invoices`、invoice usage/collection read models | 与 Search/Workbench/Imports 协作 |
 | Imports | 文件导入、预览、确认、任务、对象存储 | `app.import_batches`、`app.import_files`、`job.import_jobs` | 写入目标 facts 后影响多模块 read model |
-| Tax / Cost / ETC | 税金抵扣、成本统计、ETC、项目成本 | `read_model.cost_statistics_*`、`read_model.tax_offset_*`、ETC facts | 导入和 Redis cache 影响大 |
+| Tax / Cost / ETC | 税金抵扣、成本统计、ETC、项目成本 | direct cost/tax query services、ETC facts；legacy cost/tax read-model tables 已由 forward migrations 删除 | 导入和 Redis cache 影响大 |
 | Search / Pending Query | 统一搜索、pending projection 热路径 | `read_model.search_index_rows`、pending rows | 读模型依赖 Invoices/Bankdetail/Workbench |
 | Ops / Runtime | App Health、background jobs、settings、access control、OA sync | health/job/runtime tables | 横切 platform，不能写业务规则 |
 
@@ -455,7 +455,7 @@ GET /api/turnover-ledger
   -> server / routes_turnover_ledger
   -> TurnoverLedgerService.list_ledger/list_grouped_ledger
   -> bank rows / category rows / turnover relations
-  -> read_model.turnover_ledger_rows 或同步 rebuild fallback
+  -> direct TurnoverLedgerService payload
   -> response
 ```
 
@@ -484,9 +484,9 @@ PF-P046 已对 PF-P045 main delta 后的 Turnover Ledger 做 Micro-JIT discovery
 
 新增确认：
 
-- Turnover Ledger 读路径已经有 `TurnoverLedgerQueryService`，它优先读取 `read_model.turnover_ledger_rows`，通过 `source_version_mismatch_reasons` 判断 freshness，并在 stale/miss 时通过 runtime queue enqueue `turnover_ledger.read_model.refresh`。
-- `GET /api/turnover-ledger?view=grouped` 需要同时支持原生 grouped payload 和 flat SQL read model payload 转 grouped 的兼容路径；PF-P045 的 grouped breakdown 修正属于必须锁定的接口契约。
-- `TurnoverLedgerReadModelRefreshService` + `TurnoverLedgerSqlProjectionBuilder` 已形成 worker refresh 链路，worker registry 中 `turnover-ledger-read-model` 是 required 且 RabbitMQ eligible。
+- Turnover Ledger 读路径由 `TurnoverLedgerQueryService` 委托 direct `TurnoverLedgerService` grouped/flat payload；不再读取 `read_model.turnover_ledger_rows`，也不再通过 stale/miss enqueue `turnover_ledger.read_model.refresh`。
+- `GET /api/turnover-ledger?view=grouped` 需要保持原生 grouped payload contract；PF-P045 的 grouped breakdown 修正属于必须锁定的接口契约。
+- `TurnoverLedgerSqlProjectionBuilder`、read-model repository port、worker refresh 链路和 `read_model.turnover_ledger_rows` storage 已删除。
 - `RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction()` 已提供 dirty scope + outbox + monotonic source_version 的平台能力，但 Turnover relation confirm/withdraw、extra update、bank-row-tags batch 仍由 `server.py` handler finalizer 编排多个 side effect，不是显式 Turnover Unit of Work。
 - `/api/turnover-ledger/bank-row-tags/batch` 是 Turnover API，但写入 Bankdetail category facts；后续必须用明确 service port 和 characterization tests 固定 ownership。
 - `turnover_ledger_extras` 仍存在 `legacy_turnover_ledger_extras_fallback_persist` 风险，后续应优先锁定并移除或限制 fallback。
@@ -551,7 +551,7 @@ Batch Accounting 是独立模块，但需要在 Workbench query/read-model 边�
 | Platform / Ops | runtime/job/settings/auth related | health/runtime projections | runtime wakeup/cache | `job.outbox_events`、`job.read_model_dirty_scopes` | `mongo_oa_adapter.py` | object storage port | primary owner | primary risk owner |
 | Workbench | pair relations、overrides、exceptions | `read_model.workbench_*` | versioned page/status cache | dirty scope / read model refresh | 通过 OA projection 间接 | 不直接 | required | 不得生产 fallback |
 | Workbench Matching Engine 候选 | candidate state / relation readers | candidate matches / scope runs | 可选短 TTL | matching refresh events | 不直接 | 不直接 | required | 不得生产 fallback |
-| Turnover Ledger | turnover relations、extras、bank tags | `read_model.turnover_ledger_rows` | 可选短 TTL | `turnover_relation_changed` | 不直接 | export 可用 | required | extra fallback 风险 |
+| Turnover Ledger | turnover relations、extras、bank tags | 无 page read model；direct grouped payload | 可选短 TTL | `turnover_relation_changed` | 不直接 | export 可用 | required | extra fallback 风险 |
 | Batch Accounting | relation metadata / pair relation impact | 读取 Workbench payload | 不应直接依赖 | `batch_accounting_relation_changed` | 不直接 | 不直接 | required | 不得生产 fallback |
 | Bankdetail | bank transactions、categories、auto rules | bank detail / no OA / balance rows | 可选短 TTL | category/bank dirty scopes | 不直接 | import files via Imports | required | 不得生产 fallback |
 | Invoices | invoices、usage、collections、attachments | pending/input/output rows | 可选短 TTL | invoice dirty scopes | OA attachments read | attachment cache | required | 不得生产 fallback |

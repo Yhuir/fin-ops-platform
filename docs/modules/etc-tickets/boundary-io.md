@@ -16,12 +16,12 @@
 
 - ETC 票据管理页面、ETC 发票/批次、识别、对账、历史批次修复。
 - ETC 与发票附件、关联台候选之间的业务转换。
-- 通过 lifecycle 触发 workbench/invoice/search 相关刷新。
+- 通过 lifecycle 返回 affected scope/job diagnostics，供 workbench/invoice/search 相关 direct API 重读。
 
 ### 不负责
 
 - 不直接拥有 workbench relation 事实源。
-- 不直接维护 pending invoice 或 tax offset read model。
+- 不直接维护 pending invoice 或 tax offset direct payload。
 - 不在导入流程外绕过 ETC service 写批次。
 
 ## 输入 I/O
@@ -37,15 +37,15 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | ETC ticket/batch payload | 前端页面 | API response shape 稳定 |
-| 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
+| 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游页面投影；下游页面 direct API 重读 |
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复 |
-| Completed import job consumption | background job progress / operation barrier | ETC 发票导入 job 完成后，页面必须读取 job `operation_barrier_targets`，等待 targets fresh 后再刷新批次和任务列表 |
+| Completed import job consumption | background job progress / direct ETC GET | ETC 发票导入 job 完成后，页面发出 ETC/invoice domain event，并直接重读业务批次和任务列表；不再等待 `/api/operation-barrier/status` 或 job target fields |
 
 ## 持久化与投影
 
-- Own read model：无独立 manifest entry。
-- 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search` 等。
-- ETC 导入完成消费会额外等待 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等 job result targets。
+- Own page read model：无；无独立 manifest entry。
+- 下游 direct payload：`workbench`、`workbench_relation`、`invoice_lifecycle` 等通过 affected scope/job diagnostics 重读；Search 不再是 refresh/read model target，只受 direct search payload 影响。
+- ETC 票据页面不负责等待 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等下游页面派生数据 target；下游页面按各自 direct API/read boundary 重新读取。
 - Worker：通过 import/runtime handler、derived lifecycle 和 registered workers 扇出。
 
 ## 文件范围
@@ -56,7 +56,7 @@
 | Frontend feature/components | `web/src/features/etc/*`、`web/src/components/workbench/CandidateGroupGrid.tsx` |
 | Backend route | `routes_etc.py`、`routes_etc_import.py`、`routes_etc_invoices.py`、`routes_etc_legacy_batches.py`、`routes_etc_reconciliation.py` |
 | Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_reconciliation_*`、`etc_legacy_batch_*`、`invoice_attachment_recognition_service.py` |
-| Workbench integration | `workbench_sql_projection.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
+| Workbench integration | `workbench_query_service.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
 | Tools | `cleanup_orphan_etc_reconciliation_tasks.py`、`migrate_historical_etc_business_batches.py`、`link_existing_etc_batches.py` |
 | Tests | `tests/test_etc_*.py`、`web/src/test/Etc*.test.*`、`web/e2e/etc-tickets-flow.spec.ts` |
 

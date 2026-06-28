@@ -7,6 +7,7 @@
 | 目录 | 主题 | 状态 |
 | --- | --- | --- |
 | `modular-io-boundaries/` | 模块化 IO 边界重构：为每个模块建立输入、输出、状态、事件、read model、权限、测试和边界合同。 | Autonomous execution in progress; not global closure |
+| `remove-read-models/` | 全量移除页面 read model：页面改为 direct API 读取和组装数据，read model 合同只作为 legacy inventory。 | Analysis / planning only |
 
 ## 使用规则
 

@@ -59,7 +59,7 @@ ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入
 | preview stale | `stale_reconciliation_task_preview` 或 `preview_stale` | 当前导入页必须清空 preview 并要求重新预览 |
 | confirm queued | `etc_invoice_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status/App Health；job source 必须携带 `task_id`、`affected_domains=["imports_etc_invoices","etc_tickets"]` 和 route `/imports/etc-invoices` |
 | confirm processed | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | ETC business batch、ETC invoice metadata、PDF/XML 附件关系；只关联已存在 canonical invoice，不创建新 canonical invoice |
-| lifecycle refresh | `etc_import_confirmed` | 关联台、ETC summary row、invoice lifecycle、税金抵扣、成本统计、历史 ETC repair、search |
+| lifecycle downstream impact | `etc_import_confirmed` | 关联台、ETC summary row、invoice lifecycle、税金抵扣、成本统计、历史 ETC repair、search direct payload |
 | 业务批次提交/删除 | `manual-oa-status`、business batch delete | ETC 票据管理、关联台 summary row、税金/成本刷新 |
 
 ## 维护触发器
@@ -67,9 +67,9 @@ ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
 - 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
+- API contract、DTO shape、错误字段、权限校验、状态值或 legacy freshness 字段删除变化。
+- 业务状态、UI 状态、后台 job/worker 状态或状态流转变化。
+- 跨页面刷新、domain event、derived lifecycle、outbox、真实后台任务或缓存边界变化。
 - 测试入口、回归范围、验证命令或未测风险变化。
 
 ## 本目录文件

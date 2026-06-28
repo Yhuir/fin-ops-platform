@@ -20,9 +20,6 @@ class InputInvoiceUsageApiRoutes:
         self,
         *,
         query_service: InputInvoiceUsageQueryService,
-        rows_from_sql_read_model: Callable[[dict[str, list[str]]], dict[str, object] | None],
-        all_rows_from_sql_read_model: Callable[[dict[str, list[str]]], dict[str, object] | Any | None],
-        relation_details_from_sql_read_model: Callable[[str, dict[str, list[str]]], dict[str, object] | None],
         export_service: InputInvoiceUsageExportService,
         resolve_read_session: Callable[..., tuple[Any | None, Any | None]],
         export_query_kwargs: Callable[[dict[str, list[str]]], dict[str, object]],
@@ -31,15 +28,11 @@ class InputInvoiceUsageApiRoutes:
         xlsx_response: Callable[[str, bytes], Any],
         app_settings_service: Any,
         load_json_body: Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]],
-        payment_rules_refreshes: Callable[[dict[str, object]], None],
         payment_rules_error_response: Callable[[AppSettingsValidationError], Any],
         json_response: Callable[[HTTPStatus, object], Any],
         input_usage_error_response: Callable[[InputInvoiceUsageError], Any],
     ) -> None:
         self._query_service = query_service
-        self._rows_from_sql_read_model = rows_from_sql_read_model
-        self._all_rows_from_sql_read_model = all_rows_from_sql_read_model
-        self._relation_details_from_sql_read_model = relation_details_from_sql_read_model
         self._export_service = export_service
         self._resolve_read_session = resolve_read_session
         self._export_query_kwargs = export_query_kwargs
@@ -48,7 +41,6 @@ class InputInvoiceUsageApiRoutes:
         self._xlsx_response = xlsx_response
         self._app_settings_service = app_settings_service
         self._load_json_body = load_json_body
-        self._payment_rules_refreshes = payment_rules_refreshes
         self._payment_rules_error_response = payment_rules_error_response
         self._json_response = json_response
         self._input_usage_error_response = input_usage_error_response
@@ -89,10 +81,6 @@ class InputInvoiceUsageApiRoutes:
 
     def rows(self, query: dict[str, list[str]]) -> Any:
         try:
-            sql_payload = self._rows_from_sql_read_model(query)
-            if sql_payload is not None:
-                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-                return self._json_response(status_code, sql_payload)
             payload = self._query_service.list_rows(
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [50])[0],
@@ -110,30 +98,13 @@ class InputInvoiceUsageApiRoutes:
 
     def filter_options(self, query: dict[str, list[str]]) -> Any:
         try:
-            sql_rows_payload = self._all_rows_from_sql_read_model(query)
-            if _is_response(sql_rows_payload):
-                return sql_rows_payload
-            if isinstance(sql_rows_payload, dict):
-                if sql_rows_payload.get("read_model_status") == "refreshing":
-                    return self._json_response(HTTPStatus.ACCEPTED, sql_rows_payload)
-                payload = self._query_service.filter_options_for_rows(
-                    rows=list(sql_rows_payload.get("rows") or []),
-                    keyword=query.get("keyword", [None])[0],
-                    invoice_date_from=query.get("invoice_date_from", [None])[0],
-                    invoice_date_to=query.get("invoice_date_to", [None])[0],
-                    month=query.get("month", [None])[0],
-                    filters=query.get("filters", [None])[0],
-                )
-                payload["read_model_status"] = "fresh"
-                payload["read_model_scope_key"] = sql_rows_payload.get("read_model_scope_key")
-            else:
-                payload = self._query_service.filter_options(
-                    keyword=query.get("keyword", [None])[0],
-                    invoice_date_from=query.get("invoice_date_from", [None])[0],
-                    invoice_date_to=query.get("invoice_date_to", [None])[0],
-                    month=query.get("month", [None])[0],
-                    filters=query.get("filters", [None])[0],
-                )
+            payload = self._query_service.filter_options(
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                month=query.get("month", [None])[0],
+                filters=query.get("filters", [None])[0],
+            )
         except InputInvoiceUsageError as exc:
             return self._input_usage_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -161,10 +132,6 @@ class InputInvoiceUsageApiRoutes:
 
     def relation_details(self, row_id: str, query: dict[str, list[str]]) -> Any:
         try:
-            sql_payload = self._relation_details_from_sql_read_model(row_id, query)
-            if sql_payload is not None:
-                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-                return self._json_response(status_code, sql_payload)
             payload = self._query_service.row_relation_details(
                 row_id,
                 kind=query.get("kind", [""])[0],
@@ -200,7 +167,6 @@ class InputInvoiceUsageApiRoutes:
             updated = self._app_settings_service.update_input_invoice_usage_payment_status_rules(
                 payload,
                 actor_id=str(actor_id or "input_invoice_usage_payment_rules"),
-                after_input_invoice_usage_payment_rules_saved=self._payment_rules_refreshes,
             )
         except AppSettingsValidationError as exc:
             return self._payment_rules_error_response(exc)
@@ -221,8 +187,7 @@ class InputInvoiceUsageApiRoutes:
             return self._input_usage_error_response(exc)
         except InputInvoiceUsageExportError as exc:
             return self._export_error_response(exc)
-        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-        return self._json_response(status, payload)
+        return self._json_response(HTTPStatus.OK, payload)
 
     def export(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:
         session, auth_error = self._resolve_read_session(
@@ -241,7 +206,3 @@ class InputInvoiceUsageApiRoutes:
             return self._export_error_response(exc)
         self._record_export_download(session, filename, query)
         return self._xlsx_response(filename, content)
-
-
-def _is_response(value: object) -> bool:
-    return hasattr(value, "status_code") and hasattr(value, "body") and hasattr(value, "headers")

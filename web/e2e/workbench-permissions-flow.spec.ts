@@ -12,7 +12,6 @@ const workbenchMutationEndpoints = [
   "POST /api/workbench/actions/cancel-exception",
   "POST /api/workbench/actions/ignore-row",
   "POST /api/workbench/actions/unignore-row",
-  "POST /api/operation-barrier/status",
 ];
 
 async function selectWorkbenchGroupRows(page: Page, zone: "open" | "paired") {

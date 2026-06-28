@@ -33,12 +33,12 @@ class WorkbenchWriteUnitOfWork:
         *,
         connection: Any,
         repository_factory: Callable[[Any], Any],
-        read_model_refresh_writer: Any,
+        read_model_refresh_writer: Any | None = None,
         idempotency_store: Any,
     ) -> None:
         self._connection = connection
         self._repository_factory = repository_factory
-        self._read_model_refresh_writer = read_model_refresh_writer
+        _ = read_model_refresh_writer
         self._idempotency_store = idempotency_store
 
     def run(
@@ -90,20 +90,6 @@ class WorkbenchWriteUnitOfWork:
             result = dict(handler_result)
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
-            action_name = str(getattr(command, "action_name", "") or "")
-            refresh_reason = _refresh_reason_for(command, action_name)
-            metadata = _refresh_metadata_for(command, action_name)
-            for scope_key in _scope_keys_for(command, result):
-                event = self._read_model_refresh_writer.enqueue_refresh(
-                    transaction=transaction,
-                    scope_type="workbench",
-                    scope_key=scope_key,
-                    reason=refresh_reason,
-                    metadata=dict(metadata) if metadata is not None else None,
-                )
-                source_versions[scope_key] = _event_value(event, "source_version")
-                outbox_event_ids.append(_event_value(event, "event_id"))
-
             result["source_versions"] = source_versions
             result["outbox_event_ids"] = outbox_event_ids
             if idempotency is not None:
@@ -128,44 +114,6 @@ class WorkbenchWriteUnitOfWork:
         _raise_if_idempotency_failed(existing_record, idempotency)
         _raise_if_idempotency_in_progress(existing_record, idempotency)
         return _replay_committed_idempotency_response(existing_record)
-
-
-class RuntimeQueueReadModelRefreshWriter:
-    def __init__(
-        self,
-        queue_repository: Any,
-        *,
-        tenant_id: str = "default",
-        priority: str = "normal",
-        trace_id: str | None = None,
-    ) -> None:
-        self._queue_repository = queue_repository
-        self._tenant_id = str(tenant_id or "default")
-        self._priority = str(priority or "normal")
-        self._trace_id = str(trace_id).strip() if trace_id else None
-
-    def enqueue_refresh(
-        self,
-        *,
-        transaction: Any,
-        scope_type: str,
-        scope_key: str,
-        reason: str,
-        metadata: dict[str, object] | None = None,
-    ) -> Any:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-        if not callable(enqueue):
-            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh_in_transaction.")
-        return enqueue(
-            transaction=transaction,
-            scope_type=scope_type,
-            scope_key=scope_key,
-            reason=reason,
-            tenant_id=self._tenant_id,
-            priority=self._priority,
-            trace_id=self._trace_id,
-            metadata=metadata,
-        )
 
 
 def _scope_keys_for(command: Any, handler_result: dict[str, Any]) -> list[str]:

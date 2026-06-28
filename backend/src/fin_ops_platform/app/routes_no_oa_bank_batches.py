@@ -10,7 +10,6 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
     NoOaBankBatchPersistenceError,
 )
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 MutationSessionResolver = Callable[[dict[str, str] | None], OARequestSession | Any]
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
@@ -232,11 +231,7 @@ class NoOaBankBatchApiRoutes:
             "summary": {"submitted": submitted_count, "failed": failed_count},
             "results": results,
             "affected_months": sorted(affected_months),
-            **write_target_envelope(
-                read_model_key="no_oa_bank_batch",
-                scope_keys=sorted(affected_months),
-                fallback_scope_key="all",
-            ),
+            "affected_scope_keys": sorted(affected_months),
             "workbench_rebuild_queued": workbench_rebuild_queued,
         }
 
@@ -269,7 +264,7 @@ class NoOaBankBatchApiRoutes:
             if error_code
             in {
                 "no_oa_bank_batch_version_conflict",
-                "no_oa_bank_batch_relation_read_model_not_fresh",
+                "no_oa_bank_batch_relation_unavailable",
                 "no_oa_bank_batch_relation_active_row_conflict",
             }
             else HTTPStatus.BAD_REQUEST
@@ -283,10 +278,6 @@ class NoOaBankBatchApiRoutes:
                     for key, value in details.items()
                     if str(key)
                     in {
-                        "read_model_status",
-                        "read_model_stale_reasons",
-                        "read_model_scope_keys",
-                        "refresh_enqueued",
                         "conflicting_case_ids",
                         "row_ids",
                         "case_id",

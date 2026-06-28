@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
@@ -32,18 +33,6 @@ class StaticWorkbenchRows:
         return [dict(self._rows[row_id]) for row_id in row_ids]
 
 
-class FreshRelationFacade:
-    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
-        return {
-            "status": "fresh",
-            "rows": [],
-            "groups": [],
-            "read_model_scope_keys": list(kwargs.get("scope_keys_hint") or ["2026-05"]),
-            "stale_reasons": [],
-            "refresh_enqueued": False,
-        }
-
-
 class WriteBlockingPairRelationService(WorkbenchPairRelationService):
     def create_active_relation(self, **_kwargs):  # type: ignore[no-untyped-def]
         raise AssertionError("WorkbenchExceptionApplicationService must delegate relation writes to command service.")
@@ -61,7 +50,6 @@ def relation_command_service_for(pair_relation_service: WorkbenchPairRelationSer
             load_snapshot=pair_relation_service.snapshot,
             save_snapshot=save_snapshot,
         ),
-        relation_facade=FreshRelationFacade(),
     )
 
 
@@ -495,6 +483,12 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
         self.assertEqual(preview["scenario"]["scenario_code"], "income_contains_oa_data_anomaly")
         self.assertEqual([action["action_code"] for action in preview["available_actions"]], ["income_data_anomaly_manual_review"])
         self.assertTrue(preview["can_apply"])
+
+    def test_relation_command_unavailable_error_does_not_emit_read_model_status(self) -> None:
+        source = Path("backend/src/fin_ops_platform/services/workbench_exception_application_service.py").read_text()
+
+        self.assertNotIn('payload={"read_model_status": "unavailable"}', source)
+        self.assertIn('payload={"status": "unavailable"}', source)
 
 
 if __name__ == "__main__":

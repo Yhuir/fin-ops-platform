@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.read_model_freshness import (
+    build_fresh_cache_envelope,
     normalize_source_versions,
     require_expected_source_versions,
     resolve_read_model_freshness,
@@ -33,6 +34,25 @@ class ReadModelFreshnessTests(unittest.TestCase):
             {
                 "source_version": "3",
                 "by_month": '{"2026-04":{"schema":1,"updated_at":"a"},"2026-05":{"schema":1,"updated_at":"b"}}',
+            },
+        )
+
+    def test_build_fresh_cache_envelope_records_fresh_gate(self) -> None:
+        envelope = build_fresh_cache_envelope(
+            {"rows": []},
+            scope_key="active:2026-05",
+            source_versions={"source_version": 3},
+            schema_version="schema-v1",
+        )
+
+        self.assertEqual(envelope["payload"], {"rows": []})
+        self.assertEqual(
+            envelope["fresh_gate"],
+            {
+                "scope_key": "active:2026-05",
+                "status": "fresh",
+                "schema_version": "schema-v1",
+                "source_versions": {"source_version": "3"},
             },
         )
 

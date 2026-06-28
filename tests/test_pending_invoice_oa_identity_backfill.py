@@ -26,28 +26,17 @@ class FakeRepository:
         return [{"case_id": "candidate:missing-oa", "row_ids": ["txn-1", "inv-1"], "row_types": ["bank", "invoice"]}]
 
 
-class QueueRecorder:
-    def __init__(self) -> None:
-        self.enqueued: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-        self.enqueued.append((scope_type, scope_key, reason))
-
-
 class PendingInvoiceOaIdentityBackfillTests(unittest.TestCase):
-    def test_inspects_invalid_oa_identity_and_enqueues_existing_pending_scopes(self) -> None:
+    def test_inspects_invalid_oa_identity_without_enqueuing_pending_scopes(self) -> None:
         repository = FakeRepository()
-        queue = QueueRecorder()
+        queue = object()
         service = PendingInvoiceOaIdentityBackfillService(repository=repository, queue_repository=queue)
 
         report = service.inspect()
-        enqueued = service.enqueue_affected_scopes(reason="test_backfill")
 
         self.assertEqual(report["invalid_read_model_rows"][0]["oa_id"], "candidate:bad-oa")
         self.assertTrue(report["manual_repair_required"])
-        self.assertIn("expense:all:2026-05", enqueued)
-        self.assertIn(("pending_invoice", "expense:all:2026-05", "test_backfill"), queue.enqueued)
-        self.assertIn(("pending_invoice", "income:cash_income", "test_backfill"), queue.enqueued)
+        self.assertEqual(report["affected_scope_keys"], ["expense:all:2026-05", "expense:all"])
 
 
 if __name__ == "__main__":

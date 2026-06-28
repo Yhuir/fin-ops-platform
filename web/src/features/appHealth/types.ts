@@ -54,21 +54,6 @@ export type ApiAppHealthPayload = {
     status?: string;
   };
   oa_sync?: ApiOaSyncStatus;
-  workbench_read_model?: {
-    status?: string;
-    read_model_status?: string;
-    consistency_status?: string;
-    active_generation_id?: string | null;
-    failed_generation_id?: string | null;
-    last_error?: string | null;
-    consistency_failures?: Array<Record<string, unknown>>;
-    dirty_scopes?: string[];
-    matching_dirty_scopes?: Array<Record<string, unknown>>;
-    matching_running_scopes?: string[];
-    last_matching_error?: string | null;
-    stale_scopes?: string[];
-    rebuilding_scopes?: string[];
-  };
   background_jobs?: {
     active?: number;
     queued?: number;
@@ -177,29 +162,6 @@ export type OperationsDashboardQueueMetric = {
   warning_code?: string;
 };
 
-export type OperationsDashboardReadModelMetric = {
-  key: string;
-  refresh_duration_ms: OperationsDashboardPercentiles;
-  historical_refresh_duration_ms?: OperationsDashboardPercentiles;
-  refresh_duration_windows?: {
-    recent_15m?: {
-      sample_count: number;
-      last_completed_at: string | null;
-      duration_ms: OperationsDashboardPercentiles;
-    };
-    recent_1h?: {
-      sample_count: number;
-      last_completed_at: string | null;
-      duration_ms: OperationsDashboardPercentiles;
-    };
-  };
-  refresh_duration_by_kind?: Record<string, unknown>;
-  stale_count: number | null;
-  unavailable_count: number | null;
-  status: OperationsDashboardAvailability;
-  warning_code?: string;
-};
-
 export type OperationsDashboardWorkerMetric = {
   worker_id?: string;
   worker_instance?: string;
@@ -235,7 +197,6 @@ export type OperationsDashboardPayload = {
   runtime_performance: {
     outbox: OperationsDashboardOutboxMetric;
     queues: OperationsDashboardQueueMetric[];
-    read_models: OperationsDashboardReadModelMetric[];
     workers: OperationsDashboardWorkerMetric[];
   };
   freshness: {

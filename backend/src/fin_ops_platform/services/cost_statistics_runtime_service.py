@@ -7,38 +7,31 @@ import os
 import re
 from typing import Any, Callable
 
-from fin_ops_platform.services.cost_statistics_read_model_service import (
-    COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-)
-from fin_ops_platform.services.read_model_freshness import normalize_source_versions
-from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
+from fin_ops_platform.services.read_model_freshness import build_fresh_cache_envelope, normalize_source_versions
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 PROJECT_SCOPES = {"active", "all"}
 PROJECT_SCOPE_ORDER = ("active", "all")
+COST_STATISTICS_READ_MODEL_SCHEMA_VERSION = "2026-05-cost-statistics-explorer-v1"
 
 
 class CostStatisticsRuntimeService:
     def __init__(
         self,
         *,
-        read_model_service: Any | None = None,
         background_job_service: Any | None = None,
         queue_repository: Any | None = None,
         redis_helper: Any | None = None,
         source_versions_provider: Callable[[str], dict[str, Any]] | None = None,
-        persist_read_models: Callable[..., None] | None = None,
         explorer_loader: Callable[..., dict[str, Any]] | None = None,
         entry_count: Callable[[dict[str, Any]], int] | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
-        self._read_model_service = read_model_service
         self._background_job_service = background_job_service
         self._queue_repository = queue_repository
         self._redis_helper = redis_helper
         self._source_versions_provider = source_versions_provider
-        self._persist_read_models = persist_read_models
         self._explorer_loader = explorer_loader
         self._entry_count = entry_count or self._default_entry_count
         self._now_provider = now_provider or datetime.now
@@ -99,19 +92,6 @@ class CostStatisticsRuntimeService:
         except ValueError:
             return 60
 
-    def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-
-        gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not gateway.can_enqueue():
-            return False
-        enqueued_scope_keys = gateway.enqueue_many(
-            "cost_statistics",
-            [scope_key],
-            reason=reason,
-        )
-        return bool(enqueued_scope_keys)
-
     def delete_redis_cache(self, scope_key: str) -> None:
         delete = getattr(self._redis_helper, "delete", None)
         if not callable(delete):
@@ -122,20 +102,17 @@ class CostStatisticsRuntimeService:
         delete(f"cost_statistics:explorer:{scope_key}")
         delete(f"cost_statistics:month:{scope_key}")
 
-    def read_model_scope_key(
+    def scope_key(
         self,
         month: str,
         project_scope: str,
         *,
-        read_model: dict[str, Any] | None = None,
+        stored_payload: dict[str, Any] | None = None,
     ) -> str:
-        if isinstance(read_model, dict):
-            scope_key = str(read_model.get("scope_key", "")).strip()
+        if isinstance(stored_payload, dict):
+            scope_key = str(stored_payload.get("scope_key", "")).strip()
             if scope_key:
                 return scope_key
-        scope_key = getattr(self._read_model_service, "scope_key", None)
-        if callable(scope_key):
-            return str(scope_key(month, project_scope))
         return self.request_scope_key(month, project_scope)
 
     @staticmethod
@@ -152,7 +129,7 @@ class CostStatisticsRuntimeService:
                     break
         return months
 
-    def warmup_months_from_read_model_scope_keys(self, scope_keys: list[str]) -> list[str]:
+    def warmup_months_from_scope_keys(self, scope_keys: list[str]) -> list[str]:
         months = self.months_from_workbench_scope_keys(scope_keys)
         specific_months = sorted(month for month in months if month != "all")
         if specific_months:
@@ -162,25 +139,12 @@ class CostStatisticsRuntimeService:
         return []
 
     def invalidate_read_models(self, *, schedule_warmup: bool = True, persist_empty: bool = True) -> list[str]:
-        if self._read_model_service is None:
-            return []
-        clear = getattr(self._read_model_service, "clear", None)
-        snapshot = getattr(self._read_model_service, "snapshot", None)
-        if not callable(clear) or not callable(snapshot):
-            return []
-        deleted_scope_keys = clear()
-        if deleted_scope_keys or persist_empty:
-            self._persist(
-                snapshot=snapshot(),
-                changed_scope_keys=deleted_scope_keys,
-                operation="invalidate_cost_statistics_read_models",
-            )
         if not schedule_warmup:
-            return deleted_scope_keys
-        warmup_months = self.warmup_months_from_read_model_scope_keys(deleted_scope_keys) or ["all"]
+            return []
+        warmup_months = ["all"]
         if not self.enqueue_refresh_for_months(warmup_months, reason="cost_statistics_read_model_invalidated"):
             self.schedule_cache_warmup(warmup_months, reason="cost_statistics_read_model_invalidated")
-        return deleted_scope_keys
+        return []
 
     def invalidate_read_model_scopes(
         self,
@@ -190,55 +154,31 @@ class CostStatisticsRuntimeService:
         schedule_warmup: bool = True,
         persist_empty: bool = True,
     ) -> list[str]:
-        if self._read_model_service is None:
-            return []
         months = self.months_from_workbench_scope_keys(scope_keys)
         if not months:
             return []
         specific_months = sorted(month for month in months if month != "all")
-        invalidate_months = getattr(self._read_model_service, "invalidate_months", None)
-        snapshot = getattr(self._read_model_service, "snapshot", None)
-        if not callable(invalidate_months) or not callable(snapshot):
-            return []
         if specific_months:
-            deleted_scope_keys = invalidate_months(
-                specific_months,
-                project_scopes=["active", "all"],
-                include_all=True,
-            )
             warmup_months = specific_months
         else:
-            deleted_scope_keys = invalidate_months(
-                [],
-                project_scopes=["active", "all"],
-                include_all=True,
-            )
             warmup_months = ["all"]
-        if deleted_scope_keys or persist_empty:
-            self._persist(
-                snapshot=snapshot(),
-                changed_scope_keys=deleted_scope_keys,
-                operation=reason or "invalidate_cost_statistics_read_model_scopes",
-            )
         if schedule_warmup:
             enqueued = self.enqueue_refresh_for_months(
                 warmup_months,
                 reason=reason or "cost_statistics_scope_invalidated",
             )
-            if deleted_scope_keys and not enqueued:
+            if not enqueued:
                 self.schedule_cache_warmup(
                     warmup_months,
                     reason=reason or "cost_statistics_scope_invalidated",
                 )
-        return deleted_scope_keys
+        return []
 
     def enqueue_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
-        enqueued = False
         for target in self.warmup_targets(months=months, project_scopes=["active", "all"]):
             scope_key = target["scope_key"]
             self.delete_redis_cache(scope_key)
-            enqueued = self.enqueue_read_model_refresh(scope_key, reason=reason) or enqueued
-        return enqueued
+        return False
 
     def recover_interrupted_cache_warmup_jobs(self) -> None:
         list_attention_jobs = getattr(self._background_job_service, "list_attention_jobs", None)
@@ -309,7 +249,7 @@ class CostStatisticsRuntimeService:
         *,
         target_scope_keys: list[str] | None = None,
     ):
-        if self._read_model_service is None or self._background_job_service is None:
+        if self._background_job_service is None:
             return None
         project_scopes = ["active", "all"]
         targets = self.warmup_targets(
@@ -370,7 +310,7 @@ class CostStatisticsRuntimeService:
         project_scopes: list[str] | None = None,
         targets: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
-        if self._read_model_service is None or self._background_job_service is None:
+        if self._background_job_service is None:
             return self.warmup_result_summary(
                 target_scope_keys=[],
                 warmed_scope_keys=[],
@@ -415,22 +355,8 @@ class CostStatisticsRuntimeService:
                 failed_scope_keys.append(scope_key)
                 continue
             source_versions = self.expected_source_versions(scope_key)
-            read_model = self._upsert_read_model(
-                month,
-                project_scope,
-                payload,
-                generated_at=self._now_provider().isoformat(),
-                source_scope_keys=[month],
-                source_versions=source_versions,
-                cache_status="ready",
-            )
-            warmed_scope_key = self.read_model_scope_key(month, project_scope, read_model=read_model)
+            warmed_scope_key = self.scope_key(month, project_scope)
             warmed_scope_keys.append(warmed_scope_key)
-            self._persist(
-                snapshot=self._read_model_service.snapshot_scope_keys([warmed_scope_key]),
-                changed_scope_keys=[warmed_scope_key],
-                operation="cost_statistics_cache_warmup",
-            )
             self._cache_fresh_explorer_payload(warmed_scope_key, payload, source_versions=source_versions)
 
             remaining_scope_keys = target_scope_keys[index:]
@@ -467,26 +393,12 @@ class CostStatisticsRuntimeService:
         parsed = self.parse_scope_key(scope_key)
         if parsed is None:
             raise ValueError("cost statistics read model scope_key must be project_scope:month.")
-        if self._explorer_loader is None or self._read_model_service is None:
+        if self._explorer_loader is None:
             raise RuntimeError("cost statistics runtime service is not configured.")
         project_scope, month = parsed
         payload = self._explorer_loader(month, project_scope=project_scope)
         source_versions = self.expected_source_versions(scope_key)
-        read_model = self._upsert_read_model(
-            month,
-            project_scope,
-            payload,
-            generated_at=self._now_provider().isoformat(),
-            source_scope_keys=[month],
-            source_versions=source_versions,
-            cache_status="ready",
-        )
-        warmed_scope_key = self.read_model_scope_key(month, project_scope, read_model=read_model)
-        self._persist(
-            snapshot=self._read_model_service.snapshot_scope_keys([warmed_scope_key]),
-            changed_scope_keys=[warmed_scope_key],
-            operation="worker_cost_statistics_read_model_refresh",
-        )
+        warmed_scope_key = self.scope_key(month, project_scope)
         self._cache_fresh_explorer_payload(warmed_scope_key, payload, source_versions=source_versions)
         return {
             "scope_key": warmed_scope_key,
@@ -531,7 +443,7 @@ class CostStatisticsRuntimeService:
             if month != "all" and not MONTH_RE.match(month):
                 continue
             for project_scope in normalized_project_scopes:
-                scope_key = self.read_model_scope_key(month, project_scope)
+                scope_key = self.scope_key(month, project_scope)
                 targets.append({"month": month, "project_scope": project_scope, "scope_key": scope_key})
         return targets
 
@@ -543,7 +455,7 @@ class CostStatisticsRuntimeService:
             if parsed is None:
                 continue
             project_scope, month = parsed
-            resolved_scope_key = self.read_model_scope_key(month, project_scope)
+            resolved_scope_key = self.scope_key(month, project_scope)
             if resolved_scope_key not in normalized:
                 normalized.append(resolved_scope_key)
         return normalized
@@ -718,8 +630,8 @@ class CostStatisticsRuntimeService:
         if not callable(set_cached):
             return
         cached_payload = dict(payload)
-        cached_payload["read_model_status"] = "fresh"
-        cached_payload["read_model_scope_key"] = scope_key
+        cached_payload["status"] = "fresh"
+        cached_payload["scope_key"] = scope_key
         cached_payload["source_versions"] = source_versions
         set_cached(
             self.redis_cache_key(scope_key, source_versions=source_versions),
@@ -731,46 +643,6 @@ class CostStatisticsRuntimeService:
             ),
             ttl_seconds=self.redis_ttl_seconds(),
         )
-
-    def _persist(self, *, snapshot: dict[str, Any], changed_scope_keys: list[str] | None, operation: str) -> None:
-        if self._persist_read_models is None:
-            return
-        self._persist_read_models(
-            snapshot=snapshot,
-            changed_scope_keys=changed_scope_keys,
-            operation=operation,
-        )
-
-    def _upsert_read_model(
-        self,
-        month: str,
-        project_scope: str,
-        payload: dict[str, Any],
-        *,
-        generated_at: str,
-        source_scope_keys: list[str],
-        source_versions: dict[str, Any],
-        cache_status: str,
-    ) -> dict[str, Any]:
-        try:
-            return self._read_model_service.upsert_read_model(
-                month,
-                project_scope,
-                payload,
-                generated_at=generated_at,
-                source_scope_keys=source_scope_keys,
-                source_versions=source_versions,
-                cache_status=cache_status,
-            )
-        except TypeError:
-            return self._read_model_service.upsert_read_model(
-                month,
-                project_scope,
-                payload,
-                generated_at=generated_at,
-                source_scope_keys=source_scope_keys,
-                cache_status=cache_status,
-            )
 
     @staticmethod
     def _default_entry_count(payload: dict[str, Any]) -> int:

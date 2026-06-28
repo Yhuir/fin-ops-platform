@@ -41,9 +41,7 @@ class FakeRelationFacade:
             "status": "fresh",
             "rows": [],
             "groups": [],
-            "read_model_scope_keys": ["2026-05"],
             "stale_reasons": [],
-            "refresh_enqueued": False,
         }
         self.calls: list[dict[str, object]] = []
 
@@ -114,11 +112,8 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
                 ],
             }
         )
-        facade = FakeRelationFacade()
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
-            relation_facade=facade,
-            require_fresh_relations=True,
         )
 
         preview = service.preview_withdraw_relation(
@@ -132,8 +127,9 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(preview["before_relations"][0]["case_id"], "case-new")
         self.assertEqual(preview["after_relations"][0]["case_id"], "case-old")
         self.assertEqual(preview["submit_expected_versions"], {"relation:case-new": 2})
-        self.assertEqual(facade.calls[0]["row_ids"], ["oa-1", "bank-1", "invoice-1"])
-        self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-05"])
+        self.assertNotIn("read_model_status", preview)
+        self.assertNotIn("read_model_scope_keys", preview)
+        self.assertNotIn("refresh_enqueued", preview)
         self.assertEqual(repository.save_calls, [])
 
     def test_withdraw_relation_uses_canonical_relation_when_distribution_is_stale_by_default(self) -> None:
@@ -155,9 +151,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
                 "status": "stale",
                 "rows": [],
                 "groups": [],
-                "read_model_scope_keys": ["2026-05"],
                 "stale_reasons": ["dirty_scope:2026-05"],
-                "refresh_enqueued": True,
             }
         )
         service = WorkbenchRelationCommandService(
@@ -180,7 +174,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "withdrawn")
         self.assertEqual(result["relation"]["status"], "cancelled")
-        self.assertEqual(result["read_model_status"], "fresh")
+        self.assertNotIn("read_model_status", result)
         self.assertEqual(facade.calls, [])
         self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
 
@@ -217,11 +211,8 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
 
     def test_confirm_relation_saves_changed_case_and_audit_history(self) -> None:
         repository = FakeRelationRepository()
-        facade = FakeRelationFacade()
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
-            relation_facade=facade,
-            require_fresh_relations=True,
         )
 
         result = service.confirm_relation(
@@ -251,7 +242,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(history["after_relations"][0]["case_id"], "case-1")
         self.assertEqual(history["affected_row_ids"], ["oa-1", "bank-1"])
         self.assertEqual(history["created_by"], "finance-user")
-        self.assertEqual(facade.calls[0]["reason"], "workbench_relation_write_precondition")
+        self.assertNotIn("read_model_status", result)
 
     def test_confirm_relation_persists_evidence_and_display_tags_for_owner_modules(self) -> None:
         repository = FakeRelationRepository()
@@ -378,39 +369,34 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "workbench_relation_active_row_conflict")
         self.assertEqual(repository.save_calls, [])
 
-    def test_confirm_relation_fails_fast_when_freshness_precondition_is_explicit(self) -> None:
+    def test_confirm_relation_uses_canonical_write_safety_when_distribution_is_stale(self) -> None:
         repository = FakeRelationRepository()
+        facade = FakeRelationFacade(
+            {
+                "status": "stale",
+                "rows": [],
+                "groups": [],
+                "stale_reasons": ["dirty_scope:2026-05"],
+            }
+        )
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
-            relation_facade=FakeRelationFacade(
-                {
-                    "status": "stale",
-                    "rows": [],
-                    "groups": [],
-                    "read_model_scope_keys": ["2026-05"],
-                    "stale_reasons": ["dirty_scope:2026-05"],
-                    "refresh_enqueued": True,
-                }
-            ),
-            require_fresh_relations=True,
+            relation_facade=facade,
         )
 
-        with self.assertRaises(WorkbenchRelationCommandError) as context:
-            service.confirm_relation(
-                case_id="case-1",
-                row_ids=["oa-1", "bank-1"],
-                row_types=["oa", "bank"],
-                relation_mode="manual_confirmed",
-                actor_id="finance-user",
-                month_scope="2026-05",
-            )
+        result = service.confirm_relation(
+            case_id="case-1",
+            row_ids=["oa-1", "bank-1"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            actor_id="finance-user",
+            month_scope="2026-05",
+        )
 
-        self.assertEqual(context.exception.error_code, "workbench_relation_read_model_not_fresh")
-        self.assertEqual(context.exception.payload["read_model_status"], "stale")
-        self.assertEqual(context.exception.payload["read_model_stale_reasons"], ["dirty_scope:2026-05"])
-        self.assertEqual(context.exception.payload["read_model_scope_keys"], ["2026-05"])
-        self.assertTrue(context.exception.payload["refresh_enqueued"])
-        self.assertEqual(repository.save_calls, [])
+        self.assertEqual(result["status"], "confirmed")
+        self.assertNotIn("read_model_status", result)
+        self.assertEqual(facade.calls, [])
+        self.assertEqual(repository.save_calls[0]["changed_case_ids"], {"case-1"})
 
     def test_cancel_relation_saves_cancelled_case_and_audit_history(self) -> None:
         repository = FakeRelationRepository(
@@ -470,11 +456,8 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
                 }
             }
         )
-        facade = FakeRelationFacade()
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
-            relation_facade=facade,
-            require_fresh_relations=True,
         )
 
         result = service.cancel_relations_for_row_ids(
@@ -487,8 +470,6 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "cancelled")
         self.assertEqual(result["changed_case_ids"], ["case-etc"])
         self.assertEqual(result["affected_months"], ["2026-05"])
-        self.assertEqual(facade.calls[0]["row_ids"], ["etc_summary_batch_1"])
-        self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-05"])
         saved_snapshot = repository.save_calls[0]["snapshot"]
         self.assertEqual(saved_snapshot["pair_relations"]["case-etc"]["status"], "cancelled")
         history = saved_snapshot["pair_relation_history"][0]
@@ -496,7 +477,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(history["before_relations"][0]["case_id"], "case-etc")
         self.assertEqual(history["affected_row_ids"], ["etc_summary_batch_1", "oa-1"])
 
-    def test_update_relation_metadata_for_case_id_checks_freshness_and_records_history(self) -> None:
+    def test_update_relation_metadata_for_case_id_records_history(self) -> None:
         repository = FakeRelationRepository(
             {
                 "pair_relations": {
@@ -515,11 +496,8 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
                 }
             }
         )
-        facade = FakeRelationFacade()
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
-            relation_facade=facade,
-            require_fresh_relations=True,
         )
 
         result = service.update_relation_metadata_for_case_id(
@@ -537,7 +515,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(result["relation"]["amount_check"]["invoice_total"], "100.00")
         self.assertEqual(result["relation"]["special_metadata"]["etc_batch_link"]["external_etc_batch_id"], "ETC-1")
         self.assertEqual(result["relation"]["display_tags"], ["ETC发票已关联"])
-        self.assertEqual(facade.calls[0]["row_ids"], ["oa-1", "bank-1"])
+        self.assertNotIn("read_model_status", result)
         saved_snapshot = repository.save_calls[0]["snapshot"]
         history = saved_snapshot["pair_relation_history"][0]
         self.assertEqual(history["operation_type"], "link_existing_etc_batch")

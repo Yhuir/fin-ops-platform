@@ -99,7 +99,7 @@ ETC 批次删除是本地清理操作，不是 OA 撤销。删除入口包括：
 - 真实 OA 草稿、OA 流程、已提交 OA 事实不删除、不撤销；若存在绑定 ETC 对账任务，两个删除入口都会删除本地任务和本地上传元数据。
 - 删除后 submitted bucket 不再显示该业务批次；只有原本已存在于统一发票池的发票才会回到普通发票视图，等待未来 OA 和银行流水按普通三栏配对规则闭环。
 
-排查时如果用户反馈“删除已提交批次后 1673 汇总仍存在”，优先检查 active relation 是否仍包含 summary row、ETC metadata 是否仍为 `submitted/current_batch_id` 绑定状态、已存在 canonical invoice 是否仍为 `hidden_after_etc_submission` 或 `etc_submission_status=submitted`，再重跑对应 Workbench read model refresh。
+排查时如果用户反馈“删除已提交批次后 1673 汇总仍存在”，优先检查 active relation 是否仍包含 summary row、ETC metadata 是否仍为 `submitted/current_batch_id` 绑定状态、已存在 canonical invoice 是否仍为 `hidden_after_etc_submission` 或 `etc_submission_status=submitted`，再验证 Workbench direct payload 和 matching facts；不要恢复 Workbench read-model refresh。
 
 ## Orphan task 排查与清理
 

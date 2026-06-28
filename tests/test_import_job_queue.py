@@ -373,17 +373,9 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT, "import.fact.changed"])
         self.assertEqual(payload["handlers"], ["import.fact.changed", IMPORT_PROCESS_REQUESTED_EVENT])
 
-    def test_import_fact_changed_handler_completes_matching_dirty_scope(self) -> None:
+    def test_import_fact_changed_handler_does_not_touch_read_model_dirty_scope(self) -> None:
         class FakeQueue:
-            def __init__(self) -> None:
-                self.enqueued: list[dict[str, object]] = []
-                self.completed: list[dict[str, object]] = []
-
-            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-                self.enqueued.append(dict(kwargs))
-
-            def complete_read_model_refresh(self, **kwargs: object) -> None:
-                self.completed.append(dict(kwargs))
+            pass
 
         queue = FakeQueue()
         bundle = build_import_job_handler_bundle(
@@ -411,29 +403,9 @@ class ImportJobRepositoryTests(unittest.TestCase):
         result = bundle.handlers[IMPORT_FACT_CHANGED_EVENT](event)
 
         self.assertEqual(result["status"], "acknowledged")
-        self.assertTrue(result["refresh_enqueued"])
-        self.assertTrue(result["dirty_scope_completed"])
-        self.assertEqual(
-            queue.enqueued,
-            [
-                {
-                    "scope_type": "bank_detail",
-                    "scope_key": "2026-03",
-                    "reason": "import_facts_changed",
-                }
-            ],
-        )
-        self.assertEqual(
-            queue.completed,
-            [
-                {
-                    "tenant_id": "tenant-a",
-                    "scope_type": "bank_detail",
-                    "scope_key": "2026-03",
-                    "source_version": 0,
-                }
-            ],
-        )
+        self.assertFalse(result["refresh_job_enqueued"])
+        self.assertNotIn("refresh_enqueued", result)
+        self.assertFalse(result["dirty_scope_completed"])
 
     def test_general_import_confirm_queues_import_job_in_rabbitmq_mode(self) -> None:
         app = build_application()

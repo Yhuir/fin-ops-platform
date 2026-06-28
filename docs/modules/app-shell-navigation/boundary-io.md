@@ -7,7 +7,7 @@
 - 状态：partial
 - 当前边界可信度：medium
 - 目标边界：App shell 只负责页面注册、路由、导航、session/runtime context 和全局操作状态，不承载业务页面逻辑。
-- 当前缺口：部分页面 runtime/freshness/operation barrier 状态通过 shell/context 传播，变更时必须防止 UI 状态污染业务模块。
+- 当前缺口：部分页面 runtime/loading/operation 状态通过 shell/context 传播，变更时必须防止 UI 状态污染业务模块。
 - 旧代码删除条件：旧路由或 sidebar 配置不再被 App/PageRouteHost 引用。
 
 ## 职责边界
@@ -22,7 +22,7 @@
 
 - 不拥有页面业务状态机。
 - 不直接调用业务写 API。
-- 不决定 read model freshness，只展示来自页面/API 的状态。
+- 不决定业务数据可用性，只展示来自页面/API 的状态。
 
 ## 输入 I/O
 

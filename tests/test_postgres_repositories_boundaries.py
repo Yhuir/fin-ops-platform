@@ -8,7 +8,6 @@ from fin_ops_platform.services.postgres_repositories.read_models import Postgres
 from fin_ops_platform.services.postgres_repositories.read_models import _execute_many
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
-from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
 
 
 class TransactionRecorder:
@@ -264,9 +263,6 @@ def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -
     )
 
     executed_sql = [sql for sql, _ in connection.executed]
-    read_model_delete_index = next(
-        index for index, sql in enumerate(executed_sql) if "delete from read_model.no_oa_bank_batch_rows" in sql
-    )
     removed_events_delete_index = next(
         index
         for index, sql in enumerate(executed_sql)
@@ -276,27 +272,9 @@ def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -
         index for index, sql in enumerate(executed_sql) if "delete from app.no_oa_bank_batches where not" in sql
     )
 
-    assert read_model_delete_index < removed_events_delete_index < removed_batches_delete_index
+    assert removed_events_delete_index < removed_batches_delete_index
     assert connection.executed[removed_events_delete_index][1] == (["retained-batch"],)
     assert connection.executed[removed_batches_delete_index][1] == (["retained-batch"],)
-
-
-def test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables() -> None:
-    connection = ValuesBulkConnection()
-
-    _execute_many(
-        connection,
-        "insert into read_model.search_index_rows(row_id, payload) values (%s, %s)",
-        [("row-1", {"row_id": "row-1"})],
-    )
-
-    insert_calls = [
-        (sql, params)
-        for sql, params in connection.executed_many_values
-        if "insert into read_model.search_index_rows" in sql
-    ]
-    assert len(insert_calls) == 1
-    assert len(insert_calls[0][1]) == 1
 
 
 def test_read_model_bulk_insert_with_mapping_params_uses_execute_many() -> None:
@@ -310,43 +288,6 @@ def test_read_model_bulk_insert_with_mapping_params_uses_execute_many() -> None:
 
     assert len(connection.executed_many) == 1
     assert connection.executed_many_values == []
-
-
-def test_workbench_relation_distribution_save_batches_rows_and_groups() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_workbench_relation_distribution(
-        scope_key="2026-05",
-        groups=[
-            {
-                "group_id": "case-1",
-                "relation_source": "manual",
-                "relation_kind": "linked",
-                "relation_status": "linked",
-                "bank_transaction_ids": ["txn-1"],
-                "payload": {"case_id": "case-1", "row_ids": ["txn-1"]},
-            }
-        ],
-        rows=[
-            {
-                "row_id": "txn-1",
-                "row_type": "bank_transaction",
-                "relation_status": "linked",
-                "group_ids": ["case-1"],
-            }
-        ],
-        source_versions={"source_version": 9},
-    )
-
-    bulk_sql = [sql for sql, _params in connection.executed_many]
-    assert any("insert into read_model.workbench_relation_groups" in sql for sql in bulk_sql)
-    assert any("insert into read_model.workbench_relation_rows" in sql for sql in bulk_sql)
-    assert not any(
-        "insert into read_model.workbench_relation_groups" in sql
-        or "insert into read_model.workbench_relation_rows" in sql
-        for sql, _params in connection.executed
-    )
 
 
 def test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches() -> None:
@@ -399,12 +340,10 @@ def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() 
     )
 
     executed_sql = [sql for sql, _ in connection.executed]
-    assert "delete from read_model.no_oa_bank_batch_rows where scope_month = %s::date" in executed_sql[0]
-    assert "delete from app.no_oa_bank_batch_events where no_oa_bank_batch_id in" in executed_sql[1]
-    assert "delete from app.no_oa_bank_batches where scope_month = %s::date" in executed_sql[2]
+    assert "delete from app.no_oa_bank_batch_events where no_oa_bank_batch_id in" in executed_sql[0]
+    assert "delete from app.no_oa_bank_batches where scope_month = %s::date" in executed_sql[1]
     assert connection.executed[0][1] == ("2026-03-01", ["march-batch"])
     assert connection.executed[1][1] == ("2026-03-01", ["march-batch"])
-    assert connection.executed[2][1] == ("2026-03-01", ["march-batch"])
     assert not any(
         sql == "delete from read_model.no_oa_bank_batch_rows where not (batch_id = any(%s))"
         for sql in executed_sql
@@ -471,151 +410,6 @@ def test_workbench_category_confirmation_revoke_updates_confirmation_fact_table(
     executed_sql = [sql for sql, _ in connection.executed]
     assert any("update app.bank_transaction_category_confirmations" in sql for sql in executed_sql)
     assert all("insert into app.bank_transaction_categories" not in sql for sql in executed_sql)
-
-
-def test_read_model_tax_save_uses_entry_count_column_and_transaction() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_tax_offset_read_models(
-        {"read_models": {"2026-03": {"entries": [{"id": "row-1"}], "generated_at": "2026-03-02T00:00:00+00:00"}}}
-    )
-
-    assert connection.transaction_enters == 1
-    assert connection.transaction_exits == 1
-    assert len(connection.executed) == 1
-    sql = connection.executed[0][0]
-    assert "insert into read_model.tax_offset_read_models" in sql
-    assert "entry_count" in sql
-    assert "row_count" not in sql
-
-
-def test_invoice_lifecycle_rows_are_saved_in_batch_and_scope_is_updated() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_invoice_lifecycle_rows(
-        scope_key="2026-04",
-        rows=[
-            {
-                "subject_id": "invoice-1",
-                "subject_type": "input_invoice",
-                "scope_month": "2026-04",
-                "invoice_identity_key": "input:invoice-1",
-                "lifecycle_status": "paid",
-                "payment_status": {"code": "paid"},
-            },
-            {
-                "subject_id": "bank-1",
-                "subject_type": "bank_transaction",
-                "scope_month": "2026-04",
-                "lifecycle_status": "missing_invoice",
-                "acquisition_status": {"code": "missing_invoice"},
-            },
-        ],
-        source_versions={"invoice_lifecycle_read_model_schema_version": 1},
-    )
-
-    assert connection.transaction_enters == 1
-    assert connection.transaction_exits == 1
-    executed_sql = [sql for sql, _ in connection.executed]
-    assert any("delete from read_model.invoice_lifecycle_rows" in sql for sql in executed_sql)
-    assert len(connection.executed_many) == 1
-    batch_sql, batch_params = connection.executed_many[0]
-    assert "insert into read_model.invoice_lifecycle_rows" in batch_sql
-    assert len(batch_params) == 2
-    assert batch_params[0][1] == "invoice-1"
-    assert batch_params[0][2] == "input_invoice"
-    assert batch_params[1][1] == "bank-1"
-    assert batch_params[1][2] == "bank_transaction"
-    assert any("insert into read_model.invoice_lifecycle_scopes" in sql for sql in executed_sql)
-
-
-def test_pending_invoice_rows_save_updates_scope_inside_transaction() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_pending_invoice_rows(
-        scope_key="expense:all:2026-04",
-        rows=[
-            {
-                "id": "pending-1",
-                "bank_transaction": {
-                    "trade_time": "2026-04-03",
-                    "counterparty_name": "counterparty",
-                    "amount": "12.34",
-                },
-                "status": {"code": "missing_invoice"},
-                "invoices": [],
-                "can_create_invoice": True,
-            }
-        ],
-        source_versions={"pending_invoice_read_model_schema_version": 1},
-    )
-
-    assert connection.transaction_enters == 1
-    assert connection.transaction_exits == 1
-    executed_sql = [sql for sql, _ in connection.executed]
-    assert any("delete from read_model.pending_invoice_rows" in sql for sql in executed_sql)
-    assert any("insert into read_model.pending_invoice_rows" in sql for sql in executed_sql)
-    assert any("insert into read_model.pending_invoice_scopes" in sql for sql in executed_sql)
-
-
-def test_cost_statistics_rows_are_saved_in_batch() -> None:
-    connection = RecordingConnection()
-    repository = PostgresReadModelRepository(connection)
-
-    repository.save_cost_statistics_read_models(
-        {
-            "read_models": {
-                "active:2026-04": {
-                    "scope_key": "active:2026-04",
-                    "month": "2026-04",
-                    "project_scope": "active",
-                    "generated_at": "2026-04-02T00:00:00+00:00",
-                    "source_versions": {"cost_statistics_read_model_schema_version": 1},
-                    "payload": {
-                        "month": "2026-04",
-                        "project_scope": "active",
-                        "time_rows": [
-                            {
-                                "row_key": "cost-row-1",
-                                "transaction_id": "bank-1",
-                                "trade_time": "2026-04-01T10:00:00+08:00",
-                                "trade_date": "2026-04-01",
-                                "project_name": "项目一",
-                                "expense_type": "材料费",
-                                "amount": "100.00",
-                            },
-                            {
-                                "row_key": "cost-row-2",
-                                "transaction_id": "bank-2",
-                                "trade_time": "2026-04-02T10:00:00+08:00",
-                                "trade_date": "2026-04-02",
-                                "project_name": "项目二",
-                                "expense_type": "服务费",
-                                "amount": "200.00",
-                            },
-                        ],
-                    },
-                }
-            }
-        },
-        changed_scope_keys={"active:2026-04"},
-    )
-
-    assert connection.transaction_enters == 1
-    assert connection.transaction_exits == 1
-    executed_sql = [sql for sql, _ in connection.executed]
-    assert any("delete from read_model.cost_statistics_rows" in sql for sql in executed_sql)
-    assert len(connection.executed_many) == 1
-    batch_sql, batch_params = connection.executed_many[0]
-    assert "insert into read_model.cost_statistics_rows" in batch_sql
-    assert len(batch_params) == 2
-    assert batch_params[0][3] == "cost-row-1"
-    assert batch_params[0][4] == "bank-1"
-    assert batch_params[1][3] == "cost-row-2"
-    assert batch_params[1][4] == "bank-2"
 
 
 def test_ops_tax_etc_multi_table_saves_use_transactions() -> None:
@@ -746,15 +540,11 @@ def test_workbench_relation_repository_save_writes_relation_history_and_refresh_
     assert "insert into app.workbench_pair_relations" in executed_sql
     assert "delete from app.workbench_pair_relation_history" in executed_sql
     assert "insert into app.workbench_pair_relation_history" in executed_sql
-    assert "insert into job.read_model_dirty_scopes" in fetch_one_sql
-    assert "insert into job.outbox_events" in executed_sql
-    assert any(params[1] == "workbench_relation" and params[2] == "2026-05" for _sql, params in connection.fetch_one_calls)
-    outbox_params = [params for sql, params in connection.executed if "insert into job.outbox_events" in sql]
-    assert any(params[1] == "workbench_relation.read_model.refresh" for params in outbox_params)
-    assert any(params[1] == "cost_statistics.read_model.refresh" for params in outbox_params)
+    assert "insert into job.read_model_dirty_scopes" not in fetch_one_sql
+    assert "insert into job.outbox_events" not in executed_sql
 
 
-def test_workbench_relation_transactional_refresh_scopes_match_scope_policy_contracts() -> None:
+def test_workbench_relation_repository_does_not_write_page_read_model_refresh_scopes() -> None:
     connection = WorkbenchRelationWriteConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
 
@@ -775,14 +565,8 @@ def test_workbench_relation_transactional_refresh_scopes_match_scope_policy_cont
         changed_case_ids={"case-1"},
     )
 
-    dirty_scopes = [(params[1], params[2]) for _sql, params in connection.fetch_one_calls]
-    outbox_scopes = [(params[3], params[4]) for sql, params in connection.executed if "insert into job.outbox_events" in sql]
-
-    assert dirty_scopes
-    assert dirty_scopes == outbox_scopes
-    for scope_type, scope_key in dirty_scopes:
-        normalized = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(scope_type, [scope_key])
-        assert normalized == [scope_key]
+    assert not connection.fetch_one_calls
+    assert not any("insert into job.outbox_events" in sql for sql, _params in connection.executed)
 
 
 def test_workbench_repository_delegates_pair_relation_load_to_relation_repository() -> None:
@@ -807,15 +591,6 @@ def test_workbench_repository_no_longer_owns_pair_relation_sql() -> None:
     }
 
     assert {snippet for snippet in forbidden_snippets if snippet in repository_source} == set()
-
-
-def test_read_model_loaders_strip_export_only_rebuildable_marker() -> None:
-    repository = PostgresReadModelRepository(ReadModelReadConnection())
-
-    assert "rebuildable" not in repository.load_workbench_read_models()["read_models"]["2026-05"]
-    assert "rebuildable" not in repository.load_workbench_candidate_matches()["candidates"]["candidate-1"]
-    assert "rebuildable" not in repository.load_cost_statistics_read_models()["read_models"]["2026-05"]
-    assert "rebuildable" not in repository.load_tax_offset_read_models()["read_models"]["2026-05"]
 
 
 def test_candidate_match_loader_drops_rebuildable_transform_cache_rows() -> None:

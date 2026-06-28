@@ -1,6 +1,6 @@
 # 设置状态机
 
-> 修改设置相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。设置模块是高扇出配置域，不能只按页面局部状态理解。
+> 修改设置相关业务状态、UI 状态、cache/lifecycle 状态或 worker 状态前必须读取本文件。设置模块是高扇出配置域，不能只按页面局部状态理解。
 
 ## 业务状态
 
@@ -25,7 +25,7 @@
   - 手工项目新增后默认为 active。
   - active 与 completed 之间由 settings 保存切换。
   - OA 项目本地删除只记录 override，不删除 OA 事实。
-- 影响：项目范围变化会影响成本统计、搜索和项目筛选；必须通过 dirty/read model 或等价 lifecycle 保护。
+- 影响：项目范围变化会影响成本统计、Search direct payload 和项目筛选；下游页面必须通过 direct refetch、lifecycle 或真实后台任务保护，Search 不恢复 refresh worker。
 
 ### 访问控制
 
@@ -37,7 +37,7 @@
 
 - 银行标签状态：`active`、`archived`、`in_use_blocked`、`version_conflict`。
 - 待找发票规则状态：income/expense 方向独立 version；非法映射可从历史 payload 加载并展示修复。
-- 影响：规则保存后不能同步重建所有下游页面，但必须产生对应 dirty scope/lifecycle event。
+- 影响：规则保存后不能同步重建所有下游页面，但必须产生对应 lifecycle event 或 direct refetch 触发点。
 
 ### OA 申请人凭据
 
@@ -48,39 +48,39 @@
 
 ### 数据重置
 
-- 支持动作：`reset_bank_transactions`、`reset_invoices`、`reset_oa_and_rebuild`。
+- 支持动作：`reset_bank_transactions`、`reset_invoices`、`reset_oa_and_resync`。
 - job 状态：`idle`、`confirming`、`queued`、`running`、`succeeded`、`failed`、`cancelled/unavailable`。
 - protected targets：`form_data_db.form_data`、`fin_ops_platform_app.app_settings`、`fin_ops_platform_app.*_meta`、`fin_ops_platform_app.import_file_metadata`。
 - 允许流转：
   - admin 输入确认密码后创建 job。
   - 页面重进后可恢复 active running job。
-  - reset OA 可以按 OA retention cutoff 重建并复用缓存附件发票。
+  - reset OA 可以按 OA retention cutoff 重新同步并复用缓存附件发票。
 - 禁止流转：
   - 密码缺失/错误或 verification service 失败时清理数据。
   - job payload、错误、日志保存 OA password。
   - 删除 protected targets。
-  - reset 后让旧 read model/cache 显示为 fresh。
+  - reset 后让旧 cache 显示为可用 direct payload。
 
 ## UI 状态
 
 - loading：settings payload、credential list、active data reset job 并行加载时展示加载态，不能误显示可保存状态。
 - empty：无手工项目、无凭据、无 pending invoice 规则时显示空状态，但保留创建入口。
 - error：settings save、凭据保存、data reset job、active job 恢复失败必须展示可理解错误。
-- stale/refreshing：设置页自身不是 read model 页面；但 data reset 和规则保存引起的下游 stale/refreshing 必须通过 App Status 或下游页面体现。
+- downstream unavailable：设置页自身不是 read model 页面；但 data reset 和规则保存引起的下游暂不可用必须通过 App Status 或下游页面体现。
 - permission disabled/hidden：readonly/full access 非 admin 不显示高风险 credential/reset 入口；API 仍必须二次校验。
 - credential form：密码只存在于当前表单；保存成功后清空；列表只展示目标 OA 申请人、OA 登录账号和配置状态。
 - reset dialog：必须有动作说明、影响范围、确认密码、运行中 job progress、失败状态和重进恢复。
 
-## Read Model / Worker 状态
+## Direct API / Worker 状态
 
-- 设置事实本身不作为 read model，但它会触发或清理多个 read model。
-- refresh 触发来源：
+- 设置事实本身不作为 read model；它会触发或清理多个下游 direct API、cache、lifecycle、job/outbox。
+- direct refetch / runtime 触发来源：
   - `pending_invoice_rules_changed`：待找发票、发票 lifecycle、关联台、进项/销项/OA 待付款、税金、成本、搜索。
   - `bank_auto_tag_rules_changed` / bank tag settings：银行明细、免 OA、关联台候选、往来款、成本、搜索。
   - `project_scope_changed`：成本统计、搜索。
-  - `settings_reset_completed`：多数 read model、cache、dirty scope、App Status readiness。
-  - `startup_stale_scan`：默认关闭；启用时只标记 stale workbench matching dirty scopes，用于启动补扫；不应直接刷新用户可见 read model。
-- worker 状态：settings save 通常不直接阻塞等待 worker；必须通过 dirty scope、queue、App Status 展示 refreshing/stale/failed。
+  - `settings_reset_completed`：多数下游 direct API、cache、worker/App Status 运行态。
+  - `startup_stale_scan`：默认关闭；启用时只创建 workbench matching rescan 诊断/任务，用于启动补扫；不应直接刷新用户可见页面 payload。
+- worker 状态：settings save 通常不直接阻塞等待 worker；必须通过 outbox/queue、App Status 展示 running/failed。
 - 失败恢复：
   - settings 保存失败不得产生半写入 audit 或半更新规则。
   - data reset 失败必须保留可诊断 job 状态，不泄露密码。
@@ -93,5 +93,5 @@
 | - | 初始骨架 | 待补充 | - |
 | 2026-06-10 | 新增 OA 申请人凭据管理后端状态 | 设置页新增独立凭据事实源，admin-only，状态为 `已配置/未配置` | `tests.test_oa_applicant_credentials_service`、`tests.test_oa_applicant_credentials_api`、`tests.test_postgres_oa_applicant_credentials_repository`、`tests.test_postgres_migrations` |
 | 2026-06-10 | 落地 OA申请人凭据设置页 UI | 管理员可在设置页维护目标申请人凭据；保存走独立凭据 API；普通 settings save 不包含密码 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` |
-| 2026-06-11 | 补齐 settings 测试闭环状态机 | 将项目、权限、规则、OA 凭据、data reset 和 read model/worker fan-out 纳入同一维护边界 | `tests.test_app_settings_service`、`tests.test_settings_data_reset_service`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` |
+| 2026-06-11 | 补齐 settings 测试闭环状态机 | 将项目、权限、规则、OA 凭据、data reset 和 worker/direct API fan-out 纳入同一维护边界 | `tests.test_app_settings_service`、`tests.test_settings_data_reset_service`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-16 | 统一 settings mutation API 权限 gate | 项目同步/新增/删除和 OA 手动导入 mutation 必须校验 `can_mutate_data`；有 OA session 时 actor 来自 session，不接受 body 伪造 | `tests.test_workbench_settings_sync_api`、`tests.test_oa_manual_import_api` |

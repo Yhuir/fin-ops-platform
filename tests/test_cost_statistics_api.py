@@ -74,7 +74,7 @@ class _FallbackCostStatsOAAdapter:
         ]
 
 
-class _MemoryCostStatisticsReadModelService:
+class _MemoryCostStatisticsLocalStore:
     def __init__(self) -> None:
         self.read_models: dict[str, dict[str, object]] = {}
 
@@ -160,7 +160,7 @@ class _MemoryCostStatisticsReadModelService:
 class CostStatisticsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.app = build_application()
-        self.app._cost_statistics_read_model_service = _MemoryCostStatisticsReadModelService()
+        self.app._cost_statistics_local_store = _MemoryCostStatisticsLocalStore()
         self.app._workbench_query_service = self.app._workbench_query_service.__class__(oa_adapter=_CostStatsOAAdapter())
         self.app._workbench_api_routes = WorkbenchApiRoutes(
             self.app._workbench_query_service,
@@ -175,7 +175,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             project_active_checker=self.app._app_settings_service.is_project_active,
         )
 
-    def test_cost_statistics_explorer_cache_hit_does_not_rebuild(self) -> None:
+    def test_cost_statistics_explorer_ignores_legacy_read_model_cache(self) -> None:
         cached_payload = {
             "month": "2026-03",
             "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "88.00"},
@@ -183,18 +183,22 @@ class CostStatisticsApiTests(unittest.TestCase):
             "project_rows": [],
             "expense_type_rows": [],
         }
-        self.app._cost_statistics_read_model_service.upsert_read_model("2026-03", "active", cached_payload)
+        self.app._cost_statistics_local_store.upsert_read_model("2026-03", "active", cached_payload)
+        self.app._cost_statistics_service = SimpleNamespace(
+            get_explorer=lambda *_args, **_kwargs: {
+                "month": "2026-03",
+                "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "99.00"},
+                "time_rows": [{"transaction_id": "direct-sentinel"}],
+                "project_rows": [],
+                "expense_type_rows": [],
+            },
+        )
 
-        with patch.object(
-            self.app._cost_statistics_service,
-            "get_explorer",
-            side_effect=AssertionError("should not rebuild cached explorer"),
-        ):
-            response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
+        response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
-        self.assertEqual(payload["time_rows"][0]["transaction_id"], "cached-sentinel")
+        self.assertEqual(payload["time_rows"][0]["transaction_id"], "direct-sentinel")
 
     def test_cost_statistics_route_owner_delegates_month_and_explorer_to_query_service(self) -> None:
         from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
@@ -243,7 +247,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(explorer_response.status_code, 200)
         self.assertEqual(calls, [("month", "2026-03", "active"), ("explorer", "2026-04", "all")])
 
-    def test_cost_statistics_explorer_miss_writes_cache_and_logs_hit_metrics(self) -> None:
+    def test_cost_statistics_explorer_reads_direct_service_and_logs_miss_metrics(self) -> None:
         calls: list[tuple[str, str]] = []
 
         def build_explorer(month: str, *, project_scope: str) -> dict[str, object]:
@@ -264,7 +268,7 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(calls, [("2026-03", "active")])
+        self.assertEqual(calls, [("2026-03", "active"), ("2026-03", "active")])
         self.assertEqual(
             json.loads(second_response.body)["time_rows"],
             [{"transaction_id": "txn-1"}, {"transaction_id": "txn-2"}],
@@ -274,20 +278,24 @@ class CostStatisticsApiTests(unittest.TestCase):
             for call in print_mock.call_args_list
             if call.args and json.loads(call.args[0]).get("kind") == "cost_statistics_explorer_metric"
         ]
-        self.assertEqual([payload["cache_hit"] for payload in metric_payloads], [False, True])
+        self.assertEqual([payload["cache_hit"] for payload in metric_payloads], [False, False])
         self.assertEqual([payload["entry_count"] for payload in metric_payloads], [2, 2])
 
-    def test_cost_statistics_all_month_cache_miss_returns_empty_payload_and_schedules_warmup(self) -> None:
+    def test_cost_statistics_all_month_reads_direct_service(self) -> None:
         self.app._cost_statistics_service = SimpleNamespace(
-            get_explorer=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("all should warm asynchronously")),
+            get_explorer=lambda month, **_kwargs: {
+                "month": month,
+                "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
+                "time_rows": [],
+                "project_rows": [],
+                "expense_type_rows": [],
+            },
         )
-        job = SimpleNamespace(job_id="warmup-job-1", owner_user_id="system")
 
         with (
             patch.object(
                 self.app._background_job_service,
                 "create_or_get_idempotent_job_with_created",
-                return_value=(job, True),
             ) as create_job,
             patch.object(self.app._background_job_service, "run_job") as run_job,
         ):
@@ -300,13 +308,11 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"], [])
         self.assertEqual(payload["project_rows"], [])
         self.assertEqual(payload["expense_type_rows"], [])
-        create_job.assert_called_once()
-        self.assertEqual(create_job.call_args.kwargs["job_type"], "cost_statistics_cache_warmup")
-        self.assertIn("all", create_job.call_args.kwargs["idempotency_key"])
-        run_job.assert_called_once()
+        create_job.assert_not_called()
+        run_job.assert_not_called()
 
-    def test_workbench_scope_invalidation_deletes_cost_statistics_month_and_all_models_and_schedules_warmup(self) -> None:
-        service = self.app._cost_statistics_read_model_service
+    def test_cost_statistics_scope_invalidation_deletes_month_and_all_models_and_schedules_warmup(self) -> None:
+        service = self.app._cost_statistics_local_store
         for month in ("2026-03", "all"):
             for project_scope in ("active", "all"):
                 service.upsert_read_model(
@@ -330,9 +336,11 @@ class CostStatisticsApiTests(unittest.TestCase):
             ) as create_job,
             patch.object(self.app._background_job_service, "run_job") as run_job,
         ):
-            deleted_workbench_scopes = self.app._invalidate_workbench_read_model_scopes(["2026-03"])
+            self.app._cost_statistics_runtime().invalidate_read_model_scopes(
+                ["2026-03"],
+                reason="workbench_scope_invalidated",
+            )
 
-        self.assertEqual(deleted_workbench_scopes, ["2026-03"])
         self.assertIsNone(service.get_read_model("2026-03", "active"))
         self.assertIsNone(service.get_read_model("2026-03", "all"))
         self.assertIsNone(service.get_read_model("all", "active"))
@@ -364,7 +372,10 @@ class CostStatisticsApiTests(unittest.TestCase):
             ) as create_job,
             patch.object(self.app._background_job_service, "run_job") as run_job,
         ):
-            self.app._invalidate_workbench_read_model_scopes(["all"])
+            self.app._cost_statistics_runtime().invalidate_read_model_scopes(
+                ["all"],
+                reason="workbench_scope_invalidated",
+            )
 
         self.assertIsNone(service.get_read_model("all", "active"))
         self.assertIsNone(service.get_read_model("all", "all"))
@@ -599,9 +610,10 @@ class CostStatisticsApiTests(unittest.TestCase):
         run_job.assert_called_once()
 
     def test_import_preview_does_not_invalidate_cost_statistics_cache(self) -> None:
+        runtime_service = self.app._cost_statistics_runtime()
         with (
-            patch.object(self.app, "_invalidate_cost_statistics_read_models") as invalidate_all,
-            patch.object(self.app, "_invalidate_cost_statistics_read_model_scopes") as invalidate_scopes,
+            patch.object(runtime_service, "invalidate_read_models") as invalidate_all,
+            patch.object(runtime_service, "invalidate_read_model_scopes") as invalidate_scopes,
         ):
             response = self.app.handle_request(
                 "POST",
@@ -655,9 +667,10 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         batch_id = json.loads(preview_response.body)["batch"]["id"]
 
+        runtime_service = self.app._cost_statistics_runtime()
         with (
-            patch.object(self.app, "_invalidate_cost_statistics_read_models") as invalidate_all,
-            patch.object(self.app, "_invalidate_cost_statistics_read_model_scopes") as invalidate_scopes,
+            patch.object(runtime_service, "invalidate_read_models") as invalidate_all,
+            patch.object(runtime_service, "invalidate_read_model_scopes") as invalidate_scopes,
         ):
             response = self.app.handle_request("POST", "/imports/confirm", json.dumps({"batch_id": batch_id}))
 

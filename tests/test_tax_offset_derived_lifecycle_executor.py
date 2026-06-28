@@ -45,7 +45,7 @@ class TaxOffsetDerivedLifecycleExecutorTests(unittest.TestCase):
         self.assertEqual(
             result,
             {
-                "deleted_counts": {"tax_offset_read_models": 1},
+                "deleted_counts": {"tax_offset_cache_scopes": 1},
                 "invalidated_scopes": ["2026-05"],
                 "enqueued_jobs": ["tax_offset_cache_warmup"],
             },

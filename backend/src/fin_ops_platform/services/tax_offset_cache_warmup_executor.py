@@ -16,30 +16,24 @@ class TaxOffsetCacheWarmupExecutor:
         self,
         *,
         runtime_service: TaxOffsetRuntimeService,
-        read_model_service: Any,
         background_job_service: Any,
         month_payload_loader: Callable[[str], dict[str, object]],
-        persist_read_models: Callable[..., None],
         enabled_provider: Callable[[], bool] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._runtime_service = runtime_service
-        self._read_model_service = read_model_service
         self._background_job_service = background_job_service
         self._month_payload_loader = month_payload_loader
-        self._persist_read_models = persist_read_models
         self._enabled_provider = enabled_provider or self.env_enabled
         self._clock = clock or datetime.now
 
     def schedule(self, months: list[str], *, reason: str) -> None:
-        if self._read_model_service is None:
-            return
         if not self._enabled_provider():
             return
         deduped_months = self._deduped_months(months)
         if not deduped_months:
             return
-        affected_scope_keys = [self._runtime_service.read_model_scope_key(month) for month in deduped_months]
+        affected_scope_keys = [self._runtime_service.scope_key(month) for month in deduped_months]
         idempotency_key = f"tax_offset_cache_warmup:{reason}:{','.join(deduped_months)}"
         job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
             job_type="tax_offset_cache_warmup",
@@ -72,13 +66,11 @@ class TaxOffsetCacheWarmupExecutor:
         *,
         months: list[str],
     ) -> dict[str, object]:
-        if self._read_model_service is None:
-            return {"warmed": 0, "failed": 0}
         warmed_scope_keys: list[str] = []
         failed_scope_keys: list[str] = []
         total = len(list(months or []))
         for index, month in enumerate(list(months or []), start=1):
-            scope_key = self._runtime_service.read_model_scope_key(month)
+            scope_key = self._runtime_service.scope_key(month)
             self._background_job_service.update_progress(
                 running_job.job_id,
                 phase="build_tax_offset_cache",
@@ -92,20 +84,7 @@ class TaxOffsetCacheWarmupExecutor:
             except Exception:
                 failed_scope_keys.append(scope_key)
                 continue
-            read_model = self._read_model_service.upsert_read_model(
-                month,
-                payload,
-                generated_at=self._clock().isoformat(),
-                source_scope_keys=[month],
-                cache_status="ready",
-            )
-            warmed_scope_key = self._runtime_service.read_model_scope_key(month, read_model=read_model)
-            warmed_scope_keys.append(warmed_scope_key)
-            self._persist_read_models(
-                snapshot=self._read_model_service.snapshot_scope_keys([warmed_scope_key]),
-                changed_scope_keys=[warmed_scope_key],
-                operation="tax_offset_cache_warmup",
-            )
+            warmed_scope_keys.append(scope_key)
 
         result_summary = {
             "warmed": len(warmed_scope_keys),

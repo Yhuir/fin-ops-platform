@@ -70,7 +70,7 @@ RabbitMQ 相关变量当前只作为未来投递通道边界预留；本地同�
 ./scripts/check-local-runtime.sh --dependencies-only
 ```
 
-该检查会确认本地到服务器 PostgreSQL、Redis、MinIO/S3 的连接，以及 facts/read model 的基础行数。`./scripts/start-backend.sh` 在检测到 PostgreSQL runtime 时也会自动执行这一步；依赖不可用时直接失败，不启动一个“看起来在跑但实际不能读 PG”的后端。
+该检查会确认本地到服务器 PostgreSQL、Redis、MinIO/S3 的连接，以及 canonical facts、runtime job 和 direct API 所需基础数据。`./scripts/start-backend.sh` 在检测到 PostgreSQL runtime 时也会自动执行这一步；依赖不可用时直接失败，不启动一个“看起来在跑但实际不能读 PG”的后端。
 
 后端启动后再跑完整 smoke：
 
@@ -78,7 +78,7 @@ RabbitMQ 相关变量当前只作为未来投递通道边界预留；本地同�
 ./scripts/check-local-runtime.sh --require-backend
 ```
 
-完整检查会验证 `/health` 使用 PostgreSQL runtime、Redis 和对象存储可用，并确认 `/api/workbench/summary` 与 `/api/workbench/groups` 能从 SQL read model 返回非空数据。
+完整检查会验证 `/health` 使用 PostgreSQL runtime、Redis 和对象存储可用，并确认 `/api/workbench/summary` 与 `/api/workbench/groups` 能返回 direct Workbench payload。
 工作台首屏使用 split summary/groups endpoint。不要用机器上残留的 `127.0.0.1:8000` 旧 `backend.api.main:app` 进程判断本项目状态；本仓库默认后端端口是 `8001`，前端 Vite proxy 也默认指向 `http://127.0.0.1:8001`。
 
 没有 PostgreSQL 连接配置时，脚本仍保留本地 legacy mode 兼容路径；本地和服务器同构验收必须使用 PostgreSQL runtime。

@@ -6,17 +6,17 @@
 
 - 状态：partial
 - 当前边界可信度：medium
-- 目标边界：银行明细页面读取 `bank_detail` read model；标签、分类、自动规则等写操作通过 service/UoW 触发 scoped dirty refresh。
-- 当前缺口：模块 README 只登记了前端入口，后端 service/read model 文件已在本文件补齐，后续应同步回 README。
-- 旧代码删除条件：没有 API 或页面继续走旧的非 fresh-gated 查询路径。
+- 目标边界：银行明细页面直接读取 accounts/transactions/rules/export API DTO；标签、分类、自动规则写成功后直接重读交易列表。
+- 当前缺口：页面与下游标签读取已改为 direct facts；历史 PostgreSQL migration / 运维记录中仍会保留旧 `bank_detail` 表名作为历史上下文。
+- 旧代码删除条件：当前 runtime 已删除 `bank_detail` / `bank_account_balance` 投影、worker、manifest、deploy env 和 repository port；未来只在显式 migration/schema 清理任务中处理历史表定义。
 
 ## 职责边界
 
 ### 负责
 
 - 银行流水列表、账户筛选、标签/分类展示、自动标签规则、导出。
-- 维护 `bank_detail` scoped read model freshness。
-- 标签/分类/自动规则写操作返回统一 write target envelope，包含 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。
+- 维护银行明细 direct API 页面合同。
+- 标签/分类/自动规则写操作的后端响应仅保留 scope-only envelope 作为影响范围诊断；当前前端写成功后直接刷新银行流水，mapper 不再暴露 旧投影状态/target fields，也不再消费旧操作屏障做写后等待。
 - 为下游 workbench/no-OA/turnover 关系提供银行流水身份和标签读取边界。
 
 ### 不负责
@@ -31,25 +31,23 @@
 | --- | --- | --- |
 | 页面过滤、月份、账号、标签操作 | `BankDetailsPage.tsx`、`features/bankDetails/api.ts` | API 入参必须映射到明确查询/filter contract |
 | 标签/分类写操作 | route/service | 通过 write UoW 触发受影响 month scope |
-| 自动标签规则保存/重跑 | `BankDetailsApplicationService` | 返回 `bank_detail` operation barrier targets；无明确范围时按现有月份 fan-out，不把 `all` 当作页面 fresh 结果 |
-| Refresh scope | `bank_detail` manifest | month or `all`；`all` 只允许 fan-out 到 month shards |
+| 自动标签规则保存/重跑 | `BankDetailsApplicationService` | 响应只暴露 `affected_scope_keys`；前端只消费保存结果并直接重读交易 |
+| 旧刷新范围 | 不适用 | bank_detail 不再有 active 旧投影 旧刷新范围；页面和下游直接重读银行流水/分类事实 |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 银行明细列表/账户/标签 payload | 前端页面 | 必须带 freshness/status |
-| 自动标签规则写入结果 | 前端页面 | 前端优先等待服务端返回的 `operation_barrier_targets`；缺少/未知 read model status 默认按 `refreshing` 处理 |
-| 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播 |
+| 银行明细列表/账户/标签 payload | 前端页面 | direct payload；后端页面 GET/export 不读取 SQL 旧投影、Redis page cache 或旧投影同步字段 |
+| 自动标签规则写入结果 | 前端页面 | 写成功后直接重新请求银行流水；前端 mapper 不暴露 旧投影状态 或 target arrays |
+| 标签副作用 | turnover/workbench/audit 下游 | 通过 direct side-effect port 和 lifecycle 传播；不入队 `bank_detail` 旧刷新事件 |
 | 导出文件 | 用户下载 | 复用当前查询边界，不绕过权限 |
 
 ## 持久化与投影
 
-- Read model：`bank_detail`
-- Projection：`partitioned_scoped_incremental`
-- Worker：`bank-detail`
-- Query owner：`BankDetailsApplicationService`
-- Repository owner：`BankDetailReadModelRepositoryPort`
+- Page query：`BankDetailsApplicationService` -> `BankDetailsService`
+- Downstream category read：`BankTransactionEffectiveCategoryProvider`
+- Legacy projection / worker / repository owner：已从当前 runtime 删除；历史 migration/table 只作为历史记录。
 
 ## 文件范围
 
@@ -57,27 +55,27 @@
 | --- | --- |
 | Frontend page | `web/src/pages/BankDetailsPage.tsx` |
 | Frontend feature | `web/src/features/bankDetails/*`、`web/src/components/BankAccountValue.tsx` |
-| Backend route | `backend/src/fin_ops_platform/app/routes_bank_details.py`、`bank_detail_category_api.py`、`bank_detail_backfill.py` |
+| Backend route | `backend/src/fin_ops_platform/app/routes_bank_details.py`、`bank_detail_category_api.py` |
 | Backend service | `bank_details_application_service.py`、`bank_details_service.py`、`bank_detail_*`、`bank_transaction_*`、`bankdetail_write_uow.py` |
-| Repository / SQL | `bank_detail_read_model_repository.py`、`bank_detail_sql_projection.py`、`postgres_repositories/read_models.py` |
-| Worker/read model | `bank_detail_read_model_refresh.py`、`bank_detail_read_model_refresh_producer.py`、`bank_detail_derived_lifecycle_executor.py` |
+| Repository / SQL | direct bank facts/category repositories and `postgres_repositories/read_models.py` for remaining non-bank-detail 旧投影 |
+| Worker/旧投影 | 无 active bank_detail 旧投影 worker |
 | Tests | `tests/test_bank_details*.py`、`tests/test_bank_detail*.py`、`web/src/test/BankDetails*.test.*`、`web/e2e/bank-details-*.spec.ts` |
 
 ## 依赖方向
 
-- 允许依赖：read model repository、bank transaction identity/category service、runtime queue。
+- 允许依赖：bank transaction identity/category service、导出 service、direct effective category provider。
 - 必须通过：BankDetailsApplicationService 和 write UoW。
-- 禁止绕过：直接写 read model 表、直接从前端推断 fresh、在导入模块里改银行明细页面投影。
+- 禁止绕过：直接写 旧投影表、直接从前端推断同步状态、在导入模块里改银行明细页面投影。
 
 ## 测试与验证
 
-- Service/read model：`tests/test_bank_details_sql_runtime.py`、`tests/test_bank_details_service.py`。
+- Service/direct provider：`tests/test_bank_details_sql_runtime.py`、`tests/test_bank_details_service.py`。
 - API/frontend：`tests/test_bank_details_routes.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx`。
 - E2E：`web/e2e/bank-details-*.spec.ts`。
-- Wave 3 target envelope 回归：`BankDetailSqlRepositoryTests.test_category_mutation_response_returns_bank_detail_operation_barrier_targets`、`web/src/test/BankDetailsApi.test.ts`。
+- 后端 scope-only envelope 回归：`BankDetailSqlRepositoryTests.test_category_mutation_response_returns_bank_detail_scope_keys_only`；`web/src/test/BankDetailsApi.test.ts` 只覆盖前端业务 mapper，不再暴露 旧投影目标 arrays；前端页面回归断言不再请求旧操作屏障。
 
 ## 当前缺口和删除条件
 
 - 将本文件补齐的后端入口同步到模块 README。
-- 删除旧查询路径前，必须验证写标签、自动规则、导出和 stale/refreshing UI。
-- 后续删除旧路径时，不得删除自动规则 response envelope 或前端 unknown-status fail-closed 断言。
+- 页面 read path 已不再依赖 SQL 旧投影；后续删除后台兼容投影前，必须验证写标签、自动规则、导出、下游 relation tag、后台任务收敛和运维工具。
+- bank_detail runtime deletion 已覆盖 producer/worker/manifest/deploy/repository/SQL helper；前端不再保留 unknown-status fail-closed 断言。

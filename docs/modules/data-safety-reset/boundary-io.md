@@ -7,7 +7,7 @@
 - 状态：partial
 - 当前边界可信度：high
 - 目标边界：所有数据重置通过 SettingsDataResetService 和 background job 执行，必须可审计、可阻断误用、可验证。
-- 当前缺口：重置会影响所有 read model/worker，变更必须同步 operations 文档。
+- 当前缺口：重置会影响所有 direct API 页面和后台 worker，变更必须同步 operations 文档。
 - 旧代码删除条件：旧 reset script/API 不再绕过 service。
 
 ## 职责边界
@@ -15,7 +15,7 @@
 ### 负责
 
 - 设置页数据重置、reset job、进度查询和安全防护。
-- 重置后触发 derived lifecycle/read model rebuild。
+- 重置后触发 derived lifecycle/direct API refetch 或真实后台任务。
 - 运维脚本和生产安全约束。
 
 ### 不负责
@@ -38,12 +38,12 @@
 | --- | --- | --- |
 | Reset job | background job service | 可追踪、可失败恢复 |
 | Lifecycle event | derived data lifecycle | `settings_reset_completed` 等显式事件 |
-| Read model invalidation | runtime queue/app status | 不留下伪 fresh |
+| Runtime propagation | runtime queue/app status | 不留下旧页面事实或伪当前 payload |
 
 ## 持久化与投影
 
 - Own read model：无。
-- 影响 read model：全部或大部分 read model。
+- 影响页面：全部或大部分 direct API 页面。
 - Service owner：`SettingsDataResetService`。
 
 ## 文件范围

@@ -37,9 +37,11 @@ function responsePathMatches(responseUrl: string, pathname: string) {
   return new URL(responseUrl).pathname === pathname;
 }
 
-async function expectFreshReadModelResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
-  const payload = await (await responsePromise).json();
-  expect(payload).toMatchObject({ read_model_status: "fresh" });
+async function expectDirectPayloadResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
+  const payload = await (await responsePromise).json() as Record<string, unknown>;
+  expect(payload.read_model_status).toBeUndefined();
+  expect(payload.read_model_scope_key).toBeUndefined();
+  expect(payload.read_model_stale_reasons).toBeUndefined();
 }
 
 async function previewEtcZipFiles(page: Page) {
@@ -101,7 +103,7 @@ test.describe("ETC invoice import browser flow", () => {
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
-  test("confirms ETC import and observes downstream read models as fresh", async ({ page }) => {
+  test("confirms ETC import and observes downstream direct payloads", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       etcImportDownstreamFanout: true,
@@ -136,7 +138,7 @@ test.describe("ETC invoice import browser flow", () => {
       && response.status() === 200);
     await page.goto("/tax-offset");
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    await expectFreshReadModelResponse(taxOffsetResponse);
+    await expectDirectPayloadResponse(taxOffsetResponse);
     await expect(page.getByText("ETC导入通行服务商")).toBeVisible();
     await expect(page.getByText("ETC-2026-005")).toBeVisible();
     await expect(page.getByText(/读模型.*刷新|读模型.*失败|read model/i)).toHaveCount(0);
@@ -148,7 +150,7 @@ test.describe("ETC invoice import browser flow", () => {
       && response.status() === 200);
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    await expectFreshReadModelResponse(costRowsResponse);
+    await expectDirectPayloadResponse(costRowsResponse);
     await page.getByRole("button", { name: "按项目" }).click();
     const etcCostProject = page.getByRole("button", { name: /ETC导入通行成本项目/ });
     await expect(etcCostProject).toBeVisible();

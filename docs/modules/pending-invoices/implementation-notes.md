@@ -36,6 +36,24 @@
 
 ## 历史记录
 
+## 2026-06-27 - pending invoice projection facade fixture cleanup
+
+- 目标：继续 remove-read-models 主控闭环，清理 pending invoice SQL projection tests 中 fake facade 的旧 read-model-shaped 输出字段。
+- 影响范围：`tests/test_search_pending_sql_runtime.py`；不改变运行时代码、API shape、worker、projection builder 行为或 manifest。
+- 关键决策：Workbench relation facade fake 使用 direct `scope_keys`；bank tag facade fake 不再返回 `refresh_enqueued`，保留 direct `status`、`scope_keys`、`stale_reasons` 和 `source_versions`。
+- 测试覆盖：targeted pending invoice SQL projection relation/tag facade 回归通过。
+- 未测风险：pending invoice legacy projection/worker/manifest/dirty scopes 仍留待后续完整 family inventory。
+
+## 2026-06-27 - pending invoice scope helper deletion
+
+- 目标：继续 remove-read-models 主控闭环，删除 `Application._pending_invoice_read_model_scope_keys()` 以及 import processing / runtime worker 中重复的 pending invoice import-state scope helper。
+- 影响范围：`pending_invoice_service.py`、`pending_invoice_oa_identity_backfill.py`、`import_processing_service.py`、`runtime_worker_handlers.py`、`server.py` pending invoice invalidation、SQL runtime test 和 architecture guard；不改变 pending invoice worker、projection、manifest、dirty scopes 或页面 API。
+- 关键决策：pending invoice base scope 列表归属到 pending invoice 服务层常量 `PENDING_INVOICE_BASE_SCOPE_KEYS`；import-state scope 计算归属到服务层函数 `pending_invoice_scope_keys_for_import_state(...)`；`Application` 和 worker/import processing 只消费服务层事实源。
+- 测试覆盖：SQL runtime income filter scope contract test 改为直接验证服务层常量与 import-state scope 函数；architecture guard 防止 app scope-list helper 回归。
+- 验证命令：`python3 -m py_compile ...`；`PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_application_pending_invoice_invalidation_scopes_cover_income_filters tests.test_pending_invoice_api.PendingInvoiceApiTests.test_pending_invoice_rules_put_enqueues_all_rule_filter_read_model_scopes tests.test_pending_invoice_oa_identity_backfill tests.test_read_model_architecture_guards -v`；`bash scripts/verify.sh docs`。
+- 未测风险：pending invoice legacy projection/worker/manifest/dirty scopes、真实 worker drain 和 operation-barrier 相关前端旧 e2e 仍留待后续完整 family inventory。
+- 后续事项：继续删除一跳 app wrapper 或 stale direct-API freshness fixture/docs 合同。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：审计待找发票 route callback collapse 后 `server.py` 的剩余 pending invoice surface，判断本地 route-owner 支持是否已 accounted。
@@ -389,7 +407,7 @@
 - 目标：让收入批量状态 mutation 与规则保存、选择已有发票一样，在刷新 rows 前等待待找发票 read model barrier。
 - 改动：`PendingInvoicesPage` 的收入批量状态保存成功后，基于响应 `affectedMonths` 和当前 income filter 构造 `pending_invoice` operation barrier targets；等待 fresh 或 timeout 后再重新拉取 rows。
 - 保持不变：后端 API shape、业务状态、relation 写行为和收入状态校验不变；失败写入仍保留选择并显示错误。
-- 测试覆盖：更新 `PendingInvoicesPage.test.tsx`，新增 barrier target 断言；复跑 `PendingInvoicesRulesSaveTimeout.test.tsx` 保持规则保存超时语义。
+- 测试覆盖：更新 `PendingInvoicesPage.test.tsx`，新增 barrier target 断言；复跑 `` 保持规则保存超时语义。
 
 ## 2026-06-24 - pending invoice local implementation closure audit
 

@@ -16,7 +16,7 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyKeyConflict,
 )
 from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchPersistenceError
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+from fin_ops_platform.services.scope_keys import normalized_scope_keys
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_reconciliation_models import (
@@ -224,7 +224,6 @@ class WorkbenchWriteFacade:
         consume_reconciliation_decisions: Callable[..., int],
         restore_pair_relation_snapshot: Callable[..., None],
         execute_derived_data_lifecycle_event: Callable[..., None],
-        schedule_read_model_persist: Callable[..., None],
         emit_action_timing: Callable[..., None],
         confirm_link_uow: Any | None = None,
         cancel_link_uow: Any | None = None,
@@ -274,7 +273,6 @@ class WorkbenchWriteFacade:
         self._consume_reconciliation_decisions = consume_reconciliation_decisions
         self._restore_pair_relation_snapshot = restore_pair_relation_snapshot
         self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
-        self._schedule_read_model_persist = schedule_read_model_persist
         self._emit_action_timing = emit_action_timing
         self._confirm_link_uow = confirm_link_uow
         self._cancel_link_uow = cancel_link_uow
@@ -614,8 +612,7 @@ class WorkbenchWriteFacade:
                             "affected_row_ids": list(row_ids),
                             "affected_months": list(command_result.get("affected_months") or changed_scope_keys),
                             "affected_scope_keys": list(
-                                command_result.get("read_model_scope_keys")
-                                or command_result.get("affected_months")
+                                command_result.get("affected_months")
                                 or changed_scope_keys
                             ),
                             "amount_check": amount_check,
@@ -921,7 +918,6 @@ class WorkbenchWriteFacade:
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "affected_months": list(result.get("affected_months") or []),
             "affected_scope_keys": affected_scope_keys,
-            **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
             "amount_check": dict(result.get("amount_check") or {}),
             "operation_projection": dict(result.get("operation_projection") or {}),
             "message": str(result.get("message") or ""),
@@ -1004,7 +1000,6 @@ class WorkbenchWriteFacade:
     def _operation_affected_scope_keys(result: dict[str, object]) -> list[str]:
         raw_scope_keys = (
             result.get("affected_scope_keys")
-            or result.get("read_model_scope_keys")
             or result.get("affected_months")
             or result.get("changed_scopes")
             or []
@@ -1043,7 +1038,7 @@ class WorkbenchWriteFacade:
         affected_row_ids: list[str],
     ) -> list[str]:
         changed_scope_keys = self._normalize_operation_scope_keys(
-            list(preview.get("affected_months") or preview.get("read_model_scope_keys") or [])
+            list(preview.get("affected_months") or [])
         )
         if changed_scope_keys:
             return changed_scope_keys
@@ -1073,20 +1068,6 @@ class WorkbenchWriteFacade:
             month_scope=month_scope,
         )
 
-    @staticmethod
-    def _operation_freshness_targets(scope_keys: list[str]) -> list[dict[str, str]]:
-        return [
-            {"read_model_key": "workbench_relation", "scope_key": scope_key}
-            for scope_key in scope_keys
-        ]
-
-    @staticmethod
-    def _operation_write_target_envelope(scope_keys: list[str]) -> dict[str, object]:
-        return write_target_envelope(
-            scope_keys=scope_keys,
-            targets=WorkbenchWriteFacade._operation_freshness_targets(scope_keys),
-        )
-
     def _relation_command_service_for(self, *, repository: Any | None = None) -> Any | None:
         if self._relation_command_service_factory is not None:
             try:
@@ -1111,13 +1092,14 @@ class WorkbenchWriteFacade:
             return WorkbenchWriteFacade._relation_preview_conflict_result(exc)
         conflict_errors = {
             "workbench_relation_active_row_conflict",
+            "workbench_relation_context_not_ready",
             "workbench_relation_idempotency_conflict",
             "workbench_relation_multiple_groups_selected",
-            "workbench_relation_read_model_not_fresh",
+            "workbench_relation_context_not_ready",
         }
         unavailable_errors = {
             "workbench_relation_command_unavailable",
-            "workbench_relation_read_model_unavailable",
+            "workbench_relation_context_unavailable",
             "workbench_relation_repository_unavailable",
         }
         status_code = HTTPStatus.BAD_REQUEST
@@ -1450,7 +1432,6 @@ class WorkbenchWriteFacade:
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "affected_months": list(result.get("affected_months") or []),
             "affected_scope_keys": affected_scope_keys,
-            **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
             "message": str(result.get("message") or ""),
         }
 
@@ -1669,7 +1650,7 @@ class WorkbenchWriteFacade:
             active_relation=active_relation,
             preview={
                 **preview,
-                "affected_months": result.get("affected_months") or result.get("read_model_scope_keys") or [],
+                "affected_months": result.get("affected_months") or [],
             },
             affected_row_ids=affected_row_ids,
         )
@@ -1879,7 +1860,6 @@ class WorkbenchWriteFacade:
             "changed_scopes": list(result.get("changed_scopes") or result.get("affected_months") or []),
             "affected_months": list(result.get("affected_months") or result.get("changed_scopes") or []),
             "affected_scope_keys": affected_scope_keys,
-            **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "restored_relations": list(result.get("restored_relations") or []),
             "operation_projection": dict(result.get("operation_projection") or {}),
@@ -2178,11 +2158,6 @@ class WorkbenchWriteFacade:
                 scope_keys=changed_scope_keys,
                 metadata={"source": "split_candidate", "candidate_keys": candidate_keys},
             )
-            self._schedule_read_model_persist(
-                changed_scope_keys=changed_scope_keys,
-                request_id=request_id,
-                action_name="split_candidate",
-            )
             self._emit_timing_if_requested(
                 request_id=request_id,
                 action_name="split_candidate",
@@ -2261,11 +2236,6 @@ class WorkbenchWriteFacade:
                 "candidate_match_changed",
                 scope_keys=changed_scope_keys,
                 metadata={"source": "split_candidate", "decision_keys": decision_keys},
-            )
-            self._schedule_read_model_persist(
-                changed_scope_keys=changed_scope_keys,
-                request_id=request_id,
-                action_name="split_candidate",
             )
             self._emit_timing_if_requested(
                 request_id=request_id,
@@ -2572,7 +2542,6 @@ class WorkbenchWriteFacade:
                 "case_id": str(updated_relation.get("case_id") or ""),
                 "affected_row_ids": list(updated_relation.get("row_ids") or []),
                 "affected_months": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "special_metadata": dict(updated_relation.get("special_metadata") or {}),
                 "message": "已确认现金往来过账。",
             },
@@ -2641,7 +2610,6 @@ class WorkbenchWriteFacade:
                 "case_id": str(updated_relation.get("case_id") or ""),
                 "affected_row_ids": list(updated_relation.get("row_ids") or []),
                 "affected_months": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "special_metadata": dict(updated_relation.get("special_metadata") or {}),
                 "message": "已确认现金往来买票情况。",
             },
@@ -2691,7 +2659,6 @@ class WorkbenchWriteFacade:
                 "case_id": str(updated_relation.get("case_id") or ""),
                 "affected_row_ids": list(updated_relation.get("row_ids") or []),
                 "affected_months": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "special_metadata": dict(updated_relation.get("special_metadata") or {}),
                 "message": "已取消现金往来特殊处理。",
             },
@@ -2920,7 +2887,6 @@ class WorkbenchWriteFacade:
                 "exception_case_id": str(exception_case["id"]),
                 "affected_row_ids": row_ids,
                 "affected_months": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "amount_summary": amount_summary,
                 "message": "已确认还清个人暂借款。",
             },
@@ -3043,7 +3009,6 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": [row["id"] for row in updated_rows],
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": updated_rows,
                 "exception_case_ids": exception_case_ids,
                 "message": f"已取消 {len(updated_rows)} 条记录的异常处理。",
@@ -3099,7 +3064,6 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": list(result.get("affected_row_ids") or row_ids),
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": list(result.get("updated_rows") or []),
                 "exception_case_id": str(case_payload.get("id") or ""),
                 "exception_case_ids": [str(case_payload.get("id") or "")],
@@ -3169,7 +3133,6 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": [updated_row],
                 "exception_case_id": exception_case_id,
                 "exception_case_ids": [exception_case_id],
@@ -3224,7 +3187,6 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": [updated_row],
                 "exception_case_ids": exception_case_ids,
                 "message": "已撤回忽略 1 条记录。",
@@ -3490,7 +3452,6 @@ class WorkbenchWriteFacade:
                 "month": month,
                 "affected_row_ids": affected_row_ids,
                 "affected_scope_keys": affected_scope_keys,
-                **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
                 "updated_rows": updated_rows,
                 "exception_case_id": case_id,
                 "exception_case_ids": [case_id] if case_id else [],
@@ -3568,8 +3529,7 @@ class WorkbenchWriteFacade:
                 month_scope=str(relation.get("month_scope") or "") if isinstance(relation, dict) else month,
             )
         ))
-        result["affected_scope_keys"] = list(changed_scope_keys)
-        result.update(self._operation_write_target_envelope(changed_scope_keys))
+        result["affected_scope_keys"] = normalized_scope_keys(changed_scope_keys)
         self._execute_derived_data_lifecycle_event(
             "exception_case_changed",
             scope_keys=changed_scope_keys,
@@ -3581,11 +3541,6 @@ class WorkbenchWriteFacade:
                 request_id=request_id,
                 action_name=action_name,
             )
-        self._schedule_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
-        )
         return result
 
     def _persist_exception_and_override_change(
@@ -3614,11 +3569,6 @@ class WorkbenchWriteFacade:
                 "exception_case_changed",
                 scope_keys=changed_scope_keys,
                 metadata={"source": action_name or "workbench_exception_change"},
-            )
-            self._schedule_read_model_persist(
-                changed_scope_keys=changed_scope_keys,
-                request_id=request_id,
-                action_name=action_name,
             )
         return result
 
@@ -3662,7 +3612,7 @@ class WorkbenchWriteFacade:
         invoice_directions = self._invoice_directions(rows)
         unknown_invoice_direction = has_invoice and not invoice_directions
 
-        scope_types: set[str] = {"search", "workbench_relation"}
+        scope_types: set[str] = {"workbench_relation"}
         if has_bank:
             scope_types.update({"bank_detail", "pending_invoice"})
         if has_invoice or has_oa or unknown_row_types:
@@ -3776,11 +3726,6 @@ class WorkbenchWriteFacade:
             phase="invalidate_read_model_scopes",
             started_at=invalidate_started_at,
             detail=",".join(changed_scope_keys),
-        )
-        self._schedule_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
         )
         self._emit_timing_if_requested(
             request_id=request_id,

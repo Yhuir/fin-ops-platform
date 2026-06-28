@@ -43,8 +43,6 @@ test.describe("workbench stale and error browser flow", () => {
     await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchHealthStatus: "rebuilding",
-      workbenchPageStatus: "refreshing",
-      workbenchRefreshStatus: "refreshing",
     });
 
     await page.goto("/");
@@ -62,19 +60,17 @@ test.describe("workbench stale and error browser flow", () => {
     await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeEnabled();
   });
 
-  test("does not present stale empty payload as a true empty workbench", async ({ page }) => {
+  test("presents direct empty workbench payload as a true empty workbench", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchHealthStatus: "stale",
       workbenchPageEmpty: true,
-      workbenchPageStatus: "stale",
-      workbenchRefreshStatus: "stale",
     });
 
     await page.goto("/");
 
     await expect(page.getByRole("status", { name: /关联台待刷新/ })).toBeVisible();
-    await expect(page.getByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).toHaveCount(0);
+    await expect(page.getByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).toBeVisible();
     await expect(page.getByTestId("zone-open").getByText("未配对 0 项").first()).toBeVisible();
     await expect(page.getByTestId("zone-paired").getByText("已配对 0 项").first()).toBeVisible();
     await expect(page.getByTestId("candidate-group-open-case:CASE-202603-101")).toHaveCount(0);
@@ -128,7 +124,6 @@ test.describe("workbench stale and error browser flow", () => {
     await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchHealthStatus: "error",
-      workbenchRefreshStatus: "failed",
     });
 
     await page.goto("/");
@@ -165,14 +160,11 @@ test.describe("workbench stale and error browser flow", () => {
     await expect(openGroup).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
   });
 
-  test("keeps committed preview error when the freshness barrier times out", async ({ page }) => {
-    await page.clock.install({ time: new Date("2026-06-18T00:00:00Z") });
+  test("commits preview without entering operation barrier timeout state", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
-      operationBarrierMode: "refreshing",
     });
 
     await page.goto("/");
@@ -180,22 +172,13 @@ test.describe("workbench stale and error browser flow", () => {
     const { openGroup, previewDialog } = await openConfirmRelationPreview(page);
     await previewDialog.getByRole("button", { name: "确认关联" }).click();
 
-    await expect(previewDialog).toHaveAttribute("aria-busy", "true");
-    await expect(previewDialog.getByText("关系已写入，正在同步关联台最新数据...")).toBeVisible();
-    await page.clock.runFor(21_000);
-
-    await expect(previewDialog.getByRole("alert")).toContainText("关系已写入，关联台刷新未完成");
-    await expect(previewDialog.getByRole("alert")).toContainText("操作同步等待超时");
-    await expect(previewDialog.getByRole("button", { name: "重试" })).toHaveCount(0);
-    await expect(previewDialog.getByRole("button", { name: "关闭", exact: true })).toBeEnabled();
-    await expect(previewDialog.getByRole("textbox", { name: "备注" })).toBeDisabled();
-    await expect(openGroup).toBeVisible();
-    await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
+    await expect(previewDialog).toHaveCount(0);
+    await expect(openGroup).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(1);
   });
 
-  test("keeps projected relation committed when the background fresh refetch fails", async ({ page }) => {
+  test("keeps projected relation committed when the background direct refetch fails", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchFreshRefetchError: true,
@@ -211,7 +194,6 @@ test.describe("workbench stale and error browser flow", () => {
     await expect(openGroup).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeSubmit);
   });
 });

@@ -1,5 +1,7 @@
 # Workbench Read Model Query 发现与边界计划
 
+> 历史归档：本文记录旧 Workbench read model 迁移阶段的发现和计划，不是当前架构事实源。当前 Workbench 页面读取走 direct API；旧 Workbench projection storage 已由 `0076_drop_legacy_workbench_projection_storage.sql` 下线。当前事实以 `docs/app-architecture/`、`docs/modules/reconciliation-workbench/` 和 `.planning/refactors/remove-read-models/GOAL_PROMPT.md` 为准。
+
 状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `verified`；PF-P007 `verified`；PF-P007-MG `verified`；PF-P008 `verified`；PF-P009 `verified`；PF-P009-MG `verified`；PF-P010 `verified`；PF-P010-MG `verified`
 
 对应 prompt：`PF-P004 - Workbench Read Model Query Discovery / Boundary Plan`
@@ -85,7 +87,7 @@ sequenceDiagram
 
 - Summary 不走 Redis；直接读 PostgreSQL read model active generation。
 - 缺失或 source_version stale 时只 enqueue refresh，不在请求线程同步 rebuild。
-- `request_database_timing` 在 app shell 层包裹请求，`_emit_workbench_read_model_status_metric` 输出 Workbench freshness 状态。
+- `request_database_timing` 在 app shell 层包裹请求；旧 Workbench read-model freshness metric 已随页面 read model 迁移移除。
 
 ### Groups 分页、筛选、搜索、排序链路
 
@@ -426,7 +428,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 - 允许：小范围新增 facade / helper，保留 handler 轻量。
 - 依赖边界：Facade 只能接收细粒度依赖或 callable，不得注入 `Application`、`RuntimeRepositories`、`RuntimeRepositoryContext`、`ApplicationStateStore` 或其他全局 runtime container。
 - 测试边界：PF-P005 characterization tests 必须保持黑盒链路，不得在 `tests/test_workbench_sql_runtime.py` 中 mock/patch Facade。
-- 观测边界：`request_database_timing` 等带 HTTP path/method/request context 的 wrapper 留在 handler；`_emit_workbench_read_model_status_metric` 等纯 read-model 指标可移动或注入，但必须保持语义。
+- 观测边界：`request_database_timing` 等带 HTTP path/method/request context 的 wrapper 留在 handler；旧 Workbench read-model 状态指标不再作为目标合同保留。
 - 禁止：改变 API contract、改写 worker、重写 repository SQL。
 - Rollback：切回旧 handler 调度。
 - 验证：Slice A tests + affected API tests。

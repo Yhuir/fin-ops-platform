@@ -1,55 +1,55 @@
-# Read Model 边界合同
+# Legacy Read Model 边界合同与下线清单
 
-本文件记录当前所有页面和资源 read model 的目标边界。可执行事实源是 `backend/src/fin_ops_platform/services/read_model_manifest.py` 与 `backend/src/fin_ops_platform/services/runtime_worker_registry.py`；本文档用于开发前审阅和变更后的长期维护。
+本文件记录页面级 read model 的 legacy 下线状态和不得恢复的边界。可执行事实源是 `backend/src/fin_ops_platform/services/read_model_manifest.py` 与 `backend/src/fin_ops_platform/services/app_status_read_model_registry.py`：两者当前都必须为空 guard。
+
+2026-06-26 起，目标架构改为页面 direct API，不再新增或扩展页面 read model。新的读路径目标见 `../direct-api-read-architecture.md`，GSD 实施计划见 `.planning/refactors/remove-read-models/`。本文档中的 manifest 表不再代表未来目标态，只用于确认哪些旧路径必须被 direct API 替换后才能删除。
 
 扫描日期：2026-06-26。
 
-## 全局目标态
+## Legacy 约束
 
-普通页面 read model 必须符合 Partitioned + Scoped + Incremental Projection：
+当前页面读取目标是 direct API。剩余 read-model 相关约束只作为删除和防回归规则：
 
-- Partitioned：刷新单位要落到业务分区，不能默认无界重建。常见分区包括月份、方向、来源、账号、页面 scope、父聚合 scope。
-- Scoped：dirty scope、outbox event、worker refresh、query freshness/status 必须共享可验证 scope contract。
-- Incremental Projection：写操作只污染受影响 scope；worker 投影只重算受影响范围，除非 manifest 明确把 all 定义为 fan-out 或可查询父聚合。
+- 不得新增页面 read model、freshness/status/enqueue 边界、page refresh worker、readiness proof 或 `.read_model.refresh` event。
+- 不得把 Redis、RabbitMQ、App Status readiness 或旧 projection 状态作为页面可读证明。
+- 写操作应返回业务状态、affected ids/months/source metadata 或 updated DTO，前端通过 direct API 重读。
+- 真实异步任务只保留 import、OA sync、file migration、settings reset、Workbench matching 等后台任务；这些任务不是页面 read-model refresh worker。
 
-查询端必须经过 freshness/status/enqueue 边界；页面不能读取旧 read model 却返回 fresh。Redis 只能缓存 fresh gate 之后的 payload；RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
+迁移目标是继续删除历史 PSCIP/readiness/freshness 体系残留，而不是修复或扩展它。
 
 ## Manifest 合同表
 
 | Read model | Scope | Projection | `all` 语义 | Partition / Scope 说明 | Worker | Query owner | Repository owner | 权限边界 | 核心测试 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `workbench` | `workbench` | `active_generation_scoped_publish` | `active_month_shard_aggregate` | active generation + month shard；特殊原子发布模型 | `workbench` | `WorkbenchQueryFacade` | `PostgresReadModelRepository.workbench` | `workbench_api_session` | `tests/test_workbench_sql_runtime.py` |
-| `workbench_relation` | `workbench_relation` | `scoped_incremental_distribution` | `fan_out_command` | 关系事实源按关联影响范围分发 | `workbench-relation` | `WorkbenchRelationReadFacade` | `WorkbenchRelationReadModelRepositoryPort` | `downstream_page_api_session` | `tests/test_workbench_relation_read_facade.py` |
-| `bank_detail` | `bank_detail` | `partitioned_scoped_incremental` | `fan_out_command` | 银行明细按页面 scope / 月份等业务范围刷新 | `bank-detail` | `BankDetailsApplicationService` | `BankDetailReadModelRepositoryPort` | `bank_details_api_session` | `tests/test_bank_details_sql_runtime.py` |
-| `bank_account_balance` | `bank_account_balance` | `partitioned_scoped_incremental` | `fan_out_command` | 当前为 global all scope only | `bank-account-balance` | `BankDetailsApplicationService` | `BankAccountBalanceReadModelRepositoryPort` | `bank_details_api_session` | `tests/test_bank_account_balance_read_model.py` |
-| `pending_invoice` | `pending_invoice` | `scoped_incremental` | `forbidden_bare_all` | `direction:filter_group[:YYYY-MM]` 页面 scope | `pending-invoice`；辅助 `search-pending` | `PendingInvoiceReadModelService` | `PendingInvoiceReadModelRepositoryPort` | `pending_invoices_api_session` | `tests/test_pending_invoice_service.py` |
-| `search` | `search` | `partitioned_scoped_index` | `fan_out_command` | search source + month scope | `search`；辅助 `search-pending`、`search-secondary`、`search-tertiary` | Search read API | `SearchReadModelRepositoryPort` | `search_api_session` | `tests/test_search_pending_sql_runtime.py` |
-| `invoice_lifecycle` | `invoice_lifecycle` | `scoped_incremental` | `fan_out_command` | 发票生命周期按受影响发票/方向 scope 刷新 | `invoice-lifecycle`；辅助 `invoice-lifecycle-secondary` | `InvoiceLifecycleReadFacade` | `InvoiceLifecycleReadModelRepositoryPort` | `invoice_lifecycle_page_api_session` | `tests/test_invoice_lifecycle_read_model_refresh.py` |
-| `input_invoice_usage` | `input_invoice_usage` | `scoped_incremental` | `fan_out_command` | 进项发票使用情况按受影响 scope 刷新 | `invoice-usage-collection` | `InputInvoiceUsageReadModelService` | `InputInvoiceUsageReadModelRepositoryPort` | `input_invoice_usage_api_session` | `tests/test_input_invoice_usage_api.py` |
-| `output_invoice_collection` | `output_invoice_collection` | `scoped_incremental` | `fan_out_command` | 销项发票收款情况按受影响 scope 刷新 | `invoice-usage-collection` | `OutputInvoiceCollectionService` | `OutputInvoiceCollectionReadModelRepositoryPort` | `output_invoice_collection_api_session` | `tests/test_output_invoice_collection_api.py` |
-| `oa_pending_payment` | `oa_pending_payment` | `scoped_incremental` | `fan_out_command` | OA 待付款按受影响 scope 刷新 | `invoice-usage-collection` | `OaPendingPaymentReadModelService` | `OaPendingPaymentReadModelRepositoryPort` | `oa_pending_payment_api_session` | `tests/test_oa_pending_payment_api.py` |
-| `cost_statistics` | `cost_statistics` | `partitioned_scoped_parent_rollup` | `queryable_parent_aggregate` | active/all month + parent aggregate；允许父聚合查询语义 | `cost-statistics`；辅助 `cost-tax` | `CostStatisticsQueryService` | `CostStatisticsReadModelRepositoryPort` | `cost_statistics_api_session` | `tests/test_cost_statistics_sql_runtime.py` |
-| `tax_offset` | `tax_offset` | `partitioned_scoped_incremental` | `fan_out_command` | 税金抵扣按月份/业务 scope 刷新 | `tax-offset`；辅助 `cost-tax` | `TaxOffsetQueryService` | `TaxOffsetReadModelRepositoryPort` | `tax_offset_api_session` | `tests/test_tax_offset_sql_runtime.py` |
-| `no_oa_bank_batch` | `no_oa_bank_batch` | `scoped_incremental` | `fan_out_command` | 免 OA 流水批次按批次/关联影响 scope 刷新 | `no-oa-bank-batch` | `NoOaBankBatchApplicationService` | `NoOaBankBatchReadModelRepositoryPort` | `no_oa_bank_batch_api_session` | `tests/test_no_oa_bank_batch_application_service.py` |
-| `turnover_ledger` | `turnover_ledger` | `partitioned_scoped_incremental` | `fan_out_command` | 外部往来款按账期/主体/关联影响 scope 刷新 | `turnover-ledger` | `TurnoverLedgerQueryService` | `TurnoverLedgerReadModelRepositoryPort` | `turnover_ledger_api_session` | `tests/test_turnover_ledger_query_service.py` |
+| 无 | 无 | 无 | 无 | `READ_MODEL_MANIFEST` 当前为空；页面级 active read-model worker/manifest/App Status lane 不得回流 | 无 | 页面 direct API | 无 | 各页面 session owner | `tests/test_read_model_manifest.py` |
+
+`no_oa_bank_batch` read-model runtime 已删除；免 OA 页面当前由 `NoOaBankBatchApplicationService` / `NoOaBankBatchService` direct API 读取业务事实。
+
+`cost_statistics` 与 `tax_offset` read-model worker lane 已删除；页面当前由 `CostStatisticsQueryService` / `TaxOffsetQueryService` direct API 读取业务事实，历史 SQL projection/repository 只作为兼容存储和受控清理对象。
+
+`invoice_lifecycle` read-model worker lane、SQL projection、read facade、repository port 和 `read_model.invoice_lifecycle_rows/scopes` storage 已删除；待找发票、进项使用、销项收款、OA 待付款、税金和成本页面当前由各自 direct API 组装生命周期状态，写后直接重读页面业务 GET，不等待 `invoice_lifecycle.read_model.refresh`、dirty scope 或 readiness 收敛。
+
+`workbench_relation` read-model worker lane 已删除；`WorkbenchRelationReadFacade` 在 app runtime 中优先通过 canonical `WorkbenchRelationCommandService` 读取 active relation facts 并组装 relation context，旧 SQL read-model repository 仅作为 legacy fallback。不得恢复 `workbench-relation` worker、manifest/App Status 绑定、deploy env 或 `workbench_relation.read_model.refresh` event。
+
+`workbench` read-model worker lane 已删除；关联台页面、summary、groups、group-detail 和 row-detail 均不得依赖 `workbench.read_model.refresh`、`worker-workbench`、dirty scope、App Status read-model readiness 或 rehydrate/backfill 脚本。历史 `read_model.workbench_*` 存储只作为迁移/审计对象，不是 active page read model contract。
 
 ## 变更规则
 
-- 新增 read model 时，必须先定义 manifest entry：scope、event type、worker、projection strategy、`all` 语义、query owner、repository owner、permission boundary 和测试入口。
-- 修改 projection strategy 或 `all` 语义时，必须同步更新 scope policy、dirty scope 写入路径、worker registry、freshness/status 查询、API contract tests、worker/read model tests 和本文档。
+- 不再新增页面 read model。确有历史生产修复必须临时触碰旧 read-model storage 时，必须同时记录 direct API 替代路径和删除条件。
+- 不再修改页面 projection strategy 或 `all` refresh 语义；发现相关需求时应改 direct query/repository，而不是恢复 scope policy、dirty scope、worker registry 或 freshness/status 查询。
 - 删除旧 read model 代码前，必须证明没有页面、API、worker、测试或生产脚本继续读取旧路径。
-- `workbench` 的 active generation 原子发布模型是明确例外，不允许机械迁移成普通 gateway 模型。
-- 所有非事务 refresh 请求必须通过 `ReadModelRefreshGateway` / scope policy registry normalize、validate、dedupe 后进入 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。
-- 事务内 writer 可以在同一业务事务内写 dirty scope/outbox，但必须承担等价 scope contract，并有测试覆盖。
+- `workbench` 的旧 active generation 原子发布模型已经从页面/worker lane 下线；不得以普通 gateway 或新 worker 形式恢复。
+- `ReadModelRefreshGateway`、`RuntimeQueueRepository.enqueue_read_model_refresh(...)`、事务内 read-model refresh writer 和 dirty/readiness runtime tables 已删除；不得恢复。
+- 真实 background outbox 写入必须使用对应业务 service/repository 边界，并有测试覆盖。
 
 ## 验收要求
 
-Read model 重构或修复完成前，至少要完成：
+Read model 下线或防回归变更完成前，至少要完成：
 
-- manifest 与 registry 一致。
-- affected scopes 能从写操作进入 dirty scope/outbox。
-- worker 能消费 event 并把目标 scope 投影为 fresh。
-- API 查询能暴露 fresh/stale/refreshing 状态，不伪装 fresh。
-- 页面能在写后读取到 fresh 数据，或明确显示刷新中/不可用状态。
+- manifest 与 App Status read-model registry 保持空。
+- direct API 不返回 `read_model_status`、`refresh_enqueued`、scope key 或 stale reason。
+- 页面能在写后通过 direct API 读取业务数据，或明确显示 direct payload error/unavailable。
 - 相关旧链路没有继续被调用；旧代码若保留，必须有明确兼容理由和删除条件。
-- 测试覆盖 read model/cache/worker、API contract、service orchestration 和受影响业务回归。
+- 测试覆盖 negative guards、API contract、service orchestration、真实后台任务和受影响业务回归。
+
+已下线 read model：`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`workbench_relation`、`workbench`。这些页面/API 现在通过各自 QueryService、direct Workbench API、import facts、OA projection、WorkbenchRelationReadFacade 和业务 repository 组装 payload；不得恢复 `invoice-usage-collection` worker、三类 `.read_model.refresh` event、repository port、projection builder、`workbench-relation`/`workbench` worker 或 read-model manifest/AppStatus registration。

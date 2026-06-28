@@ -598,7 +598,6 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
       page_size: 100,
       total: groups.length,
     },
-    read_model_status: "fresh",
     ...overrides,
   };
 }
@@ -649,7 +648,6 @@ function installTurnoverLedgerFetch(options: {
   groupedFailuresBeforeSuccess?: number;
   missingDetailForRelationId?: string;
   exportDownloadResponse?: (url: URL) => Response;
-  operationBarrierResponse?: (body: Record<string, unknown>, url: URL) => Response | Promise<Response>;
 } = {}) {
   let groupedRequestCount = 0;
   let groupedFailuresRemaining = options.groupedFailuresBeforeSuccess ?? 0;
@@ -913,10 +911,6 @@ function installTurnoverLedgerFetch(options: {
           relation_mode: "turnover_manual_closure",
         },
         affected_months: ["2026-05"],
-        freshness_targets: [
-          { read_model_key: "turnover_ledger", scope_key: "2026-05" },
-          { read_model_key: "workbench_relation", scope_key: "2026-05" },
-        ],
       });
     }
     if (url.pathname === "/api/turnover-ledger/closures/withdraw" && method === "POST") {
@@ -927,10 +921,6 @@ function installTurnoverLedgerFetch(options: {
           relation_mode: "manual_confirmed",
         },
         affected_months: ["2026-05"],
-        freshness_targets: [
-          { read_model_key: "turnover_ledger", scope_key: "2026-05" },
-          { read_model_key: "workbench_relation", scope_key: "2026-05" },
-        ],
       });
     }
     const withdrawMatch = url.pathname.match(/^\/api\/turnover-ledger\/relations\/([^/]+)\/withdraw$/);
@@ -940,17 +930,7 @@ function installTurnoverLedgerFetch(options: {
         relation_id: relationId,
         status: "withdrawn",
         affected_months: ["2026-05"],
-        freshness_targets: [
-          { read_model_key: "turnover_ledger", scope_key: "2026-05" },
-          { read_model_key: "workbench_relation", scope_key: "2026-05" },
-        ],
       });
-    }
-    if (url.pathname === "/api/operation-barrier/status" && method === "POST") {
-      if (options.operationBarrierResponse) {
-        return options.operationBarrierResponse(JSON.parse(String(init?.body ?? "{}")), url);
-      }
-      return Response.json({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
     }
     throw new Error(`Unexpected request ${method} ${url.pathname}`);
   });
@@ -1319,37 +1299,9 @@ describe("Turnover ledger page", () => {
     window.removeEventListener("workbenchRelationUpdated", workbenchListener);
   });
 
-  test("does not report a committed manual closure as failed when post-write freshness sync is blocked", async () => {
+  test("reloads directly after committed manual closure without operation barrier", async () => {
     const user = userEvent.setup();
-    let barrierCallCount = 0;
-    const fetchMock = installTurnoverLedgerFetch({
-      operationBarrierResponse: (body) => {
-        barrierCallCount += 1;
-        if (barrierCallCount === 1) {
-          return Response.json({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
-        }
-        const requestedTargets = Array.isArray(body.targets) ? body.targets as Array<Record<string, unknown>> : [];
-        const target = requestedTargets[0] ?? { read_model_key: "turnover_ledger", scope_key: "all" };
-        const blockedTarget = {
-          read_model_key: String(target.read_model_key ?? "turnover_ledger"),
-          scope_type: "snapshot",
-          scope_key: String(target.scope_key ?? "all"),
-          status: "blocked",
-          fresh: false,
-          blocking: true,
-          raw_status: "failed",
-          reason: "workbench_all_scope_parent_inconsistent",
-          last_error: "generation_metadata_actual_mismatch",
-        };
-        return Response.json({
-          status: "blocked",
-          fresh: false,
-          targets: [blockedTarget],
-          blocked_targets: [blockedTarget],
-          refreshing_targets: [],
-        });
-      },
-    });
+    const fetchMock = installTurnoverLedgerFetch();
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
@@ -1370,7 +1322,7 @@ describe("Turnover ledger page", () => {
       });
       expect(request).toBeDefined();
     });
-    expect(await screen.findByText("操作已提交，后台同步尚未完成，请稍后刷新。")).toBeInTheDocument();
+    expect(await screen.findByText("外部往来闭环已确认")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
   });
 
@@ -1438,21 +1390,6 @@ describe("Turnover ledger page", () => {
         bank_row_ids: ["bank-jia-income-200000", "bank-jia-income-100000", "bank-jia-expense-300000"],
         idempotency_key: expect.stringMatching(/^turnover-manual-closure:/),
       });
-    });
-    await waitFor(() => {
-      const barrierRequest = fetchMock.mock.calls.find(([input, init]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        if (url.pathname !== "/api/operation-barrier/status" || init?.method !== "POST") {
-          return false;
-        }
-        return JSON.stringify(JSON.parse(String(init?.body))) === JSON.stringify({
-          targets: [
-            { read_model_key: "turnover_ledger", scope_key: "2026-05" },
-            { read_model_key: "workbench_relation", scope_key: "2026-05" },
-          ],
-        });
-      });
-      expect(barrierRequest).toBeDefined();
     });
   });
 
@@ -1538,7 +1475,7 @@ describe("Turnover ledger page", () => {
     })).toBe(false);
   });
 
-  test("blocks manual closure submit when the fresh ledger reload is still stale", async () => {
+  test("relies on row version checks during fresh ledger reload", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch({
       groupedPayloads: [
@@ -1549,9 +1486,6 @@ describe("Turnover ledger page", () => {
         groupedPayloadWithFlowCategoryVersions("all", {
           "bank-company-expense-1000": 8,
           "bank-company-income-1000": 9,
-        }, {
-          read_model_status: "stale",
-          read_model_stale_reasons: ["source_version_mismatch"],
         }),
       ],
     });
@@ -1569,14 +1503,14 @@ describe("Turnover ledger page", () => {
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
     await user.click(within(drawer).getByRole("button", { name: "确定" }));
 
-    expect((await screen.findAllByText("所选流水已刷新，请重新选择后再确认闭环。")).length).toBeGreaterThan(0);
     await waitFor(() => {
       expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(2);
     });
     expect(fetchMock.mock.calls.some(([input, init]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
-    })).toBe(false);
+    })).toBe(true);
+    expect(screen.queryByText("所选流水已刷新，请重新选择后再确认闭环。")).not.toBeInTheDocument();
   });
 
   test("confirms closure when cash direction crosses turnover stage columns", async () => {
@@ -1682,21 +1616,6 @@ describe("Turnover ledger page", () => {
           && JSON.parse(String(init?.body)).cash_closure_case_id === "case-workbench-cash-1";
       });
       expect(withdrawRequest).toBeDefined();
-    });
-    await waitFor(() => {
-      const barrierRequest = fetchMock.mock.calls.find(([input, init]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        if (url.pathname !== "/api/operation-barrier/status" || init?.method !== "POST") {
-          return false;
-        }
-        return JSON.stringify(JSON.parse(String(init?.body))) === JSON.stringify({
-          targets: [
-            { read_model_key: "turnover_ledger", scope_key: "2026-05" },
-            { read_model_key: "workbench_relation", scope_key: "2026-05" },
-          ],
-        });
-      });
-      expect(barrierRequest).toBeDefined();
     });
     await waitFor(() => {
       expectCustomEventDetailContaining(turnoverListener, {
@@ -1854,18 +1773,13 @@ describe("Turnover ledger page", () => {
     expect(within(page).queryByText("往来款台账加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
   });
 
-  test("shows grouped read model stale warning and blocks manual closure", async () => {
+  test("keeps direct closure controls available from grouped payload", async () => {
     const user = userEvent.setup();
-    installTurnoverLedgerFetch({
-      groupedOverrides: {
-        read_model_status: "stale",
-        read_model_stale_reasons: ["source_version_mismatch"],
-      },
-    });
+    installTurnoverLedgerFetch();
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    expect(await within(page).findByText("往来款台账正在刷新，当前展示的是非最新数据。")).toBeInTheDocument();
+    expect(within(page).queryByText("往来款台账正在刷新，当前展示的是非最新数据。")).not.toBeInTheDocument();
 
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
@@ -1875,7 +1789,7 @@ describe("Turnover ledger page", () => {
     expect(within(table).getByRole("button", { name: "编辑流水 bank-company-expense-1000" })).toBeEnabled();
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
-    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeDisabled();
+    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeEnabled();
   });
 
   test("shows bank-detail tags as read-only in turnover management", async () => {

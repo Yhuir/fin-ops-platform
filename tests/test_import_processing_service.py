@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 
 
-def test_general_import_confirm_passes_bank_detail_scope_keys_to_persist_state() -> None:
+def test_general_import_confirm_uses_direct_bank_detail_without_refresh_scope() -> None:
     persisted: list[dict[str, object]] = []
     preview = SimpleNamespace(row_results=[], normalized_rows=[{"trade_time": "2026-06-02 10:00:00"}])
     service = ImportProcessingService(
@@ -27,8 +27,6 @@ def test_general_import_confirm_passes_bank_detail_scope_keys_to_persist_state()
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         cost_statistics_scope_keys_for_import_preview=lambda _preview: ["2026-06"],
         cost_statistics_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        bank_detail_scope_keys_for_import_preview=lambda _preview: ["2026-06"],
-        bank_detail_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         input_invoice_usage_scope_keys_for_import_preview=lambda _preview: ["2026-06"],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_preview=lambda _preview: [],
@@ -42,14 +40,16 @@ def test_general_import_confirm_passes_bank_detail_scope_keys_to_persist_state()
     assert persisted == [
         {
             "cost_statistics_scope_keys": ["2026-06"],
-            "bank_detail_scope_keys": ["2026-06"],
             "input_invoice_usage_scope_keys": ["2026-06"],
             "output_invoice_collection_scope_keys": [],
         }
     ]
-    assert {"read_model_key": "bank_detail", "scope_key": "2026-06"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "bank_account_balance", "scope_key": "all"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "workbench_relation", "scope_key": "2026-06"} in result["operation_barrier_targets"]
+    assert "2026-06" in result["affected_scope_keys"]
+    assert "active:2026-06" in result["affected_scope_keys"]
+    assert "all:2026-06" in result["affected_scope_keys"]
+    assert "read_model_scope_keys" not in result
+    assert "operation_barrier_targets" not in result
+    assert "freshness_targets" not in result
 
 
 def test_general_invoice_import_confirm_uses_bulk_read_model_invalidations_once() -> None:
@@ -81,8 +81,6 @@ def test_general_invoice_import_confirm_uses_bulk_read_model_invalidations_once(
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         cost_statistics_scope_keys_for_import_preview=lambda _preview: ["2026-04", "2026-05"],
         cost_statistics_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        bank_detail_scope_keys_for_import_preview=lambda _preview: [],
-        bank_detail_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         input_invoice_usage_scope_keys_for_import_preview=lambda _preview: ["2026-04", "2026-05"],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_preview=lambda _preview: [],
@@ -100,17 +98,17 @@ def test_general_invoice_import_confirm_uses_bulk_read_model_invalidations_once(
             "persist",
             {
                 "cost_statistics_scope_keys": ["2026-04", "2026-05"],
-                "bank_detail_scope_keys": [],
                 "input_invoice_usage_scope_keys": ["2026-04", "2026-05"],
                 "output_invoice_collection_scope_keys": [],
             },
             None,
         ),
     ]
-    assert {"read_model_key": "tax_offset", "scope_key": "2026-04"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "tax_offset", "scope_key": "2026-05"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "input_invoice_usage", "scope_key": "2026-04"} in result["operation_barrier_targets"]
-    assert not any(target["read_model_key"] == "bank_account_balance" for target in result["operation_barrier_targets"])
+    assert "2026-04" in result["affected_scope_keys"]
+    assert "2026-05" in result["affected_scope_keys"]
+    assert "read_model_scope_keys" not in result
+    assert "operation_barrier_targets" not in result
+    assert "freshness_targets" not in result
 
 
 def test_file_import_confirm_job_returns_import_write_targets() -> None:
@@ -147,8 +145,6 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         cost_statistics_scope_keys_for_import_preview=lambda _preview: [],
         cost_statistics_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
-        bank_detail_scope_keys_for_import_preview=lambda _preview: [],
-        bank_detail_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         input_invoice_usage_scope_keys_for_import_preview=lambda _preview: [],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_preview=lambda _preview: [],
@@ -165,9 +161,12 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
     )
 
     assert result["affected_months"] == ["2026-06"]
-    assert {"read_model_key": "bank_detail", "scope_key": "2026-06"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "bank_account_balance", "scope_key": "all"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "cost_statistics", "scope_key": "active:2026-06"} in result["operation_barrier_targets"]
+    assert "2026-06" in result["affected_scope_keys"]
+    assert "active:2026-06" in result["affected_scope_keys"]
+    assert "all:2026-06" in result["affected_scope_keys"]
+    assert "read_model_scope_keys" not in result
+    assert "operation_barrier_targets" not in result
+    assert "freshness_targets" not in result
 
 
 def test_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known() -> None:
@@ -207,8 +206,6 @@ def test_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         cost_statistics_scope_keys_for_import_preview=lambda _preview: [],
         cost_statistics_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        bank_detail_scope_keys_for_import_preview=lambda _preview: [],
-        bank_detail_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         input_invoice_usage_scope_keys_for_import_preview=lambda _preview: [],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_preview=lambda _preview: [],
@@ -230,8 +227,8 @@ def test_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are
     assert refresh_calls == [(["2026-04"], "etc_invoice_import_confirm")]
     assert imported_marks[0]["import_batch_id"] == "batch-etc-1"
     assert result["affected_months"] == ["2026-04"]
-    assert result["affected_scope_keys"] == result["read_model_scope_keys"]
-    assert {"read_model_key": "tax_offset", "scope_key": "2026-04"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "input_invoice_usage", "scope_key": "2026-04"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "workbench_relation", "scope_key": "2026-04"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "cost_statistics", "scope_key": "active:2026-04"} in result["operation_barrier_targets"]
+    assert "2026-04" in result["affected_scope_keys"]
+    assert "active:2026-04" in result["affected_scope_keys"]
+    assert "read_model_scope_keys" not in result
+    assert "operation_barrier_targets" not in result
+    assert "freshness_targets" not in result

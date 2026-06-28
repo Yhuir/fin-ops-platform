@@ -11,9 +11,9 @@
 | `APP-SHELL-E2E-005` | `covered` | `web/src/test/AppSidebar.test.tsx`、`web/src/test/App.test.tsx`、`web/e2e/app-shell-responsive.spec.ts` | 覆盖 compact drawer 打开、导航后关闭和真实 Chromium mobile viewport。 |
 | `APP-SHELL-E2E-006` | `covered` | `web/e2e/app-shell-responsive.spec.ts` | 覆盖 `?embedded=oa` shell、默认折叠和展开行为。 |
 | `APP-SHELL-E2E-007` | `covered` | `web/src/test/SessionGate.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖 forbidden/expired/read-export/full/admin shell gate 和 protected API 零越权。 |
-| `APP-SHELL-E2E-008` | `covered` | `web/src/test/GlobalOperationOverlayContext.test.tsx`、页面级写操作 E2E | 覆盖 overlay 成功自动关闭、失败保留错误、用户确认关闭；页面级写操作验证 freshness。 |
+| `APP-SHELL-E2E-008` | `covered` | `web/src/test/GlobalOperationOverlayContext.test.tsx`、页面级写操作 E2E | 覆盖 overlay 成功自动关闭、失败保留错误、用户确认关闭；页面级写操作验证 direct reload/refetch 或真实后台任务结果。 |
 | `APP-SHELL-E2E-009` | `covered` | `web/src/test/PageSessionStateContext.test.tsx`、`web/src/test/useFinanceTableSession.test.tsx` | 覆盖 page/state/user/version/TTL/session storage fallback 和 table session 恢复。 |
-| `APP-SHELL-E2E-010` | `covered` | `web/src/test/App.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/app-shell.spec.ts` | 覆盖 shell 中 App Status 展示和 route 切换不替代页面 freshness。 |
+| `APP-SHELL-E2E-010` | `covered` | `web/src/test/App.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/app-shell.spec.ts` | 覆盖 shell 中 App Status 展示和 route 切换不替代页面 direct-read 状态。 |
 
 ## 缺口分类
 

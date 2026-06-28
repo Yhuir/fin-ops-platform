@@ -156,49 +156,7 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         self.assertEqual(batch_payload["batch"]["id"], batch_id)
         self.assertEqual(batch_payload["row_results"][0]["linked_object_type"], "invoice")
 
-        rebuilt_app._workbench_read_model_service.upsert_read_model(
-            scope_key="2026-03",
-            payload={
-                "month": "2026-03",
-                "summary": {"oa_count": 0, "bank_count": 1, "invoice_count": 0, "paired_count": 0, "open_count": 1, "exception_count": 0},
-                "paired": {"groups": []},
-                "open": {
-                    "groups": [
-                        {
-                            "group_id": "case:no_oa_stage09",
-                            "oa_rows": [],
-                            "bank_rows": [
-                                {
-                                    "id": "bk-no-oa-stage09-001",
-                                    "type": "bank",
-                                    "source_kind": "no_oa_bank_batch_summary",
-                                    "label": "免OA · 手续费",
-                                    "counterparty_name": "阶段09无OA银行行",
-                                    "amount": "88.00",
-                                    "trade_time": "2026-03-01",
-                                    "detail_fields": {"企业流水号": "NO-OA-STAGE09-SERIAL"},
-                                }
-                            ],
-                            "invoice_rows": [],
-                        }
-                    ]
-                },
-            },
-            generated_at="2026-03-02T00:00:00+00:00",
-        )
-        rebuilt_app._persist_workbench_read_models_best_effort(
-            snapshot=rebuilt_app._workbench_read_model_service.snapshot_scope_keys(["2026-03"]),
-            changed_scope_keys=["2026-03"],
-            operation="stage09_search_smoke",
-        )
-        search_app = self._build_app()
-        search_response = search_app.handle_request("GET", "/api/search?q=NO-OA-STAGE09-SERIAL&scope=bank&month=all")
-        search_payload = json.loads(search_response.body)
-        self.assertEqual(search_response.status_code, 200, search_response.body)
-        self.assertGreaterEqual(search_payload["summary"]["total"], 1)
-        self.assertIn("NO-OA-STAGE09-SERIAL", json.dumps(search_payload, ensure_ascii=False))
-
-        invalid_search_response = search_app.handle_request("GET", "/api/search?q=NO-OA-STAGE09-SERIAL&scope=invalid&month=all")
+        invalid_search_response = rebuilt_app.handle_request("GET", "/api/search?q=NO-OA-STAGE09-SERIAL&scope=invalid&month=all")
         self.assertEqual(invalid_search_response.status_code, 400)
         self.assertEqual(json.loads(invalid_search_response.body)["error"], "invalid_search_request")
 

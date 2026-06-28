@@ -10,11 +10,9 @@ import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
 } from "../features/domainEvents";
-import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
+import { useActivePageEvent } from "../contexts/PageRuntimeContext";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { operationBarrierTargets, operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
-import type { OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   fetchNoOaBankBatchDetail,
   fetchNoOaBankBatchTagSelection,
@@ -34,7 +32,6 @@ import type {
   NoOaBankBatch,
   NoOaBankBatchDetail,
   NoOaBankBatchesResponse,
-  NoOaBankBatchReadModelStatus,
   NoOaBankBatchStatus,
   NoOaBankBatchStatusBucket,
   NoOaBankBatchDetailRow,
@@ -54,8 +51,6 @@ const EMPTY_BATCHES: NoOaBankBatchesResponse = {
     categories: [],
   },
   batches: [],
-  readModelStatus: "refreshing",
-  readModelStaleReasons: [],
 };
 
 const EMPTY_TAG_SELECTION: NoOaBankBatchTagSelection = {
@@ -68,7 +63,6 @@ const EMPTY_TAG_SELECTION: NoOaBankBatchTagSelection = {
 
 const SELF_SUB_LABEL = "主标签本身";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
-const NO_OA_READ_MODEL_REFRESH_RETRY_MS = 1000;
 const NO_OA_BANK_BATCH_PAGE_SIZE = 200;
 
 type BatchStatusMeta = { label: string; color: "default" | "primary" | "success" | "warning" | "error" };
@@ -193,22 +187,11 @@ function BatchStatusTag({ status }: { status: string }) {
 function mutationEventDetail(result: {
   affectedMonths?: string[];
   affectedScopeKeys?: string[];
-  operationBarrierTargets?: OperationBarrierTarget[];
 }) {
   return {
     affectedMonths: result.affectedMonths ?? [],
     affectedScopeKeys: result.affectedScopeKeys ?? [],
-    operationBarrierTargets: result.operationBarrierTargets ?? [],
   };
-}
-
-function mutationBarrierTargets(
-  result: { affectedMonths?: string[]; operationBarrierTargets?: OperationBarrierTarget[] },
-  fallbackScopeKey: string,
-) {
-  return result.operationBarrierTargets && result.operationBarrierTargets.length > 0
-    ? result.operationBarrierTargets
-    : operationBarrierTargetsFromMonths("no_oa_bank_batch", result.affectedMonths ?? [], fallbackScopeKey);
 }
 
 type NoOaTagNode = {
@@ -390,7 +373,6 @@ function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey
 
 export default function NoOaBankBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
-  const { active } = useOptionalPageActivation("no-oa-bank-batches");
   const { canMutateData } = useSessionPermissions();
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<NoOaBankBatchStatusBucket>("unsubmitted");
@@ -407,7 +389,6 @@ export default function NoOaBankBatchPage() {
   const [selectedAccountForSubmit, setSelectedAccountForSubmit] = useState<string | null>(null);
   const [batchPage, setBatchPage] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [tagLoading, setTagLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -419,8 +400,6 @@ export default function NoOaBankBatchPage() {
   const detailRequestSeqRef = useRef(0);
   const batchQueryKeyRef = useRef("");
   const manualLabelSelectionRef = useRef(false);
-  const readModelStatus = payload.readModelStatus;
-  const readModelNeedsRefresh = readModelStatus !== "fresh";
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -461,20 +440,14 @@ export default function NoOaBankBatchPage() {
     }
     applyBatchesPayload(nextPayload);
     setLoading(false);
-    setBackgroundRefreshing(false);
     return nextPayload;
   }, [applyBatchesPayload, batchPage, bucket, month]);
 
-  const loadBatches = useCallback((signal?: AbortSignal, options: { background?: boolean } = {}) => {
-    const background = options.background === true;
+  const loadBatches = useCallback((signal?: AbortSignal) => {
     const requestId = batchRequestSeqRef.current + 1;
     batchRequestSeqRef.current = requestId;
-    if (background) {
-      setBackgroundRefreshing(true);
-    } else {
-      setLoading(true);
-      setError(null);
-    }
+    setLoading(true);
+    setError(null);
     fetchNoOaBankBatches({
       month,
       bucket,
@@ -492,21 +465,13 @@ export default function NoOaBankBatchPage() {
         if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
           return;
         }
-        if (!background && !isAbortLikeError(caught)) {
+        if (!isAbortLikeError(caught)) {
           setError(caught instanceof Error ? caught.message : "免OA流水批次加载失败");
         }
       })
       .finally(() => {
-        if (background && requestId !== batchRequestSeqRef.current) {
-          setBackgroundRefreshing(false);
-          return;
-        }
         if (!signal?.aborted && requestId === batchRequestSeqRef.current) {
-          if (background) {
-            setBackgroundRefreshing(false);
-          } else {
-            setLoading(false);
-          }
+          setLoading(false);
         }
       });
   }, [applyBatchesPayload, batchPage, bucket, month]);
@@ -529,16 +494,6 @@ export default function NoOaBankBatchPage() {
     loadBatches(controller.signal);
     return () => controller.abort();
   }, [batchPage, bucket, loadBatches, month, refreshToken]);
-
-  useEffect(() => {
-    if (!active || !readModelNeedsRefresh || loading || backgroundRefreshing) {
-      return undefined;
-    }
-    const retryId = window.setTimeout(() => {
-      loadBatches(undefined, { background: true });
-    }, NO_OA_READ_MODEL_REFRESH_RETRY_MS);
-    return () => window.clearTimeout(retryId);
-  }, [active, backgroundRefreshing, loadBatches, loading, readModelNeedsRefresh]);
 
   const tagNodesByCode = useMemo(() => {
     const nodes = new Map<string, NoOaTagNode>();
@@ -815,10 +770,6 @@ export default function NoOaBankBatchPage() {
             transactionIds,
             note: "",
           });
-          setMessage("正在等待免OA批次读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(submitResult, month),
-          );
           setMessage("正在刷新免OA流水批次...");
           await reloadBatchesAfterMutation();
           return submitResult;
@@ -849,10 +800,6 @@ export default function NoOaBankBatchPage() {
             expectedVersion: batch.version,
             note: "",
           });
-          setMessage("正在等待免OA批次读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(submitResult, batch.scopeMonth || month),
-          );
           setMessage("正在刷新免OA流水批次...");
           await reloadBatchesAfterMutation();
           return submitResult;
@@ -887,10 +834,6 @@ export default function NoOaBankBatchPage() {
           });
           setWithdrawTarget(null);
           setWithdrawReason("");
-          setMessage("正在等待免OA批次读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(withdrawResult, target.scopeMonth || month),
-          );
           setMessage("正在刷新免OA流水批次...");
           await reloadBatchesAfterMutation();
           return withdrawResult;
@@ -926,8 +869,6 @@ export default function NoOaBankBatchPage() {
           setTagDrawerOpen(false);
           setDetails({});
           setDetailErrors({});
-          setMessage("正在等待免OA批次读模型同步...");
-          await waitForOperationFreshness(operationBarrierTargets("no_oa_bank_batch", ["all"]));
           setMessage("正在刷新免OA流水批次...");
           await reloadBatchesAfterMutation();
           return saved;

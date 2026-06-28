@@ -55,29 +55,23 @@ class RecordingPendingInvoiceRelationCommandService:
             "changed_case_ids": [relation["case_id"]],
             "affected_months": ["2026-05"],
             "version": 1,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": ["2026-05"],
-            "refresh_enqueued": False,
             "idempotent_replay": False,
         }
 
 
-class StalePendingInvoiceRelationCommandService:
+class ConflictingPendingInvoiceRelationCommandService:
     def assert_write_precondition(self, **_kwargs: object) -> dict[str, object]:
         raise WorkbenchRelationCommandError(
-            "workbench_relation_read_model_not_fresh",
-            "Workbench relation read model is stale.",
+            "workbench_relation_active_row_conflict",
+            "One or more rows already have active relations.",
             payload={
-                "read_model_status": "stale",
-                "read_model_stale_reasons": ["dirty_scope"],
-                "read_model_scope_keys": ["2026-05"],
-                "refresh_enqueued": True,
+                "conflicting_case_ids": ["case-existing"],
+                "row_ids": ["txn_expense"],
             },
         )
 
     def confirm_relation(self, **_kwargs: object) -> dict[str, object]:
-        raise AssertionError("stale relation writes must fail before confirm_relation")
+        raise AssertionError("conflicting relation writes must fail before confirm_relation")
 
 
 class PairServiceWorkbenchRelationRepository:
@@ -333,8 +327,6 @@ class FakeWorkbenchRelationFacade:
             "rows": rows,
             "groups": groups,
             "source_versions": {"schema_version": 52},
-            "read_model_scope_keys": ["2026-05"],
-            "refresh_enqueued": False,
             "stale_reasons": [],
         }
 
@@ -1791,29 +1783,37 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(call["row_types"], ["bank", "invoice"])
         self.assertEqual(call["history_operation_type"], "confirm_link")
 
-    def test_confirm_manual_invoice_fails_fast_when_relation_read_model_is_stale(self) -> None:
+    def test_confirm_manual_invoice_fails_fast_when_relation_has_active_conflict(self) -> None:
         command_store: dict[str, dict[str, object]] = {}
         service = PendingInvoiceApplicationService(
             import_service=self.import_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(command_store),
             relation_facade=self._relation_facade(import_service=self.import_service),
-            relation_command_service=StalePendingInvoiceRelationCommandService(),
+            relation_command_service=ConflictingPendingInvoiceRelationCommandService(),
         )
-        preview = service.preview_manual_invoice(self._payload(invoice_no="MAN-STALE"))
+        preview = service.preview_manual_invoice(self._payload(invoice_no="MAN-CONFLICT"))
 
         with self.assertRaises(PendingInvoiceError) as context:
             service.confirm_manual_invoice(
-                {**self._payload(invoice_no="MAN-STALE"), "preview_id": preview["preview_id"], "request_id": "request-stale"},
+                {
+                    **self._payload(invoice_no="MAN-CONFLICT"),
+                    "preview_id": preview["preview_id"],
+                    "request_id": "request-conflict",
+                },
                 actor_id="finance-user",
             )
 
-        self.assertEqual(context.exception.error_code, "pending_invoice_relation_read_model_not_fresh")
-        self.assertEqual(context.exception.details["read_model_status"], "stale")
-        self.assertEqual(context.exception.details["read_model_stale_reasons"], ["dirty_scope"])
+        self.assertEqual(context.exception.error_code, "active_relation_conflict")
+        self.assertEqual(context.exception.details["conflicting_case_ids"], ["case-existing"])
+        self.assertEqual(context.exception.details["row_ids"], ["txn_expense"])
+        self.assertNotIn("read_model_status", context.exception.details)
+        self.assertNotIn("read_model_stale_reasons", context.exception.details)
+        self.assertNotIn("read_model_scope_keys", context.exception.details)
+        self.assertNotIn("refresh_enqueued", context.exception.details)
         self.assertEqual(self.import_service.list_invoices(), [])
         self.assertEqual(self.pair_service.list_active_relations(), [])
-        self.assertEqual(command_store["request-stale"]["status"], "failed_recoverable")
-        self.assertNotIn("invoice_created", command_store["request-stale"]["status_history"])
+        self.assertEqual(command_store["request-conflict"]["status"], "failed_recoverable")
+        self.assertNotIn("invoice_created", command_store["request-conflict"]["status_history"])
 
     def test_confirm_allows_existing_bank_oa_relation_when_creating_invoice_relation(self) -> None:
         self.pair_service.create_active_relation(
@@ -1995,10 +1995,9 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["relation_mode"], "pending_invoice_attach_existing_invoice")
         self.assertEqual(result["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(
-            result["operation_barrier_targets"],
-            [{"read_model_key": "pending_invoice", "scope_key": "2026-05"}],
-        )
+        self.assertNotIn("read_model_scope_keys", result)
+        self.assertNotIn("freshness_targets", result)
+        self.assertNotIn("operation_barrier_targets", result)
         self.assertEqual(len(self.pair_service.list_active_relations()), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
 
@@ -2462,14 +2461,10 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["affected_transaction_ids"], [first_txn.id, second_txn.id])
         self.assertEqual(result["status_code"], "cash_income")
         self.assertEqual(result["affected_months"], ["2026-05", "2026-06"])
-        self.assertEqual(result["read_model_scope_keys"], ["2026-05", "2026-06"])
-        self.assertEqual(
-            result["freshness_targets"],
-            [
-                {"read_model_key": "pending_invoice", "scope_key": "2026-05"},
-                {"read_model_key": "pending_invoice", "scope_key": "2026-06"},
-            ],
-        )
+        self.assertEqual(result["affected_scope_keys"], ["2026-05", "2026-06"])
+        self.assertNotIn("read_model_scope_keys", result)
+        self.assertNotIn("freshness_targets", result)
+        self.assertNotIn("operation_barrier_targets", result)
         self.assertEqual(len(self.audit_events), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_income_status_override_batch_confirmed")
         self.assertEqual(self.audit_events[0]["transaction_ids"], [first_txn.id, second_txn.id])

@@ -20,7 +20,6 @@ test.describe("workbench relations tax offset browser fan-out", () => {
 
     await confirmWorkbenchRelation(page);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
 
     await page.getByRole("link", { name: "税金抵扣" }).click();
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();

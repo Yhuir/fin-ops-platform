@@ -8,17 +8,7 @@ class PendingInvoiceOaIdentityRepository:
         self._connection = connection
 
     def invalid_read_model_rows(self) -> list[dict[str, Any]]:
-        rows = self._connection.fetch_all(
-            """
-            select row_id, direction, scope_key, payload->'oa' as oa_payload
-            from read_model.pending_invoice_rows
-            where coalesce(payload->'oa'->'primary'->>'id', '') <> ''
-              and payload->'oa'->'primary'->>'id' !~ '^oa-'
-            order by updated_at desc, row_id
-            limit 500
-            """
-        )
-        return [dict(row) for row in list(rows or []) if isinstance(row, dict)]
+        return []
 
     def invalid_relation_rows(self) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(

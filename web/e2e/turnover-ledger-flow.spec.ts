@@ -77,17 +77,16 @@ test.describe("turnover ledger browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("shows stale grouped ledger data without allowing manual closure", async ({ page }) => {
+  test("uses direct grouped ledger data without page-level read model gating", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
-      turnoverLedgerReadModelStatus: "stale",
     });
 
     await page.goto("/turnover-ledger");
     await expect(page.getByTestId("turnover-ledger-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
-    await expect(page.getByText("往来款台账正在刷新，当前展示的是非最新数据。")).toBeVisible();
+    await expect(page.getByText("往来款台账正在刷新，当前展示的是非最新数据。")).toHaveCount(0);
 
     const table = page.getByRole("table", { name: "往来款左右双栏台账" });
     await expect(table).toBeVisible();
@@ -99,14 +98,15 @@ test.describe("turnover ledger browser flow", () => {
     await table.getByRole("checkbox", { name: "选择流水 turnover-bank-expense-1000" }).check();
     await table.getByRole("checkbox", { name: "选择流水 turnover-bank-income-1000" }).check();
     await expect(page.getByText("已选 2 笔")).toBeVisible();
-    await expect(page.getByRole("button", { name: "确认闭环" })).toBeDisabled();
-    await expect(page.getByRole("dialog", { name: "确认外部往来闭环" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "确认闭环" })).toBeEnabled();
+    await page.getByRole("button", { name: "确认闭环" }).click();
+    await expect(page.getByRole("dialog", { name: "确认外部往来闭环" })).toBeVisible();
     expect(api.count("POST /api/turnover-ledger/closures/confirm")).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
 
-  test("saves turnover tag selection through the freshness barrier and reloads the ledger", async ({ page }) => {
+  test("saves turnover tag selection and directly reloads the ledger", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
@@ -124,7 +124,6 @@ test.describe("turnover ledger browser flow", () => {
     await expect(drawer.getByLabel("外部往来款收款")).toBeChecked();
 
     await drawer.getByLabel("外部往来款收款").uncheck();
-    const barrierCallsBeforeSave = api.count("POST /api/operation-barrier/status");
     await drawer.getByRole("button", { name: "保存" }).click();
 
     await expect(page.getByText("外部往来款标签设置已保存")).toBeVisible();
@@ -133,13 +132,12 @@ test.describe("turnover ledger browser flow", () => {
       expected_version: 1,
       selected_tag_codes: ["external_turnover_payment"],
     });
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeSave);
     expect(api.count("GET /api/turnover-ledger")).toBeGreaterThan(ledgerLoadsBeforeSave);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
 
-  test("confirms and withdraws a manual turnover closure through freshness barriers", async ({ page }) => {
+  test("confirms and withdraws a manual turnover closure through direct reloads", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
@@ -171,7 +169,6 @@ test.describe("turnover ledger browser flow", () => {
     await expect(page.getByRole("heading", { name: "操作失败" })).toHaveCount(0);
     await expect(page.getByText("银行流水状态已变化，请刷新后重试。")).toHaveCount(0);
     expect(api.count("POST /api/turnover-ledger/closures/confirm")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     await expect(page.getByText("收支闭环").first()).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
@@ -181,8 +178,9 @@ test.describe("turnover ledger browser flow", () => {
       && response.status() === 200);
     await page.getByRole("link", { name: "成本统计" }).click();
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    const costPayload = await (await costExplorerResponse).json() as { read_model_status?: string };
-    expect(costPayload.read_model_status).toBe("fresh");
+    const costPayload = await (await costExplorerResponse).json() as Record<string, unknown>;
+    expect("read_model_status" in costPayload).toBe(false);
+    expect("read_model_scope_key" in costPayload).toBe(false);
     await page.getByRole("button", { name: "按项目" }).click();
     const turnoverCostProject = page.getByRole("button", { name: /外部往来闭环成本项目/ });
     await expect(turnoverCostProject).toBeVisible();
@@ -198,7 +196,6 @@ test.describe("turnover ledger browser flow", () => {
     await expect(page.getByTestId("turnover-ledger-page")).toBeVisible();
     await expect(table).toBeVisible();
     await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
-    const barrierCallsBeforeWithdraw = api.count("POST /api/operation-barrier/status");
     await table.getByRole("checkbox", { name: "选择流水 turnover-bank-expense-1000" }).check();
     await expect(page.getByRole("button", { name: "撤回闭环" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "确认闭环" })).toHaveCount(0);
@@ -206,7 +203,6 @@ test.describe("turnover ledger browser flow", () => {
 
     await expect(page.getByText("外部往来闭环已撤回")).toBeVisible();
     expect(api.count("POST /api/turnover-ledger/relations/turnover_rel_e2e_closure/withdraw")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
     await expect(page.getByText("收支闭环")).toHaveCount(0);
     await expect(table.getByText("未闭环")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);

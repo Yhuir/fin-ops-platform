@@ -58,10 +58,6 @@ class _FakeConnection:
         attachment_cache_rows: list[dict[str, object]] | None = None,
         attachment_cache_source_rows: list[dict[str, object]] | None = None,
         attachment_rows: list[dict[str, object]] | None = None,
-        workbench_cross_zone_duplicates: list[dict[str, object]] | None = None,
-        workbench_open_visible_owner_duplicates: list[dict[str, object]] | None = None,
-        workbench_oa_alias_groups: list[dict[str, object]] | None = None,
-        workbench_orphan_relation_groups: list[dict[str, object]] | None = None,
         missing_tables: set[str] | None = None,
     ) -> None:
         self._invoice_rows = invoice_rows
@@ -70,10 +66,6 @@ class _FakeConnection:
         self._attachment_cache_rows = attachment_cache_rows
         self._attachment_cache_source_rows = attachment_cache_source_rows
         self._attachment_rows = attachment_rows
-        self._workbench_cross_zone_duplicates = workbench_cross_zone_duplicates
-        self._workbench_open_visible_owner_duplicates = workbench_open_visible_owner_duplicates
-        self._workbench_oa_alias_groups = workbench_oa_alias_groups
-        self._workbench_orphan_relation_groups = workbench_orphan_relation_groups
         self._missing_tables = set(missing_tables or set())
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
@@ -85,33 +77,12 @@ class _FakeConnection:
             "app.oa_attachment_invoice_cache",
             "app.oa_attachment_invoice_cache_sources",
             "app.oa_attachments",
-            "read_model.workbench_group_rows",
-            "app.oa_applications",
-            "app.workbench_pair_relations",
         }:
-            if (
-                table_name == "read_model.workbench_group_rows"
-                and self._workbench_cross_zone_duplicates is None
-                and self._workbench_open_visible_owner_duplicates is None
-            ):
-                return {"table_name": None}
-            if table_name == "app.oa_applications" and self._workbench_oa_alias_groups is None:
-                return {"table_name": None}
-            if table_name == "app.workbench_pair_relations" and self._workbench_orphan_relation_groups is None:
-                return {"table_name": None}
             return {"table_name": table_name}
         return {"table_name": None}
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         normalized = " ".join(sql.split()).lower()
-        if "from read_model.workbench_group_rows" in normalized and "visible_owner_claims" in normalized:
-            return list(self._workbench_open_visible_owner_duplicates or [])
-        if "from read_model.workbench_group_rows" in normalized and "duplicate_rows" in normalized:
-            return list(self._workbench_cross_zone_duplicates or [])
-        if "from app.oa_applications" in normalized and "having count(distinct row_id) > 1" in normalized:
-            return list(self._workbench_oa_alias_groups or [])
-        if "with relation_rows as" in normalized and "missing_row_ids" in normalized:
-            return list(self._workbench_orphan_relation_groups or [])
         if "from app.invoices" in normalized:
             return list(self._invoice_rows) if self._invoice_rows is not None else [
                 {
@@ -520,87 +491,6 @@ class AuditObjectIdentityToolTests(unittest.TestCase):
         self.assertEqual(report["summary"]["etc_invoice_count"], 0)
         self.assertEqual(report["summary"]["oa_attachment_invoice_cache_entry_count"], 0)
         self.assertEqual(report["summary"]["blocking_issue_count"], 0)
-
-    def test_audit_reports_workbench_cross_zone_identity_duplicates_and_orphan_relations(self) -> None:
-        report = audit_object_identity(
-            connection=_FakeConnection(
-                invoice_rows=[],
-                bank_rows=[],
-                etc_rows=[],
-                attachment_cache_rows=[],
-                workbench_cross_zone_duplicates=[
-                    {
-                        "scope_key": "2026-02",
-                        "object_kind": "invoice",
-                        "object_identity_key": "265320000000992",
-                        "object_identity_kind": "digital_invoice_no",
-                        "zones": ["open", "paired"],
-                        "row_ids": ["invoice-formal-project-1", "oa-att-inv-project-1"],
-                        "source_kinds": ["invoice", "oa_attachment_invoice"],
-                    }
-                ],
-                workbench_oa_alias_groups=[
-                    {"form_id": "OA-ALIAS-1", "row_ids": ["oa-old", "oa-new"], "row_count": 2}
-                ],
-                workbench_orphan_relation_groups=[
-                    {"case_id": "CASE-ORPHAN", "missing_row_ids": ["invoice-missing"]}
-                ],
-            ),
-            policy=FinancialObjectIdentityPolicy(),
-            example_limit=10,
-            workbench_scope="2026-02",
-        )
-
-        self.assertEqual(report["summary"]["workbench_audit_status"], "available")
-        self.assertEqual(report["summary"]["workbench_cross_zone_identity_duplicate_group_count"], 1)
-        self.assertEqual(report["summary"]["workbench_oa_alias_group_count"], 1)
-        self.assertEqual(report["summary"]["workbench_orphan_relation_group_count"], 1)
-        self.assertEqual(report["summary"]["blocking_issue_count"], 2)
-        self.assertEqual(
-            report["workbench_identity_audit"]["cross_zone_identity_duplicates"][0]["object_identity_key"],
-            "265320000000992",
-        )
-
-    def test_audit_reports_workbench_open_visible_owner_duplicates(self) -> None:
-        report = audit_object_identity(
-            connection=_FakeConnection(
-                invoice_rows=[],
-                bank_rows=[],
-                etc_rows=[],
-                attachment_cache_rows=[],
-                workbench_cross_zone_duplicates=[],
-                workbench_open_visible_owner_duplicates=[
-                    {
-                        "scope_key": "all",
-                        "object_kind": "invoice",
-                        "claim_kind": "digital_invoice_no",
-                        "claim_key": "26322000000129268441",
-                        "zones": ["open"],
-                        "group_ids": [
-                            "scope:2026-01:temp:standalone-invoice-500",
-                            "scope:2026-02:candidate:bank-invoice-500",
-                        ],
-                        "row_ids": ["inv-imported-500", "inv-imported-500-alias"],
-                        "source_kinds": ["invoice"],
-                        "total_count": 3,
-                    }
-                ],
-            ),
-            policy=FinancialObjectIdentityPolicy(),
-            example_limit=1,
-            workbench_scope="all",
-        )
-
-        self.assertEqual(report["summary"]["workbench_audit_status"], "available")
-        self.assertEqual(report["summary"]["workbench_cross_zone_identity_duplicate_group_count"], 0)
-        self.assertEqual(report["summary"]["workbench_open_visible_owner_duplicate_group_count"], 3)
-        self.assertEqual(report["summary"]["blocking_issue_count"], 3)
-        self.assertEqual(len(report["workbench_identity_audit"]["open_visible_owner_duplicates"]), 1)
-        self.assertEqual(
-            report["workbench_identity_audit"]["open_visible_owner_duplicates"][0]["claim_key"],
-            "26322000000129268441",
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

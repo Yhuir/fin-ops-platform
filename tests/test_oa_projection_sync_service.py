@@ -18,11 +18,10 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
     def test_month_sync_with_no_source_records_clears_existing_projection_scope(self) -> None:
         source_adapter = FakeSourceAdapter(months=[], records_by_month={"2026-06": []})
         projection_repository = FakeProjectionRepository()
-        queue_repository = FakeQueueRepository()
         service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue_repository,
+            queue_repository=object(),
         )
 
         result = service.handle_runtime_event(_event("2026-06"))
@@ -31,18 +30,17 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(projection_repository.stale_completed_scopes, ["2026-06"])
         self.assertEqual(projection_repository.non_completed_scopes, ["2026-06"])
 
-    def test_oa_sync_marks_oa_pending_payment_read_model_dirty_for_progress_rows(self) -> None:
+    def test_oa_sync_persists_completed_rows_without_read_model_enqueue_for_progress_rows(self) -> None:
         records = [
             _oa("oa-pay-completed", "2026-06", workflow_status="completed"),
             _oa("oa-pay-progress", "2026-06", workflow_status="in_progress"),
         ]
         source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
         projection_repository = FakeProjectionRepository()
-        queue_repository = FakeQueueRepository()
         service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue_repository,
+            queue_repository=object(),
             retention_cutoff_date_provider=lambda: "2026-01-01",
         )
 
@@ -53,33 +51,25 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(result["removed_non_completed_count"], 1)
         self.assertEqual([record.workflow_status for record in projection_repository.saved_records], ["completed"])
         self.assertEqual([record.workflow_status for record in projection_repository.deleted_non_completed_records], ["completed", "in_progress"])
-        self.assertIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
-        self.assertIn(("oa_pending_payment", "all", "oa_projection_sync"), queue_repository.refreshes)
 
-    def test_oa_sync_search_refresh_uses_search_producer_boundary(self) -> None:
+    def test_oa_sync_no_longer_enqueues_downstream_page_read_model_refresh(self) -> None:
         records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
         source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
         projection_repository = FakeProjectionRepository()
-        queue_repository = FakeQueueRepository()
-        search_refresh_producer = FakeSearchRefreshProducer()
         service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue_repository,
-            search_read_model_refresh_producer=search_refresh_producer,
+            queue_repository=object(),
         )
 
         service.handle_runtime_event(_event("2026-06"))
 
-        self.assertEqual(search_refresh_producer.calls, [(["2026-06", "all"], "oa_projection_sync")])
-        self.assertNotIn(("search", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
-        self.assertIn(("workbench", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
+        self.assertEqual(projection_repository.sync_runs[0]["status"], "succeeded")
 
-    def test_oa_sync_promotes_completed_pending_payment_relations_and_marks_affected_scopes_dirty(self) -> None:
+    def test_oa_sync_promotes_completed_pending_payment_relations_without_read_model_enqueue(self) -> None:
         records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
         source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
         projection_repository = FakeProjectionRepository()
-        queue_repository = FakeQueueRepository()
         promoter = FakePendingPaymentRelationPromoter(
             {
                 "promoted_count": 1,
@@ -92,7 +82,7 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue_repository,
+            queue_repository=object(),
             pending_payment_relation_promoter=promoter,
         )
 
@@ -101,8 +91,6 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual([record.id for record in promoter.completed_records], ["oa-pay-completed"])
         self.assertEqual(result["promoted_pending_payment_relation_count"], 1)
         self.assertEqual(result["pending_payment_relation_promotion_error_count"], 0)
-        self.assertIn(("workbench", "2026-02", "oa_projection_sync"), queue_repository.refreshes)
-        self.assertIn(("oa_pending_payment", "2026-02", "oa_projection_sync"), queue_repository.refreshes)
 
 
 class FakeSourceAdapter:
@@ -154,23 +142,6 @@ class FakeProjectionRepository:
 
     def record_sync_run(self, payload: dict[str, object]) -> None:
         self.sync_runs.append(dict(payload))
-
-
-class FakeQueueRepository:
-    def __init__(self) -> None:
-        self.refreshes: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_kwargs: object) -> None:
-        self.refreshes.append((scope_type, scope_key, reason))
-
-
-class FakeSearchRefreshProducer:
-    def __init__(self) -> None:
-        self.calls: list[tuple[list[str], str]] = []
-
-    def enqueue(self, scope_keys: list[str], *, reason: str, **_kwargs: object) -> bool:
-        self.calls.append((list(scope_keys), reason))
-        return True
 
 
 class FakePendingPaymentRelationPromoter:

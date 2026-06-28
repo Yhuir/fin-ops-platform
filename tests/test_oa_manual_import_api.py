@@ -54,27 +54,11 @@ class OAManualImportApiTests(unittest.TestCase):
         )
 
     def _assert_oa_manual_targets(self, payload: dict[str, object], *, month: str) -> None:
-        target_pairs = {
-            (str(target["read_model_key"]), str(target["scope_key"]))
-            for target in payload["operation_barrier_targets"]
-        }
-        expected_pairs = {
-            ("workbench", month),
-            ("workbench_relation", month),
-            ("invoice_lifecycle", month),
-            ("tax_offset", month),
-            ("search", month),
-            ("cost_statistics", f"active:{month}"),
-            ("cost_statistics", f"all:{month}"),
-        }
-        self.assertTrue(
-            expected_pairs.issubset(target_pairs),
-            f"missing targets: {expected_pairs - target_pairs}",
-        )
-        self.assertEqual(payload["freshness_targets"], payload["operation_barrier_targets"])
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
         self.assertIn(month, payload["affected_scope_keys"])
-        self.assertIn(f"active:{month}", payload["affected_scope_keys"])
-        self.assertIn(f"all:{month}", payload["read_model_scope_keys"])
+        self.assertIn("all", payload["affected_scope_keys"])
+        self.assertNotIn("read_model_scope_keys", payload)
 
     def test_search_endpoint_returns_early_rows_ignoring_global_cutoff_and_supports_paging(self) -> None:
         app = self._build_app_with_service(
@@ -122,10 +106,7 @@ class OAManualImportApiTests(unittest.TestCase):
     def test_refresh_endpoint_returns_counts_and_invalidates_affected_scopes(self) -> None:
         app = self._build_app_with_service(adapter=RecordingOAAdapter([oa_record("oa-exp-1981", month="2025-12", invoices=[])]))
 
-        with (
-            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate,
-            patch.object(app._search_service, "clear_cache") as clear_cache,
-        ):
+        with patch.object(app._search_service, "clear_cache") as clear_cache:
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/oa/manual-search/refresh-attachments",
@@ -137,8 +118,6 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["row_id"], "oa-exp-1981")
         self.assertEqual(payload["rows"][0]["importable_invoice_count"], 1)
         self._assert_oa_manual_targets(payload, month="2025-12")
-        invalidate.assert_called_once()
-        self.assertEqual(set(invalidate.call_args.args[0]), {"all", "2025-12"})
         clear_cache.assert_called_once()
 
     def test_import_endpoint_imports_completed_rejects_in_progress_and_is_idempotent(self) -> None:
@@ -177,10 +156,7 @@ class OAManualImportApiTests(unittest.TestCase):
         app = self._build_app_with_service(adapter=RecordingOAAdapter([oa_record("oa-exp-1981")]), store=store)
 
         list_response = app.handle_request("GET", "/api/workbench/settings/oa/manual-imports")
-        with (
-            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate,
-            patch.object(app._search_service, "clear_cache") as clear_cache,
-        ):
+        with patch.object(app._search_service, "clear_cache") as clear_cache:
             delete_response = app.handle_request(
                 "DELETE",
                 "/api/workbench/settings/oa/manual-imports/oa-exp-1981",
@@ -195,7 +171,6 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(delete_payload["row_id"], "oa-exp-1981")
         self._assert_oa_manual_targets(delete_payload, month="2025-12")
         self.assertEqual(store.load_manual_oa_imports()["row_ids"], [])
-        self.assertEqual(set(invalidate.call_args.args[0]), {"all", "2025-12"})
         clear_cache.assert_called_once()
 
     def test_manual_import_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor(self) -> None:

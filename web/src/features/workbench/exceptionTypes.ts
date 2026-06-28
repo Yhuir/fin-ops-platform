@@ -66,12 +66,6 @@ export type WorkbenchExceptionApplyPayload = {
   payload: Record<string, unknown>;
 };
 
-export type WorkbenchExceptionFreshnessTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
-};
-
 export type WorkbenchExceptionApplyResult = {
   success: boolean;
   case: Record<string, unknown> | null;
@@ -79,8 +73,6 @@ export type WorkbenchExceptionApplyResult = {
   updatedRows: Array<Record<string, unknown>>;
   affectedRowIds: string[];
   affectedScopeKeys: string[];
-  freshnessTargets: WorkbenchExceptionFreshnessTarget[];
-  operationBarrierTargets: WorkbenchExceptionFreshnessTarget[];
   workbenchRefreshRequired: boolean;
   message?: string;
 };

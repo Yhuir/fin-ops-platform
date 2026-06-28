@@ -130,7 +130,7 @@ class RuntimeConvergenceClosureTests(unittest.TestCase):
         ), patch.object(closure, "_run", side_effect=fake_run), patch.object(
             closure.migrate,
             "run_psql",
-            return_value='{"oa_sync_done_count":1,"oa_projection_rows":1,"oa_sync_runs":1,"dirty_scope_count":1}',
+            return_value='{"oa_sync_done_count":1,"oa_projection_rows":1,"oa_sync_runs":1}',
         ):
             result = closure._check_oa_source(require_real_infra=True)
 
@@ -170,9 +170,8 @@ class RuntimeConvergenceClosureTests(unittest.TestCase):
 
         self.assertEqual(result.status, closure.PASS)
         worker_commands = [command for command in calls if "fin_ops_platform.app.worker" in command]
-        self.assertGreaterEqual(len(worker_commands), 10)
+        self.assertGreaterEqual(len(worker_commands), 3)
         self.assertTrue(all("--registration" in command for command in worker_commands))
-        self.assertTrue(any("workbench" in command for command in worker_commands))
         self.assertTrue(any("import" in command for command in worker_commands))
 
     def test_report_output_file_is_written(self) -> None:

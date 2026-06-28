@@ -14,7 +14,6 @@ from fin_ops_platform.services.app_status_domain_registry import (
 from fin_ops_platform.services.app_status_dependency_registry import APP_STATUS_DEPENDENCY_REGISTRY
 from fin_ops_platform.services.app_status_job_registry import APP_STATUS_BACKGROUND_JOB_REGISTRY
 from fin_ops_platform.services.app_status_overview_service import AppStatusOverviewService
-from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.background_job_service import BackgroundJob, BackgroundJobService
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.runtime_state_policy import BACKGROUND_JOB_KNOWN_TYPES
@@ -107,22 +106,18 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertEqual(set(domain_routes(APP_STATUS_DOMAIN_REGISTRY)), FRONTEND_ROUTES)
 
     def test_domain_registry_has_runtime_fact_sources_for_every_mapping(self) -> None:
-        read_model_keys = set(APP_STATUS_READ_MODEL_REGISTRY)
         worker_instances = set(registration_by_instance_name())
         job_types = set(APP_STATUS_BACKGROUND_JOB_REGISTRY) | set(BACKGROUND_JOB_KNOWN_TYPES)
         dependency_keys = set(APP_STATUS_DEPENDENCY_REGISTRY)
 
-        missing_read_models: dict[str, list[str]] = {}
         missing_workers: dict[str, list[str]] = {}
         missing_job_types: dict[str, list[str]] = {}
         missing_dependencies: dict[str, list[str]] = {}
         for domain in APP_STATUS_DOMAIN_REGISTRY:
-            missing_read_models[domain.key] = [key for key in domain.read_model_keys if key not in read_model_keys]
             missing_workers[domain.key] = [key for key in domain.worker_instances if key not in worker_instances]
             missing_job_types[domain.key] = [key for key in domain.job_types if key not in job_types]
             missing_dependencies[domain.key] = [key for key in domain.dependencies if key not in dependency_keys]
 
-        self.assertFalse({key: value for key, value in missing_read_models.items() if value})
         self.assertFalse({key: value for key, value in missing_workers.items() if value})
         self.assertFalse({key: value for key, value in missing_job_types.items() if value})
         self.assertFalse({key: value for key, value in missing_dependencies.items() if value})
@@ -160,98 +155,22 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertEqual(payload["background_tasks"][0]["percent"], 10)
         self.assertIn("imports_etc_invoices", payload["background_tasks"][0]["affected_domains"])
 
-    def test_failed_critical_read_model_marks_domain_and_overall_red_without_blocking_writes(self) -> None:
+    def test_runtime_summary_counts_workers_and_queue_backlog(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
 
         payload = service.build_overview(
             session=FakeSession(identity=FakeIdentity()),
             active_jobs=[],
             attention_jobs=[],
-            read_model_statuses={
-                "bank_detail": {"status": "failed", "last_error": "projection failed"},
-            },
-            app_health_snapshot={
-                "generated_at": "2026-06-04T10:00:00+00:00",
-                "status": "blocked",
-                "dependencies": healthy_dependencies(),
-                "alerts": {"active": []},
-            },
-        )
-
-        self.assertEqual(payload["overall"]["color"], "red")
-        self.assertEqual(payload["overall"]["level"], "blocked")
-        self.assertFalse(payload["overall"]["blocks_mutations"])
-        self.assertEqual(payload["overall"]["write_safety"]["status"], "ready")
-        self.assertEqual(payload["overall"]["write_safety"]["blockers"], [])
-        bank_domain = next(domain for domain in payload["domains"] if domain["key"] == "bank_details")
-        self.assertEqual(bank_domain["status"], "failed")
-        self.assertEqual(bank_domain["level"], "blocked")
-        self.assertIn("projection failed", bank_domain["details"])
-
-    def test_missing_readiness_record_keeps_domain_busy_and_overall_yellow(self) -> None:
-        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
-
-        payload = service.build_overview(
-            session=FakeSession(identity=FakeIdentity()),
-            active_jobs=[],
-            attention_jobs=[],
-            read_model_statuses={
-                "bank_detail": {"status": "missing", "reason": "readiness record missing"},
-            },
-            worker_statuses={"bank-detail": {"status": "ready"}},
-            app_health_snapshot={
-                "generated_at": "2026-06-04T10:00:00+00:00",
-                "status": "busy",
-                "dependencies": healthy_dependencies(),
-                "alerts": {"active": []},
-            },
-        )
-
-        bank_domain = next(domain for domain in payload["domains"] if domain["key"] == "bank_details")
-        self.assertEqual(bank_domain["level"], "busy")
-        self.assertEqual(bank_domain["status"], "missing")
-        self.assertEqual(payload["overall"]["color"], "yellow")
-
-    def test_runtime_summary_counts_read_models_workers_and_queue_backlog(self) -> None:
-        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
-
-        payload = service.build_overview(
-            session=FakeSession(identity=FakeIdentity()),
-            active_jobs=[],
-            attention_jobs=[],
-            read_model_statuses={
-                "bank_detail": {"status": "fresh"},
-                "cost_statistics": {
-                    "status": "refreshing",
-                    "scopes": [
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:all",
-                            "status": "fresh",
-                        },
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:2026-05",
-                            "status": "failed",
-                            "last_error": "projection failed",
-                        },
-                    ],
-                },
-                "pending_invoice": {"status": "failed", "last_error": "projection failed"},
-                "turnover_ledger": {"status": "missing"},
-            },
             worker_statuses={
                 "runtime-worker": {"status": "ready", "required": True},
-                "cost-tax": {"status": "working", "required": True},
-                "bank-detail": {"status": "stale", "required": True, "warning_code": "heartbeat_stale"},
+                "import": {"status": "working", "required": True},
+                "legacy-relation": {"status": "stale", "required": True, "warning_code": "heartbeat_stale"},
                 "legacy-worker": {"status": "missing", "required": False, "warning_code": "required_worker_missing"},
             },
             outbox_statuses={
-                "bank_detail.read_model.refresh": {"status": "pending", "count": 2},
-                "cost_statistics.read_model.refresh": {"status": "processing", "count": 1},
-                "pending_invoice.read_model.refresh": {"status": "failed", "count": 3},
+                "oa.sync": {"status": "pending", "count": 2},
+                "cost_statistics_cache_warmup": {"status": "processing", "count": 1},
             },
             app_health_snapshot={
                 "generated_at": "2026-06-04T10:00:00+00:00",
@@ -261,20 +180,7 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(
-            payload["runtime_summary"]["read_models"],
-            {
-                "total": 4,
-                "fresh": 1,
-                "refreshing": 1,
-                "stale": 0,
-                "missing": 1,
-                "failed": 1,
-                "unavailable": 0,
-                "issue_count": 3,
-                "scope_issue_count": 1,
-            },
-        )
+        self.assertNotIn("read_models", payload["runtime_summary"])
         self.assertEqual(payload["runtime_summary"]["workers"]["total"], 4)
         self.assertEqual(payload["runtime_summary"]["workers"]["required"], 3)
         self.assertEqual(payload["runtime_summary"]["workers"]["ready"], 1)
@@ -285,11 +191,11 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertEqual(
             payload["runtime_summary"]["queue"],
             {
-                "event_type_count": 3,
+                "event_type_count": 2,
                 "pending": 2,
                 "processing": 1,
-                "failed": 3,
-                "backlog": 6,
+                "failed": 0,
+                "backlog": 3,
             },
         )
 
@@ -300,10 +206,6 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
             session=FakeSession(identity=FakeIdentity()),
             active_jobs=[],
             attention_jobs=[],
-            read_model_statuses={
-                "oa_pending_payment": {"status": "fresh"},
-                "invoice_lifecycle": {"status": "fresh"},
-            },
             worker_statuses={
                 "oa-sync": {"status": "ready", "required": True},
             },
@@ -321,269 +223,6 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         domain_levels = {domain["key"]: domain["level"] for domain in payload["domains"]}
         self.assertEqual(domain_levels["oa_pending_payments"], "busy")
         self.assertEqual(domain_levels["settings"], "ok")
-
-    def test_cost_statistics_fresh_readiness_restores_domain_after_previous_failure(self) -> None:
-        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
-
-        payload = service.build_overview(
-            session=FakeSession(identity=FakeIdentity()),
-            active_jobs=[],
-            attention_jobs=[],
-            read_model_statuses={
-                "cost_statistics": {
-                    "status": "fresh",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:all",
-                    "updated_at": "2026-06-04T10:05:00+00:00",
-                },
-            },
-            worker_statuses={"cost-tax": {"status": "ready"}},
-            app_health_snapshot={
-                "generated_at": "2026-06-04T10:05:00+00:00",
-                "status": "ok",
-                "dependencies": healthy_dependencies(),
-                "alerts": {"active": []},
-            },
-        )
-
-        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
-        self.assertEqual(cost_domain["level"], "ok")
-        self.assertEqual(cost_domain["status"], "ready")
-        self.assertEqual(cost_domain["reason"], "成本统计已同步")
-        self.assertEqual(payload["overall"]["level"], "ok")
-
-    def test_cost_statistics_refreshing_readiness_is_busy_not_blocked(self) -> None:
-        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
-
-        payload = service.build_overview(
-            session=FakeSession(identity=FakeIdentity()),
-            active_jobs=[],
-            attention_jobs=[],
-            read_model_statuses={
-                "cost_statistics": {
-                    "status": "refreshing",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:2026-05",
-                },
-            },
-            worker_statuses={"cost-tax": {"status": "ready"}},
-            app_health_snapshot={
-                "generated_at": "2026-06-04T10:05:00+00:00",
-                "status": "busy",
-                "dependencies": healthy_dependencies(),
-                "alerts": {"active": []},
-            },
-        )
-
-        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
-        self.assertEqual(cost_domain["level"], "busy")
-        self.assertEqual(cost_domain["status"], "refreshing")
-        self.assertEqual(cost_domain["reason"], "成本统计正在同步")
-        self.assertEqual(payload["overall"]["level"], "busy")
-
-    def test_cost_statistics_failed_readiness_blocks_cost_domain(self) -> None:
-        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
-
-        payload = service.build_overview(
-            session=FakeSession(identity=FakeIdentity()),
-            active_jobs=[],
-            attention_jobs=[],
-            read_model_statuses={
-                "cost_statistics": {
-                    "status": "failed",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:all",
-                    "last_error": "all scope projection failed",
-                },
-            },
-            worker_statuses={"cost-tax": {"status": "ready"}},
-            app_health_snapshot={
-                "generated_at": "2026-06-04T10:05:00+00:00",
-                "status": "blocked",
-                "dependencies": healthy_dependencies(),
-                "alerts": {"active": []},
-            },
-        )
-
-        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
-        self.assertEqual(cost_domain["level"], "blocked")
-        self.assertEqual(cost_domain["status"], "failed")
-        self.assertEqual(cost_domain["reason"], "成本统计不可用")
-        self.assertIn("all scope projection failed", cost_domain["details"])
-        self.assertEqual(payload["overall"]["level"], "blocked")
-
-    def test_cost_statistics_month_shard_failure_is_busy_with_scope_detail(self) -> None:
-        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
-
-        payload = service.build_overview(
-            session=FakeSession(identity=FakeIdentity()),
-            active_jobs=[],
-            attention_jobs=[],
-            read_model_statuses={
-                "cost_statistics": {
-                    "status": "failed",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:2026-05",
-                    "last_error": "month shard projection failed",
-                    "scopes": [
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:all",
-                            "status": "fresh",
-                            "updated_at": "2026-06-04T10:03:00+00:00",
-                        },
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:2026-05",
-                            "status": "failed",
-                            "last_error": "month shard projection failed",
-                            "updated_at": "2026-06-04T10:05:00+00:00",
-                        },
-                    ],
-                },
-            },
-            worker_statuses={"cost-tax": {"status": "ready"}},
-            app_health_snapshot={
-                "generated_at": "2026-06-04T10:05:00+00:00",
-                "status": "busy",
-                "dependencies": healthy_dependencies(),
-                "alerts": {"active": []},
-            },
-        )
-
-        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
-        self.assertEqual(cost_domain["level"], "busy")
-        self.assertEqual(cost_domain["status"], "failed")
-        self.assertEqual(cost_domain["reason"], "成本统计局部分片需要重试")
-        self.assertIn("active:2026-05: month shard projection failed", cost_domain["details"])
-        self.assertEqual(
-            cost_domain["read_model_scopes"],
-            [
-                {
-                    "read_model_key": "cost_statistics",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:all",
-                    "status": "fresh",
-                    "last_error": "",
-                    "updated_at": "2026-06-04T10:03:00+00:00",
-                },
-                {
-                    "read_model_key": "cost_statistics",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:2026-05",
-                    "status": "failed",
-                    "last_error": "month shard projection failed",
-                    "updated_at": "2026-06-04T10:05:00+00:00",
-                },
-            ],
-        )
-        self.assertEqual(payload["overall"]["level"], "busy")
-
-    def test_cost_statistics_parent_scope_failure_still_blocks_domain(self) -> None:
-        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
-
-        payload = service.build_overview(
-            session=FakeSession(identity=FakeIdentity()),
-            active_jobs=[],
-            attention_jobs=[],
-            read_model_statuses={
-                "cost_statistics": {
-                    "status": "failed",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:all",
-                    "last_error": "parent projection failed",
-                    "scopes": [
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:all",
-                            "status": "failed",
-                            "last_error": "parent projection failed",
-                            "updated_at": "2026-06-04T10:05:00+00:00",
-                        },
-                    ],
-                },
-            },
-            worker_statuses={"cost-tax": {"status": "ready"}},
-            app_health_snapshot={
-                "generated_at": "2026-06-04T10:05:00+00:00",
-                "status": "blocked",
-                "dependencies": healthy_dependencies(),
-                "alerts": {"active": []},
-            },
-        )
-
-        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
-        self.assertEqual(cost_domain["level"], "blocked")
-        self.assertEqual(cost_domain["status"], "failed")
-        self.assertIn("active:all: parent projection failed", cost_domain["details"])
-        self.assertEqual(payload["overall"]["level"], "blocked")
-
-    def test_historical_read_model_scopes_are_diagnostics_not_current_blockers(self) -> None:
-        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
-
-        payload = service.build_overview(
-            session=FakeSession(identity=FakeIdentity()),
-            active_jobs=[],
-            attention_jobs=[],
-            read_model_statuses={
-                "cost_statistics": {
-                    "status": "fresh",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:all",
-                    "scopes": [
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:all",
-                            "status": "fresh",
-                            "updated_at": "2026-06-04T10:07:00+00:00",
-                        },
-                    ],
-                    "historical_scopes": [
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "all",
-                            "status": "failed",
-                            "last_error": "legacy scope failed",
-                            "updated_at": "2026-06-04T09:00:00+00:00",
-                            "current_effective": False,
-                            "history_reason": "legacy_scope_contract",
-                        },
-                    ],
-                },
-            },
-            worker_statuses={"cost-tax": {"status": "ready"}},
-            app_health_snapshot={
-                "generated_at": "2026-06-04T10:07:00+00:00",
-                "status": "ok",
-                "dependencies": healthy_dependencies(),
-                "alerts": {"active": []},
-            },
-        )
-
-        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
-        self.assertEqual(cost_domain["level"], "ok")
-        self.assertEqual(cost_domain["status"], "ready")
-        self.assertNotIn("all: legacy scope failed", cost_domain["details"])
-        self.assertEqual(
-            cost_domain["historical_read_model_scopes"],
-            [
-                {
-                    "read_model_key": "cost_statistics",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "all",
-                    "status": "failed",
-                    "last_error": "legacy scope failed",
-                    "updated_at": "2026-06-04T09:00:00+00:00",
-                    "current_effective": "false",
-                    "history_reason": "legacy_scope_contract",
-                },
-            ],
-        )
 
     def test_missing_critical_dependency_key_is_blocked_not_available(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
@@ -616,8 +255,8 @@ class FakeRuntimeConnection:
         if "from job.outbox_events" in normalized:
             return [
                 {
-                    "event_type": "bank_detail.read_model.refresh",
-                    "scope_type": "bank_detail",
+                    "event_type": "oa.sync",
+                    "scope_type": "oa",
                     "scope_key": "2026-03",
                     "status": "pending",
                     "count": 1,
@@ -625,42 +264,17 @@ class FakeRuntimeConnection:
                     "updated_at": "2026-06-04T10:00:00+00:00",
                 }
             ]
-        if "from job.read_model_dirty_scopes" in normalized:
-            return [
-                {
-                    "scope_type": "bank_detail",
-                    "status": "processing",
-                    "count": 2,
-                    "last_error": None,
-                    "updated_at": "2026-06-04T10:00:00+00:00",
-                }
-            ]
-        if "from read_model.app_status_readiness" in normalized:
-            return [
-                {
-                    "read_model_key": "bank_detail",
-                    "scope_type": "bank_detail",
-                    "scope_key": "all",
-                    "status": "fresh",
-                    "schema_version": "v1",
-                    "source_versions": {"bank_transactions": 1},
-                    "row_count": 10,
-                    "generated_at": "2026-06-04T10:00:00+00:00",
-                    "updated_at": "2026-06-04T10:00:00+00:00",
-                    "last_error": None,
-                }
-            ]
         if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
             return [
                 {
-                    "worker_id": "bank-detail",
-                    "worker_instance": "bank-detail",
-                    "worker_kind": "bank-detail-read-model",
+                    "worker_id": "legacy-relation",
+                    "worker_instance": "legacy-relation",
+                    "worker_kind": "legacy-relation-worker",
                     "status": "running",
                     "heartbeat_lag_seconds": 12,
                     "payload": {
-                        "worker_instance": "bank-detail",
-                        "configured_event_types": ["bank_detail.read_model.refresh"],
+                        "worker_instance": "legacy-relation",
+                        "configured_event_types": ["oa.sync"],
                     },
                 }
             ]
@@ -668,17 +282,17 @@ class FakeRuntimeConnection:
 
 
 class AppStatusRuntimeRepositoryTests(unittest.TestCase):
-    def test_runtime_repository_groups_dirty_scopes_outbox_and_workers_for_overview(self) -> None:
+    def test_runtime_repository_groups_outbox_and_workers_for_overview(self) -> None:
         snapshot = RuntimeMonitoringRepository(FakeRuntimeConnection()).app_status_runtime_snapshot()
 
-        self.assertEqual(snapshot["read_model_statuses"]["bank_detail"]["status"], "refreshing")
-        self.assertEqual(snapshot["outbox_statuses"]["bank_detail.read_model.refresh"]["status"], "pending")
+        self.assertNotIn("read_model_statuses", snapshot)
+        self.assertEqual(snapshot["outbox_statuses"]["oa.sync"]["status"], "pending")
         self.assertEqual(
-            snapshot["outbox_statuses"]["bank_detail.read_model.refresh"]["scopes"],
+            snapshot["outbox_statuses"]["oa.sync"]["scopes"],
             [
                 {
-                    "event_type": "bank_detail.read_model.refresh",
-                    "scope_type": "bank_detail",
+                    "event_type": "oa.sync",
+                    "scope_type": "oa",
                     "scope_key": "2026-03",
                     "status": "pending",
                     "count": 1,
@@ -686,294 +300,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(snapshot["worker_statuses"]["bank-detail"]["status"], "ready")
-
-    def test_runtime_repository_reports_registry_read_model_without_readiness_as_missing(self) -> None:
-        class NoReadinessConnection(FakeRuntimeConnection):
-            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                if "from job.outbox_events" in normalized:
-                    return []
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return []
-                if "from read_model.app_status_readiness" in normalized:
-                    return []
-                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
-                    return []
-                raise AssertionError(sql)
-
-        snapshot = RuntimeMonitoringRepository(NoReadinessConnection()).app_status_runtime_snapshot()
-
-        self.assertEqual(snapshot["read_model_statuses"]["bank_detail"]["status"], "missing")
-        self.assertEqual(snapshot["read_model_statuses"]["bank_detail"]["reason"], "readiness record missing")
-
-    def test_runtime_repository_preserves_cost_statistics_scope_readiness_details(self) -> None:
-        class CostScopeConnection(FakeRuntimeConnection):
-            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                if "from job.outbox_events" in normalized:
-                    return []
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return [
-                        {
-                            "scope_type": "cost_statistics",
-                            "scope_key": "all:2026-05",
-                            "status": "processing",
-                            "count": 1,
-                            "last_error": None,
-                            "updated_at": "2026-06-04T10:06:00+00:00",
-                        },
-                    ]
-                if "from read_model.app_status_readiness" in normalized:
-                    return [
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:all",
-                            "status": "fresh",
-                            "schema_version": "cost-v1",
-                            "source_versions": {"workbench": 10},
-                            "row_count": 42,
-                            "generated_at": "2026-06-04T10:03:00+00:00",
-                            "updated_at": "2026-06-04T10:03:00+00:00",
-                            "last_error": None,
-                        },
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:2026-05",
-                            "status": "failed",
-                            "schema_version": "cost-v1",
-                            "source_versions": {"workbench": 10},
-                            "row_count": None,
-                            "generated_at": None,
-                            "updated_at": "2026-06-04T10:05:00+00:00",
-                            "last_error": "projection failed",
-                        },
-                    ]
-                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
-                    return [
-                        {
-                            "worker_id": "cost-tax-1",
-                            "worker_instance": "cost-tax",
-                            "worker_kind": "cost-tax-read-model",
-                            "status": "running",
-                            "heartbeat_lag_seconds": 8,
-                            "payload": {
-                                "worker_instance": "cost-tax",
-                                "configured_event_types": [
-                                    "cost_statistics.read_model.refresh",
-                                    "tax_offset.read_model.refresh",
-                                ],
-                            },
-                        },
-                    ]
-                raise AssertionError(sql)
-
-        snapshot = RuntimeMonitoringRepository(CostScopeConnection()).app_status_runtime_snapshot()
-        cost_status = snapshot["read_model_statuses"]["cost_statistics"]
-
-        self.assertEqual(cost_status["status"], "failed")
-        self.assertEqual(
-            cost_status["scopes"],
-            [
-                {
-                    "read_model_key": "cost_statistics",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:all",
-                    "status": "fresh",
-                    "last_error": "",
-                    "updated_at": "2026-06-04T10:03:00+00:00",
-                },
-                {
-                    "read_model_key": "cost_statistics",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:2026-05",
-                    "status": "failed",
-                    "last_error": "projection failed",
-                    "updated_at": "2026-06-04T10:05:00+00:00",
-                },
-                {
-                    "read_model_key": "cost_statistics",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "all:2026-05",
-                    "status": "refreshing",
-                    "last_error": "",
-                    "updated_at": "2026-06-04T10:06:00+00:00",
-                },
-            ],
-        )
-
-    def test_runtime_repository_treats_requeued_cost_statistics_deadlock_as_refreshing(self) -> None:
-        class RequeuedDeadlockConnection(FakeRuntimeConnection):
-            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                if "from job.outbox_events" in normalized:
-                    return []
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return [
-                        {
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:2026-03",
-                            "status": "failed",
-                            "count": 1,
-                            "last_error": "deadlock detected DETAIL: process waits for lock",
-                            "updated_at": "2026-06-04T10:05:00+00:00",
-                        },
-                        {
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:2026-03",
-                            "status": "processing",
-                            "count": 1,
-                            "last_error": None,
-                            "updated_at": "2026-06-04T10:06:00+00:00",
-                        },
-                    ]
-                if "from read_model.app_status_readiness" in normalized:
-                    return [
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:all",
-                            "status": "fresh",
-                            "schema_version": "cost-v1",
-                            "source_versions": {"workbench": 10},
-                            "row_count": 42,
-                            "generated_at": "2026-06-04T10:03:00+00:00",
-                            "updated_at": "2026-06-04T10:03:00+00:00",
-                            "last_error": None,
-                        },
-                    ]
-                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
-                    return [
-                        {
-                            "worker_id": "cost-tax-1",
-                            "worker_instance": "cost-tax",
-                            "worker_kind": "cost-tax-read-model",
-                            "status": "running",
-                            "heartbeat_lag_seconds": 8,
-                            "payload": {
-                                "worker_instance": "cost-tax",
-                                "configured_event_types": [
-                                    "cost_statistics.read_model.refresh",
-                                    "tax_offset.read_model.refresh",
-                                ],
-                            },
-                        },
-                    ]
-                raise AssertionError(sql)
-
-        snapshot = RuntimeMonitoringRepository(RequeuedDeadlockConnection()).app_status_runtime_snapshot()
-        cost_status = snapshot["read_model_statuses"]["cost_statistics"]
-
-        self.assertEqual(cost_status["status"], "refreshing")
-        self.assertEqual(
-            cost_status["scopes"],
-            [
-                {
-                    "read_model_key": "cost_statistics",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:all",
-                    "status": "fresh",
-                    "last_error": "",
-                    "updated_at": "2026-06-04T10:03:00+00:00",
-                },
-                {
-                    "read_model_key": "cost_statistics",
-                    "scope_type": "cost_statistics",
-                    "scope_key": "active:2026-03",
-                    "status": "refreshing",
-                    "last_error": "",
-                    "updated_at": "2026-06-04T10:06:00+00:00",
-                },
-            ],
-        )
-
-    def test_runtime_repository_treats_legacy_cost_statistics_scopes_as_historical(self) -> None:
-        class LegacyCostScopeConnection(FakeRuntimeConnection):
-            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                if "from job.outbox_events" in normalized:
-                    return []
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return [
-                        {
-                            "scope_type": "cost_statistics",
-                            "scope_key": "all",
-                            "status": "failed",
-                            "count": 1,
-                            "last_error": "legacy dirty scope failed",
-                            "updated_at": "2026-06-04T09:02:00+00:00",
-                        },
-                    ]
-                if "from read_model.app_status_readiness" in normalized:
-                    return [
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "active:all",
-                            "status": "fresh",
-                            "schema_version": "cost-v1",
-                            "source_versions": {"workbench": 10},
-                            "row_count": 42,
-                            "generated_at": "2026-06-04T10:07:00+00:00",
-                            "updated_at": "2026-06-04T10:07:00+00:00",
-                            "last_error": None,
-                        },
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "all",
-                            "status": "failed",
-                            "schema_version": "cost-v0",
-                            "source_versions": {},
-                            "row_count": None,
-                            "generated_at": None,
-                            "updated_at": "2026-06-04T09:00:00+00:00",
-                            "last_error": "legacy parent scope failed",
-                        },
-                        {
-                            "read_model_key": "cost_statistics",
-                            "scope_type": "cost_statistics",
-                            "scope_key": "2026-03",
-                            "status": "failed",
-                            "schema_version": "cost-v0",
-                            "source_versions": {},
-                            "row_count": None,
-                            "generated_at": None,
-                            "updated_at": "2026-06-04T09:01:00+00:00",
-                            "last_error": "legacy month scope failed",
-                        },
-                    ]
-                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
-                    return [
-                        {
-                            "worker_id": "cost-tax-1",
-                            "worker_instance": "cost-tax",
-                            "worker_kind": "cost-tax-read-model",
-                            "status": "running",
-                            "heartbeat_lag_seconds": 8,
-                            "payload": {
-                                "worker_instance": "cost-tax",
-                                "configured_event_types": [
-                                    "cost_statistics.read_model.refresh",
-                                    "tax_offset.read_model.refresh",
-                                ],
-                            },
-                        },
-                    ]
-                raise AssertionError(sql)
-
-        snapshot = RuntimeMonitoringRepository(LegacyCostScopeConnection()).app_status_runtime_snapshot()
-        cost_status = snapshot["read_model_statuses"]["cost_statistics"]
-
-        self.assertEqual(cost_status["status"], "fresh")
-        self.assertEqual([scope["scope_key"] for scope in cost_status["scopes"]], ["active:all"])
-        self.assertEqual(
-            [scope["scope_key"] for scope in cost_status["historical_scopes"]],
-            ["all", "2026-03", "all"],
-        )
-        self.assertTrue(all(scope["current_effective"] is False for scope in cost_status["historical_scopes"]))
+        self.assertEqual(snapshot["worker_statuses"]["legacy-relation"]["status"], "ready")
 
     def test_runtime_repository_ignores_outbox_rows_covered_by_later_success(self) -> None:
         class CoveredOutboxConnection(FakeRuntimeConnection):
@@ -986,17 +313,16 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                     self.outbox_sql = normalized
                     return [
                         {
-                            "event_type": "output_invoice_collection.read_model.refresh",
-                            "scope_type": "output_invoice_collection",
+                            "event_type": "oa.sync",
+                            "scope_type": "oa",
                             "scope_key": "2026-05",
                             "status": "dead_lettered",
                             "count": 1,
                             "updated_at": "2026-06-04T09:00:00+00:00",
                             "covered_by_later_done": False,
-                            "covered_by_later_readiness": True,
                         },
                         {
-                            "event_type": "bank_detail.read_model.refresh",
+                            "event_type": "bank_detail.fact.changed",
                             "scope_type": "bank_detail",
                             "scope_key": "all",
                             "status": "failed",
@@ -1005,20 +331,15 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                             "covered_by_later_done": False,
                         },
                         {
-                            "event_type": "pending_invoice.read_model.refresh",
-                            "scope_type": "pending_invoice",
+                            "event_type": "oa.sync",
+                            "scope_type": "oa",
                             "scope_key": "all",
                             "status": "pending",
                             "count": 1,
                             "updated_at": "2026-06-04T10:01:00+00:00",
                             "covered_by_later_done": True,
-                            "covered_by_later_readiness": False,
                         },
                     ]
-                if "from read_model.app_status_readiness" in normalized:
-                    return []
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return []
                 if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
                     return []
                 raise AssertionError(sql)
@@ -1026,56 +347,14 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         connection = CoveredOutboxConnection()
         snapshot = RuntimeMonitoringRepository(connection).app_status_runtime_snapshot()
 
-        self.assertNotIn("output_invoice_collection.read_model.refresh", snapshot["outbox_statuses"])
-        self.assertEqual(snapshot["outbox_statuses"]["bank_detail.read_model.refresh"]["status"], "failed")
-        self.assertNotIn("pending_invoice.read_model.refresh", snapshot["outbox_statuses"])
+        self.assertNotIn("workbench_relation.read_model.refresh", snapshot["outbox_statuses"])
+        self.assertEqual(snapshot["outbox_statuses"]["bank_detail.fact.changed"]["status"], "failed")
+        self.assertNotIn("workbench_relation.read_model.refresh", snapshot["outbox_statuses"])
         self.assertIn("e.status <> 'done' and e.publish_status in ('publishing', 'failed')", connection.outbox_sql)
         self.assertIn("when e.publish_status = 'failed' then 'publish_failed'", connection.outbox_sql)
         self.assertIn("done.status = 'done'", connection.outbox_sql)
-        self.assertIn("readiness.status = 'fresh'", connection.outbox_sql)
-
-    def test_runtime_repository_ignores_dirty_scope_covered_by_later_fresh_readiness(self) -> None:
-        class CoveredDirtyScopeConnection(FakeRuntimeConnection):
-            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return [
-                        {
-                            "scope_type": "input_invoice_usage",
-                            "scope_key": "all",
-                            "status": "pending",
-                            "count": 1,
-                            "last_error": None,
-                            "updated_at": "2026-06-04T09:59:00+00:00",
-                            "covered_by_later_readiness": True,
-                        }
-                    ]
-                if "from read_model.app_status_readiness" in normalized:
-                    return [
-                        {
-                            "read_model_key": "input_invoice_usage",
-                            "scope_type": "input_invoice_usage",
-                            "scope_key": "all",
-                            "status": "fresh",
-                            "schema_version": "v1",
-                            "source_versions": {"input_invoices": 7},
-                            "row_count": 128,
-                            "generated_at": "2026-06-04T10:00:00+00:00",
-                            "updated_at": "2026-06-04T10:00:00+00:00",
-                            "last_error": None,
-                        }
-                    ]
-                if "from job.outbox_events" in normalized:
-                    return []
-                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
-                    return []
-                raise AssertionError(sql)
-
-        snapshot = RuntimeMonitoringRepository(CoveredDirtyScopeConnection()).app_status_runtime_snapshot()
-
-        input_usage_status = snapshot["read_model_statuses"]["input_invoice_usage"]
-        self.assertEqual(input_usage_status["status"], "fresh")
-        self.assertEqual(input_usage_status["scopes"][0]["status"], "fresh")
+        self.assertNotIn("read_model.app_status_readiness", connection.outbox_sql)
+        self.assertNotIn("readiness.status = 'fresh'", connection.outbox_sql)
 
     def test_runtime_repository_ignores_failed_outbox_row_covered_by_later_pending_retry(self) -> None:
         class CoveredByRetryConnection(FakeRuntimeConnection):
@@ -1092,7 +371,6 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                             "updated_at": "2026-06-04T09:59:00+00:00",
                             "covered_by_later_event": True,
                             "covered_by_later_done": False,
-                            "covered_by_later_readiness": False,
                         },
                         {
                             "event_type": "oa.sync",
@@ -1103,13 +381,8 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                             "updated_at": "2026-06-04T10:00:00+00:00",
                             "covered_by_later_event": False,
                             "covered_by_later_done": False,
-                            "covered_by_later_readiness": False,
                         },
                     ]
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return []
-                if "from read_model.app_status_readiness" in normalized:
-                    return []
                 if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
                     return []
                 raise AssertionError(sql)
@@ -1119,95 +392,18 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         self.assertEqual(snapshot["outbox_statuses"]["oa.sync"]["status"], "pending")
         self.assertEqual(snapshot["outbox_statuses"]["oa.sync"]["count"], 1)
 
-    def test_runtime_repository_ignores_failed_outbox_row_covered_by_active_dirty_scope(self) -> None:
-        class CoveredByDirtyScopeConnection(FakeRuntimeConnection):
-            def __init__(self) -> None:
-                self.outbox_sql = ""
+    def test_runtime_repository_no_longer_writes_read_model_readiness(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "backend"
+            / "src"
+            / "fin_ops_platform"
+            / "services"
+            / "runtime_monitoring.py"
+        ).read_text(encoding="utf-8")
 
-            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                if "from job.outbox_events" in normalized:
-                    self.outbox_sql = normalized
-                    return [
-                        {
-                            "event_type": "workbench.read_model.refresh",
-                            "scope_type": "workbench",
-                            "scope_key": "all",
-                            "status": "failed",
-                            "count": 1,
-                            "last_error": "generation_metadata_actual_mismatch",
-                            "updated_at": "2026-06-21T22:47:00+08:00",
-                            "covered_by_later_event": False,
-                            "covered_by_later_done": False,
-                            "covered_by_later_readiness": False,
-                            "covered_by_active_dirty_scope": True,
-                        },
-                        {
-                            "event_type": "workbench.read_model.refresh",
-                            "scope_type": "workbench",
-                            "scope_key": "all",
-                            "status": "pending",
-                            "count": 1,
-                            "last_error": None,
-                            "updated_at": "2026-06-21T22:48:00+08:00",
-                            "covered_by_later_event": False,
-                            "covered_by_later_done": False,
-                            "covered_by_later_readiness": False,
-                            "covered_by_active_dirty_scope": False,
-                        },
-                    ]
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return []
-                if "from read_model.app_status_readiness" in normalized:
-                    return []
-                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
-                    return []
-                raise AssertionError(sql)
-
-        connection = CoveredByDirtyScopeConnection()
-        snapshot = RuntimeMonitoringRepository(connection).app_status_runtime_snapshot()
-
-        self.assertEqual(snapshot["outbox_statuses"]["workbench.read_model.refresh"]["status"], "pending")
-        self.assertEqual(snapshot["outbox_statuses"]["workbench.read_model.refresh"]["count"], 1)
-        self.assertNotIn("last_error", snapshot["outbox_statuses"]["workbench.read_model.refresh"])
-        self.assertIn("from job.read_model_dirty_scopes dirty", connection.outbox_sql)
-        self.assertIn("covered_by_active_dirty_scope", connection.outbox_sql)
-        self.assertIn("e.status in ('failed', 'dead_lettered')", connection.outbox_sql)
-
-    def test_runtime_repository_records_read_model_readiness_through_repository_boundary(self) -> None:
-        class RecordingConnection(FakeRuntimeConnection):
-            def __init__(self) -> None:
-                self.executed: list[tuple[str, tuple[object, ...]]] = []
-
-            def execute(self, sql: str, params: tuple[object, ...] = ()):
-                self.executed.append((sql, params))
-
-        connection = RecordingConnection()
-        RuntimeMonitoringRepository(connection).record_read_model_readiness(
-            read_model_key="bank_detail",
-            scope_type="bank_detail",
-            scope_key="all",
-            status="fresh",
-            schema_version="v1",
-            source_versions={"bank_transactions": 7},
-            row_count=12,
-            generated_at="2026-06-04T10:00:00+00:00",
-        )
-
-        self.assertEqual(len(connection.executed), 1)
-        sql, params = connection.executed[0]
-        self.assertIn("read_model.app_status_readiness", sql)
-        self.assertEqual(params[1:5], ("bank_detail", "bank_detail", "all", "fresh"))
-        self.assertIn('"bank_transactions": 7', str(params[6]))
-
-    def test_runtime_repository_rejects_unknown_readiness_status(self) -> None:
-        with self.assertRaises(ValueError):
-            RuntimeMonitoringRepository(FakeRuntimeConnection()).record_read_model_readiness(
-                read_model_key="bank_detail",
-                scope_type="bank_detail",
-                scope_key="all",
-                status="almost_ready",
-            )
+        self.assertNotIn("def record_read_model_readiness", source)
+        self.assertNotIn("insert into read_model.app_status_readiness", source)
 
     def test_runtime_repository_reports_unavailable_snapshot_instead_of_empty_green(self) -> None:
         class BrokenConnection:
@@ -1216,8 +412,10 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
 
         snapshot = RuntimeMonitoringRepository(BrokenConnection()).app_status_runtime_snapshot()
 
-        self.assertEqual(snapshot["read_model_statuses"]["__runtime__"]["status"], "unavailable")
-        self.assertIn("postgres unavailable", snapshot["read_model_statuses"]["__runtime__"]["last_error"])
+        self.assertNotIn("read_model_statuses", snapshot)
+        self.assertEqual(snapshot["worker_statuses"]["__runtime__"]["status"], "unavailable")
+        self.assertIn("postgres unavailable", snapshot["worker_statuses"]["__runtime__"]["last_error"])
+        self.assertEqual(snapshot["outbox_statuses"]["__runtime__"]["status"], "unavailable")
 
     def test_service_marks_runtime_unavailable_as_blocked_not_green(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
@@ -1226,9 +424,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
             session=FakeSession(identity=FakeIdentity()),
             active_jobs=[],
             attention_jobs=[],
-            read_model_statuses={
-                "__runtime__": {"status": "unavailable", "last_error": "postgres unavailable"},
-            },
+            worker_statuses={"__runtime__": {"status": "unavailable", "last_error": "postgres unavailable"}},
             app_health_snapshot={
                 "generated_at": "2026-06-04T10:00:00+00:00",
                 "status": "blocked",
@@ -1244,7 +440,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["overall"]["write_safety"]["status"], "blocked")
         self.assertEqual(payload["overall"]["write_safety"]["blockers"], ["runtime"])
 
-    def test_required_worker_missing_marks_critical_domain_blocked(self) -> None:
+    def test_removed_workbench_worker_no_longer_blocks_batch_accounting_domain(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
 
         payload = service.build_overview(
@@ -1252,7 +448,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
             active_jobs=[],
             attention_jobs=[],
             worker_statuses={
-                "bank-detail": {"status": "missing", "warning_code": "required_worker_missing"},
+                "legacy-relation": {"status": "missing", "warning_code": "required_worker_missing"},
             },
             app_health_snapshot={
                 "generated_at": "2026-06-04T10:00:00+00:00",
@@ -1262,9 +458,8 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
             },
         )
 
-        bank_domain = next(domain for domain in payload["domains"] if domain["key"] == "bank_details")
-        self.assertEqual(bank_domain["level"], "blocked")
-        self.assertEqual(payload["overall"]["color"], "red")
+        batch_accounting_domain = next(domain for domain in payload["domains"] if domain["key"] == "batch_accounting")
+        self.assertEqual(batch_accounting_domain["level"], "ok")
 
     def test_file_import_can_use_explicit_affected_domain_without_marking_all_import_pages(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
@@ -1441,7 +636,7 @@ class AppStatusArchitectureBoundaryTests(unittest.TestCase):
     def test_app_status_server_integration_uses_public_runtime_snapshot_boundary(self) -> None:
         source = Path("backend/src/fin_ops_platform/app/server.py").read_text(encoding="utf-8")
         method_start = source.index("    def _app_status_runtime_statuses")
-        method_end = source.index("    def _apply_workbench_generation_health", method_start)
+        method_end = source.index("    def _emit_app_health_timing", method_start)
         method_source = source[method_start:method_end]
 
         self.assertNotIn("AppStatusRuntimeReader", source)
@@ -1453,6 +648,11 @@ class AppStatusArchitectureBoundaryTests(unittest.TestCase):
 
         self.assertNotIn("from job.", source.lower())
         self.assertNotIn("select ", source.lower())
+
+    def test_app_status_overview_service_does_not_accept_read_model_status_fallback(self) -> None:
+        source = Path("backend/src/fin_ops_platform/services/app_status_overview_service.py").read_text(encoding="utf-8")
+
+        self.assertNotIn('payload.get("read_model_status")', source)
 
 
 class AppStatusApiContractTests(unittest.TestCase):

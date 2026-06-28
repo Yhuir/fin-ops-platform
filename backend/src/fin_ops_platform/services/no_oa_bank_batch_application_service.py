@@ -18,18 +18,11 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NoOaBankBatchService,
 )
-from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LABELS
-from fin_ops_platform.services.read_model_freshness import (
-    require_expected_source_versions,
-    source_version_mismatch_reasons,
-)
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+from fin_ops_platform.services.snapshot_version import snapshot_version
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
 
 SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -67,7 +60,7 @@ class NoOaPairRelationSnapshotPort:
         return self.snapshot()
 
     def snapshot_version(self) -> str:
-        return WorkbenchReadModelService.snapshot_version(self.snapshot())
+        return snapshot_version(self.snapshot())
 
     def snapshot_by_case_id(self, case_id: str) -> dict[str, object] | None:
         normalized_case_id = str(case_id or "").strip()
@@ -112,18 +105,12 @@ class NoOaBankBatchApplicationService:
         app_settings_service: AppSettingsService,
         bank_transaction_category_service: BankTransactionCategoryService,
         pair_relation_snapshot_port: NoOaPairRelationSnapshotPort,
-        workbench_read_model_service: WorkbenchReadModelService,
         state_store: Any | None,
         tag_selection_service: Any | None = None,
-        no_oa_bank_batch_read_model_repository: Any | None = None,
-        workbench_sql_read_repository: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         bank_transaction_category_affected_months_provider: Callable[[list[str]], list[str]] | None = None,
         execute_derived_data_lifecycle_event: Callable[..., Any] | None = None,
-        expand_workbench_read_model_scope_keys_for_base_scopes: Callable[[list[str]], list[str]] | None = None,
         search_cache_clearer: Callable[[], Any] | None = None,
-        queue_repository: Any | None = None,
-        read_model_refresh_producer: Any | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
@@ -134,24 +121,13 @@ class NoOaBankBatchApplicationService:
         self._app_settings_service = app_settings_service
         self._bank_transaction_category_service = bank_transaction_category_service
         self._pair_relation_snapshot_port = pair_relation_snapshot_port
-        self._workbench_read_model_service = workbench_read_model_service
         self._state_store = state_store
-        self._no_oa_bank_batch_read_model_repository = no_oa_bank_batch_read_model_repository
-        if self._no_oa_bank_batch_read_model_repository is None and workbench_sql_read_repository is not None:
-            self._no_oa_bank_batch_read_model_repository = NoOaBankBatchReadModelRepositoryPort(
-                workbench_sql_read_repository
-            )
         self._workbench_matching_source_versions_provider = workbench_matching_source_versions_provider or (lambda: {})
         self._bank_transaction_category_affected_months_provider = (
             bank_transaction_category_affected_months_provider or (lambda _row_ids: [])
         )
         self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event or (lambda *_args, **_kwargs: None)
-        self._expand_workbench_read_model_scope_keys_for_base_scopes = (
-            expand_workbench_read_model_scope_keys_for_base_scopes or (lambda scope_keys: scope_keys)
-        )
         self._search_cache_clearer = search_cache_clearer or (lambda: None)
-        self._queue_repository = queue_repository
-        self._read_model_refresh_producer = read_model_refresh_producer
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
 
@@ -168,67 +144,14 @@ class NoOaBankBatchApplicationService:
             "month": filters["month"],
             "account_key": filters["account_key"],
         }
-        refresh_scope_keys = self._refresh_scope_keys_for_filters(filters)
-        list_read_model_batches = getattr(self._no_oa_bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
-        if callable(list_read_model_batches):
-            summary_read_model_batches = list_read_model_batches(summary_filters)
-            read_model_batches = list_read_model_batches(filters)
-            if summary_read_model_batches is None or read_model_batches is None:
-                refresh_reason = "api_no_oa_read_model_missing"
-                refresh_enqueued = self.enqueue_background_refresh(refresh_scope_keys, reason=refresh_reason)
-                return {
-                    "summary": self.summary([]),
-                    "batches": [],
-                    **self._pagination_payload([], pagination),
-                    "read_model_status": "missing",
-                    "read_model_stale_reasons": [],
-                    "refresh_enqueued": refresh_enqueued,
-                    "refresh_reason": refresh_reason,
-                }
-            if summary_read_model_batches is not None and read_model_batches is not None:
-                self.load_relation_source_versions_for_scope_keys(refresh_scope_keys)
-                stale_reasons = self.no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
-                summary_public_batches = self._public_batches(summary_read_model_batches)
-                read_model_public_batches = self._public_batches(read_model_batches)
-                if stale_reasons:
-                    refresh_reason = "api_no_oa_source_versions_stale"
-                    refresh_enqueued = self.enqueue_background_refresh(refresh_scope_keys, reason=refresh_reason)
-                    return {
-                        "summary": self.summary(summary_public_batches),
-                        "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
-                        **self._pagination_payload(read_model_public_batches, pagination),
-                        "read_model_status": "stale",
-                        "read_model_stale_reasons": stale_reasons,
-                        "refresh_enqueued": refresh_enqueued,
-                        "refresh_reason": refresh_reason,
-                    }
-                return {
-                    "summary": self.summary(summary_public_batches),
-                    "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
-                    **self._pagination_payload(read_model_public_batches, pagination),
-                    "read_model_status": "fresh",
-                }
         summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
         read_batches = self._no_oa_bank_batch_service.list_batches(filters)
-        if summary_batches or read_batches:
-            summary_public_batches = self._public_batches(summary_batches)
-            read_public_batches = self._public_batches(read_batches)
-            return {
-                "summary": self.summary(summary_public_batches),
-                "batches": self.resolve_labels(self._page_items(read_public_batches, pagination)),
-                **self._pagination_payload(read_public_batches, pagination),
-                "read_model_status": "fresh",
-            }
-        refresh_reason = "api_no_oa_read_model_unavailable"
-        refresh_enqueued = self.enqueue_background_refresh(refresh_scope_keys, reason=refresh_reason)
+        summary_public_batches = self._public_batches(summary_batches)
+        read_public_batches = self._public_batches(read_batches)
         return {
-            "summary": self.summary([]),
-            "batches": [],
-            **self._pagination_payload([], pagination),
-            "read_model_status": "unavailable",
-            "read_model_stale_reasons": [],
-            "refresh_enqueued": refresh_enqueued,
-            "refresh_reason": refresh_reason,
+            "summary": self.summary(summary_public_batches),
+            "batches": self.resolve_labels(self._page_items(read_public_batches, pagination)),
+            **self._pagination_payload(read_public_batches, pagination),
         }
 
     def tag_selection_payload(self) -> dict[str, Any]:
@@ -240,7 +163,6 @@ class NoOaBankBatchApplicationService:
         if self._tag_selection_service is not None:
             return self._tag_selection_service.update_tag_selection(payload, actor_id=actor_id)
         result = self._app_settings_service.update_no_oa_bank_batch_tag_selection(payload, actor_id=actor_id)
-        self.enqueue_background_refresh(["all"], reason="no_oa_bank_batch_tag_selection_changed")
         self.after_mutation(["all"], changed_case_ids=[], persist=False)
         return result
 
@@ -457,12 +379,6 @@ class NoOaBankBatchApplicationService:
 
     @staticmethod
     def _relation_command_error(exc: WorkbenchRelationCommandError) -> NoOaBankBatchRelationMutationError:
-        if exc.error_code in {"workbench_relation_read_model_not_fresh", "workbench_relation_read_model_unavailable"}:
-            return NoOaBankBatchRelationMutationError(
-                "no_oa_bank_batch_relation_read_model_not_fresh",
-                "no_oa_bank_batch_relation_read_model_not_fresh",
-                payload=exc.payload,
-            )
         if exc.error_code == "workbench_relation_active_row_conflict":
             return NoOaBankBatchRelationMutationError(
                 "no_oa_bank_batch_relation_active_row_conflict",
@@ -473,6 +389,16 @@ class NoOaBankBatchApplicationService:
             return NoOaBankBatchRelationMutationError(
                 "no_oa_bank_batch_relation_not_found",
                 "no_oa_bank_batch_relation_not_found",
+                payload=exc.payload,
+            )
+        if exc.error_code in {
+            "workbench_relation_context_not_ready",
+            "workbench_relation_context_not_ready",
+            "workbench_relation_context_unavailable",
+        }:
+            return NoOaBankBatchRelationMutationError(
+                "no_oa_bank_batch_relation_unavailable",
+                "no_oa_bank_batch_relation_unavailable",
                 payload=exc.payload,
             )
         return NoOaBankBatchRelationMutationError(exc.error_code, exc.error_code, payload=exc.payload)
@@ -545,54 +471,6 @@ class NoOaBankBatchApplicationService:
             apply_relation_repairs=apply_relation_repairs,
             scope_key=refresh_scope_key,
         )
-
-    def unchanged_read_model_scope_result(
-        self,
-        *,
-        scope_key: str,
-        source_versions: dict[str, object],
-    ) -> dict[str, object] | None:
-        normalized_scope_key = str(scope_key or "all").strip() or "all"
-        filters = {"month": normalized_scope_key} if SEARCH_MONTH_RE.match(normalized_scope_key) else {}
-        source_versions_summary_loader = getattr(
-            self._no_oa_bank_batch_read_model_repository,
-            "no_oa_bank_batch_source_versions_summary",
-            None,
-        )
-        if callable(source_versions_summary_loader):
-            summary = source_versions_summary_loader(filters)
-            if not isinstance(summary, dict) or str(summary.get("read_model_status") or "") != "fresh":
-                return None
-            existing_source_versions = summary.get("source_versions")
-            if not isinstance(existing_source_versions, dict) or dict(existing_source_versions) != source_versions:
-                return None
-            return {
-                "scope_key": normalized_scope_key,
-                "batch_count": max(int(summary.get("row_count") or 0), 0),
-                "source_versions": source_versions,
-                "skipped": True,
-                "skip_reason": "source_versions_unchanged",
-            }
-        list_read_model_batches = getattr(self._no_oa_bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
-        if not callable(list_read_model_batches):
-            return None
-        read_model_rows = list_read_model_batches(filters)
-        if not read_model_rows:
-            return None
-        existing_versions = [
-            row.get("source_versions")
-            for row in list(read_model_rows)
-            if isinstance(row, dict) and isinstance(row.get("source_versions"), dict)
-        ]
-        if not existing_versions or any(dict(value) != source_versions for value in existing_versions):
-            return None
-        return {
-            "scope_key": normalized_scope_key,
-            "batch_count": len(read_model_rows),
-            "source_versions": source_versions,
-            "skipped": True,
-            "skip_reason": "source_versions_unchanged",
-        }
 
     def active_relations_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> list[dict[str, object]]:
         return self._workbench_relation_active_relations_for_bank_rows(bank_rows)
@@ -949,7 +827,7 @@ class NoOaBankBatchApplicationService:
             "no_oa_bank_batch_schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
             "no_oa_bank_batch_tag_selection_version": int(no_oa_selection.get("version") or 1),
             "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
-            "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
+            "bank_transaction_category_snapshot_version": snapshot_version(
                 self._bank_transaction_category_service.snapshot()
             ),
         }
@@ -1083,27 +961,6 @@ class NoOaBankBatchApplicationService:
             enriched.append(next_row)
         return enriched
 
-    def no_oa_bank_batch_stale_reasons(self, batches: object) -> list[str]:
-        batch_rows = batches if isinstance(batches, list) else []
-        if not batch_rows:
-            return []
-        expected = require_expected_source_versions(
-            self.no_oa_bank_batch_source_versions(),
-            context="no_oa_bank_batch_read_model",
-        )
-        reasons: list[str] = []
-        for batch in batch_rows:
-            if not isinstance(batch, dict):
-                continue
-            source_versions = batch.get("source_versions")
-            for reason in source_version_mismatch_reasons(
-                expected=expected,
-                actual=source_versions if isinstance(source_versions, dict) else {},
-            ):
-                if reason not in reasons:
-                    reasons.append(reason)
-        return reasons
-
     def after_mutation(
         self,
         affected_months: list[str],
@@ -1117,7 +974,6 @@ class NoOaBankBatchApplicationService:
             for month in list(affected_months or [])
             if SEARCH_MONTH_RE.match(str(month).strip())
         ]
-        scope_keys = ["all", *normalized_months]
         self._execute_derived_data_lifecycle_event(
             "no_oa_bank_batch_changed",
             months=normalized_months,
@@ -1130,19 +986,10 @@ class NoOaBankBatchApplicationService:
         if persist:
             self.persist_mutation(
                 changed_case_ids=changed_case_ids,
-                changed_scope_keys=self._expand_workbench_read_model_scope_keys_for_base_scopes(scope_keys),
             )
         return bool(normalized_months)
 
-    def enqueue_background_refresh(self, scope_keys: list[str], *, reason: str) -> bool:
-        if self._read_model_refresh_producer is not None:
-            return bool(self._read_model_refresh_producer.enqueue(scope_keys, reason=reason))
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not refresh_gateway.can_enqueue():
-            return False
-        return bool(refresh_gateway.enqueue_many("no_oa_bank_batch", scope_keys, reason=reason))
-
-    def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
+    def persist_mutation(self, *, changed_case_ids: list[str]) -> None:
         if self._state_store is None:
             return
         try:
@@ -1155,9 +1002,7 @@ class NoOaBankBatchApplicationService:
                 if changed_case_ids
                 else self._pair_relation_snapshot_port.snapshot(),
                 no_oa_bank_batch_snapshot=self._no_oa_public_snapshot(),
-                workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
                 changed_case_ids=changed_case_ids,
-                changed_scope_keys=changed_scope_keys,
             )
         except Exception as exc:
             raise NoOaBankBatchPersistenceError(str(exc)) from exc
@@ -1189,11 +1034,7 @@ class NoOaBankBatchApplicationService:
             "batch": self.resolve_labels([batch])[0],
             "pair_relation": relation or {},
             "affected_months": affected_months,
-            **write_target_envelope(
-                read_model_key="no_oa_bank_batch",
-                scope_keys=affected_months,
-                fallback_scope_key="all",
-            ),
+            "affected_scope_keys": affected_months,
             "workbench_rebuild_queued": workbench_rebuild_queued,
             "results": [{"batch_id": batch.get("batch_id"), "status": status}],
         }

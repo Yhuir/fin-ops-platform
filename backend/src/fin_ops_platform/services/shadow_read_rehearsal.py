@@ -209,10 +209,7 @@ def default_shadow_read_domain_specs(
             _domain("turnover_relations", "load_turnover_relations", "relation id -> turnover relation", "P0"),
             _domain("turnover_relation_audit_log", "load_turnover_relation_audit_log", "audit event list", "P2"),
             _domain("turnover_ledger_extras", "load_turnover_ledger_extras", "ledger extras snapshot", "P1"),
-            _domain("workbench_read_models", "load_workbench_read_models", "scope key -> read model rows", "P1"),
             _domain("workbench_candidate_matches", "load_workbench_candidate_matches", "month/scope -> candidates", "P1"),
-            _domain("cost_statistics_read_models", "load_cost_statistics_read_models", "scope key -> cost read model", "P1"),
-            _domain("tax_offset_read_models", "load_tax_offset_read_models", "scope key -> tax offset read model", "P1"),
             _domain("tax_certified_imports", "load_tax_certified_imports", "tax certified import snapshot", "P1"),
             _domain(
                 "etc_state",

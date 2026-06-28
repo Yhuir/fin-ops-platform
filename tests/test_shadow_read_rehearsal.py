@@ -174,6 +174,16 @@ class ShadowReadRehearsalTests(unittest.TestCase):
         self.assertTrue(all(not spec.method_name.startswith("load_oa") for spec in specs))
         json.dumps([spec.to_dict() for spec in specs], ensure_ascii=False)
 
+    def test_default_domain_specs_do_not_include_legacy_page_read_models(self) -> None:
+        specs = default_shadow_read_domain_specs()
+        domains = {spec.domain for spec in specs}
+
+        self.assertNotIn("workbench_read_models", domains)
+        self.assertNotIn("cost_statistics_read_models", domains)
+        self.assertNotIn("tax_offset_read_models", domains)
+        with self.assertRaisesRegex(ValueError, "Unsupported shadow-read domains"):
+            default_shadow_read_domain_specs(domains=["workbench_read_models"])
+
     def test_cli_rejects_forbidden_flags(self) -> None:
         stderr = StringIO()
 

@@ -8,11 +8,6 @@ from fin_ops_platform.services.app_status_dependency_registry import APP_STATUS_
 
 
 APP_HEALTH_SCHEMA_VERSION = 1
-REBUILD_JOB_TYPES = {
-    "workbench_rebuild",
-    "workbench_read_model_rebuild",
-    "oa_sync_workbench_rebuild",
-}
 
 
 class AppHealthService:
@@ -43,12 +38,6 @@ class AppHealthService:
         queued_jobs = [job for job in active_jobs if getattr(job, "status", None) == "queued"]
         primary_running = self.primary_running_job([*queued_jobs, *running_jobs])
         primary_attention = self.primary_attention_job(resolved_attention_jobs)
-        rebuild_jobs = [
-            job
-            for job in active_jobs
-            if getattr(job, "status", None) in {"queued", "running"}
-            and self.is_workbench_read_model_rebuild_job(job)
-        ]
         matching_dirty_scope_entries = self.matching_dirty_scope_entries(oa_sync_payload)
         matching_dirty_scopes = [
             str(entry.get("scope_month"))
@@ -59,15 +48,7 @@ class AppHealthService:
         dirty_scopes = sorted(dict.fromkeys([*self.dirty_scopes(oa_sync_payload), *matching_dirty_scopes]))
         oa_sync_status = str(oa_sync_payload.get("status") or "").strip()
         oa_sync_unavailable = oa_sync_status == "error"
-        rebuilding = bool(rebuild_jobs) or rebuild_scheduled or bool(matching_running_scopes)
-        if oa_sync_unavailable:
-            workbench_read_model_status = "error"
-        elif rebuilding:
-            workbench_read_model_status = "rebuilding"
-        elif dirty_scopes:
-            workbench_read_model_status = "stale"
-        else:
-            workbench_read_model_status = "ready"
+        rebuilding = rebuild_scheduled or bool(matching_running_scopes)
 
         session_blocked = not bool(getattr(session, "allowed", False)) or not bool(getattr(session, "can_access_app", False))
         dependencies = {
@@ -110,31 +91,16 @@ class AppHealthService:
             status = "ok"
 
         dirty_scope_ages = self.dirty_scope_ages(oa_sync_payload, dirty_scopes)
-        relation_read_model = self.workbench_relation_read_model_payload(oa_sync_payload)
-        relation_dirty_backlog = int(relation_read_model.get("dirty_backlog") or 0)
-        relation_stale_scopes = [
-            str(scope)
-            for scope in list(relation_read_model.get("stale_scopes") or [])
-            if str(scope).strip()
-        ]
-        rebuild_running_seconds = [
-            self.seconds_since(getattr(job, "started_at", None) or getattr(job, "created_at", None), now)
-            for job in rebuild_jobs
-            if getattr(job, "status", None) == "running"
-        ]
         metrics = {
             "app_health_duration_ms": round(float(duration_ms), 2),
             "dirty_scope_count": len(dirty_scopes),
             "workbench_matching_dirty_scope_count": len(matching_dirty_scopes),
             "dirty_scope_age_seconds": dirty_scope_ages,
             "dirty_scope_age_seconds_max": max(dirty_scope_ages.values(), default=0),
-            "workbench_rebuild_running_seconds_max": round(max(rebuild_running_seconds, default=0), 2),
             "background_jobs_active_count": len(active_jobs),
             "background_jobs_running_count": len(running_jobs),
             "background_jobs_attention_count": len(resolved_attention_jobs),
             "active_alert_count": len((alerts or {}).get("active", [])),
-            "workbench_relation_dirty_backlog": relation_dirty_backlog,
-            "workbench_relation_stale_scope_count": len(relation_stale_scopes),
         }
         active_job_payloads = [self._job_payload(job) for job in active_jobs]
         attention_job_payloads = [self._job_payload(job) for job in resolved_attention_jobs]
@@ -145,15 +111,6 @@ class AppHealthService:
             "generated_at": now.isoformat(),
             "session": self._session_payload(session, blocked=session_blocked),
             "oa_sync": oa_sync_payload,
-            "workbench_read_model": {
-                "status": workbench_read_model_status,
-                "dirty_scopes": dirty_scopes,
-                "matching_dirty_scopes": matching_dirty_scope_entries,
-                "matching_running_scopes": matching_running_scopes,
-                "last_matching_error": self.last_matching_error(matching_dirty_scope_entries),
-                "rebuild_job_ids": [str(getattr(job, "job_id", "")) for job in rebuild_jobs],
-            },
-            "workbench_relation_read_model": relation_read_model,
             "background_jobs": {
                 "active": len(active_jobs),
                 "queued": len(queued_jobs),
@@ -194,14 +151,6 @@ class AppHealthService:
         ]
 
     @staticmethod
-    def last_matching_error(entries: list[dict[str, Any]]) -> str | None:
-        for entry in reversed(entries):
-            error = str(entry.get("last_error") or "").strip()
-            if error:
-                return error
-        return None
-
-    @staticmethod
     def dirty_scope_ages(oa_sync_payload: dict[str, Any], dirty_scopes: list[str]) -> dict[str, float]:
         raw_ages = oa_sync_payload.get("dirty_scope_age_seconds")
         if isinstance(raw_ages, dict):
@@ -211,34 +160,6 @@ class AppHealthService:
             }
         lag_seconds = max(0.0, AppHealthService._as_float(oa_sync_payload.get("lag_seconds")))
         return {scope: lag_seconds for scope in dirty_scopes}
-
-    @staticmethod
-    def workbench_relation_read_model_payload(oa_sync_payload: dict[str, Any]) -> dict[str, Any]:
-        payload = oa_sync_payload.get("workbench_relation_read_model")
-        payload = payload if isinstance(payload, dict) else {}
-        stale_scopes = [
-            str(scope).strip()
-            for scope in list(payload.get("stale_scopes") or payload.get("dirty_scopes") or [])
-            if str(scope).strip()
-        ]
-        dirty_backlog = int(AppHealthService._as_float(payload.get("dirty_backlog") or len(stale_scopes)))
-        last_failure_reason = str(payload.get("last_failure_reason") or "").strip()
-        status = str(payload.get("status") or "").strip() or (
-            "failed" if last_failure_reason else ("stale" if dirty_backlog or stale_scopes else "ready")
-        )
-        return {
-            "status": status,
-            "dirty_backlog": dirty_backlog,
-            "stale_scopes": stale_scopes,
-            "last_refresh_at": payload.get("last_refresh_at") or "",
-            "last_failure_reason": last_failure_reason,
-            "source_versions": payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
-        }
-
-    @staticmethod
-    def is_workbench_read_model_rebuild_job(job: object) -> bool:
-        job_type = str(getattr(job, "type", "") or "").strip().lower()
-        return job_type in REBUILD_JOB_TYPES or ("workbench" in job_type and "rebuild" in job_type)
 
     @classmethod
     def primary_running_job(cls, jobs: list[object]) -> object | None:

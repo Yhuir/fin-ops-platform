@@ -88,12 +88,7 @@ class CostStatisticsApiRoutes:
             payload, _cache_hit = self._query_service.get_month_statistics(current_month, normalized_project_scope)
         except ValueError as error:
             return self._project_scope_error_response(error)
-        status = (
-            HTTPStatus.ACCEPTED
-            if payload.get("read_model_status") == "refreshing" and not payload.get("rows")
-            else HTTPStatus.OK
-        )
-        return self._json_response(status, payload)
+        return self._json_response(HTTPStatus.OK, payload)
 
     def handle_explorer(self, month: str | None, project_scope: str | None) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
@@ -112,12 +107,7 @@ class CostStatisticsApiRoutes:
                 duration_ms=self._duration_ms(started_at),
                 entry_count=self._entry_count(payload),
             )
-        status = (
-            HTTPStatus.ACCEPTED
-            if payload.get("read_model_status") == "refreshing" and not payload.get("time_rows")
-            else HTTPStatus.OK
-        )
-        return self._json_response(status, payload)
+        return self._json_response(HTTPStatus.OK, payload)
 
     def handle_project(self, month: str | None, project_name: str, project_scope: str | None) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")

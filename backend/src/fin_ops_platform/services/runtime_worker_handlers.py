@@ -16,7 +16,6 @@ from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
-from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import BankAccountBalanceReadModelRefreshProducer
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
@@ -34,8 +33,6 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_inv
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.project_costing import ProjectCostingService
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 from fin_ops_platform.services.workbench_candidate_match_service import (
@@ -51,8 +48,9 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
 )
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
+from fin_ops_platform.services.workbench_matching_row_provider import WorkbenchMatchingRowProvider
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_projection_versions import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchMatchingRelationReadPort
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
@@ -61,7 +59,6 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandService,
 )
 from fin_ops_platform.services.workbench_special_pair_rule_service import WorkbenchSpecialPairRuleService
-from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION, WorkbenchSqlProjectionBuilder
 
 
 IMPORT_FACT_CHANGED_EVENT = "import.fact.changed"
@@ -145,8 +142,6 @@ class ImportRuntimeProcessorFactory:
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
             cost_statistics_scope_keys_for_import_preview=_cost_statistics_scope_keys_for_import_preview,
             cost_statistics_scope_keys_for_import_file_session=_cost_statistics_scope_keys_for_import_file_session,
-            bank_detail_scope_keys_for_import_preview=_bank_detail_scope_keys_for_import_preview,
-            bank_detail_scope_keys_for_import_file_session=_bank_detail_scope_keys_for_import_file_session,
             input_invoice_usage_scope_keys_for_import_preview=_input_invoice_usage_scope_keys_for_import_preview,
             input_invoice_usage_scope_keys_for_import_file_session=_input_invoice_usage_scope_keys_for_import_file_session,
             output_invoice_collection_scope_keys_for_import_preview=_output_invoice_collection_scope_keys_for_import_preview,
@@ -190,14 +185,13 @@ class WorkbenchMatchingWorkerFactory:
             pair_relation_service=pair_relation_service,
         )
         app_settings_service = _app_settings_service(state_store)
-        row_provider = _WorkbenchSqlMatchingRowProvider(connection=self._connection)
+        row_provider = WorkbenchMatchingRowProvider(connection=self._connection)
         return build_workbench_matching_dirty_scope_worker(
             dirty_queue=WorkbenchReconciliationDirtyQueue(repository=read_model_repository),
             matching_orchestrator=WorkbenchMatchingOrchestrator(
                 row_provider=row_provider.rows_for_scope,
                 relation_read_port=WorkbenchMatchingRelationReadPort(pair_relation_service),
                 candidate_match_service=WorkbenchCandidateMatchService.from_snapshot(state_store.load_workbench_candidate_matches()),
-                read_model_service=WorkbenchReadModelService.from_snapshot({}),
                 rules=WorkbenchMatchingRules(include_special_rules=False),
                 special_rule_service=WorkbenchSpecialPairRuleService(),
                 exception_case_service=WorkbenchExceptionCaseService.from_snapshot(state_store.load_workbench_exception_cases()),
@@ -275,22 +269,10 @@ class _RuntimeWorkerDerivedLifecycle:
         state_store: Any,
         search_service: SearchService,
         workbench_source_versions_provider: Callable[[], dict[str, object]],
-        search_read_model_refresh_producer: Any | None = None,
-        bank_account_balance_read_model_refresh_producer: Any | None = None,
     ) -> None:
-        self._queue_repository = queue_repository
         self._state_store = state_store
         self._search_service = search_service
         self._lifecycle = DerivedDataLifecycleService()
-        self._read_model_refresh_gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
-        self._search_read_model_refresh_producer = (
-            search_read_model_refresh_producer
-            or SearchReadModelRefreshProducer(refresh_gateway_provider=lambda: self._read_model_refresh_gateway)
-        )
-        self._bank_account_balance_read_model_refresh_producer = (
-            bank_account_balance_read_model_refresh_producer
-            or BankAccountBalanceReadModelRefreshProducer(refresh_gateway_provider=lambda: self._read_model_refresh_gateway)
-        )
         self._workbench_source_versions_provider = workbench_source_versions_provider
 
     def execute_event(
@@ -315,18 +297,16 @@ class _RuntimeWorkerDerivedLifecycle:
         return self._lifecycle.execute_plan(
             plan,
             executors={
-                "workbench_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench", reason),
-                "workbench_relation_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench_relation", reason),
                 "workbench_candidate_matches": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
                 "workbench_matching_dirty_scopes": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
-                "invoice_lifecycle_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "invoice_lifecycle", reason),
-                "cost_statistics_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "cost_statistics", reason),
-                "tax_offset_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "tax_offset", reason),
+                "invoice_lifecycle_read_model": lambda domain_plan: {
+                    "deleted_counts": {"invoice_lifecycle_read_models": 0},
+                    "invalidated_scopes": _domain_plan_scope_keys(domain_plan) or ["all"],
+                    "enqueued_jobs": [],
+                },
+                "cost_statistics_read_model": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
+                "tax_offset_read_model": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
                 "tax_offset_month_cache": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
-                "pending_invoice_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "pending_invoice", reason),
-                "bank_account_balance_read_model": lambda domain_plan: self._enqueue_bank_account_balance_domain(domain_plan, reason),
-                "bank_detail_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "bank_detail", reason),
-                "no_oa_bank_batch_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "no_oa_bank_batch", reason),
                 "search_cache": lambda domain_plan: self._clear_search_cache(domain_plan),
                 "oa_adapter_records_cache": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
                 "historical_etc_repair_state": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
@@ -371,7 +351,8 @@ class _RuntimeWorkerDerivedLifecycle:
         )
 
     def invalidate_tax_offset_scopes(self, scope_keys: list[str], *, reason: str) -> list[str]:
-        return self._enqueue_scopes("tax_offset", scope_keys, reason=reason)
+        _ = reason
+        return self._scope_keys({"scope_keys": scope_keys})
 
     def refresh_after_etc_invoice_link(self, changed_months: list[str], *, reason: str) -> None:
         months = [month for month in _dedupe_text(changed_months) if SEARCH_MONTH_RE.match(month)]
@@ -393,7 +374,6 @@ class _RuntimeWorkerDerivedLifecycle:
         etc_reconciliation_task_service: Any,
         tax_certified_import_service: Any,
         cost_statistics_scope_keys: list[str] | None = None,
-        bank_detail_scope_keys: list[str] | None = None,
         input_invoice_usage_scope_keys: list[str] | None = None,
         output_invoice_collection_scope_keys: list[str] | None = None,
         invalidate_cost_statistics: bool = True,
@@ -417,63 +397,11 @@ class _RuntimeWorkerDerivedLifecycle:
         save_tax_certified_imports = getattr(self._state_store, "save_tax_certified_imports", None)
         if callable(save_tax_certified_imports):
             save_tax_certified_imports(tax_certified_import_service.snapshot())
-        self._enqueue_scopes(
-            "workbench",
-            _workbench_read_model_scope_keys_for_import_state(cost_statistics_scope_keys),
-            reason="import_state_changed",
-        )
-        self._enqueue_scopes("workbench_relation", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        self._enqueue_scopes("invoice_lifecycle", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        self._search_read_model_refresh_producer.enqueue(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        self._enqueue_scopes(
-            "pending_invoice",
-            _pending_invoice_read_model_scope_keys_for_import_state(cost_statistics_scope_keys),
-            reason="import_state_changed",
-        )
         if input_invoice_usage_scope_keys is None:
             input_invoice_usage_scope_keys = cost_statistics_scope_keys or ["all"]
         if output_invoice_collection_scope_keys is None:
             output_invoice_collection_scope_keys = cost_statistics_scope_keys or ["all"]
-        if input_invoice_usage_scope_keys:
-            self._enqueue_scopes(
-                "input_invoice_usage",
-                input_invoice_usage_scope_keys,
-                reason="import_state_changed",
-            )
-        if output_invoice_collection_scope_keys:
-            self._enqueue_scopes(
-                "output_invoice_collection",
-                output_invoice_collection_scope_keys,
-                reason="import_state_changed",
-            )
-        self._enqueue_scopes("oa_pending_payment", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        if bank_detail_scope_keys:
-            self._enqueue_scopes("bank_detail", bank_detail_scope_keys, reason="import_facts_changed")
-            self._bank_account_balance_read_model_refresh_producer.enqueue_all(reason="import_state_changed")
-        if invalidate_cost_statistics:
-            self._enqueue_scopes("cost_statistics", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-
-    def _enqueue_bank_account_balance_domain(self, domain_plan: dict[str, object], reason: str) -> dict[str, object]:
-        enqueued_scope_keys = self._bank_account_balance_read_model_refresh_producer.enqueue_scope_keys(
-            self._scope_keys(domain_plan) or ["all"],
-            reason=reason,
-        )
-        return {
-            "deleted_counts": {"bank_account_balance": 0},
-            "invalidated_scopes": enqueued_scope_keys,
-            "enqueued_jobs": ["bank_account_balance.read_model.refresh"] if enqueued_scope_keys else [],
-        }
-
-    def _enqueue_domain(self, domain_plan: dict[str, object], scope_type: str, reason: str) -> dict[str, object]:
-        scope_keys = self._scope_keys(domain_plan) or ["all"]
-        return {
-            "deleted_counts": {scope_type: 0},
-            "invalidated_scopes": self._enqueue_scopes(scope_type, scope_keys, reason=reason),
-            "enqueued_jobs": [f"{scope_type}.read_model.refresh"] if scope_keys else [],
-        }
-
-    def _enqueue_scopes(self, scope_type: str, scope_keys: list[str], *, reason: str) -> list[str]:
-        return self._read_model_refresh_gateway.enqueue_many(scope_type, scope_keys, reason=reason)
+        _ = (input_invoice_usage_scope_keys, output_invoice_collection_scope_keys, invalidate_cost_statistics)
 
     def _mark_workbench_matching(self, domain_plan: dict[str, object], reason: str) -> dict[str, object]:
         months = [scope for scope in self._scope_keys(domain_plan) if SEARCH_MONTH_RE.match(scope)]
@@ -779,32 +707,6 @@ def _cost_statistics_scope_keys_for_import_rows(rows: Any) -> list[str]:
     return months or ["all"]
 
 
-def _bank_detail_scope_keys_for_import_preview(preview: Any) -> list[str]:
-    return _bank_detail_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
-
-
-def _bank_detail_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
-    selected = {str(file_id) for file_id in list(selected_file_ids or [])}
-    rows: list[Any] = []
-    for file in list(getattr(session, "files", []) or []):
-        if str(getattr(file, "id", "") or "") in selected:
-            rows.extend(list(getattr(file, "normalized_rows", []) or []))
-    return _bank_detail_scope_keys_for_import_rows(rows)
-
-
-def _bank_detail_scope_keys_for_import_rows(rows: Any) -> list[str]:
-    months: set[str] = set()
-    for row in list(rows or []):
-        payload = row if isinstance(row, dict) else getattr(row, "__dict__", {})
-        if not any(str(payload.get(key) or "").strip() for key in ("account_no", "bank_serial_no", "txn_direction")):
-            continue
-        for key in ("txn_date", "trade_time", "trade_date", "pay_receive_time"):
-            value = str(payload.get(key) or "").strip()
-            if SEARCH_MONTH_RE.match(value[:7]):
-                months.add(value[:7])
-    return sorted(months)
-
-
 def _input_invoice_usage_scope_keys_for_import_preview(preview: Any) -> list[str]:
     return _invoice_relation_scope_keys_for_import_preview(preview, BatchType.INPUT_INVOICE)
 
@@ -855,64 +757,17 @@ def _normalized_batch_type(value: Any) -> BatchType | None:
         return None
 
 
-def _workbench_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
-    month_scope_keys = [scope_key for scope_key in _dedupe_text(scope_keys or []) if SEARCH_MONTH_RE.match(scope_key)]
-    return month_scope_keys or ["all"]
-
-
-def _pending_invoice_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
-    month_scope_keys = [scope_key for scope_key in _dedupe_text(scope_keys or []) if SEARCH_MONTH_RE.match(scope_key)]
-    if not month_scope_keys:
-        return ["expense:all", "income:all", "income:cash_income"]
-    return [
-        scoped_key
-        for month in month_scope_keys
-        for scoped_key in (
-            f"expense:all:{month}",
-            f"income:all:{month}",
-            f"income:cash_income:{month}",
-        )
-    ]
-
-
-class _WorkbenchSqlMatchingRowProvider:
-    def __init__(self, *, connection: Any) -> None:
-        self._builder = WorkbenchSqlProjectionBuilder(connection=connection)
-
-    def rows_for_scope(self, scope_month: str) -> dict[str, list[dict[str, object]]]:
-        month = str(scope_month or "").strip()
-        return {
-            "oa_rows": list(self._builder._oa_projection_rows(month)),
-            "bank_rows": list(self._builder._bank_rows(month)),
-            "invoice_rows": list(self._builder._invoice_rows(month)),
-        }
-
-
 def handle_import_fact_changed_event(event: Any, *, queue_repository: Any | None = None) -> dict[str, Any]:
+    _ = queue_repository
     scope_type = str(getattr(event, "scope_type", None) or event.payload.get("scope_type") or "").strip()
     scope_key = str(getattr(event, "scope_key", None) or event.payload.get("scope_key") or "").strip()
-    refresh_enqueued = False
-    if scope_type == "bank_detail" and scope_key:
-        gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
-        refresh_enqueued = bool(gateway.enqueue_one("bank_detail", scope_key, reason="import_facts_changed"))
-    dirty_scope_completed = False
-    complete = getattr(queue_repository, "complete_read_model_refresh", None)
-    if callable(complete) and scope_type and scope_key:
-        source_version = getattr(event, "source_version", None) or event.payload.get("source_version") or 0
-        complete(
-            tenant_id=str(getattr(event, "tenant_id", None) or "default"),
-            scope_type=scope_type,
-            scope_key=scope_key,
-            source_version=source_version,
-        )
-        dirty_scope_completed = True
     return {
         "status": "acknowledged",
         "event_type": IMPORT_FACT_CHANGED_EVENT,
         "scope_type": scope_type,
         "scope_key": scope_key,
-        "refresh_enqueued": refresh_enqueued,
-        "dirty_scope_completed": dirty_scope_completed,
+        "refresh_job_enqueued": False,
+        "dirty_scope_completed": False,
         "note": "import fact dirty scopes are persisted by the import fact writer",
     }
 

@@ -80,12 +80,6 @@ where schema_version is null
 create index if not exists tax_offset_read_models_status_scope_idx
     on read_model.tax_offset_read_models (cache_status, scope_month, generated_at desc);
 
-alter table read_model.search_index_rows
-    add column if not exists cache_status text not null default 'fresh';
-
-create index if not exists search_index_rows_status_scope_idx
-    on read_model.search_index_rows (status, scope_month, source_kind);
-
 create table if not exists read_model.pending_invoice_rows (
     id uuid primary key default gen_random_uuid(),
     row_id text not null,
@@ -133,21 +127,17 @@ do $$
 begin
     if exists (select 1 from pg_roles where rolname = 'fin_ops_api') then
         grant select on read_model.pending_invoice_rows to fin_ops_api;
-        grant select on read_model.search_index_rows to fin_ops_api;
     end if;
 
     if exists (select 1 from pg_roles where rolname = 'fin_ops_worker') then
         grant select, insert, update, delete on read_model.pending_invoice_rows to fin_ops_worker;
-        grant select, insert, update, delete on read_model.search_index_rows to fin_ops_worker;
     end if;
 
     if exists (select 1 from pg_roles where rolname = 'fin_ops_readonly') then
         grant select on read_model.pending_invoice_rows to fin_ops_readonly;
-        grant select on read_model.search_index_rows to fin_ops_readonly;
     end if;
 
     if exists (select 1 from pg_roles where rolname = 'fin_ops_migrator') then
         grant select, insert, update, delete on read_model.pending_invoice_rows to fin_ops_migrator;
-        grant select, insert, update, delete on read_model.search_index_rows to fin_ops_migrator;
     end if;
 end $$;

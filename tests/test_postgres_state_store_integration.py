@@ -192,13 +192,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             }
         )
         self.store.save_turnover_ledger_extras({"extras": {"ledger-1": {"scope_month": "2026-03", "note": "checked"}}})
-        self.store.save_cost_statistics_read_models(
-            {"read_models": {"cost-2026-03": {"scope_month": "2026-03", "entries": [{"id": "entry-1"}]}}}
-        )
-        self.store.save_tax_offset_read_models(
-            {"read_models": {"tax-2026-03": {"scope_month": "2026-03", "entries": [{"id": "entry-1"}]}}}
-        )
-
         expected_counts = {
             "app.app_settings": 10,
             "job.background_jobs": 1,
@@ -214,8 +207,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             "app.turnover_relations": 1,
             "app.turnover_relation_events": 1,
             "app.turnover_ledger_extras": 1,
-            "read_model.cost_statistics_read_models": 1,
-            "read_model.tax_offset_read_models": 1,
             "app.pending_invoice_manual_invoice_commands": 1,
         }
         for table, minimum_count in expected_counts.items():
@@ -577,7 +568,7 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             "candidate-new,candidate-other",
         )
 
-    def test_save_no_oa_bank_batches_replaces_absent_read_model_rows(self) -> None:
+    def test_save_no_oa_bank_batches_replaces_absent_canonical_batches(self) -> None:
         self.store.save_no_oa_bank_batches(
             {
                 "batches": {
@@ -627,14 +618,7 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.assertEqual(
             fetch_scalar(
                 self.database_url,
-                "select count(*) from read_model.no_oa_bank_batch_rows where batch_id = 'old-conflict';",
-            ),
-            "0",
-        )
-        self.assertEqual(
-            fetch_scalar(
-                self.database_url,
-                "select string_agg(batch_id, ',' order by batch_id) from read_model.no_oa_bank_batch_rows;",
+                "select string_agg(batch_id, ',' order by batch_id) from app.no_oa_bank_batches;",
             ),
             "submitted-internal-transfer",
         )

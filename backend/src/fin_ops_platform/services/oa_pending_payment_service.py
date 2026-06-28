@@ -108,7 +108,7 @@ class OaPendingPaymentQueryService:
         in_progress_oa_projection: Any | None = None,
         payment_status_repository: OAPaymentStatusRepository | None = None,
         lifecycle_policy: Any | None = None,
-        require_fresh_relations: bool = True,
+        require_fresh_relations: bool = False,
     ) -> None:
         self._import_service = import_service
         self._relation_facade = relation_facade
@@ -170,8 +170,6 @@ class OaPendingPaymentQueryService:
             "sort": {"field": normalized_sort_field, "direction": normalized_sort_direction},
             "viewMode": normalized_view_mode,
             "filterConfig": self._filter_config(),
-            "read_model_status": READ_MODEL_STATUS,
-            "readModelStatus": READ_MODEL_STATUS,
             "source_versions": self.source_versions(),
             "sourceVersions": self.source_versions(),
         }

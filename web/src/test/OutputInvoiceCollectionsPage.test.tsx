@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -237,12 +237,11 @@ const rowsPayload = {
     total: 51,
   },
   filterConfig: [],
-  readModelStatus: "live_query",
   generatedAt: "2026-05-24T00:00:00Z",
   sourceVersion: "output-invoice-collections:v1",
 };
 
-function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?: Promise<void>; rowsPayloadOverride?: unknown } = {}) {
+function installOutputInvoiceCollectionsFetch(options: { rowsPayloadOverride?: unknown } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/output-invoice-collections/rows") {
@@ -402,26 +401,6 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
       }
       return jsonResponse({ settings: { prefix: "SK", resetPeriod: "monthly", version: 1 } });
     }
-    if (url.pathname === "/api/operation-barrier/status") {
-      await options.operationBarrierDelay;
-      return jsonResponse({
-        status: "fresh",
-        fresh: true,
-        targets: [
-          {
-            read_model_key: "output_invoice_collection",
-            scope_type: "output_invoice_collection",
-            scope_key: "all",
-            status: "fresh",
-            fresh: true,
-            blocking: false,
-            raw_status: "fresh",
-          },
-        ],
-        blocked_targets: [],
-        refreshing_targets: [],
-      });
-    }
     if (
       url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-status"
       || url.pathname === "/api/output-invoice-collections/rows/output-collection-row-001/collection-reminder"
@@ -434,8 +413,6 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
     ) {
       return jsonResponse({
         ok: true,
-        read_model_scope_keys: ["2026-05"],
-        freshness_targets: [{ read_model_key: "output_invoice_collection", scope_key: "2026-05" }],
       });
     }
     return jsonResponse({});
@@ -457,27 +434,10 @@ function rowsRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectio
     .filter((url) => url.pathname === "/api/output-invoice-collections/rows");
 }
 
-function operationBarrierRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectionsFetch>) {
-  return fetchMock.mock.calls.filter(([input]) => {
-    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-    return url.pathname === "/api/operation-barrier/status";
-  });
-}
-
 function statusRulesRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectionsFetch>) {
   return fetchMock.mock.calls
     .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
     .filter((url) => url.pathname === "/api/output-invoice-collections/status-rules");
-}
-
-function deferred<T = void>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-  return { promise, resolve, reject };
 }
 
 function readWebSource(path: string) {
@@ -599,7 +559,7 @@ describe("Output invoice collections page", () => {
     expect(outputGroupRules).not.toMatch(/#f6fbf8|#f5f9ff|#f8fafc|#fbfdfc|#f1faff|#f8fbff|#fbfcfd|rgba\(14,\s*165,\s*233,\s*0\.10\)/);
   });
 
-  test("shows a refreshing state instead of a true empty state while read model details stay hidden", async () => {
+  test("renders direct rows and filters without read model freshness fields", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/output-invoice-collections/rows") {
@@ -607,12 +567,10 @@ describe("Output invoice collections page", () => {
           rows: [],
           pagination: { page: 1, pageSize: 20, total: 0 },
           filterConfig: [],
-          read_model_status: "refreshing",
-          readModelStatus: "refreshing",
-        }, 202);
+        }, 200);
       }
       if (url.pathname === "/api/output-invoice-collections/filter-options") {
-        return jsonResponse({ fields: [], read_model_status: "refreshing", readModelStatus: "refreshing" }, 202);
+        return jsonResponse({ fields: [] }, 200);
       }
       return jsonResponse({});
     });
@@ -621,80 +579,17 @@ describe("Output invoice collections page", () => {
     renderAuthenticatedAppAt("/output-invoice-collections");
 
     const page = await screen.findByTestId("output-invoice-collections-page");
-    expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(within(page).queryByText("销项发票收款情况数据正在刷新")).not.toBeInTheDocument();
+    expect(within(page).queryByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).not.toBeInTheDocument();
     expect(within(page).queryByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
-  });
-
-  test("treats stale filter options as non-fresh instead of showing a fresh empty state", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/output-invoice-collections/rows") {
-        return jsonResponse({
-          rows: [],
-          pagination: { page: 1, pageSize: 20, total: 0 },
-          filterConfig: [],
-          read_model_status: "fresh",
-          readModelStatus: "fresh",
-        });
-      }
-      if (url.pathname === "/api/output-invoice-collections/filter-options") {
-        return jsonResponse({ fields: [], read_model_status: "stale", readModelStatus: "stale" }, 202);
-      }
-      return jsonResponse({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/output-invoice-collections");
-
-    const page = await screen.findByTestId("output-invoice-collections-page");
-    expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下没有销项发票收款记录。")).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
-  });
-
-  test("cleans up read model retry reload after route unmount", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/output-invoice-collections/rows") {
-        return jsonResponse({
-          rows: [],
-          pagination: { page: 1, pageSize: 20, total: 0 },
-          filterConfig: [],
-          read_model_status: "refreshing",
-          readModelStatus: "refreshing",
-        }, 202);
-      }
-      if (url.pathname === "/api/output-invoice-collections/filter-options") {
-        return jsonResponse({ fields: [], read_model_status: "refreshing", readModelStatus: "refreshing" }, 202);
-      }
-      return jsonResponse({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderAuthenticatedAppAt("/output-invoice-collections");
-    const page = await screen.findByTestId("output-invoice-collections-page");
-    expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
-    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
+    expect(within(page).getByText("当前条件下没有销项发票收款记录。")).toBeInTheDocument();
     expect(rowsRequests(fetchMock)).toHaveLength(1);
-
-    fireEvent.click(screen.getByRole("link", { name: "设置" }));
-    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(screen.queryByTestId("output-invoice-collections-page")).not.toBeInTheDocument();
     vi.useFakeTimers();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
-    });
-
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(rowsRequests(fetchMock)).toHaveLength(1);
-
     vi.useRealTimers();
-    fireEvent.click(screen.getByRole("link", { name: "销项发票收款情况" }));
-    expect(await screen.findByTestId("output-invoice-collections-page")).toBeInTheDocument();
-
-    expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
+    expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeEnabled();
   });
 
   test("adds sidebar route and renders grouped project table layout with real export entry", async () => {
@@ -1110,10 +1005,9 @@ describe("Output invoice collections page", () => {
     });
   }, 45000);
 
-  test("waits for output invoice collection barrier before reloading after red relation confirm", async () => {
-    const barrier = deferred();
+  test("reloads rows directly after red relation confirm without operation barrier polling", async () => {
     const user = userEvent.setup();
-    const fetchMock = installOutputInvoiceCollectionsFetch({ operationBarrierDelay: barrier.promise });
+    const fetchMock = installOutputInvoiceCollectionsFetch();
     renderAuthenticatedAppAt("/output-invoice-collections");
 
     const page = await screen.findByTestId("output-invoice-collections-page");
@@ -1133,24 +1027,14 @@ describe("Output invoice collections page", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
-    expect(JSON.parse(String(barrierInit?.body))).toEqual({
-      targets: [{ read_model_key: "output_invoice_collection", scope_key: "2026-05" }],
-    });
-    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
-
-    barrier.resolve();
-
     await waitFor(() => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
     });
   }, 45000);
 
-  test("waits for output invoice collection barrier target returned by receipt creation", async () => {
-    const barrier = deferred();
+  test("reloads rows directly after receipt creation without operation barrier polling", async () => {
     const user = userEvent.setup();
-    const fetchMock = installOutputInvoiceCollectionsFetch({ operationBarrierDelay: barrier.promise });
+    const fetchMock = installOutputInvoiceCollectionsFetch();
     renderAuthenticatedAppAt("/output-invoice-collections", { session: { canAdminAccess: true } });
 
     const page = await screen.findByTestId("output-invoice-collections-page");
@@ -1167,15 +1051,6 @@ describe("Output invoice collections page", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
-    expect(JSON.parse(String(barrierInit?.body))).toEqual({
-      targets: [{ read_model_key: "output_invoice_collection", scope_key: "2026-05" }],
-    });
-    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
-
-    barrier.resolve();
-
     await waitFor(() => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
     });

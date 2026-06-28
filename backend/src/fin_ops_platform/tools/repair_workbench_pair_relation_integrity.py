@@ -11,8 +11,6 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_matches_oa,
     oa_attachment_parent_oa_id,
 )
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
@@ -22,30 +20,24 @@ OA_AUTO_OFFSET_MODE = "oa_invoice_offset_auto_match"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Repair active workbench pair relations that reference rows no longer present in SQL read models.")
-    parser.add_argument("--execute", action="store_true", help="Persist changes. Without this flag the command is a dry run.")
+    parser = argparse.ArgumentParser(description="Build a Workbench pair-relation repair plan from explicit relation and current-row snapshots.")
+    parser.add_argument("--snapshot-json", required=True, help="Path to a JSON file containing pair_relations and pair_relation_history.")
+    parser.add_argument("--current-rows-json", required=True, help="Path to a JSON file containing current direct Workbench row payloads.")
+    parser.add_argument("--existing-oa-row-ids-json", required=True, help="Path to a JSON file containing existing OA row ids.")
     parser.add_argument("--actor-id", default="system:workbench-relation-integrity-repair")
-    parser.add_argument("--limit", type=int, default=0, help="Maximum number of changed relations to persist; 0 means no limit.")
+    parser.add_argument("--limit", type=int, default=0, help="Maximum number of changed relations to include; 0 means no limit.")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    connection = PostgresConnection(PostgresSettings.from_env())
-    snapshot = PostgresWorkbenchRepository(connection).load_workbench_pair_relations()
     repair = build_repair_plan(
-        snapshot,
-        current_rows=_load_current_workbench_rows(connection),
-        existing_oa_row_ids=_load_existing_oa_row_ids(connection),
+        _load_json_object(str(args.snapshot_json)),
+        current_rows=_load_json_list(str(args.current_rows_json)),
+        existing_oa_row_ids={str(row_id).strip() for row_id in _load_json_list(str(args.existing_oa_row_ids_json)) if str(row_id).strip()},
         actor_id=str(args.actor_id),
         limit=max(0, int(args.limit or 0)),
     )
-    if args.execute and repair["changed_case_ids"]:
-        repository = PostgresWorkbenchRepository(connection)
-        repository.save_workbench_pair_relations(
-            repair["snapshot"],
-            changed_case_ids=set(repair["changed_case_ids"]),
-        )
     print(json.dumps({key: value for key, value in repair.items() if key != "snapshot"}, ensure_ascii=False, sort_keys=True))
     return 0 if repair["status"] == "ok" else 1
 
@@ -134,7 +126,7 @@ def build_repair_plan(
                     affected_row_ids=row_ids,
                     actor_id=actor_id,
                     timestamp=timestamp,
-                    note="Cancelled active auto relation because its OA source row is no longer present after PostgreSQL migration.",
+                    note="Cancelled active auto relation because its OA source row is no longer present in canonical facts.",
                 )
             )
             changed_case_ids.append(str(case_id))
@@ -165,7 +157,7 @@ def build_repair_plan(
                 affected_row_ids=sorted({*row_ids, *(row_id for row_id, _row_type in new_entries)}),
                 actor_id=actor_id,
                 timestamp=timestamp,
-                note="Reconciled active relation row_ids with SQL-native workbench read model rows.",
+                note="Reconciled active relation row_ids with direct Workbench row facts.",
             )
         )
         changed_case_ids.append(str(case_id))
@@ -182,28 +174,16 @@ def build_repair_plan(
     }
 
 
-def _load_current_workbench_rows(connection: PostgresConnection) -> list[dict[str, Any]]:
-    return connection.fetch_all(
-        """
-        select row_id, source_kind, payload->>'derived_from_oa_id' as derived_from_oa_id
-             , payload
-        from read_model.workbench_rows
-        where scope_key = 'all'
-          and generation_id = (
-              select generation_id
-              from read_model.workbench_generations
-              where scope_key = 'all' and status = 'active'
-              order by activated_at desc
-              limit 1
-          )
-        order by row_id
-        """
-    )
+def _load_json_object(path: str) -> dict[str, Any]:
+    with open(path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return payload if isinstance(payload, dict) else {}
 
 
-def _load_existing_oa_row_ids(connection: PostgresConnection) -> set[str]:
-    rows = connection.fetch_all("select row_id from app.oa_applications order by row_id")
-    return {str(row.get("row_id") or "").strip() for row in rows if str(row.get("row_id") or "").strip()}
+def _load_json_list(path: str) -> list[Any]:
+    with open(path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return payload if isinstance(payload, list) else []
 
 
 def _replace_relation_rows(

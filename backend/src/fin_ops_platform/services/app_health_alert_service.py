@@ -8,7 +8,6 @@ from typing import Any
 
 DIRTY_SCOPE_WARNING_SECONDS = 300
 DIRTY_SCOPE_CRITICAL_SECONDS = 900
-WORKBENCH_REBUILD_WARNING_SECONDS = 300
 BACKGROUND_JOB_WARNING_SECONDS = 600
 RECENT_RECOVERED_LIMIT = 20
 
@@ -120,7 +119,6 @@ class AppHealthAlertService:
         alerts: dict[str, AppHealthAlert] = {}
         metrics = snapshot.get("metrics") if isinstance(snapshot.get("metrics"), dict) else {}
         oa_sync = snapshot.get("oa_sync") if isinstance(snapshot.get("oa_sync"), dict) else {}
-        workbench = snapshot.get("workbench_read_model") if isinstance(snapshot.get("workbench_read_model"), dict) else {}
         background_jobs = snapshot.get("background_jobs") if isinstance(snapshot.get("background_jobs"), dict) else {}
         dependencies = snapshot.get("dependencies") if isinstance(snapshot.get("dependencies"), dict) else {}
         session = snapshot.get("session") if isinstance(snapshot.get("session"), dict) else {}
@@ -143,18 +141,7 @@ class AppHealthAlertService:
                 kind="oa_sync_dirty_scope",
                 severity=severity,
                 scope=scope,
-                message=f"OA 数据变更已等待 {int(age_seconds)} 秒，关联台读模型尚未刷新。",
-                now=now,
-            )
-
-        rebuild_seconds = self._as_float(metrics.get("workbench_rebuild_running_seconds_max"))
-        if str(workbench.get("status") or "") == "rebuilding" and rebuild_seconds >= WORKBENCH_REBUILD_WARNING_SECONDS:
-            self._put_alert(
-                alerts,
-                kind="workbench_rebuild_long_running",
-                severity="warning",
-                scope="workbench_read_model",
-                message=f"关联台读模型重建已运行 {int(rebuild_seconds)} 秒。",
+                message=f"OA 数据变更已等待 {int(age_seconds)} 秒，关联台同步尚未完成。",
                 now=now,
             )
 

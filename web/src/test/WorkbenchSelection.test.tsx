@@ -867,46 +867,10 @@ describe("Workbench row selection and detail modal", () => {
     );
   });
 
-  test("workbench action uses operation-scoped freshness targets and backend projection", async () => {
+  test("workbench action applies backend projection without operation barrier polling", async () => {
     const user = userEvent.setup();
     const baseFetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
-    let barrierPollCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (fetchPath(input).startsWith("/api/operation-barrier/status")) {
-        barrierPollCount += 1;
-        const fresh = barrierPollCount >= 9;
-        return jsonResponse({
-          status: fresh ? "fresh" : "refreshing",
-          fresh,
-          targets: [
-            {
-              read_model_key: "workbench_relation",
-              scope_type: "workbench_relation",
-              scope_key: "2026-03",
-              status: fresh ? "fresh" : "refreshing",
-              fresh,
-              blocking: !fresh,
-              raw_status: fresh ? "fresh" : "pending",
-              reason: fresh ? undefined : "refresh outbox pending",
-            },
-          ],
-          blocked_targets: [],
-          refreshing_targets: fresh
-            ? []
-            : [
-              {
-                read_model_key: "workbench_relation",
-                scope_type: "workbench_relation",
-                scope_key: "2026-03",
-                status: "refreshing",
-                fresh: false,
-                blocking: true,
-                raw_status: "pending",
-                reason: "refresh outbox pending",
-              },
-            ],
-        });
-      }
       return baseFetchMock(input, init);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -935,10 +899,6 @@ describe("Workbench row selection and detail modal", () => {
       }),
     ).toBeInTheDocument();
     await waitFor(() => {
-      expect(within(preview).getByText("关系已写入，正在同步关联台最新数据...")).toBeInTheDocument();
-    }, { timeout: 2_000 });
-
-    await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
     }, { timeout: 5_000 });
     expect(
@@ -951,15 +911,9 @@ describe("Workbench row selection and detail modal", () => {
         name: /2026-03-28.*智能工厂设备商/,
       }),
     ).toBeInTheDocument();
-    const barrierCall = fetchMock.mock.calls.find(([input]) => fetchPath(input).startsWith("/api/operation-barrier/status"));
-    expect(barrierCall).toBeDefined();
-    const barrierBody = JSON.parse(String((barrierCall?.[1]?.body ?? "{}")));
-    expect(barrierBody.targets).toEqual([
-      { read_model_key: "workbench_relation", scope_key: "2026-03" },
-    ]);
   });
 
-  test("workbench action never waits on global relation scope when action response lacks precise targets", async () => {
+  test("workbench action never waits on global relation scope when action response only reports all scope", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       actionDelayMs: 20,
@@ -968,9 +922,6 @@ describe("Workbench row selection and detail modal", () => {
         ...body,
         affected_months: ["all"],
         affected_scope_keys: ["all"],
-        freshness_targets: [
-          { read_model_key: "workbench_relation", scope_key: "all" },
-        ],
       }),
     });
     renderWorkbenchPage();
@@ -994,8 +945,6 @@ describe("Workbench row selection and detail modal", () => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
     }, { timeout: 2_000 });
 
-    const barrierCalls = fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/operation-barrier/status"));
-    expect(barrierCalls).toHaveLength(0);
     expect(screen.queryByText(/操作同步等待超时/)).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
   });
@@ -1030,12 +979,9 @@ describe("Workbench row selection and detail modal", () => {
     });
   });
 
-  test("confirm link applies operation projection even when the main workbench generation is still refreshing", async () => {
+  test("confirm link applies operation projection without waiting for OA sync readiness", async () => {
     const user = userEvent.setup();
-    installMockApiFetch({
-      actionDelayMs: 20,
-      workbenchReadModelStatus: "refreshing",
-    });
+    installMockApiFetch({ actionDelayMs: 20 });
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
@@ -1056,7 +1002,7 @@ describe("Workbench row selection and detail modal", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
     }, { timeout: 2_000 });
-    expect(screen.queryByText(/关联台刷新未完成/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/页面刷新失败/)).not.toBeInTheDocument();
     expect(
       within(openZone).queryByRole("row", {
         name: /2026-03-28.*智能工厂设备商/,
@@ -1084,7 +1030,7 @@ describe("Workbench row selection and detail modal", () => {
     ).toBeInTheDocument();
   });
 
-  test("withdraw link finishes only after the fresh refetch moves the group back to open", async () => {
+  test("withdraw link finishes after direct refetch moves the group back to open", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ actionDelayMs: 20, workbenchLoadDelayMs: 160 });
     const relationUpdatedListener = vi.fn();
@@ -1273,7 +1219,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(withdrawButton).toBeEnabled();
   });
 
-  test("workbench stale refresh does not globally disable selected group actions", async () => {
+  test("App Health workbench stale status does not globally disable selected group actions", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
       appHealth: {
@@ -1284,12 +1230,6 @@ describe("Workbench row selection and detail modal", () => {
           status: "synced",
           message: "OA 已同步",
           dirty_scopes: [],
-        },
-        workbench_read_model: {
-          status: "stale",
-          dirty_scopes: ["2026-04"],
-          stale_scopes: ["2026-04"],
-          rebuilding_scopes: ["2026-04"],
         },
         background_jobs: {
           active: 0,
@@ -1303,7 +1243,6 @@ describe("Workbench row selection and detail modal", () => {
     renderAppAt("/");
 
     const openZone = await screen.findByTestId("zone-open");
-    expect(await screen.findByRole("status", { name: /关联台待刷新/ })).toBeInTheDocument();
     await user.click(await within(openZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
 
     expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
@@ -1323,12 +1262,6 @@ describe("Workbench row selection and detail modal", () => {
           message: "OA 有待处理变更",
           dirty_scopes: ["2026-04"],
         },
-        workbench_read_model: {
-          status: "ready",
-          dirty_scopes: [],
-          stale_scopes: [],
-          rebuilding_scopes: [],
-        },
         background_jobs: {
           active: 0,
           queued: 0,
@@ -1341,7 +1274,6 @@ describe("Workbench row selection and detail modal", () => {
     renderAppAt("/");
 
     const openZone = await screen.findByTestId("zone-open");
-    expect(await screen.findByRole("status", { name: /关联台待刷新/ })).toBeInTheDocument();
     await user.click(await within(openZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
 
     expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
@@ -1984,18 +1916,16 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderAppAt("/");
 
-    await screen.findByRole("status", { name: "系统状态正常" });
+    await screen.findByRole("status", { name: "正在加载关联台" });
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/oa-sync/events"))).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/oa-sync/status"))).toBe(true);
 
     await waitFor(() => {
-      expect(screen.getByRole("status", { name: "系统状态正常" })).toHaveClass("ok");
       expect(screen.queryByRole("status", { name: "OA 正在同步，关联台稍后更新" })).not.toBeInTheDocument();
     }, { timeout: 5_000 });
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/oa-sync/status")).length).toBeGreaterThan(2);
-      expect(screen.getByRole("status", { name: "系统状态正常" })).toHaveClass("ok");
       expect(screen.queryByRole("status", { name: "OA 正在同步，关联台稍后更新" })).not.toBeInTheDocument();
     }, { timeout: 8_000 });
   });
@@ -2281,7 +2211,7 @@ describe("Workbench row selection and detail modal", () => {
     });
   });
 
-  test("canceling processed exception restores rows after the fresh workbench refetch", async () => {
+  test("canceling processed exception restores rows after direct workbench refetch", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
@@ -2349,55 +2279,22 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByText("工作台数据加载失败，请稍后重试。")).not.toBeInTheDocument();
   });
 
-  test("does not render the global empty state for a stale empty workbench payload", async () => {
-    installMockApiFetch({
-      workbenchEmptyPayload: true,
-      workbenchReadModelStatus: "stale",
-      workbenchRefreshStatus: {
-        scope_key: "all",
-        read_model_status: "stale",
-        dirty_scopes: [
-          {
-            scope_key: "2026-03",
-            status: "failed",
-            last_error: null,
-          },
-        ],
-        last_error: null,
-        retryable: true,
-      },
-    });
+  test("renders the global empty state for a direct empty workbench payload", async () => {
+    installMockApiFetch({ workbenchEmptyPayload: true });
     renderWorkbenchPage();
 
     await screen.findByTestId("zone-open");
     expect(screen.queryByText("关联台待刷新，当前结果可能不是完整最新数据。")).not.toBeInTheDocument();
-    expect(screen.queryByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).not.toBeInTheDocument();
+    expect(screen.getByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).toBeInTheDocument();
     expect(within(screen.getByTestId("zone-open")).getByText("未配对 0 项")).toBeInTheDocument();
   });
 
-  test("requeued workbench refresh failure does not show the stale failure banner", async () => {
-    installMockApiFetch({
-      workbenchRefreshStatus: {
-        scope_key: "all",
-        read_model_status: "refreshing",
-        dirty_scopes: [
-          {
-            scope_key: "2026-03",
-            status: "failed",
-            last_error: "workbench_all_scope_parent_inconsistent: active_relation_open_membership count=4",
-          },
-          {
-            scope_key: "2026-03",
-            status: "processing",
-          },
-        ],
-        last_error: null,
-        retryable: false,
-      },
-    });
+  test("does not poll workbench refresh status while showing direct rows", async () => {
+    const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
 
     expect(await screen.findByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/api/workbench/refresh-status"), expect.anything());
     await waitFor(() => {
       expect(screen.queryByText(/关联台刷新失败/)).not.toBeInTheDocument();
       expect(screen.queryByText(/workbench_all_scope_parent_inconsistent/)).not.toBeInTheDocument();

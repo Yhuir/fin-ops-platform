@@ -89,16 +89,6 @@ def collect_evidence(
                 window_hours=normalized_window_hours,
             )
         ),
-        "active_generation_row_counts": _safe_section(
-            lambda: _active_generation_row_counts(connection, tenant_id=tenant_id, limit=normalized_limit)
-        ),
-        "workbench_refresh_after_matching": _safe_section(
-            lambda: _workbench_refresh_after_matching(
-                connection,
-                tenant_id=tenant_id,
-                window_hours=normalized_window_hours,
-            )
-        ),
         "query_timing_evidence": _safe_section(
             lambda: _query_timing_evidence(connection, limit=normalized_limit)
         ),
@@ -269,64 +259,6 @@ def _candidate_decision_counts(connection: Any, *, tenant_id: str, window_hours:
     }
 
 
-def _active_generation_row_counts(connection: Any, *, tenant_id: str, limit: int) -> list[dict[str, Any]]:
-    return [
-        _normalize_row(row)
-        for row in connection.fetch_all(
-            """
-            select
-              gen.scope_key,
-              count(*)::bigint as row_count,
-              count(*) filter (where gr.source_kind = 'oa')::bigint as oa_row_count,
-              count(*) filter (where gr.source_kind = 'bank')::bigint as bank_row_count,
-              count(*) filter (where gr.source_kind = 'invoice')::bigint as invoice_row_count,
-              count(*) filter (where gr.group_id like 'case:%%')::bigint as active_relation_row_count,
-              count(*) filter (where gr.status = 'held' or gr.row_role = 'held')::bigint as held_row_count,
-              max(gen.generated_at)::text as generated_at
-            from read_model.workbench_generations gen
-            join read_model.workbench_group_rows gr
-              on gr.generation_id = gen.generation_id
-            where gen.tenant_id = %s
-              and gen.status = 'active'
-            group by gen.scope_key
-            order by row_count desc, gen.scope_key
-            limit %s
-            """,
-            (tenant_id, limit),
-        )
-    ]
-
-
-def _workbench_refresh_after_matching(connection: Any, *, tenant_id: str, window_hours: int) -> dict[str, Any]:
-    row = connection.fetch_one(
-        """
-        select
-          count(*)::bigint as sample_count,
-          percentile_disc(0.50) within group (
-            order by extract(epoch from (updated_at - created_at)) * 1000
-          ) filter (where status = 'done')::float as p50_enqueue_to_done_ms,
-          percentile_disc(0.95) within group (
-            order by extract(epoch from (updated_at - created_at)) * 1000
-          ) filter (where status = 'done')::float as p95_enqueue_to_done_ms,
-          percentile_disc(0.99) within group (
-            order by extract(epoch from (updated_at - created_at)) * 1000
-          ) filter (where status = 'done')::float as p99_enqueue_to_done_ms,
-          max(updated_at)::text as last_seen_at
-        from job.outbox_events
-        where tenant_id = %s
-          and event_type = 'workbench.read_model.refresh'
-          and updated_at >= now() - (%s::text || ' hours')::interval
-          and (
-            raw_payload->>'reason' in ('candidate_match_changed', 'dirty_scope_retry', 'workbench_matching_changed')
-            or raw_payload->'metadata'->>'source' = 'workbench_matching'
-            or raw_payload::text like '%%workbench_matching%%'
-          )
-        """,
-        (tenant_id, window_hours),
-    )
-    return _normalize_row(row or {})
-
-
 def _query_timing_evidence(connection: Any, *, limit: int) -> dict[str, Any]:
     try:
         rows = _pg_stat_workbench_queries(connection, limit=limit)
@@ -369,8 +301,6 @@ def _pg_stat_workbench_queries(connection: Any, *, limit: int) -> list[dict[str,
                     "%workbench_matching_dirty_scopes%",
                     "%workbench_reconciliation_decisions%",
                     "%workbench_candidate_matches%",
-                    "%workbench_rows%",
-                    "%workbench_generations%",
                     "%workbench_pair_relations%",
                 ],
                 limit,
@@ -387,15 +317,6 @@ def _explain_probes(connection: Any) -> list[dict[str, Any]]:
             where tenant_id = 'default'
             order by updated_at desc
             limit 20
-        """,
-        "active_workbench_generation_row_counts": """
-            select gen.scope_key, count(*)::bigint
-            from read_model.workbench_generations gen
-            join read_model.workbench_group_rows gr
-              on gr.generation_id = gen.generation_id
-            where gen.tenant_id = 'default'
-              and gen.status = 'active'
-            group by gen.scope_key
         """,
         "workbench_decision_counts": """
             select scope_month, decision_status, count(*)::bigint
@@ -425,8 +346,6 @@ def _missing_evidence_fields(sections: dict[str, dict[str, Any]]) -> list[str]:
         "matching_scope_samples": "claimed/processed/failed/stale-completed scope samples",
         "worker_heartbeat": "workbench-matching heartbeat",
         "candidate_decision_counts": "candidate/decision count evidence",
-        "active_generation_row_counts": "OA/bank/invoice/active relation row counts",
-        "workbench_refresh_after_matching": "Workbench enqueue-to-fresh after matching",
         "query_timing_evidence": "query timing evidence",
     }
     for key, label in required_sections.items():

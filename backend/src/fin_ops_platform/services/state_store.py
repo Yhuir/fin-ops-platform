@@ -49,8 +49,6 @@ WORKBENCH_EXCEPTION_CASES_META_COLLECTION = "workbench_exception_cases_meta"
 WORKBENCH_EXCEPTION_CASES_COLLECTION = "workbench_exception_cases"
 WORKBENCH_PAIR_RELATIONS_META_COLLECTION = "workbench_pair_relations_meta"
 WORKBENCH_PAIR_RELATIONS_COLLECTION = "workbench_pair_relations"
-WORKBENCH_READ_MODELS_META_COLLECTION = "workbench_read_models_meta"
-WORKBENCH_READ_MODELS_COLLECTION = "workbench_read_models"
 WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION = "workbench_candidate_matches_meta"
 WORKBENCH_CANDIDATE_MATCHES_COLLECTION = "workbench_candidate_matches"
 WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION = "workbench_matching_dirty_scopes_meta"
@@ -63,10 +61,6 @@ TURNOVER_RELATIONS_COLLECTION = "turnover_relations"
 TURNOVER_RELATION_AUDIT_LOG_COLLECTION = "turnover_relation_audit_log"
 TURNOVER_LEDGER_EXTRAS_META_COLLECTION = "turnover_ledger_extras_meta"
 TURNOVER_LEDGER_EXTRAS_COLLECTION = "turnover_ledger_extras"
-COST_STATISTICS_READ_MODELS_META_COLLECTION = "cost_statistics_read_models_meta"
-COST_STATISTICS_READ_MODELS_COLLECTION = "cost_statistics_read_models"
-TAX_OFFSET_READ_MODELS_META_COLLECTION = "tax_offset_read_models_meta"
-TAX_OFFSET_READ_MODELS_COLLECTION = "tax_offset_read_models"
 OA_ATTACHMENT_INVOICE_CACHE_COLLECTION = "oa_attachment_invoice_cache"
 OA_SYNC_STATE_COLLECTION = "oa_sync_state"
 MANUAL_OA_IMPORTS_COLLECTION = "manual_oa_imports"
@@ -253,8 +247,6 @@ class ApplicationStateStore:
                 "workbench_exception_cases": self._mongo_database[WORKBENCH_EXCEPTION_CASES_COLLECTION],
                 "workbench_pair_relations_meta": self._mongo_database[WORKBENCH_PAIR_RELATIONS_META_COLLECTION],
                 "workbench_pair_relations": self._mongo_database[WORKBENCH_PAIR_RELATIONS_COLLECTION],
-                "workbench_read_models_meta": self._mongo_database[WORKBENCH_READ_MODELS_META_COLLECTION],
-                "workbench_read_models": self._mongo_database[WORKBENCH_READ_MODELS_COLLECTION],
                 "workbench_candidate_matches_meta": self._mongo_database[WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION],
                 "workbench_candidate_matches": self._mongo_database[WORKBENCH_CANDIDATE_MATCHES_COLLECTION],
                 "workbench_matching_dirty_scopes_meta": self._mongo_database[WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION],
@@ -267,10 +259,6 @@ class ApplicationStateStore:
                 "turnover_relation_audit_log": self._mongo_database[TURNOVER_RELATION_AUDIT_LOG_COLLECTION],
                 "turnover_ledger_extras_meta": self._mongo_database[TURNOVER_LEDGER_EXTRAS_META_COLLECTION],
                 "turnover_ledger_extras": self._mongo_database[TURNOVER_LEDGER_EXTRAS_COLLECTION],
-                "cost_statistics_read_models_meta": self._mongo_database[COST_STATISTICS_READ_MODELS_META_COLLECTION],
-                "cost_statistics_read_models": self._mongo_database[COST_STATISTICS_READ_MODELS_COLLECTION],
-                "tax_offset_read_models_meta": self._mongo_database[TAX_OFFSET_READ_MODELS_META_COLLECTION],
-                "tax_offset_read_models": self._mongo_database[TAX_OFFSET_READ_MODELS_COLLECTION],
                 "oa_attachment_invoice_cache": self._mongo_database[OA_ATTACHMENT_INVOICE_CACHE_COLLECTION],
                 "oa_sync_state": self._mongo_database[OA_SYNC_STATE_COLLECTION],
                 "manual_oa_imports": self._mongo_database[MANUAL_OA_IMPORTS_COLLECTION],
@@ -1393,60 +1381,20 @@ class ApplicationStateStore:
         with self._no_oa_bank_batches_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
-    def load_workbench_read_models(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_workbench_read_models_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        current_payload = self._load_local_pickle()
-        snapshot = current_payload.get("workbench_read_models")
-        return snapshot if isinstance(snapshot, dict) else {}
-
-    def save_workbench_read_models(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_workbench_read_models_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                    changed_scope_keys=changed_scope_keys,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        current_payload = self._load_local_pickle()
-        current_payload["workbench_read_models"] = normalized_snapshot
-        self._save_local_pickle(current_payload)
-
     def save_no_oa_bank_batch_mutation(
         self,
         *,
         pair_relation_snapshot: dict[str, Any],
         no_oa_bank_batch_snapshot: dict[str, Any],
-        workbench_read_model_snapshot: dict[str, Any],
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
-        changed_scope_keys: set[str] | list[str] | tuple[str, ...],
     ) -> None:
         normalized_case_ids = [str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()]
-        normalized_scope_keys = [str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()]
         if normalized_case_ids:
             self.save_workbench_pair_relations(
                 pair_relation_snapshot,
                 changed_case_ids=normalized_case_ids,
             )
         self.save_no_oa_bank_batches(no_oa_bank_batch_snapshot)
-        self.save_workbench_read_models(
-            workbench_read_model_snapshot,
-            changed_scope_keys=normalized_scope_keys,
-        )
 
     def load_workbench_candidate_matches(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -1593,72 +1541,6 @@ class ApplicationStateStore:
         current_payload["turnover_ledger_extras"] = normalized_snapshot
         self._save_local_pickle(current_payload)
 
-    def load_cost_statistics_read_models(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_cost_statistics_read_models_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        current_payload = self._load_local_pickle()
-        snapshot = current_payload.get("cost_statistics_read_models")
-        return snapshot if isinstance(snapshot, dict) else {}
-
-    def save_cost_statistics_read_models(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_cost_statistics_read_models_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                    changed_scope_keys=changed_scope_keys,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        current_payload = self._load_local_pickle()
-        current_payload["cost_statistics_read_models"] = normalized_snapshot
-        self._save_local_pickle(current_payload)
-
-    def load_tax_offset_read_models(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_tax_offset_read_models_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        current_payload = self._load_local_pickle()
-        snapshot = current_payload.get("tax_offset_read_models")
-        return snapshot if isinstance(snapshot, dict) else {}
-
-    def save_tax_offset_read_models(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_tax_offset_read_models_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                    changed_scope_keys=changed_scope_keys,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        current_payload = self._load_local_pickle()
-        current_payload["tax_offset_read_models"] = normalized_snapshot
-        self._save_local_pickle(current_payload)
-
     def load(self) -> dict[str, Any]:
         if self._mongo_database is not None:
             detailed_payload = self._load_detailed_mongo_payload()
@@ -1702,8 +1584,6 @@ class ApplicationStateStore:
                 self._save_workbench_exception_cases_detailed(payload.get("workbench_exception_cases", {}), updated_at)
             if "workbench_pair_relations" in payload:
                 self._save_workbench_pair_relations_detailed(payload.get("workbench_pair_relations", {}), updated_at)
-            if "workbench_read_models" in payload:
-                self._save_workbench_read_models_detailed(payload.get("workbench_read_models", {}), updated_at)
             if "workbench_candidate_matches" in payload:
                 self._save_workbench_candidate_matches_detailed(payload.get("workbench_candidate_matches", {}), updated_at)
             if "workbench_matching_dirty_scopes" in payload:
@@ -1717,13 +1597,6 @@ class ApplicationStateStore:
                 self._save_turnover_relations_detailed(payload.get("turnover_relations", {}), updated_at)
             if "turnover_ledger_extras" in payload:
                 self._save_turnover_ledger_extras_detailed(payload.get("turnover_ledger_extras", {}), updated_at)
-            if "cost_statistics_read_models" in payload:
-                self._save_cost_statistics_read_models_detailed(
-                    payload.get("cost_statistics_read_models", {}),
-                    updated_at,
-                )
-            if "tax_offset_read_models" in payload:
-                self._save_tax_offset_read_models_detailed(payload.get("tax_offset_read_models", {}), updated_at)
             if "pending_invoice_commands" in payload:
                 self._save_pending_invoice_commands_detailed(payload.get("pending_invoice_commands", {}), updated_at)
             if "app_health_alerts" in payload:
@@ -1938,8 +1811,6 @@ class ApplicationStateStore:
                         "workbench_row_overrides": WORKBENCH_ROW_OVERRIDES_COLLECTION,
                         "workbench_pair_relations_meta": WORKBENCH_PAIR_RELATIONS_META_COLLECTION,
                         "workbench_pair_relations": WORKBENCH_PAIR_RELATIONS_COLLECTION,
-                        "workbench_read_models_meta": WORKBENCH_READ_MODELS_META_COLLECTION,
-                        "workbench_read_models": WORKBENCH_READ_MODELS_COLLECTION,
                         "workbench_candidate_matches_meta": WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION,
                         "workbench_candidate_matches": WORKBENCH_CANDIDATE_MATCHES_COLLECTION,
                         "workbench_matching_dirty_scopes_meta": WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION,
@@ -1952,10 +1823,6 @@ class ApplicationStateStore:
                         "turnover_relation_audit_log": TURNOVER_RELATION_AUDIT_LOG_COLLECTION,
                         "turnover_ledger_extras_meta": TURNOVER_LEDGER_EXTRAS_META_COLLECTION,
                         "turnover_ledger_extras": TURNOVER_LEDGER_EXTRAS_COLLECTION,
-                        "cost_statistics_read_models_meta": COST_STATISTICS_READ_MODELS_META_COLLECTION,
-                        "cost_statistics_read_models": COST_STATISTICS_READ_MODELS_COLLECTION,
-                        "tax_offset_read_models_meta": TAX_OFFSET_READ_MODELS_META_COLLECTION,
-                        "tax_offset_read_models": TAX_OFFSET_READ_MODELS_COLLECTION,
                         "oa_attachment_invoice_cache": OA_ATTACHMENT_INVOICE_CACHE_COLLECTION,
                         "oa_sync_state": OA_SYNC_STATE_COLLECTION,
                         "tax_certified_imports_meta": TAX_CERTIFIED_IMPORTS_META_COLLECTION,
@@ -1988,14 +1855,11 @@ class ApplicationStateStore:
         workbench_overrides_payload = self._load_workbench_overrides_detailed_payload()
         workbench_exception_cases_payload = self._load_workbench_exception_cases_detailed_payload()
         workbench_pair_relations_payload = self._load_workbench_pair_relations_detailed_payload()
-        workbench_read_models_payload = self._load_workbench_read_models_detailed_payload()
         workbench_candidate_matches_payload = self._load_workbench_candidate_matches_detailed_payload()
         workbench_matching_dirty_scopes_payload = self._load_workbench_matching_dirty_scopes_detailed_payload()
         no_oa_bank_batches_payload = self._load_no_oa_bank_batches_detailed_payload()
         turnover_relations_payload = self._load_turnover_relations_detailed_payload()
         turnover_ledger_extras_payload = self._load_turnover_ledger_extras_detailed_payload()
-        cost_statistics_read_models_payload = self._load_cost_statistics_read_models_detailed_payload()
-        tax_offset_read_models_payload = self._load_tax_offset_read_models_detailed_payload()
         pending_invoice_commands_payload = self._load_pending_invoice_commands_detailed_payload()
         app_health_alerts_payload = self._load_app_health_alerts_detailed_payload()
         found_any = any(
@@ -2008,14 +1872,11 @@ class ApplicationStateStore:
                 workbench_overrides_payload,
                 workbench_exception_cases_payload,
                 workbench_pair_relations_payload,
-                workbench_read_models_payload,
                 workbench_candidate_matches_payload,
                 workbench_matching_dirty_scopes_payload,
                 no_oa_bank_batches_payload,
                 turnover_relations_payload,
                 turnover_ledger_extras_payload,
-                cost_statistics_read_models_payload,
-                tax_offset_read_models_payload,
                 pending_invoice_commands_payload,
                 app_health_alerts_payload,
             )
@@ -2035,8 +1896,6 @@ class ApplicationStateStore:
             payload["workbench_exception_cases"] = workbench_exception_cases_payload
         if workbench_pair_relations_payload:
             payload["workbench_pair_relations"] = workbench_pair_relations_payload
-        if workbench_read_models_payload:
-            payload["workbench_read_models"] = workbench_read_models_payload
         if workbench_candidate_matches_payload:
             payload["workbench_candidate_matches"] = workbench_candidate_matches_payload
         if workbench_matching_dirty_scopes_payload:
@@ -2047,10 +1906,6 @@ class ApplicationStateStore:
             payload["turnover_relations"] = turnover_relations_payload
         if turnover_ledger_extras_payload:
             payload["turnover_ledger_extras"] = turnover_ledger_extras_payload
-        if cost_statistics_read_models_payload:
-            payload["cost_statistics_read_models"] = cost_statistics_read_models_payload
-        if tax_offset_read_models_payload:
-            payload["tax_offset_read_models"] = tax_offset_read_models_payload
         if pending_invoice_commands_payload:
             payload["pending_invoice_commands"] = pending_invoice_commands_payload
         if app_health_alerts_payload:
@@ -2442,17 +2297,6 @@ class ApplicationStateStore:
         payload["pair_relations"] = pair_relations
         return payload
 
-    def _load_workbench_read_models_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["workbench_read_models_meta"].find_one({"_id": STATE_DOCUMENT_ID})
-        meta_payload = self._load_binary_payload(meta_document)
-        read_models = self._load_entities_by_id(self._mongo_detailed_collections["workbench_read_models"])
-        if not meta_payload and not read_models:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["read_models"] = read_models
-        return payload
-
     def _load_workbench_candidate_matches_detailed_payload(self) -> dict[str, Any]:
         meta_document = self._mongo_detailed_collections["workbench_candidate_matches_meta"].find_one(
             {"_id": STATE_DOCUMENT_ID}
@@ -2535,55 +2379,41 @@ class ApplicationStateStore:
         payload["extras"] = extras
         return payload
 
-    def _load_cost_statistics_read_models_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["cost_statistics_read_models_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        read_models = self._load_entities_by_id(self._mongo_detailed_collections["cost_statistics_read_models"])
-        if not meta_payload and not read_models:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["read_models"] = read_models
-        return payload
-
-    def _load_tax_offset_read_models_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["tax_offset_read_models_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        read_models = self._load_entities_by_id(self._mongo_detailed_collections["tax_offset_read_models"])
-        if not meta_payload and not read_models:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["read_models"] = read_models
-        return payload
-
     def _load_pending_invoice_commands_detailed_payload(self) -> dict[str, Any]:
-        commands = self._load_entities_by_id(self._mongo_detailed_collections["pending_invoice_commands"])
-        return commands if isinstance(commands, dict) else {}
-
-    def load_pending_invoice_commands(self) -> dict[str, Any]:
-        return self._load_pending_invoice_commands_detailed_payload()
-
-    def save_pending_invoice_commands(self, snapshot: dict[str, Any]) -> None:
-        self._save_pending_invoice_commands_detailed(snapshot, datetime.now(UTC))
-
-    def _load_app_health_alerts_detailed_payload(self) -> dict[str, Any]:
-        document = self._mongo_detailed_collections["app_health_alerts"].find_one({"_id": STATE_DOCUMENT_ID})
+        document = self._mongo_detailed_collections["pending_invoice_commands"].find_one(
+            {"_id": STATE_DOCUMENT_ID}
+        )
         payload = self._load_binary_payload(document)
         return payload if isinstance(payload, dict) else {}
 
-    def _save_workbench_overrides_detailed(self, workbench_overrides_snapshot: Any, updated_at: datetime) -> None:
-        snapshot = workbench_overrides_snapshot if isinstance(workbench_overrides_snapshot, dict) else {}
+    def _load_app_health_alerts_detailed_payload(self) -> dict[str, Any]:
+        document = self._mongo_detailed_collections["app_health_alerts"].find_one(
+            {"_id": STATE_DOCUMENT_ID}
+        )
+        payload = self._load_binary_payload(document)
+        return payload if isinstance(payload, dict) else {}
+
+    def _save_pending_invoice_commands_detailed(self, snapshot: Any, updated_at: datetime) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        self._mongo_detailed_collections["pending_invoice_commands"].replace_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "_id": STATE_DOCUMENT_ID,
+                "schema": "pending_invoice_commands",
+                "payload": Binary(pickle.dumps(normalized_snapshot)),
+                "updated_at": updated_at,
+            },
+            upsert=True,
+        )
+
+    def _save_workbench_overrides_detailed(self, snapshot: Any, updated_at: datetime) -> None:
+        snapshot_payload = snapshot if isinstance(snapshot, dict) else {}
         meta_payload = {
             key: value
-            for key, value in snapshot.items()
+            for key, value in snapshot_payload.items()
             if key not in {"row_overrides"}
         }
-        row_overrides = snapshot.get("row_overrides", {})
+        row_overrides = snapshot_payload.get("row_overrides", {})
         self._mongo_detailed_collections["workbench_overrides_meta"].update_one(
             {"_id": STATE_DOCUMENT_ID},
             {
@@ -2775,82 +2605,6 @@ class ApplicationStateStore:
                 "$set": {
                     **serialized_meta_payload,
                     "pair_relation_count": len(pair_relations) if isinstance(pair_relations, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_workbench_read_models_detailed(
-        self,
-        snapshot: dict[str, Any],
-        updated_at: datetime,
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"read_models"}
-        }
-        read_models = snapshot.get("read_models", {})
-        collection = self._mongo_detailed_collections["workbench_read_models"]
-        if changed_scope_keys is not None:
-            normalized_scope_keys = {str(scope_key) for scope_key in changed_scope_keys if str(scope_key)}
-            for scope_key in normalized_scope_keys:
-                read_model = read_models.get(scope_key) if isinstance(read_models, dict) else None
-                if isinstance(read_model, dict):
-                    serialized_read_model = self._serialize_value(read_model)
-                    collection.replace_one(
-                        {"_id": scope_key},
-                        {
-                            "_id": str(scope_key),
-                            "scope_key": serialized_read_model.get("scope_key"),
-                            "scope_type": serialized_read_model.get("scope_type"),
-                            "generated_at": serialized_read_model.get("generated_at"),
-                            "payload": Binary(pickle.dumps(read_model)),
-                            "updated_at": updated_at,
-                        },
-                        upsert=True,
-                    )
-                else:
-                    collection.delete_many({"_id": scope_key})
-            self._mongo_detailed_collections["workbench_read_models_meta"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        **meta_payload,
-                        "read_model_count": collection.count_documents({}),
-                        "payload": Binary(pickle.dumps(meta_payload)),
-                        "updated_at": updated_at,
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        read_model_documents = []
-        if isinstance(read_models, dict):
-            for scope_key, read_model in read_models.items():
-                serialized_read_model = self._serialize_value(read_model)
-                read_model_documents.append(
-                    {
-                        "_id": str(scope_key),
-                        "scope_key": serialized_read_model.get("scope_key"),
-                        "scope_type": serialized_read_model.get("scope_type"),
-                        "generated_at": serialized_read_model.get("generated_at"),
-                        "payload": Binary(pickle.dumps(read_model)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(collection, read_model_documents)
-        self._mongo_detailed_collections["workbench_read_models_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "read_model_count": len(read_models) if isinstance(read_models, dict) else 0,
                     "payload": Binary(pickle.dumps(meta_payload)),
                     "updated_at": updated_at,
                 }
@@ -3205,207 +2959,6 @@ class ApplicationStateStore:
             upsert=True,
         )
 
-    def _save_cost_statistics_read_models_detailed(
-        self,
-        snapshot: dict[str, Any],
-        updated_at: datetime,
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"read_models"}
-        }
-        read_models = snapshot.get("read_models", {})
-        collection = self._mongo_detailed_collections["cost_statistics_read_models"]
-        if changed_scope_keys is not None:
-            normalized_scope_keys = {str(scope_key) for scope_key in changed_scope_keys if str(scope_key)}
-            for scope_key in normalized_scope_keys:
-                read_model = read_models.get(scope_key) if isinstance(read_models, dict) else None
-                if isinstance(read_model, dict):
-                    serialized_read_model = self._serialize_value(read_model)
-                    collection.replace_one(
-                        {"_id": scope_key},
-                        {
-                            "_id": str(scope_key),
-                            "scope_key": serialized_read_model.get("scope_key"),
-                            "scope_type": serialized_read_model.get("scope_type"),
-                            "schema_version": serialized_read_model.get("schema_version"),
-                            "month": serialized_read_model.get("month"),
-                            "project_scope": serialized_read_model.get("project_scope"),
-                            "generated_at": serialized_read_model.get("generated_at"),
-                            "cache_status": serialized_read_model.get("cache_status"),
-                            "entry_count": serialized_read_model.get("entry_count"),
-                            "source_scope_keys": serialized_read_model.get("source_scope_keys"),
-                            "payload": Binary(pickle.dumps(read_model)),
-                            "updated_at": updated_at,
-                        },
-                        upsert=True,
-                    )
-                else:
-                    collection.delete_many({"_id": scope_key})
-            self._mongo_detailed_collections["cost_statistics_read_models_meta"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        **meta_payload,
-                        "read_model_count": collection.count_documents({}),
-                        "payload": Binary(pickle.dumps(meta_payload)),
-                        "updated_at": updated_at,
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        read_model_documents = []
-        if isinstance(read_models, dict):
-            for scope_key, read_model in read_models.items():
-                serialized_read_model = self._serialize_value(read_model)
-                read_model_documents.append(
-                    {
-                        "_id": str(scope_key),
-                        "scope_key": serialized_read_model.get("scope_key"),
-                        "scope_type": serialized_read_model.get("scope_type"),
-                        "schema_version": serialized_read_model.get("schema_version"),
-                        "month": serialized_read_model.get("month"),
-                        "project_scope": serialized_read_model.get("project_scope"),
-                        "generated_at": serialized_read_model.get("generated_at"),
-                        "cache_status": serialized_read_model.get("cache_status"),
-                        "entry_count": serialized_read_model.get("entry_count"),
-                        "source_scope_keys": serialized_read_model.get("source_scope_keys"),
-                        "payload": Binary(pickle.dumps(read_model)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(collection, read_model_documents)
-        self._mongo_detailed_collections["cost_statistics_read_models_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "read_model_count": len(read_models) if isinstance(read_models, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_tax_offset_read_models_detailed(
-        self,
-        snapshot: dict[str, Any],
-        updated_at: datetime,
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"read_models"}
-        }
-        read_models = snapshot.get("read_models", {})
-        collection = self._mongo_detailed_collections["tax_offset_read_models"]
-        if changed_scope_keys is not None:
-            normalized_scope_keys = {str(scope_key) for scope_key in changed_scope_keys if str(scope_key)}
-            for scope_key in normalized_scope_keys:
-                read_model = read_models.get(scope_key) if isinstance(read_models, dict) else None
-                if isinstance(read_model, dict):
-                    serialized_read_model = self._serialize_value(read_model)
-                    collection.replace_one(
-                        {"_id": scope_key},
-                        {
-                            "_id": str(scope_key),
-                            "scope_key": serialized_read_model.get("scope_key"),
-                            "scope_type": serialized_read_model.get("scope_type"),
-                            "schema_version": serialized_read_model.get("schema_version"),
-                            "month": serialized_read_model.get("month"),
-                            "generated_at": serialized_read_model.get("generated_at"),
-                            "cache_status": serialized_read_model.get("cache_status"),
-                            "output_count": serialized_read_model.get("output_count"),
-                            "input_plan_count": serialized_read_model.get("input_plan_count"),
-                            "certified_count": serialized_read_model.get("certified_count"),
-                            "source_scope_keys": serialized_read_model.get("source_scope_keys"),
-                            "payload": Binary(pickle.dumps(read_model)),
-                            "updated_at": updated_at,
-                        },
-                        upsert=True,
-                    )
-                else:
-                    collection.delete_many({"_id": scope_key})
-            self._mongo_detailed_collections["tax_offset_read_models_meta"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        **meta_payload,
-                        "read_model_count": collection.count_documents({}),
-                        "payload": Binary(pickle.dumps(meta_payload)),
-                        "updated_at": updated_at,
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        read_model_documents = []
-        if isinstance(read_models, dict):
-            for scope_key, read_model in read_models.items():
-                serialized_read_model = self._serialize_value(read_model)
-                read_model_documents.append(
-                    {
-                        "_id": str(scope_key),
-                        "scope_key": serialized_read_model.get("scope_key"),
-                        "scope_type": serialized_read_model.get("scope_type"),
-                        "schema_version": serialized_read_model.get("schema_version"),
-                        "month": serialized_read_model.get("month"),
-                        "generated_at": serialized_read_model.get("generated_at"),
-                        "cache_status": serialized_read_model.get("cache_status"),
-                        "output_count": serialized_read_model.get("output_count"),
-                        "input_plan_count": serialized_read_model.get("input_plan_count"),
-                        "certified_count": serialized_read_model.get("certified_count"),
-                        "source_scope_keys": serialized_read_model.get("source_scope_keys"),
-                        "payload": Binary(pickle.dumps(read_model)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(collection, read_model_documents)
-        self._mongo_detailed_collections["tax_offset_read_models_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "read_model_count": len(read_models) if isinstance(read_models, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_pending_invoice_commands_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
-        command_documents: list[dict[str, Any]] = []
-        if isinstance(snapshot, dict):
-            for request_id, command in snapshot.items():
-                if not isinstance(command, dict):
-                    continue
-                serialized_command = self._serialize_value(command)
-                command_documents.append(
-                    {
-                        **serialized_command,
-                        "_id": str(serialized_command.get("request_id") or request_id),
-                        "request_id": str(serialized_command.get("request_id") or request_id),
-                        "request_key": serialized_command.get("request_key"),
-                        "status": serialized_command.get("status"),
-                        "updated_at": updated_at,
-                        "payload": Binary(pickle.dumps(command)),
-                    }
-                )
-        self._replace_collection_documents(
-            self._mongo_detailed_collections["pending_invoice_commands"],
-            command_documents,
-        )
-
     def _save_tax_certified_imports_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
         meta_payload = {
             key: value
@@ -3623,14 +3176,11 @@ class ApplicationStateStore:
                 "workbench_overrides",
                 "workbench_exception_cases",
                 "workbench_pair_relations",
-                "workbench_read_models",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
                 "no_oa_bank_batches",
                 "turnover_relations",
                 "turnover_ledger_extras",
-                "cost_statistics_read_models",
-                "tax_offset_read_models",
                 "app_health_alerts",
             )
         )

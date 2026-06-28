@@ -1,6 +1,6 @@
 # App Shell 与导航状态机
 
-> 修改 `App Shell 与导航` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
+> 修改 `App Shell 与导航` 相关业务状态、UI 状态、direct API 状态或 runtime 状态前必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
 
 ## 业务状态
 
@@ -8,7 +8,7 @@
 
 - 状态事实源：`pageRegistry.tsx`、`SessionContext`、`PageRuntimeContext`、`PageSessionStateContext`。
 - 允许流转：route 匹配后只挂载当前页面；页面离开后卸载；返回页面重新 mount 并通过页面自己的 API/read boundary 重新加载。
-- 禁止流转：旧页面隐藏保活、旧页面继续响应 domain event、侧栏维护第二套路由事实、页面 session 保存业务事实或 read model payload。
+- 禁止流转：旧页面隐藏保活、旧页面继续响应 domain event、侧栏维护第二套路由事实、页面 session 保存业务事实或业务 payload。
 
 ## Session Gate 状态
 
@@ -79,22 +79,22 @@
 - key 由 `userScope/pageKey/stateKey` 组成。
 - 用户 scope 变化时清理旧用户 prefix。
 - session expired 时清理当前用户 scope。
-- 可保存轻量 UI state；禁止保存 rows、read model payload、权限事实、业务事实、loading/error/toast 或失败中的提交。
+- 可保存轻量 UI state；禁止保存 rows、业务 payload、权限事实、业务事实、loading/error/toast 或失败中的提交。
 
 ## Domain Event 状态
 
 - `useActivePageEvent` 在当前页面 active 时处理事件。
 - 因为当前实现不保留 inactive 页面，route 切换后旧页面 listener 必须通过 unmount cleanup 移除。
-- 前端 event 只是同一浏览器会话刷新提示，不是事实源；跨页面一致性必须由后端 dirty scope/read model/worker 保证。
+- 前端 event 只是同一浏览器会话 refetch 提示，不是事实源；跨页面一致性必须由 canonical facts、direct API、真实后台任务和 App Status/runtime facts 保证。
 
 禁止：inactive/已卸载页面延迟 replay 旧事件；前端 event 替代后端 lifecycle。
 
-## Read Model / Worker 状态
+## Direct API / Runtime 状态边界
 
-本模块不拥有 read model 或 worker。
+本模块不拥有页面数据 projection 或后台 worker。
 
-- `fresh/missing/refreshing/stale/failed/unavailable` 由各页面 API、`ReadModelQueryGateway`、App Status 和具体模块维护。
-- shell 只展示 `AppStatusIndicator` 和背景任务提示，不自行推导 read model freshness。
+- 旧同步状态不是 shell 自有状态；具体页面用 direct API loading/error/empty，App Status 用真实 runtime facts。
+- shell 只展示 `AppStatusIndicator` 和背景任务提示，不自行推导页面可读/同步状态。
 - 路由切换不能把全局 App Status 过滤成当前页面状态，也不能把页面 loading 写入 runtime facts。
 
 ## 变更记录

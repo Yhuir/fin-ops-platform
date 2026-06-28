@@ -1,1 +1,0 @@
-{"success":true,"action":"ignore_row","month":"all","affected_row_ids":["iv-o-202603-001"],"exception_case_id":"WEX-BROWSER-001","affected_months":["2026-03"],"affected_scope_keys":["2026-03"],"freshness_targets":[{"read_model_key":"workbench_relation","scope_key":"2026-03"}],"message":"已忽略 1 条记录。"}

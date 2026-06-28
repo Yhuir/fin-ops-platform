@@ -603,8 +603,7 @@ def _check_oa_source(*, require_real_infra: bool) -> CheckResult:
 select json_build_object(
     'oa_sync_done_count', (select count(*) from job.outbox_events where event_type = 'oa.sync' and dedupe_key = '{dedupe_key}' and status = 'done'),
     'oa_projection_rows', (select count(*) from app.oa_applications where scope_month = {scope_month_literal}),
-    'oa_sync_runs', (select count(*) from app.oa_sync_runs where sync_type = 'oa_projection'),
-    'dirty_scope_count', (select count(*) from job.read_model_dirty_scopes where reason = 'oa_projection_sync')
+    'oa_sync_runs', (select count(*) from app.oa_sync_runs where sync_type = 'oa_projection')
 )::text;
 """
     try:
@@ -619,7 +618,7 @@ select json_build_object(
         )
     missing = [
         key
-        for key in ("oa_sync_done_count", "oa_projection_rows", "oa_sync_runs", "dirty_scope_count")
+        for key in ("oa_sync_done_count", "oa_projection_rows", "oa_sync_runs")
         if int(verification.get(key) or 0) <= 0
     ]
     if missing:
@@ -694,13 +693,11 @@ def _check_performance_probe(*, require_real_infra: bool) -> CheckResult:
     database_url = _postgres_database_url()
     if not database_url:
         return CheckResult(
-            name="performance.read_models",
+            name="performance.direct_reads",
             status=FAIL if require_real_infra else SKIP,
-            detail="No PostgreSQL URL available for read model EXPLAIN/timing probes.",
+            detail="No PostgreSQL URL available for direct-read EXPLAIN/timing probes.",
         )
     sql = """
-explain (analyze, buffers, format json)
-select count(*) from read_model.workbench_rows;
 explain (analyze, buffers, format json)
 select count(*) from read_model.cost_statistics_read_models;
 explain (analyze, buffers, format json)
@@ -709,11 +706,11 @@ select count(*) from read_model.tax_offset_read_models;
     try:
         output = migrate.run_psql(database_url, sql=sql)
     except Exception as exc:
-        return CheckResult(name="performance.read_models", status=FAIL, detail=f"Read model performance probe failed: {exc}")
+        return CheckResult(name="performance.direct_reads", status=FAIL, detail=f"Direct-read compatibility probe failed: {exc}")
     return CheckResult(
-        name="performance.read_models",
+        name="performance.direct_reads",
         status=PASS,
-        detail="Read model EXPLAIN ANALYZE probes completed.",
+        detail="Direct-read compatibility EXPLAIN ANALYZE probes completed.",
         metadata={"output_sample": output[:2000]},
     )
 
@@ -726,9 +723,10 @@ def _run_targeted_unit_tests() -> CheckResult:
             "unittest",
             "tests.test_runtime_bootstrap",
             "tests.test_postgres_state_store",
-            "tests.test_workbench_sql_runtime",
-            "tests.test_cost_statistics_sql_runtime",
-            "tests.test_tax_offset_sql_runtime",
+            "tests.test_workbench_matching_row_provider",
+            "tests.test_cost_statistics_runtime_service",
+            "tests.test_tax_offset_worker_rebuild_executor",
+            "tests.test_tax_offset_cache_warmup_executor",
             "-v",
         ],
         env=_python_env(),

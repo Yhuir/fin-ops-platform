@@ -16,7 +16,7 @@
 - 关联台未配对区 open/proposed 候选必须通过 `WorkbenchRelationReadFacade` 进入进项发票使用情况页面展示；页面不能直接读取关联台候选表。candidate 只展示关系证据，不参与支付状态或 confirmed relation 判断。
 - `+N` 详情展开优先读取 `read_model.input_invoice_usage_rows` 单行 payload；SQL read model stale/missing 时返回 refreshing 并入队刷新，不在详情接口中触发全量 live rebuild。
 - 月份 shard 构建时，当前 workbench relation scope 的 unlinked/empty row 不能阻止按发票 row id 定向补查跨月 linked group；补查用于展示 OA/银行流水/发票摘要，但 read model 的 `workbench_relation_source_versions` 仍按当前 shard scope 保存。
-- 支付状态规则保存、OA reverse 草稿创建和 OA submitted/manual status 写成功后，页面必须先等待当前 scope 的 `input_invoice_usage` operation barrier fresh，再重新读取 rows；barrier blocked/timeout 只提示后台同步未完成，不能提前读旧投影。
+- 支付状态规则保存、OA reverse 草稿创建和 OA submitted/manual status 写成功后，前端页面直接重新读取 rows，不再等待 `input_invoice_usage` operation barrier。后端 legacy target envelope 暂时保留给旧调用方和后续合同收口。
 - `以发票反提 OA` 的草稿提交确认弹窗可以由用户取消；取消、父页面重渲染和 preview reload 都不能清空当前草稿 batch，状态为 `oa_draft_created` 的 batch 必须出现在 `暂存` 页签。暂存列表不展示 OA 草稿链接，只展示两项处理动作。
 - OA reverse preview 中已有 active/linked OA 关系的发票仍然不是可创建候选，但需要作为 rejected display row 返回给前端，展示 `已关联oa` chip、禁用勾选；关联台未配对区 open/proposed OA candidate 也不是可创建候选，展示 `候选oa` chip、禁用勾选。drawer 支持 `全部/已经关联oa/候选oa/未关联oa` 表头筛选。
 - 2026-06-11 测试闭环审计确认：本模块 P0/P1 已有测试覆盖 read model all scope、OA 反提、凭据加密、目标申请人 token provider、未提交回滚、已提交历史、设置页 UI 和进项页面 drawer；本轮不新增重复测试，主要补齐测试矩阵并同步长期 API 契约。
@@ -37,6 +37,43 @@
 ```
 
 ## 历史记录
+
+## 2026-06-27 - 删除 payment rules read model refresh wrapper
+
+- 目标：继续 remove-read-models 主控闭环，删除 `Application._enqueue_input_invoice_usage_payment_rules_refreshes(...)` 这一层只服务 route factory 的 app helper。
+- 影响范围：`server.py` 的 input usage route factory、platform/runtime boundary guard 和 read model architecture guard；不改变支付规则 API、校验、审计或刷新目标。
+- 关键决策：保存支付规则后仍同时入队 `input_invoice_usage` 与 `invoice_lifecycle`；callback 直接在 route factory 内声明，不保留 app-level read-model wrapper。
+- 测试覆盖：`tests.test_input_invoice_usage_api`、`tests.test_input_invoice_usage_payment_rules`、`tests.test_read_model_architecture_guards` 和对应 platform guard 通过。
+- 未测风险：legacy input usage/lifecycle projection 与 worker 仍存在，后续完整 family inventory 再删。
+
+## 2026-06-27 - 删除 OA reverse read model invalidator wrapper
+
+- 目标：继续 remove-read-models 主控闭环，删除 `Application._invalidate_input_invoice_usage_oa_reverse_read_models(...)` 这一层只做转发的一跳 app helper。
+- 影响范围：`server.py` 的 OA reverse service factory 和 read model architecture guard；不改变 OA reverse API、状态机、repository、relation writer 或页面合同。
+- 关键决策：OA reverse service 仍通过注入 callback 触发 `input_invoice_usage` legacy refresh 和 pair relation persist；callback 直接在 service factory 内声明，不保留 app-level read-model wrapper。
+- 测试覆盖：`tests.test_input_invoice_usage_api`、`tests.test_input_invoice_usage_oa_reverse_service` 和 `tests.test_read_model_architecture_guards` 通过。
+- 未测风险：legacy input invoice usage projection/worker 仍存在，后续完整 family inventory 再删。
+
+## 2026-06-27 - 删除 input usage 专用 read model enqueue wrapper
+
+- 目标：继续 remove-read-models 主控闭环，删除 `Application._enqueue_input_invoice_usage_read_model_refresh(...)` 这一层仅转发到 refresh gateway 的 app helper。
+- 影响范围：`server.py` 中 OA reverse invalidation、支付规则 refresh callback、invoice usage collection fan-out；不改变 rows/filter/detail/export API shape、支付规则保存语义、OA reverse 状态机或 worker event schema。
+- 关键决策：复用既有 `_enqueue_generic_read_model_refreshes("input_invoice_usage", [scope_key], ...)`，不新增 producer 或抽象；architecture guard 防止专用 app helper 回归。
+- 文档影响：本实施记录同步；长期页面 contract 不变，direct rows 读取方向不变。
+- 测试覆盖：更新 `tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_input_invoice_usage_app_level_projection_helpers_do_not_return`。
+- 验证命令：见 remove-read-models Loop 119 执行状态。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；本轮不删除 shared generic refresh gateway、worker 或 dirty scope 表。
+
+## 2026-06-26 - 写后直接刷新 rows，移除前端 operation barrier 等待
+
+- 目标：执行 remove-read-models Phase 1 的前端小切片，先让进项发票使用页面不再在 OA reverse / 支付规则写成功后等待 `input_invoice_usage` operation barrier。
+- 影响范围：`InputInvoiceUsagePage.tsx`、`InputInvoiceUsagePage.test.tsx`、本模块 `boundary-io.md`、`tests.md`、`e2e-spec.md`、`e2e-coverage.md`；后端 API response shape 和 legacy target envelope 暂不改变。
+- 关键决策：写成功代表 canonical write 已提交；父页面直接调用既有 `loadRows("refresh")` 重新读取 rows。后端仍返回 `freshness_targets` / `operation_barrier_targets` 以兼容 legacy callers，后续 direct API 迁移或后端合同收口时再删除。
+- 文档影响：更新模块边界、测试矩阵和 E2E 合同，说明前端不再消费 operation barrier target 等待 fresh。
+- 测试覆盖：`web/src/test/InputInvoiceUsagePage.test.tsx::reloads rows directly after OA reverse draft creation without operation barrier polling` 覆盖草稿创建后 rows 直接刷新且没有 `/api/operation-barrier/status` 请求。
+- 验证命令：`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx`。
+- 未测风险：本切片只移除前端等待，不迁移 `/api/input-invoice-usage/rows` 的 read model 读路径，也不删除后端 target envelope、worker 或 dirty scope。
+- 后续事项：继续按 remove-read-models Phase 1 迁移其它前端 operation barrier 调用，并在后端写 API 合同收口时删除 legacy target 字段。
 
 ## 2026-06-25 - Post fresh-gate local closure audit
 
@@ -268,7 +305,7 @@
 - 关键决策：父页面集中用当前 `month || all` 构造 `input_invoice_usage` barrier target；drawer 的 `onSaved` / `onBatchChanged` 改为可 await。barrier fresh 后才刷新 rows；barrier blocked/timeout 是 post-commit 同步未完成，不读取旧投影。
 - 文档影响：更新本实施记录、`tests.md` 和 Spec-first E2E 覆盖说明。
 - 测试覆盖：新增 Vitest 回归，证明 OA reverse draft 创建后 barrier resolve 前 rows 请求数不增加，request body 为 `input_invoice_usage:all`；既有支付规则/OA reverse drawer 测试继续保护保存和弹窗交互。
-- 验证命令：`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx src/test/OperationBarrierApi.test.ts`。
+- 验证命令：`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`。
 - 未测风险：本地 Vitest 只证明页面等待 barrier，不证明真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
 
 ## 2026-06-21 - 支付状态规则抽屉第一阶段 UI 闭环

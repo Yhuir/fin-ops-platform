@@ -1,6 +1,6 @@
 # ETC发票导入状态机
 
-> 修改 `ETC发票导入` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。
+> 修改 `ETC发票导入` 相关业务状态、UI 状态、direct payload 状态或 worker 状态前必须读取本文件。
 
 ## 业务状态
 
@@ -38,7 +38,7 @@
 | `confirming` | 前端提交 `/api/etc/import/confirm` | `queued`、`error` |
 | `queued` | `etc_invoice_import` background job 创建；App Status domain 为 `imports_etc_invoices` + `etc_tickets`、route 为 `/imports/etc-invoices`，source 保留 `task_id` | `processing`、`failed`、可轮询 |
 | `processing` | `etc_invoice_import.confirm` processor 正在写入 | `succeeded`、`partial_success`、`failed` |
-| `succeeded` | 所有匹配发票导入成功，task 标记 imported | downstream refreshing |
+| `succeeded` | 所有匹配发票导入成功，task 标记 imported | 下游通过 direct refetch、真实后台任务或 App Status 收敛 |
 | `partial_success` | 部分 item 失败，task 标记 import failed 可重试 | 保留错误，允许重试 |
 | `failed` | job 或 service 失败 | task 标记 import failed，不能把旧 preview 当 fresh |
 
@@ -58,7 +58,7 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 - 非 `.zip` 文件不得进入 ETC import preview。
 - `preview_blocked`、`preview_stale`、`task_preview_stale` 不得 confirm。
 - task version 或 `confirmed_item_set_hash` 不匹配时不得继续 import。
-- `queued` / `processing` 不得让 ETC、关联台、税金或成本页面显示 fresh。
+- `queued` / `processing` 不得让 ETC、关联台、税金或成本页面显示导入已完成。
 - business batch 已创建 OA 草稿后不得追加补充导入，除非先 revoke 回未提交链路。
 - 删除 submitted business batch 不得删除真实 OA 草稿或 OA 已提交事实。
 
@@ -67,21 +67,21 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 - loading：ready task 加载、zip preview、confirm、job polling、source task refresh 时展示局部 loading；route unmount 必须清理 in-flight preview 状态。
 - empty：没有 ready task 时展示不可导入原因，不显示可确认按钮。
 - error：非 zip、缺少 task、unknown task、storage unavailable、queue unavailable、job failed、manual status failed 必须有可见反馈。
-- stale/refreshing：`stale_reconciliation_task_preview` 清空 preview 并要求重新预览；downstream stale/refreshing 由各自 read model status 呈现。
+- preview stale：`stale_reconciliation_task_preview` 清空 preview 并要求重新预览；下游暂不可用由各自页面 direct unavailable/error 状态呈现。
 - permission disabled/hidden：当前导入写权限由后端 contract 决定；若未来增加前端权限显示，必须补隐藏/禁用交互测试。
 
-## Read Model / Worker 状态
+## Runtime / Worker 状态
 
 | 状态 | 事实源 | UI/调用方语义 |
 | --- | --- | --- |
-| `fresh` | 下游 read model source_versions 与 ETC/canonical facts 匹配 | 页面可展示并允许依赖 fresh 的写入 |
-| `missing` | read model scope 不存在 | API 应 enqueue refresh 并返回 refreshing/missing 语义 |
-| `refreshing` | dirty scope/job 已排队或处理中 | 页面显示刷新中，不能把旧数据当最终结果 |
-| `stale` | source_versions 或 dirty scope 表明旧数据 | 页面禁用依赖 fresh 的写入，提示刷新 |
-| `failed` | import job、worker 或 read model refresh 失败 | App Status/App Health 应暴露阻塞或 busy 详情 |
-| `unavailable` | durable queue、repository、对象存储或 worker plane 不可用 | 不能用 cache 伪造 fresh |
+| `ready` | import job 完成、ETC/canonical facts 可读、required runtime healthy | 页面 direct 重读业务批次和任务列表 |
+| `missing` | worker/env/dependency 缺失 | App Status/App Health 暴露 missing；页面不伪造成功 |
+| `running` | import job、outbox 或真实后台任务排队/处理中 | App Status/App Health 可显示后台 busy；页面不能把该状态当 GET 合同 |
+| `stale` | worker heartbeat 或依赖状态 stale | App Status/App Health busy/blocked；页面写安全由 import job、权限和业务版本校验决定 |
+| `failed` | import job、worker 或真实后台任务失败 | App Status/App Health 应暴露阻塞或 busy 详情 |
+| `unavailable` | durable queue、repository、对象存储或 worker plane 不可用 | 不能用 cache 伪造 readiness |
 
-刷新触发来源：
+Direct refetch / runtime 触发来源：
 
 - `etc_import_confirmed`
 - `etc_reconciliation_task_deleted`
@@ -93,11 +93,11 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 
 - ETC import job failure 通过 background job 和 reconciliation task `import_failed` 暴露。
 - `partial_success` 需要保留失败 item，允许用户按当前 task 重新预览或重试。
-- 下游 read model failure 由对应 worker/readiness 负责，ETC 导入页不能替下游页面做 fresh 判定。
+- 下游 background job/runtime failure 由对应 worker、App Status 或页面 direct API 负责，ETC 导入页不能替下游页面做可读判定。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-16 | 补齐 ETC 导入 confirm job 的 App Status metadata contract | `etc_invoice_import` job source 保留 task/domain/route，导入页和 ETC 票据页都能被全局状态标记为受影响域 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_returns_background_job_and_imports_asynchronously`、`tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
-| 2026-06-11 | 首轮补齐 ETC 发票导入状态机 | 明确 task/zip preview/confirm job/business batch/read model 状态边界 | `tests/test_etc_backend.py`、`tests/test_etc_reconciliation_service.py`、`web/src/test/ImportCenterPage.test.tsx`、`bash scripts/verify.sh docs` |
+| 2026-06-11 | 首轮补齐 ETC 发票导入状态机 | 明确 task/zip preview/confirm job/business batch/当时 read model 状态边界；当前只保留 legacy guard | `tests/test_etc_backend.py`、`tests/test_etc_reconciliation_service.py`、`web/src/test/ImportCenterPage.test.tsx`、`bash scripts/verify.sh docs` |

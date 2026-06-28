@@ -95,9 +95,7 @@ else:
                       (select count(*) from app.import_batches),
                       (select count(*) from app.file_objects where migration_status = 'verified'),
                       (select count(*) from app.oa_applications),
-                      (select count(*) from app.oa_sync_runs),
-                      (select count(*) from read_model.workbench_rows),
-                      (select count(*) from read_model.workbench_candidate_matches)
+                      (select count(*) from app.oa_sync_runs)
                     """
                 )
                 counts = cur.fetchone()
@@ -106,7 +104,7 @@ else:
             "PostgreSQL ready "
             f"(invoices={counts[0]}, bank_transactions={counts[1]}, import_batches={counts[2]}, "
             f"verified_files={counts[3]}, oa_applications={counts[4]}, oa_sync_runs={counts[5]}, "
-            f"workbench_rows={counts[6]}, candidate_matches={counts[7]}, topology={pg_topology}, "
+            f"topology={pg_topology}, "
             f"connect_select_ms={connect_select_ms:.0f}, count_query_ms={count_query_ms:.0f})"
         )
         if pg_topology == "ssh_tunnel":

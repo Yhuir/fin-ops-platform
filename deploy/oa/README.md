@@ -177,7 +177,7 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `deploy/oa/env/fin-ops.secrets.env.example`
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`
 - `deploy/oa/env/fin-ops.worker.oa-sync.env.example`
-- `deploy/oa/env/fin-ops.worker.workbench.env.example`
+- `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
 ## 生产 Browser Route-Shell Smoke Bundle
@@ -192,7 +192,7 @@ python3 scripts/package_production_browser_smoke.py \
 
 该 bundle 只包含批准的生产 route-shell spec、strict diagnostics fixture、Playwright 配置、package metadata/lockfile 和 manifest。它不包含 `web/dist`、`node_modules`、Playwright browser binaries、admin production spec、截图、trace、video、HTML report、token、cookie 或 secret env。生成 bundle 不会上传、部署、安装依赖、下载浏览器、登录 OA 或访问生产。
 
-正常 OA release 仍由 `scripts/deploy_oa.py` 打包 backend、`web/dist`、scripts、deploy helpers 和选定根文档；不要为了 browser smoke 修改正常 release archive 去携带 `web/e2e`、`node_modules` 或浏览器二进制。真正执行生产 browser evidence 前，必须先有独立 runner runtime、内存 token broker、脱敏 artifact contract，以及执行前后的 `/health/ready`、dirty scope、App Status readiness、read-model outbox 和 dead-letter 聚合检查。
+正常 OA release 仍由 `scripts/deploy_oa.py` 打包 backend、`web/dist`、scripts、deploy helpers 和选定根文档；不要为了 browser smoke 修改正常 release archive 去携带 `web/e2e`、`node_modules` 或浏览器二进制。真正执行生产 browser evidence 前，必须先有独立 runner runtime、内存 token broker、脱敏 artifact contract，以及执行前后的 `/health/ready`、durable outbox、worker heartbeat、App Status 和 dead-letter 聚合检查。
 
 ### OA 支付状态 MySQL 写回解锁
 
@@ -274,8 +274,8 @@ systemd 模板位于：
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
 
 关联台自动配对必须单独启用 `workbench-matching` worker。它消费
-`job.workbench_matching_dirty_scopes`，生成 `read_model.workbench_reconciliation_decisions`；
-`workbench-read-model` worker 只负责把已有关系和自动决策投影到页面读模型，不能替代自动配对。
+`job.workbench_matching_dirty_scopes`，生成匹配决策事实；`workbench-read-model`
+worker 已删除，不能作为页面读取或自动配对依赖。
 生产实例配置示例：
 
 - `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
@@ -298,7 +298,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.postgres apply
 ```
 
-RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、发票使用/收款、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。运行前置检查见 `docs/operations/postgresql-runtime.md`，worker/read model 运维口径见 `docs/operations/runtime-worker-governance.md`。
+RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 覆盖 OA sync、import job 和 file migration 等真实后台任务；页面读取走 direct API，不再有独立 Search/read-model worker lane。生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。运行前置检查见 `docs/operations/postgresql-runtime.md`，worker 运维口径见 `docs/operations/runtime-worker-governance.md`。
 
 RabbitMQ 生产 env 拆分：
 
@@ -306,7 +306,7 @@ RabbitMQ 生产 env 拆分：
 - `/etc/fin-ops/fin-ops.rabbitmq-dispatcher.env`：dispatcher shadow publish/real publish 配置。同步 SLO 发布默认
   `RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5`，避免 outbox 写入后最多等待 5 秒才投递到 RabbitMQ；
   如生产需要临时降频，可在该 env 文件中覆盖，但必须用 `rabbitmq_dispatcher_lag_seconds` 和
-  read model enqueue-to-fresh smoke 证明仍满足页面 SLO。
+  durable outbox/worker heartbeat 指标证明仍满足后台 worker SLO；页面 SLO 以 direct API latency 为准。
 - `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`：API 只读 management metrics 配置。
 - `/etc/fin-ops/fin-ops.rabbitmq-worker.env`：worker consumer 共享 `RABBITMQ_URL` 凭据；该文件不得设置 `FIN_OPS_QUEUE_BACKEND`。
 - `/etc/fin-ops/fin-ops.worker.<instance>.env`：单 worker 实例配置。只有灰度到 RabbitMQ 的实例才把本文件切为 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。
@@ -319,27 +319,13 @@ worker env，并启用、重启以下 required worker。仓库内的
 
 worker 实例、event types、env 模板和 smoke check 命令均从
 `python -m fin_ops_platform.tools.runtime_worker_manifest` 推导。不要在生产 runbook 中维护第二份
-worker 清单；新增 worker 或 read model refresh event 时先改 registry，再让部署和监控从 registry
+worker 清单；新增真实后台 worker 或 event type 时先改 registry，再让部署和监控从 registry
 收敛。完整运维口径见 `docs/operations/runtime-worker-governance.md`。
 
 ```bash
 sudo systemctl enable --now fin-ops-worker@oa-sync.service
 sudo systemctl enable --now fin-ops-worker@workbench.service
 sudo systemctl enable --now fin-ops-worker@workbench-matching.service
-sudo systemctl enable --now fin-ops-worker@bank-detail.service
-sudo systemctl enable --now fin-ops-worker@bank-account-balance.service
-sudo systemctl enable --now fin-ops-worker@no-oa-bank-batch.service
-sudo systemctl enable --now fin-ops-worker@turnover-ledger.service
-sudo systemctl enable --now fin-ops-worker@search-pending.service
-sudo systemctl enable --now fin-ops-worker@search.service
-sudo systemctl enable --now fin-ops-worker@search-secondary.service
-sudo systemctl enable --now fin-ops-worker@search-tertiary.service
-sudo systemctl enable --now fin-ops-worker@pending-invoice.service
-sudo systemctl enable --now fin-ops-worker@invoice-usage-collection.service
-sudo systemctl enable --now fin-ops-worker@invoice-lifecycle-secondary.service
-sudo systemctl enable --now fin-ops-worker@cost-tax.service
-sudo systemctl enable --now fin-ops-worker@cost-statistics.service
-sudo systemctl enable --now fin-ops-worker@tax-offset.service
 sudo systemctl enable --now fin-ops-worker@import.service
 ```
 
@@ -386,7 +372,7 @@ python -m fin_ops_platform.app.worker \
 - `activate` 会把历史 `/opt/fin-ops/current` 归档到 `/opt/fin-ops/legacy-current-archives/current-<timestamp>`；
   release 模式只允许从 `/opt/fin-ops/releases/<release-name>/src` 运行，`current` 目录不再参与运行时
 - `/health` 是轻量 liveness，暴露 runtime identity，包括工作目录、实际 `fin_ops_platform.__file__`、
-  `PYTHONPATH` 和 `RELEASE.json`，不会跑 workbench read model self-test；release 运行时若实际导入路径
+  `PYTHONPATH` 和 `RELEASE.json`，不会跑 Workbench 页面投影 self-test；release 运行时若实际导入路径
   不在当前 release 的 `backend/src` 下，健康状态必须是 `not_ready`
 - `/health/ready` 是部署 readiness 边界；`/health/deep` 才执行较重的 workbench API self-test，
   不作为发布脚本的快速就绪检查
@@ -408,8 +394,8 @@ python -m fin_ops_platform.app.worker \
 ./scripts/deploy-oa.sh --remote-min-free-mb 1024
 ```
 
-Workbench read model 生产修复需要读取 `/etc/fin-ops` runtime env 时，不要把 DB secret 暴露给
-`finops-deploy`，也不要手写 SQL 改 `job.read_model_dirty_scopes`。先确认 active release 名称：
+Workbench 生产诊断需要读取 `/etc/fin-ops` runtime env 时，不要把 DB secret 暴露给
+`finops-deploy`，也不要手写 SQL 改 legacy runtime tables。先确认 active release 名称：
 
 ```bash
 sudo /usr/local/sbin/finops-deploy-control status
@@ -418,31 +404,15 @@ sudo /usr/local/sbin/finops-deploy-control status
 然后通过 root-owned helper 运行受控命令：
 
 ```bash
-sudo /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> --json
 sudo /usr/local/sbin/finops-deploy-control workbench-audit-identity <release-name> \
   --json \
   --workbench-scope all \
   --limit 20
-sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
-sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> \
-  --apply \
-  --reason production_scope_contract_repair \
-  --json
-sudo /usr/local/sbin/finops-deploy-control read-model-slo-smoke <release-name> \
-  --json \
-  --critical-only \
-  --target-ms 5000
 ```
 
-`workbench-rehydrate` 会调用 release 内的 `scripts/rehydrate-workbench-read-models.py`，
-按月份 shard 重建 Workbench SQL read model，再发布 `all` 聚合；`workbench-audit-identity`
+`workbench-audit-identity`
 只运行 `fin_ops_platform.tools.audit_object_identity`，用于查看强身份跨区重复、OA alias 和孤儿关系样本。
-`read-model-scope-contract` 只运行 release 内的 `scripts/check-read-model-scope-contracts.py`，
-用于只读检查或受控清理 legacy/invalid read model scope。以上命令都只接受固定脚本/模块参数，
-由 helper 加载 runtime env，不提供任意 shell 执行能力。
-`read-model-slo-smoke` 只运行 release 内的 `fin_ops_platform.tools.read_model_slo_smoke` dry-run，
-用于在不暴露 PostgreSQL DSN 的情况下发现 critical read model scopes；该 helper 明确拒绝 `--apply`，
-真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。
+旧 `read-model-scope-contract` helper 已删除；页面 read-model scope repair 不再是生产发布入口。以上命令都只接受固定脚本/模块参数，由 helper 加载 runtime env，不提供任意 shell 执行能力。
 
 说明：
 

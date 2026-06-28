@@ -144,7 +144,7 @@ class HttpSloProbeTests(unittest.TestCase):
             return http_slo_probe.HttpProbeResponse(
                 status_code=200,
                 headers={"content-type": "application/json"},
-                body=json.dumps({"read_model_status": "fresh", "cache_status": "fresh"}).encode("utf-8"),
+                body=json.dumps({"cache_status": "fresh"}).encode("utf-8"),
             )
 
         report = http_slo_probe.collect_http_slo(
@@ -163,11 +163,11 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertEqual(observed[0][1]["Accept-Encoding"], "gzip")
         self.assertTrue(report["auth_configured"])
         self.assertNotIn("secret-token", json.dumps(report))
-        self.assertEqual(report["probes"][0]["read_model_statuses"], {"fresh": 2})
+        self.assertNotIn("read_model_statuses", report["probes"][0])
         self.assertEqual(report["probes"][0]["cache_statuses"], {"fresh": 2})
 
     def test_gzip_json_response_is_decoded_for_metadata(self) -> None:
-        payload = gzip.compress(b'{"read_model_status":"fresh","cache_status":"fresh"}')
+        payload = gzip.compress(b'{"cache_status":"fresh"}')
 
         def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
             return http_slo_probe.HttpProbeResponse(
@@ -187,7 +187,7 @@ class HttpSloProbeTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["probes"][0]["read_model_statuses"], {"fresh": 1})
+        self.assertNotIn("read_model_statuses", report["probes"][0])
         self.assertEqual(report["probes"][0]["cache_statuses"], {"fresh": 1})
         self.assertEqual(report["samples"][0]["response_bytes"], len(payload))
 
@@ -238,9 +238,9 @@ class HttpSloProbeTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["probes"][0]["read_model_statuses"], {})
+        self.assertNotIn("read_model_statuses", report["probes"][0])
 
-    def test_non_fresh_read_model_or_refresh_enqueue_fails_probe(self) -> None:
+    def test_legacy_read_model_metadata_does_not_drive_probe_status(self) -> None:
         responses = [
             {"read_model_status": "missing", "refresh_enqueued": True},
             {"read_model_status": "fresh", "refresh_enqueued": False},
@@ -263,10 +263,11 @@ class HttpSloProbeTests(unittest.TestCase):
             request_fn=request_fn,
         )
 
-        self.assertEqual(report["status"], "fail")
-        self.assertFalse(report["probes"][0]["freshness_pass"])
-        self.assertEqual(report["probes"][0]["non_fresh_read_model_statuses"], {"missing": 1})
-        self.assertEqual(report["probes"][0]["refresh_enqueued_count"], 1)
+        self.assertEqual(report["status"], "pass")
+        self.assertNotIn("freshness_pass", report["probes"][0])
+        self.assertNotIn("read_model_statuses", report["probes"][0])
+        self.assertNotIn("non_fresh_read_model_statuses", report["probes"][0])
+        self.assertNotIn("refresh_enqueued_count", report["probes"][0])
 
     def test_unexpected_status_fails_probe(self) -> None:
         def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:

@@ -66,14 +66,6 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
             count,
             {"status": str(status)},
         )
-    for status, count in _mapping(runtime.get("dirty_scopes")).items():
-        writer.gauge(
-            "finops_read_model_dirty_scopes",
-            "PostgreSQL durable read model dirty scopes by status.",
-            count,
-            {"status": str(status)},
-        )
-
     for name in (
         "failed_jobs",
         "oldest_pending_event_age_seconds",
@@ -81,8 +73,6 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
         "missing_required_worker_count",
         "stale_required_worker_count",
         "mismatched_required_worker_count",
-        "read_model_refresh_sample_count",
-        "read_model_refresh_failure_rate",
         "rabbitmq_unpublished_backlog",
         "rabbitmq_publish_failed_backlog",
         "rabbitmq_dispatcher_lag_seconds",
@@ -92,7 +82,6 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
         "rabbitmq_dlq_count",
         "rabbitmq_oldest_message_age_seconds",
         "rabbitmq_publish_confirm_sample_limit",
-        "stale_dirty_scope_count",
     ):
         writer.gauge(
             f"finops_{name}",
@@ -100,114 +89,6 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
             runtime.get(name),
         )
 
-    for quantile, value in _percentiles(runtime.get("read_model_refresh_duration_ms")).items():
-        writer.gauge(
-            "finops_read_model_refresh_duration_ms",
-            "Read model refresh duration percentiles in milliseconds.",
-            value,
-            {"quantile": quantile},
-        )
-    for quantile, value in _percentiles(runtime.get("read_model_refresh_enqueue_to_fresh_ms")).items():
-        writer.gauge(
-            "finops_read_model_refresh_enqueue_to_fresh_ms",
-            "Read model enqueue-to-fresh latency percentiles in milliseconds.",
-            value,
-            {"quantile": quantile},
-        )
-    for row in _list_of_mappings(runtime.get("read_model_refresh_by_key")):
-        labels = {
-            "read_model_key": str(row.get("key") or ""),
-            "event_type": str(row.get("event_type") or ""),
-            "scope_type": str(row.get("scope_type") or ""),
-        }
-        for quantile, value in _percentiles(row.get("duration_ms")).items():
-            writer.gauge(
-                "finops_read_model_refresh_by_key_duration_ms",
-                "Read model refresh duration percentiles by read model key in milliseconds.",
-                value,
-                {**labels, "quantile": quantile},
-            )
-        for quantile, value in _percentiles(row.get("enqueue_to_fresh_ms")).items():
-            writer.gauge(
-                "finops_read_model_refresh_by_key_enqueue_to_fresh_ms",
-                "Read model enqueue-to-fresh latency percentiles by read model key in milliseconds.",
-                value,
-                {**labels, "quantile": quantile},
-            )
-        for field in (
-            "sample_count",
-            "completed_sample_count",
-            "failed_count",
-            "failure_rate",
-        ):
-            writer.gauge(
-                f"finops_read_model_refresh_by_key_{field}",
-                _help_text(f"read_model_refresh_by_key_{field}"),
-                row.get(field),
-                labels,
-            )
-    for window, row in _mapping(runtime.get("read_model_refresh_current_windows")).items():
-        metric = _mapping(row)
-        labels = {"window": str(window)}
-        for quantile, value in _percentiles(metric.get("duration_ms")).items():
-            writer.gauge(
-                "finops_read_model_refresh_current_window_duration_ms",
-                "Read model refresh duration percentiles by current window in milliseconds.",
-                value,
-                {**labels, "quantile": quantile},
-            )
-        for quantile, value in _percentiles(metric.get("enqueue_to_fresh_ms")).items():
-            writer.gauge(
-                "finops_read_model_refresh_current_window_enqueue_to_fresh_ms",
-                "Read model enqueue-to-fresh latency percentiles by current window in milliseconds.",
-                value,
-                {**labels, "quantile": quantile},
-            )
-        for field in (
-            "sample_count",
-            "completed_sample_count",
-            "failed_count",
-            "failure_rate",
-        ):
-            writer.gauge(
-                f"finops_read_model_refresh_current_window_{field}",
-                _help_text(f"read_model_refresh_current_window_{field}"),
-                metric.get(field),
-                labels,
-            )
-    for row in _list_of_mappings(runtime.get("read_model_refresh_by_key_current_windows")):
-        labels = {
-            "read_model_key": str(row.get("key") or ""),
-            "event_type": str(row.get("event_type") or ""),
-            "scope_type": str(row.get("scope_type") or ""),
-            "window": str(row.get("window") or ""),
-        }
-        for quantile, value in _percentiles(row.get("duration_ms")).items():
-            writer.gauge(
-                "finops_read_model_refresh_by_key_current_window_duration_ms",
-                "Read model refresh duration percentiles by key and current window in milliseconds.",
-                value,
-                {**labels, "quantile": quantile},
-            )
-        for quantile, value in _percentiles(row.get("enqueue_to_fresh_ms")).items():
-            writer.gauge(
-                "finops_read_model_refresh_by_key_current_window_enqueue_to_fresh_ms",
-                "Read model enqueue-to-fresh latency percentiles by key and current window in milliseconds.",
-                value,
-                {**labels, "quantile": quantile},
-            )
-        for field in (
-            "sample_count",
-            "completed_sample_count",
-            "failed_count",
-            "failure_rate",
-        ):
-            writer.gauge(
-                f"finops_read_model_refresh_by_key_current_window_{field}",
-                _help_text(f"read_model_refresh_by_key_current_window_{field}"),
-                row.get(field),
-                labels,
-            )
     for status, count in _mapping(runtime.get("rabbitmq_publish_status")).items():
         writer.gauge(
             "finops_rabbitmq_publish_events",
@@ -255,22 +136,6 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
                 1,
                 {**labels, "warning_code": warning_code},
             )
-
-    workbench = _mapping(runtime.get("workbench_read_model"))
-    for name in (
-        "active_scope_count",
-        "active_row_count",
-        "active_group_count",
-        "active_summary_count",
-        "building_scope_count",
-        "failed_scope_count",
-    ):
-        writer.gauge(
-            f"finops_workbench_read_model_{name}",
-            _help_text(f"workbench_read_model_{name}"),
-            workbench.get(name),
-        )
-
 
 def _api_performance_metrics(writer: "_PrometheusWriter", api_performance: Mapping[str, Any]) -> None:
     endpoints = _mapping(api_performance.get("endpoints"))

@@ -7,7 +7,6 @@ from urllib.parse import unquote
 
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
-from fin_ops_platform.services.pending_invoice_read_model_service import PendingInvoiceReadModelService
 from fin_ops_platform.services.pending_invoice_rules_application_service import PendingInvoiceRulesApplicationService
 from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceApplicationService,
@@ -38,7 +37,6 @@ class PendingInvoiceApiRoutes:
         *,
         query_service: PendingInvoiceQueryService,
         application_service: PendingInvoiceApplicationService,
-        read_model_service: PendingInvoiceReadModelService,
         rules_service: PendingInvoiceRulesApplicationService,
         export_content_type: str,
         resolve_read_session: ReadSessionResolver | None = None,
@@ -51,7 +49,6 @@ class PendingInvoiceApiRoutes:
     ) -> None:
         self._query_service = query_service
         self._application_service = application_service
-        self._read_model_service = read_model_service
         self._rules_service = rules_service
         self._export_content_type = export_content_type
         self._resolve_read_session = resolve_read_session
@@ -166,23 +163,17 @@ class PendingInvoiceApiRoutes:
         return None
 
     def rows(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        payload = self._read_model_service.rows(query)
-        return _read_model_status_code(payload), payload
+        return HTTPStatus.OK, self._query_service.list_rows(**_query_kwargs(query))
 
     def filter_options(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        options_payload = self._read_model_service.filter_options(query)
-        if options_payload.get("read_model_status") != "fresh":
-            return HTTPStatus.ACCEPTED, options_payload
-        payload = self._query_service.filter_options_for_rows(
-            rows=list(options_payload.get("rows") or []),
-            direction=str(options_payload.get("direction") or query.get("direction", ["expense"])[0]),
-            filter=str(options_payload.get("filter") or query.get("filter", ["all"])[0]),
+        return HTTPStatus.OK, self._query_service.filter_options(
+            direction=str(query.get("direction", ["expense"])[0]),
+            filter=str(query.get("filter", ["all"])[0]),
+            keyword=query.get("keyword", [None])[0],
+            date_from=query.get("date_from", [None])[0],
+            date_to=query.get("date_to", [None])[0],
+            filters=query.get("filters", [None])[0],
         )
-        if isinstance(options_payload.get("options"), dict):
-            payload["options"] = options_payload["options"]
-        payload["read_model_status"] = "fresh"
-        payload["read_model_scope_key"] = options_payload.get("read_model_scope_key")
-        return HTTPStatus.OK, payload
 
     def invoice_candidates(self, query: dict[str, list[str]]) -> dict[str, Any]:
         return self._query_service.invoice_candidates(
@@ -281,11 +272,12 @@ class PendingInvoiceApiRoutes:
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         self._require_mutation(session, "当前账户没有保存待找发票规则权限。")
         try:
-            return HTTPStatus.OK, self._rules_service.update_rules(
+            payload = self._rules_service.update_rules(
                 direction=query.get("direction", ["expense"])[0],
                 payload=payload,
                 actor_id=_actor_id(session, "pending_invoice_rules"),
             )
+            return HTTPStatus.OK, payload
         except AppSettingsValidationError as exc:
             status = HTTPStatus.CONFLICT if str(exc.error_code).endswith("_version_conflict") else HTTPStatus.BAD_REQUEST
             return status, {"error": exc.error_code, "message": str(exc)}
@@ -322,19 +314,10 @@ class PendingInvoiceApiRoutes:
         )
 
     def export_preview(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        rows_payload = self._read_model_service.all_rows(query)
-        if rows_payload.get("read_model_status") != "fresh":
-            return HTTPStatus.ACCEPTED, rows_payload
-        return HTTPStatus.OK, self._query_service.export_preview_for_rows(
-            rows=list(rows_payload.get("rows") or []),
-            filters=_query_kwargs(query),
-        )
+        return HTTPStatus.OK, self._query_service.export_preview(**_query_kwargs(query))
 
     def export(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any] | PendingInvoiceExportFile]:
-        rows_payload = self._read_model_service.all_rows(query)
-        if rows_payload.get("read_model_status") != "fresh":
-            return HTTPStatus.ACCEPTED, rows_payload
-        filename, content = self._query_service.export_for_rows(rows=list(rows_payload.get("rows") or []))
+        filename, content = self._query_service.export(**_query_kwargs(query))
         return HTTPStatus.OK, PendingInvoiceExportFile(
             filename=filename,
             content=content,
@@ -445,14 +428,6 @@ class PendingInvoiceApiRoutes:
     def _persist(self) -> None:
         if callable(self._persist_state):
             self._persist_state()
-
-
-def _read_model_status_code(payload: dict[str, Any]) -> HTTPStatus:
-    return (
-        HTTPStatus.ACCEPTED
-        if payload.get("read_model_status") == "refreshing" and not payload.get("rows")
-        else HTTPStatus.OK
-    )
 
 
 def _query_kwargs(query: dict[str, list[str]]) -> dict[str, object]:

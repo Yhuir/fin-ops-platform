@@ -21,8 +21,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
-                "workbench_read_model",
-                "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
                 "tax_offset_read_model",
@@ -54,7 +52,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 downstream_indexes = [
                     domains.index(domain)
                     for domain in [
-                        "pending_invoice_read_model",
                         "tax_offset_read_model",
                         "cost_statistics_read_model",
                         "search_cache",
@@ -88,10 +85,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
-                "bank_account_balance_read_model",
-                "bank_detail_read_model",
-                "workbench_read_model",
-                "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
                 "cost_statistics_read_model",
@@ -100,7 +93,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         )
         self.assertNotIn("tax_offset_read_model", [domain["domain"] for domain in plan["domains"]])
 
-    def test_bank_transaction_category_changed_maps_workbench_pending_cost_and_search_domains(self) -> None:
+    def test_bank_transaction_category_changed_maps_workbench_cost_and_search_domains(self) -> None:
         service = DerivedDataLifecycleService()
 
         plan = service.plan_event("bank_transaction_category_changed", months=["2026-03"])
@@ -109,13 +102,9 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
-                "bank_detail_read_model",
-                "workbench_read_model",
-                "workbench_relation_read_model",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
-                "pending_invoice_read_model",
                 "cost_statistics_read_model",
                 "search_cache",
             ],
@@ -131,12 +120,9 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             domains,
             [
-                "workbench_read_model",
-                "workbench_relation_read_model",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
-                "pending_invoice_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "cost_statistics_read_model",
@@ -148,8 +134,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertNotIn("bank_account_balance_read_model", domains)
         self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
         self.assertIn("tax_offset_cache_warmup", plan["will_enqueue_jobs"])
-        self.assertIn("cost_statistics.read_model.refresh", plan["will_enqueue_jobs"])
-        self.assertNotIn("cost_statistics_cache_warmup", plan["will_enqueue_jobs"])
+        self.assertIn("cost_statistics_cache_warmup", plan["will_enqueue_jobs"])
+        self.assertNotIn("cost_statistics.read_model.refresh", plan["will_enqueue_jobs"])
 
     def test_pair_and_exception_changes_mark_workbench_matching_dirty_scopes(self) -> None:
         service = DerivedDataLifecycleService()
@@ -159,8 +145,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
 
         self.assertIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in pair_plan["domains"]])
         self.assertIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in exception_plan["domains"]])
-        self.assertIn("workbench_relation_read_model", [domain["domain"] for domain in pair_plan["domains"]])
-        self.assertIn("workbench_relation_read_model", [domain["domain"] for domain in exception_plan["domains"]])
+        self.assertNotIn("workbench_relation_read_model", [domain["domain"] for domain in pair_plan["domains"]])
+        self.assertNotIn("workbench_relation_read_model", [domain["domain"] for domain in exception_plan["domains"]])
         self.assertIn("workbench_matching", pair_plan["will_enqueue_jobs"])
         self.assertIn("workbench_matching", exception_plan["will_enqueue_jobs"])
 
@@ -173,22 +159,20 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
-                "workbench_read_model",
-                "workbench_relation_read_model",
                 "search_cache",
             ],
         )
         self.assertNotIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in plan["domains"]])
         self.assertEqual(plan["will_enqueue_jobs"], [])
 
-    def test_batch_accounting_relation_changed_refreshes_bank_detail_tags(self) -> None:
+    def test_batch_accounting_relation_changed_uses_direct_relation_without_relation_read_model(self) -> None:
         service = DerivedDataLifecycleService()
 
         plan = service.plan_event("batch_accounting_relation_changed", months=["2026-01"])
 
         self.assertEqual(plan["affected_scopes"], ["2026-01", "all"])
-        self.assertIn("bank_detail_read_model", [domain["domain"] for domain in plan["domains"]])
-        self.assertIn("workbench_relation_read_model", [domain["domain"] for domain in plan["domains"]])
+        self.assertNotIn("bank_detail_read_model", [domain["domain"] for domain in plan["domains"]])
+        self.assertNotIn("workbench_relation_read_model", [domain["domain"] for domain in plan["domains"]])
 
     def test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill(self) -> None:
         service = DerivedDataLifecycleService()
@@ -198,7 +182,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual([domain["domain"] for domain in plan["domains"]], ["workbench_matching_dirty_scopes"])
         self.assertEqual(plan["will_enqueue_jobs"], ["workbench_matching"])
 
-    def test_manual_invoice_confirmed_maps_invoice_workbench_tax_cost_pending_and_search_domains(self) -> None:
+    def test_manual_invoice_confirmed_maps_invoice_workbench_tax_cost_and_search_domains(self) -> None:
         service = DerivedDataLifecycleService()
 
         plan = service.plan_event("pending_invoice_manual_invoice_confirmed", months=["2026-05"])
@@ -208,12 +192,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
-                "bank_detail_read_model",
-                "workbench_read_model",
-                "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
-                "pending_invoice_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "cost_statistics_read_model",
@@ -224,7 +204,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual([domain["domain"] for domain in attach_plan["domains"]], [domain["domain"] for domain in plan["domains"]])
         self.assertEqual(attach_plan["will_enqueue_jobs"], plan["will_enqueue_jobs"])
 
-    def test_income_status_override_only_refreshes_pending_invoice_and_search_domains(self) -> None:
+    def test_income_status_override_only_clears_search_cache(self) -> None:
         service = DerivedDataLifecycleService()
 
         plan = service.plan_event("pending_invoice_income_status_override_confirmed", months=["2026-05"])
@@ -233,7 +213,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             [domain["domain"] for domain in plan["domains"]],
             [
-                "pending_invoice_read_model",
                 "search_cache",
             ],
         )
@@ -244,18 +223,18 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         plan = service.plan_event("bank_auto_tag_rules_changed", months=["2026-03"])
 
         domains = [domain["domain"] for domain in plan["domains"]]
-        self.assertIn("bank_detail_read_model", domains)
-        self.assertIn("no_oa_bank_batch_read_model", domains)
+        self.assertNotIn("bank_detail_read_model", domains)
+        self.assertNotIn("no_oa_bank_batch_read_model", domains)
         self.assertNotIn("bank_account_balance_read_model", domains)
 
-    def test_no_oa_bank_batch_changed_refreshes_no_oa_read_model(self) -> None:
+    def test_no_oa_bank_batch_changed_skips_removed_no_oa_read_model(self) -> None:
         service = DerivedDataLifecycleService()
 
         plan = service.plan_event("no_oa_bank_batch_changed", months=["2026-03"])
 
         domains = [domain["domain"] for domain in plan["domains"]]
-        self.assertIn("no_oa_bank_batch_read_model", domains)
-        self.assertIn("workbench_read_model", domains)
+        self.assertNotIn("no_oa_bank_batch_read_model", domains)
+        self.assertNotIn("workbench_read_model", domains)
 
     def test_oa_rebuilt_maps_oa_workbench_candidate_tax_cost_and_historical_reconcile_domains(self) -> None:
         service = DerivedDataLifecycleService()
@@ -267,8 +246,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             [domain["domain"] for domain in plan["domains"]],
             [
                 "oa_adapter_records_cache",
-                "workbench_read_model",
-                "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
                 "tax_offset_read_model",
@@ -313,14 +290,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         )
         calls: list[tuple[str, list[str], bool]] = []
 
-        def workbench_executor(domain_plan: dict) -> dict:
-            calls.append((domain_plan["domain"], domain_plan["scope_keys"], domain_plan["dry_run"]))
-            return {
-                "deleted_counts": {"workbench_read_models": 2},
-                "invalidated_scopes": ["2026-03", "all"],
-                "enqueued_jobs": ["workbench_matching:2026-03"],
-            }
-
         def search_executor(domain_plan: dict) -> dict:
             calls.append((domain_plan["domain"], domain_plan["scope_keys"], domain_plan["dry_run"]))
             return {
@@ -331,20 +300,17 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         summary = service.execute_plan(
             plan,
             executors={
-                "workbench_read_model": workbench_executor,
                 "search_cache": search_executor,
             },
         )
 
         self.assertFalse(summary["dry_run"])
-        self.assertEqual(summary["deleted_counts"]["workbench_read_models"], 2)
         self.assertEqual(summary["deleted_counts"]["search_cache"], 1)
-        self.assertEqual(summary["invalidated_scopes"], ["2026-03", "all", "search:all"])
-        self.assertEqual(summary["enqueued_jobs"], ["workbench_matching:2026-03"])
+        self.assertEqual(summary["invalidated_scopes"], ["search:all"])
+        self.assertEqual(summary["enqueued_jobs"], [])
         self.assertIn("cost_statistics_read_model", summary["skipped"])
         self.assertEqual(summary["errors"], [])
         self.assertGreaterEqual(summary["duration_ms"], 0)
-        self.assertIn(("workbench_read_model", ["2026-03", "all"], False), calls)
         json.dumps(summary)
 
     def test_unknown_event_fails_fast(self) -> None:
@@ -387,18 +353,12 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(
             DERIVED_DATA_DOMAINS,
             (
-                "workbench_read_model",
-                "workbench_relation_read_model",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
                 "cost_statistics_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
-                "pending_invoice_read_model",
-                "bank_account_balance_read_model",
-                "bank_detail_read_model",
-                "no_oa_bank_batch_read_model",
                 "search_cache",
                 "oa_adapter_records_cache",
                 "file_import_sessions",

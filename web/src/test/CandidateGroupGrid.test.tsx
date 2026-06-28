@@ -496,7 +496,6 @@ describe("Workbench candidate grouping layout", () => {
             summary: payload.summary,
             oa_status: payload.oa_status,
             invoice_inventory: payload.invoice_inventory,
-            read_model_status: "fresh",
             generated_at: "2026-05-22T09:30:00+08:00",
           }),
           { status: 200 },
@@ -518,7 +517,6 @@ describe("Workbench candidate grouping layout", () => {
               : { oa: 0, bank: 0, invoice: 0, rows: 0 },
             has_more: false,
             groups,
-            read_model_status: "fresh",
           }),
           { status: 200 },
         );

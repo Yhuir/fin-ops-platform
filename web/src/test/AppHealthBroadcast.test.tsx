@@ -70,7 +70,6 @@ function healthyPayload(generatedAt: string): ApiAppHealthPayload {
     generated_at: generatedAt,
     session: { status: "authenticated" },
     oa_sync: { status: "synced", dirty_scopes: [] },
-    workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
     background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
   };
 }
@@ -81,8 +80,34 @@ function stalePayload(generatedAt: string): ApiAppHealthPayload {
     generated_at: generatedAt,
     session: { status: "authenticated" },
     oa_sync: { status: "synced", dirty_scopes: [] },
-    workbench_read_model: { status: "stale", dirty_scopes: ["oa"], stale_scopes: ["oa"] },
     background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
+    app_status: {
+      version: 1,
+      generated_at: generatedAt,
+      overall: {
+        level: "busy",
+        color: "yellow",
+        reason: "关联台正在同步",
+        blocks_mutations: false,
+        write_safety: { status: "ready", reason: "写操作可用", blocks_mutations: false, blockers: [] },
+      },
+      domains: [
+        {
+          key: "workbench",
+          label: "关联台",
+          route: "/",
+          level: "busy",
+          status: "refreshing",
+          reason: "关联台正在同步",
+          details: [],
+          workers: ["workbench-read-model"],
+          job_ids: [],
+          updated_at: generatedAt,
+        },
+      ],
+      background_tasks: [],
+      alerts: [],
+    },
   };
 }
 
@@ -162,7 +187,7 @@ describe("AppHealth BroadcastChannel sync", () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
-      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "关联台待刷新");
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "关联台正在同步");
     });
     expect(broadcastInstances[0].postMessage).not.toHaveBeenCalled();
   });

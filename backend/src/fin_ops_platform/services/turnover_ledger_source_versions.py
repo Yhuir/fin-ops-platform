@@ -4,9 +4,9 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION
+from fin_ops_platform.services.snapshot_version import snapshot_version
 from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SCHEMA_VERSION
 from fin_ops_platform.services.turnover_relation_service import TURNOVER_RELATION_SCHEMA_VERSION
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
 
 def build_turnover_ledger_source_versions(
@@ -27,16 +27,16 @@ def build_turnover_ledger_source_versions(
             if bank_auto_tag_rules_version_provider is not None
             else _bank_auto_tag_rules_version(app_settings_service)
         ),
-        "turnover_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
+        "turnover_relation_snapshot_version": snapshot_version(
             relation_service.snapshot()
         ),
-        "turnover_ledger_extras_snapshot_version": WorkbenchReadModelService.snapshot_version(
+        "turnover_ledger_extras_snapshot_version": snapshot_version(
             extra_snapshot_provider()
         ),
-        "turnover_ledger_tag_selection_snapshot_version": WorkbenchReadModelService.snapshot_version(
+        "turnover_ledger_tag_selection_snapshot_version": snapshot_version(
             app_settings_service.get_turnover_ledger_tag_selection_payload()
         ),
-        "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
+        "bank_transaction_category_snapshot_version": snapshot_version(
             bank_transaction_category_service.snapshot()
         ),
     }

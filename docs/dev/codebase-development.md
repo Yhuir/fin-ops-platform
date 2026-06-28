@@ -23,7 +23,7 @@
 - API client：`web/src/features/*/api.ts`。
 - 跨页刷新提示：`web/src/features/domainEvents.ts`。
 
-页面组件负责用户可见状态、交互和 DTO 展示。业务口径、权限、freshness、read model 状态和跨页事实不能在前端重新推导。
+页面组件负责用户可见状态、交互和 DTO 展示。业务口径、权限、legacy freshness/read model 诊断和跨页事实不能在前端重新推导。
 
 会话启动规则：
 
@@ -36,7 +36,7 @@
 - 新页面必须从 `pageRegistry` 注册 route/sidebar/pageKey，并保持 route-level code splitting 与侧边栏 preload。
 - 路由切换只保留当前页面挂载；不要新增页面 mounted cache、data snapshot 或滚动 snapshot。
 - 筛选、分页、搜索词等轻量 UI 状态接 `usePageSessionState` 或 `useFinanceTableSession`；不要把 read model rows、API payload 或长列表滚动位置写入页面会话。
-- 页面订阅 finance domain event 时使用 `useActiveFinanceDomainEvent`；只有当前挂载页面响应事件，切回页面后仍通过原 API/read model freshness 边界刷新。
+- 页面订阅 finance domain event 时使用 `useActiveFinanceDomainEvent`；只有当前挂载页面响应事件，切回页面后仍通过原 API/direct read boundary 刷新。
 - 不把 UI session 写入后端 API、facts、audit、dirty scope、outbox 或 read model。
 
 ## 新增或修改功能流程

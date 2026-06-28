@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_job_queue import ImportJob
 from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
-from fin_ops_platform.services.read_model_write_targets import normalized_scope_keys
-
-MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+from fin_ops_platform.services.scope_keys import normalized_scope_keys
 
 
 class ImportProcessingService:
@@ -33,8 +30,6 @@ class ImportProcessingService:
         tax_offset_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         cost_statistics_scope_keys_for_import_preview: Callable[[Any], list[str]],
         cost_statistics_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
-        bank_detail_scope_keys_for_import_preview: Callable[[Any], list[str]],
-        bank_detail_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         input_invoice_usage_scope_keys_for_import_preview: Callable[[Any], list[str]],
         input_invoice_usage_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         output_invoice_collection_scope_keys_for_import_preview: Callable[[Any], list[str]],
@@ -61,8 +56,6 @@ class ImportProcessingService:
         self._tax_offset_scope_keys_for_import_file_session = tax_offset_scope_keys_for_import_file_session
         self._cost_statistics_scope_keys_for_import_preview = cost_statistics_scope_keys_for_import_preview
         self._cost_statistics_scope_keys_for_import_file_session = cost_statistics_scope_keys_for_import_file_session
-        self._bank_detail_scope_keys_for_import_preview = bank_detail_scope_keys_for_import_preview
-        self._bank_detail_scope_keys_for_import_file_session = bank_detail_scope_keys_for_import_file_session
         self._input_invoice_usage_scope_keys_for_import_preview = input_invoice_usage_scope_keys_for_import_preview
         self._input_invoice_usage_scope_keys_for_import_file_session = input_invoice_usage_scope_keys_for_import_file_session
         self._output_invoice_collection_scope_keys_for_import_preview = output_invoice_collection_scope_keys_for_import_preview
@@ -124,7 +117,6 @@ class ImportProcessingService:
         tax_offset_scope_keys = self._tax_offset_scope_keys_for_import_preview(preview)
         workbench_scope_keys = self._workbench_matching_scope_months_for_import_preview(preview)
         cost_statistics_scope_keys = self._cost_statistics_scope_keys_for_import_preview(preview)
-        bank_detail_scope_keys = self._bank_detail_scope_keys_for_import_preview(preview)
         input_invoice_usage_scope_keys = self._input_invoice_usage_scope_keys_for_import_preview(preview)
         output_invoice_collection_scope_keys = self._output_invoice_collection_scope_keys_for_import_preview(preview)
         self._invalidate_tax_offset_read_model_scopes(
@@ -137,17 +129,15 @@ class ImportProcessingService:
         )
         self._persist_state_with_workbench_invalidation(
             cost_statistics_scope_keys=cost_statistics_scope_keys,
-            bank_detail_scope_keys=bank_detail_scope_keys,
             input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
             output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
         )
         return {
             "batch": self._serialize_value(batch),
             "row_results": self._serialize_value(preview.row_results),
-            **self._import_write_target_envelope(
+            **self._import_affected_scope_payload(
                 cost_statistics_scope_keys=cost_statistics_scope_keys,
                 tax_offset_scope_keys=tax_offset_scope_keys,
-                bank_detail_scope_keys=bank_detail_scope_keys,
                 input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
                 output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
             ),
@@ -234,10 +224,6 @@ class ImportProcessingService:
                 confirmed_session,
                 selected_file_ids,
             )
-            bank_detail_scope_keys = self._bank_detail_scope_keys_for_import_file_session(
-                confirmed_session,
-                selected_file_ids,
-            )
             input_invoice_usage_scope_keys = self._input_invoice_usage_scope_keys_for_import_file_session(
                 confirmed_session,
                 selected_file_ids,
@@ -252,7 +238,6 @@ class ImportProcessingService:
             )
             self._persist_state_with_workbench_invalidation(
                 cost_statistics_scope_keys=cost_statistics_scope_keys,
-                bank_detail_scope_keys=bank_detail_scope_keys,
                 input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
                 output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
             )
@@ -261,10 +246,9 @@ class ImportProcessingService:
                 "selected": total,
                 "affected_months": scope_months,
                 "enqueued_matching_job_id": matching_job_id,
-                **self._import_write_target_envelope(
+                **self._import_affected_scope_payload(
                     cost_statistics_scope_keys=cost_statistics_scope_keys,
                     tax_offset_scope_keys=tax_offset_scope_keys,
-                    bank_detail_scope_keys=bank_detail_scope_keys,
                     input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
                     output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
                 ),
@@ -353,10 +337,9 @@ class ImportProcessingService:
         result_summary.update(
             {
                 "affected_months": changed_scope_keys,
-                **self._import_write_target_envelope(
+                **self._import_affected_scope_payload(
                     cost_statistics_scope_keys=changed_scope_keys,
                     tax_offset_scope_keys=changed_scope_keys,
-                    bank_detail_scope_keys=[],
                     input_invoice_usage_scope_keys=changed_scope_keys,
                     output_invoice_collection_scope_keys=[],
                 ),
@@ -420,11 +403,10 @@ class ImportProcessingService:
         }
 
     @staticmethod
-    def _import_write_target_envelope(
+    def _import_affected_scope_payload(
         *,
         cost_statistics_scope_keys: list[str],
         tax_offset_scope_keys: list[str],
-        bank_detail_scope_keys: list[str],
         input_invoice_usage_scope_keys: list[str],
         output_invoice_collection_scope_keys: list[str],
     ) -> dict[str, object]:
@@ -441,25 +423,17 @@ class ImportProcessingService:
 
         cost_scope_keys = normalized_scope_keys(cost_statistics_scope_keys, fallback="all")
         add("tax_offset", tax_offset_scope_keys)
-        add("workbench", _workbench_read_model_scope_keys_for_import_state(cost_scope_keys))
         add("workbench_relation", cost_scope_keys)
         add("invoice_lifecycle", cost_scope_keys)
         add("search", cost_scope_keys)
-        add("pending_invoice", _pending_invoice_read_model_scope_keys_for_import_state(cost_scope_keys))
         add("input_invoice_usage", input_invoice_usage_scope_keys)
         add("output_invoice_collection", output_invoice_collection_scope_keys)
         add("oa_pending_payment", cost_scope_keys)
-        add("bank_detail", bank_detail_scope_keys)
-        if bank_detail_scope_keys:
-            add("bank_account_balance", ["all"])
         add("cost_statistics", cost_scope_keys)
 
         scope_keys = normalized_scope_keys([target["scope_key"] for target in targets])
         return {
             "affected_scope_keys": scope_keys,
-            "read_model_scope_keys": scope_keys,
-            "freshness_targets": targets,
-            "operation_barrier_targets": list(targets),
         }
 
     def resolve_task_etc_business_batch(
@@ -478,23 +452,3 @@ class ImportProcessingService:
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,
         )
-
-
-def _workbench_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
-    month_scope_keys = [scope_key for scope_key in normalized_scope_keys(scope_keys) if MONTH_RE.match(scope_key)]
-    return month_scope_keys or ["all"]
-
-
-def _pending_invoice_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
-    month_scope_keys = [scope_key for scope_key in normalized_scope_keys(scope_keys) if MONTH_RE.match(scope_key)]
-    if not month_scope_keys:
-        return ["expense:all", "income:all", "income:cash_income"]
-    return [
-        scoped_key
-        for month in month_scope_keys
-        for scoped_key in (
-            f"expense:all:{month}",
-            f"income:all:{month}",
-            f"income:cash_income:{month}",
-        )
-    ]

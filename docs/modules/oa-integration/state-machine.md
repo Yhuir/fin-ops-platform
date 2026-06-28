@@ -1,13 +1,13 @@
 # OA 集成状态机
 
-> 修改 `oa-integration` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。
+> 修改 `oa-integration` 相关业务状态、UI 状态、projection 状态或 worker 状态前必须读取本文件。
 
 ## 外部 OA / Mongo 状态
 
 | 状态 | 含义 | 允许行为 | 禁止行为 |
 | --- | --- | --- | --- |
 | `available` | OA 用户信息、OA 登录、OA Mongo 或投影源可用 | session 校验、sync、查询、草稿创建 | 无 |
-| `degraded` | 部分字段、附件或下游投影不可用 | 返回可解释 warning/status；允许只读旧投影但必须标明 stale/degraded | 把 degraded 数据标成 fresh |
+| `degraded` | 部分字段、附件或下游投影不可用 | 返回可解释 warning/status；允许只读旧投影但必须标明 degraded/outdated | 把 degraded 数据标成可用新数据 |
 | `unavailable` | OA userInfo、OA login 或 Mongo 连接失败 | 返回 401/403/502/structured error；App Status blocked/degraded | 伪造用户、创建草稿、刷新投影成功 |
 | `backoff` | Mongo 短时间连续失败 | 跳过重复外部查询，保留 error read status | 高频重试压垮外部 OA/Mongo |
 
@@ -35,7 +35,7 @@
 | --- | --- | --- |
 | `queued` | `/api/integrations/oa/sync` 或 runtime event 入队 | `queued -> running` |
 | `running` | worker 消费 `oa.sync` | `running -> succeeded`、`running -> failed` |
-| `succeeded` | 投影 upsert 完成并写 sync run | 下游 dirty scope enqueue：Workbench、Search、Pending Invoice、Invoice Lifecycle、OA Pending Payment 等 |
+| `succeeded` | 投影 upsert 完成并写 sync run | 下游页面通过 direct API、operation projection、真实 outbox 或 cache warmup 收敛；不得恢复页面刷新队列。 |
 | `failed` | 源 adapter、repository 或 queue 失败 | 记录失败 run，保留旧投影，等待 retry/backoff |
 | `retention_pruned` | all scope sync 根据 cutoff 清理旧投影 | 旧月份下游 scope dirty，不能删除 manual import marker |
 
@@ -44,7 +44,7 @@
 - HTTP API 直接 inline 跑全量 sync。
 - projection 半写入后标记 succeeded。
 - worker 依赖 Flask/Application/session/header。
-- RabbitMQ transport 被当作 read model 事实源。
+- RabbitMQ transport 被当作页面事实源。
 
 ## OA Applicant Credential 状态
 
@@ -78,7 +78,7 @@
 
 禁止：
 
-- preview hash stale 后继续创建 batch。
+- preview hash 过期后继续创建 batch。
 - expected version mismatch 后写状态。
 - idempotency key 重复导致重复草稿。
 - submitted history 暴露内部 batch id 或 invoice ids。
@@ -103,24 +103,24 @@
 
 - loading：session bootstrap、OA 待付款 rows/filter/detail、进项 OA reverse preview/draft、ETC business batch detail/action、settings credentials/manual search 加载中。
 - empty：无 OA rows、无凭据、无手动导入记录、无可导入 OA 搜索结果。
-- error：OA session/OA login/Mongo/read model/API structured error 必须可见，不吞掉。
-- stale/refreshing：OA sync 或下游 read model 非 fresh 时，页面必须禁用高风险写入或提示后台刷新。
+- error：OA session/OA login/Mongo/OA sync/API structured error 必须可见，不吞掉。
+- direct unavailable：OA sync 或下游 direct payload 暂不可用时，页面必须禁用高风险写入或提示后台刷新。
 - permission disabled/hidden：只读用户隐藏写入，full access 隐藏 admin-only，admin 才能维护 OA applicant credentials。
 
-## Read Model / Worker 状态
+## OA Projection / Worker 状态
 
 | 状态 | 含义 | 页面/API 要求 |
 | --- | --- | --- |
-| `fresh` | 投影和页面 read model 与 source version 对齐 | 正常展示与允许满足前置条件的写入 |
-| `missing` | SQL read model 不存在 | 返回 refreshing/missing，并 enqueue refresh |
-| `refreshing` | refresh 已入队或 worker 正在处理 | 页面展示 refreshing，写入按模块前置条件禁用 |
-| `stale` | source version 变化或 dirty scope 未完成 | 不得返回看似 fresh 的空数据 |
-| `failed` | worker refresh 失败 | App Status blocked/degraded，页面显示错误或 stale |
-| `unavailable` | repository/queue/外部系统不可用 | structured error，不能同步扫描替代 production read model |
+| `current` | OA projection/OA sync 状态与 source version 对齐 | 正常展示与允许满足前置条件的写入 |
+| `missing` | OA projection 或 sync watermark 缺失 | 只作为后端诊断；页面 API 不返回旧刷新状态合同 |
+| `syncing` | OA sync 或真实后台任务正在处理 | 页面按模块 loading/disabled 语义展示，不透出页面级同步字段 |
+| `outdated` | source version 变化或真实后台任务未完成 | 不得返回看似 current 的空数据 |
+| `failed` | worker/sync 失败 | App Status blocked/degraded，页面显示结构化错误或 outdated 诊断 |
+| `unavailable` | repository/queue/外部系统不可用 | structured error，不能同步扫描替代 production projection |
 
-refresh 触发来源：
+触发来源：
 
-- `oa.sync` worker 成功后下游 dirty scope。
+- `oa.sync` worker 成功后下游 direct API / operation projection / cache warmup。
 - OA 手动导入/删除 marker。
 - 进项 OA reverse draft/revoke/manual status。
 - ETC OA draft/manual status/delete。
@@ -130,4 +130,4 @@ refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| 2026-06-11 | 首轮测试闭环补齐 OA 集成状态机 | session、OA sync、凭据、进项 OA 反提、ETC OA 草稿、read model 状态 | `PYTHONPATH=backend/src python3 -m unittest ... -v`、`cd web && npm test -- --run ...`、`bash scripts/verify.sh docs` |
+| 2026-06-11 | 首轮测试闭环补齐 OA 集成状态机 | session、OA sync、凭据、进项 OA 反提、ETC OA 草稿、projection/worker 状态 | `PYTHONPATH=backend/src python3 -m unittest ... -v`、`cd web && npm test -- --run ...`、`bash scripts/verify.sh docs` |

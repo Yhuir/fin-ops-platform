@@ -288,8 +288,6 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
         operators: arrayValue(config.operators).map(stringValue) as InputInvoiceUsageRowsResponse["filterConfig"][number]["operators"],
       };
     }),
-    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
-    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
   };
 }
 
@@ -462,13 +460,13 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
   const raw = objectValue(payload);
   const rawKind = stringValue(raw.kind);
   const kind = rawKind === "bank" ? "银行流水" : rawKind === "invoice" ? "发票" : "OA";
-  const readModelStatus = stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status"));
-  if (readModelStatus && readModelStatus !== "fresh") {
+  const detailAvailable = camelOrSnake(raw, "detailAvailable", "detail_available") !== false;
+  if (!detailAvailable) {
     return {
       title: stringValue(raw.title) || `${kind}关联明细`,
       subtitle: stringValue(camelOrSnake(raw, "rowId", "row_id")),
       detailAvailable: false,
-      unavailableReason: "进项发票使用情况关联明细正在刷新，完成后请重新打开详情。",
+      unavailableReason: stringValue(camelOrSnake(raw, "unavailableReason", "unavailable_reason")),
       sections: [],
     };
   }
@@ -494,7 +492,8 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
   return {
     title: stringValue(raw.title) || `${kind}关联明细`,
     subtitle: stringValue(camelOrSnake(raw, "rowId", "row_id")),
-    detailAvailable: camelOrSnake(raw, "detailAvailable", "detail_available") !== false,
+    detailAvailable,
+    unavailableReason: stringValue(camelOrSnake(raw, "unavailableReason", "unavailable_reason")),
     sections,
   };
 }
@@ -520,8 +519,6 @@ function mapFilterOptionsResponse(payload: unknown): InputInvoiceUsageFilterOpti
         }),
       };
     }),
-    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
-    readModelScopeKey: stringValue(camelOrSnake(raw, "readModelScopeKey", "read_model_scope_key")),
   };
 }
 
@@ -802,7 +799,7 @@ async function requestExportBlob(url: string, init: RequestInit = {}): Promise<I
     let message = rawText || "导出接口返回了非 xlsx 响应。";
     try {
       const payload = JSON.parse(rawText) as { message?: string };
-      message = payload.message || "读模型正在刷新，请稍后再导出。";
+      message = payload.message || "导出数据暂不可用，请稍后再试。";
     } catch {
       // Keep raw text.
     }
@@ -855,7 +852,6 @@ export async function fetchInputInvoiceUsageExportPreview(request: FetchRowsRequ
     scopeLabel: stringValue(camelOrSnake(raw, "scopeLabel", "scope_label")),
     columns: arrayValue(raw.columns).map(stringValue),
     sampleRows: arrayValue(camelOrSnake(raw, "sampleRows", "sample_rows")).map(objectStringMap),
-    readModelStatus: stringValue(camelOrSnake(raw, "readModelStatus", "read_model_status")),
     message: stringValue(raw.message),
   };
 }

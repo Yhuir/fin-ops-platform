@@ -29,7 +29,7 @@ class TaxOffsetDerivedLifecycleExecutor:
                 reason=str(domain_plan.get("reason") or "derived_lifecycle_tax_offset"),
             )
         return {
-            "deleted_counts": {"tax_offset_read_models": len(deleted_scope_keys)},
+            "deleted_counts": {"tax_offset_cache_scopes": len(deleted_scope_keys)},
             "invalidated_scopes": deleted_scope_keys,
             "enqueued_jobs": ["tax_offset_cache_warmup"] if deleted_scope_keys else [],
         }

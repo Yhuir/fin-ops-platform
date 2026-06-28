@@ -21,7 +21,7 @@
 
 - 不拥有业务页面状态机。
 - 不直接确认业务关联或付款。
-- 不把外部 OA 数据直接当作页面 fresh read model。
+- 不把外部 OA 数据直接当作页面 direct payload。
 
 ## 输入 I/O
 
@@ -35,15 +35,15 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| OA projection rows | repositories/read models | 带 source version |
+| OA projection rows | OA projection repository | 带 source version |
 | OA session/permission payload | frontend session | 不泄露 secret |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
-| OA manual import mutation result | settings/workbench frontend、operation barrier | `refresh-attachments`、`manual-imports` create/remove 必须返回 affected scopes、read model scope keys、freshness targets 和 operation barrier targets |
+| OA manual import mutation result | settings/workbench frontend | `refresh-attachments`、`manual-imports` create/remove 返回业务结果和 `affected_scope_keys`；不返回页面 projection scope keys、同步证明 targets 或 legacy barrier targets；前端手动导入表写后直接重新搜索 |
 
 ## 持久化与投影
 
-- Own read model：无单一页面 read model；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
-- OA manual import/create/refresh/remove 影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search` 和 `cost_statistics`；返回 target envelope 后由页面等待 operation barrier。
+- Own page projection：无单一页面 projection；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
+- OA manual import/create/refresh/remove 影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search` 和 `cost_statistics`；settings 手动导入表在 mutation 成功后直接重新搜索当前筛选结果，不等待 legacy barrier。
 - External system：OA Mongo / OA app。
 - Repository：`postgres_repositories/oa_projection.py`、`oa_applicant_credentials.py`。
 
@@ -75,4 +75,4 @@
 ## 当前缺口和删除条件
 
 - OA token/credential 变更必须同步 permissions/security docs。
-- 删除旧 OA projection path 前必须验证 source version 和 downstream freshness。
+- 删除旧 OA projection path 前必须验证 source version 和下游 direct API/cache warmup 收敛。

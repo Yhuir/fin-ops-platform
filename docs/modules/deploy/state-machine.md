@@ -1,6 +1,6 @@
 # 部署 状态机
 
-> 修改 `部署` 相关 CI、发布、运行时、read model 或 worker 状态前必须读取本文件。
+> 修改 `部署` 相关 CI、发布、运行时或 worker 状态前必须读取本文件。
 
 ## CI / 验证状态
 
@@ -51,28 +51,28 @@
 
 | UI 状态 | 触发 | 要求 |
 | --- | --- | --- |
-| loading | 新 release 重启、worker 切换、read model refreshing | App Status 或页面 loading/stale 必须来自真实 runtime/readiness |
-| empty | 新 release 后页面 fresh 且 rows 为空 | 不能由旧 cache/read model 缺失伪装 |
+| loading | 新 release 重启、worker 切换、direct payload unavailable | App Status 或页面 loading/error 必须来自真实 runtime/job/dependency facts |
+| empty | 新 release 后页面 direct payload 可用且 rows 为空 | 不能由旧 cache/read model 缺失伪装 |
 | error | API 500/403/session failed/worker failed | 页面显示真实错误或权限状态，不应被 Nginx fallback 成 index.html |
-| stale/refreshing | migration 或 worker 后 read model 重建 | App Status yellow/busy，页面不得把旧数据标 fresh |
+| backend busy | migration、真实 worker 或后台任务处理中 | App Status yellow/busy，页面不得把旧数据标可用 |
 | permission disabled/hidden | OA cookie/session/role sync 改变 | `/api/session/me` JSON 契约和 app 内权限仍是最终判断 |
 
-## Read Model / Worker 状态
+## Worker / Runtime 状态
 
 | 状态 | 来源 | 要求 |
 | --- | --- | --- |
-| `fresh` | readiness/source version + no active dirty scope | 发布后只有真实 worker/projection 证明 fresh 才能 green |
-| `missing` | worker 未注册、readiness 缺失、projection 缺表 | App Health missing；需要 migration/worker/env 修复 |
-| `refreshing` | dirty scope pending/processing | 发布后允许短暂 yellow，但需要 drain |
-| `stale` | worker heartbeat stale、source/schema mismatch | App Health busy/blocked；禁止忽略 |
-| `failed` | worker/job/dirty scope failed | 进入 App Health attention；需要 inspect/retry/repair |
+| `ready` | required workers healthy、jobs/outbox 无 current blocker、dependencies available | 发布后只有真实 worker/job/dependency 证明收敛才能 green |
+| `missing` | worker 未注册、env 缺失、dependency 缺失 | App Health missing；需要 migration/worker/env 修复 |
+| `running` | background job/outbox pending 或 processing | 发布后允许短暂 yellow，但需要收敛 |
+| `stale` | worker heartbeat stale、dependency stale | App Health busy/blocked；禁止忽略 |
+| `failed` | worker/job/outbox failed | 进入 App Health attention；需要 inspect/retry/repair |
 | `unavailable` | PostgreSQL/Redis/RabbitMQ/OA/Nginx 不可用 | 部署 smoke 失败，按 dependency 排障 |
 
 ## 失败恢复
 
 1. 先看 remote deploy step 和 exit code，定位失败在 packaging、upload、check-release、migration、activation、readiness、public route 还是 cleanup。
 2. 读取 `finops-deploy-control status`、systemd status/journal、`/health`、`/health/ready`、App Health dashboard。
-3. 如果是 worker readiness，优先检查 worker manifest/env example/systemd instance/heartbeat/event type mismatch。
+3. 如果是 worker runtime，优先检查 worker manifest/env example/systemd instance/heartbeat/event type mismatch。
 4. 如果是 Nginx route，检查仓库 example 和服务器 `nginx -T` 是否一致。
 5. 如果 migration 或数据风险，先 staging restore 验证，再决定 PITR/rollback/repair。
 6. 回滚后验证 frontend hash、API release identity、required workers、public session route 和关键页面 smoke。

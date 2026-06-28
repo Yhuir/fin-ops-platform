@@ -1,13 +1,13 @@
 # Finance Table System 状态机
 
 
-> 修改 `Finance Table System` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
+> 修改 `Finance Table System` 相关业务状态、UI 状态或页面 direct payload 合同时必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
 
 ## 业务状态
 
-本模块不拥有业务事实状态。它只展示页面 API/read model 返回的 rows、summary、pagination、filter config、read model status 和 export preview。
+本模块不拥有业务事实状态。它只展示页面 API 返回的 rows、summary、pagination、filter config、loading/error/empty 状态和 export preview。
 
-- 状态事实源：各页面 API、read model freshness、页面本地 query/session state。
+- 状态事实源：各页面 direct API、页面本地 query/session state。
 - 允许流转：业务状态变化必须来自页面 API 或用户交互触发的页面 query；表格 primitive 只接收 props 渲染。
 - 禁止流转：表格 primitive 自行推断业务状态、自行读写 API、自行缓存 rows、自行伪造 fresh。
 
@@ -17,10 +17,10 @@
 | --- | --- | --- |
 | `initial` | 页面 query 和默认分页/筛选/排序初始化。 | 页面级 tests |
 | `loading` | 首次加载或显式刷新；页面决定表格 skeleton/state row。 | 页面级 tests |
-| `empty` | rows 为空但 contract fresh 或可展示空结果；必须使用明确空状态，不把 read model missing 当空结果。 | 页面级 tests |
+| `empty` | direct rows 为空且页面合同允许展示空结果；必须使用明确空状态，不把 API 错误当空结果。 | 页面级 tests |
 | `error` | API/export/filter option 失败；显示错误反馈，保留或清理旧 payload 由页面 contract 决定。 | 页面级 tests |
-| `refreshing` | read model 正在刷新；页面可展示旧 payload + 刷新提示，危险写/导出按页面 contract 禁用。 | 页面级 tests |
-| `stale` | read model stale/source mismatch；页面必须提示 stale，不把旧 rows 当 fresh。 | 页面级 tests |
+| `refreshing` | 用户触发直接刷新且请求未完成；页面保持 loading/refreshing 语义，不读取 read model 状态。 | 页面级 tests |
+| `stale` | 后端 direct API 返回明确业务错误或版本冲突；页面按错误合同处理，不把旧 rows 当 fresh。 | 页面级 tests |
 | `permission hidden/disabled` | 写入、导出或 admin 操作按权限隐藏/禁用。 | permissions-and-audit 与页面级 tests |
 
 ## 表格交互状态
@@ -61,20 +61,20 @@
 | `downloading` | 请求真实 export blob；不能把 JSON/HTML 错误当文件。 |
 | `success` | 浏览器下载触发，展示成功反馈。 |
 | `error` | preview/download 失败，展示错误反馈并保留用户可修正状态。 |
-| `disabled` | read model stale/refreshing 或权限不足时按页面 contract 禁用。 |
+| `disabled` | direct payload 暂不可用或权限不足时按页面 contract 禁用。 |
 
 导出 API contract 由各页面 API tests 保护；共享表格不发起导出。
 
-## Read Model / Worker 状态
+## Page Data / Runtime 状态
 
-- `fresh`：页面可以展示 rows/summary，并允许页面 contract 允许的导出/写入。
-- `missing/refreshing/stale/schema_mismatch/source_mismatch`：页面必须展示 refreshing/stale 或不可用提示；不能把空 rows 当真实空结果。
+- `available`：页面可以展示 rows/summary，并允许页面 contract 允许的导出/写入。
+- `temporarily_unavailable`：页面必须展示不可用或重试提示；不能把空 rows 当真实空结果。
 - `failed/unavailable`：页面展示错误/blocked 状态；写入和导出按页面 contract 禁用。
-- refresh 触发来源：页面 API、domain event、用户刷新、后台 worker/read model gateway；表格 primitive 不触发 read model refresh。
-- 失败恢复：页面触发 reload/retry，或等待 worker/App Status 收敛；表格 primitive 不自行恢复。
+- refresh 触发来源：页面 API、domain event、用户刷新、真实后台任务或 App Status/runtime facts；表格 primitive 不触发页面数据刷新。
+- 失败恢复：页面触发 reload/retry，或等待真实 worker/App Status 收敛；表格 primitive 不自行恢复。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| 2026-06-11 | 补齐 Finance Table System 状态机 | shared primitive、页面级表格、table session、导出、read model 状态展示 | `cd web && npm test -- --run src/test/FinanceTable.test.tsx` |
+| 2026-06-11 | 补齐 Finance Table System 状态机 | shared primitive、页面级表格、table session、导出、页面数据状态展示 | `cd web && npm test -- --run src/test/FinanceTable.test.tsx` |

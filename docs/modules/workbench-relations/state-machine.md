@@ -2,7 +2,7 @@
 
 ## Relation 事实与展示上下文
 
-`app.workbench_pair_relations` 只保存 confirmed relation fact。`workbench_relation` read model 可以同时分发 active confirmed relation、paired automatic decision、open/proposed unmatched candidate 和 unlinked rows，但 automatic decision 不是 confirmed write fact。
+`app.workbench_pair_relations` 只保存 confirmed relation fact。`workbench_relation` projection 可以同时分发 active confirmed relation、paired automatic decision、open/proposed unmatched candidate 和 unlinked rows，但 automatic decision 不是 confirmed write fact。
 
 Workbench active generation 是面向关联台页面的派生投影；`workbench_relation` 是面向下游页面的关系分发 read model。二者都只能从 canonical relation fact、自动 decision/candidate 和各业务事实表派生，不能互相作为写入事实源。active relation 的 `special_metadata`、`amount_check`、`display_tags` 和 `source_versions` 必须随投影传播，以便批量账务、ETC、待找发票、进项反提等外部 owner 的展示归属保持一致。
 
@@ -14,7 +14,7 @@ confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirme
 - `read_model.workbench_reconciliation_decisions` 中 `relation_status='candidate'`、未确认或仅用于候选展示的匹配。
 - OA 待付款进行中 OA 的 active pending relation 或 `app.bank_transaction_relation_claims`。它们只用于 OA 待付款 in-progress 视图和关联台候选排除，不是 Workbench confirmed relation fact。
 - 页面本地 table rows、drawer state、session state。
-- 非 fresh `workbench_relation` 返回的空 rows。
+- 暂不可用的 `workbench_relation` 返回空 rows。
 
 `relation_status='linked'` 是下游只读页面判断已关联/已支付的唯一关系状态；`relation_status='candidate'` 只表示关联台未配对候选，应展示为候选证据，但不能驱动支付状态、row 独占或撤回/取消业务。
 
@@ -88,14 +88,14 @@ stateDiagram-v2
 - idempotency key：判断重复请求或冲突请求。
 - 权限、session、DB 可写性和目标 owner 状态：判断是否允许 mutation。
 
-只有调用方显式要求 read-model freshness precondition 时，`refreshing` / `stale` / `missing` / `source_mismatch` / `schema_mismatch` / `failed` / `unavailable` 才阻断该写入。普通页面 read model non-fresh 只影响读侧诊断和 payload freshness，不应让已具备 canonical 写安全的 relation mutation 等待 distribution 追赶。
+页面读侧 direct unavailable 不阻断写入；legacy relation distribution 追赶只影响读侧诊断，不应让已具备 canonical 写安全的 relation mutation 等待 distribution 追赶。
 
 错误响应至少包含：
 
 - `error`
 - `message`
 - version/idempotency/permission/write safety 冲突字段。
-- 如果错误来自显式 freshness precondition，则包含 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。
+- mutation 错误不返回 relation legacy diagnostics/status/scope/enqueue 字段。
 
 ## Audit history
 

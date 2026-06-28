@@ -1,6 +1,6 @@
 # 对象身份与去重规则审计
 
-本文档描述业务对象 identity/dedup 的生产审计方式。当前闭环统一规则入口，并在 workbench active generation 中投影对象身份字段；仍不启用独立的 `object_identity` 分发 read model。
+本文档描述业务对象 identity/dedup 的生产审计方式。当前闭环统一规则入口，并以 canonical app facts 与 relation facts 为准；不启用独立的 `object_identity` 分发 read model。
 
 ## 规则边界
 
@@ -12,7 +12,7 @@
 - 强发票 identity 只包含数电发票号、发票代码+号码。税额指纹、金额、项目、申请人、对方名称等弱字段只用于审计提示，不用于自动跨来源合并。
 - 银行流水只有在稳定 business-fields identity 完整且其中一条已被 paired/异常/忽略占用时，才压制同 identity 的 open 别名；全 open 重复只审计。
 - OA 单据以 `row_id` 为主身份，`form_id`/`workflow_no` 只作为 alias 审计线索，不按金额、申请人或项目推断合并。
-- 历史冲突不做破坏性合并。审计输出报告，人工 repair 或 read model rebuild 后再重新审计。
+- 历史冲突不做破坏性合并。审计输出报告，人工 repair 或 direct payload/relation diagnostics 恢复后再重新审计。
 
 ## 生产审计命令
 
@@ -23,15 +23,6 @@ cd /path/to/fin-ops-platform
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity --json --limit 50
 ```
 
-可限定 workbench active generation scope：
-
-```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
-  --json \
-  --limit 50 \
-  --workbench-scope 2026-02
-```
-
 报告覆盖：
 
 - `app.invoices`：正式发票 canonical key、stored key mismatch、duplicate canonical、missing canonical；其中 blocking 只看数电发票号、发票代码+号码这两类强 identity，税额指纹只作为 warning。
@@ -40,31 +31,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
 - `app.invoices.etc_invoice_id`：已关联到统一发票池既有 canonical 发票的 ETC metadata 数量。
 - `app.oa_attachment_invoice_cache`：OA 附件票缓存中的正式发票 evidence/invoices canonical、suspected duplicate、missing canonical。
 - `app.oa_attachment_invoice_cache_sources` / `app.oa_attachments`：将 OA 附件票缓存 key 映射回真实附件和 OA，用于区分“缓存内部重复”和“跨 OA 重复发票”。
-- `read_model.workbench_group_rows` active generation：同一强发票 identity 或稳定银行 identity 是否同时存在于 `paired` 和 `open` zone。
-- `read_model.workbench_group_rows` active generation：同一 row id 或同一强发票 identity 是否在多个 open group 中同时成为 visible/operable owner；银行流水 open/open 只按 row id 审计，不按稳定 business-fields identity 阻断。
 - `app.oa_applications`：同一 `form_id` 是否映射多个 `row_id`，用于排查 OA alias 风险。
 - `app.workbench_pair_relations`：active relation 中是否存在指向已不存在对象的 row_id。
-
-## Workbench relation 展示归属审计
-
-对象 identity 审计负责发现同一业务对象是否有多个 visible owner；active relation 写入后是否已经在当前 Workbench active generation 中同组展示，由独立的 relation display 审计覆盖。发布前或生产修复后执行：
-
-```bash
-cd /path/to/fin-ops-platform
-PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_workbench_relation_display --json --limit 50
-```
-
-该工具只执行 `select`，不写 `app.*`、`read_model.*` 或 `job.*`。它检查：
-
-- `app.workbench_pair_relations` 中 active relation 的成员 row 是否存在于 active Workbench `all` generation。
-- 同一 relation 的成员 row 在 `all` 或成员月份 scope 中是否被拆到多个 group。
-- 同一 relation row 在同一个 active scope 中是否有多个 visible owner。
-- row payload 中的 `case_id` / `relation_mode` 是否与 canonical relation 不一致。
-- `all` generation 是否旧于 relation 成员所在月份 generation。
-
-出现 blocking issue 时，不要直接修改 `read_model.workbench_group_rows` 或 `read_model.workbench_generations`。修复必须走现有刷新边界：按 relation 成员月份通过 `ReadModelRefreshGateway` / 事务内 repository scope contract 入队 Workbench month refresh，再用 aggregate-only `all` refresh 收敛全局 active generation。修复后重跑本审计和对象 identity 审计，确认两个报告的 `blocking_issue_count=0`。
-
-`--limit` 只限制明细 examples 数量，不影响 summary count。生产判断以 summary 中的全量 count 和 `blocking_issue_count` 为准。
 
 ## 表状态
 
@@ -86,8 +54,6 @@ Blocking issue 包含：
 - 同一 canonical key 下出现多条银行流水。
 - 同一 OA 附件票强 canonical key 出现在多个不同 OA 报销中。强 key 包含数电票号、发票代码+号码、附件稳定 hash；`seller_tax_no + buyer_tax_no + invoice_date + total_with_tax` 这类弱税额指纹不作为 OA 附件票 blocking key。
 - 历史 `source_unique_key` 与当前强发票或银行 policy canonical key 不一致。正式发票弱税额指纹 mismatch 不阻断发布。
-- Workbench active generation 中同一强发票 identity 或稳定银行 identity 同时出现在 `paired` 与 `open`。
-- Workbench active generation 中同一 row id 或同一强发票 identity 同时出现在多个 open group，导致同一事实有多个 visible/operable owner。
 - Active workbench relation 指向已不存在的 row_id。
 - Active workbench relation 的成员 row 在 active Workbench generation 中缺失、拆组、重复 visible owner、payload relation 不一致，或 `all` generation 旧于成员月份 generation。
 
@@ -108,9 +74,9 @@ Blocking issue 包含：
 - 先确认业务事实，再处理数据；不要只因为 key 相同就合并。
 - canonical duplicate 优先查原始导入批次、附件来源、ETC 批次和税局认证记录。
 - 修复应通过已有业务命令、专用 repair 工具或 migration 脚本完成，并保留审计记录。
-- 修复或发布后必须重建受影响 workbench/workbench_relation scope，再重新执行审计命令，确认 `blocking_issue_count=0`。
-- relation display 不一致的生产修复只能入队刷新或使用专用 repair 工具重新触发 canonical scope contract；禁止手改 read model 投影行。
+- 修复或发布后必须重读受影响 Workbench/workbench_relation direct payload，再重新执行审计命令，确认 `blocking_issue_count=0`。
+- relation display 不一致的生产修复只能使用已有业务命令或专用 repair 工具重新触发 canonical relation facts；禁止手改 legacy read model 投影行。
 
-## 后续 read model 条件
+## 后续扩展条件
 
-本轮只在 workbench 投影表增加 nullable identity columns，不新增独立 object identity read model 或 worker。只有当两个以上页面需要展示 duplicate group、canonical object 或 source lineage 时，才启用独立 `object_identity` read model。届时需要补齐 migration、worker registry、manifest/systemd env、health、backfill 和 source_versions。
+本轮只在 Workbench direct payload 的事实查询侧暴露 identity 证据，不新增独立 object identity read model 或 worker。只有当两个以上页面需要展示 duplicate group、canonical object 或 source lineage，且 direct query 已有真实性能瓶颈证据时，才允许设计可删除短 TTL response cache 或专用查询索引；不得恢复页面 read-model freshness、worker、manifest 或 systemd env。

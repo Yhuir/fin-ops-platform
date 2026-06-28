@@ -18,7 +18,6 @@ CORE_COUNT_TABLES = (
     ("import_files", "app.import_files"),
     ("invoices", "app.invoices"),
     ("bank_transactions", "app.bank_transactions"),
-    ("search_index_rows", "read_model.search_index_rows"),
 )
 FORBIDDEN_ACTIONS = ("cutover", "enable_dual_write", "restart_service", "production_write")
 SECRET_KEY_PARTS = ("password", "passwd", "secret", "token", "credential", "database_url", "uri", "url")

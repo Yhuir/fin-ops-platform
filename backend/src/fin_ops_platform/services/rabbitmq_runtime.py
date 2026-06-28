@@ -539,12 +539,8 @@ def _basic_properties(**kwargs: Any) -> Any:
 
 
 def _queue_name_for_event(settings: RuntimeQueueSettings, event_type: str) -> str:
-    if event_type == "workbench.read_model.refresh":
-        return settings.rabbitmq_workbench_queue
     return f"{settings.rabbitmq_queue_prefix}.{event_type}"
 
 
 def _routing_key_for_event(settings: RuntimeQueueSettings, event_type: str) -> str:
-    if event_type == "workbench.read_model.refresh":
-        return settings.rabbitmq_workbench_routing_key
     return event_type

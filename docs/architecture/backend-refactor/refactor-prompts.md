@@ -2090,7 +2090,7 @@ Pre-Flight:
   - `_expected_workbench_source_versions`
   - `_workbench_source_versions_stale_reasons`
   - `_workbench_groups_redis_cache_key_from_version`
-  - `_emit_workbench_read_model_status_metric`
+  - Workbench read-model status metric（已在页面 read model 迁移中移除）
   - `PostgresReadModelRepository.get_workbench_summary`
   - `PostgresReadModelRepository.get_workbench_groups_page`
   - `PostgresReadModelRepository.get_workbench_group_detail`
@@ -2155,7 +2155,7 @@ Facade Boundary Rules:
 - Handler 仍负责 HTTP raw params 的边界入口；复杂 normalization 可以移动，但必须保持现有错误格式。
 - Facade 不得通过 constructor、method 参数或闭包持有 `Application`、`RuntimeRepositories`、`RuntimeRepositoryContext`、`ApplicationStateStore` 或状态存储协议实例。若某个 helper 当前只能从这些对象取得，必须在 `server.py` 中拆出更小的 callable / adapter 后再传入 Facade。
 - 带 HTTP 路由上下文的 observability wrapper 必须留在 `server.py` handler 层包裹 Facade 调用，例如 `request_database_timing` 这类依赖 path、method、request context 的统计边界不得下沉到 Facade。
-- 纯业务 / read-model 状态指标可以移动到 Facade 或以 metric emitter 注入，例如 `_emit_workbench_read_model_status_metric`，但必须保持指标名、标签语义和触发条件不变。
+- 纯业务指标可以移动到 Facade 或以 metric emitter 注入；旧 Workbench read-model 状态指标已在页面 read model 迁移中移除，不再保留指标名、标签语义或触发条件。
 
 Required Implementation Work:
 1. Baseline confirmation

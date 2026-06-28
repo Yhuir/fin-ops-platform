@@ -1,5 +1,20 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-27 - Workbench relation facade fixture freshness cleanup
+
+目标：继续 remove-read-models 主控闭环，删除 Workbench relation facade tests 中 fake repository 的旧 read-model-shaped 输出字段。
+
+变更：
+
+- `tests/test_workbench_relation_read_facade.py` 的 facade-level fake repository 改为返回 direct `status` / `scope_keys`。
+- 保留底层 `PostgresReadModelRepository` 和 repository port 对 legacy SQL payload 的测试，不在本轮删除 live projection 兼容。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_read_facade.WorkbenchRelationReadFacadeTests.test_get_by_row_ids_returns_fresh_linked_and_unlinked_contexts tests.test_workbench_relation_read_facade.WorkbenchRelationReadFacadeTests.test_facade_passes_scope_hint_for_empty_relation_context tests.test_workbench_relation_read_facade.WorkbenchRelationReadFacadeTests.test_non_fresh_result_enqueues_refresh_when_required tests.test_workbench_relation_read_facade.WorkbenchRelationReadFacadeTests.test_list_unlinked_filters_by_status_and_row_type -v
+```
+
 ## 2026-06-24 - Workbench group detail route-owner extraction
 
 目标：把 `GET /api/workbench/groups/detail` 的 HTTP 参数校验和 facade response mapping 从 `Application` 抽到显式 read-only route owner。

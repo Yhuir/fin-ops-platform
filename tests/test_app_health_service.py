@@ -61,7 +61,8 @@ class AppHealthServiceTests(unittest.TestCase):
 
         self.assertEqual(snapshot["version"], APP_HEALTH_SCHEMA_VERSION)
         self.assertEqual(snapshot["status"], "ok")
-        self.assertEqual(snapshot["workbench_read_model"]["status"], "ready")
+        self.assertNotIn("workbench_read_model", snapshot)
+        self.assertNotIn("workbench_relation_read_model", snapshot)
         self.assertEqual(snapshot["metrics"]["app_health_duration_ms"], 12.35)
         self.assertEqual(snapshot["alerts"]["active"], [])
 
@@ -82,10 +83,10 @@ class AppHealthServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(snapshot["status"], "busy")
-        self.assertEqual(snapshot["workbench_read_model"]["status"], "stale")
+        self.assertNotIn("workbench_read_model", snapshot)
         self.assertEqual(snapshot["metrics"]["dirty_scope_age_seconds"], {"all": 321.0})
 
-    def test_workbench_relation_read_model_health_exposes_backlog_and_failure(self) -> None:
+    def test_workbench_relation_read_model_health_payload_is_not_exposed(self) -> None:
         service = AppHealthService()
 
         snapshot = service.build_snapshot(
@@ -108,13 +109,10 @@ class AppHealthServiceTests(unittest.TestCase):
             duration_ms=1,
         )
 
-        relation = snapshot["workbench_relation_read_model"]
-        self.assertEqual(relation["status"], "stale")
-        self.assertEqual(relation["dirty_backlog"], 2)
-        self.assertEqual(relation["stale_scopes"], ["2026-01", "2026-02"])
-        self.assertEqual(relation["last_failure_reason"], "projection_failed")
-        self.assertEqual(snapshot["metrics"]["workbench_relation_dirty_backlog"], 2)
-        self.assertEqual(snapshot["metrics"]["workbench_relation_stale_scope_count"], 2)
+        self.assertEqual(snapshot["status"], "ok")
+        self.assertNotIn("workbench_relation_read_model", snapshot)
+        self.assertNotIn("workbench_relation_dirty_backlog", snapshot["metrics"])
+        self.assertNotIn("workbench_relation_stale_scope_count", snapshot["metrics"])
 
     def test_workbench_matching_dirty_scope_marks_busy_and_exposes_last_error(self) -> None:
         service = AppHealthService()
@@ -140,9 +138,7 @@ class AppHealthServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(snapshot["status"], "busy")
-        self.assertEqual(snapshot["workbench_read_model"]["status"], "stale")
-        self.assertEqual(snapshot["workbench_read_model"]["dirty_scopes"], ["2026-05"])
-        self.assertEqual(snapshot["workbench_read_model"]["last_matching_error"], "matching unavailable")
+        self.assertNotIn("workbench_read_model", snapshot)
         self.assertEqual(snapshot["metrics"]["workbench_matching_dirty_scope_count"], 1)
 
     def test_workbench_matching_running_scope_marks_rebuilding(self) -> None:
@@ -162,8 +158,7 @@ class AppHealthServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(snapshot["status"], "busy")
-        self.assertEqual(snapshot["workbench_read_model"]["status"], "rebuilding")
-        self.assertEqual(snapshot["workbench_read_model"]["matching_running_scopes"], ["2026-05"])
+        self.assertNotIn("workbench_read_model", snapshot)
 
     def test_rebuild_job_marks_read_model_rebuilding(self) -> None:
         service = AppHealthService()
@@ -187,9 +182,8 @@ class AppHealthServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(snapshot["status"], "busy")
-        self.assertEqual(snapshot["workbench_read_model"]["status"], "rebuilding")
-        self.assertEqual(snapshot["workbench_read_model"]["rebuild_job_ids"], ["job_1"])
-        self.assertGreaterEqual(snapshot["metrics"]["workbench_rebuild_running_seconds_max"], 480)
+        self.assertNotIn("workbench_read_model", snapshot)
+        self.assertEqual(snapshot["background_jobs"]["active_jobs"][0]["job_id"], "job_1")
 
     def test_build_snapshot_counts_active_and_attention_jobs_separately(self) -> None:
         service = AppHealthService()
@@ -256,7 +250,7 @@ class AppHealthServiceTests(unittest.TestCase):
 
         self.assertEqual(snapshot["status"], "blocked")
         self.assertEqual(snapshot["dependencies"]["oa_sync"]["status"], "unavailable")
-        self.assertEqual(snapshot["workbench_read_model"]["status"], "error")
+        self.assertNotIn("workbench_read_model", snapshot)
 
     def test_sse_event_serializes_named_event(self) -> None:
         body = AppHealthService.serialize_sse_event("app_health", {"status": "ok"})

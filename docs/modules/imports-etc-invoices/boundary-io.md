@@ -17,7 +17,7 @@
 - ETC 发票文件/ZIP 上传、过滤、解析、预览和确认。
 - 触发 ETC reconciliation、附件识别和相关 lifecycle。
 - 为 ETC 票据管理页面提供导入后业务事实。
-- 后台导入 job 完成后，`result_summary` 必须在 affected months 已知后返回 read model target envelope；queued admission 阶段不得伪造 targets。
+- 后台导入 job 完成后，`result_summary` 必须在 affected months 已知后返回 affected month/scope 诊断信息；queued admission 阶段不得伪造下游已收敛状态。
 
 ### 不负责
 
@@ -39,13 +39,13 @@
 | --- | --- | --- |
 | ETC import preview/result | 前端页面 | 可审计、可失败恢复 |
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
-| Dirty scope | lifecycle/runtime queue | 影响 workbench/invoice/search 等下游 |
-| Job completion target envelope | background job result summary / ETC 票据页 | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`operation_barrier_targets`，消费 completed job 的页面必须先等待 barrier 再刷新最终列表 |
+| Downstream impact | lifecycle/runtime queue | 影响 workbench/invoice/tax/cost 等下游 direct API 和真实后台任务；Search 只通过 direct `/api/search` 重新读取业务结果 |
+| Job completion summary | background job result summary / ETC 票据页 | 后端 result summary 可返回 `affected_months`、`affected_scope_keys` 等写后影响诊断信息；不返回 `read_model_scope_keys` 等 legacy target fields。前端 background job mapper 只暴露业务可读的 affected fields，ETC 票据页消费 completed job 后直接重读业务批次/任务列表，不再等待 operation barrier 或 job target fields |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search`、`tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics`。
+- Downstream impact：`workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 的 direct API / lifecycle /真实后台任务；Search 不再是 refresh/read model target，只受 direct search payload 影响。
 - Worker：import/runtime handlers。
 
 ## 文件范围

@@ -1,5 +1,4 @@
 import type { BankTransactionTagDictionary } from "../pendingInvoices/types";
-import type { OperationBarrierTarget } from "../operationBarrier/api";
 
 export type BankDetailAccount = {
   accountIdentity?: string | null;
@@ -18,16 +17,12 @@ export type BankDetailAccount = {
   transactionTotalCount?: number;
 };
 
-export type BankDetailReadModelStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
-
 export type BankDetailAccountsResponse = {
   accounts: BankDetailAccount[];
   totalBalance: string | null;
   balanceAccountCount: number;
   missingBalanceAccountCount: number;
   totalBalancesByCurrency?: Record<string, string>;
-  balanceReadModelStatus?: BankDetailReadModelStatus;
-  readModelStatus?: BankDetailReadModelStatus;
   cacheStatus?: string | null;
 };
 
@@ -148,7 +143,6 @@ export type BankDetailTransactionsResponse = {
   };
   categoryCounts: BankTransactionCategoryCounts;
   tagDictionary?: BankTransactionTagDictionary;
-  readModelStatus?: BankDetailReadModelStatus;
   cacheStatus?: string | null;
 };
 
@@ -260,10 +254,6 @@ export type BankAutoTagRulesResponse = {
   permissions: {
     canSave: boolean;
   };
-  readModelStatus?: "fresh" | "refreshing" | string;
-  readModelScopeKeys: string[];
-  freshnessTargets: OperationBarrierTarget[];
-  operationBarrierTargets: OperationBarrierTarget[];
   refreshReason?: "saved" | "reapplied";
 };
 

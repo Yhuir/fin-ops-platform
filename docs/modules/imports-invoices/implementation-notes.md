@@ -7,6 +7,7 @@
 
 - 发票导入不是独立实现；页面入口复用 `ImportWorkflowPage mode="invoice"`，因此任何共享导入工作流改动都必须同时检查银行流水导入和 ETC 发票导入。
 - 发票导入确认后的事实源是 canonical invoice facts + derived lifecycle + read model freshness，不是 confirm API 或 background job 的返回值。
+- 共享导入页确认成功后直接请求 Workbench 当前月，不再消费 `operation_barrier_targets` 或等待 `/api/operation-barrier/status`。
 - 本模块首轮闭环状态为 `documented-risk`：自动化测试已覆盖核心 contract 和历史 bug，但真实大文件、真实 Postgres/RabbitMQ/Redis/systemd worker drain、下游页面真实浏览器 smoke 仍需发布前验证。
 
 ## 记录模板

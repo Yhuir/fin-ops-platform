@@ -3258,7 +3258,7 @@ PF-P005-MG 已 verified。`main` 已 push 到 `origin/main`，远端测试基线
 - handler 仍负责 HTTP 参数入口、Response 包装和 server 层错误边界；facade 负责 read repository、freshness、refresh enqueue、Redis page cache 和 payload contract 的调度。
 - Facade 不得 import `Application` 或 HTTP `Response`，必须通过显式依赖、callable 或轻量 data/result object 与 `server.py` 解耦，避免反向依赖。
 - Facade 必须使用细粒度依赖注入；不得接收 `Application`、`RuntimeRepositories`、`RuntimeRepositoryContext`、`ApplicationStateStore`、`StateStoreProtocol` 或其他全局 runtime container，避免把 `server.py` 的耦合搬到新的上帝对象。
-- HTTP route/request 上下文相关的 observability wrapper（例如 `request_database_timing`）必须留在 `server.py` handler 层；纯 Workbench read-model 状态指标（例如 `_emit_workbench_read_model_status_metric`）可以移动或通过 metric emitter 注入 Facade，但指标语义必须保持。
+- HTTP route/request 上下文相关的 observability wrapper（例如 `request_database_timing`）必须留在 `server.py` handler 层；旧 Workbench read-model 状态指标已随页面 read model 迁移移除，不再作为 Facade 迁移目标。
 
 #### 禁止范围
 

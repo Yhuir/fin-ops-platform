@@ -4,25 +4,27 @@
 
 ## 模块化状态
 
-- 状态：partial
+- 状态：direct-runtime-guard
 - 当前边界可信度：high
-- 目标边界：所有后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明。
-- 当前缺口：部分 worker 同时承担多个 read model event，变更时必须同步检查 systemd/env、RabbitMQ dispatch 和 tests。
-- 旧代码删除条件：旧 worker 启动方式不再被 deploy/systemd/scripts 引用。
+- 目标边界：所有保留的后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明；页面 read model refresh worker 已下线并由负向 guard 保护。
+- 当前缺口：继续清理历史文档/fixture 中把页面 read-model event 当当前 worker lane 的表述；真实 worker 变更必须同步检查 systemd/env、RabbitMQ dispatch 和 tests。
+- 旧代码删除条件：旧 worker 启动方式不再被 deploy/systemd/scripts 引用，且 `.read_model.refresh` 不回流。
 
 ## 职责边界
 
 ### 负责
 
 - Runtime queue、worker registry、worker handler、worker health/readiness。
-- 把 durable queue 中的 outbox/read model event 分发给对应 worker。
+- 把 durable queue 中的真实 background outbox event 分发给对应 worker。
 - 为部署和 app health 暴露 worker 实例合同。
+- 记录页面 read-model worker 已删除项并防止回流。
 
 ### 不负责
 
 - 不拥有业务源事实。
 - 不直接知道 HTTP cookie/header 或 Flask response。
 - 不绕过 service/repository 边界写业务表。
+- 不新增页面 read model refresh worker。
 
 ## 输入 I/O
 
@@ -36,8 +38,8 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| Job result/status | runtime queue/app health | 成功、失败、重试和 readiness 可观察；影响 read model 的 job completion result summary 必须携带 target envelope 或明确不适用 |
-| Read model projection | 对应 repository | 只写 worker 对应投影 |
+| Job result/status | runtime queue/app health | 成功、失败、重试和 readiness 可观察；影响页面 direct refetch 的 job result summary 必须携带 affected scope/domain 或明确不适用 |
+| Background task result | 对应 service/repository | 只写真实后台任务负责的 canonical facts、external projection 或 task state |
 | Wakeup/transport | RabbitMQ 可选 | 不能作为状态事实源 |
 
 ## 文件范围
@@ -54,7 +56,7 @@
 
 ## 依赖方向
 
-- 允许依赖：runtime queue repository、registered handlers、read model projection services。
+- 允许依赖：runtime queue repository、registered handlers、真实后台任务 service。
 - 必须通过：runtime worker registry。
 - 禁止绕过：worker import `Application`、`app.server`、`app.auth`、HTTP response/status objects。
 
@@ -68,5 +70,5 @@
 
 ## 当前缺口和删除条件
 
-- 新增 worker 必须同步 registry、manifest/systemd env、tests、docs。
+- 新增 worker 必须同步 registry、systemd env、tests、docs；不得新增页面 read-model refresh worker。
 - 移除 worker 前必须证明 deploy、queue event、RabbitMQ dispatch 和 app health 不再引用。

@@ -40,7 +40,6 @@ class FakeConnection:
                 {"table_name": "import_files", "row_count": 4},
                 {"table_name": "invoices", "row_count": 5},
                 {"table_name": "bank_transactions", "row_count": 6},
-                {"table_name": "search_index_rows", "row_count": 7},
             ]
         raise AssertionError(f"unexpected fetch_all SQL: {sql}")
 

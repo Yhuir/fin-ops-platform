@@ -11,16 +11,8 @@ from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
-from fin_ops_platform.services.bank_account_balance_read_model_repository import BankAccountBalanceReadModelRepositoryPort
-from fin_ops_platform.services.bank_detail_read_model_repository import BankDetailReadModelRepositoryPort
-from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
-from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
-from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
 from fin_ops_platform.services.object_storage import ObjectStorageReadError, ObjectStorageRepository, ObjectStorageWriteError
-from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
-from fin_ops_platform.services.output_invoice_collection_read_model_repository import OutputInvoiceCollectionReadModelRepositoryPort
-from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories import (
     PostgresCoreRepository,
     PostgresOaPendingPaymentRelationRepository,
@@ -38,11 +30,7 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_workbench_pair_relations,
 )
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
-from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
 from fin_ops_platform.services.state_store import ApplicationStateStore, GRIDFS_BUCKET_NAME, GRIDFS_REF_PREFIX, load_mongo_state_settings
-from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
-from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
-from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 
 APP_SETTINGS_KEY = "app_settings"
@@ -144,19 +132,6 @@ class PostgresStateStore:
         self._ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
         self._read_model_repository = PostgresReadModelRepository(connection)
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
-        self._cost_statistics_sql_read_repository = CostStatisticsReadModelRepositoryPort(self._sql_read_model_repository)
-        self._tax_offset_read_model_repository = TaxOffsetReadModelRepositoryPort(self._read_model_repository)
-        self._bank_account_balance_sql_read_repository = BankAccountBalanceReadModelRepositoryPort(self._sql_read_model_repository)
-        self._bank_detail_sql_read_repository = BankDetailReadModelRepositoryPort(self._sql_read_model_repository)
-        self._pending_invoice_sql_read_repository = PendingInvoiceReadModelRepositoryPort(self._sql_read_model_repository)
-        self._search_sql_read_repository = SearchReadModelRepositoryPort(self._sql_read_model_repository)
-        self._input_invoice_usage_sql_read_repository = InputInvoiceUsageReadModelRepositoryPort(self._sql_read_model_repository)
-        self._output_invoice_collection_sql_read_repository = OutputInvoiceCollectionReadModelRepositoryPort(self._sql_read_model_repository)
-        self._oa_pending_payment_sql_read_repository = OaPendingPaymentReadModelRepositoryPort(self._sql_read_model_repository)
-        self._no_oa_bank_batch_sql_read_repository = NoOaBankBatchReadModelRepositoryPort(self._sql_read_model_repository)
-        self._tax_offset_sql_read_repository = TaxOffsetReadModelRepositoryPort(self._sql_read_model_repository)
-        self._turnover_ledger_sql_read_repository = TurnoverLedgerReadModelRepositoryPort(self._sql_read_model_repository)
-        self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
         self._oa_pending_payment_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
@@ -217,39 +192,9 @@ class PostgresStateStore:
                 "last_error": str(exc) or exc.__class__.__name__,
             }
             return {
-                "read_model_statuses": {"__runtime__": dict(payload)},
                 "worker_statuses": {"__runtime__": dict(payload)},
                 "outbox_statuses": {"__runtime__": dict(payload)},
             }
-
-    def record_read_model_readiness(
-        self,
-        *,
-        read_model_key: str,
-        scope_type: str,
-        scope_key: str,
-        status: str,
-        tenant_id: str = "default",
-        schema_version: str = "",
-        source_versions: dict[str, Any] | None = None,
-        row_count: int | None = None,
-        generated_at: object | None = None,
-        last_error: str | None = None,
-        raw_payload: dict[str, Any] | None = None,
-    ) -> None:
-        RuntimeMonitoringRepository(self._connection).record_read_model_readiness(
-            read_model_key=read_model_key,
-            scope_type=scope_type,
-            scope_key=scope_key,
-            status=status,
-            tenant_id=tenant_id,
-            schema_version=schema_version,
-            source_versions=source_versions,
-            row_count=row_count,
-            generated_at=generated_at,
-            last_error=last_error,
-            raw_payload=raw_payload,
-        )
 
     @property
     def oa_projection_repository(self) -> PostgresOAProjectionRepository:
@@ -607,27 +552,14 @@ class PostgresStateStore:
     def save_no_oa_bank_batches_scope(self, snapshot: dict[str, Any], *, scope_key: str) -> None:
         self._workbench_repository.save_no_oa_bank_batches_scope(snapshot, scope_key=scope_key)
 
-    def load_workbench_read_models(self) -> dict[str, Any]:
-        snapshot = self._read_model_repository.load_workbench_read_models()
-        if snapshot:
-            return snapshot
-        return {}
-
-    def save_workbench_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
-        self._read_model_repository.save_workbench_read_models(snapshot, changed_scope_keys=changed_scope_keys)
-        self._save_snapshot("workbench_read_models", snapshot)
-
     def save_no_oa_bank_batch_mutation(
         self,
         *,
         pair_relation_snapshot: dict[str, Any],
         no_oa_bank_batch_snapshot: dict[str, Any],
-        workbench_read_model_snapshot: dict[str, Any],
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
-        changed_scope_keys: set[str] | list[str] | tuple[str, ...],
     ) -> None:
         normalized_case_ids = {str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()}
-        normalized_scope_keys = {str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()}
 
         def write(_connection: Any) -> None:
             if normalized_case_ids:
@@ -636,10 +568,6 @@ class PostgresStateStore:
                     changed_case_ids=normalized_case_ids,
                 )
             self.save_no_oa_bank_batches(no_oa_bank_batch_snapshot)
-            self.save_workbench_read_models(
-                workbench_read_model_snapshot,
-                changed_scope_keys=normalized_scope_keys,
-            )
 
         run_in_transaction(self._connection, write)
 
@@ -721,29 +649,6 @@ class PostgresStateStore:
         self._workbench_repository.save_turnover_ledger_extras(snapshot)
         self._save_snapshot("turnover_ledger_extras", snapshot)
 
-    def load_cost_statistics_read_models(self) -> dict[str, Any]:
-        snapshot = self._read_model_repository.load_cost_statistics_read_models()
-        if snapshot:
-            return snapshot
-        return {}
-
-    def save_cost_statistics_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
-        self._read_model_repository.save_cost_statistics_read_models(snapshot, changed_scope_keys=changed_scope_keys)
-        self._save_snapshot("cost_statistics_read_models", snapshot)
-
-    def load_tax_offset_read_models(self) -> dict[str, Any]:
-        snapshot = self._tax_offset_read_model_repository.load_tax_offset_read_models()
-        if snapshot:
-            return snapshot
-        return {}
-
-    def save_tax_offset_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
-        self._tax_offset_read_model_repository.save_tax_offset_read_models(
-            snapshot,
-            changed_scope_keys=changed_scope_keys,
-        )
-        self._save_snapshot("tax_offset_read_models", snapshot)
-
     @property
     def import_fact_repository(self) -> PostgresCoreRepository:
         return self._core_repository
@@ -755,64 +660,6 @@ class PostgresStateStore:
     @property
     def oa_pending_payment_relation_repository(self) -> PostgresOaPendingPaymentRelationRepository:
         return self._oa_pending_payment_relation_repository
-
-    @property
-    def workbench_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._sql_read_model_repository
-
-    @property
-    def workbench_sql_projection_builder(self) -> Any:
-        from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
-
-        return WorkbenchSqlProjectionBuilder(connection=self._connection, read_model_repository=self._read_model_repository)
-
-    @property
-    def cost_statistics_sql_read_repository(self) -> CostStatisticsReadModelRepositoryPort:
-        return self._cost_statistics_sql_read_repository
-
-    @property
-    def tax_offset_sql_read_repository(self) -> TaxOffsetReadModelRepositoryPort:
-        return self._tax_offset_sql_read_repository
-
-    @property
-    def turnover_ledger_sql_read_repository(self) -> TurnoverLedgerReadModelRepositoryPort:
-        return self._turnover_ledger_sql_read_repository
-
-    @property
-    def search_sql_read_repository(self) -> SearchReadModelRepositoryPort:
-        return self._search_sql_read_repository
-
-    @property
-    def pending_invoice_sql_read_repository(self) -> PendingInvoiceReadModelRepositoryPort:
-        return self._pending_invoice_sql_read_repository
-
-    @property
-    def bank_account_balance_sql_read_repository(self) -> BankAccountBalanceReadModelRepositoryPort:
-        return self._bank_account_balance_sql_read_repository
-
-    @property
-    def bank_detail_sql_read_repository(self) -> BankDetailReadModelRepositoryPort:
-        return self._bank_detail_sql_read_repository
-
-    @property
-    def workbench_relation_sql_read_repository(self) -> WorkbenchRelationReadModelRepositoryPort:
-        return self._workbench_relation_sql_read_repository
-
-    @property
-    def input_invoice_usage_sql_read_repository(self) -> InputInvoiceUsageReadModelRepositoryPort:
-        return self._input_invoice_usage_sql_read_repository
-
-    @property
-    def output_invoice_collection_sql_read_repository(self) -> OutputInvoiceCollectionReadModelRepositoryPort:
-        return self._output_invoice_collection_sql_read_repository
-
-    @property
-    def oa_pending_payment_sql_read_repository(self) -> OaPendingPaymentReadModelRepositoryPort:
-        return self._oa_pending_payment_sql_read_repository
-
-    @property
-    def no_oa_bank_batch_sql_read_repository(self) -> NoOaBankBatchReadModelRepositoryPort:
-        return self._no_oa_bank_batch_sql_read_repository
 
     def list_invoices_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_invoices_page(**kwargs)
@@ -865,14 +712,11 @@ class PostgresStateStore:
             "workbench_overrides": self._load_snapshot_or_empty("workbench_overrides"),
             "workbench_exception_cases": self.load_workbench_exception_cases(),
             "workbench_pair_relations": self.load_workbench_pair_relations(),
-            "workbench_read_models": self.load_workbench_read_models(),
             "workbench_candidate_matches": self.load_workbench_candidate_matches(),
             "workbench_matching_dirty_scopes": self._load_snapshot_or_empty("workbench_matching_dirty_scopes"),
             "no_oa_bank_batches": self.load_no_oa_bank_batches(),
             "turnover_relations": self.load_turnover_relations(),
             "turnover_ledger_extras": self.load_turnover_ledger_extras(),
-            "cost_statistics_read_models": self.load_cost_statistics_read_models(),
-            "tax_offset_read_models": self.load_tax_offset_read_models(),
             "app_health_alerts": self.load_app_health_alerts(),
             "pending_invoice_commands": self.load_pending_invoice_commands(),
         }
@@ -905,8 +749,6 @@ class PostgresStateStore:
             self.save_workbench_pair_relations(normalized.get("workbench_pair_relations") or {})
         if "no_oa_bank_batches" in normalized:
             self.save_no_oa_bank_batches(normalized.get("no_oa_bank_batches") or {})
-        if "workbench_read_models" in normalized:
-            self.save_workbench_read_models(normalized.get("workbench_read_models") or {})
         if "workbench_candidate_matches" in normalized:
             self.save_workbench_candidate_matches(normalized.get("workbench_candidate_matches") or {})
         if "workbench_matching_dirty_scopes" in normalized:
@@ -915,10 +757,6 @@ class PostgresStateStore:
             self.save_turnover_relations(normalized.get("turnover_relations") or {})
         if "turnover_ledger_extras" in normalized:
             self.save_turnover_ledger_extras(normalized.get("turnover_ledger_extras") or {})
-        if "cost_statistics_read_models" in normalized:
-            self.save_cost_statistics_read_models(normalized.get("cost_statistics_read_models") or {})
-        if "tax_offset_read_models" in normalized:
-            self.save_tax_offset_read_models(normalized.get("tax_offset_read_models") or {})
         if "app_health_alerts" in normalized:
             self.save_app_health_alerts(normalized.get("app_health_alerts") or {})
         if "pending_invoice_commands" in normalized:

@@ -20,7 +20,6 @@ type AutoTagRulesDrawerProps = {
   onClose: () => void;
   onSaved?: (payload: BankAutoTagRulesResponse) => void;
   canMutateData?: boolean;
-  refreshStatus?: "idle" | "refreshing" | "fresh";
   refreshScope?: BankAutoTagRefreshScope;
   saveAutoTagRules?: (payload: SaveBankAutoTagRulesRequest) => Promise<BankAutoTagRulesResponse>;
   reapplyAutoTagRules?: () => Promise<BankAutoTagRulesResponse>;
@@ -280,7 +279,6 @@ export default function AutoTagRulesDrawer({
   onClose,
   onSaved,
   canMutateData = true,
-  refreshStatus = "idle",
   refreshScope,
   saveAutoTagRules = saveBankAutoTagRules,
   reapplyAutoTagRules = reapplyBankAutoTagRules,
@@ -344,15 +342,6 @@ export default function AutoTagRulesDrawer({
       });
     return () => controller.abort();
   }, [open]);
-
-  useEffect(() => {
-    if (refreshStatus === "refreshing") {
-      setFeedback(lastRefreshAction === "reapply" ? "已提交重新应用，银行明细正在刷新。" : "规则已保存，银行明细正在刷新。");
-    }
-    if (refreshStatus === "fresh") {
-      setFeedback(lastRefreshAction === "reapply" ? "重新应用已完成，银行明细已刷新。" : "规则已保存，银行明细已刷新。");
-    }
-  }, [lastRefreshAction, refreshStatus]);
 
   const dirty = useMemo(() => normalizedDraft(activeRules, archivedRules) !== baseline, [activeRules, archivedRules, baseline]);
   const readonly = !canMutateData || !canSave || saving || reapplying || loading;
@@ -460,7 +449,7 @@ export default function AutoTagRulesDrawer({
         setActiveRules(nextActive);
         setArchivedRules(nextArchived);
         setBaseline(normalizedDraft(nextActive, nextArchived));
-        setFeedback(payload.readModelStatus === "fresh" ? "规则已保存，银行明细已刷新。" : "规则已保存，银行明细正在刷新。");
+        setFeedback("规则已保存，银行明细已刷新。");
         onSaved?.(payload);
       })
       .catch((caught) => {
@@ -490,7 +479,7 @@ export default function AutoTagRulesDrawer({
         setActiveRules(nextActive);
         setArchivedRules(nextArchived);
         setBaseline(normalizedDraft(nextActive, nextArchived));
-        setFeedback(payload.readModelStatus === "fresh" ? "重新应用已完成，银行明细已刷新。" : "已提交重新应用，银行明细正在刷新。");
+        setFeedback("重新应用已完成，银行明细已刷新。");
         onSaved?.(payload);
       })
       .catch((caught) => {

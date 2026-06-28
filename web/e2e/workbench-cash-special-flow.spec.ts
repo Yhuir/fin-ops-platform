@@ -4,7 +4,6 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 const pairedGroupTestId = "candidate-group-paired-case:CASE-202603-101";
-const operationBarrierPath = "POST /api/operation-barrier/status";
 const workbenchGroupsPath = "GET /api/workbench/groups";
 const passThroughPath = "/api/workbench/actions/confirm-cash-pass-through";
 const ticketPurchasePath = "/api/workbench/actions/confirm-cash-ticket-purchase";
@@ -44,8 +43,6 @@ test.describe("workbench cash special browser flow", () => {
 
     await page.goto("/");
     await expect(page.getByTestId(pairedGroupTestId)).toBeVisible();
-
-    const barrierCallsBeforePassThrough = api.count(operationBarrierPath);
     const groupsCallsBeforePassThrough = api.count(workbenchGroupsPath);
     await openPairedBankRowMenu(page);
     const passThroughResponse = waitForWorkbenchPost(page, passThroughPath);
@@ -61,11 +58,8 @@ test.describe("workbench cash special browser flow", () => {
       note: "由关联台确认现金往来过账",
     });
     expectWorkbenchRowIds(passThroughBody);
-    expect(api.count(operationBarrierPath)).toBeGreaterThan(barrierCallsBeforePassThrough);
     expect(api.count(workbenchGroupsPath)).toBeGreaterThanOrEqual(groupsCallsBeforePassThrough);
     await expectNoUnexpectedSuccessUiErrors(page);
-
-    const barrierCallsBeforeTicket = api.count(operationBarrierPath);
     await openPairedBankRowMenu(page);
     await page.getByRole("menuitem", { name: "确认为买票" }).click();
 
@@ -100,10 +94,7 @@ test.describe("workbench cash special browser flow", () => {
       note: "浏览器确认买票成本",
     });
     expectWorkbenchRowIds(ticketBody);
-    expect(api.count(operationBarrierPath)).toBeGreaterThan(barrierCallsBeforeTicket);
     await expectNoUnexpectedSuccessUiErrors(page);
-
-    const barrierCallsBeforeCancel = api.count(operationBarrierPath);
     await openPairedBankRowMenu(page);
     const cancelResponse = waitForWorkbenchPost(page, cancelCashSpecialPath);
     await page.getByRole("menuitem", { name: "取消现金处理" }).click();
@@ -118,7 +109,6 @@ test.describe("workbench cash special browser flow", () => {
       note: "由关联台取消现金往来特殊处理",
     });
     expectWorkbenchRowIds(cancelBody);
-    expect(api.count(operationBarrierPath)).toBeGreaterThan(barrierCallsBeforeCancel);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

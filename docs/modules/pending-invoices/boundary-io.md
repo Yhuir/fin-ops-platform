@@ -1,22 +1,22 @@
 # 待找发票模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-06-27
 
 ## 模块化状态
 
 - 状态：partial
 - 当前边界可信度：high
-- 目标边界：待找发票页面读取 `pending_invoice` scoped read model，规则保存和关联变更触发精确 scope refresh。
-- 当前缺口：pending invoice 同时依赖 search、invoice lifecycle、workbench relation，变更时必须同时核验 fan-out。
-- 旧代码删除条件：旧 API 直查路径不再被前端或 tests 引用。
+- 目标边界：待找发票页面直接读取 rows/rules/filter/export API DTO，规则保存和关联变更成功后直接重读 rows；页面 API 不返回 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_key(s)` 或 `refresh_enqueued`。
+- 当前缺口：pending invoice 页面、worker、projection、repository port 和 active storage 调用点已清零；历史 PostgreSQL migrations 仍包含旧表创建/变更记录，后续若做 fresh-schema baseline 再另行清理。
+- 旧代码删除条件：已满足当前运行面；不得重新引入 pending-invoice read model、freshness gate、refresh worker 或 operation barrier target。
 
 ## 职责边界
 
 ### 负责
 
 - 待找发票列表、规则、筛选、导出和发票关联入口。
-- `pending_invoice` read model 的 direction/filter/month scope。
-- 与 search/invoice lifecycle 的投影联动。
+- 待找发票 direct rows/rules/filter/export 页面合同。
+- 与 invoice lifecycle 的 direct query 联动。
 
 ### 不负责
 
@@ -29,25 +29,25 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面筛选、方向、规则操作 | `PendingInvoicesPage.tsx`、`features/pendingInvoices/api.ts` | scope 必须落到 direction/filter/month |
-| 关联/规则写入 | pending invoice services | 写后触发 pending_invoice/search/invoice_lifecycle 相关 scope |
-| Refresh scope | `pending_invoice` manifest | `direction:filter_group[:YYYY-MM]`；bare `all` forbidden |
+| 关联/规则写入 | pending invoice services | 写后返回业务结果、影响月份/scope，并由页面直接重读 rows；不触发 pending-invoice read model refresh |
+| Direct rows scope | `PendingInvoiceQueryService` | `direction/filter/date/page` 页面查询参数；不接受 read model scope 作为事实源 |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 待找发票 rows/summary | 前端页面 | fresh/status 可见；缺少/未知 read model status 保持 refreshing/non-fresh |
-| 规则保存结果 | API | 持久化规则并触发刷新 |
-| 发票关联/收入状态写结果 | API/frontend | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
-| Dirty scope | runtime queue | 不允许无界全量 |
+| 待找发票 rows/summary | 前端页面 | direct payload；API 不返回页面级 read model freshness 字段 |
+| 规则保存结果 | API | 持久化规则并返回 affected diagnostics；页面成功后 direct refetch rows |
+| 发票关联/收入状态写结果 | API/frontend | 返回业务写入结果、`affected_months` 和 `affected_scope_keys`；不返回 `read_model_scope_keys`，前端成功后直接重读 rows |
+| Lifecycle source rows | `invoice_lifecycle_sql_projection.py` | 通过 direct `PendingInvoiceQueryService` 分页读取 expense/income rows 后映射 lifecycle 行 |
 
 ## 持久化与投影
 
-- Read model：`pending_invoice`
-- Projection：`scoped_incremental`
-- Worker：`pending-invoice`，辅助 `search-pending`
-- Query owner：`PendingInvoiceReadModelService`
-- Repository owner：`PendingInvoiceReadModelRepositoryPort`
+- Read model：无当前运行面；旧 `pending_invoice` 只存在于历史 migrations/归档文档
+- Projection：无 pending-invoice SQL projection
+- Worker：无 pending-invoice worker
+- Query owner：`PendingInvoiceQueryService`
+- Repository owner：无 pending-invoice read-model repository port
 
 ## 文件范围
 
@@ -56,15 +56,15 @@
 | Frontend page | `web/src/pages/PendingInvoicesPage.tsx` |
 | Frontend feature/components | `web/src/features/pendingInvoices/*`、`web/src/components/pendingInvoices/*` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_pending_invoices.py` |
-| Backend service | `pending_invoice_service.py`、`pending_invoice_read_model_service.py`、`pending_invoice_rules_application_service.py`、`pending_invoice_lifecycle_service.py`、`pending_invoice_status.py` |
-| Repository / SQL | `pending_invoice_read_model_repository.py`、`search_pending_sql_projection.py`、`invoice_lifecycle_sql_projection.py` |
+| Backend service | `pending_invoice_service.py`、`pending_invoice_rules_application_service.py`、`pending_invoice_lifecycle_service.py`、`pending_invoice_status.py` |
+| Repository / SQL | `invoice_lifecycle_sql_projection.py`（通过 direct pending query 读取源 rows）；无 pending-invoice SQL projection/repository |
 | Tests | `tests/test_pending_invoice*.py`、`web/src/test/PendingInvoices*.test.*`、`web/e2e/pending-invoices-*.spec.ts` |
 
 ## 依赖方向
 
-- 允许依赖：invoice lifecycle policy/read facade、search projection、workbench relation read facade。
-- 必须通过：PendingInvoiceReadModelService and rules application service。
-- 禁止绕过：bare all refresh；页面自行合成 invoice status。
+- 允许依赖：invoice lifecycle policy/read facade、workbench relation read facade。
+- 必须通过：`PendingInvoiceQueryService` 和 rules application service；`PendingInvoiceReadModelService` 已删除，页面 route 不返回迁移期 read model freshness 字段。
+- 禁止绕过：重新引入 pending-invoice read model refresh；页面自行合成 invoice status。
 
 ## 测试与验证
 
@@ -75,5 +75,6 @@
 
 ## 当前缺口和删除条件
 
-- 修改规则或 scope policy 时必须同步 manifest/scope tests。
-- 删除旧路径前必须覆盖 expense/income、规则保存、关联、导出和 fan-out。
+- 修改规则、direct rows scope 或 lifecycle 映射时必须同步 API/service/lifecycle tests。
+- 继续删除历史 migrations 或 fresh-schema baseline 前，必须单独评估数据库升级兼容性。
+- 必须保留当前页面 API “无 freshness 字段”的回归测试。

@@ -133,14 +133,12 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439011")
         relation_command = FakeRelationCommandService()
         pending_relation_service = FakePendingRelationService()
-        refresh_calls: list[tuple[str, str, str]] = []
         service = _service(
             oa_records=[_oa("oa-pay-2047", "100.00", workflow_status="in_progress")],
             transactions=[_bank("bank-100", "100.00")],
             relation_command=relation_command,
             pending_relation_service=pending_relation_service,
             payment_repository=payment_repository,
-            refresh_calls=refresh_calls,
         )
 
         payload = service.confirm_paid(
@@ -162,25 +160,11 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(create_call["source_action"], "confirm_paid")
         self.assertEqual(create_call["idempotency_key"], "idem-1")
         self.assertEqual(create_call["amount_check"]["matched"], True)
-        self.assertEqual(
-            refresh_calls,
-            [
-                ("workbench", "2026-06", "oa_pending_payment_confirm_paid"),
-                ("oa_pending_payment", "2026-06", "oa_pending_payment_confirm_paid"),
-                ("workbench", "all", "oa_pending_payment_confirm_paid"),
-                ("oa_pending_payment", "all", "oa_pending_payment_confirm_paid"),
-            ],
-        )
         self.assertEqual(payload["affected_scope_keys"], ["2026-06", "all"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [
-                {"read_model_key": "oa_pending_payment", "scope_key": "2026-06"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-06"},
-                {"read_model_key": "oa_pending_payment", "scope_key": "all"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
-            ],
-        )
+        self.assertNotIn("readModelRefresh", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
 
     def test_confirm_paid_without_bank_uses_existing_active_relation(self) -> None:
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439012")
@@ -241,14 +225,12 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439015")
         relation_command = FakeRelationCommandService()
         pending_relation_service = FakePendingRelationService()
-        refresh_calls: list[tuple[str, str, str]] = []
         service = _service(
             oa_records=[_oa("oa-link", "100.00", workflow_status="in_progress")],
             transactions=[_bank("bank-link", "100.00")],
             relation_command=relation_command,
             pending_relation_service=pending_relation_service,
             payment_repository=payment_repository,
-            refresh_calls=refresh_calls,
         )
 
         payload = service.link_bank_transactions(
@@ -267,17 +249,12 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(create_call["oa_row_ids"], ["oa-link"])
         self.assertEqual(create_call["bank_transaction_ids"], ["bank-link"])
         self.assertEqual(create_call["source_action"], "link_bank_transactions")
-        self.assertEqual(
-            refresh_calls,
-            [
-                ("workbench", "2026-06", "oa_pending_payment_link_bank_transactions"),
-                ("oa_pending_payment", "2026-06", "oa_pending_payment_link_bank_transactions"),
-                ("workbench", "all", "oa_pending_payment_link_bank_transactions"),
-                ("oa_pending_payment", "all", "oa_pending_payment_link_bank_transactions"),
-            ],
-        )
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-06", "all"])
-        self.assertEqual(payload["freshness_targets"][0], {"read_model_key": "oa_pending_payment", "scope_key": "2026-06"})
+        self.assertEqual(payload["affected_scope_keys"], ["2026-06", "all"])
+        self.assertNotIn("readModelRefresh", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("readModelRefresh", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
 
     def test_link_bank_transactions_keeps_relation_without_writeback_when_amount_mismatches(self) -> None:
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439018")
@@ -308,14 +285,12 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439019")
         relation_command = FakeRelationCommandService()
         pending_relation_service = FakePendingRelationService()
-        refresh_calls: list[tuple[str, str, str]] = []
         service = _service(
             oa_records=[_oa("oa-auto", "100.00", workflow_status="in_progress")],
             transactions=[_bank("bank-auto", "100.00")],
             relation_command=relation_command,
             pending_relation_service=pending_relation_service,
             payment_repository=payment_repository,
-            refresh_calls=refresh_calls,
         )
 
         payload = service.auto_reconcile_bank_transactions({"month": "2026-06"}, actor_id="tester")
@@ -332,17 +307,10 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(len(pending_relation_service.create_calls), 1)
         self.assertEqual(pending_relation_service.create_calls[0]["raw_payload"]["history_operation_type"], "oa_pending_payment_auto_reconcile")
         self.assertEqual(pending_relation_service.create_calls[0]["amount_check"]["rule_code"], "oa_bank_exact_amount")
-        self.assertEqual(
-            refresh_calls,
-            [
-                ("workbench", "2026-06", "oa_pending_payment_auto_reconcile"),
-                ("oa_pending_payment", "2026-06", "oa_pending_payment_auto_reconcile"),
-                ("workbench", "all", "oa_pending_payment_auto_reconcile"),
-                ("oa_pending_payment", "all", "oa_pending_payment_auto_reconcile"),
-            ],
-        )
         self.assertEqual(payload["affected_scope_keys"], ["2026-06", "all"])
-        self.assertEqual(payload["operation_barrier_targets"][-1], {"read_model_key": "workbench_relation", "scope_key": "all"})
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
 
     def test_auto_reconcile_all_months_groups_matches_by_month(self) -> None:
         payment_repository = FakePaymentStatusRepository(
@@ -353,7 +321,6 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         )
         relation_command = FakeRelationCommandService()
         pending_relation_service = FakePendingRelationService()
-        refresh_calls: list[tuple[str, str, str]] = []
         service = _service(
             oa_records=[
                 _oa(
@@ -386,7 +353,6 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
             relation_command=relation_command,
             pending_relation_service=pending_relation_service,
             payment_repository=payment_repository,
-            refresh_calls=refresh_calls,
         )
 
         payload = service.auto_reconcile_bank_transactions({"month": "all"}, actor_id="tester")
@@ -403,8 +369,7 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
                 ("2026-06", ["oa-auto-jun", "bank-jun"]),
             ],
         )
-        self.assertIn(("workbench", "2026-04", "oa_pending_payment_auto_reconcile"), refresh_calls)
-        self.assertIn(("oa_pending_payment", "2026-06", "oa_pending_payment_auto_reconcile"), refresh_calls)
+        self.assertEqual(set(payload["affected_scope_keys"]), {"2026-04", "2026-06", "all"})
 
     def test_auto_reconcile_writes_completed_oa_when_existing_relation_is_paid(self) -> None:
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439020", pay_status=PAY_STATUS_PENDING)
@@ -482,14 +447,12 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
                 }
             ]
         )
-        refresh_calls: list[tuple[str, str, str]] = []
         service = _service(
             oa_records=[],
             completed_oa_records=[_oa("oa-completed-paid", "100.00", workflow_status="completed")],
             transactions=[_bank("bank-completed", "100.00")],
             relation_command=relation_command,
             payment_repository=payment_repository,
-            refresh_calls=refresh_calls,
         )
 
         payload = service.auto_reconcile_bank_transactions({"month": "2026-06"}, actor_id="tester")
@@ -497,10 +460,11 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(payload["autoMatchedCount"], 0)
         self.assertEqual(payload["writebackCount"], 0)
         self.assertEqual(payload["oaPaymentWritebacks"], [])
-        self.assertEqual(payload["readModelRefresh"]["enqueued"], False)
-        self.assertEqual(payload["operation_barrier_targets"], [])
+        self.assertNotIn("readModelRefresh", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
         self.assertEqual(payment_repository.marked_flow_ids, [])
-        self.assertEqual(refresh_calls, [])
         self.assertEqual(relation_command.confirm_calls, [])
 
     def test_auto_reconcile_reports_skipped_exact_match_when_flow_id_is_missing(self) -> None:
@@ -694,18 +658,7 @@ def _service(
     relation_command: FakeRelationCommandService,
     pending_relation_service: FakePendingRelationService | None = None,
     payment_repository: FakePaymentStatusRepository,
-    refresh_calls: list[tuple[str, str, str]] | None = None,
 ) -> OaPendingPaymentCommandService:
-    calls = refresh_calls if refresh_calls is not None else []
-
-    def enqueue_workbench(scope_key: str, *, reason: str, **_kwargs: object) -> bool:
-        calls.append(("workbench", scope_key, reason))
-        return True
-
-    def enqueue_oa_pending(scope_key: str, *, reason: str, **_kwargs: object) -> bool:
-        calls.append(("oa_pending_payment", scope_key, reason))
-        return True
-
     return OaPendingPaymentCommandService(
         import_service=ImportNormalizationService(existing_transactions=transactions),
         oa_projection=StaticOAProjection(oa_records),
@@ -713,8 +666,6 @@ def _service(
         relation_command_service=relation_command,
         pending_relation_service=pending_relation_service or FakePendingRelationService(),
         payment_status_repository=payment_repository,
-        enqueue_workbench_refresh=enqueue_workbench,
-        enqueue_oa_pending_payment_refresh=enqueue_oa_pending,
     )
 
 

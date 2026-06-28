@@ -168,15 +168,6 @@ describe("imports api", () => {
           },
           files: [],
           affected_scope_keys: ["2026-06", "all"],
-          read_model_scope_keys: ["2026-06", "all"],
-          freshness_targets: [
-            { read_model_key: "bank_detail", scope_key: "2026-06" },
-            { read_model_key: "bank_account_balance", scope_key: "all" },
-          ],
-          operation_barrier_targets: [
-            { read_model_key: "bank_detail", scope_key: "2026-06" },
-            { read_model_key: "bank_account_balance", scope_key: "all" },
-          ],
         }),
         {
           status: 200,
@@ -191,11 +182,6 @@ describe("imports api", () => {
     const payload = await confirmImportFiles("import_session_0001", ["import_file_0001"]);
 
     expect(payload.affectedScopeKeys).toEqual(["2026-06", "all"]);
-    expect(payload.readModelScopeKeys).toEqual(["2026-06", "all"]);
-    expect(payload.operationBarrierTargets).toEqual([
-      { readModelKey: "bank_detail", scopeKey: "2026-06" },
-      { readModelKey: "bank_account_balance", scopeKey: "all" },
-    ]);
   });
 
   test("maps duplicate group and skipped row detail fields from preview response", async () => {

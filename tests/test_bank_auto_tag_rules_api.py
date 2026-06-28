@@ -11,7 +11,7 @@ from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
 from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
 from fin_ops_platform.services.state_store import ApplicationStateStore
-from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
+from fin_ops_platform.services.workbench_projection_versions import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
 def _session(*, can_mutate_data: bool = True) -> SimpleNamespace:
@@ -22,11 +22,7 @@ def _session(*, can_mutate_data: bool = True) -> SimpleNamespace:
 
 
 class _ReadModelQueue:
-    def __init__(self) -> None:
-        self.enqueued: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-        self.enqueued.append((scope_type, scope_key, reason))
+    pass
 
 
 class _BankDetailStatusRepository:
@@ -41,10 +37,10 @@ class _BankDetailStatusRepository:
 
     def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
         return {
-            "read_model_status": self.status,
-            "read_model_scope_keys": list(scope_keys),
-            "read_model_generated_at": "2026-05-27T21:00:00+00:00",
-            "read_model_scope_signatures": {
+            "status": self.status,
+            "scope_keys": list(scope_keys),
+            "generated_at": "2026-05-27T21:00:00+00:00",
+            "scope_signatures": {
                 scope_key: {
                     "status": "fresh",
                     "source_versions": (
@@ -85,7 +81,6 @@ class _BankDetailStatusRepository:
             ],
             "category_counts": {"fee": 1, "uncategorized": 0},
             "pagination": {"page": 1, "page_size": 100, "total": 1},
-            "read_model_status": self.status,
         }
 
     def list_bank_detail_accounts(self, **_kwargs: object) -> dict[str, object]:
@@ -106,11 +101,7 @@ class _BankDetailStatusRepository:
             "total_balance": "90.00",
             "balance_account_count": 1,
             "missing_balance_account_count": 0,
-            "read_model_status": self.status,
         }
-
-    def list_bank_account_balances(self, **kwargs: object) -> dict[str, object]:
-        return self.list_bank_detail_accounts(**kwargs)
 
 
 class BankAutoTagRulesApiTests(unittest.TestCase):
@@ -209,17 +200,11 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(payload["system_rule"]["priority_label"], "优先级 1")
         self.assertEqual(payload["active_rules"][0]["priority_label"], "优先级 2")
         self.assertEqual({rule["priority"] for rule in payload["active_rules"]}, {2})
-        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("no_oa_bank_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
-    def test_reapply_endpoint_enqueues_bank_detail_refresh_without_changing_rules(self) -> None:
+    def test_reapply_endpoint_reapplies_rules_without_bank_detail_refresh(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        app._bank_detail_available_month_scope_provider = lambda: SimpleNamespace(
-            scope_keys=lambda: ["2026-03", "2026-04"]
-        )
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()
 
         with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
@@ -228,29 +213,18 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 202)
         self.assertEqual(payload["version"], current["version"])
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-03", "2026-04"])
-        self.assertEqual(
-            payload["freshness_targets"],
-            [
-                {"read_model_key": "bank_detail", "scope_key": "2026-03"},
-                {"read_model_key": "bank_detail", "scope_key": "2026-04"},
-            ],
-        )
-        self.assertEqual(payload["enqueued_jobs"], ["bank_detail.read_model.refresh"])
-        self.assertEqual(
-            queue.enqueued,
-            [
-                ("bank_detail", "2026-03", "bank_auto_tag_rules_reapply_requested"),
-                ("bank_detail", "2026-04", "bank_auto_tag_rules_reapply_requested"),
-            ],
-        )
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertEqual(payload["affected_scope_keys"], ["all"])
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
+        self.assertNotIn("enqueued_jobs", payload)
         audit = app._audit_service.as_dicts()[-1]
         self.assertEqual(audit["action"], "bank_auto_tag_rules_reapply_requested")
-        self.assertEqual(audit["metadata"]["scope_keys"], ["2026-03", "2026-04"])
+        self.assertEqual(audit["metadata"]["scope_keys"], ["all"])
         self.assertEqual(audit["metadata"]["version"], current["version"])
 
-    def test_reapply_endpoint_fails_when_bank_detail_refresh_queue_is_unavailable(self) -> None:
+    def test_reapply_endpoint_does_not_require_read_model_refresh_queue(self) -> None:
         app = build_application()
         app._runtime_repositories = SimpleNamespace(queue_repository=None)
 
@@ -258,8 +232,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             response = app.handle_request("POST", "/api/bank-details/auto-tag-rules/reapply", "{}")
 
         payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(payload["error"], "bank_auto_tag_rules_reapply_unavailable")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["affected_scope_keys"], ["all"])
+        self.assertNotIn("error", payload)
 
     def test_reapply_endpoint_requires_mutation_permission(self) -> None:
         app = build_application()
@@ -276,7 +251,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(payload["error"], "permission_denied")
-        self.assertEqual(queue.enqueued, [])
 
     def test_confirmation_endpoint_rejects_single_auto_match_candidate(self) -> None:
         app = build_application()
@@ -794,8 +768,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 for candidate in suggestion["auto_candidate_categories"]
             )
         )
-        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("no_oa_bank_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
     def test_put_external_turnover_rule_clears_legacy_third_label_and_persists_action_type(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -962,39 +934,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(aggregate_sql_versions["bank_auto_tag_rules_version"], 42)
         self.assertEqual(aggregate_sql_versions["builder"], WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
 
-    def test_workbench_refresh_status_marks_old_bank_auto_tag_generation_stale(self) -> None:
-        app = build_application()
-
-        class WorkbenchRepository:
-            def get_workbench_refresh_status(self, *, scope_key: str) -> dict[str, object]:
-                return {
-                    "scope_key": scope_key,
-                    "read_model_status": "fresh",
-                    "active_generation_id": "gen-1",
-                    "generations": [
-                        {
-                            "generation_id": "gen-1",
-                            "status": "active",
-                            "source_versions": {
-                                "builder": "2026-05-25-oa-attachment-source-groups",
-                                "bank_auto_tag_rules_version": 1,
-                                "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
-                                "oa_projection_sync_version": app._current_oa_projection_sync_version(),
-                            },
-                        }
-                    ],
-                }
-
-        app._workbench_sql_read_repository = WorkbenchRepository()
-
-        with patch.object(app, "_current_bank_auto_tag_rules_version", return_value=2):
-            response = app._handle_api_workbench_refresh_status("2026-05")
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
-
     def test_put_derives_label_from_required_primary_and_optional_sub_label(self) -> None:
         app = build_application()
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()
@@ -1090,21 +1029,15 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("bank_detail", "2026-01", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
-        self.assertIn(("bank_detail", "2026-01", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("bank_detail", "2026-03", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
-    def test_bank_category_mutation_side_effect_port_enqueues_turnover_ledger_all_refresh(self) -> None:
+    def test_bank_category_mutation_side_effect_port_does_not_enqueue_turnover_ledger_refresh(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
         app._invalidate_workbench_after_bank_transaction_categories = lambda _months: True
         app._audit_service = SimpleNamespace(record_action=lambda **_kwargs: None)
         side_effect_port = BankDetailCategoryMutationSideEffectPort(
-            enqueue_bank_detail_refresh=app._bank_detail_read_model_refresh_producer().enqueue,
-            enqueue_turnover_ledger_refresh=app._turnover_ledger_read_model_refresh_producer().enqueue,
+            enqueue_turnover_ledger_refresh=lambda *_args, **_kwargs: False,
             invalidate_workbench_after_category_mutation=app._invalidate_workbench_after_bank_transaction_categories,
             audit_service=app._audit_service,
         )
@@ -1117,17 +1050,13 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             metadata={},
         )
 
-        self.assertIn(("bank_detail", "2026-03", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertNotIn(("turnover_ledger", "2026-03", "bank_detail_category_confirmation_changed"), queue.enqueued)
 
-    def test_bank_detail_api_does_not_reenqueue_already_refreshing_scopes(self) -> None:
+    def test_bank_detail_api_ignores_legacy_sql_read_repository_for_page_reads(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
         repository = _BankDetailStatusRepository(status="refreshing")
         app._bank_detail_sql_read_repository = repository
-        app._bank_account_balance_sql_read_repository = repository
         app._requires_sql_read_model_runtime = lambda: True
 
         transactions = self._bank_detail_transactions_payload(
@@ -1148,13 +1077,38 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             date_to="2026-12-31",
         )
 
-        self.assertEqual(transactions["read_model_status"], "refreshing")
-        self.assertEqual(accounts["read_model_status"], "refreshing")
-        self.assertEqual(transactions["rows"][0]["id"], "txn-existing-read-model")
-        self.assertEqual(accounts["accounts"][0]["account_key"], "icbc:6386")
-        self.assertEqual(repository.transaction_reads, 1)
-        self.assertEqual(repository.account_reads, 1)
-        self.assertEqual(queue.enqueued, [])
+        self.assertNotIn("read_model_status", transactions)
+        self.assertNotIn("read_model_status", accounts)
+        self.assertIn("rows", transactions)
+        self.assertIn("accounts", accounts)
+        self.assertEqual(repository.transaction_reads, 0)
+        self.assertEqual(repository.account_reads, 0)
+
+    def test_bank_detail_accounts_api_uses_direct_accounts_payload_shape(self) -> None:
+        app = build_application()
+        app._bank_details_service = SimpleNamespace(
+            list_accounts=lambda **_kwargs: {
+                "accounts": [],
+                "total_balance": None,
+                "balance_account_count": 0,
+                "missing_balance_account_count": 0,
+            },
+            list_transactions=lambda **_kwargs: {},
+            _bank_transaction_tags_payload=lambda: {},
+        )
+
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+            accounts = self._bank_detail_accounts_payload(app, date_from="2026-01-01", date_to="2026-12-31")
+
+        self.assertEqual(accounts["accounts"], [])
+        for key in (
+            "read_model_status",
+            "balance_read_model_status",
+            "read_model_scope_keys",
+            "read_model_stale_reasons",
+            "refresh_enqueued",
+        ):
+            self.assertNotIn(key, accounts)
 
     def test_bank_detail_legacy_sql_helpers_are_removed_from_application_boundary(self) -> None:
         class DelegatingService:
@@ -1163,11 +1117,11 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
 
             def accounts_payload(self, **kwargs: object) -> dict[str, object]:
                 self.calls.append(("accounts", dict(kwargs)))
-                return {"accounts": [{"account_key": "delegated"}], "read_model_status": "fresh"}
+                return {"accounts": [{"account_key": "delegated"}]}
 
             def transactions_payload(self, **kwargs: object) -> dict[str, object]:
                 self.calls.append(("transactions", dict(kwargs)))
-                return {"rows": [{"id": "delegated-txn"}], "read_model_status": "fresh"}
+                return {"rows": [{"id": "delegated-txn"}]}
 
         class PoisonRepository:
             def bank_detail_scope_keys_for_range(self, **_kwargs: object) -> list[str]:
@@ -1224,111 +1178,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 ),
             ],
         )
-
-    def test_bank_detail_api_reenqueues_stale_scopes_once(self) -> None:
-        app = build_application()
-        queue = _ReadModelQueue()
-        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        repository = _BankDetailStatusRepository(status="stale")
-        app._bank_detail_sql_read_repository = repository
-        app._requires_sql_read_model_runtime = lambda: True
-
-        payload = self._bank_detail_transactions_payload(
-            app,
-            account_key=None,
-            date_from="2026-01-01",
-            date_to="2026-12-31",
-            keyword="网银证书服务费",
-            category_code=None,
-            category_primary_label=None,
-            category_sub_label=None,
-            page="1",
-            page_size="100",
-        )
-
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertEqual(payload["rows"][0]["id"], "txn-existing-read-model")
-        self.assertEqual(repository.transaction_reads, 1)
-        self.assertEqual(queue.enqueued, [("bank_detail", "2026-01", "api_stale")])
-
-    def test_bank_detail_api_treats_old_auto_tag_rule_version_as_stale(self) -> None:
-        app = build_application()
-        queue = _ReadModelQueue()
-        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        repository = _BankDetailStatusRepository(
-            status="fresh",
-            bank_auto_tag_rules_version=None,
-        )
-        app._bank_detail_sql_read_repository = repository
-        app._requires_sql_read_model_runtime = lambda: True
-
-        payload = self._bank_detail_transactions_payload(
-            app,
-            account_key=None,
-            date_from="2026-01-01",
-            date_to="2026-12-31",
-            keyword="网银证书服务费",
-            category_code=None,
-            category_primary_label=None,
-            category_sub_label=None,
-            page="1",
-            page_size="100",
-        )
-
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertEqual(payload["rows"][0]["id"], "txn-existing-read-model")
-        self.assertEqual(repository.transaction_reads, 1)
-        self.assertEqual(queue.enqueued, [("bank_detail", "2026-01", "api_stale")])
-
-    def test_bank_detail_freshness_uses_latest_auto_tag_rules_from_shared_store(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            reader_app = build_application(data_dir=data_dir)
-            writer_app = build_application(data_dir=data_dir)
-            current = writer_app._app_settings_service.get_bank_auto_tag_rules_payload()
-            active_rules = []
-            for rule in current["active_rules"]:
-                if rule["code"] == "fee":
-                    rules = {**rule["rules"]}
-                    rules["contains_any"] = [*list(rules.get("contains_any") or []), "跨进程版本测试"]
-                    rules["contains"] = [*list(rules.get("contains") or []), "跨进程版本测试"]
-                    active_rules.append({**rule, "rules": rules})
-                else:
-                    active_rules.append(rule)
-            saved = writer_app._app_settings_service.update_bank_auto_tag_rules(
-                {
-                    "expected_version": current["version"],
-                    "active_rules": active_rules,
-                    "archived_rules": current["archived_rules"],
-                },
-                actor_id="settings-owner",
-            )
-            self.assertGreater(saved["version"], current["version"])
-            queue = _ReadModelQueue()
-            reader_app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-            repository = _BankDetailStatusRepository(
-                status="fresh",
-                bank_auto_tag_rules_version=int(saved["version"]),
-            )
-            reader_app._bank_detail_sql_read_repository = repository
-            reader_app._requires_sql_read_model_runtime = lambda: True
-
-            payload = self._bank_detail_transactions_payload(
-                reader_app,
-                account_key=None,
-                date_from="2026-01-01",
-                date_to="2026-12-31",
-                keyword="网银证书服务费",
-                category_code=None,
-                category_primary_label=None,
-                category_sub_label=None,
-                page="1",
-                page_size="100",
-            )
-
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertEqual(repository.transaction_reads, 1)
-        self.assertEqual(queue.enqueued, [])
 
     def test_put_rejects_invalid_payloads_with_structured_errors(self) -> None:
         app = build_application()

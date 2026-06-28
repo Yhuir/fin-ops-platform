@@ -42,13 +42,8 @@ class _RuntimeRecorder:
 class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
     def test_execute_invalidates_explicit_scopes_and_reports_gateway_refresh_job(self) -> None:
         runtime = _RuntimeRecorder()
-        enqueued: list[dict[str, object]] = []
         executor = CostStatisticsDerivedLifecycleExecutor(
             runtime_service=runtime,
-            enqueue_refresh=lambda scope_keys, **kwargs: enqueued.append(
-                {"scope_keys": list(scope_keys), **dict(kwargs)}
-            ) or True,
-            can_enqueue_refresh=lambda: True,
         )
 
         result = executor.execute(
@@ -71,26 +66,20 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(enqueued, [])
         self.assertEqual(
             result,
             {
-                "deleted_counts": {"cost_statistics_read_models": 2},
+                "deleted_counts": {"cost_statistics_cache_scopes": 2},
                 "invalidated_scopes": ["active:2026-05", "all:2026-05"],
-                "enqueued_jobs": ["cost_statistics.read_model.refresh"],
+                "enqueued_jobs": ["cost_statistics_cache_warmup"],
             },
         )
 
     def test_execute_preserves_no_warmup_refresh_fallback_metadata_and_deleted_scope_shape(self) -> None:
         runtime = _RuntimeRecorder()
         runtime.invalidate_scopes_result = []
-        enqueued: list[dict[str, object]] = []
         executor = CostStatisticsDerivedLifecycleExecutor(
             runtime_service=runtime,
-            enqueue_refresh=lambda scope_keys, **kwargs: enqueued.append(
-                {"scope_keys": list(scope_keys), **dict(kwargs)}
-            ) or True,
-            can_enqueue_refresh=lambda: False,
         )
 
         result = executor.execute(
@@ -122,28 +111,11 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            enqueued,
-            [
-                {
-                    "scope_keys": ["active:2026-06"],
-                    "reason": "pending_invoice_rules_changed",
-                    "metadata": {
-                        "source": "unit-test",
-                        "case_id": "CASE-1",
-                        "action_name": "pending_invoice_rules",
-                        "downstream_scope_types": ["cost_statistics"],
-                        "invoice_usage_scope_types": ["input_invoice_usage"],
-                        "pending_invoice_scope_keys": ["expense:all:2026-06"],
-                    },
-                }
-            ],
-        )
-        self.assertEqual(
             result,
             {
-                "deleted_counts": {"cost_statistics_read_models": 1},
+                "deleted_counts": {"cost_statistics_cache_scopes": 1},
                 "invalidated_scopes": ["active:2026-06"],
-                "enqueued_jobs": ["cost_statistics.read_model.refresh"],
+                "enqueued_jobs": [],
             },
         )
 
@@ -151,8 +123,6 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
         runtime = _RuntimeRecorder()
         executor = CostStatisticsDerivedLifecycleExecutor(
             runtime_service=runtime,
-            enqueue_refresh=lambda _scope_keys, **_kwargs: False,
-            can_enqueue_refresh=lambda: False,
         )
 
         result = executor.execute(
@@ -168,7 +138,7 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
         self.assertEqual(
             result,
             {
-                "deleted_counts": {"cost_statistics_read_models": 2},
+                "deleted_counts": {"cost_statistics_cache_scopes": 2},
                 "invalidated_scopes": ["active:all", "all:all"],
                 "enqueued_jobs": ["cost_statistics_cache_warmup"],
             },
@@ -177,13 +147,8 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
     def test_execute_no_scope_refresh_fallback_defaults_to_all(self) -> None:
         runtime = _RuntimeRecorder()
         runtime.invalidate_scopes_result = []
-        enqueued: list[dict[str, object]] = []
         executor = CostStatisticsDerivedLifecycleExecutor(
             runtime_service=runtime,
-            enqueue_refresh=lambda scope_keys, **kwargs: enqueued.append(
-                {"scope_keys": list(scope_keys), **dict(kwargs)}
-            ) or False,
-            can_enqueue_refresh=lambda: True,
         )
 
         result = executor.execute({}, schedule_warmup=False)
@@ -200,13 +165,9 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            enqueued,
-            [{"scope_keys": ["all"], "reason": "derived_lifecycle_cost_statistics", "metadata": None}],
-        )
-        self.assertEqual(
             result,
             {
-                "deleted_counts": {"cost_statistics_read_models": 1},
+                "deleted_counts": {"cost_statistics_cache_scopes": 1},
                 "invalidated_scopes": ["all"],
                 "enqueued_jobs": [],
             },

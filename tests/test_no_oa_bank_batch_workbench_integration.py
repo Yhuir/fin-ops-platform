@@ -56,7 +56,6 @@ class PairSnapshotRelationFacade:
             "rows": rows,
             "groups": groups,
             "source_versions": {"schema_version": 52},
-            "read_model_scope_keys": [month],
         }
 
     def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
@@ -172,7 +171,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             actor="tester",
         )
         self._enable_no_oa_tags(app, sorted(set(category_codes)))
-        app._invalidate_workbench_read_models()
         return app, row_ids
 
     def _post_confirm_link(self, app: object, row_ids: list[str]):
@@ -219,8 +217,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertFalse(
             any(set(batch.get("row_ids") or []).intersection(row_ids) for batch in unsubmitted)
         )
-
-        app._invalidate_workbench_read_models()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
         paired_group = next(
             group for group in payload["paired"]["groups"]
@@ -334,23 +330,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         unsubmitted = app._no_oa_bank_batch_service.list_batches({"bucket": "unsubmitted"})
         self.assertFalse(any(set(batch.get("row_ids") or []).intersection(row_ids) for batch in unsubmitted))
 
-    def test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh(self) -> None:
-        class StaleNoOaReadRepository:
-            def list_no_oa_bank_batch_rows(self, _filters: dict[str, object]) -> list[dict[str, object]]:
-                return [
-                    {
-                        "batch_id": "stale_sql_batch",
-                        "batch_type": "salary",
-                        "status": "submitted",
-                        "status_bucket": "submitted",
-                        "scope_month": "2026-02",
-                        "row_ids": ["stale-bank-row"],
-                        "row_count": 1,
-                        "total_amount": "1.00",
-                        "source_versions": {"bank_auto_tag_rules_version": 0},
-                    }
-                ]
-
+    def test_no_oa_bank_batches_ignore_stale_sql_read_model_rows_in_get_path(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -379,35 +359,20 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             body=json.dumps({"expected_version": version, "selected_tag_codes": ["salary"]}),
             headers={"Content-Type": "application/json"},
         )
-        app._no_oa_bank_batch_sql_read_repository = StaleNoOaReadRepository()
-
         response = app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
-        self.assertEqual(payload["batches"][0]["batch_id"], "stale_sql_batch")
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertNotIn("refresh_enqueued", payload)
+        self.assertEqual(payload["batches"], [])
 
     def test_no_oa_bank_batches_missing_sql_read_model_does_not_refresh_in_get_path(self) -> None:
-        class MissingNoOaReadRepository:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
-
-            def list_no_oa_bank_batch_rows(self, filters: dict[str, object]) -> None:
-                self.calls.append(dict(filters))
-                return None
-
         class QueueRepository:
-            def __init__(self) -> None:
-                self.enqueued: list[dict[str, object]] = []
-
-            def enqueue_read_model_refresh(self, **kwargs):
-                self.enqueued.append(dict(kwargs))
-                return {"event_id": "queued"}
+            pass
 
         app = build_application()
-        app._no_oa_bank_batch_sql_read_repository = MissingNoOaReadRepository()
         app._runtime_repositories = type(
             "RuntimeRepositories",
             (),
@@ -426,77 +391,10 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["read_model_status"], "missing")
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertNotIn("refresh_enqueued", payload)
         self.assertEqual(payload["batches"], [])
-        self.assertTrue(payload["refresh_enqueued"])
-        self.assertEqual(
-            app._runtime_repositories.queue_repository.enqueued,
-            [
-                {
-                    "scope_type": "no_oa_bank_batch",
-                    "scope_key": "all",
-                    "reason": "api_no_oa_read_model_missing",
-                }
-            ],
-        )
-
-    def test_no_oa_repository_returns_fresh_empty_rows_when_readiness_is_fresh(self) -> None:
-        connection = NoOaReadModelConnection(readiness_status="fresh")
-        repository = PostgresReadModelRepository(connection)
-
-        rows = repository.list_no_oa_bank_batch_rows({"month": "2026-06", "bucket": "unsubmitted"})
-
-        self.assertEqual(rows, [])
-        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
-        self.assertIn("read_model.app_status_readiness", executed_sql)
-        self.assertIn("job.read_model_dirty_scopes", executed_sql)
-
-    def test_no_oa_repository_keeps_missing_when_readiness_is_absent_or_refreshing(self) -> None:
-        missing_repository = PostgresReadModelRepository(NoOaReadModelConnection(readiness_status=None))
-        refreshing_repository = PostgresReadModelRepository(
-            NoOaReadModelConnection(readiness_status="fresh", dirty_status="pending")
-        )
-
-        self.assertIsNone(missing_repository.list_no_oa_bank_batch_rows({"month": "2026-06"}))
-        self.assertIsNone(refreshing_repository.list_no_oa_bank_batch_rows({"month": "2026-06"}))
-
-    def test_no_oa_repository_does_not_treat_all_fresh_as_month_fresh_when_month_is_dirty(self) -> None:
-        connection = NoOaReadModelConnection(
-            readiness_by_scope={"all": "fresh", "2026-06": "fresh"},
-            dirty_by_scope={"2026-06": "pending"},
-        )
-        repository = PostgresReadModelRepository(connection)
-
-        rows = repository.list_no_oa_bank_batch_rows({"month": "2026-06", "bucket": "unsubmitted"})
-
-        self.assertIsNone(rows)
-        self.assertIn(
-            ("no_oa_bank_batch", "2026-06"),
-            [
-                tuple(params)
-                for sql, params in connection.fetch_one_calls
-                if "from job.read_model_dirty_scopes" in sql
-            ],
-        )
-
-    def test_no_oa_repository_accepts_month_fresh_without_all_readiness_record(self) -> None:
-        connection = NoOaReadModelConnection(
-            readiness_status=None,
-            readiness_by_scope={"2026-06": "fresh"},
-        )
-        repository = PostgresReadModelRepository(connection)
-
-        rows = repository.list_no_oa_bank_batch_rows({"month": "2026-06", "bucket": "unsubmitted"})
-
-        self.assertEqual(rows, [])
-        self.assertIn(
-            ("2026-06",),
-            [
-                tuple(params)
-                for sql, params in connection.fetch_one_calls
-                if "from read_model.app_status_readiness" in sql
-            ],
-        )
 
     def test_no_oa_bank_batch_detail_does_not_refresh_all_batches(self) -> None:
         app = build_application()
@@ -629,7 +527,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             note="确认工资",
         )
         submitted = submit_result["batch"]
-        app._invalidate_workbench_read_models()
         paired_response = app.handle_request("GET", "/api/workbench?month=all")
         paired_payload = json.loads(paired_response.body)
         paired_group = paired_payload["paired"]["groups"][0]
@@ -656,7 +553,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             expected_version=int(submitted["version"]),
             reason="误提交",
         )
-        app._invalidate_workbench_read_models()
         open_response = app.handle_request("GET", "/api/workbench?month=all")
         open_payload = json.loads(open_response.body)
 
@@ -711,7 +607,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             note="确认手续费",
         )
         submitted = submit_result["batch"]
-        app._invalidate_workbench_read_models()
         workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
         paired_group = workbench_payload["paired"]["groups"][0]
         summary_row = paired_group["summary_row"]
@@ -751,7 +646,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             note="确认内部往来",
         )
         submitted = submit_result["batch"]
-        app._invalidate_workbench_read_models()
         paired_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
         paired_group = paired_payload["paired"]["groups"][0]
 
@@ -774,7 +668,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             expected_version=int(submitted["version"]),
             reason="误提交",
         )
-        app._invalidate_workbench_read_models()
         open_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
 
         self.assertEqual(open_payload["summary"]["paired_count"], 0)
@@ -828,7 +721,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
             if batch["batch_type"] == "salary"
         ]
-        app._invalidate_workbench_read_models()
         workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
         paired_group = workbench_payload["paired"]["groups"][0]
         active_relations = app._workbench_pair_relation_service.list_active_relations()
@@ -944,7 +836,6 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
             if batch["batch_type"] == "salary"
         ]
-        app._invalidate_workbench_read_models()
         workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
         paired_group = workbench_payload["paired"]["groups"][0]
         active_relations = app._workbench_pair_relation_service.list_active_relations()

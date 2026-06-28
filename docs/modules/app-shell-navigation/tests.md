@@ -47,16 +47,16 @@
 | 1. Business core unit tests | 不适用 | N/A | 本模块不定义金额、匹配、分类、状态写入等业务规则；业务口径在各页面/service 模块。 |
 | 2. Service-layer tests | 不适用 | N/A | 本模块不触碰后端 service、repository、audit 或事务边界。 |
 | 3. API contract tests | 间接适用 | `SessionGate.test.tsx`、`App.test.tsx`、`web/e2e/app-shell.spec.ts` | shell 只消费 `/api/session/me` 和页面 API；会话 API contract 由 `permissions-and-audit` 覆盖，本模块保护真实浏览器 gate 行为和页面 API 不被未授权触发。 |
-| 4. Read model/cache/background job tests | 间接适用 | `App.test.tsx` | shell 不刷新 read model，但必须不把全局 App Status 绑定到当前 route；具体 read model 由页面模块覆盖。 |
+| 4. Read model/cache/background job tests | 间接适用 | `App.test.tsx` | shell 不刷新 read model，也不把全局 App Status 绑定到当前 route；页面级 direct/runtime 行为由对应页面模块覆盖。 |
 | 5. Frontend component and interaction tests | 适用，已补 | `PageRouteHost.test.tsx`、`AppSidebar.test.tsx`、`App.test.tsx`、`SessionGate.test.tsx`、`GlobalOperationOverlayContext.test.tsx`、`PageSessionStateContext.test.tsx`、`useFinanceTableSession.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/app-shell-responsive.spec.ts` | 覆盖 route、sidebar、compact drawer、session gate、operation overlay、page session、table session、full shell smoke、真实浏览器 AppHealth route smoke、移动 drawer 和 embedded OA shell。 |
-| 6. End-to-end business-flow integration tests | 间接适用 | `App.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/app-shell-responsive.spec.ts` | 本模块不承载业务写入链路；保留 workbench -> tax、cost/settings/import/turnover shell smoke，并用真实 Chromium 验证 shell + session + protected route + responsive/embedded shell 的端到端渲染。业务写入端到端链路由页面模块和 read model/worker 模块覆盖。 |
+| 6. End-to-end business-flow integration tests | 间接适用 | `App.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/app-shell-responsive.spec.ts` | 本模块不承载业务写入链路；保留 workbench -> tax、cost/settings/import/turnover shell smoke，并用真实 Chromium 验证 shell + session + protected route + responsive/embedded shell 的端到端渲染。业务写入端到端链路由对应页面模块和 runtime worker 模块覆盖。 |
 | 7. Existing feature regression tests | 适用，已补 | 同上 | 本轮新增 route event cleanup、active/import shortcut、compact drawer close 和 Playwright app shell smoke 回归；继续保护旧导航和 session state 行为。 |
 
 ## 历史 bug 回归库
 
 | 日期 | 问题 | 回归测试 |
 | --- | --- | --- |
-| 2026-06-11 | 防止页面切换后旧页面仍响应 window/domain event，导致旧页面刷新或误写 UI state | `PageRouteHost.test.tsx` `removes active page event listeners when a route unmounts` |
+| 2026-06-11 | 防止页面切换后旧页面仍响应 window/domain event，导致旧页面 refetch 或误写 UI state | `PageRouteHost.test.tsx` `removes active page event listeners when a route unmounts` |
 | 2026-06-11 | 防止 import shortcut 进入导入页后误显示 active，或移动端点击导航后 drawer 不关闭 | `AppSidebar.test.tsx` active/import shortcut 与 compact drawer tests |
 | 2026-06-14 | 防止各页面重复实现全屏写操作 loading，或失败后自动关闭导致用户继续操作旧事实 | `GlobalOperationOverlayContext.test.tsx` |
 
@@ -101,6 +101,6 @@ cd web && npm run e2e:smoke
 ## 未测风险
 
 - 已有真实 Chromium smoke 覆盖 shell/session/protected route、移动 drawer 打开/导航/关闭和 embedded OA shell 展开；CSS sticky/sidebar 像素级视觉、真实触摸手势惯性和真实 OA iframe 尺寸仍需专项 Playwright 或发布前手工 smoke。
-- 生产 user-scope route-shell smoke 已证明真实域名和真实 full-access user cookie 下 16 个核心路由可打开且无隐藏浏览器错误/意外写请求，但它不替代页面级业务流、弹窗、下载、iframe、滚动、大表格、网络恢复或写后 read model 收敛测试。
+- 生产 user-scope route-shell smoke 已证明真实域名和真实 full-access user cookie 下 16 个核心路由可打开且无隐藏浏览器错误/意外写请求，但它不替代页面级业务流、弹窗、下载、iframe、滚动、大表格、网络恢复或写后 direct/runtime 收敛测试。
 - route chunk preload 只验证调用和 fallback，不模拟真实网络分包失败后的浏览器缓存行为；当前契约是失败不阻断导航。
 - full route registry 数量测试会在新增页面时失败，需要同步更新预期和 App Status/domain docs，而不是随意放宽。

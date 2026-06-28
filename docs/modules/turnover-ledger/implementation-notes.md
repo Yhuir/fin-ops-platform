@@ -1,5 +1,23 @@
 # 外部往来款管理 实施记录
 
+## 2026-06-27 - turnover relation facade fixture scope cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 turnover UoW tests 中 fake Workbench relation facade 的旧 `read_model_scope_keys` 输出字段。
+- 影响范围：`tests/test_turnover_ledger_uow_contract.py`；不改变运行时代码、API shape、worker、projection 或 Workbench relation command 行为。
+- 关键决策：测试替身使用 direct `scope_keys`，不再制造 read-model-shaped scope 字段；保留 direct `status` 和 relation rows/groups。
+- 测试覆盖：targeted turnover manual closure withdraw / restore / command-service-required 回归通过。
+- 未测风险：turnover legacy projection/worker/dirty scopes 和真实 worker drain 仍留待后续完整 family inventory。
+
+## 2026-06-26 - 前端写后移除operation barrier等待
+
+- 目标：外部往来款页面在 tag-selection、extra、manual closure confirm/withdraw 成功后直接重读 grouped ledger，不再请求 `/api/operation-barrier/status`。
+- 影响范围：`web/src/pages/TurnoverLedgerPage.tsx`、`web/src/test/TurnoverLedgerPage.test.tsx`、本模块 README/boundary/state-machine/tests/e2e 文档。
+- 关键决策：本轮不改后端 response shape，也不删除 shared operation barrier helper；`freshness_targets` / `operation_barrier_targets` 暂留兼容和诊断，页面不消费。
+- 文档影响：同步 `README.md`、`boundary-io.md`、`state-machine.md`、`tests.md`、`e2e-spec.md` 和 `e2e-coverage.md`。
+- 测试覆盖：Vitest 覆盖 manual closure confirm、cash closure withdraw 和相关写后路径不请求 operation barrier，并继续重读 grouped ledger。
+- 验证命令：`cd web && npm test -- --run src/test/TurnoverLedgerPage.test.tsx`。
+- 未测风险：本轮未迁移 `/api/turnover-ledger` 后端 read model 读路径；真实 worker drain、Workbench/cost/search 下游收敛仍由后续迁移和 staging smoke 覆盖。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：执行 `server-py:turnover-ledger-route-owner-local-closure-audit`，确认所有 `/api/turnover-ledger*` route callbacks 已从 `server.py` 迁出。
@@ -131,7 +149,7 @@
 - PostgreSQL SQL runtime 下外部往来闭环的银行流水事实源必须是 `bank_detail` SQL read model，并保留 Workbench 使用的 legacy/source row id；不能再从 legacy import snapshot 推导可闭环流水。
 - 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回原闭环关系再重新选择。
 - 外部往来页撤回只允许 row types 子集为 `{oa, bank}` 的 `turnover_manual_closure`；若已在关联台补齐发票或其他业务 row type，必须去关联台撤回完整关系。
-- `readModelStatus !== "fresh"` 时前端必须显示诊断并避免把旧 grouped payload 当作最终业务结论；manual closure 这类依赖页面所选 flow row versions 的写操作必须先阻断或等待 fresh 后重新加载并重绑定，后端 stale precondition、canonical write safety、权限/session、DB 和 idempotency/version 继续作为最终兜底。写 API 成功后必须用全屏 operation overlay 等待 `turnover_ledger` barrier fresh 并重新加载。
+- `readModelStatus !== "fresh"` 时前端必须显示诊断并避免把旧 grouped payload 当作最终业务结论；manual closure 这类依赖页面所选 flow row versions 的写操作必须先阻断或重新加载并重绑定，后端 stale precondition、canonical write safety、权限/session、DB 和 idempotency/version 继续作为最终兜底。写 API 成功后使用全屏 operation overlay 直接重新加载 grouped ledger，不再等待 operation barrier。
 - 写路径应优先保持 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork` 边界；legacy fallback 只作为兼容风险存在，不能继续扩大。
 - 涉及 Workbench relation 的 manual closure/withdraw 即使经过 legacy fallback facade，也必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation write fallback。
 - 外部往来闭环和 OA/发票关联是两个不同事实：OA/发票关联 chip 只展示，不参与“确认闭环/撤回闭环”的决定链路；前端只展示正向 chip，“已关联 OA”“已关联 发票”“收支闭环”。未闭环不显示 chip。确认闭环可合并所选银行流水已有的 OA-bank active relation；撤回闭环只撤回同一 `cash_closure_case_id` 的 Workbench active case，并恢复确认前的 OA-bank relation。
@@ -160,7 +178,7 @@
 
 - 目标：执行 modular IO slice `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`，审计外部往来台账 read model fresh gate、force refresh、operation barrier 和旧链路污染。
 - 影响范围：外部往来 SQL fresh gate、scope policy、manifest/App Status/worker registry、Workbench relation source-version proof、operation barrier tests 和 `Application` turnover read model clear/refresh helper；不改变运行时代码。
-- 关键决策：现有 `TurnoverLedgerQueryService` 已走 `ReadModelQueryGateway`，`turnover_ledger` scope policy 是 month/all，manifest/App Status/worker registry 已登记，projection 在 Workbench relation 不 fresh 时不保存半成品，写后 barrier 已有 `turnover_ledger:all` 阻断证据。但 `Application._enqueue_turnover_ledger_read_model_refreshes(...)` 和 `_clear_turnover_ledger_read_model_best_effort(...)` 仍是 app-owned helper，且 clear 仍通过 broad workbench SQL repository，必须先抽出或改走 turnover-specific port。
+- 关键决策：现有 `TurnoverLedgerQueryService` 已走 SQL query boundary，`turnover_ledger` scope policy 是 month/all，manifest/App Status/worker registry 已登记，projection 在 Workbench relation 不 fresh 时不保存半成品，写后 barrier 已有 `turnover_ledger:all` 阻断证据。后续 refresh producer/clear port extraction 已删除 `Application._enqueue_turnover_ledger_read_model_refreshes(...)` 和 `_clear_turnover_ledger_read_model_best_effort(...)`；clear 已改走 turnover-specific port。
 - 测试覆盖：本轮是 analysis/accounting only；下一实现 slice 必须新增/更新 refresh producer / clear port guard。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-freshness-operation-barrier-audit.md`。
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；`turnover_ledger` 不能声明 local closure。
@@ -445,7 +463,7 @@
 - 影响范围：`TurnoverLedgerPage` 写操作、`GlobalOperationOverlayProvider`、`operationBarrier` API client。
 - 关键决策：写 API 成功后等待 `turnover_ledger` barrier fresh，再 reload grouped payload 并关闭 overlay。前端事件只做刷新提示，不能替代 barrier/read boundary。
 - 文档影响：更新本模块 `README.md`、`tests.md`、`implementation-notes.md`。
-- 测试覆盖：更新 `web/src/test/TurnoverLedgerPage.test.tsx`，并由 `GlobalOperationOverlayContext.test.tsx`、`OperationBarrierApi.test.ts` 覆盖共享 overlay/barrier 行为。
+- 测试覆盖：更新 `web/src/test/TurnoverLedgerPage.test.tsx`，并由 `GlobalOperationOverlayContext.test.tsx` 覆盖共享 overlay 行为。
 - 验证命令：见本轮最终执行记录。
 - 未测风险：真实生产登录态 operation-to-fresh latency 需要发布后度量。
 
@@ -470,7 +488,7 @@
 - 目标：把 `turnover-ledger` 从测试闭环 `pending` 推进到可维护的 `documented-risk` 状态。
 - 影响范围：外部往来页面、tag-selection、bank-row-tags batch、relation extra、manual closure、withdraw、export、turnover read model、turnover-ledger worker、Workbench pair relation、App Status、前端 domain events。
 - CodeGraph 审计：
-  - `TurnoverLedgerPage` 调用 `fetchTurnoverLedgerGrouped`、`fetchTurnoverLedgerTagSelection`、`confirmTurnoverClosure`、`saveTurnoverRelationExtra`、`withdrawTurnoverRelation`；stale read model 只显示诊断，写操作由后端 stale precondition/canonical write safety 决定，成功后通过 operation barrier 等待 fresh。
+  - `TurnoverLedgerPage` 调用 `fetchTurnoverLedgerGrouped`、`fetchTurnoverLedgerTagSelection`、`confirmTurnoverClosure`、`saveTurnoverRelationExtra`、`withdrawTurnoverRelation`；stale read model 只显示诊断，写操作由后端 stale precondition/canonical write safety 决定，成功后直接重新读取 grouped ledger。
   - `TurnoverLedgerApiRoutes` 仍承接 read/write route 形状；read path 已通过 `TurnoverLedgerReadFacade` 包住。
   - `TurnoverLedgerQueryService` 通过 `ReadModelQueryGateway` 处理 `turnover_ledger` scope `all` 的 fresh/stale/missing/refreshing。
   - `TurnoverLedgerWriteFacade` 和 `TurnoverLedgerWriteUnitOfWork` 覆盖 extra、bank-row-tags、confirm、zero-difference closure、withdraw、tag-selection 的 stale precondition、idempotency、dirty/outbox。
@@ -566,6 +584,6 @@ git diff --check
 - 触发事实：生产受控写样本显示 turnover relation/closure 写后存在 `turnover_ledger:all`、`workbench:all`、`cost_statistics:all` 等宽 scope 长尾，影响写后 freshness SLO。
 - 根因：普通 turnover 写路径已经能解析 affected months，但 `TurnoverLedgerWriteFacade` 仍把 turnover ledger 以及 downstream workbench/cost/search refresh requests 默认扩成 `all` 或混入 `all`；manual closure 前端提交前 fresh gate 也默认等 `turnover_ledger:all`。
 - 决策：bank-row-tags、relation confirm、manual closure confirm、relation withdraw 在已知 affected months 时只 refresh affected month scopes；`all` 只保留为 manifest fan-out command、tag-selection/extra 等全局或未知月份路径，以及 cash closure withdraw 等写前无法解析 affected months 的例外。
-- 前端边界：manual closure 点击确认前按所选 flow rows 的交易/借款/还款日期提取月份并等待对应 `turnover_ledger:<month>` fresh；无法提取月份时才退回 `all`。写成功后的 operation barrier 使用后端返回 targets。
+- 前端边界：manual closure 点击确认前重新读取 grouped ledger 并重绑定所选 flow rows；写成功后直接重新读取 grouped ledger，不再使用后端返回 targets 做 operation barrier 等待。
 - 测试覆盖：`tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_read_model_write_targets.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`。
 - 未测风险：本条为本地代码和合同修复；仍需要发布后用生产 turnover/workbench/no-OA 写样本重跑 write-operation SLO，并在恢复样本后复核 dirty/outbox/readiness 全 fresh。

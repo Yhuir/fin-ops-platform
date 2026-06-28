@@ -8,6 +8,7 @@
 - 银行明细测试覆盖 P0 的自动标签规则、候选确认、人工补分类、read model freshness、账户余额独立 read model、relation tag 投影、API contract 和前端交互；真实基础设施/真实历史数据 smoke 仍归入发布验证风险。
 - 账户余额 read model 与银行明细 rows read model 必须保持独立。标签规则保存、重应用、关键字/分类/日期筛选不能用 stale account payload 覆盖已有 fresh balance。
 - 银行明细前端 domain event 只负责刷新提示和 refetch；跨页面一致性的事实源仍是后端 dirty scope、outbox、worker 和 read model freshness。
+- 自动标签规则保存/重应用成功后，前端直接重新请求银行流水，不再请求 operation barrier；后端 legacy target envelope 暂时保留以避免 response shape 变更。
 - 银行明细对 no-OA、turnover ledger、pending/search、cost/tax、workbench relation 的 fan-out 在本模块记录上游影响；具体下游页面的 UI/业务流回归由各模块轮次继续补齐。
 
 ## 记录模板
@@ -26,6 +27,40 @@
 ```
 
 ## 历史记录
+
+## 2026-06-27 - bank transaction tag facade fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 `BankTransactionTagReadFacadeTests` 中 fake repository 的旧 read-model-shaped 输出字段。
+- 影响范围：`tests/test_bank_details_sql_runtime.py` 中 facade-level test doubles；不改变运行时代码、API shape、worker、projection、repository port 或 SQL repository tests。
+- 关键决策：facade 测试替身使用 direct `status` / `scope_keys` / `scope_signatures`，不再制造 `read_model_status` / `read_model_scope_keys` / `read_model_scope_signatures`；底层 bank-detail repository/SQL 兼容测试保留。
+- 测试覆盖：完整 `BankTransactionTagReadFacadeTests` 通过。
+- 未测风险：bank detail legacy SQL projection/worker/manifest/dirty scopes 和账户余额 read model 仍留待后续完整 family inventory。
+
+## 2026-06-27 - bank details direct fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 bank-details route/service tests 中旧 read-model freshness/scope fixture 字段。
+- 影响范围：`tests/test_bank_details_routes.py`、`tests/test_bank_details_service.py`；不改变运行时代码、API shape、worker、projection 或 Redis。
+- 关键决策：direct route/service tests 只保留业务 payload；relation facade fixture 使用 `scope_keys` direct field，不再制造 `read_model_scope_keys`。
+- 测试覆盖：完整 `tests.test_bank_details_routes` 与 `tests.test_bank_details_service` 通过。
+- 未测风险：bank detail SQL projection/worker/manifest/dirty scopes 仍留待后续 family inventory。
+
+## 2026-06-27 - auto-tag API test fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，清理银行明细 auto-tag API 测试替身中残留的页面级 read model freshness 字段。
+- 影响范围：`tests/test_bank_auto_tag_rules_api.py`；不改变运行时代码、API shape、refresh enqueue 或 worker。
+- 关键决策：页面读路径已是 direct payload，测试替身不再返回 `read_model_status` / `read_model_scope_keys`；保留负向断言防止这些字段回流到 API payload。
+- 测试覆盖：完整 `tests.test_bank_auto_tag_rules_api` 通过。
+- 未测风险：银行明细 legacy SQL projection/worker、账户余额 read model 和下游 fan-out 仍是后续兼容面。
+
+## 2026-06-26 - 写后直接刷新银行流水，移除前端 operation barrier 等待
+
+- 目标：执行移除 read model 架构主控闭环中的银行明细页面 slice，切断 `BankDetailsPage` 对 operation barrier polling 的硬依赖。
+- 影响范围：`BankDetailsPage`、`BankDetailsPage.test.tsx` 和本模块 E2E/测试/边界文档；后端 API response shape 暂不改变。
+- 关键决策：自动标签规则保存和重应用成功后直接调用现有交易刷新逻辑，不再构造 `bank_detail` barrier target，也不请求 `/api/operation-barrier/status`。
+- 文档影响：同步 `README.md` 不适用；同步 `boundary-io.md`、`state-machine.md`、`e2e-spec.md`、`e2e-coverage.md` 和 `tests.md`。
+- 测试覆盖：更新 `web/src/test/BankDetailsPage.test.tsx`，覆盖保存自动标签规则后直接刷新且 operation barrier 请求数为 0。
+- 验证命令：本轮执行 `cd web && npm test -- --run src/test/BankDetailsPage.test.tsx`、`bash scripts/verify.sh docs`、`git diff --check`。
+- 未测风险：本 slice 不连接真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；后端 read model refresh 字段和 read model service 仍在，需后续 GSD slice 继续删除。
 
 ## 2026-06-25 - route-owner local closure audit retry
 

@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-27 - cost statistics app invalidation wrapper deletion
+
+- 目标：继续 remove-read-models 主控闭环，删除 `Application._invalidate_cost_statistics_read_models(...)` 和 `Application._invalidate_cost_statistics_read_model_scopes(...)` 这两个仅转发到 runtime service 的 app-level wrapper。
+- 影响范围：`server.py` Workbench/import invalidation 调用点、成本统计 API/runtime tests、Workbench invalidation regression、read-model architecture guard；不改变成本统计 API、scope normalization、worker、projection 或本地 runtime store 语义。
+- 关键决策：调用点直接使用 `self._cost_statistics_runtime().invalidate_read_models(...)` / `.invalidate_read_model_scopes(...)`；`CostStatisticsRuntimeService` 继续拥有 scope/warmup/persistence 语义。
+- 文档影响：同步记录到 cost-statistics 与 shared read-model implementation notes，并更新 remove-read-models 主控状态。
+- 测试覆盖：成本统计 API、SQL runtime、runtime service、Workbench scope invalidation regression 和 architecture guard。
+- 验证命令：`python3 -m py_compile ...`；`PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_api tests.test_cost_statistics_sql_runtime tests.test_cost_statistics_runtime_service tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_invalidation_marks_dirty_scope_without_sync_rebuild tests.test_read_model_architecture_guards -v`；`bash scripts/verify.sh docs`；`git diff --check ...`。
+- 未测风险：成本统计 legacy projection/worker/manifest/dirty scopes、真实 PostgreSQL/RabbitMQ/Redis worker drain 和 Workbench active-generation compatibility 仍留待后续完整 family inventory。
+- 后续事项：继续优先删除一跳 app wrapper 或 stale direct-API fixture/docs 合同；不要在未完成 family inventory 前删除 live SQL projection/worker/manifest。
+
 ## 2026-06-25 - cost statistics route-owner local closure audit
 
 - 目标：执行 `server-py:cost-statistics-route-owner-local-closure-audit`，确认 route callback collapse 后 `server.py` 剩余 cost statistics surface 是否仍有本地 route-owner 缺口。
@@ -108,9 +119,9 @@
 
 - 目标：执行 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`，复核 repository port 之后成本统计 freshness、operation barrier、parent aggregate、worker ownership 和 legacy/app-owned surface。
 - 影响范围：`CostStatisticsQueryService`、`CostStatisticsRuntimeService`、`CostStatisticsReadModelRefreshService`、`CostStatisticsSqlProjectionBuilder`、`Application._derived_lifecycle_cost_statistics_executor(...)`、成本统计 tests/docs、modular IO state；不改变成本归因、项目范围、导出、API、UI、worker event、queue schema 或 Redis envelope。
-- 关键决策：SQL fresh gate、production repository unavailable fail-closed、force refresh scope normalization、parent aggregate proof、primary `cost-statistics` worker 和 `cost-tax` compatibility lane 均有本地证据；但 `Application._derived_lifecycle_cost_statistics_executor(...)` 仍直接编排成本统计 lifecycle invalidation、warmup/refresh fallback 和 `enqueued_jobs` accounting，必须先抽取为显式 executor，不能进入 Go summary-rollup admission。
+- 关键决策：SQL fresh gate、production repository unavailable fail-closed、force refresh scope normalization、parent aggregate proof、primary `cost-statistics` worker 和 `cost-tax` compatibility lane 均有本地证据；后续 derived lifecycle executor extraction 已删除 `Application._derived_lifecycle_cost_statistics_executor(...)`，成本统计 lifecycle invalidation、warmup/refresh fallback 和 `enqueued_jobs` accounting 已由显式 executor 负责。
 - 文档影响：新增 freshness/barrier audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
-- 测试覆盖：本轮是 analysis/accounting only；下一实现边界必须新增/更新 derived lifecycle executor/static guard tests。
+- 测试覆盖：本轮是 analysis/accounting only；后续已新增/更新 derived lifecycle executor/static guard tests。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-refresh-freshness-operation-barrier-audit.md`。
 - 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实 App Status/high-row/browser evidence 仍 deferred。
 - 后续事项：执行 `read-models:cost-statistics-derived-lifecycle-executor-port-extraction`；Go summary-rollup admission 继续 blocked。
@@ -211,7 +222,7 @@
 - 影响范围：`web/e2e/cost-statistics-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、成本统计测试矩阵、Spec-first 覆盖矩阵和全局 testing closure 文档。
 - 关键决策：
   - 新增 opt-in deterministic mock `costStatisticsLargeDataset`，默认成本统计数据不变；启用时向 `2026-03` active/all explorer 增加 120 条长项目名、长对方户名、长费用内容和多费用类型成本行。
-  - Browser 流先等待 `/api/cost-statistics/explorer?month=2026-03&project_scope=active` 返回 `read_model_status=fresh` 和 120+ rows，再断言按时间表存在大数据行、表格可横向/纵向滚动、右侧列在 viewport 内、导出入口未被遮挡且无浏览器错误。
+  - Browser 流先等待 `/api/cost-statistics/explorer?month=2026-03&project_scope=active` 返回 direct explorer payload 和 120+ rows，再断言按时间表存在大数据行、表格可横向/纵向滚动、右侧列在 viewport 内、导出入口未被遮挡且无浏览器错误。
   - 切到按项目后继续等待 `active:all` fresh explorer，选择长项目和费用类型，断言项目对应流水表展示长字段并可横向/纵向滚动。
   - 首次运行失败属于测试断言问题：按时间表本来不展示对方户名，已把对方户名断言放到项目下钻表；第二轮失败属于 HeroUI 表头包装层导致的 `elementFromPoint` 假阳性，表头改为 viewport 可见性，按钮/选择器仍保留未遮挡检查。
 - 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录、`docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/testing-closure-state.md` 和 `docs/dev/testing-closure-dependency-map.md`。
@@ -276,7 +287,7 @@
 - 影响范围：成本统计 Spec-first E2E 覆盖矩阵、测试矩阵、实施记录和全局 testing closure state；本轮不改业务代码。
 - 关键决策：
   - 复用 `web/e2e/imports-etc-invoices-flow.spec.ts::confirms ETC import and observes downstream read models as fresh` 作为成本统计下游导入 fan-out 的 Browser 证据，避免重复造一条只覆盖同一 mock 状态的成本页测试。
-  - 该测试在 ETC confirm 后依次进入 ETC 票据、税金抵扣和成本统计；成本统计阶段等待 `/api/cost-statistics/explorer`，断言 `read_model_status=fresh`，再切到按项目并展示 `ETC导入通行成本项目`、金额 `32.26`、`ETC高速通行费` 和 `ETC导入通行服务商`。
+  - 该测试在 ETC confirm 后依次进入 ETC 票据、税金抵扣和成本统计；成本统计阶段等待 `/api/cost-statistics/explorer` 返回 direct explorer payload，再切到按项目并展示 `ETC导入通行成本项目`、金额 `32.26`、`ETC高速通行费` 和 `ETC导入通行服务商`。
   - 当时 `COST-E2E-010` 仍为 `partial`：ETC 导入已有 Browser 证据；后续银行/发票导入、no-OA、turnover、settings 和权限/导出证据补齐后，已由本文件上方 covered 校准记录收敛。
 - 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录、`docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/testing-closure-state.md` 和 `docs/dev/testing-closure-dependency-map.md`。
 - 测试覆盖：未新增测试；校准并验证既有 `web/e2e/imports-etc-invoices-flow.spec.ts` 中 ETC import downstream fan-out。

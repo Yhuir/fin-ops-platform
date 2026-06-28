@@ -19,9 +19,9 @@ class FakeConnection:
         if "current_refresh_event_samples" in normalized:
             return [
                 {
-                    "event_id": "event-current-workbench-1",
-                    "event_type": "workbench.read_model.refresh",
-                    "scope_type": "workbench",
+                    "event_id": "event-current-cost-statistics-1",
+                    "event_type": "cost_statistics.fact.changed",
+                    "scope_type": "cost_statistics",
                     "scope_key": "all",
                     "status": "done",
                     "source_version": 43,
@@ -38,10 +38,10 @@ class FakeConnection:
         if "slow_refresh_event_samples" in normalized:
             return [
                 {
-                    "event_id": "event-search-1",
-                    "event_type": "search.read_model.refresh",
-                    "scope_type": "search",
-                    "scope_key": "2026-03",
+                    "event_id": "event-cost-statistics-slow-1",
+                    "event_type": "cost_statistics.fact.changed",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "all",
                     "status": "done",
                     "source_version": 42,
                     "priority": "normal",
@@ -54,9 +54,9 @@ class FakeConnection:
                     "skip_reason": "",
                 },
                 {
-                    "event_id": "event-workbench-1",
-                    "event_type": "workbench.read_model.refresh",
-                    "scope_type": "workbench",
+                    "event_id": "event-cost-statistics-1",
+                    "event_type": "cost_statistics.fact.changed",
+                    "scope_type": "cost_statistics",
                     "scope_key": "all",
                     "status": "done",
                     "source_version": 40,
@@ -89,7 +89,7 @@ class FakeConnection:
                 },
                 {
                     "window_name": "all_time",
-                    "event_type": "workbench.read_model.refresh",
+                    "event_type": "cost_statistics.fact.changed",
                     "p50_ms": 200.0,
                     "p95_ms": 500.0,
                     "p99_ms": 650.0,
@@ -104,7 +104,7 @@ class FakeConnection:
                 },
                 {
                     "window_name": "all_time",
-                    "event_type": "tax_offset.read_model.refresh",
+                    "event_type": "tax_offset.fact.changed",
                     "p50_ms": 50.0,
                     "p95_ms": 80.0,
                     "p99_ms": 90.0,
@@ -134,7 +134,7 @@ class FakeConnection:
                 },
                 {
                     "window_name": "recent_15m",
-                    "event_type": "workbench.read_model.refresh",
+                    "event_type": "cost_statistics.fact.changed",
                     "p50_ms": 95.0,
                     "p95_ms": 150.0,
                     "p99_ms": 190.0,
@@ -151,9 +151,9 @@ class FakeConnection:
         if "pending_outbox_by_scope" in normalized:
             return [
                 {
-                    "event_type": "workbench.read_model.refresh",
+                    "event_type": "import.fact.changed",
                     "status": "pending",
-                    "scope_type": "workbench",
+                    "scope_type": "import",
                     "scope_key": "all",
                     "count": 2,
                     "oldest_age_seconds": 610.0,
@@ -164,7 +164,7 @@ class FakeConnection:
         if "dirty_scope_backlog_by_scope" in normalized:
             return [
                 {
-                    "scope_type": "workbench",
+                    "scope_type": "cost_statistics",
                     "scope_key": "all",
                     "status": "pending",
                     "count": 1,
@@ -189,20 +189,6 @@ class FakeConnection:
             return [{"publish_status": "unpublished", "count": 4}, {"publish_status": "failed", "count": 2}]
         if "from job.outbox_events" in normalized:
             return [{"status": "pending", "count": 3}, {"status": "failed", "count": 1}]
-        if "from job.read_model_dirty_scopes" in normalized and "group by status" in normalized:
-            return [{"status": "pending", "count": 2}, {"status": "processing", "count": 1}]
-        if "from job.read_model_dirty_scopes" in normalized and "updated_at <" in normalized:
-            return [
-                {
-                    "tenant_id": "default",
-                    "scope_type": "workbench",
-                    "scope_key": "workbench:month:2026-05",
-                    "status": "pending",
-                    "age_seconds": 600.0,
-                    "attempts": 2,
-                    "last_error": "boom",
-                }
-            ]
         return []
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
@@ -249,25 +235,25 @@ class FakeWorkerMetricsConnection:
             return []
         return [
             {
-                "worker_id": "host-workbench",
-                "worker_instance": "workbench",
+                "worker_id": "host-oa-sync",
+                "worker_instance": "oa-sync",
                 "worker_kind": "unexpected-kind",
                 "status": "idle",
                 "heartbeat_lag_seconds": 1.0,
                 "payload": {
-                    "worker_instance": "workbench",
-                    "configured_event_types": ["workbench.read_model.refresh"],
+                    "worker_instance": "oa-sync",
+                    "configured_event_types": ["cost_statistics.fact.changed"],
                 },
             },
             {
-                "worker_id": "host-bank-detail",
-                "worker_instance": "bank-detail",
-                "worker_kind": "bank-detail-read-model",
+                "worker_id": "host-legacy-relation",
+                "worker_instance": "legacy-relation",
+                "worker_kind": "legacy-relation-worker",
                 "status": "idle",
                 "heartbeat_lag_seconds": 999.0,
                 "payload": {
-                    "worker_instance": "bank-detail",
-                    "configured_event_types": ["bank_detail.read_model.refresh"],
+                    "worker_instance": "legacy-relation",
+                    "configured_event_types": ["cost_statistics.fact.changed"],
                 },
             },
             {
@@ -278,7 +264,7 @@ class FakeWorkerMetricsConnection:
                 "heartbeat_lag_seconds": 2.0,
                 "payload": {
                     "worker_instance": "bank-account-balance",
-                    "configured_event_types": ["bank_account_balance.read_model.refresh"],
+                    "configured_event_types": ["bank_account_balance.fact.changed"],
                 },
             },
             {
@@ -300,7 +286,7 @@ class FakeWorkerMetricsConnection:
                 "heartbeat_lag_seconds": 4.0,
                 "payload": {
                     "worker_instance": "cost-tax",
-                    "configured_event_types": ["cost_statistics.read_model.refresh", "tax_offset.read_model.refresh"],
+                    "configured_event_types": ["cost_statistics.fact.changed", "tax_offset.fact.changed"],
                 },
             },
             {
@@ -311,7 +297,7 @@ class FakeWorkerMetricsConnection:
                 "heartbeat_lag_seconds": 999999.0,
                 "payload": {
                     "worker_instance": "cost-tax-read-model",
-                    "configured_event_types": ["cost_statistics.read_model.refresh"],
+                    "configured_event_types": ["cost_statistics.fact.changed"],
                 },
             },
         ]
@@ -321,14 +307,14 @@ class FakeWorkerMetricsConnection:
 
 
 class RuntimeMonitoringRepositoryTests(unittest.TestCase):
-    def test_health_summary_reports_backlog_failed_jobs_and_stale_dirty_scopes(self) -> None:
+    def test_health_summary_reports_backlog_failed_jobs_and_worker_status(self) -> None:
         connection = FakeConnection()
         repository = RuntimeMonitoringRepository(connection, rabbitmq_metrics_provider=FakeRabbitMqMetrics())
 
         summary = repository.health_summary(stale_after_seconds=300)
 
         self.assertEqual(summary["queue_backlog"], {"pending": 3, "failed": 1})
-        self.assertEqual(summary["dirty_scopes"], {"pending": 2, "processing": 1})
+        self.assertNotIn("dirty_scopes", summary)
         self.assertEqual(summary["failed_jobs"], 1)
         self.assertEqual(summary["max_pending_age_seconds"], 42.0)
         self.assertEqual(summary["oldest_pending_event_age_seconds"], 42.0)
@@ -337,39 +323,12 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["stale_required_worker_count"], 0)
         self.assertEqual(summary["mismatched_required_worker_count"], 0)
         self.assertEqual(summary["worker_metrics"][0]["status"], "missing")
-        self.assertEqual(summary["read_model_refresh_duration_ms"], {"p50": 120.0, "p95": 300.0, "p99": 450.0})
-        self.assertEqual(summary["read_model_refresh_enqueue_to_fresh_ms"], {"p50": 180.0, "p95": 350.0, "p99": 500.0})
-        self.assertEqual(summary["read_model_refresh_sample_count"], 10)
-        self.assertEqual(summary["read_model_refresh_failure_rate"], 0.1)
-        self.assertEqual(summary["read_model_refresh_by_key"][0]["key"], "workbench")
-        self.assertEqual(summary["read_model_refresh_by_key"][0]["event_type"], "workbench.read_model.refresh")
-        self.assertEqual(summary["read_model_refresh_by_key"][0]["duration_ms"]["p95"], 500.0)
-        self.assertEqual(summary["read_model_refresh_by_key"][0]["enqueue_to_fresh_ms"]["p95"], 550.0)
-        self.assertEqual(summary["read_model_refresh_by_key"][0]["sample_count"], 5)
-        self.assertEqual(summary["read_model_refresh_by_key"][0]["failure_rate"], 0.2)
-        self.assertEqual(summary["read_model_refresh_by_key"][0]["last_fresh_at"], "2026-06-13 03:00:01+08")
-        self.assertEqual(summary["read_model_refresh_by_key"][1]["key"], "tax_offset")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["event_id"], "event-search-1")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["key"], "search")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["scope_key"], "2026-03")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["enqueue_to_fresh_ms"], 35150.0)
-        self.assertFalse(summary["read_model_refresh_slow_events"][0]["skipped"])
-        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["event_id"], "event-current-workbench-1")
-        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["key"], "workbench")
-        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["scope_key"], "all")
-        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["duration_ms"], 28000.0)
-        self.assertEqual(summary["read_model_refresh_current_windows"]["recent_15m"]["sample_count"], 3)
-        self.assertEqual(
-            summary["read_model_refresh_current_windows"]["recent_15m"]["enqueue_to_fresh_ms"]["p95"],
-            160.0,
-        )
-        self.assertEqual(summary["read_model_refresh_current_windows"]["recent_1h"]["sample_count"], 0)
-        self.assertEqual(summary["read_model_refresh_by_key_current_windows"][0]["window"], "recent_15m")
-        self.assertEqual(summary["read_model_refresh_by_key_current_windows"][0]["key"], "workbench")
-        self.assertEqual(
-            summary["read_model_refresh_by_key_current_windows"][0]["enqueue_to_fresh_ms"]["p95"],
-            170.0,
-        )
+        self.assertNotIn("read_model_refresh_duration_ms", summary)
+        self.assertNotIn("read_model_refresh_enqueue_to_fresh_ms", summary)
+        self.assertNotIn("read_model_refresh_sample_count", summary)
+        self.assertNotIn("read_model_refresh_failure_rate", summary)
+        self.assertNotIn("read_model_refresh_by_key", summary)
+        self.assertNotIn("read_model_refresh_slow_events", summary)
         self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
         self.assertEqual(summary["rabbitmq_unpublished_backlog"], 4)
         self.assertEqual(summary["rabbitmq_publish_failed_backlog"], 2)
@@ -381,15 +340,15 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["rabbitmq_unacked_messages"], 1)
         self.assertEqual(summary["rabbitmq_consumer_count"], 2)
         self.assertEqual(summary["rabbitmq_dlq_count"], 0)
-        self.assertEqual(summary["stale_dirty_scope_count"], 1)
-        self.assertEqual(summary["stale_dirty_scopes"][0]["scope_key"], "workbench:month:2026-05")
+        self.assertNotIn("stale_dirty_scope_count", summary)
+        self.assertNotIn("stale_dirty_scopes", summary)
         self.assertEqual(
             summary["pending_outbox_events_by_scope"],
             [
                 {
-                    "event_type": "workbench.read_model.refresh",
+                    "event_type": "import.fact.changed",
                     "status": "pending",
-                    "scope_type": "workbench",
+                    "scope_type": "import",
                     "scope_key": "all",
                     "count": 2,
                     "oldest_age_seconds": 610.0,
@@ -398,57 +357,12 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(
-            summary["dirty_scopes_by_scope"],
-            [
-                {
-                    "scope_type": "workbench",
-                    "scope_key": "all",
-                    "status": "pending",
-                    "count": 1,
-                    "oldest_age_seconds": 620.0,
-                    "attempts": 2,
-                    "last_error": "still refreshing",
-                }
-            ],
-        )
-        self.assertEqual(
-            summary["workbench_read_model"],
-            {
-                "generation_status_counts": {"active": 3, "building": 1},
-                "active_scope_count": 3,
-                "active_row_count": 150,
-                "active_group_count": 45,
-                "active_summary_count": 3,
-                "building_scope_count": 1,
-                "failed_scope_count": 0,
-                "latest_generated_at": "2026-05-29 21:00:00+08",
-                "all_scope": {
-                    "status": "building",
-                    "row_count": 0,
-                    "group_count": 0,
-                    "summary_count": 0,
-                    "updated_at": "2026-05-29 21:02:00+08",
-                    "last_error": "",
-                },
-            },
-        )
+        self.assertNotIn("dirty_scopes_by_scope", summary)
+        self.assertNotIn("workbench_read_model", summary)
         normalized_calls = [" ".join(sql.lower().split()) for sql, _ in connection.calls]
-        refresh_metric_sql = next(sql for sql in normalized_calls if "recent_refresh_events" in sql)
-        self.assertIn("cross join lateral", refresh_metric_sql)
-        self.assertIn("order by updated_at desc", refresh_metric_sql)
-        self.assertIn("limit %s", refresh_metric_sql)
-        self.assertIn("processed_at - refresh_event.created_at", refresh_metric_sql)
-        self.assertIn("metric_windows(window_name, started_at)", refresh_metric_sql)
-        self.assertIn("recent_15m", refresh_metric_sql)
-        self.assertNotIn("from job.outbox_events where event_type like", refresh_metric_sql)
-        slow_event_sql = next(sql for sql in normalized_calls if "slow_refresh_event_samples" in sql)
-        self.assertIn("cross join lateral", slow_event_sql)
-        self.assertIn("limit %s", slow_event_sql)
-        self.assertIn("order by greatest(coalesce(enqueue_to_fresh_ms, 0)", slow_event_sql)
-        current_slow_event_sql = next(sql for sql in normalized_calls if "current_refresh_event_samples" in sql)
-        self.assertIn("created_at >= now() - interval '6 hours'", current_slow_event_sql)
-        self.assertIn("duration_ms desc nulls last", current_slow_event_sql)
+        self.assertFalse(any("recent_refresh_events" in sql for sql in normalized_calls))
+        self.assertFalse(any("slow_refresh_event_samples" in sql for sql in normalized_calls))
+        self.assertFalse(any("current_refresh_event_samples" in sql for sql in normalized_calls))
         publish_confirm_sql = next(sql for sql in normalized_calls if "recent_publish_confirms" in sql)
         self.assertIn("cross join lateral", publish_confirm_sql)
         self.assertIn("limit %s", publish_confirm_sql)
@@ -459,16 +373,16 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         )
         self.assertIn("where e.status <> 'done'", queue_status_sql)
         self.assertIn("done.status = 'done'", queue_status_sql)
-        self.assertIn("readiness.status = 'fresh'", queue_status_sql)
-        self.assertIn("readiness.updated_at > e.updated_at", queue_status_sql)
+        self.assertNotIn("read_model.app_status_readiness", queue_status_sql)
+        self.assertNotIn("readiness.status = 'fresh'", queue_status_sql)
         publish_status_sql = next(
             sql
             for sql in normalized_calls
             if "select e.publish_status, count(*)::bigint as count from job.outbox_events e" in sql
         )
-        self.assertIn("readiness.updated_at > e.updated_at", publish_status_sql)
         self.assertIn("done.status = 'done'", publish_status_sql)
-        self.assertIn("readiness.status = 'fresh'", publish_status_sql)
+        self.assertNotIn("read_model.app_status_readiness", publish_status_sql)
+        self.assertNotIn("readiness.status = 'fresh'", publish_status_sql)
 
     def test_ready_health_summary_uses_lightweight_runtime_contract(self) -> None:
         connection = FakeConnection()
@@ -478,24 +392,25 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         executed_sql = "\n".join(sql for sql, _params in connection.calls).lower()
 
         self.assertEqual(summary["queue_backlog"], {"pending": 3, "failed": 1})
-        self.assertEqual(summary["dirty_scopes"], {"pending": 2, "processing": 1})
+        self.assertNotIn("dirty_scopes", summary)
         self.assertEqual(summary["failed_jobs"], 1)
         self.assertEqual(summary["oldest_pending_event_age_seconds"], 42.0)
         self.assertEqual(summary["worker_heartbeat_lag_seconds"], 8.0)
-        self.assertEqual(summary["read_model_refresh_sample_count"], 10)
-        self.assertEqual(summary["read_model_refresh_failure_rate"], 0.1)
+        self.assertNotIn("read_model_refresh_sample_count", summary)
+        self.assertNotIn("read_model_refresh_failure_rate", summary)
         self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
         self.assertEqual(summary["rabbitmq_queue_depth"], 5)
-        self.assertEqual(summary["stale_dirty_scope_count"], 1)
-        self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "workbench.read_model.refresh")
-        self.assertEqual(summary["dirty_scopes_by_scope"][0]["scope_key"], "all")
+        self.assertNotIn("stale_dirty_scope_count", summary)
+        self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "import.fact.changed")
+        self.assertNotIn("dirty_scopes_by_scope", summary)
         self.assertNotIn("read_model_refresh_duration_ms", summary)
         self.assertNotIn("read_model_refresh_by_key", summary)
         self.assertNotIn("read_model_refresh_slow_events", summary)
         self.assertNotIn("workbench_read_model", summary)
-        self.assertIn("event_type = 'cost_statistics.read_model.refresh'", executed_sql)
-        self.assertIn("scope_key = 'all' or scope_key ~ '^[0-9]{4}-[0-9]{2}$'", executed_sql)
+        self.assertNotIn(".read_model.refresh", executed_sql)
         self.assertIn("payload->>'scope_key'", executed_sql)
+        self.assertNotIn("job.read_model_dirty_scopes", executed_sql)
+        self.assertNotIn("read_model.app_status_readiness", executed_sql)
         self.assertNotIn("{_current_effective_dirty_scope_predicate_sql", executed_sql)
         self.assertNotIn("slow_refresh_event_samples", executed_sql)
         self.assertNotIn("current_refresh_event_samples", executed_sql)
@@ -525,11 +440,11 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(metric["pending_count"], 1)
         self.assertIn("where ( e.status in ('pending', 'failed', 'dead_lettered')", connection.sql)
         self.assertIn("or e.publish_status in ('publishing', 'failed')", connection.sql)
-        self.assertIn("e.event_type = 'cost_statistics.read_model.refresh'", connection.sql)
+        self.assertNotIn(".read_model.refresh", connection.sql)
         self.assertIn("count(*) filter (where e.publish_status = 'failed')", connection.sql)
         self.assertIn("done.status = 'done'", connection.sql)
-        self.assertIn("readiness.status = 'fresh'", connection.sql)
-        self.assertIn("readiness.updated_at > e.updated_at", connection.sql)
+        self.assertNotIn("read_model.app_status_readiness", connection.sql)
+        self.assertNotIn("readiness.status = 'fresh'", connection.sql)
 
     def test_dashboard_worker_metrics_are_registry_instance_aware(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
@@ -537,18 +452,17 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         metrics = repository.dashboard_worker_metrics()
         by_instance = {row["worker_instance"]: row for row in metrics}
 
-        self.assertEqual(by_instance["workbench"]["warning_code"], "worker_kind_mismatch")
-        self.assertEqual(by_instance["workbench"]["expected_worker_kind"], "workbench-read-model")
-        self.assertEqual(by_instance["workbench"]["worker_kind"], "unexpected-kind")
-        self.assertEqual(by_instance["bank-detail"]["warning_code"], "worker_heartbeat_stale")
-        self.assertEqual(by_instance["bank-detail"]["status"], "stale")
-        self.assertTrue(by_instance["bank-account-balance"]["required"])
-        self.assertEqual(by_instance["bank-account-balance"]["status"], "available")
+        self.assertEqual(by_instance["oa-sync"]["warning_code"], "worker_kind_mismatch")
+        self.assertEqual(by_instance["oa-sync"]["expected_worker_kind"], "oa-sync")
+        self.assertEqual(by_instance["oa-sync"]["worker_kind"], "unexpected-kind")
+        self.assertFalse(by_instance["legacy-relation"]["required"])
+        self.assertNotIn("warning_code", by_instance["legacy-relation"])
+        self.assertFalse(by_instance["bank-account-balance"]["required"])
         self.assertFalse(by_instance["cost-tax-read-model"]["required"])
-        self.assertFalse(by_instance["cost-tax-read-model"]["current_effective"])
-        self.assertEqual(by_instance["cost-tax-read-model"]["warning_code"], "worker_event_type_mismatch")
+        self.assertTrue(by_instance["cost-tax-read-model"]["current_effective"])
+        self.assertNotIn("warning_code", by_instance["cost-tax-read-model"])
         self.assertNotIn("warning_code", by_instance["import"])
-        self.assertEqual(by_instance["oa-sync"]["warning_code"], "required_worker_missing")
+        self.assertEqual(by_instance["workbench-matching"]["warning_code"], "required_worker_missing")
 
     def test_app_status_worker_snapshot_ignores_historical_optional_worker_heartbeats(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
@@ -556,7 +470,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         snapshot = repository.app_status_runtime_snapshot()
 
         self.assertIn("cost-tax", snapshot["worker_statuses"])
-        self.assertNotIn("cost-tax-read-model", snapshot["worker_statuses"])
+        self.assertIn("cost-tax-read-model", snapshot["worker_statuses"])
 
     def test_health_summary_counts_worker_mismatches(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
@@ -564,7 +478,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         summary = repository.health_summary(stale_after_seconds=300)
 
         self.assertGreaterEqual(summary["missing_required_worker_count"], 1)
-        self.assertEqual(summary["stale_required_worker_count"], 1)
+        self.assertEqual(summary["stale_required_worker_count"], 0)
         self.assertEqual(summary["mismatched_required_worker_count"], 1)
 
 

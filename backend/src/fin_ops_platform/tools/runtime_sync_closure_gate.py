@@ -14,7 +14,6 @@ from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringReposi
 from fin_ops_platform.tools import (
     health_ready_payload_probe,
     http_slo_probe,
-    read_model_slo_smoke,
     sse_smoke_probe,
     write_operation_e2e_smoke,
     write_operation_slo_audit,
@@ -28,13 +27,10 @@ SKIP = "skip"
 WRITE_E2E_REQUIRED_ARGS = ("--write-scenario", "--apply-write-scenarios", "--write-approval-ticket")
 RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "queue_backlog",
-    "dirty_scopes",
     "failed_jobs",
-    "stale_dirty_scope_count",
     "missing_required_worker_count",
     "stale_required_worker_count",
     "mismatched_required_worker_count",
-    "read_model_refresh_failure_rate",
     "worker_metrics",
 )
 
@@ -62,7 +58,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--admin-token", default=os.getenv("FIN_OPS_HTTP_SLO_ADMIN_TOKEN", ""))
     parser.add_argument("--cookie", default=os.getenv("FIN_OPS_HTTP_SLO_COOKIE", ""))
     parser.add_argument("--allow-unauthenticated-http", action="store_true")
-    parser.add_argument("--apply-read-model-smoke", action="store_true")
     parser.add_argument("--write-scenario", type=Path)
     parser.add_argument("--apply-write-scenarios", action="store_true")
     parser.add_argument(
@@ -70,7 +65,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("FIN_OPS_WRITE_E2E_APPROVAL_TICKET", ""),
         help="Required with --apply-write-scenarios. Business approval reference for mutating write-operation smoke.",
     )
-    parser.add_argument("--read-model-target-ms", type=float, default=1_000.0)
     parser.add_argument("--write-target-ms", type=float, default=1_000.0)
     parser.add_argument("--http-target-ms", type=float, default=1_000.0)
     parser.add_argument("--sse-target-ms", type=float, default=1_000.0)
@@ -113,11 +107,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         headers=headers,
         admin_headers=admin_headers,
         allow_unauthenticated_http=bool(args.allow_unauthenticated_http),
-        apply_read_model_smoke=bool(args.apply_read_model_smoke),
         write_scenario=args.write_scenario,
         apply_write_scenarios=bool(args.apply_write_scenarios),
         write_approval_ticket=str(args.write_approval_ticket or ""),
-        read_model_target_ms=max(1.0, float(args.read_model_target_ms)),
         write_target_ms=max(1.0, float(args.write_target_ms)),
         http_target_ms=max(1.0, float(args.http_target_ms)),
         sse_target_ms=max(1.0, float(args.sse_target_ms)),
@@ -146,11 +138,9 @@ def run_closure_gate(
     headers: Mapping[str, str] | None = None,
     admin_headers: Mapping[str, str] | None = None,
     allow_unauthenticated_http: bool = False,
-    apply_read_model_smoke: bool = False,
     write_scenario: Path | None = None,
     apply_write_scenarios: bool = False,
     write_approval_ticket: str = "",
-    read_model_target_ms: float = 1_000.0,
     write_target_ms: float = 1_000.0,
     http_target_ms: float = 1_000.0,
     sse_target_ms: float = 1_000.0,
@@ -172,14 +162,6 @@ def run_closure_gate(
     write_audit_operations = _write_scenario_operations(write_scenarios)
     checks = [
         _runtime_health_check(connection),
-        _read_model_smoke_check(
-            connection,
-            apply=apply_read_model_smoke,
-            tenant_id=tenant_id,
-            target_ms=read_model_target_ms,
-            timeout_seconds=timeout_seconds,
-            poll_interval_seconds=poll_interval_seconds,
-        ),
         _http_slo_check(
             base_url=base_url,
             api_prefix=api_prefix,
@@ -243,7 +225,6 @@ def run_closure_gate(
             "health_ready_payload_ms": health_ready_target_ms,
             "health_ready_max_response_bytes": health_ready_max_response_bytes,
             "health_ready_max_api_performance_endpoints": health_ready_max_api_performance_endpoints,
-            "read_model_enqueue_to_fresh_ms": read_model_target_ms,
             "write_operation_enqueue_to_done_ms": write_target_ms,
             "write_operation_enqueue_to_done_p99_ms": write_operation_slo_audit.effective_p99_target_ms_for(
                 write_target_ms,
@@ -251,7 +232,6 @@ def run_closure_gate(
             ),
         },
         "auth_configured": _auth_configured(normalized_headers) or _auth_configured(normalized_admin_headers),
-        "apply_read_model_smoke": bool(apply_read_model_smoke),
         "apply_write_scenarios": bool(apply_write_scenarios),
         "write_approval_configured": bool(str(write_approval_ticket or "").strip()),
         "checks": [check.to_payload() for check in checks],
@@ -282,7 +262,7 @@ def _runtime_health_check(connection: Any) -> ClosureCheck:
     return ClosureCheck(
         "runtime_health",
         PASS if not blockers else FAIL,
-        "Runtime queue, worker, RabbitMQ and dirty-scope blockers are clear." if not blockers else "Runtime health has current blockers.",
+        "Runtime queue, worker and RabbitMQ blockers are clear." if not blockers else "Runtime health has current blockers.",
         {
             "blockers": blockers,
             "snapshot": {
@@ -291,62 +271,16 @@ def _runtime_health_check(connection: Any) -> ClosureCheck:
                     "queue_backlog",
                     "failed_jobs",
                     "max_pending_age_seconds",
-                    "stale_dirty_scope_count",
                     "missing_required_worker_count",
                     "stale_required_worker_count",
                     "mismatched_required_worker_count",
                     "rabbitmq_queue_depth",
                     "rabbitmq_unacked_messages",
                     "rabbitmq_dlq_count",
-                    "read_model_refresh_failure_rate",
                 )
                 if key in summary
             },
         },
-    )
-
-
-def _read_model_smoke_check(
-    connection: Any,
-    *,
-    apply: bool,
-    tenant_id: str,
-    target_ms: float,
-    timeout_seconds: float,
-    poll_interval_seconds: float,
-) -> ClosureCheck:
-    report = read_model_slo_smoke.run_smoke(
-        connection,
-        apply=apply,
-        tenant_id=tenant_id,
-        target_ms=target_ms,
-        timeout_seconds=timeout_seconds,
-        poll_interval_seconds=poll_interval_seconds,
-    )
-    if not apply:
-        return ClosureCheck(
-            "read_model_direct_smoke",
-            FAIL,
-            "Direct read model smoke was not applied; final closure requires enqueue-to-fresh evidence.",
-            _compact_report(report),
-        )
-    planned_scope_count = _safe_int(report.get("planned_scope_count"))
-    result_count = _safe_int(report.get("result_count"))
-    if report.get("status") == PASS and (planned_scope_count <= 0 or result_count <= 0):
-        return ClosureCheck(
-            "read_model_direct_smoke",
-            FAIL,
-            "Direct read model smoke produced no scope/result samples; final closure requires non-empty enqueue-to-fresh evidence.",
-            {
-                **_compact_report(report),
-                "error": "read_model_smoke_empty_samples",
-            },
-        )
-    return ClosureCheck(
-        "read_model_direct_smoke",
-        PASS if report.get("status") == PASS else FAIL,
-        "All App Status read models converged within target." if report.get("status") == PASS else "One or more read models missed the direct-scope SLO.",
-        _compact_report(report),
     )
 
 
@@ -659,15 +593,12 @@ def _runtime_blockers(summary: Mapping[str, Any]) -> dict[str, Any]:
     for key in ("missing_required_worker_count", "stale_required_worker_count", "mismatched_required_worker_count"):
         if int(summary.get(key) or 0) > 0:
             blockers[key] = summary.get(key)
-    for key in ("rabbitmq_queue_depth", "rabbitmq_unacked_messages", "rabbitmq_dlq_count", "stale_dirty_scope_count", "failed_jobs"):
+    for key in ("rabbitmq_queue_depth", "rabbitmq_unacked_messages", "rabbitmq_dlq_count", "failed_jobs"):
         if int(summary.get(key) or 0) > 0:
             blockers[key] = summary.get(key)
     queue_backlog = summary.get("queue_backlog")
     if isinstance(queue_backlog, dict) and any(int(value or 0) > 0 for value in queue_backlog.values()):
         blockers["queue_backlog"] = queue_backlog
-    failure_rate = summary.get("read_model_refresh_failure_rate")
-    if isinstance(failure_rate, (int, float)) and float(failure_rate) > 0:
-        blockers["read_model_refresh_failure_rate"] = failure_rate
     return blockers
 
 

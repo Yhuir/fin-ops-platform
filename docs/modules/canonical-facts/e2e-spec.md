@@ -1,0 +1,16 @@
+# Canonical Facts E2E 规格
+
+本模块没有独立页面或用户可直接操作的 E2E 流程。它的 E2E 验收通过 owner 模块业务流程间接覆盖。
+
+## 规格映射
+
+| Spec ID | 业务流程 | Owner 模块 |
+| --- | --- | --- |
+| `CF-IMPORT-001` | 导入预览确认后写入 canonical facts，并通过 direct API /真实后台任务展示受影响页面结果 | `imports-invoices`、`imports-bank-transactions`、`imports-etc-invoices` |
+| `CF-REL-001` | 关联确认/撤回后写入 relation facts，并刷新关联台和下游页面 | `workbench-relations`、`reconciliation-workbench` |
+| `CF-TAG-001` | 银行流水分类确认后写入标签事实，并刷新银行明细、搜索和相关 downstream | `bank-details` |
+| `CF-LIFECYCLE-001` | 发票/收款/待付款生命周期写入后，下游页面通过 direct API 展示 | `pending-invoices`、`output-invoice-collections`、`oa-pending-payments` |
+
+## 不适用原因
+
+`canonical-facts` 是资源治理模块，不新增路由、页面、按钮、表单或浏览器交互。因此不维护独立 Playwright spec；新增或修改 E2E 时必须落到具体 owner 页面/功能模块。

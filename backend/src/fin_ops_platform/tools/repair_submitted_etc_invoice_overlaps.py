@@ -8,7 +8,6 @@ from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 
 
@@ -218,23 +217,14 @@ def apply_submitted_etc_invoice_overlap_repair(
             operator=normalized_operator,
         )
 
-    enqueued_scopes: list[str] = []
-    if queue_repository is not None and affected_months:
-        gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
-        enqueued_scopes = gateway.enqueue_many(
-            "workbench",
-            affected_months + ["all"],
-            reason="submitted_etc_invoice_overlap_repair",
-            priority="high",
-            metadata={"reason": normalized_reason, "operator": normalized_operator},
-        )
+    _ = queue_repository
 
     return {
         "applied": True,
         "requested_count": len(auto_fix_candidates),
         "updated_count": updated_count,
         "affected_workbench_scopes": affected_months + (["all"] if affected_months else []),
-        "enqueued_workbench_scopes": enqueued_scopes,
+        "enqueued_workbench_scopes": [],
     }
 
 

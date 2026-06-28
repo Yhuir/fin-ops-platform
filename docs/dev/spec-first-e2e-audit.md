@@ -26,9 +26,9 @@ Spec-first 的事实源顺序：
 
 - 模块目标和用户角色。
 - 页面入口、主要用户流程和核心业务动作。
-- 数据状态：loading、empty、error、refreshing、stale、fresh。
+- 数据状态：loading、empty、error、direct payload unavailable、reload recovered。
 - 权限规则：`admin`、`full_access`、`read_export_only`、forbidden/expired session。
-- API/read model/worker/freshness 边界。
+- API/direct payload/real background job/cache warmup/legacy projection guard 边界。
 - 跨页面 fan-out。
 - 失败场景和不可自动化风险。
 
@@ -65,7 +65,7 @@ IMPORT-BANK-E2E-001
 | 状态 | 含义 |
 | --- | --- |
 | `covered` | 已有自动化测试从用户可见行为或稳定业务契约证明该 Spec。 |
-| `partial` | 已覆盖主路径，但缺少关键角色、失败、stale/refreshing、跨页面或真实浏览器断言。 |
+| `partial` | 已覆盖主路径，但缺少关键角色、失败、direct payload unavailable、跨页面或真实浏览器断言。 |
 | `missing` | 没有足够自动化覆盖。 |
 | `code-driven` | 测试按现有代码行为写成，尚未证明业务 Spec。 |
 | `wrong-behavior-protected` | 测试正在保护与 Spec 冲突的错误行为，必须重写或修代码。 |
@@ -92,7 +92,7 @@ IMPORT-BANK-E2E-001
 | 决策 | 条件 |
 | --- | --- |
 | 保留 | 已映射到 Spec ID，断言用户可见结果和业务契约，mock 数据符合业务。 |
-| 加强 | 主路径有效，但缺权限、失败、freshness、跨页、下载、弹窗或大表格断言。 |
+| 加强 | 主路径有效，但缺权限、失败、direct payload unavailable、跨页、下载、弹窗或大表格断言。 |
 | 重写 | 测试只证明页面未崩、只适配现有 bug、断言实现细节、mock 与业务不符。 |
 | 删除/合并 | 重复覆盖同一 Spec 且增加维护成本；删除前必须确认其他测试仍覆盖该 Spec。 |
 
@@ -101,7 +101,7 @@ IMPORT-BANK-E2E-001
 - 优先用 role、label、test id 和用户可见文本定位。
 - 断言最终用户结果：状态标签、表格行、弹窗、下载事件、导航、错误反馈和刷新次数。
 - 不断言 React state、内部函数、临时 CSS class 或非业务字段。
-- 写操作后必须验证 freshness/barrier/refetch 结果；不能只断言 POST 被调用。
+- 写操作后必须验证 direct reload/refetch、affected scopes/job diagnostics 或真实后台任务结果；不能只断言 POST 被调用。
 - 权限场景必须证明 UI gate 和 mutation API 未触发。
 - API mock 必须表达业务事实，不得为了当前代码方便而缩短业务链路。
 

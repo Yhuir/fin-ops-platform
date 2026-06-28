@@ -10,10 +10,10 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | --- | --- | --- |
 | 后端生命周期事件 | `DERIVED_DATA_EVENTS`、`DerivedDataLifecycleService.plan_event(...)` | 导入确认、关系确认/撤回、标签规则、税金认证、ETC、设置重置、启动 stale scan |
 | 后端派生域 | `DERIVED_DATA_DOMAINS`、`_EVENT_DOMAINS` | workbench、relation、invoice lifecycle、pending invoice、tax/cost、bank detail、no-OA、search/cache |
-| 后端执行边界 | `execute_plan(...)`、`_RuntimeWorkerDerivedLifecycle.execute_event(...)`、`Application._execute_derived_data_lifecycle_event(...)` | executor 缺失时应跳过并记录；真实 dirty/outbox 必须由 runtime/read model gateway 承担 |
+| 后端执行边界 | `execute_plan(...)`、`_RuntimeWorkerDerivedLifecycle.execute_event(...)`、`Application._execute_derived_data_lifecycle_event(...)` | executor 缺失时应跳过并记录；真实 affected scope、outbox、background job 或 cache warmup 必须由 runtime/业务边界承担 |
 | 前端 domain event | `web/src/features/domainEvents.ts` | 事件只做同 session / cross-tab 刷新提示，不是事实源 |
-| 前端页面订阅 | `useActiveFinanceDomainEvent(...)` 和页面调用点 | inactive 页面不能 replay 旧事件；页面刷新不能替代 read model freshness |
-| 页面/UI 状态 | 各页面 API response 的 `read_model_status` / stale fields | 页面 loading/error/stale/refreshing 必须以后端事实为准 |
+| 前端页面订阅 | `useActiveFinanceDomainEvent(...)` 和页面调用点 | inactive 页面不能 replay 旧事件；页面刷新不能替代 direct API 事实读取 |
+| 页面/UI 状态 | 各页面 direct API response / unavailable fields | 页面 loading/error/unavailable 必须以后端事实为准 |
 | 共享测试 | backend unittest、Vitest、页面交互测试 | 新增事件必须补后端 mapping、前端 contract、受影响页面回归 |
 
 ## 后端 lifecycle event 影响图
@@ -32,13 +32,13 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | `pending_invoice_income_status_override_confirmed` | pending invoice、search | 待找发票 | `test_income_status_override_...` |
 | `no_oa_bank_batch_changed` | no-OA、workbench | 免 OA、关联台 | `test_no_oa_bank_batch_changed_...` |
 | `batch_accounting_relation_changed` | bank detail、workbench relation | 批量账务、银行明细、关联台 | `test_batch_accounting_relation_changed_...` |
-| `turnover_relation_changed` | workbench/relation/matching、cost/search | 往来款、关联台、成本 | all-event safe plan guard；页面模块继续补 |
+| `turnover_relation_changed` | workbench/relation/matching、cost；search direct payload | 往来款、关联台、成本、搜索 | all-event safe plan guard；页面模块继续补 |
 | `tax_certified_import_confirmed` | invoice lifecycle、tax、search | 税金、进项使用 | lifecycle ordering test；税金模块继续补 |
-| `etc_business_batch_changed` | ETC/tax/cost/search 相关派生域 | ETC、税金、成本 | all-event safe plan guard；ETC 模块继续补 |
-| `settings_reset_completed` / `manual_derived_cache_cleanup` | 多数 read model/cache/job 域 | 所有列表页、App Health、成本/搜索 | manual cleanup tests；settings/cost 模块继续补 |
+| `etc_business_batch_changed` | ETC/tax/cost 相关派生域；search direct payload | ETC、税金、成本、搜索 | all-event safe plan guard；ETC 模块继续补 |
+| `settings_reset_completed` / `manual_derived_cache_cleanup` | 多数 direct payload/cache/job 域 | 所有列表页、App Health、成本/搜索 | manual cleanup tests；settings/cost 模块继续补 |
 | `project_scope_changed` | 成本统计、搜索 | 成本/搜索 | `tests/test_derived_data_lifecycle_service.py` |
-| `startup_stale_scan` | opt-in `workbench_matching_dirty_scopes` only | 关联台 matching 补扫；默认启动不执行，启用时只标记 stale scope，不得刷新用户可见 read model | `test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill`、`test_startup_stale_scan_is_disabled_during_application_startup_by_default`、`test_startup_stale_scan_can_be_enabled_during_application_startup`、`test_startup_stale_scan_skips_fresh_matching_months` |
-| PostgreSQL candidate scope run restore | `read_model.workbench_candidate_matches` + `job.workbench_matching_dirty_scopes` | formal read path 必须恢复 completed matching scope run，避免 opt-in 启动补扫误判已完成月份 stale | `test_postgres_candidate_matches_restore_completed_scope_runs` |
+| `startup_stale_scan` | opt-in Workbench matching scope only | 关联台 matching 补扫；默认启动不执行，启用时只标记 matching 补扫范围，不得刷新用户可见页面派生数据 | `test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill`、`test_startup_stale_scan_is_disabled_during_application_startup_by_default`、`test_startup_stale_scan_can_be_enabled_during_application_startup`、`test_startup_stale_scan_skips_fresh_matching_months` |
+| PostgreSQL candidate scope run restore | Workbench candidate matching storage + matching scope run state | formal read path 必须恢复 completed matching scope run，避免 opt-in 启动补扫误判已完成月份 stale | `test_postgres_candidate_matches_restore_completed_scope_runs` |
 
 ## 前端 domain event 影响图
 
@@ -57,11 +57,11 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_derived_data_lifecycle_service.py` | lifecycle event 到派生域的映射、scope 去重、protected target、防未知事件是核心规则。 |
-| 2. Service-layer tests | 适用 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_invoice_lifecycle_derived_lifecycle_executor.py` | `execute_plan` 聚合 executor 结果；runtime worker derived lifecycle 负责把 plan 落到 dirty/read model refresh；invoice lifecycle explicit executor 保护 scope/reason/metadata/result shape。 |
+| 2. Service-layer tests | 适用 | `tests/test_derived_data_lifecycle_service.py`、legacy runtime worker scope tests、`tests/test_invoice_lifecycle_derived_lifecycle_executor.py` | `execute_plan` 聚合 executor 结果；runtime worker derived lifecycle 负责把 plan 落到 affected scopes、real background jobs 或 cache warmup；invoice lifecycle explicit executor 保护 scope/reason/metadata/result shape。 |
 | 3. API contract tests | 间接适用 | 各业务模块 API contract tests | 本模块不直接暴露普通业务 API；若改 `Application._execute_derived_data_lifecycle_event` 的 API 响应 shape，必须补对应 API contract。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | lifecycle 只规划影响域；实际 dirty/outbox、readiness、worker 由 runtime/read-model 测试保护。 |
+| 4. Read model/cache/background job tests | 部分适用 | `tests/test_derived_data_lifecycle_service.py`、legacy read-model guard tests、runtime worker tests | lifecycle 只规划影响域；当前页面闭环由 direct API、真实 background job、outbox 和 App Status runtime facts 保护；legacy read-model tests 仅作删除/兼容防回归。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/domainEvents.test.ts`、`web/src/test/useActiveFinanceDomainEvent.test.tsx`、各页面测试 | 覆盖事件合同、affected months、跨 tab、订阅/退订、inactive 页面不 replay。 |
-| 6. End-to-end business-flow integration tests | 按需适用 | 具体页面/业务模块 smoke | lifecycle event 跨模块时必须在对应模块补关键链路，例如 import -> lifecycle -> read model -> 页面 stale/fresh。 |
+| 6. End-to-end business-flow integration tests | 按需适用 | 具体页面/业务模块 smoke | lifecycle event 跨模块时必须在对应模块补关键链路，例如 import -> lifecycle -> direct API -> 页面收敛。 |
 | 7. Existing feature regression tests | 适用 | `tests/test_derived_data_lifecycle_service.py`、`web/src/test/domainEvents.test.ts` | 新增/改名事件必须先补 characterization/regression，避免旧页面刷新链路被破坏。 |
 
 ## 历史 bug 回归库
@@ -70,13 +70,13 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | --- | --- | --- | --- |
 | 2026-06-11 | 新增 derived lifecycle event 可能只加入枚举，未证明能生成安全 plan。 | `test_every_declared_event_builds_safe_json_serializable_plan` | covered |
 | 2026-06-11 | 前端 finance domain event 改名或漏同步，导致页面监听旧事件失效。 | `web/src/test/domainEvents.test.ts::declares the finance domain event contract` | covered |
-| 2026-06-13 | 应用/worker 重启触发 `startup_stale_scan` 时误刷新 workbench、relation、invoice lifecycle、cost、tax 等页面 read model，或无条件重扫 matching dirty scopes，造成分钟级同步窗口。 | `test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill`、`test_startup_stale_scan_is_disabled_during_application_startup_by_default`、`test_startup_stale_scan_can_be_enabled_during_application_startup`、`test_startup_stale_scan_skips_fresh_matching_months`、`test_postgres_candidate_matches_restore_completed_scope_runs` | covered |
+| 2026-06-13 | 应用/worker 重启触发 `startup_stale_scan` 时误刷新 workbench、relation、invoice lifecycle、cost、tax 等页面派生数据，或无条件重扫 matching scope，造成分钟级同步窗口。 | `test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill`、`test_startup_stale_scan_is_disabled_during_application_startup_by_default`、`test_startup_stale_scan_can_be_enabled_during_application_startup`、`test_startup_stale_scan_skips_fresh_matching_months`、`test_postgres_candidate_matches_restore_completed_scope_runs` | covered |
 | 长期 | 前端 domain event 被误当成事实源，inactive 页面 replay 旧事件误刷新。 | `web/src/test/useActiveFinanceDomainEvent.test.tsx` | covered |
 
 ## 关键 smoke flows
 
-1. `业务写入 -> DerivedDataLifecycleService.plan_event -> execute_plan -> dirty scope/outbox -> worker -> read model readiness -> 页面 fresh/stale`
-2. `页面 A emit finance domain event -> 当前 active 页面刷新 -> inactive 页面不 replay -> 页面重新 mount 后走 API/read boundary`
+1. `业务写入 -> DerivedDataLifecycleService.plan_event -> execute_plan -> affected scopes/outbox/background job -> direct API 收敛 -> 页面 ready/error/unavailable`
+2. `页面 A emit finance domain event -> 当前 active 页面刷新 -> inactive 页面不 replay -> 页面重新 mount 后走 direct API/read boundary`
 3. `跨 tab BroadcastChannel 收到 finance event -> 本 tab dispatch CustomEvent -> 页面 handler 刷新`
 4. `新增 backend lifecycle event -> safe plan guard -> 具体业务模块补 event mapping 和 affected page regression`
 5. `新增 frontend finance event -> event contract guard -> emit/subscribe 页面测试 -> 后端 lifecycle 不缺位`
@@ -84,7 +84,7 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 ## 本模块验证命令
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_runtime_worker_read_model_refresh_scopes -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_lifecycle_derived_lifecycle_executor -v
 cd web && npm test -- --run src/test/domainEvents.test.ts src/test/useActiveFinanceDomainEvent.test.tsx
 bash scripts/verify.sh docs
@@ -96,6 +96,6 @@ bash scripts/verify.sh docs
 
 ## 未测风险
 
-- 本模块不证明每个页面在每个具体 event 后都正确展示 loading/error/stale/refreshing；这些必须由页面模块测试覆盖。
-- 后端 `execute_plan` 的具体 executor 落库行为分散在 runtime/read-model/业务模块；本模块只保护规划和聚合合同。
-- 前端 domain event 只是刷新提示，不能证明后端 dirty scope 已存在；跨页面一致性仍以后端 read model freshness 和 worker readiness 为准。
+- 本模块不证明每个页面在每个具体 event 后都正确展示 loading/error/unavailable；这些必须由页面模块测试覆盖。
+- 后端 `execute_plan` 的具体 executor 落库行为分散在 runtime/业务模块；本模块只保护规划和聚合合同。
+- 前端 domain event 只是刷新提示，不能证明后端 affected scope 或真实后台任务已存在；跨页面一致性仍以后端 direct API、派生数据和 worker runtime facts 为准。

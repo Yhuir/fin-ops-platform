@@ -10,11 +10,9 @@ from uuid import uuid4
 from fin_ops_platform.services.output_invoice_collection_models import (
     OutputInvoiceCollectionRowRef,
     output_invoice_collection_freshness_metadata,
-    output_invoice_collection_scope_key,
 )
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
 from fin_ops_platform.services.output_invoice_collection_status_service import OutputInvoiceCollectionStatusOverlayService
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 RowProvider = Callable[[str], dict[str, Any] | None]
@@ -382,9 +380,9 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
 
 class OutputInvoiceCollectionLifecycleService:
     def __init__(self, *, repository: Any, row_provider: RowProvider, queue_repository: Any | None = None) -> None:
+        _ = queue_repository
         self._repository = repository
         self._row_provider = row_provider
-        self._queue_repository = queue_repository
         self._status_service = OutputInvoiceCollectionStatusOverlayService()
 
     def set_collection_status(
@@ -535,17 +533,6 @@ class OutputInvoiceCollectionLifecycleService:
             raise OutputInvoiceCollectionError("row_not_found", "销项发票收款行不存在。", status_code=HTTPStatus.NOT_FOUND)
         return row
 
-    def _enqueue(self, row: dict[str, Any], *, reason: str, trace_id: str | None = None) -> None:
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not refresh_gateway.can_enqueue():
-            return
-        refresh_gateway.enqueue_one(
-            "output_invoice_collection",
-            output_invoice_collection_scope_key(row),
-            reason=reason,
-            trace_id=trace_id,
-        )
-
     def _run_mutation(
         self,
         row: dict[str, Any],
@@ -554,24 +541,14 @@ class OutputInvoiceCollectionLifecycleService:
         mutate: Callable[[Any | None], dict[str, Any]],
         trace_id: str | None,
     ) -> dict[str, Any]:
+        _ = row, reason, trace_id
         transaction_runner = getattr(self._repository, "run_in_transaction", None)
-        enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-        if callable(transaction_runner) and callable(enqueue_in_transaction):
+        if callable(transaction_runner):
             def callback(transaction: Any) -> dict[str, Any]:
-                result = mutate(transaction)
-                enqueue_in_transaction(
-                    transaction=transaction,
-                    scope_type="output_invoice_collection",
-                    scope_key=output_invoice_collection_scope_key(row),
-                    reason=reason,
-                    trace_id=trace_id,
-                )
-                return result
+                return mutate(transaction)
 
             return transaction_runner(callback)
-        result = mutate(None)
-        self._enqueue(row, reason=reason, trace_id=trace_id)
-        return result
+        return mutate(None)
 
 
 def _now_iso() -> str:

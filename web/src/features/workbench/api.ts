@@ -38,10 +38,6 @@ import type {
   WorkbenchGroupsPageQuery,
   WorkbenchGroupsPageResult,
   WorkbenchInitialPageResult,
-  WorkbenchReadModelStatus,
-  WorkbenchRefreshScopeStatus,
-  WorkbenchRefreshStatus,
-  WorkbenchRefreshStatusEvent,
   WorkbenchZoneCounts,
   WorkbenchZoneId,
   WorkbenchZonePageInfo,
@@ -185,7 +181,6 @@ type ApiWorkbenchSummaryPayload = {
   month: string;
   scope_key?: string;
   generated_at?: string | null;
-  read_model_status?: WorkbenchReadModelStatus;
   oa_status?: ApiWorkbenchPayload["oa_status"];
   invoice_inventory?: ApiWorkbenchInvoiceInventory;
   summary: ApiWorkbenchPayload["summary"];
@@ -200,7 +195,6 @@ type ApiWorkbenchGroupsPayload = {
   total: number;
   row_counts?: Partial<Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">>;
   has_more: boolean;
-  read_model_status?: WorkbenchReadModelStatus;
   groups: ApiWorkbenchGroup[];
 };
 
@@ -230,50 +224,6 @@ type ApiWorkbenchOaSyncStatus = {
   failed_event_count?: number | null;
   failedEventCount?: number | null;
   version?: number | null;
-};
-
-type ApiWorkbenchRefreshScopeStatus = {
-  scope_key?: string | null;
-  scopeKey?: string | null;
-  status?: string | null;
-  updated_at?: string | null;
-  updatedAt?: string | null;
-  last_error?: string | null;
-  lastError?: string | null;
-  source_version?: number | string | null;
-  sourceVersion?: number | string | null;
-};
-
-type ApiWorkbenchRefreshStatus = {
-  scope_key?: string | null;
-  scopeKey?: string | null;
-  read_model_status?: WorkbenchReadModelStatus | null;
-  readModelStatus?: WorkbenchReadModelStatus | null;
-  status?: string | null;
-  generated_at?: string | null;
-  generatedAt?: string | null;
-  active_generation_id?: string | null;
-  activeGenerationId?: string | null;
-  consistency_status?: string | null;
-  consistencyStatus?: string | null;
-  read_model_version?: string | number | null;
-  readModelVersion?: string | number | null;
-  source_version?: string | number | null;
-  sourceVersion?: string | number | null;
-  version?: string | number | null;
-  dirty_scopes?: ApiWorkbenchRefreshScopeStatus[] | null;
-  dirtyScopes?: ApiWorkbenchRefreshScopeStatus[] | null;
-  running_scopes?: unknown[] | null;
-  runningScopes?: unknown[] | null;
-  processed_count?: number | string | null;
-  processedCount?: number | string | null;
-  total_count?: number | string | null;
-  totalCount?: number | string | null;
-  worker_lag_seconds?: number | string | null;
-  workerLagSeconds?: number | string | null;
-  last_error?: string | null;
-  lastError?: string | null;
-  retryable?: boolean | null;
 };
 
 type ApiIgnoredWorkbenchPayload = {
@@ -513,38 +463,6 @@ type ApiWorkbenchActionResult = {
   affected_scope_keys?: unknown[];
   changedScopes?: unknown[];
   changed_scopes?: unknown[];
-  freshnessTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  freshness_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  operationBarrierTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  operation_barrier_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
   operationProjection?: ApiWorkbenchOperationProjection;
   operation_projection?: ApiWorkbenchOperationProjection;
   message: string;
@@ -559,12 +477,6 @@ type ApiWorkbenchOperationProjection = {
   };
 };
 
-export type WorkbenchActionFreshnessTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
-};
-
 export type WorkbenchOperationProjection = {
   after: {
     pairedGroups: WorkbenchCandidateGroup[];
@@ -572,11 +484,23 @@ export type WorkbenchOperationProjection = {
   };
 };
 
-export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "operationProjection" | "freshnessTargets" | "operationBarrierTargets" | "affectedScopeKeys"> & {
+export type WorkbenchActionResult = {
+  success: boolean;
+  action: string;
+  month: string;
+  affected_row_ids: string[];
+  case_id?: string;
+  exception_case_id?: string;
+  exception_case_ids?: string[];
+  updated_rows?: Array<{ id: string }>;
+  affectedMonths?: unknown[];
+  affected_months?: unknown[];
   affectedScopeKeys: string[];
-  freshnessTargets: WorkbenchActionFreshnessTarget[];
-  operationBarrierTargets: WorkbenchActionFreshnessTarget[];
+  affected_scope_keys?: unknown[];
+  changedScopes?: unknown[];
+  changed_scopes?: unknown[];
   operationProjection?: WorkbenchOperationProjection;
+  message: string;
 };
 
 type ApiWorkbenchExceptionScenario = {
@@ -666,38 +590,6 @@ type ApiWorkbenchExceptionApplyResult = {
   affectedRowIds?: unknown[];
   affected_scope_keys?: unknown[];
   affectedScopeKeys?: unknown[];
-  freshness_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  freshnessTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  operation_barrier_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  operationBarrierTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
   workbench_refresh_required?: boolean;
   workbenchRefreshRequired?: boolean;
   message?: string;
@@ -900,27 +792,12 @@ type ApiOaManualSearchResult = {
   page_size?: number | null;
 };
 
-type ApiReadModelTarget = {
-  readModelKey?: unknown;
-  read_model_key?: unknown;
-  scopeType?: unknown;
-  scope_type?: unknown;
-  scopeKey?: unknown;
-  scope_key?: unknown;
-};
-
-type ApiReadModelTargetEnvelope = {
+type ApiAffectedScopeEnvelope = {
   affectedScopeKeys?: unknown[] | null;
   affected_scope_keys?: unknown[] | null;
-  readModelScopeKeys?: unknown[] | null;
-  read_model_scope_keys?: unknown[] | null;
-  freshnessTargets?: ApiReadModelTarget[] | null;
-  freshness_targets?: ApiReadModelTarget[] | null;
-  operationBarrierTargets?: ApiReadModelTarget[] | null;
-  operation_barrier_targets?: ApiReadModelTarget[] | null;
 };
 
-type ApiOaManualAttachmentRefreshResult = ApiReadModelTargetEnvelope & {
+type ApiOaManualAttachmentRefreshResult = ApiAffectedScopeEnvelope & {
   rows?: Array<{
     row_id?: string | null;
     attachment_file_count?: number | null;
@@ -930,14 +807,14 @@ type ApiOaManualAttachmentRefreshResult = ApiReadModelTargetEnvelope & {
   errors?: Array<Record<string, unknown>> | null;
 };
 
-type ApiOaManualImportResult = ApiReadModelTargetEnvelope & {
+type ApiOaManualImportResult = ApiAffectedScopeEnvelope & {
   imported?: string[] | null;
   already_imported?: string[] | null;
   failed?: Array<Record<string, unknown>> | null;
   rows?: ApiOaManualSearchRow[] | null;
 };
 
-type ApiOaManualImportRemovalResult = ApiReadModelTargetEnvelope & {
+type ApiOaManualImportRemovalResult = ApiAffectedScopeEnvelope & {
   removed?: boolean | null;
   row_id?: string | null;
 };
@@ -1796,8 +1673,6 @@ function mapWorkbenchExceptionPreview(payload: ApiWorkbenchExceptionPreview): Wo
 function mapWorkbenchExceptionApplyResult(
   payload: ApiWorkbenchExceptionApplyResult,
 ): WorkbenchExceptionApplyResult {
-  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
-  const operationBarrierTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   return {
     success: payload.success === true,
     case: payload.case ?? null,
@@ -1806,8 +1681,6 @@ function mapWorkbenchExceptionApplyResult(
     affectedRowIds: (payload.affectedRowIds ?? payload.affected_row_ids ?? []).map((rowId) => String(rowId)),
     affectedScopeKeys: cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
       .filter((scopeKey) => scopeKey !== "all"),
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     workbenchRefreshRequired: payload.workbenchRefreshRequired ?? payload.workbench_refresh_required ?? false,
     message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : undefined,
   };
@@ -1887,10 +1760,6 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
   };
 }
 
-function mapReadModelStatus(value: unknown): WorkbenchReadModelStatus {
-  return String(value ?? "refreshing").trim() as WorkbenchReadModelStatus || "refreshing";
-}
-
 function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZonePageInfo {
   return {
     zone: payload.zone,
@@ -1905,7 +1774,6 @@ function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZone
         || toCount(payload.row_counts?.oa) + toCount(payload.row_counts?.bank) + toCount(payload.row_counts?.invoice),
     },
     hasMore: payload.has_more === true,
-    readModelStatus: mapReadModelStatus(payload.read_model_status),
   };
 }
 
@@ -2362,60 +2230,6 @@ function cleanOaSyncScopeList(value: unknown[] | undefined) {
     : [];
 }
 
-function nullableNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function cleanRefreshScopeList(value: unknown[] | null | undefined): WorkbenchRefreshScopeStatus[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .filter((item): item is ApiWorkbenchRefreshScopeStatus => Boolean(item) && typeof item === "object")
-    .map((scope) => ({
-      scopeKey: String(scope.scopeKey ?? scope.scope_key ?? "").trim(),
-      status: String(scope.status ?? "").trim(),
-      updatedAt: scope.updatedAt ?? scope.updated_at ?? null,
-      lastError: scope.lastError ?? scope.last_error ?? null,
-      sourceVersion: nullableNumber(scope.sourceVersion ?? scope.source_version),
-    }))
-    .filter((scope) => scope.scopeKey || scope.status);
-}
-
-function mapWorkbenchRefreshStatus(payload: ApiWorkbenchRefreshStatus): WorkbenchRefreshStatus {
-  const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "refreshing").trim() || "refreshing";
-  return {
-    scopeKey: String(payload.scopeKey ?? payload.scope_key ?? "all").trim() || "all",
-    readModelStatus: rawStatus as WorkbenchReadModelStatus,
-    consistencyStatus: payload.consistencyStatus ?? payload.consistency_status ?? null,
-    generatedAt: payload.generatedAt ?? payload.generated_at ?? null,
-    activeGenerationId: payload.activeGenerationId ?? payload.active_generation_id ?? null,
-    readModelVersion:
-      payload.readModelVersion ??
-      payload.read_model_version ??
-      payload.activeGenerationId ??
-      payload.active_generation_id ??
-      payload.sourceVersion ??
-      payload.source_version ??
-      payload.version ??
-      null,
-    dirtyScopes: cleanRefreshScopeList(payload.dirtyScopes ?? payload.dirty_scopes),
-    runningScopes: cleanOaSyncScopeList((payload.runningScopes ?? payload.running_scopes) as unknown[] | undefined),
-    processedCount: nullableNumber(payload.processedCount ?? payload.processed_count),
-    totalCount: nullableNumber(payload.totalCount ?? payload.total_count),
-    workerLagSeconds: nullableNumber(payload.workerLagSeconds ?? payload.worker_lag_seconds),
-    lastError: payload.lastError ?? payload.last_error ?? null,
-    retryable: payload.retryable === true,
-  };
-}
-
 export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<WorkbenchOaSyncStatus> {
   const payload = await requestJson<ApiWorkbenchOaSyncStatus>("/api/oa-sync/status", { method: "GET", signal });
   const status = String(payload.status ?? "synced").trim() || "synced";
@@ -2438,73 +2252,6 @@ export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<
         : 0,
     version: typeof payload.version === "number" ? payload.version : null,
   };
-}
-
-export async function fetchWorkbenchRefreshStatus(month: string, signal?: AbortSignal): Promise<WorkbenchRefreshStatus> {
-  const params = new URLSearchParams({ month });
-  const payload = await requestJson<ApiWorkbenchRefreshStatus>(`/api/workbench/refresh-status?${params.toString()}`, {
-    method: "GET",
-    signal,
-  });
-  return mapWorkbenchRefreshStatus(payload);
-}
-
-export type WorkbenchRefreshSubscription = {
-  close: () => void;
-};
-
-export function subscribeWorkbenchRefreshEvents(
-  month: string,
-  onEvent: (event: WorkbenchRefreshStatusEvent) => void,
-  onError: (error: unknown) => void,
-): WorkbenchRefreshSubscription | null {
-  if (typeof globalThis.EventSource !== "function") {
-    return null;
-  }
-
-  const params = new URLSearchParams({ month });
-  const eventSource = new EventSource(apiUrl(`/api/workbench/events?${params.toString()}`), {
-    withCredentials: true,
-  });
-  let closed = false;
-
-  const close = () => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    eventSource.close();
-  };
-
-  const handleStatusEvent = (eventName: string) => (event: MessageEvent) => {
-    try {
-      onEvent({
-        event: eventName,
-        status: mapWorkbenchRefreshStatus(JSON.parse(event.data) as ApiWorkbenchRefreshStatus),
-      });
-    } catch (error) {
-      close();
-      onError(error);
-    }
-  };
-
-  [
-    "workbench.read_model.refresh_started",
-    "workbench.read_model.progress",
-    "workbench.read_model.page_available",
-    "workbench.read_model.summary_updated",
-    "workbench.read_model.completed",
-    "workbench.read_model.failed",
-  ].forEach((eventName) => {
-    eventSource.addEventListener(eventName, handleStatusEvent(eventName));
-  });
-
-  eventSource.onerror = (event) => {
-    close();
-    onError(event);
-  };
-
-  return { close };
 }
 
 function workbenchGroupsUrl(
@@ -2915,7 +2662,7 @@ export async function refreshManualOaImportAttachments(
       unrecognizedAttachmentCount: toCount(row.unrecognized_attachment_count),
     })).filter((row) => row.rowId.length > 0),
     errors: payload.errors ?? [],
-    ...mapReadModelTargetEnvelope(payload),
+    ...mapAffectedScopeEnvelope(payload),
   };
 }
 
@@ -2938,7 +2685,7 @@ export async function importManualOaRows(rowIds: string[]): Promise<OaManualImpo
     alreadyImported: (payload.already_imported ?? []).map((rowId) => String(rowId)),
     failed: payload.failed ?? [],
     rows: (payload.rows ?? []).map(mapOaManualSearchRow).filter((row) => row.rowId.length > 0),
-    ...mapReadModelTargetEnvelope(payload),
+    ...mapAffectedScopeEnvelope(payload),
   };
 }
 
@@ -2967,7 +2714,7 @@ export async function removeManualOaImport(rowId: string): Promise<OaManualImpor
   return {
     removed: payload.removed === true,
     rowId: toDisplayValue(payload.row_id, rowId),
-    ...mapReadModelTargetEnvelope(payload),
+    ...mapAffectedScopeEnvelope(payload),
   };
 }
 
@@ -3092,76 +2839,33 @@ export async function syncWorkbenchSettingsProjects(actorId: string): Promise<Wo
 function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchActionResult {
   const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
     .filter((scopeKey) => scopeKey !== "all");
-  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
-  const operationBarrierTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   const operationProjection = mapWorkbenchOperationProjection(payload.operationProjection ?? payload.operation_projection);
-  const {
-    operationProjection: _rawOperationProjection,
-    operation_projection: _rawOperationProjectionSnake,
-    freshnessTargets: _rawFreshnessTargets,
-    freshness_targets: _rawFreshnessTargetsSnake,
-    operationBarrierTargets: _rawOperationBarrierTargets,
-    operation_barrier_targets: _rawOperationBarrierTargetsSnake,
-    affectedScopeKeys: _rawAffectedScopeKeys,
-    affected_scope_keys: _rawAffectedScopeKeysSnake,
-    ...rest
-  } = payload;
   return {
-    ...rest,
+    success: payload.success,
+    action: payload.action,
+    month: payload.month,
+    affected_row_ids: payload.affected_row_ids,
+    case_id: payload.case_id,
+    exception_case_id: payload.exception_case_id,
+    exception_case_ids: payload.exception_case_ids,
+    updated_rows: payload.updated_rows,
+    affectedMonths: payload.affectedMonths,
+    affected_months: payload.affected_months,
     affectedScopeKeys,
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
+    affected_scope_keys: payload.affected_scope_keys,
+    changedScopes: payload.changedScopes,
+    changed_scopes: payload.changed_scopes,
+    message: payload.message,
     ...(operationProjection ? { operationProjection } : {}),
   };
 }
 
-function mapReadModelTargetEnvelope(payload: ApiReadModelTargetEnvelope) {
+function mapAffectedScopeEnvelope(payload: ApiAffectedScopeEnvelope) {
   const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
     .filter((scopeKey) => scopeKey !== "all");
-  const readModelScopeKeys = cleanScopeList(payload.readModelScopeKeys ?? payload.read_model_scope_keys)
-    .filter((scopeKey) => scopeKey !== "all");
-  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
-  const operationBarrierTargets = cleanFreshnessTargets(
-    payload.operationBarrierTargets ?? payload.operation_barrier_targets,
-  );
   return {
     affectedScopeKeys,
-    readModelScopeKeys,
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
   };
-}
-
-function cleanFreshnessTargets(value: unknown): WorkbenchActionFreshnessTarget[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const normalized: WorkbenchActionFreshnessTarget[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const record = item as Record<string, unknown>;
-    const readModelKey = String(record.readModelKey ?? record.read_model_key ?? "").trim();
-    const scopeKey = String(record.scopeKey ?? record.scope_key ?? "").trim();
-    const scopeType = String(record.scopeType ?? record.scope_type ?? "").trim();
-    if (!readModelKey || !scopeKey || scopeKey === "all") {
-      continue;
-    }
-    const target = {
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    };
-    if (!normalized.some((candidate) =>
-      candidate.readModelKey === target.readModelKey
-      && candidate.scopeKey === target.scopeKey
-      && candidate.scopeType === target.scopeType
-    )) {
-      normalized.push(target);
-    }
-  }
-  return normalized;
 }
 
 function mapWorkbenchOperationProjection(value: unknown): WorkbenchOperationProjection | undefined {

@@ -108,8 +108,6 @@ class CrossMonthWorkbenchRelationFacade:
             ],
             "groups": [],
             "source_versions": dict(self._last_source_versions),
-            "read_model_scope_keys": [str(month)],
-            "refresh_enqueued": False,
             "stale_reasons": [],
         }
 
@@ -123,8 +121,6 @@ class CrossMonthWorkbenchRelationFacade:
                 "rows": [],
                 "groups": [],
                 "source_versions": dict(self._last_source_versions),
-                "read_model_scope_keys": ["2026-04"],
-                "refresh_enqueued": False,
                 "stale_reasons": [],
             }
         row_ids_payload = [*self.oa_ids, *self.bank_ids, self.invoice_id]
@@ -160,8 +156,6 @@ class CrossMonthWorkbenchRelationFacade:
                 }
             ],
             "source_versions": dict(self._last_source_versions),
-            "read_model_scope_keys": ["2026-04"],
-            "refresh_enqueued": False,
             "stale_reasons": [],
         }
 
@@ -182,6 +176,24 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["invoice"]["sellerName"], "生产库供应商")
         self.assertEqual(repository.invoice_page_calls[0]["month"], None)
         self.assertEqual(repository.invoice_page_calls[0]["invoice_type"], InvoiceType.INPUT.value)
+
+    def test_default_rows_do_not_require_fresh_relation_distribution(self) -> None:
+        class RefreshingRelationFacade:
+            def get_by_row_ids(self, _row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+                return {"status": "refreshing", "rows": [], "groups": [], "stale_reasons": ["refreshing"]}
+
+        vendor = self._counterparty("vendor", "生产库供应商")
+        invoice = self._invoice("inv-direct", "PG-002", vendor, total_with_tax="118.00")
+        service = InputInvoiceUsageQueryService(
+            import_service=ImportNormalizationService(existing_invoices=[invoice]),
+            relation_facade=RefreshingRelationFacade(),
+        )
+
+        payload = service.list_rows()
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["rows"][0]["invoiceId"], "inv-direct")
+        self.assertNotIn("read_model_status", payload)
 
     def test_list_rows_batches_repository_bank_reads_across_all_invoice_rows(self) -> None:
         vendor = self._counterparty("vendor", "生产库供应商")

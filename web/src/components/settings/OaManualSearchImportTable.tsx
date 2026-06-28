@@ -2,7 +2,6 @@ import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppChrome } from "../../contexts/AppChromeContext";
-import { waitForOperationFreshness } from "../../features/operationBarrier/api";
 import {
   importManualOaRows,
   refreshManualOaImportAttachments,
@@ -62,11 +61,6 @@ function nextToggledList(value: string, current: string[]) {
   return current.includes(value)
     ? current.filter((item) => item !== value)
     : [...current, value];
-}
-
-function mergeUpdatedRows(rows: OaManualSearchRow[], updates: OaManualSearchRow[]) {
-  const updateMap = new Map(updates.map((row) => [row.rowId, row]));
-  return rows.map((row) => updateMap.get(row.rowId) ?? row);
 }
 
 function pageCount(total: number, pageSize: number) {
@@ -172,7 +166,14 @@ export default function OaManualSearchImportTable() {
     setError("");
     try {
       const result = await searchManualOaImports(buildFilters(targetPage, targetPageSize));
+      const nextRows = result.rows;
       setRows(result.rows);
+      setSelectedRows((current) => {
+        const rowMap = new Map(nextRows.map((row) => [row.rowId, row]));
+        return Object.fromEntries(
+          Object.entries(current).map(([rowId, selectedRow]) => [rowId, rowMap.get(rowId) ?? selectedRow]),
+        );
+      });
       setTotal(result.total);
       setPage(result.page);
       setPageSize(result.pageSize || targetPageSize);
@@ -220,25 +221,7 @@ export default function OaManualSearchImportTable() {
     setError("");
     try {
       const result = await refreshManualOaImportAttachments([row.rowId]);
-      if (result.operationBarrierTargets.length > 0) {
-        await waitForOperationFreshness(result.operationBarrierTargets);
-      }
-      const updatedCounts = result.rows[0];
-      if (updatedCounts) {
-        const updateRow = (candidate: OaManualSearchRow) =>
-          candidate.rowId === updatedCounts.rowId
-            ? {
-              ...candidate,
-              attachmentFileCount: updatedCounts.attachmentFileCount,
-              importableInvoiceCount: updatedCounts.importableInvoiceCount,
-              unrecognizedAttachmentCount: updatedCounts.unrecognizedAttachmentCount,
-            }
-            : candidate;
-        setRows((current) => current.map(updateRow));
-        setSelectedRows((current) => Object.fromEntries(
-          Object.entries(current).map(([rowId, selectedRow]) => [rowId, updateRow(selectedRow)]),
-        ));
-      }
+      await runSearch(page, pageSize);
       if (result.errors.length > 0) {
         setError("部分附件刷新失败");
       }
@@ -260,12 +243,8 @@ export default function OaManualSearchImportTable() {
     setError("");
     try {
       const result = await importManualOaRows(selectedImportableRows.map((row) => row.rowId));
-      publishOaImportStatus(90, "等待数据同步");
-      if (result.operationBarrierTargets.length > 0) {
-        await waitForOperationFreshness(result.operationBarrierTargets);
-      }
-      publishOaImportStatus(95, "刷新搜索结果");
-      setRows((current) => mergeUpdatedRows(current, result.rows));
+      publishOaImportStatus(90, "刷新搜索结果");
+      await runSearch(page, pageSize);
       setSelectedRows((current) => {
         const updatedMap = new Map(result.rows.map((row) => [row.rowId, row]));
         return Object.fromEntries(

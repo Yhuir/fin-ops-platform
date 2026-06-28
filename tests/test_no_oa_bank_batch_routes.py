@@ -18,7 +18,7 @@ class FakeNoOaApplicationService:
 
     def list_batches_payload(self, query):
         self.calls.append(("list", query))
-        return {"summary": {}, "batches": [], "read_model_status": "fresh"}
+        return {"summary": {}, "batches": []}
 
     def tag_selection_payload(self):
         self.calls.append(("tag_selection", None))
@@ -114,7 +114,7 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
         selection_status, selection_payload = routes.tag_selection()
 
         self.assertEqual(list_status, HTTPStatus.OK)
-        self.assertEqual(list_payload["read_model_status"], "fresh")
+        self.assertNotIn("read_model_status", list_payload)
         self.assertEqual(selection_status, HTTPStatus.OK)
         self.assertEqual(selection_payload["version"], 1)
         self.assertEqual(
@@ -292,10 +292,9 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
         self.assertEqual(payload["summary"], {"submitted": 1, "failed": 4})
         self.assertEqual(payload["affected_months"], ["2026-05"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-05"}],
-        )
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
         self.assertTrue(payload["workbench_rebuild_queued"])
         self.assertEqual(payload["results"][0]["status"], "submitted")
         self.assertEqual(payload["results"][1]["error"], "unknown_no_oa_bank_batch")

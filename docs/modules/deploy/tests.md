@@ -41,7 +41,7 @@
 | 1. Business core unit tests | 不直接适用 | N/A | deploy 模块没有业务金额/状态规则；核心规则是脚本/环境契约 | N/A | 若新增发布策略算法或 release retention 规则，补脚本级 unit tests |
 | 2. Service-layer tests | 适用 | `tests/test_deploy_oa_script.py`、`tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` | 覆盖 deploy helper、worker registry、env examples、RabbitMQ dispatch contract | 无 P0 | 修改 helper/systemd/env/worker manifest 时必须补 |
 | 3. API contract tests | 间接适用 | `tests/test_app.py`、`tests/test_app_postgres_mode.py`、`tests/test_deploy_oa_script.py` | 覆盖 `/health/ready` 和 session route proxy smoke 脚本契约 | 无 P0 | 修改 health/session/Nginx path 时补 route contract |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 worker manifest、read model event、RabbitMQ dispatcher env、runtime boundary | P1 | 真 systemd/RabbitMQ/Redis/worker drain 需要 staging |
+| 4. Background job / deleted read-model guard tests | 适用 | `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖真实 worker manifest、RabbitMQ dispatcher env、runtime boundary 和已删除 page read-model event guard | P1 | 真 systemd/RabbitMQ/Redis/worker job drain 需要 staging |
 | 5. Frontend component and interaction tests | 间接适用 | `scripts/verify.sh frontend`、`scripts/verify.sh e2e`、nightly CI | deploy 不改页面；通过全量 Vitest/build 和 Playwright app shell smoke 防旧页面破坏 | P1 | 更多真实浏览器/OA iframe/缓存刷新需 smoke |
 | 6. End-to-end business-flow integration tests | 适用但本地有限 | deploy release script tests + health tests | 覆盖发布脚本顺序，不执行真实 SSH/systemd/migration | P1 | 真实 release -> migration -> restart -> worker ready -> App Health 绿灯需 staging/生产前 smoke |
 | 7. Existing feature regression tests | 适用 | `scripts/verify.sh all`、nightly CI、全量测试 | 保证部署/CI 改动不会漏跑旧模块测试，并防止开发机 legacy app Mongo 旧状态破坏 clean 回归入口 | 无 P0 | 改验证入口时必须保护 backend/frontend/browser e2e/docs 都仍被 all 覆盖 |
@@ -66,7 +66,7 @@
 - Release dry-run：`./scripts/deploy-oa.sh --dry-run --no-activate --allow-dirty`，检查远端命令不执行激活但包含 release layout/check-release/storage preflight。
 - Staging release：上传 release -> check-release -> activate -> `/health/ready` ready -> worker readiness zero missing/stale/mismatch -> public session API returns JSON 401 without token。
 - Nginx smoke：刷新 `/fin-ops/`、深链 route、hashed assets、`/fin-ops-api/api/session/me`、`/fin-ops/api/session/me`。
-- Worker smoke：required worker instances 来自 manifest；systemd active；App Health 无 missing/stale/mismatch worker；dirty scope backlog 不增长。
+- Worker smoke：required worker instances 来自 manifest；systemd active；App Health 无 missing/stale/mismatch worker；background job/outbox backlog 不增长。
 - Rollback smoke：切回上一个 release 或恢复备份，确认 frontend hash、API release identity、worker drop-in 和 App Health 收敛。
 
 ## 模块验证命令
@@ -98,7 +98,7 @@ bash scripts/verify.sh docs
 ## 未测风险
 
 - 真实服务器 SSH/sudo 权限、root-owned helper 安装、systemd drop-in、worker restart 和 journal 日志只靠 staging/生产前 smoke。
-- PostgreSQL migration、备份/PITR、对象存储、Redis/RabbitMQ 真连接和大生产库 worker drain 不由本地 unittest 证明。
+- PostgreSQL migration、备份/PITR、对象存储、Redis/RabbitMQ 真连接和大生产库真实 worker/job drain 不由本地 unittest 证明。
 - Nginx live config 可能与仓库 example 偏离，必须在服务器上 `nginx -T` 或实际 route smoke。
 - GitHub Actions 是否在远端仓库启用、secret/cache 配置和权限需要在 GitHub 侧确认。
 - 浏览器真实缓存、OA iframe cookie、下载和移动端布局仍由真实浏览器 smoke 覆盖。

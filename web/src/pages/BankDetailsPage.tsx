@@ -35,7 +35,6 @@ import {
   emitFinanceDomainEvent,
   eventAffectedMonths,
 } from "../features/domainEvents";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import type {
   BankAutoTagRulesResponse,
@@ -43,7 +42,6 @@ import type {
   BankDateFilter,
   BankDetailAccount,
   BankDetailExportMode,
-  BankDetailReadModelStatus,
   BankDetailTransaction,
   BankDetailTransactionsResponse,
   BankTransactionDirection,
@@ -56,14 +54,9 @@ import type { BankTransactionTagDefinition } from "../features/pendingInvoices/t
 const DEFAULT_BANK_YEAR = "2026";
 const DEFAULT_BANK_MONTH = "2026-05";
 const DEFAULT_PAGE_SIZE = 100;
-const BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS = 1000;
-const BANK_DETAIL_RULE_REFRESH_RETRY_MS = 300;
-const BANK_DETAIL_RULE_REFRESH_RELOAD_ATTEMPTS = 20;
 const ALL_ACCOUNTS_KEY = "__all_bank_accounts__";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
-const AUTO_TAG_RULE_SAVE_SYNC_WARNING = "规则已保存，后台同步尚未完成，请稍后刷新。";
-const AUTO_TAG_RULE_REAPPLY_SYNC_WARNING = "已提交重新应用，后台同步尚未完成，请稍后刷新。";
 const FEATURED_CATEGORY_CODES: BankTransactionCategoryCode[] = [
   "fee",
   "salary",
@@ -364,64 +357,6 @@ function monthScopeKeysForRange(dateFrom: string | null | undefined, dateTo: str
     scopeKeys.push(`${year}-${String(month).padStart(2, "0")}`);
   }
   return scopeKeys;
-}
-
-function bankDetailOperationScopeKeys(rows: BankDetailTransaction[], dateFilter: BankDateFilter) {
-  const visibleRowScopes = Array.from(new Set(
-    rows
-      .map((row) => monthScopeKey(row.tradeTime))
-      .filter((value): value is string => Boolean(value)),
-  ));
-  return visibleRowScopes.length > 0
-    ? visibleRowScopes
-    : monthScopeKeysForRange(dateFilter.dateFrom, dateFilter.dateTo);
-}
-
-function wait(ms: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function normalizeReadModelStatus(value: BankDetailReadModelStatus | null | undefined): BankDetailReadModelStatus {
-  return value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing"
-    ? value
-    : "fresh";
-}
-
-function combinedReadModelStatus(
-  accountsStatus: BankDetailReadModelStatus,
-  transactionsStatus: BankDetailReadModelStatus,
-): BankDetailReadModelStatus {
-  if (accountsStatus === "refreshing" || transactionsStatus === "refreshing") {
-    return "refreshing";
-  }
-  if (accountsStatus === "schema_mismatch" || transactionsStatus === "schema_mismatch") {
-    return "schema_mismatch";
-  }
-  if (accountsStatus === "stale" || transactionsStatus === "stale") {
-    return "stale";
-  }
-  if (accountsStatus === "missing" || transactionsStatus === "missing") {
-    return "missing";
-  }
-  return "fresh";
-}
-
-function bankReadModelStatusMessage(status: BankDetailReadModelStatus) {
-  if (status === "refreshing") {
-    return "银行明细正在刷新，暂时显示当前可用数据。";
-  }
-  if (status === "stale") {
-    return "银行明细待刷新，暂时显示当前可用数据。";
-  }
-  if (status === "schema_mismatch") {
-    return "银行明细结构正在升级，暂时显示当前可用数据。";
-  }
-  if (status === "missing") {
-    return "银行明细读模型正在初始化，暂时显示当前可用数据。";
-  }
-  return "";
 }
 
 type BankCategoryFilterControlProps = {
@@ -1591,8 +1526,6 @@ export default function BankDetailsPage() {
   });
   const [searchInput, setSearchInput] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [accountsReadModelStatus, setAccountsReadModelStatus] = useState<BankDetailReadModelStatus>("refreshing");
-  const [transactionsReadModelStatus, setTransactionsReadModelStatus] = useState<BankDetailReadModelStatus>("refreshing");
   const [loading, setLoading] = useState(true);
   const [rowLoading, setRowLoading] = useState(false);
   const [accountRequestPending, setAccountRequestPending] = useState(false);
@@ -1618,22 +1551,9 @@ export default function BankDetailsPage() {
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
   const [rulesDrawerOpen, setRulesDrawerOpen] = useState(false);
   const [rulesFeedback, setRulesFeedback] = useState<string | null>(null);
-  const [rulesRefreshStatus, setRulesRefreshStatus] = useState<"idle" | "refreshing" | "fresh">("idle");
   const [categoryMutationId, setCategoryMutationId] = useState<string | null>(null);
-  const rulesRefreshPendingRef = useRef(false);
-  const rulesRefreshFeedbackRef = useRef({
-    refreshing: "规则已保存，银行明细正在刷新。",
-    fresh: "规则已保存，银行明细已刷新。",
-  });
-  const hasAccountPayloadRef = useRef(false);
-  const hasTransactionPayloadRef = useRef(false);
   const [accountRefreshToken, setAccountRefreshToken] = useState(0);
   const [refreshToken, setRefreshToken] = useState(0);
-  const readModelStatus = combinedReadModelStatus(accountsReadModelStatus, transactionsReadModelStatus);
-  const accountsNeedRefresh = accountsReadModelStatus !== "fresh";
-  const transactionsNeedRefresh = transactionsReadModelStatus !== "fresh";
-  const readModelNeedsRefresh = accountsNeedRefresh || transactionsNeedRefresh;
-  const readModelStatusMessage = bankReadModelStatusMessage(readModelStatus);
   const selectedTransactionAccountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey || null;
   const categoryFilterQueryKey = useMemo(() => categoryFilterSnapshotKey({
     accountKey: selectedTransactionAccountKey,
@@ -1673,12 +1593,6 @@ export default function BankDetailsPage() {
       requestHasCategoryFilter: boolean;
     },
   ) => {
-    const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
-    setTransactionsReadModelStatus(nextReadModelStatus);
-    if (nextReadModelStatus !== "fresh" && payload.rows.length === 0) {
-      return;
-    }
-    hasTransactionPayloadRef.current = true;
     setRows(payload.rows);
     setRowCount(payload.pagination.total);
     if (!requestHasCategoryFilter) {
@@ -1705,7 +1619,7 @@ export default function BankDetailsPage() {
   useEffect(() => {
     const controller = new AbortController();
     setAccountRequestPending(true);
-    setLoading(!hasAccountPayloadRef.current);
+    setLoading(true);
     setError(null);
     fetchBankDetailAccounts({
       dateFrom: dateFilter.dateFrom,
@@ -1713,15 +1627,6 @@ export default function BankDetailsPage() {
       signal: controller.signal,
     })
       .then((payload) => {
-        const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
-        setAccountsReadModelStatus(nextReadModelStatus);
-        if (nextReadModelStatus !== "fresh" && hasAccountPayloadRef.current) {
-          return;
-        }
-        if (nextReadModelStatus !== "fresh" && payload.accounts.length === 0) {
-          return;
-        }
-        hasAccountPayloadRef.current = true;
         setAccountsData({
           accounts: payload.accounts,
           totalBalance: payload.totalBalance,
@@ -1782,7 +1687,7 @@ export default function BankDetailsPage() {
     }
     const controller = new AbortController();
     setTransactionRequestPending(true);
-    setRowLoading(!hasTransactionPayloadRef.current);
+    setRowLoading(true);
     setError(null);
     const accountKey = selectedTransactionAccountKey;
     const snapshotQueryKey = categoryFilterQueryKey;
@@ -1799,10 +1704,6 @@ export default function BankDetailsPage() {
         signal: controller.signal,
       })
         .then((payload) => {
-          const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
-          if (nextReadModelStatus !== "fresh" && payload.rows.length === 0) {
-            return;
-          }
           applyCategorySnapshotPayload(payload, snapshotQueryKey);
         })
         .catch((caught) => {
@@ -1866,44 +1767,6 @@ export default function BankDetailsPage() {
       setSelectedCategoryFilter(ALL_CATEGORY_FILTER);
     }
   }, [categoryOptions, categorySnapshotCurrent, selectedCategoryFilter]);
-
-  useEffect(() => {
-    if (!rulesRefreshPendingRef.current) {
-      return;
-    }
-    if (readModelNeedsRefresh) {
-      setRulesRefreshStatus("refreshing");
-      setRulesFeedback(rulesRefreshFeedbackRef.current.refreshing);
-      return;
-    }
-    rulesRefreshPendingRef.current = false;
-    setRulesRefreshStatus("fresh");
-    setRulesFeedback(rulesRefreshFeedbackRef.current.fresh);
-  }, [readModelNeedsRefresh]);
-
-  useEffect(() => {
-    if (!active || !readModelNeedsRefresh || loading || rowLoading || accountRequestPending || transactionRequestPending) {
-      return undefined;
-    }
-    const retryId = window.setTimeout(() => {
-      if (accountsNeedRefresh) {
-        setAccountRefreshToken((current) => current + 1);
-      }
-      if (transactionsNeedRefresh) {
-        setRefreshToken((current) => current + 1);
-      }
-    }, BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS);
-    return () => window.clearTimeout(retryId);
-  }, [
-    accountRequestPending,
-    accountsNeedRefresh,
-    active,
-    loading,
-    readModelNeedsRefresh,
-    rowLoading,
-    transactionRequestPending,
-    transactionsNeedRefresh,
-  ]);
 
   const handleWorkbenchRelationUpdated = useCallback((event: Event) => {
     const affectedMonths = eventAffectedMonths(event);
@@ -2214,42 +2077,32 @@ export default function BankDetailsPage() {
     setTransactionRequestPending(true);
     setError(null);
     try {
-      let latestPayload: BankDetailTransactionsResponse | null = null;
-      for (let attempt = 0; attempt < BANK_DETAIL_RULE_REFRESH_RELOAD_ATTEMPTS; attempt += 1) {
-        if (requestHasCategoryFilter) {
-          const snapshotPayload = await fetchBankDetailTransactions({
-            accountKey,
-            dateFrom: dateFilter.dateFrom,
-            dateTo: dateFilter.dateTo,
-            keyword: searchKeyword,
-            page: 1,
-            pageSize: 1,
-          });
-          const snapshotStatus = normalizeReadModelStatus(snapshotPayload.readModelStatus);
-          if (snapshotStatus === "fresh" || snapshotPayload.rows.length > 0) {
-            applyCategorySnapshotPayload(snapshotPayload, snapshotQueryKey);
-          }
-        }
-
-        latestPayload = await fetchBankDetailTransactions({
+      if (requestHasCategoryFilter) {
+        const snapshotPayload = await fetchBankDetailTransactions({
           accountKey,
           dateFrom: dateFilter.dateFrom,
           dateTo: dateFilter.dateTo,
           keyword: searchKeyword,
-          categoryCode: selectedCategoryRequestParams.categoryCode,
-          categoryPrimaryLabel: selectedCategoryRequestParams.categoryPrimaryLabel,
-          categorySubLabel: selectedCategoryRequestParams.categorySubLabel,
-          categoryThirdLabel: selectedCategoryRequestParams.categoryThirdLabel,
-          page: paginationModel.page + 1,
-          pageSize: paginationModel.pageSize,
+          page: 1,
+          pageSize: 1,
         });
-        applyTransactionsPayload(latestPayload, { snapshotQueryKey, requestHasCategoryFilter });
-        if (normalizeReadModelStatus(latestPayload.readModelStatus) === "fresh") {
-          return latestPayload;
-        }
-        await wait(BANK_DETAIL_RULE_REFRESH_RETRY_MS);
+        applyCategorySnapshotPayload(snapshotPayload, snapshotQueryKey);
       }
-      throw new Error("银行明细读模型仍在刷新，请稍后重试。");
+
+      const latestPayload = await fetchBankDetailTransactions({
+        accountKey,
+        dateFrom: dateFilter.dateFrom,
+        dateTo: dateFilter.dateTo,
+        keyword: searchKeyword,
+        categoryCode: selectedCategoryRequestParams.categoryCode,
+        categoryPrimaryLabel: selectedCategoryRequestParams.categoryPrimaryLabel,
+        categorySubLabel: selectedCategoryRequestParams.categorySubLabel,
+        categoryThirdLabel: selectedCategoryRequestParams.categoryThirdLabel,
+        page: paginationModel.page + 1,
+        pageSize: paginationModel.pageSize,
+      });
+      applyTransactionsPayload(latestPayload, { snapshotQueryKey, requestHasCategoryFilter });
+      return latestPayload;
     } finally {
       setTransactionRequestPending(false);
     }
@@ -2329,59 +2182,30 @@ export default function BankDetailsPage() {
       channel.postMessage({ version: payload.version, activeRules: payload.activeRules });
       channel.close();
     }
-    const feedback = payload.refreshReason === "reapplied"
-      ? {
-        refreshing: "已提交重新应用，银行明细正在刷新。",
-        fresh: "重新应用已完成，银行明细已刷新。",
-      }
-      : {
-        refreshing: "规则已保存，银行明细正在刷新。",
-        fresh: "规则已保存，银行明细已刷新。",
-      };
-    rulesRefreshFeedbackRef.current = feedback;
-    return feedback;
+    return payload.refreshReason === "reapplied"
+      ? "重新应用已完成，银行明细已刷新。"
+      : "规则已保存，银行明细已刷新。";
   }, []);
 
   const handleAutoTagRulesSavedAfterRefresh = useCallback((payload: BankAutoTagRulesResponse) => {
     const feedback = publishAutoTagRulesSaved(payload);
-    rulesRefreshPendingRef.current = false;
-    setRulesRefreshStatus("fresh");
-    setRulesFeedback(feedback.fresh);
+    setRulesFeedback(feedback);
   }, [publishAutoTagRulesSaved]);
 
-  const handleAutoTagRulesSavedWithPendingSync = useCallback((payload: BankAutoTagRulesResponse, message: string) => {
-    publishAutoTagRulesSaved(payload);
-    rulesRefreshPendingRef.current = false;
-    setRulesRefreshStatus("refreshing");
-    setRulesFeedback(message);
-    setRefreshToken((current) => current + 1);
-  }, [publishAutoTagRulesSaved]);
-
-  const waitForCurrentBankDetailRulesRefresh = useCallback(async (
+  const refreshAfterBankDetailRulesMutation = useCallback(async (
     setMessage: (message: string) => void,
-    payload?: BankAutoTagRulesResponse,
+    _payload?: BankAutoTagRulesResponse,
   ) => {
-    const responseTargets = (payload?.operationBarrierTargets ?? []).filter((target) => target.scopeKey);
-    const scopeKeys = bankDetailOperationScopeKeys(rows, dateFilter);
-    setMessage("正在等待银行明细读模型同步...");
-    await waitForOperationFreshness(
-      responseTargets.length > 0 ? responseTargets : operationBarrierTargets("bank_detail", scopeKeys),
-    );
     setMessage("正在刷新银行流水...");
     await reloadTransactionsAfterRulesMutation();
-  }, [dateFilter, reloadTransactionsAfterRulesMutation, rows]);
+  }, [reloadTransactionsAfterRulesMutation]);
 
   const saveAutoTagRulesWithRefresh = useCallback(async (request: SaveBankAutoTagRulesRequest) => {
     const result = await runOperation({
       loadingMessage: "正在保存自动标签规则...",
       action: async ({ setMessage }) => {
         const payload = await saveBankAutoTagRules(request);
-        try {
-          await waitForCurrentBankDetailRulesRefresh(setMessage, payload);
-        } catch {
-          handleAutoTagRulesSavedWithPendingSync(payload, AUTO_TAG_RULE_SAVE_SYNC_WARNING);
-          return payload;
-        }
+        await refreshAfterBankDetailRulesMutation(setMessage, payload);
         handleAutoTagRulesSavedAfterRefresh(payload);
         return payload;
       },
@@ -2391,19 +2215,14 @@ export default function BankDetailsPage() {
       return result.value;
     }
     throw result.error;
-  }, [handleAutoTagRulesSavedAfterRefresh, handleAutoTagRulesSavedWithPendingSync, runOperation, waitForCurrentBankDetailRulesRefresh]);
+  }, [handleAutoTagRulesSavedAfterRefresh, refreshAfterBankDetailRulesMutation, runOperation]);
 
   const reapplyAutoTagRulesWithRefresh = useCallback(async () => {
     const result = await runOperation({
       loadingMessage: "正在重新应用自动标签规则...",
       action: async ({ setMessage }) => {
         const payload = await reapplyBankAutoTagRules();
-        try {
-          await waitForCurrentBankDetailRulesRefresh(setMessage, payload);
-        } catch {
-          handleAutoTagRulesSavedWithPendingSync(payload, AUTO_TAG_RULE_REAPPLY_SYNC_WARNING);
-          return payload;
-        }
+        await refreshAfterBankDetailRulesMutation(setMessage, payload);
         handleAutoTagRulesSavedAfterRefresh(payload);
         return payload;
       },
@@ -2413,7 +2232,7 @@ export default function BankDetailsPage() {
       return result.value;
     }
     throw result.error;
-  }, [handleAutoTagRulesSavedAfterRefresh, handleAutoTagRulesSavedWithPendingSync, runOperation, waitForCurrentBankDetailRulesRefresh]);
+  }, [handleAutoTagRulesSavedAfterRefresh, refreshAfterBankDetailRulesMutation, runOperation]);
 
   const datePickerYears = createYearOptions(activeDatePickerYear);
   const selectedDateFilterLabel = dateFilterLabel(dateFilter);
@@ -2428,16 +2247,11 @@ export default function BankDetailsPage() {
         ) : null}
         {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
         {rulesFeedback ? (
-          <StatePanel tone={rulesRefreshStatus === "refreshing" ? "warning" : "success"} compact>
+          <StatePanel tone="success" compact>
             {rulesFeedback}
           </StatePanel>
         ) : null}
-        {!loading && readModelNeedsRefresh && readModelStatusMessage ? (
-          <StatePanel tone={readModelStatus === "refreshing" ? "loading" : "warning"} compact>
-            {readModelStatusMessage}
-          </StatePanel>
-        ) : null}
-        {!loading && !readModelNeedsRefresh && accountsData.accounts.length === 0 ? (
+        {!loading && accountsData.accounts.length === 0 ? (
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
         ) : null}
 
@@ -2607,20 +2421,7 @@ export default function BankDetailsPage() {
                         <FinanceTableCell columnRole="description" textValue="loading">-</FinanceTableCell>
                       </FinanceTableRow>
                     ) : null}
-                    {!rowLoading && rows.length === 0 && readModelNeedsRefresh ? (
-                      <FinanceTableRow id="read-model-refreshing" className="bank-transaction-state-row" textValue={readModelStatusMessage}>
-                        <FinanceTableCell columnRole="identity" textValue={readModelStatusMessage}>
-                          <span className="bank-transaction-state-message">{readModelStatusMessage}</span>
-                        </FinanceTableCell>
-                        <FinanceTableCell columnRole="status" textValue="refreshing">-</FinanceTableCell>
-                        <FinanceTableCell columnRole="amount" textValue="refreshing">-</FinanceTableCell>
-                        <FinanceTableCell columnRole="amount" textValue="refreshing">-</FinanceTableCell>
-                        <FinanceTableCell columnRole="description" textValue="refreshing">-</FinanceTableCell>
-                        <FinanceTableCell columnRole="description" textValue="refreshing">-</FinanceTableCell>
-                        <FinanceTableCell columnRole="description" textValue="refreshing">-</FinanceTableCell>
-                      </FinanceTableRow>
-                    ) : null}
-                    {!rowLoading && rows.length === 0 && !readModelNeedsRefresh ? (
+                    {!rowLoading && rows.length === 0 ? (
                       <FinanceTableRow id="empty" className="bank-transaction-state-row" textValue="当前时间范围内没有流水。">
                         <FinanceTableCell columnRole="identity" textValue="当前时间范围内没有流水。">
                           <EmptyTransactionOverlay />
@@ -2730,7 +2531,6 @@ export default function BankDetailsPage() {
         saveAutoTagRules={saveAutoTagRulesWithRefresh}
         reapplyAutoTagRules={reapplyAutoTagRulesWithRefresh}
         refreshScope={{ dateFrom: dateFilter.dateFrom, dateTo: dateFilter.dateTo }}
-        refreshStatus={rulesRefreshStatus}
       />
       {dateFilterOpen ? (
         <div

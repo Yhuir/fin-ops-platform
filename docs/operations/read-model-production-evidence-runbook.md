@@ -1,23 +1,25 @@
-# Read Model 生产证据 Runbook
+# Legacy Read Model 生产证据归档
 
 日期：2026-06-26
 
-本 runbook 用于当前 main 代码发布后，采集 Read Model 全页面读写闭环的生产证据。它不是开发计划，也不是完成声明；只有本页门禁实际通过后，才能把对应 read model 标记为 PSCIP-L4。
+> 2026-06-28 更新：本 runbook 已进入 legacy evidence archive。页面级 read model 正在下线，`read-model-scope-contract` helper、scope repair 脚本和 `tests.test_read_model_scope_contract` 已删除。后续生产验证应证明页面走 direct API/canonical facts，而不是证明 read model freshness 闭环。
+
+本 runbook 仅保留为历史归档，不再作为当前 main 的发布或验收入口。当前生产验证应使用 direct API、canonical facts、durable outbox、worker heartbeat、App Health 和业务写后重读证据。
 
 ## 目标
 
-- 证明页面读 API 不会把 stale/missing/failed/unavailable payload 标记为 fresh。
-- 证明写操作成功后会产生 affected scopes、dirty scope/outbox、worker projection、readiness/freshness 和 operation barrier 收敛。
-- 证明前端写后等待 operation barrier 或 fresh reload 后才展示最终状态。
+- 证明页面读 API 走 direct API/canonical facts，不把 legacy stale/missing/failed/unavailable payload 当作当前页面结果。
+- 证明写操作成功后返回 affected scopes/ids/months 或 true outbox side effects，并且页面通过 direct refetch 展示最终状态。
+- 证明前端写后不依赖 operation barrier endpoint；legacy read model 只作为删除清单或历史诊断。
 - 证明高行数 scoped read path 满足可接受延迟，并且不是无界全量扫描热路径。
 - 证明生产样本验证后已恢复到操作前状态。
 
 ## 禁止事项
 
 - 不把 Admin Token、cookie、DSN、私钥、生产 env、原始敏感 payload 写入 repo、`.planning/`、docs、日志、截图、shell history 或测试 fixture。
-- 不通过数据库修改来制造验证样本、伪造 read model fresh、跳过业务写操作或修正非样本数据。
-- 不直接写 `read_model.app_status_readiness=fresh` 来通过验证。
-- 不删除 current-effective dirty/outbox blocker 来制造“收敛”。
+- 不通过数据库修改来制造验证样本、伪造 fresh、跳过业务写操作或修正非样本数据。
+- 不直接写 legacy readiness 表来通过验证。
+- 不删除 current-effective outbox blocker 来制造“收敛”。
 - 不对业务事实表执行无界 update/delete/truncate。
 
 ## 前置门禁
@@ -28,9 +30,9 @@
 ```bash
 PYTHONPATH=backend/src python3 -m unittest -q tests.test_read_model_architecture_guards tests.test_platform_runtime_boundary_guards
 PYTHONPATH=backend/src python3 -m unittest -q tests.test_read_model_manifest tests.test_runtime_worker_registry
-PYTHONPATH=backend/src python3 -m unittest -q tests.test_read_model_query_gateway tests.test_read_model_refresh_gateway tests.test_operation_freshness_barrier
-PYTHONPATH=backend/src python3 -m unittest -q tests.test_read_model_freshness tests.test_read_model_scope_contract tests.test_runtime_worker_read_model_refresh_scopes
-PYTHONPATH=backend/src python3 -m unittest -q tests.test_write_operation_slo_audit tests.test_write_operation_e2e_smoke tests.test_runtime_sync_closure_gate tests.test_read_model_slo_smoke
+PYTHONPATH=backend/src python3 -m unittest -q tests.test_read_model_freshness tests.test_read_model_refresh_gateway
+PYTHONPATH=backend/src python3 -m unittest -q tests.test_runtime_worker_read_model_refresh_scopes tests.test_app_status_overview_service
+PYTHONPATH=backend/src python3 -m unittest -q tests.test_write_operation_slo_audit tests.test_write_operation_e2e_smoke tests.test_runtime_sync_closure_gate
 bash scripts/verify.sh docs
 npm run build
 git diff --check
@@ -57,23 +59,23 @@ git diff --check
 发布后先执行只读检查，不做修复：
 
 ```bash
-sudo -n /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
 PYTHONPATH=/opt/fin-ops/current/backend/src /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_worker_manifest --json
 ```
 
+旧 `read-model-scope-contract` 发布 helper 已删除；不得用页面 read-model scope repair 作为发布证据或恢复手段。
+
 ## 只读证据
 
-对每个 App Status read model 采集：
+对每个受影响页面或后台任务采集：
 
 - app health / readiness status。
-- dirty scope current-effective 状态。
 - outbox pending/processing/failed/dead-letter 状态。
-- worker heartbeat 和 required worker readiness。
-- read model query status: fresh/stale/refreshing/failed/unavailable。
+- worker heartbeat 和 required worker 状态。
+- direct API status/latency/row count。
 - schema/source version proof。
 - scoped query latency 或 EXPLAIN evidence。
 
-证据只记录 metadata，例如 read model key、scope key、status、latency、row count、job id、event id、timestamp；不记录原始敏感业务 payload。
+证据只记录 metadata，例如 route/module、scope key、status、latency、row count、job id、event id、timestamp；不记录原始敏感业务 payload。
 
 ## 写操作样本
 
@@ -92,13 +94,13 @@ PYTHONPATH=/opt/fin-ops/current/backend/src /opt/fin-ops/venv/bin/python -m fin_
 | page/module | 页面或模块 |
 | operation | 业务操作名称 |
 | before snapshot | 操作前最小必要状态 |
-| expected targets | read model key + scope key |
+| expected targets | affected ids/months/scopes 或 direct API route |
 | apply method | API/UI/command |
-| observed dirty/outbox | event/scope metadata |
+| observed outbox | event/scope metadata |
 | observed worker | worker/status/latency metadata |
-| observed page fresh | API/page freshness metadata |
+| observed page result | API/page direct payload metadata |
 | restore method | business inverse 或 bounded DB restore |
-| post-restore proof | canonical state + read model freshness |
+| post-restore proof | canonical state + direct API result |
 
 ## 恢复策略
 
@@ -116,7 +118,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src /opt/fin-ops/venv/bin/python -m fin_
 2. exact predicate 可证明只命中本样本行，例如主键、版本、tenant、业务 ID 全部匹配。
 3. 单事务执行，事务内先校验命中行数，再 update/insert/delete。
 4. 写入审计记录或保留命令输出，说明 reason、sample_id、predicate、affected row count。
-5. post-restore verification 通过：业务事实、read model dirty/outbox、operation barrier、页面 read API 均回到期望状态。
+5. post-restore verification 通过：业务事实、read model dirty/outbox、页面 direct read API 均回到期望状态。
 
 如果无法建立 operation-before snapshot、exact predicate、transaction safety 或 post-restore verification，必须 hard stop；不能扩大 DB 修改范围。
 
@@ -136,7 +138,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src /opt/fin-ops/venv/bin/python -m fin_
 
 - manifest、scope policy、worker registry、App Status registry 和 docs 一致。
 - 读 API fresh/status 合同通过生产或等价真实 runtime 验证。
-- 写样本能从业务操作追踪到 dirty/outbox、worker、projection、readiness、operation barrier 和页面 fresh。
+- 写样本能从业务操作追踪到 dirty/outbox、worker、projection、readiness 和页面 direct read 结果。
 - 样本恢复完成并验证。
 - 性能证据通过。
 - 旧链路已删除，或有 guard 证明 normal production path 不可达且有删除条件。

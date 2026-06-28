@@ -14,7 +14,6 @@ from fin_ops_platform.services.workbench_reconciliation_engine import (
     WorkbenchReconciliationEngine,
 )
 from fin_ops_platform.services.workbench_reconciliation_models import expand_scope_month_window
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 from fin_ops_platform.services.workbench_special_reconciliation_adapter import WorkbenchSpecialReconciliationAdapter
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
     WORKBENCH_SPECIAL_RULES_VERSION,
@@ -48,7 +47,6 @@ class WorkbenchMatchingOrchestrator:
         row_provider: WorkbenchMonthlyRowProvider | Callable[[str], dict[str, Any]],
         relation_read_port: WorkbenchMatchingRelationReadPort,
         candidate_match_service: WorkbenchCandidateMatchService,
-        read_model_service: WorkbenchReadModelService,
         rules: WorkbenchMatchingRules,
         special_rule_service: WorkbenchSpecialPairRuleService | None = None,
         exception_case_service: object | None = None,
@@ -62,7 +60,6 @@ class WorkbenchMatchingOrchestrator:
         self._row_provider = row_provider
         self._relation_read_port = relation_read_port
         self._candidate_match_service = candidate_match_service
-        self._read_model_service = read_model_service
         self._rules = rules
         self._special_rule_service = special_rule_service or WorkbenchSpecialPairRuleService()
         self._exception_case_service = exception_case_service
@@ -142,7 +139,6 @@ class WorkbenchMatchingOrchestrator:
                     request_id=str(summary["request_id"]),
                     reason=str(summary["reason"]),
                 )
-                self._invalidate_read_models(scope_month)
                 summary["processed_months"].append(scope_month)
                 summary["duration_ms"] = self._duration_ms(started_at)
                 self._emit_progress(progress_callback, summary)
@@ -220,8 +216,6 @@ class WorkbenchMatchingOrchestrator:
         summary["auto_completed_relation_count"] = int(summary.get("auto_completed_relation_count") or 0) + int(
             result.get("auto_completed_relation_count") or 0
         )
-        self._invalidate_read_models(scope_month)
-
     def _accumulate_rule_summary(self, summary: dict[str, Any]) -> None:
         last_summary = getattr(self._rules, "last_summary", None)
         if not callable(last_summary):
@@ -535,13 +529,6 @@ class WorkbenchMatchingOrchestrator:
                 if row_id in row_ids:
                     scoped_ids.add(row_id)
         return scoped_ids
-
-    def _invalidate_read_models(self, scope_month: str) -> None:
-        delete_read_model = getattr(self._read_model_service, "delete_read_model", None)
-        if not callable(delete_read_model):
-            raise ValueError("read_model_service must provide delete_read_model(scope_key).")
-        for scope_key in (scope_month, "all"):
-            delete_read_model(scope_key)
 
     def _log(self, event: str, summary: dict[str, Any], *, failed: bool = False) -> None:
         payload = {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from http import HTTPStatus
+from pathlib import Path
 from unittest.mock import patch
 
 from fin_ops_platform.app.auth import OARequestSession
@@ -142,10 +143,6 @@ class _RecordingRelationCommandService:
             "changed_case_ids": [relation["case_id"]],
             "affected_months": ["2026-05"],
             "version": 1,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": ["2026-05"],
-            "refresh_enqueued": False,
             "idempotent_replay": False,
         }
 
@@ -162,10 +159,6 @@ class _RecordingRelationCommandService:
             "changed_case_ids": [str(kwargs["case_id"])],
             "affected_months": ["2026-05"],
             "version": 4,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": ["2026-05"],
-            "refresh_enqueued": False,
             "idempotent_replay": False,
         }
 
@@ -205,10 +198,6 @@ class _RecordingRelationCommandService:
             "affected_row_ids": ["oa-1", "bank-1"],
             "restored_relations": [],
             "version": 4,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": ["2026-05"],
-            "refresh_enqueued": False,
             "idempotent_replay": False,
         }
 
@@ -252,16 +241,14 @@ class _RecordingDecisionStore:
         return changed
 
 
-class _StaleConfirmRelationCommandService:
+class _ConflictingConfirmRelationCommandService:
     def confirm_relation(self, **kwargs: object) -> dict[str, object]:
         raise WorkbenchRelationCommandError(
-            "workbench_relation_read_model_not_fresh",
-            "Workbench relation read model is refreshing.",
+            "workbench_relation_active_row_conflict",
+            "One or more rows are already active in another workbench relation.",
             payload={
-                "read_model_status": "refreshing",
-                "read_model_stale_reasons": ["dirty_scope_pending"],
-                "read_model_scope_keys": ["2026-05"],
-                "refresh_enqueued": True,
+                "conflicting_case_ids": ["CASE-EXISTING"],
+                "row_ids": list(kwargs.get("row_ids") or []),
             },
         )
 
@@ -378,7 +365,6 @@ def _new_facade(
             if lifecycle_calls is not None
             else None
         ),
-        schedule_read_model_persist=lambda *_, **__: None,
         emit_action_timing=lambda **_: None,
         confirm_link_uow=confirm_uow,
         cancel_link_uow=cancel_uow,
@@ -430,7 +416,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
         self.assertEqual(getattr(command, "tenant_id"), "default")
 
-    def test_confirm_link_response_returns_operation_freshness_targets_for_affected_scopes(self) -> None:
+    def test_confirm_link_response_returns_affected_scope_keys_only(self) -> None:
         facade = _new_facade(confirm_uow=_RecordingUoW())
 
         result = facade.confirm_link(
@@ -446,13 +432,14 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
-        self.assertNotIn({"read_model_key": "workbench_relation", "scope_key": "all"}, result.payload["freshness_targets"])
-        self.assertEqual(
-            result.payload["freshness_targets"],
-            [
-                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-            ],
-        )
+        self.assertNotIn("read_model_scope_keys", result.payload)
+        self.assertNotIn("freshness_targets", result.payload)
+        self.assertNotIn("operation_barrier_targets", result.payload)
+
+    def test_write_facade_does_not_read_legacy_read_model_scope_keys(self) -> None:
+        source = Path("backend/src/fin_ops_platform/services/workbench_write_facade.py").read_text(encoding="utf-8")
+
+        self.assertNotIn('get("read_model_scope_keys")', source)
 
     def test_confirm_link_two_pane_operation_projection_uses_open_groups(self) -> None:
         def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
@@ -571,13 +558,9 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), ["2026-03", "2026-02"])
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
-        self.assertEqual(
-            result.payload["freshness_targets"],
-            [
-                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
-            ],
-        )
+        self.assertNotIn("read_model_scope_keys", result.payload)
+        self.assertNotIn("freshness_targets", result.payload)
+        self.assertNotIn("operation_barrier_targets", result.payload)
 
     def test_cancel_link_replay_and_run_commands_use_explicit_actor_and_tenant_context(self) -> None:
         uow = _RecordingUoW()
@@ -626,7 +609,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
             self.assertEqual(getattr(command, "tenant_id"), "default")
 
-    def test_withdraw_link_response_returns_operation_freshness_targets_for_affected_scopes(self) -> None:
+    def test_withdraw_link_response_returns_affected_scope_keys_only(self) -> None:
         facade = _new_facade(
             withdraw_uow=_RecordingUoW(),
             relation_command_service=_RecordingRelationCommandService(),
@@ -645,12 +628,9 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(
-            result.payload["freshness_targets"],
-            [
-                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-            ],
-        )
+        self.assertNotIn("read_model_scope_keys", result.payload)
+        self.assertNotIn("freshness_targets", result.payload)
+        self.assertNotIn("operation_barrier_targets", result.payload)
 
     def test_withdraw_link_targets_preview_row_months_when_relation_scope_is_all(self) -> None:
         class _AllScopePreviewRelationCommandService(_RecordingRelationCommandService):
@@ -672,7 +652,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                     "before_relations": [active_relation],
                     "after_relations": [],
                     "submit_expected_versions": {"relation:CASE-ALL": 7},
-                    "read_model_scope_keys": ["all"],
                 }
 
         uow = _RecordingUoW()
@@ -711,13 +690,9 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), ["2026-03", "2026-02"])
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
-        self.assertEqual(
-            result.payload["freshness_targets"],
-            [
-                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
-            ],
-        )
+        self.assertNotIn("read_model_scope_keys", result.payload)
+        self.assertNotIn("freshness_targets", result.payload)
+        self.assertNotIn("operation_barrier_targets", result.payload)
 
     def test_confirm_and_cancel_link_map_in_progress_idempotency_to_stable_conflict_payload(self) -> None:
         facade = _new_facade(confirm_uow=_InProgressUoW(), cancel_uow=_InProgressUoW())
@@ -748,10 +723,10 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(cancel.payload["error"], "idempotency_key_in_progress")
         self.assertTrue(cancel.payload["retryable"])
 
-    def test_confirm_link_uow_preserves_relation_command_freshness_error(self) -> None:
+    def test_confirm_link_uow_preserves_relation_command_error(self) -> None:
         facade = _new_facade(
             confirm_uow=_HandlerCallingUoW(),
-            relation_command_service=_StaleConfirmRelationCommandService(),
+            relation_command_service=_ConflictingConfirmRelationCommandService(),
         )
 
         result = facade.confirm_link(
@@ -765,11 +740,9 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
-        self.assertEqual(result.payload["error"], "workbench_relation_read_model_not_fresh")
-        self.assertEqual(result.payload["read_model_status"], "refreshing")
-        self.assertEqual(result.payload["read_model_stale_reasons"], ["dirty_scope_pending"])
-        self.assertEqual(result.payload["read_model_scope_keys"], ["2026-05"])
-        self.assertTrue(result.payload["refresh_enqueued"])
+        self.assertEqual(result.payload["error"], "workbench_relation_active_row_conflict")
+        self.assertEqual(result.payload["conflicting_case_ids"], ["CASE-EXISTING"])
+        self.assertEqual(result.payload["row_ids"], ["oa-1", "bank-1"])
 
     def test_confirm_and_cancel_link_delegate_relation_writes_to_command_service_without_uow(self) -> None:
         relation_command = _RecordingRelationCommandService()
@@ -1169,7 +1142,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         app._oa_identity_service = object()
         app._access_control_service = object()
         app._load_json_body = lambda body: ({"month": "2026-05"}, None)
-        app._workbench_write_freshness_guard = lambda: None
+        app._workbench_write_sync_guard = lambda: None
 
         def live_confirm(payload: dict[str, object], *, request_id: str | None = None, actor_id: str | None = None, tenant_id: str | None = None) -> Response:
             captured["confirm"] = {"actor_id": actor_id, "tenant_id": tenant_id, "request_id": request_id}

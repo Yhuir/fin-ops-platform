@@ -76,11 +76,6 @@ test.describe("finance table system browser flow", () => {
     await expectVisibleAndUncovered(page.getByRole("columnheader", { name: "连接 p95" }), "rightmost request-performance column");
     await expect(page.getByRole("row", { name: /\/api\/session\/me/ })).toContainText("45 ms");
 
-    const readModelTableScroll = page.getByTestId("app-health-runtime").locator(".finance-table__scroll").nth(2);
-    await expectHorizontalScroll(readModelTableScroll, "read model freshness table");
-    await expectVisibleAndUncovered(page.getByRole("columnheader", { name: "unavailable" }), "rightmost read-model column");
-    await expect(page.getByRole("row", { name: "workbench", exact: true })).toContainText("120 ms");
-
     await expect(page.getByRole("columnheader", { name: "Worker" })).toBeVisible();
     await expect(page.getByRole("row", { name: /workbench-read-model/ })).toContainText("1 s");
     await expect(page.getByText("正在加载系统状态。")).toHaveCount(0);

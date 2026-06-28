@@ -70,9 +70,7 @@ class HttpProbeSample:
     content_type: str
     ok: bool
     error: str | None = None
-    read_model_status: str | None = None
     cache_status: str | None = None
-    refresh_enqueued: bool | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -88,9 +86,7 @@ class HttpProbeSample:
             "content_type": self.content_type,
             "ok": self.ok,
             **({"error": self.error} if self.error else {}),
-            **({"read_model_status": self.read_model_status} if self.read_model_status else {}),
             **({"cache_status": self.cache_status} if self.cache_status else {}),
-            **({"refresh_enqueued": self.refresh_enqueued} if self.refresh_enqueued is not None else {}),
         }
 
 
@@ -123,72 +119,64 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("app_health", "/api/app-health"),
     HttpProbe("background_jobs_active", "/api/background-jobs/active"),
     HttpProbe("operations_app_health_dashboard", "/api/operations/app-health-dashboard", auth_scope="admin"),
-    HttpProbe("workbench_summary_all", "/api/workbench/summary?month=all", expected_statuses=(200, 202)),
-    HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("workbench_settings", "/api/workbench/settings", expected_statuses=(200, 202)),
+    HttpProbe("workbench_summary_all", "/api/workbench/summary?month=all"),
+    HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50"),
+    HttpProbe("workbench_settings", "/api/workbench/settings"),
     HttpProbe(
         "bank_details_accounts",
         f"/api/bank-details/accounts?date_from={_current_year_start()}&date_to={_current_year_end()}",
-        expected_statuses=(200, 202),
     ),
     HttpProbe(
         "bank_details_transactions",
         f"/api/bank-details/transactions?date_from={_current_year_start()}&date_to={_current_year_end()}&page=1&page_size=50",
-        expected_statuses=(200, 202),
     ),
-    HttpProbe("bank_details_auto_tag_rules", "/api/bank-details/auto-tag-rules", expected_statuses=(200, 202)),
+    HttpProbe("bank_details_auto_tag_rules", "/api/bank-details/auto-tag-rules"),
     HttpProbe(
         "pending_invoices_rows",
         "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
-        expected_statuses=(200, 202),
     ),
     HttpProbe(
         "pending_invoices_filter_options",
         "/api/pending-invoices/filter-options?direction=expense&sort_field=trade_date&sort_direction=desc",
-        expected_statuses=(200, 202),
     ),
-    HttpProbe("pending_invoices_rules", "/api/pending-invoices/rules", expected_statuses=(200, 202)),
-    HttpProbe("input_invoice_usage_rows", "/api/input-invoice-usage/rows?page=1&page_size=20", expected_statuses=(200, 202)),
-    HttpProbe("input_invoice_usage_filter_options", "/api/input-invoice-usage/filter-options", expected_statuses=(200, 202)),
-    HttpProbe("input_invoice_usage_payment_status_rules", "/api/input-invoice-usage/payment-status-rules", expected_statuses=(200, 202)),
-    HttpProbe("oa_pending_payments_rows", "/api/oa-pending-payments/rows?page=1&page_size=20", expected_statuses=(200, 202)),
-    HttpProbe("oa_pending_payments_filter_options", "/api/oa-pending-payments/filter-options", expected_statuses=(200, 202)),
-    HttpProbe("output_invoice_collections_rows", "/api/output-invoice-collections/rows?page=1&page_size=20", expected_statuses=(200, 202)),
-    HttpProbe("output_invoice_collections_filter_options", "/api/output-invoice-collections/filter-options", expected_statuses=(200, 202)),
-    HttpProbe("output_invoice_collections_status_rules", "/api/output-invoice-collections/status-rules", expected_statuses=(200, 202)),
-    HttpProbe("tax_offset_summary", f"/api/tax-offset/summary?month={DEFAULT_BUSINESS_MONTH}", expected_statuses=(200, 202)),
-    HttpProbe("tax_offset_rows", f"/api/tax-offset?month={DEFAULT_BUSINESS_MONTH}", expected_statuses=(200, 202)),
+    HttpProbe("pending_invoices_rules", "/api/pending-invoices/rules"),
+    HttpProbe("input_invoice_usage_rows", "/api/input-invoice-usage/rows?page=1&page_size=20"),
+    HttpProbe("input_invoice_usage_filter_options", "/api/input-invoice-usage/filter-options"),
+    HttpProbe("input_invoice_usage_payment_status_rules", "/api/input-invoice-usage/payment-status-rules"),
+    HttpProbe("oa_pending_payments_rows", "/api/oa-pending-payments/rows?page=1&page_size=20"),
+    HttpProbe("oa_pending_payments_filter_options", "/api/oa-pending-payments/filter-options"),
+    HttpProbe("output_invoice_collections_rows", "/api/output-invoice-collections/rows?page=1&page_size=20"),
+    HttpProbe("output_invoice_collections_filter_options", "/api/output-invoice-collections/filter-options"),
+    HttpProbe("output_invoice_collections_status_rules", "/api/output-invoice-collections/status-rules"),
+    HttpProbe("tax_offset_summary", f"/api/tax-offset/summary?month={DEFAULT_BUSINESS_MONTH}"),
+    HttpProbe("tax_offset_rows", f"/api/tax-offset?month={DEFAULT_BUSINESS_MONTH}"),
     HttpProbe(
         "cost_statistics_explorer_all",
         f"/api/cost-statistics/explorer?month={DEFAULT_BUSINESS_MONTH}&project_scope=active",
-        expected_statuses=(200, 202),
     ),
     HttpProbe(
         "cost_statistics_summary_all",
         f"/api/cost-statistics?month={DEFAULT_BUSINESS_MONTH}&project_scope=active",
-        expected_statuses=(200, 202),
     ),
     HttpProbe(
         "no_oa_bank_batches",
         f"/api/no-oa-bank-batches?month={_current_month()}&bucket=unsubmitted&page=1&page_size=200",
-        expected_statuses=(200, 202),
     ),
-    HttpProbe("no_oa_bank_batches_tag_selection", "/api/no-oa-bank-batches/tag-selection", expected_statuses=(200, 202)),
+    HttpProbe("no_oa_bank_batches_tag_selection", "/api/no-oa-bank-batches/tag-selection"),
     HttpProbe(
         "batch_accounting",
         f"/api/batch-accounting?bank_year={_current_year()}&oa_year={_current_year()}&bucket=unsubmitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",
-        expected_statuses=(200, 202),
     ),
-    HttpProbe("turnover_ledger_grouped", "/api/turnover-ledger?view=grouped&page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("turnover_ledger_tag_selection", "/api/turnover-ledger/tag-selection", expected_statuses=(200, 202)),
-    HttpProbe("etc_invoices", "/api/etc/invoices?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("etc_batches", "/api/etc/batches?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("etc_business_batches", "/api/etc/business-batches?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("etc_reconciliation_tasks", "/api/etc/reconciliation-tasks?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("import_facts_batches", "/api/import-facts/batches?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("import_facts_files", "/api/import-facts/files?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("import_facts_invoices", "/api/import-facts/invoices?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("search_all", "/api/search?q=%E5%85%AC%E5%8F%B8&scope=all&month=all&limit=5", expected_statuses=(200, 202)),
+    HttpProbe("turnover_ledger_grouped", "/api/turnover-ledger?view=grouped&page=1&page_size=50"),
+    HttpProbe("turnover_ledger_tag_selection", "/api/turnover-ledger/tag-selection"),
+    HttpProbe("etc_invoices", "/api/etc/invoices?page=1&page_size=50"),
+    HttpProbe("etc_batches", "/api/etc/batches?page=1&page_size=50"),
+    HttpProbe("etc_business_batches", "/api/etc/business-batches?page=1&page_size=50"),
+    HttpProbe("etc_reconciliation_tasks", "/api/etc/reconciliation-tasks?page=1&page_size=50"),
+    HttpProbe("import_facts_batches", "/api/import-facts/batches?page=1&page_size=50"),
+    HttpProbe("import_facts_files", "/api/import-facts/files?page=1&page_size=50"),
+    HttpProbe("import_facts_invoices", "/api/import-facts/invoices?page=1&page_size=50"),
+    HttpProbe("search_all", "/api/search?q=%E5%85%AC%E5%8F%B8&scope=all&month=all&limit=5"),
 )
 
 
@@ -374,9 +362,7 @@ def _collect_one(
             content_type=content_type,
             ok=ok,
             error=None if ok else html_api_error or f"unexpected_status:{response.status_code}",
-            read_model_status=metadata.get("read_model_status"),
             cache_status=metadata.get("cache_status"),
-            refresh_enqueued=metadata.get("refresh_enqueued"),
         )
     except Exception as exc:
         elapsed_ms = (monotonic() - started) * 1000
@@ -421,30 +407,18 @@ def _summarize_probe(probe: HttpProbe, samples: Sequence[HttpProbeSample]) -> di
     durations = [sample.elapsed_ms for sample in probe_samples]
     status_counts: dict[str, int] = {}
     errors: list[str] = []
-    read_model_statuses: dict[str, int] = {}
     cache_statuses: dict[str, int] = {}
-    refresh_enqueued_count = 0
     for sample in probe_samples:
         status_key = str(sample.status_code) if sample.status_code is not None else "error"
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
         if sample.error and sample.error not in errors:
             errors.append(sample.error)
-        if sample.read_model_status:
-            read_model_statuses[sample.read_model_status] = read_model_statuses.get(sample.read_model_status, 0) + 1
         if sample.cache_status:
             cache_statuses[sample.cache_status] = cache_statuses.get(sample.cache_status, 0) + 1
-        if sample.refresh_enqueued:
-            refresh_enqueued_count += 1
     success_count = sum(1 for sample in probe_samples if sample.ok)
     p95 = _percentiles(durations)["p95"]
-    non_fresh_statuses = {
-        status: count
-        for status, count in read_model_statuses.items()
-        if status != "fresh"
-    }
     passes_status = success_count == len(probe_samples) and bool(probe_samples)
     passes_slo = p95 is not None and p95 <= probe.target_ms
-    passes_freshness = not non_fresh_statuses and refresh_enqueued_count == 0
     return {
         "name": probe.name,
         "kind": probe.kind,
@@ -457,13 +431,9 @@ def _summarize_probe(probe: HttpProbe, samples: Sequence[HttpProbeSample]) -> di
         "status_counts": status_counts,
         "duration_ms": _percentiles(durations),
         "slo_pass": bool(passes_slo),
-        "freshness_pass": bool(passes_freshness),
-        "status": "pass" if passes_status and passes_slo and passes_freshness else "fail",
+        "status": "pass" if passes_status and passes_slo else "fail",
         "errors": errors,
-        "read_model_statuses": read_model_statuses,
-        "non_fresh_read_model_statuses": non_fresh_statuses,
         "cache_statuses": cache_statuses,
-        "refresh_enqueued_count": refresh_enqueued_count,
     }
 
 
@@ -600,9 +570,7 @@ def _extract_response_metadata(body: bytes, content_type: str) -> dict[str, Any]
     return {
         key: value
         for key, value in {
-            "read_model_status": _first_string(payload, ("read_model_status", "readModelStatus")),
             "cache_status": _first_string(payload, ("cache_status", "cacheStatus")),
-            "refresh_enqueued": _first_bool(payload, ("refresh_enqueued", "refreshEnqueued")),
         }.items()
         if value is not None
     }
@@ -625,14 +593,6 @@ def _html_response_error(probe: HttpProbe, content_type: str, body: bytes) -> st
     prefix = body.lstrip()[:128].lower()
     if prefix.startswith(b"<!doctype html") or prefix.startswith(b"<html"):
         return "html_response_for_api_probe"
-    return None
-
-
-def _first_bool(payload: Mapping[str, Any], keys: Sequence[str]) -> bool | None:
-    for key in keys:
-        value = payload.get(key)
-        if isinstance(value, bool):
-            return value
     return None
 
 

@@ -281,6 +281,7 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(confirm_payload["job"]["type"], "file_import")
         self.assertEqual(confirm_payload["job"]["affected_domains"], ["imports_invoices"])
         self.assertEqual(confirm_payload["job"]["route"], "/imports/invoices")
+        self.assertNotIn("read_model_scope_keys", confirm_payload)
         job_id = confirm_payload["job"]["job_id"]
         job_payload = confirm_payload["job"]
         for _ in range(20):

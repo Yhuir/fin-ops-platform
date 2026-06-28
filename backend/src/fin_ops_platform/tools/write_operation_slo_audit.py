@@ -32,7 +32,7 @@ class OperationExpectation:
 @dataclass(frozen=True)
 class OperationExpectationResult:
     operation: str
-    event_type: str
+    event_type: str | None
     scope_type: str
     reason: str
     action_names: tuple[str, ...]
@@ -47,7 +47,6 @@ class OperationExpectationResult:
     latest_event_id: str | None
     latest_action_name: str | None
     latest_event_status: str | None
-    latest_dirty_status: str | None
     latest_error: str | None = None
 
 
@@ -73,12 +72,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation(
         "turnover_manual_closure_or_withdraw",
         "cost_statistics",
-        "turnover_relation_changed",
-        ("turnover_relation_zero_difference_closure", "withdraw_relation", "turnover_relation_withdraw"),
-    ),
-    OperationExpectation(
-        "turnover_manual_closure_or_withdraw",
-        "search",
         "turnover_relation_changed",
         ("turnover_relation_zero_difference_closure", "withdraw_relation", "turnover_relation_withdraw"),
     ),
@@ -126,7 +119,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_confirm_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "input_invoice_usage", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "cost_statistics", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "tax_offset", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "workbench", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
@@ -135,7 +127,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_withdraw_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "input_invoice_usage", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "cost_statistics", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "tax_offset", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "workbench", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
@@ -143,7 +134,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "invoice_lifecycle", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "input_invoice_usage", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "tax_offset", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "workbench", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
@@ -151,24 +141,20 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "invoice_lifecycle", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "input_invoice_usage", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "tax_offset", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "workbench", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "bank_detail", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "cost_statistics", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "workbench", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "bank_detail", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "cost_statistics", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation("invoice_import_confirmed", "workbench", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "workbench_relation", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "invoice_lifecycle", "import_state_changed"),
-    OperationExpectation("invoice_import_confirmed", "search", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "pending_invoice", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "input_invoice_usage", "import_state_changed", required=False),
     OperationExpectation("invoice_import_confirmed", "output_invoice_collection", "import_state_changed", required=False),
@@ -178,12 +164,10 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("bank_import_confirmed", "workbench", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "workbench_relation", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "invoice_lifecycle", "import_state_changed"),
-    OperationExpectation("bank_import_confirmed", "search", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "pending_invoice", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "input_invoice_usage", "import_state_changed", required=False),
     OperationExpectation("bank_import_confirmed", "output_invoice_collection", "import_state_changed", required=False),
     OperationExpectation("bank_import_confirmed", "oa_pending_payment", "import_state_changed"),
-    OperationExpectation("bank_import_confirmed", "bank_account_balance", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "cost_statistics", "import_state_changed"),
     OperationExpectation("bank_import_confirmed", "bank_detail", "import_facts_changed"),
     OperationExpectation("etc_import_confirmed", "workbench", "etc_invoice_import_confirm"),
@@ -195,13 +179,12 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("no_oa_bank_batch_withdraw", "workbench", "workbench_scope_invalidated", ("no_oa_bank_batch_withdraw",)),
     OperationExpectation("no_oa_bank_batch_withdraw", "workbench_relation", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
     OperationExpectation("no_oa_bank_batch_withdraw", "cost_statistics", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
-    OperationExpectation("no_oa_bank_batch_withdraw", "search", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
 )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Audit recent real write-operation read model refresh SLO from durable outbox events.",
+        description="Audit recent real write-operation SLO from durable outbox events.",
     )
     parser.add_argument("--json", action="store_true", help="Print JSON output. This is the default output shape.")
     parser.add_argument("--output", type=Path, help="Optional path to write the JSON report.")
@@ -271,14 +254,14 @@ def audit_write_operation_slo(
     expectations = _selected_expectations(operations)
     effective_p99_target_ms = effective_p99_target_ms_for(target_ms, p99_target_ms)
     rows = (
-        recent_read_model_refresh_events_since(
+        recent_write_operation_events_since(
             connection,
             tenant_id=tenant_id,
             started_at=since,
             limit=limit,
         )
         if since is not None
-        else _recent_read_model_refresh_events(
+        else _recent_write_operation_events(
             connection,
             tenant_id=tenant_id,
             lookback_hours=lookback_hours,
@@ -334,7 +317,7 @@ def selected_expectations_for_operations(operations: Sequence[str] | None) -> li
     return _selected_expectations(operations)
 
 
-def recent_read_model_refresh_events_since(
+def recent_write_operation_events_since(
     connection: Any,
     *,
     tenant_id: str,
@@ -362,17 +345,9 @@ def recent_read_model_refresh_events_since(
           e.processed_at,
           e.updated_at,
           e.last_error as event_last_error,
-          e.raw_payload,
-          d.status as dirty_status,
-          d.last_error as dirty_last_error
+          e.raw_payload
         from job.outbox_events e
-        left join job.read_model_dirty_scopes d
-         on d.tenant_id = e.tenant_id
-         and d.scope_type = e.scope_type
-         and d.scope_key = e.scope_key
-         and d.source_version = coalesce(e.source_version, 0)
         where e.tenant_id = %s
-          and (e.event_type like '%%.read_model.refresh' or e.event_type = 'import.fact.changed')
           and e.created_at >= %s
         order by e.created_at desc, e.id desc
         limit %s
@@ -395,7 +370,7 @@ def _selected_expectations(operations: Sequence[str] | None) -> list[OperationEx
     ]
 
 
-def _recent_read_model_refresh_events(
+def _recent_write_operation_events(
     connection: Any,
     *,
     tenant_id: str,
@@ -423,17 +398,9 @@ def _recent_read_model_refresh_events(
           e.processed_at,
           e.updated_at,
           e.last_error as event_last_error,
-          e.raw_payload,
-          d.status as dirty_status,
-          d.last_error as dirty_last_error
+          e.raw_payload
         from job.outbox_events e
-        left join job.read_model_dirty_scopes d
-         on d.tenant_id = e.tenant_id
-         and d.scope_type = e.scope_type
-         and d.scope_key = e.scope_key
-         and d.source_version = coalesce(e.source_version, 0)
         where e.tenant_id = %s
-          and (e.event_type like '%%.read_model.refresh' or e.event_type = 'import.fact.changed')
           and e.created_at >= now() - (%s * interval '1 hour')
         order by e.created_at desc, e.id desc
         limit %s
@@ -450,11 +417,11 @@ def _evaluate_expectation(
     target_ms: float,
     p99_target_ms: float,
 ) -> OperationExpectationResult:
-    expected_event_type = expectation.event_type or f"{expectation.scope_type}.read_model.refresh"
+    expected_event_type = expectation.event_type
     samples = [
         row
         for row in rows
-        if str(row.get("event_type") or "") == expected_event_type
+        if (expected_event_type is None or str(row.get("event_type") or "") == expected_event_type)
         and str(row.get("scope_type") or "") == expectation.scope_type
         and str(row.get("reason") or "") == expectation.reason
         and (
@@ -481,24 +448,18 @@ def _evaluate_expectation(
             latest_event_id=None,
             latest_action_name=None,
             latest_event_status=None,
-            latest_dirty_status=None,
-            latest_error="no_recent_required_write_refresh_event" if expectation.required else None,
+            latest_error="no_recent_required_write_operation_event" if expectation.required else None,
         )
     durations = [
         duration
         for duration in (_duration_ms(row.get("created_at"), row.get("processed_at")) for row in samples)
         if duration is not None
     ]
-    failed_samples = [
-        row
-        for row in samples
-        if str(row.get("event_status") or "") != "done"
-        or str(row.get("dirty_status") or "") not in {"", "done"}
-    ]
+    failed_samples = [row for row in samples if str(row.get("event_status") or "") != "done"]
     p95 = _percentile(durations, 0.95)
     p99 = _percentile(durations, 0.99)
     max_duration = max(durations) if durations else None
-    latest_error = str(latest.get("event_last_error") or latest.get("dirty_last_error") or "").strip() or None
+    latest_error = str(latest.get("event_last_error") or "").strip() or None
     if failed_samples:
         status = "fail"
     elif p95 is None:
@@ -514,7 +475,7 @@ def _evaluate_expectation(
         status = "pass"
     return OperationExpectationResult(
         operation=expectation.operation,
-        event_type=expected_event_type,
+        event_type=expected_event_type or str(latest.get("event_type") or "") or None,
         scope_type=expectation.scope_type,
         reason=expectation.reason,
         action_names=expectation.action_names,
@@ -529,7 +490,6 @@ def _evaluate_expectation(
         latest_event_id=str(latest.get("event_id") or "") or None,
         latest_action_name=str(latest.get("action_name") or "") or None,
         latest_event_status=str(latest.get("event_status") or "") or None,
-        latest_dirty_status=str(latest.get("dirty_status") or "") or None,
         latest_error=latest_error,
     )
 

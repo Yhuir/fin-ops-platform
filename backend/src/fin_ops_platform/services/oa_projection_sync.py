@@ -6,9 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
-from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 
 
 MONTH_FORMAT = "%Y-%m"
@@ -23,19 +21,12 @@ class OAProjectionSyncService:
         queue_repository: Any,
         retention_cutoff_date_provider: Any | None = None,
         pending_payment_relation_promoter: Any | None = None,
-        search_read_model_refresh_producer: Any | None = None,
     ) -> None:
+        _ = queue_repository
         self._source_adapter = source_adapter
         self._projection_repository = projection_repository
-        self._queue_repository = queue_repository
         self._retention_cutoff_date_provider = retention_cutoff_date_provider
         self._pending_payment_relation_promoter = pending_payment_relation_promoter
-        self._search_read_model_refresh_producer = (
-            search_read_model_refresh_producer
-            or SearchReadModelRefreshProducer(
-                refresh_gateway_provider=lambda: ReadModelRefreshGateway(queue_repository=self._queue_repository)
-            )
-        )
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         scope_key = self._event_scope_key(event)
@@ -70,11 +61,6 @@ class OAProjectionSyncService:
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
         if callable(record_sync_run):
             record_sync_run(result)
-        self._mark_downstream_dirty(
-            scope_key,
-            records,
-            extra_months=[*pruned_months, *list(promotion_result.get("affected_months") or [])],
-        )
         return result
 
     @staticmethod
@@ -239,35 +225,6 @@ class OAProjectionSyncService:
             raise RuntimeError("pending payment relation promoter must expose promote_completed_records().")
         result = promote(completed_records, actor_id="oa_projection_sync")
         return result if isinstance(result, dict) else {}
-
-    def _mark_downstream_dirty(
-        self,
-        scope_key: str,
-        records: list[OAApplicationRecord],
-        *,
-        extra_months: list[str] | None = None,
-    ) -> None:
-        months = {
-            str(record.month).strip()
-            for record in list(records or [])
-            if str(getattr(record, "month", "")).strip()
-        }
-        months.update(month for month in list(extra_months or []) if month)
-        if scope_key != "all" and scope_key:
-            months.add(scope_key)
-        target_scopes = sorted({month for month in months if month and month != "all"})
-        if target_scopes:
-            target_scopes.append("all")
-        else:
-            target_scopes = ["all"]
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not refresh_gateway.can_enqueue():
-            return
-        refresh_gateway.enqueue_many("workbench", target_scopes, reason="oa_projection_sync")
-        self._search_read_model_refresh_producer.enqueue(target_scopes, reason="oa_projection_sync")
-        refresh_gateway.enqueue_many("oa_pending_payment", target_scopes, reason="oa_projection_sync")
-        refresh_gateway.enqueue_many("pending_invoice", ["expense:all", "income:all"], reason="oa_projection_sync")
-
 
 def _is_invoice_attachment_payload(value: Any) -> bool:
     if not isinstance(value, dict):

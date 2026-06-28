@@ -4,7 +4,7 @@
 
 ## 事实源边界
 
-- 当前产品、架构、API、read model、worker、部署和测试事实只以本页列出的长期文档入口为准。
+- 当前产品、架构、API、direct API 目标读路径、legacy read model、worker、部署和测试事实只以本页列出的长期文档入口为准。
 - `.planning/` 是 GSD 执行工作区和历史执行记录，不作为当前需求、架构、API 或验收事实源；仍有价值的结论必须先提炼到 `docs/` 的长期事实源后才能作为依据。
 - `docs/refactor-ui/` 是 `refactor-ui` 分支 UI 平台迁移的专项工作区。该目录中的 prompt、master goal、state 或迁移队列只约束对应 UI 迁移流程，不作为当前 `main` 分支的后端、API、read model、worker 或生产运行事实源。
 - `docs/modules/*/implementation-notes.md` 只保存提炼后的目标、决策、验收、风险和后续事项；读取到历史记录时，必须回到模块 `README.md`、`state-machine.md`、`tests.md` 以及产品/架构/开发/运维长期事实源确认当前事实。
@@ -26,7 +26,7 @@
 | `business-flows/` | 面向业务读者的页面目的、操作流程、数据流向和页面间影响关系 |
 | `modules/` | 按页面和关键功能域组织的维护入口、状态机、测试矩阵和实施记录 |
 | `product-specs/` | 面向产品和业务的需求、口径、验收标准 |
-| `architecture/` | 系统边界、模块边界/I/O、数据模型、持久化、部署形态 |
+| `architecture/` | 系统边界、direct API 目标读路径、模块边界/I/O、数据模型、持久化、部署形态 |
 | `dev/` | 开发者入口、接口契约、测试、本地运行 |
 | `operations/` | 部署、数据安全、worker/read model、监控告警 |
 | `references/` | 仓库布局、外部系统、原始业务源和迁移历史摘要 |
@@ -77,10 +77,12 @@
 
 1. `architecture/module-boundaries/README.md`
 2. `architecture/module-boundaries/inventory.md`
-3. `architecture/module-boundaries/read-model-contracts.md`
-4. `architecture/module-boundaries/maintenance.md`
-5. `modules/README.md`
-6. 按目标模块继续读取 `modules/<module>/README.md` 和必要的状态机、测试、实施记录。
+3. 涉及页面读取、列表、统计、搜索或导出时读取 `architecture/direct-api-read-architecture.md`
+4. 涉及 PostgreSQL 业务唯一真相时读取 `architecture/module-boundaries/canonical-facts.md`
+5. 涉及 legacy read model 下线或旧路径删除时读取 `architecture/module-boundaries/read-model-contracts.md`
+6. `architecture/module-boundaries/maintenance.md`
+7. `modules/README.md`
+8. 按目标模块继续读取 `modules/<module>/README.md` 和必要的状态机、测试、实施记录。
 
 ### 当前 App 架构维护
 
@@ -118,13 +120,14 @@
 
 1. `operations/postgresql-runtime.md`
 2. `operations/runtime-worker-governance.md`
-3. `references/postgresql-migration-history.md`
+3. `architecture/module-boundaries/canonical-facts.md`
+4. `references/postgresql-migration-history.md`
 
 ## 当前技术债
 
 这些事项只在索引中保留提醒；进入实际执行时应沉淀到对应产品、架构、开发或运维文档，长期重构进度记录到 `architecture/backend-refactor/migration-state-log.md`。
 
-- 将工作台、搜索、成本统计等重查询路径继续收敛到物化读模型。
+- 将工作台、搜索、成本统计等重查询路径从 legacy read model 迁移到 direct API，并用索引、分页、聚合 SQL 和性能证据保护。
 - 将后台任务状态和健康告警统一到可恢复、可重试的任务体系。
 - 执行 Python-first 后端重构计划，入口见 `architecture/backend-refactor/README.md`。
 - 将历史本地 pickle/JSON 兼容路径逐步收敛，避免生产依赖本地文件。

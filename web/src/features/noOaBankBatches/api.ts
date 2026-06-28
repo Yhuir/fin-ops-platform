@@ -3,8 +3,6 @@ import type {
   NoOaBankBatchDetail,
   NoOaBankBatchDetailRow,
   NoOaBankBatchesPageInfo,
-  NoOaBankBatchReadModelStatus,
-  ReadModelOperationBarrierTarget,
   NoOaBankBatchTagDefinition,
   NoOaBankBatchTagSelection,
   NoOaBankBatchMutationResult,
@@ -134,10 +132,6 @@ type ApiNoOaBankBatchesResponse = {
   summary?: ApiNoOaBankBatchSummary;
   batches?: ApiNoOaBankBatch[];
   pagination?: ApiNoOaBankBatchesPageInfo | null;
-  read_model_status?: string | null;
-  readModelStatus?: string | null;
-  read_model_stale_reasons?: unknown[] | null;
-  readModelStaleReasons?: unknown[] | null;
 };
 
 type ApiNoOaBankBatchesPageInfo = {
@@ -206,12 +200,6 @@ type ApiNoOaBankBatchMutationResult = {
   affectedMonths?: string[];
   affected_scope_keys?: string[];
   affectedScopeKeys?: string[];
-  read_model_scope_keys?: string[];
-  readModelScopeKeys?: string[];
-  freshness_targets?: unknown;
-  freshnessTargets?: unknown;
-  operation_barrier_targets?: unknown;
-  operationBarrierTargets?: unknown;
   workbench_rebuild_queued?: boolean | null;
   workbenchRebuildQueued?: boolean | null;
   results?: Array<Record<string, unknown>>;
@@ -244,47 +232,6 @@ function stringList(value: string[] | undefined) {
 
 function unknownStringList(value: unknown) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
-}
-
-function normalizeReadModelStatus(value: string | null | undefined): NoOaBankBatchReadModelStatus {
-  return value === "fresh"
-    || value === "refreshing"
-    || value === "stale"
-    || value === "schema_mismatch"
-    || value === "missing"
-    ? value
-    : "refreshing";
-}
-
-function readModelTargets(value: unknown): ReadModelOperationBarrierTarget[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const targets: ReadModelOperationBarrierTarget[] = [];
-  const seen = new Set<string>();
-  value.forEach((item) => {
-    if (!item || typeof item !== "object") {
-      return;
-    }
-    const raw = item as Record<string, unknown>;
-    const readModelKey = textValue(raw.read_model_key ?? raw.readModelKey);
-    const scopeKey = textValue(raw.scope_key ?? raw.scopeKey);
-    const scopeType = textValue(raw.scope_type ?? raw.scopeType);
-    if (!readModelKey || !scopeKey) {
-      return;
-    }
-    const key = `${readModelKey}\u0000${scopeKey}\u0000${scopeType}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    targets.push({
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    });
-  });
-  return targets;
 }
 
 function textValue(value: unknown) {
@@ -464,16 +411,10 @@ function mapDetailRow(row: ApiNoOaBankBatchDetailRow = {}): NoOaBankBatchDetailR
 
 function mapMutationResult(payload: ApiNoOaBankBatchMutationResult): NoOaBankBatchMutationResult {
   const affectedScopeKeys = stringList(payload.affected_scope_keys ?? payload.affectedScopeKeys);
-  const readModelScopeKeys = stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys);
-  const freshnessTargets = readModelTargets(payload.freshness_targets ?? payload.freshnessTargets);
-  const operationTargets = readModelTargets(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     batch: payload.batch ? mapBatch(payload.batch) : null,
     affectedMonths: stringList(payload.affected_months ?? payload.affectedMonths),
     affectedScopeKeys,
-    readModelScopeKeys,
-    freshnessTargets,
-    operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
     workbenchRebuildQueued: Boolean(payload.workbench_rebuild_queued ?? payload.workbenchRebuildQueued),
     results: Array.isArray(payload.results) ? payload.results : [],
   };
@@ -520,8 +461,6 @@ export async function fetchNoOaBankBatches({
     summary: mapSummary(payload.summary),
     batches: Array.isArray(payload.batches) ? payload.batches.map(mapBatch).filter(isPublicBatch) : [],
     pagination: mapPagination(payload.pagination),
-    readModelStatus: normalizeReadModelStatus(payload.read_model_status ?? payload.readModelStatus),
-    readModelStaleReasons: unknownStringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),
   };
 }
 

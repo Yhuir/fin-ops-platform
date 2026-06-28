@@ -288,7 +288,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                         }
                     ],
                 }
-                return {"read_model_status": "refreshing", "rows": rows_by_month.get(month, [])}
+                return {"status": "refreshing", "rows": rows_by_month.get(month, [])}
 
         with self._temporary_app() as app:
             repository = SqlBankDetailRepository()
@@ -397,19 +397,6 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             transaction_ids,
         )
 
-    def test_sql_turnover_rows_tolerate_early_startup_before_app_settings_service_is_bound(self) -> None:
-        with self._temporary_app() as app:
-            app._bank_detail_sql_read_repository = object()
-            app._requires_sql_read_model_runtime = lambda: True  # type: ignore[method-assign]
-            app_settings_service = app._app_settings_service
-            delattr(app, "_app_settings_service")
-            try:
-                rows = app._turnover_bank_transaction_rows()
-            finally:
-                app._app_settings_service = app_settings_service
-
-        self.assertEqual(rows, [])
-
     def test_deterministic_turnover_relation_does_not_sync_to_workbench_without_manual_closure(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app)
@@ -494,13 +481,10 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
         self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
-        self.assertEqual(
-            payload["freshness_targets"],
-            [
-                {"read_model_key": "turnover_ledger", "scope_key": "all"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-            ],
-        )
+        self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
         matching_open_groups = [
             group
             for group in open_groups
@@ -521,9 +505,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                     "status": "stale",
                     "rows": [],
                     "groups": [],
-                    "read_model_scope_keys": ["2026-03"],
                     "stale_reasons": ["source_version_mismatch"],
-                    "refresh_enqueued": True,
                 }
 
         with self._temporary_app() as app:

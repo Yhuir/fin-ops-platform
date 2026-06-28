@@ -2,7 +2,7 @@
 
 ## 模块目标
 
-`finance-table-system` 保护财务页面共享表格体验：列角色对齐、分页摘要、筛选/排序/分页参数、横向滚动、窄屏可达性、导出入口、loading/empty/error/stale 状态和详情 drawer/dialog 的可读性。共享 `FinanceTable` 只提供展示 primitive；页面级业务查询、权限、read model freshness、导出 API 和写操作由对应页面模块负责。
+`finance-table-system` 保护财务页面共享表格体验：列角色对齐、分页摘要、筛选/排序/分页参数、横向滚动、窄屏可达性、导出入口、loading/empty/error/unavailable 状态和详情 drawer/dialog 的可读性。共享 `FinanceTable` 只提供展示 primitive；页面级业务查询、权限、direct API contract、导出 API 和写操作由对应页面模块负责。
 
 ## 用户角色
 
@@ -18,19 +18,19 @@
 | `FIN-TABLE-E2E-002` | 金额、方向、状态、空值、截断文本和列角色对齐语义稳定；金额/数量右对齐，日期/状态/方向/选择居中，主体/账户/说明左对齐。 | P1 |
 | `FIN-TABLE-E2E-003` | 窄屏和宽表可以横向滚动到右侧列；刷新/导出/操作入口不遮挡表格。 | P0 |
 | `FIN-TABLE-E2E-004` | 页面级筛选、排序、分页、search 和 tab 状态会进入对应 API query，不因共享表格迁移丢失。 | P0 |
-| `FIN-TABLE-E2E-005` | 页面级导出使用当前筛选/排序，不受当前分页限制；row-limit 或非 fresh 时不伪成功下载。 | P0 |
-| `FIN-TABLE-E2E-006` | read model `refreshing` / `stale` / `missing` / `failed` 时不显示普通空态、不泄露旧 rows、不允许写入或导出伪成功。 | P0 |
-| `FIN-TABLE-E2E-007` | 表格详情 drawer/dialog 只展示 fresh 或当前 row 的详情；non-fresh 时显示不可用诊断，不长期 loading。 | P0 |
+| `FIN-TABLE-E2E-005` | 页面级导出使用当前筛选/排序，不受当前分页限制；row-limit 或 direct payload 暂不可用时不伪成功下载。 | P0 |
+| `FIN-TABLE-E2E-006` | direct empty/error 场景不显示普通空态、不泄露旧 rows、不允许写入或导出伪成功。 | P0 |
+| `FIN-TABLE-E2E-007` | 表格详情 drawer/dialog 只展示当前 row 的可用详情；暂不可用时显示不可用诊断，不长期 loading。 | P0 |
 | `FIN-TABLE-E2E-008` | table session 只保存轻量 UI 状态，并按 page/state/user/columnsVersion 隔离；不保存 rows/read model payload。 | P1 |
 | `FIN-TABLE-E2E-009` | 代表性大表格在真实 Chromium 中无 console/page error，关键右侧列可读。 | P0 |
 | `FIN-TABLE-E2E-010` | 页面 wrapper 可以保留自身业务差异；共享 primitive 测试不能替代每页筛选/排序/导出/状态测试。 | P0 |
 
 ## 数据状态
 
-- `loading`：显示 loading，不使用旧 rows 冒充 fresh。
-- `empty`：只在 fresh 且确实无数据时显示。
-- `refreshing` / `stale` / `missing` / `failed`：必须显示诊断或刷新中状态，阻止伪成功写入/导出。
-- `fresh`：允许筛选、排序、分页、详情和导出按页面规则工作。
+- `loading`：显示 loading，不使用旧 rows 冒充当前事实。
+- `empty`：只在 direct API 明确返回空结果时显示。
+- `error` / `unavailable`：必须显示诊断或错误状态，阻止伪成功写入/导出。
+- `ready`：允许筛选、排序、分页、详情和导出按页面规则工作。
 
 ## 权限规则
 
@@ -38,12 +38,12 @@
 - admin-only 表格或运维表格必须由 `app-health-operations` / `permissions-and-audit` 保护。
 - forbidden/expired session 不触发表格 protected API。
 
-## API / Read Model / Worker 边界
+## API / Runtime 边界
 
 - 共享 primitive 不发 HTTP；API contract 由页面 API 和后端模块负责。
 - 页面必须把筛选、排序、分页和导出参数作为稳定契约测试。
-- read model freshness 由页面 API/read model 模块提供；表格不能伪造 fresh。
-- 写操作后的 worker drain/freshness barrier 由页面业务流 E2E 或 runtime smoke 验证。
+- direct payload 可用性由页面 API 模块提供；表格不能伪造可用数据。
+- 写操作后的真实后台任务或 direct API 收敛由页面业务流 E2E 或 runtime smoke 验证。
 
 ## 跨页面影响
 

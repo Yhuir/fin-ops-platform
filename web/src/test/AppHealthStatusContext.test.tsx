@@ -54,7 +54,6 @@ vi.mock("../features/appHealth/api", async (importOriginal) => {
       status: "ok",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", dirty_scopes: [] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
       dependencies: {},
     }),
@@ -207,7 +206,6 @@ describe("AppHealthStatusProvider", () => {
       status: "busy",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
       background_jobs: {
         active: 1,
         queued: 0,
@@ -231,12 +229,11 @@ describe("AppHealthStatusProvider", () => {
     });
   });
 
-  it("does not block mutations when app status is blocked only by read freshness", async () => {
+  it("does not block mutations when app status is blocked only by sync readiness", async () => {
     mocked.appHealth = {
       status: "blocked",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
       app_status: {
         version: 1,
@@ -262,8 +259,6 @@ describe("AppHealthStatusProvider", () => {
             status: "failed",
             reason: "银行明细不可用",
             details: ["projection failed"],
-            read_models: ["bank_detail"],
-            read_model_scopes: [],
             workers: ["bank-detail"],
             job_ids: [],
             updated_at: "2026-06-13T17:30:00+08:00",
@@ -289,7 +284,6 @@ describe("AppHealthStatusProvider", () => {
       status: "busy",
       session: { status: "authenticated" },
       oa_sync: { status: "idle", message: "OA 有待处理变更", dirty_scopes: ["2026-03"] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
       app_status: {
         version: 1,
@@ -315,8 +309,6 @@ describe("AppHealthStatusProvider", () => {
             status: "ready",
             reason: "关联台已同步",
             details: [],
-            read_models: ["workbench"],
-            read_model_scopes: [],
             workers: ["workbench-read-model"],
             job_ids: [],
             updated_at: "2026-06-13T17:30:00+08:00",
@@ -339,27 +331,6 @@ describe("AppHealthStatusProvider", () => {
     });
   });
 
-  it("reports workbench matching running months without being overwritten by OA synced", async () => {
-    mocked.appHealth = {
-      status: "busy",
-      session: { status: "authenticated" },
-      oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
-      workbench_read_model: {
-        status: "rebuilding",
-        dirty_scopes: [],
-        stale_scopes: [],
-        rebuilding_scopes: [],
-        matching_running_scopes: ["2026-03"],
-      },
-      background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
-    };
-    renderProbe();
-    await waitFor(() => {
-      expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
-      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "正在生成关联台候选：2026-03");
-    });
-  });
-
   it("does not treat succeeded jobs as running AppHealth work", async () => {
     mocked.jobs = [{
       jobId: "job-succeeded",
@@ -375,20 +346,20 @@ describe("AppHealthStatusProvider", () => {
     });
   });
 
-  it("reports yellow when the backend says the workbench read model is stale", async () => {
+  it("uses shell workbench status when app status overview is unavailable", async () => {
+    mocked.workbenchStatus = { level: "pending", reason: "关联台待刷新" };
     mocked.appHealth = {
       session: { status: "authenticated" },
       oa_sync: { status: "synced", dirty_scopes: [] },
-      workbench_read_model: { status: "stale", dirty_scopes: ["oa"], stale_scopes: ["oa"] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
     };
     renderProbe();
     await waitFor(() => {
       expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
-      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "关联台待刷新");
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "正在加载关联台");
     });
     expect(screen.getByLabelText("health")).toHaveTextContent("\"oaSync\":\"idle\"");
-    expect(screen.getByLabelText("health")).toHaveTextContent("\"workbench\":\"stale\"");
+    expect(screen.getByLabelText("health")).toHaveTextContent("\"workbench\":\"loading\"");
   });
 
   it("updates from an app_health SSE snapshot before polling", async () => {
@@ -404,13 +375,39 @@ describe("AppHealthStatusProvider", () => {
       generated_at: "2026-05-06T09:00:00+08:00",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", dirty_scopes: [] },
-      workbench_read_model: { status: "stale", dirty_scopes: ["oa"], stale_scopes: ["oa"] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
+      app_status: {
+        version: 1,
+        generated_at: "2026-05-06T09:00:00+08:00",
+        overall: {
+          level: "busy",
+          color: "yellow",
+          reason: "关联台正在同步",
+          blocks_mutations: false,
+          write_safety: { status: "ready", reason: "写操作可用", blocks_mutations: false, blockers: [] },
+        },
+        domains: [
+          {
+            key: "workbench",
+            label: "关联台",
+            route: "/",
+            level: "busy",
+            status: "refreshing",
+            reason: "关联台正在同步",
+            details: [],
+            workers: ["workbench-read-model"],
+            job_ids: [],
+            updated_at: "2026-05-06T09:00:00+08:00",
+          },
+        ],
+        background_tasks: [],
+        alerts: [],
+      },
     });
 
     await waitFor(() => {
       expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
-      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "关联台待刷新");
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "关联台正在同步");
     });
     expect(fetchAppHealth).not.toHaveBeenCalled();
   });
@@ -422,7 +419,6 @@ describe("AppHealthStatusProvider", () => {
       generated_at: "2026-05-06T09:01:00+08:00",
       session: { status: "authenticated" },
       oa_sync: { status: "synced", dirty_scopes: [] },
-      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
       background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
     };
     renderProbe();

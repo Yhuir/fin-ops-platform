@@ -18,10 +18,7 @@ WRITE_METHODS = frozenset(
         "save_no_oa_bank_batches",
         "save_bank_transaction_categories",
         "save_turnover_relations",
-        "save_workbench_read_models",
         "save_workbench_candidate_matches",
-        "save_cost_statistics_read_models",
-        "save_tax_offset_read_models",
         "save_background_jobs",
         "save_app_health_alerts",
     }

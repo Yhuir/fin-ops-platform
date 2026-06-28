@@ -100,7 +100,6 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(openGroup).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
 
     const workbenchGroupCallsBeforeRetry = api.count("GET /api/workbench/groups");
     await previewDialog.getByRole("button", { name: "重试" }).click();
@@ -109,7 +108,6 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     await expect(page.getByTestId("candidate-group-open-case:CASE-202603-101")).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(2);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(workbenchGroupCallsBeforeRetry);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
@@ -134,7 +132,6 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(openGroup).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
   });
 
   test("prevents duplicate confirm-link submissions while the preview is submitting", async ({ page }) => {

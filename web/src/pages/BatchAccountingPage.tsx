@@ -8,8 +8,6 @@ import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayCon
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import { ApiClientError } from "../features/apiClient";
-import { operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
-import type { OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   fetchBatchAccounting,
   submitBatchAccounting,
@@ -32,10 +30,6 @@ const EMPTY_PAYLOAD: BatchAccountingResponse = {
   oaRows: [],
   relationsByBankRowId: {},
   pagination: {},
-  readModelStatus: "refreshing",
-  readModelStaleReasons: [],
-  readModelScopeKeys: [],
-  refreshEnqueued: false,
 };
 
 const BATCH_ACCOUNTING_PAGE_SIZE = 200;
@@ -176,54 +170,16 @@ function oaSearchText(row: BatchAccountingOaRow) {
 function mutationEventDetail(result: {
   affectedMonths?: string[];
   affectedScopeKeys?: string[];
-  operationBarrierTargets?: OperationBarrierTarget[];
 }) {
   return {
     affectedMonths: result.affectedMonths ?? [],
     affectedScopeKeys: result.affectedScopeKeys ?? [],
-    operationBarrierTargets: result.operationBarrierTargets ?? [],
   };
 }
 
-function mutationBarrierTargets(
-  result: { affectedMonths?: string[]; operationBarrierTargets?: OperationBarrierTarget[] },
-  fallbackScopeKey: string,
-) {
-  return result.operationBarrierTargets && result.operationBarrierTargets.length > 0
-    ? result.operationBarrierTargets
-    : operationBarrierTargetsFromMonths("workbench_relation", result.affectedMonths ?? [], fallbackScopeKey);
-}
-
-function monthFromBankRow(row: BatchAccountingBankRow | null) {
-  const month = String(row?.tradeTime ?? "").slice(0, 7);
-  return /^\d{4}-\d{2}$/.test(month) ? month : "all";
-}
-
-function stringListFromPayload(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((item) => String(item ?? "").trim())
-    .filter(Boolean);
-}
-
-function scopeMessage(scopeKeys: string[]) {
-  return scopeKeys.length > 0 ? `影响范围：${scopeKeys.join("、")}` : "";
-}
-
 function mutationErrorMessage(caught: unknown, fallback: string) {
-  if (caught instanceof ApiClientError && caught.code === "batch_accounting_read_model_not_fresh") {
-    const payload = caught.payload && typeof caught.payload === "object"
-      ? caught.payload as Record<string, unknown>
-      : {};
-    const staleReasons = stringListFromPayload(payload.read_model_stale_reasons ?? payload.readModelStaleReasons);
-    const scopeKeys = stringListFromPayload(payload.read_model_scope_keys ?? payload.readModelScopeKeys);
-    return [
-      caught.message,
-      staleReasons.join("、"),
-      scopeMessage(scopeKeys),
-    ].filter(Boolean).join(" ");
+  if (caught instanceof ApiClientError && caught.code === "batch_accounting_relation_unavailable") {
+    return "批量账务关系状态正在更新，请刷新后重试。";
   }
   return caught instanceof Error ? caught.message : fallback;
 }
@@ -362,12 +318,6 @@ export default function BatchAccountingPage() {
   const bankAmountCents = selectedBankRow ? parseMoneyCents(selectedBankRow.amount) : 0;
   const selectedOaTotalCents = selectedOaRows.reduce((total, row) => total + parseMoneyCents(row.amount), 0);
   const differenceCents = bankAmountCents - selectedOaTotalCents;
-  const readModelStatus = payload.readModelStatus || "refreshing";
-  const readModelNeedsRefresh = readModelStatus !== "fresh";
-  const readModelScopeMessage = scopeMessage(payload.readModelScopeKeys);
-  const readModelStatusMessage = payload.refreshEnqueued
-    ? `关联台关系读模型 ${readModelStatus}，正在刷新。`
-    : `关联台关系读模型 ${readModelStatus}，刷新未入队，请检查系统状态。`;
   const isAmountMismatch = bucket === "unsubmitted"
     && Boolean(selectedBankRow)
     && selectedOaRows.length > 0
@@ -564,10 +514,6 @@ export default function BatchAccountingPage() {
             expectedVersion: selectedBankRow.version,
             note: isAmountMismatch ? differenceNote : "",
           });
-          setMessage("正在等待批量账务关联读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(submitResult, monthFromBankRow(selectedBankRow)),
-          );
           setMessage("正在刷新批量账务关联数据...");
           await reloadDataAfterMutation();
           return submitResult;
@@ -603,10 +549,6 @@ export default function BatchAccountingPage() {
           });
           setWithdrawOpen(false);
           setWithdrawReason("");
-          setMessage("正在等待批量账务关联读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(withdrawResult, monthFromBankRow(selectedBankRow)),
-          );
           setMessage("正在刷新批量账务关联数据...");
           await reloadDataAfterMutation();
           return withdrawResult;
@@ -660,12 +602,6 @@ export default function BatchAccountingPage() {
       </div>
 
       {error ? <StatePanel tone="error" title={error} /> : null}
-      {!error && readModelNeedsRefresh ? (
-        <StatePanel tone="warning" title={readModelStatusMessage}>
-          <span>{payload.readModelStaleReasons.join("、") || "等待关联台关系读模型恢复 fresh 后再提交或撤回。"}</span>
-          {readModelScopeMessage ? <span>{readModelScopeMessage}</span> : null}
-        </StatePanel>
-      ) : null}
       {!canMutateData ? (
         <StatePanel compact tone="warning">
           当前账号仅支持查看和导出，不能提交或撤回批量账务关联。

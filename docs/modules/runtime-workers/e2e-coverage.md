@@ -6,10 +6,10 @@
 | --- | --- | --- | --- |
 | `WORKER-E2E-001` | `covered` | `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、deploy worker manifest tests；生产只读巡检显示 20 个 worker running。 | GitHub/生产未来 release 仍需每次 smoke。 |
 | `WORKER-E2E-002` | `covered` | `tests/test_runtime_queue.py`、`tests/test_runtime_worker.py`、`tests/test_runtime_queue_ops.py`。 | 真实 dead-letter repair 需要 operator 审批。 |
-| `WORKER-E2E-003` | `covered` | `tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_scope_contract.py`。 | 新 read model/event 必须同步 registry 和 contract tests。 |
+| `WORKER-E2E-003` | `covered` | `tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_runtime_worker_registry.py`、`tests/test_read_model_manifest.py`、`tests/test_read_model_architecture_guards.py`。 | 页面 read model/event/parser 不得回流；如新增真实 worker/event 必须同步 registry 和 guard tests。 |
 | `WORKER-E2E-004` | `covered` | dependency-not-fresh defer、active scope dedupe、superseded event 回归测试已覆盖。 | 真实长尾 latency 仍需 runtime SLO。 |
 | `WORKER-E2E-005` | `partial` | `tests/test_rabbitmq_runtime.py`、`tests/test_rabbitmq_staging_preflight.py` 覆盖 transport 合同。 | 无 `RABBITMQ_TEST_URL` 时不能证明真实 broker。 |
-| `WORKER-E2E-006` | `partial` | 最近生产只读 `runtime_sync_closure_gate` 的 `runtime_health` pass，queue/DLQ/unacked 为 0；随后 current release critical direct apply full rerun 15/15 pass，DB 汇总 outbox/dirty 全 done、readiness 全 fresh。 | authenticated/full closure 和 mutating scenario 未闭合。 |
+| `WORKER-E2E-006` | `partial` | 最近生产只读 `runtime_sync_closure_gate` 的 `runtime_health` pass，queue/DLQ/unacked 为 0；随后 current release critical direct apply full rerun 15/15 pass。 | authenticated/full closure 和 mutating scenario 未闭合。 |
 | `WORKER-E2E-007` | `external-risk` | `bash scripts/verify.sh infra-smoke` 是统一入口。 | 需要 staging/production env、apply gate 和长期运行窗口。 |
 
 ## 当前验证入口

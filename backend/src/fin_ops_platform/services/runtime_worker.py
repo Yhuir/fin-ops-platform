@@ -6,19 +6,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 import json
 import os
-import re
 import signal
 from time import monotonic, sleep
 from typing import Any, Iterator
 
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 RuntimeEventHandler = Callable[[RuntimeQueueEvent], dict[str, Any] | None]
-READ_MODEL_NOT_FRESH_RE = re.compile(r"([a-z0-9_]+)_read_model_not_fresh")
-MONTH_SCOPE_RE = re.compile(r"\d{4}-\d{2}")
-PARENT_SCOPE_KEYS_RE = re.compile(r"parent_scope_keys=([0-9]{4}-[0-9]{2}(?:,[0-9]{4}-[0-9]{2})*)")
 
 
 class RuntimeWorkerResult(str, Enum):
@@ -79,13 +74,11 @@ class RuntimeWorker:
         config: RuntimeWorkerConfig,
         handlers: dict[str, RuntimeEventHandler] | None = None,
         redis_helper: Any | None = None,
-        read_model_refresh_gateway: ReadModelRefreshGateway | None = None,
     ) -> None:
         self._queue = queue_repository
         self._config = config
         self._handlers = dict(handlers or {})
         self._redis_helper = redis_helper
-        self._read_model_refresh_gateway = read_model_refresh_gateway or ReadModelRefreshGateway(queue_repository=queue_repository)
 
     def run_once(self) -> RuntimeWorkerResult:
         event_types = self._claim_event_types()
@@ -140,7 +133,6 @@ class RuntimeWorker:
         except Exception as exc:
             error = str(exc) or exc.__class__.__name__
             if self._is_dependency_not_fresh_error(error):
-                dependency_refreshes = self._enqueue_dependency_refreshes(event, error)
                 delay_seconds = self._dependency_not_fresh_delay_seconds(event, error)
                 self._defer_event(event, error, delay_seconds=delay_seconds)
                 self._record_heartbeat(
@@ -150,7 +142,6 @@ class RuntimeWorker:
                         "retry": True,
                         "error": error,
                         "delay_seconds": delay_seconds,
-                        **({"dependency_refreshes": dependency_refreshes} if dependency_refreshes else {}),
                     },
                 )
                 self._log("runtime_worker.event_deferred", event=event, retry=True, error=error)
@@ -267,60 +258,6 @@ class RuntimeWorker:
             return
         self._fail_event(event, reason)
 
-    def _enqueue_dependency_refreshes(self, event: RuntimeQueueEvent, error: str) -> list[dict[str, Any]]:
-        if not self._read_model_refresh_gateway.can_enqueue():
-            return []
-        dependencies = self._dependency_refresh_scopes(event, error)
-        enqueued: list[dict[str, Any]] = []
-        for dependency in dependencies:
-            scope_type = dependency["scope_type"]
-            scope_key = dependency["scope_key"]
-            force_refresh = dependency.get("force_refresh") is True
-            if self._dependency_refresh_is_active(event.tenant_id, scope_type, scope_key):
-                enqueued.append({"scope_type": scope_type, "scope_key": scope_key, "status": "already_active"})
-                continue
-            if not force_refresh and self._dependency_refresh_is_fresh(event.tenant_id, scope_type, scope_key):
-                enqueued.append({"scope_type": scope_type, "scope_key": scope_key, "status": "already_fresh"})
-                continue
-            try:
-                normalized_scope_keys = self._read_model_refresh_gateway.enqueue_one(
-                    scope_type,
-                    scope_key,
-                    reason="dependency_not_fresh",
-                    tenant_id=event.tenant_id,
-                    priority=self._dependency_refresh_priority(event.priority),
-                    trace_id=event.trace_id,
-                    metadata={
-                        "source_event_id": event.event_id,
-                        "source_event_type": event.event_type,
-                        "source_scope_type": event.scope_type,
-                        "source_scope_key": event.scope_key,
-                        "dependency_error": error,
-                    },
-                )
-            except Exception as exc:
-                self._log(
-                    "runtime_worker.dependency_refresh_enqueue_failed",
-                    event=event,
-                    retry=True,
-                    error=str(exc) or exc.__class__.__name__,
-                )
-                continue
-            enqueued.extend({"scope_type": scope_type, "scope_key": normalized_scope_key} for normalized_scope_key in normalized_scope_keys)
-        return enqueued
-
-    def _dependency_refresh_is_active(self, tenant_id: str, scope_type: str, scope_key: str) -> bool:
-        checker = getattr(self._queue, "read_model_refresh_is_active", None)
-        if not callable(checker):
-            return False
-        return bool(checker(tenant_id=tenant_id, scope_type=scope_type, scope_key=scope_key))
-
-    def _dependency_refresh_is_fresh(self, tenant_id: str, scope_type: str, scope_key: str) -> bool:
-        checker = getattr(self._queue, "read_model_refresh_is_fresh", None)
-        if not callable(checker):
-            return False
-        return bool(checker(tenant_id=tenant_id, scope_type=scope_type, scope_key=scope_key))
-
     def _retry_delay_for_attempt(self, attempts: int) -> int:
         exponent = max(0, int(attempts or 1) - 1)
         return int(self._config.retry_delay_seconds * (2**exponent))
@@ -332,82 +269,6 @@ class RuntimeWorker:
     def _is_dependency_not_fresh_error(error: str) -> bool:
         normalized = str(error or "").strip().lower()
         return "read_model_not_fresh" in normalized
-
-    @classmethod
-    def _dependency_refresh_scopes(cls, event: RuntimeQueueEvent, error: str) -> list[dict[str, Any]]:
-        normalized = str(error or "").strip().lower()
-        dependencies: list[dict[str, Any]] = []
-        seen: set[tuple[str, str]] = set()
-        for match in READ_MODEL_NOT_FRESH_RE.finditer(normalized):
-            scope_type = match.group(1)
-            if not scope_type:
-                continue
-            parent_scope_keys = cls._parent_scope_keys_from_error(normalized)
-            force_refresh = "parent_generation_inconsistent" in normalized
-            if scope_type == str(event.scope_type or "") and parent_scope_keys:
-                for parent_scope_key in parent_scope_keys:
-                    identity = (scope_type, parent_scope_key)
-                    if identity in seen:
-                        continue
-                    seen.add(identity)
-                    payload: dict[str, Any] = {"scope_type": scope_type, "scope_key": parent_scope_key}
-                    if force_refresh:
-                        payload["force_refresh"] = True
-                    dependencies.append(payload)
-                continue
-            if scope_type == str(event.scope_type or ""):
-                continue
-            scope_key = cls._dependency_scope_key(scope_type, event)
-            if not scope_key:
-                continue
-            identity = (scope_type, scope_key)
-            if identity in seen:
-                continue
-            seen.add(identity)
-            dependencies.append({"scope_type": scope_type, "scope_key": scope_key})
-        return dependencies
-
-    @staticmethod
-    def _parent_scope_keys_from_error(error: str) -> list[str]:
-        match = PARENT_SCOPE_KEYS_RE.search(str(error or "").strip().lower())
-        if not match:
-            return []
-        scope_keys: list[str] = []
-        seen: set[str] = set()
-        for item in match.group(1).split(","):
-            scope_key = item.strip()
-            if not scope_key or scope_key in seen:
-                continue
-            seen.add(scope_key)
-            scope_keys.append(scope_key)
-        return scope_keys
-
-    @classmethod
-    def _dependency_scope_key(cls, dependency_scope_type: str, event: RuntimeQueueEvent) -> str:
-        source_scope_key = str(event.scope_key or event.aggregate_id or "").strip()
-        if not source_scope_key:
-            return ""
-        if dependency_scope_type == "bank_detail":
-            if MONTH_SCOPE_RE.fullmatch(source_scope_key):
-                return source_scope_key
-            months = MONTH_SCOPE_RE.findall(source_scope_key)
-            if months:
-                return months[-1]
-            # bank_detail:all is a fan-out command, not a stable freshness dependency.
-            # Downstream all-scope events must not infer it; the source facade is
-            # responsible for enqueueing concrete month shards when it can identify them.
-            return ""
-        if source_scope_key == "all" or MONTH_SCOPE_RE.fullmatch(source_scope_key):
-            return source_scope_key
-        months = MONTH_SCOPE_RE.findall(source_scope_key)
-        return months[-1] if months else source_scope_key
-
-    @staticmethod
-    def _dependency_refresh_priority(event_priority: str | None) -> str:
-        priority = str(event_priority or "normal").strip().lower()
-        if priority == "urgent":
-            return "urgent"
-        return "high"
 
     @contextmanager
     def _shutdown_signal_handlers(self) -> Iterator[None]:

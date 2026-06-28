@@ -31,12 +31,12 @@
 - 改动：新增 `SearchQueryFreshnessService` 与 `SearchIndexSourceVersionsProvider`；删除 `Application._get_search_payload_from_sql_read_model(...)` 与 `_search_index_expected_source_versions(...)`；`/api/search` route 只负责参数校验、HTTP status 映射和无 SQL repository 时的 legacy/local fallback。
 - 保持不变：search API response shape、status code 行为、SQL miss enqueue reason、source-version stale reasons、search ranking、group context、worker event、scope policy、queue schema、Redis/cache、权限和前端行为均不变。
 - 测试覆盖：新增 service-layer tests 覆盖 SQL miss/fresh/source-version mismatch；新增 platform guard 防止 app-owned query freshness helper 回到 `server.py`；复跑 search API/runtime/manifest 相关测试。
-- 下一步：审计并拆分 `Application._enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)`，决定抽取 search refresh producer/invalidation service 还是保留 compat-only wrapper。
+- 后续状态：refresh producer/invalidation extraction 已完成；`Application._enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)` 已删除，search refresh enqueue 和 scope normalization 由 `SearchReadModelRefreshProducer` 负责。
 
 ## 2026-06-24 - refresh producer and invalidation extraction
 
 - 目标：把 search refresh enqueue 和 invalidation scope normalization 从 `Application` 移到显式 producer。
-- 审计结论：`Application._enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)` 都只是 gateway-backed producer / scope normalization helper，适合抽到 search read model producer。
+- 审计结论：`Application._enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)` 已抽到 search read model producer；`Application` 不再拥有 search refresh enqueue/scope normalization helper。
 - 改动：新增 `SearchReadModelRefreshProducer`；删除旧 app-owned refresh/invalidation helper；`SearchQueryFreshnessService`、settings update、import-state invalidation、Workbench invalidation 和 derived lifecycle search cache invalidation 改为调用 producer。
 - 保持不变：refresh 仍通过 `ReadModelRefreshGateway`，scope type 仍为 `search`，reason/metadata 透传保持不变；search API、worker event、scope policy、queue schema、Redis/cache、权限和前端行为均不变。
 - 下一步：执行 `read-models:search-local-implementation-closure-audit`，确认是否只剩真实 PostgreSQL/worker/App Status/high-row/browser evidence defer，还是仍有本地 implementation gap。
@@ -57,7 +57,15 @@
 - 保持不变：OA sync target scopes、Workbench/OA pending payment/pending invoice fan-out、Search worker event、scope policy、queue schema、API shape、Redis/cache、权限和前端行为均不变。
 - 下一步：执行 `read-models:search-post-oa-projection-sync-local-implementation-closure-audit`。
 
-## 2026-06-24 - runtime import-state Search refresh producer boundary
+## 2026-06-27 - runtime import-state Search refresh assertion cleanup
+
+- 目标：继续 remove-read-models 主控闭环，清理 Workbench import-state scope helper 合并时暴露的旧 Search refresh 断言。
+- 影响范围：`tests/test_workbench_sql_runtime.py` 和 Search 模块文档；不改变 Search direct API、worker registry、manifest 或 SQL projection 残留。
+- 关键决策：`_RuntimeWorkerDerivedLifecycle.persist_import_state(...)` 不再 enqueue `search` read model refresh；`tests/test_runtime_worker_read_model_refresh_scopes.py::RuntimeWorkerReadModelRefreshScopeTests::test_import_state_no_longer_enqueues_search_read_model_refresh` 是当前事实源。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests.test_runtime_worker_read_model_refresh_scopes -v`。
+- 未测风险：legacy Search SQL projection cleanup 仍是后续 family，不在本轮删除。
+
+## 2026-06-24 - runtime import-state Search refresh producer boundary（历史）
 
 - 目标：让 runtime import-state 持久化后的 Search fan-out 也走统一 Search producer，避免高频 import-state path 继续保留 Search refresh enqueue 的第二套 owner。
 - 审计结论：post-OA-sync audit 发现 `_RuntimeWorkerDerivedLifecycle.persist_import_state(...)` 仍直接调用 generic `_enqueue_scopes("search", ..., reason="import_state_changed")`。该路径仍经过 `ReadModelRefreshGateway` 和 scope policy registry，但绕过了 `SearchReadModelRefreshProducer`。

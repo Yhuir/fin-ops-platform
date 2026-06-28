@@ -99,74 +99,13 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertIn("generated_at", payload)
         self.assertEqual(payload["session"]["status"], "authenticated")
         self.assertIn("oa_sync", payload)
-        self.assertEqual(payload["workbench_read_model"]["status"], "ready")
+        self.assertNotIn("workbench_read_model", payload)
+        self.assertNotIn("workbench_relation_read_model", payload)
         self.assertEqual(payload["background_jobs"]["active"], 0)
         self.assertIn("dependencies", payload)
         self.assertEqual(payload["version"], 1)
         self.assertIn("metrics", payload)
         self.assertEqual(payload["alerts"]["active"], [])
-
-    def test_operation_barrier_status_returns_runtime_readiness_contract(self) -> None:
-        app = build_application()
-        app._state_store = SimpleNamespace(
-            app_status_runtime_snapshot=lambda: {
-                "read_model_statuses": {
-                    "workbench_relation": {
-                        "status": "refreshing",
-                        "scopes": [
-                            {
-                                "scope_type": "workbench_relation",
-                                "scope_key": "2026-02",
-                                "status": "refreshing",
-                                "updated_at": "2026-06-14T10:00:00+00:00",
-                            }
-                        ],
-                    }
-                },
-                "outbox_statuses": {},
-                "worker_statuses": {"workbench-relation": {"status": "ready"}},
-            }
-        )
-
-        response = app.handle_request(
-            "POST",
-            "/api/operation-barrier/status",
-            body=json.dumps({"targets": [{"read_model_key": "workbench_relation", "scope_key": "2026-02"}]}),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "refreshing")
-        self.assertFalse(payload["fresh"])
-        self.assertEqual(payload["targets"][0]["read_model_key"], "workbench_relation")
-        self.assertEqual(payload["targets"][0]["scope_key"], "2026-02")
-        self.assertEqual(payload["targets"][0]["worker_status"], "ready")
-
-    def test_operation_barrier_rejects_invalid_target_contract(self) -> None:
-        app = build_application()
-
-        response = app.handle_request(
-            "POST",
-            "/api/operation-barrier/status",
-            body=json.dumps({"targets": [{"scope_key": "all"}]}),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "invalid_operation_barrier_request")
-
-    def test_operation_barrier_rejects_non_object_target_entries(self) -> None:
-        app = build_application()
-
-        response = app.handle_request(
-            "POST",
-            "/api/operation-barrier/status",
-            body=json.dumps({"targets": ["workbench_relation"]}),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "invalid_operation_barrier_request")
 
     def test_app_health_reports_dirty_oa_scopes_as_busy_and_stale(self) -> None:
         app = build_application()
@@ -179,92 +118,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "busy")
         self.assertEqual(payload["oa_sync"]["status"], "refreshing")
         self.assertEqual(payload["oa_sync"]["dirty_scopes"], ["all"])
-        self.assertEqual(payload["workbench_read_model"]["status"], "stale")
-        self.assertEqual(payload["workbench_read_model"]["dirty_scopes"], ["all"])
-
-    def test_app_health_reports_workbench_generation_consistency_failure(self) -> None:
-        app = build_application()
-
-        class FailedWorkbenchRepository:
-            def get_workbench_refresh_status(self, *, scope_key: str):
-                return {
-                    "scope_key": scope_key,
-                    "read_model_status": "failed",
-                    "consistency_status": "failed",
-                    "active_generation_id": "gen-all",
-                    "last_error": "generation_metadata_actual_mismatch: all/gen-all",
-                    "consistency_failures": [
-                        {
-                            "scope_key": "all",
-                            "generation_id": "gen-all",
-                            "group_count": 6,
-                            "actual_group_count": 0,
-                        }
-                    ],
-                }
-
-        app._workbench_sql_read_repository = FailedWorkbenchRepository()
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "blocked")
-        self.assertEqual(payload["workbench_read_model"]["status"], "error")
-        self.assertEqual(payload["workbench_read_model"]["consistency_status"], "failed")
-        self.assertEqual(payload["workbench_read_model"]["active_generation_id"], "gen-all")
-        self.assertIn("generation_metadata_actual_mismatch", payload["workbench_read_model"]["last_error"])
-
-    def test_app_health_keeps_workbench_consistency_failure_busy_during_active_repair(self) -> None:
-        app = build_application()
-
-        class RepairingWorkbenchRepository:
-            def get_workbench_refresh_status(self, *, scope_key: str):
-                return {
-                    "scope_key": scope_key,
-                    "read_model_status": "refreshing",
-                    "consistency_status": "failed",
-                    "active_generation_id": "gen-all",
-                    "last_error": "Workbench read model generation consistency failed.",
-                    "consistency_failures": [
-                        {
-                            "scope_key": "all",
-                            "generation_id": "gen-all",
-                            "group_count": 6,
-                            "actual_group_count": 0,
-                        }
-                    ],
-                }
-
-        app._workbench_sql_read_repository = RepairingWorkbenchRepository()
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "busy")
-        self.assertEqual(payload["workbench_read_model"]["status"], "rebuilding")
-        self.assertNotEqual(payload["dependencies"].get("workbench_read_model", {}).get("status"), "unavailable")
-        self.assertNotEqual(payload["app_status"]["overall"]["level"], "blocked")
-
-    def test_app_health_caches_workbench_refresh_status_briefly(self) -> None:
-        app = build_application()
-
-        class CountingWorkbenchRepository:
-            def __init__(self) -> None:
-                self.calls = 0
-
-            def get_workbench_refresh_status(self, *, scope_key: str):
-                self.calls += 1
-                return {"scope_key": scope_key, "read_model_status": "fresh", "consistency_status": "fresh"}
-
-        repository = CountingWorkbenchRepository()
-        app._workbench_sql_read_repository = repository
-
-        app.handle_request("GET", "/api/app-health")
-        app.handle_request("GET", "/api/app-health")
-
-        self.assertEqual(repository.calls, 1)
+        self.assertNotIn("workbench_read_model", payload)
 
     def test_dirty_oa_scopes_block_workbench_write_actions(self) -> None:
         app = build_application()
@@ -316,8 +170,8 @@ class AppHealthApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "busy")
-        self.assertEqual(payload["workbench_read_model"]["status"], "rebuilding")
-        self.assertEqual(payload["workbench_read_model"]["rebuild_job_ids"], [job.job_id])
+        self.assertNotIn("workbench_read_model", payload)
+        self.assertEqual(payload["background_jobs"]["primary_running"]["job_id"], job.job_id)
 
     def test_app_health_reports_unacknowledged_failed_and_partial_success_jobs_as_attention(self) -> None:
         app = build_application()
@@ -479,7 +333,7 @@ class AppHealthApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "blocked")
-        self.assertEqual(payload["workbench_read_model"]["status"], "error")
+        self.assertNotIn("workbench_read_model", payload)
         self.assertEqual(payload["dependencies"]["oa_sync"]["status"], "unavailable")
         self.assertEqual(payload["alerts"]["active"][0]["kind"], "dependency_unavailable")
 
@@ -530,6 +384,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertIn("data_inventory", payload)
         self.assertIn("request_performance", payload)
         self.assertIn("runtime_performance", payload)
+        self.assertNotIn("read_models", payload["runtime_performance"])
         self.assertNotIn("status", payload)
         self.assertEqual(payload["data_inventory"]["bank"]["total_count"], 1)
 

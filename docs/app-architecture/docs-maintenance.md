@@ -13,12 +13,12 @@
 | 后端重构计划 | `docs/architecture/backend-refactor/` |
 | 产品和业务口径 | `docs/product-specs/` |
 | API、测试、本地开发 | `docs/dev/` |
-| 部署、监控、恢复、worker/read model 运维 | `docs/operations/` |
+| 部署、监控、恢复、worker/legacy read model 运维 | `docs/operations/` |
 | 外部系统和原始业务源 | `docs/references/` |
 
 `.planning/` 不在当前事实源列表中。它只保存 GSD 工作区状态、阶段计划、debug 记录和历史执行上下文；采用其中任何结论前，必须用当前代码、测试和上表长期事实源重新验证。
 
-`docs/refactor-ui/` 是 `refactor-ui` 分支 UI 平台迁移专项工作区。该目录中的 prompt、master goal、state 和队列文件只约束 UI 迁移流程，不作为当前 app 后端、API、read model、worker 或生产运行事实源。
+`docs/refactor-ui/` 是 `refactor-ui` 分支 UI 平台迁移专项工作区。该目录中的 prompt、master goal、state 和队列文件只约束 UI 迁移流程，不作为当前 app 后端、API、direct API/legacy read model、worker 或生产运行事实源。
 
 ## 删除和归档规则
 
@@ -40,7 +40,7 @@
 | 新增 API contract 或 DTO shape | 目标模块 `README.md` 或 `implementation-notes.md`、`docs/dev/api-contracts.md` |
 | 新增前端 domain event | 目标模块 `README.md`、`pages.md` |
 | 新增 derived lifecycle 事件或 domain | 目标模块 `README.md`、`runtime-and-ownership.md`、`pages.md` |
-| 新增 read model 或 worker | 目标模块 `README.md`、`runtime-and-ownership.md`、`docs/operations/runtime-worker-governance.md` |
+| 迁移 legacy read model 或新增真实后台 worker | 目标模块 `README.md`、`runtime-and-ownership.md`、`docs/operations/runtime-worker-governance.md`、`docs/architecture/direct-api-read-architecture.md` |
 | 改 PostgreSQL runtime/queue/Redis/RabbitMQ 边界 | 目标资源模块、`runtime-and-ownership.md`、`docs/operations/postgresql-runtime.md` |
 | 改业务规则、状态、验收口径 | 目标模块 `state-machine.md`、`docs/product-specs/` |
 
@@ -55,6 +55,6 @@
 
 - 业务事实优先：影响核销、台账、权限、导出、搜索、审计的状态必须有后端结构化模型。
 - 预览先于写入：导入、数据重置、批量提交、自动匹配等高影响动作必须先展示影响范围，再执行确认。
-- 写模型和读模型分离：确认关联、撤回、异常处理等写操作只改变最小事实；列表、搜索、导出优先消费物化读模型。
+- Direct API 读路径：确认关联、撤回、异常处理等写操作只改变最小事实；列表、搜索、导出通过 service/repository 直接读取 PostgreSQL canonical facts、OA projection 和导入事实。Legacy 物化读模型只作为迁移清单保留。
 - OA 是外部事实源：OA Mongo 只读接入，app 可以建立映射、缓存和投影，但不能写 OA 原始库。
 - 可追溯比“看起来完成”更重要：每个财务闭环都要能回答数据来源、处理人、处理原因、影响对象、撤回和恢复方式。

@@ -184,10 +184,9 @@ class DistributedInvoiceRelationContext:
             return
         if str(result.get("status") or "") != FRESH_WORKBENCH_RELATION_STATUS:
             reasons = ",".join(str(item) for item in list(result.get("stale_reasons") or []))
-            scope_keys = ",".join(str(item) for item in list(result.get("read_model_scope_keys") or []))
             raise RuntimeError(
-                "workbench_relation_read_model_not_fresh"
-                f": status={result.get('status')}, scope_keys={scope_keys}, reasons={reasons}"
+                "workbench_relation_context_not_ready"
+                f": status={result.get('status')}, reasons={reasons}"
             )
 
     def _merge_distributed_result(self, result: dict[str, Any]) -> None:

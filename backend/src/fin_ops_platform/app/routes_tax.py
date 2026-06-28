@@ -6,7 +6,7 @@ from time import monotonic
 from typing import Any, Callable
 from urllib.parse import unquote
 
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+from fin_ops_platform.services.scope_keys import normalized_scope_keys
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.tax_offset_plan_service import TaxOffsetPlanConflictError
 from fin_ops_platform.services.tax_certified_import_service import UploadedCertifiedImportFile
@@ -168,15 +168,7 @@ class TaxApiRoutes:
                 duration_ms=self._duration_ms(started_at),
                 payload=payload,
             )
-        status = (
-            HTTPStatus.ACCEPTED
-            if payload.get("read_model_status") == "refreshing"
-            and not payload.get("input_plan_items")
-            and not payload.get("output_items")
-            and not payload.get("certified_items")
-            else HTTPStatus.OK
-        )
-        return self._respond(status, payload)
+        return self._respond(HTTPStatus.OK, payload)
 
     def handle_summary(self, month: str | None) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
@@ -187,8 +179,7 @@ class TaxApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_tax_offset_request", "message": str(exc)},
             )
-        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-        return self._respond(status, payload)
+        return self._respond(HTTPStatus.OK, payload)
 
     def handle_calculate(self, payload: dict[str, object]) -> Any:
         started_at = monotonic()
@@ -451,11 +442,7 @@ class TaxApiRoutes:
     @staticmethod
     def _tax_certified_import_write_targets(result: dict[str, object]) -> dict[str, object]:
         batch = result.get("batch") if isinstance(result.get("batch"), dict) else {}
-        return write_target_envelope(
-            read_model_key="tax_offset",
-            scope_keys=list(batch.get("months") or []),
-            fallback_scope_key="all",
-        )
+        return {"affected_scope_keys": normalized_scope_keys(list(batch.get("months") or []), fallback="all")}
 
 
 def _safe_list_count(value: object) -> int:

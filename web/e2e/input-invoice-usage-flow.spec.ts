@@ -40,7 +40,6 @@ function mutationCalls(calls: string[]) {
 function durableWriteCalls(calls: string[]) {
   const readLikePosts = new Set([
     "POST /api/input-invoice-usage/oa-reverse/preview",
-    "POST /api/operation-barrier/status",
   ]);
   return mutationCalls(calls).filter((entry) => !readLikePosts.has(entry));
 }
@@ -287,25 +286,23 @@ test.describe("input invoice usage browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("shows read model refreshing diagnostics instead of stale rows or a true empty state", async ({ page }) => {
+  test("keeps direct rows visible without page-level read model polling", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      inputInvoiceUsageReadModelStatus: "stale",
-      sessionMode: "full_access",
-    });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
     await page.goto("/input-invoice-usage");
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "进项发票使用情况" })).toBeVisible();
-    await expect(page.getByText("进项发票使用情况数据正在刷新")).toBeVisible();
-    await expect(page.getByText("进项发票使用情况读模型不是最新，完成后页面会自动重新加载。")).toBeVisible();
+    await expect(page.getByText("进项发票使用情况数据正在刷新")).toHaveCount(0);
+    await expect(page.getByText("进项发票使用情况读模型不是最新，完成后页面会自动重新加载。")).toHaveCount(0);
     await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
     await expect(page.getByText("当前条件下没有进项发票使用记录。")).toHaveCount(0);
-    await expect(page.getByText("SD-INV-E2E-0001")).toHaveCount(0);
-    await expect(page.getByText("input_invoice_usage_stale")).toHaveCount(0);
-    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toHaveCount(0);
+    await expect(page.getByText("SD-INV-E2E-0001")).toBeVisible();
+    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
 
-    expect(api.count("GET /api/input-invoice-usage/rows")).toBeGreaterThanOrEqual(1);
+    const stableRowsCount = api.count("GET /api/input-invoice-usage/rows");
+    await page.waitForTimeout(1_200);
+    expect(api.count("GET /api/input-invoice-usage/rows")).toBe(stableRowsCount);
     expect(api.count("GET /api/input-invoice-usage/filter-options")).toBeGreaterThanOrEqual(1);
     expect(mutationCalls(api.calls)).toEqual([]);
     expect(browserErrors).toEqual([]);
@@ -314,7 +311,7 @@ test.describe("input invoice usage browser flow", () => {
   test("shows relation detail refreshing diagnostics instead of loading forever", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      inputInvoiceUsageRelationDetailReadModelStatus: "stale",
+      inputInvoiceUsageRelationDetailStatus: "stale",
       sessionMode: "full_access",
     });
 
@@ -348,10 +345,10 @@ test.describe("input invoice usage browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("opens fresh +N relation details from the row read model without mutations", async ({ page }) => {
+  test("opens ready +N relation details without mutations", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      inputInvoiceUsageRelationDetailReadModelStatus: "fresh",
+      inputInvoiceUsageRelationDetailStatus: "ready",
       sessionMode: "full_access",
     });
 
@@ -478,10 +475,9 @@ test.describe("input invoice usage browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps export download disabled while the export read model refreshes", async ({ page }) => {
+  test("ignores legacy export freshness fields and keeps download available", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      inputInvoiceUsageExportReadModelStatus: "stale",
       sessionMode: "read_export_only",
     });
 
@@ -495,16 +491,28 @@ test.describe("input invoice usage browser flow", () => {
     });
     await page.getByRole("button", { name: "筛选内容导出" }).click();
     const previewResponse = await previewResponsePromise;
-    expect(previewResponse.status()).toBe(202);
+    expect(previewResponse.status()).toBe(200);
 
     const drawer = page.getByRole("dialog", { name: "筛选内容导出" });
     await expect(drawer).toBeVisible();
-    await expect(drawer.getByText("导出数据准备中，请稍后再试。")).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "下载导出" })).toBeDisabled();
+    await expect(drawer.getByRole("table", { name: "进项发票使用情况导出样例" })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "下载导出" })).toBeEnabled();
+    await expect(drawer.getByText("导出数据准备中，请稍后再试。")).toHaveCount(0);
     await expect(drawer.getByText("进项发票使用情况数据正在刷新，请稍后重试导出。")).toHaveCount(0);
 
+    const exportResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET" && url.pathname.endsWith("/api/input-invoice-usage/export");
+    });
+    const downloadPromise = page.waitForEvent("download");
+    await drawer.getByRole("button", { name: "下载导出" }).click();
+    const [exportResponse, download] = await Promise.all([exportResponsePromise, downloadPromise]);
+    expect(exportResponse.status()).toBe(200);
+    expect(download.suggestedFilename()).toBe("input-invoice-usage.xlsx");
+    await download.saveAs(testInfo.outputPath("input-invoice-usage-legacy-freshness.xlsx"));
+
     expect(api.count("GET /api/input-invoice-usage/export-preview")).toBe(1);
-    expect(api.count("GET /api/input-invoice-usage/export")).toBe(0);
+    expect(api.count("GET /api/input-invoice-usage/export")).toBe(1);
     expect(mutationCalls(api.calls)).toEqual([]);
     expect(browserErrors).toEqual([]);
   });

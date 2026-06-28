@@ -42,7 +42,7 @@
 - 业务服务：`backend/src/fin_ops_platform/services/`。
 - 当前模块边界必须至少覆盖 Workbench、Turnover Ledger、Batch Accounting、Bankdetail、Invoices、Imports、Tax/Cost/ETC、Search、Ops/Runtime。
 - 持久化：PostgreSQL 为生产主读写；OA Mongo 只作为 worker/audit/tooling 的只读源。
-- Read Model：工作台、搜索、待找发票、税金、成本、银行明细等页面正在向 SQL read model 收敛。
+- Read Model：页面读取目标是 direct API；工作台、待找发票、税金、成本、银行明细等仍有迁移期 legacy read model/worker 兼容面。Search 页面读取已改为 direct `/api/search`，不再向 SQL read model 收敛。
 - 外部服务：Redis 用于短 TTL cache、wakeup 和辅助锁；RabbitMQ 是 outbox envelope transport；PostgreSQL outbox 和 durable queue 是事实源。
 - Worker：Python worker 继续处理 OA sync、read model refresh、导入解析、文件迁移和后台任务。
 

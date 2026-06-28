@@ -531,18 +531,16 @@ describe("Cost statistics page", () => {
     expect(screen.queryByText("成本统计数据加载失败，请稍后重试。")).not.toBeInTheDocument();
   });
 
-  test("hides read model refresh details without treating empty accepted payload as final empty data", async () => {
+  test("ignores legacy read model refresh fields on empty explorer payloads", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     installMockApiFetch({ costRefreshingMonths: ["2026-03"] });
 
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    expect(screen.getByText("成本统计读模型正在刷新，当前结果生成后会自动更新。")).toBeInTheDocument();
-    expect(screen.getAllByText("待刷新")).toHaveLength(2);
-    expect(screen.getByText("--")).toBeInTheDocument();
-    expect(screen.queryByText("当前时间范围没有可用于成本统计的支出流水。")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导出中心" })).toBeDisabled();
+    expect(screen.queryByText("成本统计读模型正在刷新，当前结果生成后会自动更新。")).not.toBeInTheDocument();
+    expect(screen.getByText("当前时间范围没有可用于成本统计的支出流水。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出中心" })).toBeEnabled();
   });
 
   test("opens export center in time view with exact date range and shows export feedback inside the modal", async () => {

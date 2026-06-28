@@ -237,8 +237,6 @@ class RelationDistributionFacadeStub:
             "rows": [dict(row) for row in self.rows if str(row.get("row_id") or "") in wanted],
             "groups": [],
             "source_versions": {"schema_version": "test"},
-            "read_model_scope_keys": ["2026-03", "2026-04", "2026-05"],
-            "refresh_enqueued": False,
             "stale_reasons": [],
         }
 
@@ -650,7 +648,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(row_limit_response.status_code, 400)
         self.assertEqual(json.loads(row_limit_response.body)["error"], "bank_detail_export_row_limit_exceeded")
 
-    def test_bank_details_export_api_uses_sql_read_model_refresh_contract_in_sql_runtime(self) -> None:
+    def test_bank_details_export_api_uses_direct_export_contract_in_sql_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             class FakeBankDetailSqlReadRepository:
@@ -662,10 +660,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
                 def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
                     return {
-                        "read_model_status": "refreshing",
-                        "read_model_scope_keys": list(scope_keys),
-                        "read_model_generated_at": None,
-                        "read_model_scope_signatures": {},
+                        "status": "refreshing",
+                        "scope_keys": list(scope_keys),
+                        "generated_at": None,
+                        "scope_signatures": {},
                     }
 
                 def list_bank_detail_transactions(self, **_kwargs: object) -> dict[str, object]:
@@ -677,26 +675,32 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                         "rows": [],
                         "category_counts": {"uncategorized": 0},
                         "pagination": {"page": 1, "page_size": 100, "total": 0},
-                        "read_model_status": "refreshing",
-                        "cache_status": "bypass",
+                        "status": "refreshing",
                     }
 
-            sql_repository = FakeBankDetailSqlReadRepository()
+            direct_transactions_payload = {
+                "account_key": None,
+                "date_from": "2026-04-01",
+                "date_to": "2026-05-18",
+                "rows": [],
+                "category_counts": {"uncategorized": 0},
+                "pagination": {"page": 1, "page_size": 100, "total": 0},
+            }
             with (
-                patch.object(app, "_requires_sql_read_model_runtime", return_value=True),
-                patch.object(app, "_bank_detail_sql_read_repository", sql_repository),
-                patch.object(app._bank_details_service, "list_transactions", side_effect=AssertionError("export should not bypass SQL read model")),
+                patch.object(app._bank_details_service, "list_transactions", return_value=direct_transactions_payload),
             ):
                 response = app.handle_request(
                     "GET",
                     "/api/bank-details/transactions/export?mode=all&date_from=2026-04-01&date_to=2026-05-18",
                 )
+            workbook = load_workbook(BytesIO(response.body))
             audit_entries = app._audit_service.as_dicts()
 
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(json.loads(response.body)["read_model_status"], "refreshing")
-        self.assertTrue(sql_repository.called)
-        self.assertFalse(any(entry["action"] == "bank_detail_export_downloaded" for entry in audit_entries))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response.headers["Content-Type"])
+        self.assertEqual(workbook.sheetnames, ["全部流水"])
+        self.assertFalse(sql_repository.called)
+        self.assertTrue(any(entry["action"] == "bank_detail_export_downloaded" for entry in audit_entries))
 
     def test_bank_details_api_projects_workbench_relation_tags(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -734,11 +738,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     }
                 ]
             )
-            with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
-                linked_response = app.handle_request(
-                    "GET",
-                    "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
-                )
+            linked_response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
+            )
             cancel_response = app.handle_request(
                 "POST",
                 "/api/workbench/actions/cancel-link",
@@ -756,11 +759,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     }
                 ]
             )
-            with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
-                unlinked_response = app.handle_request(
-                    "GET",
-                    "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
-                )
+            unlinked_response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
+            )
             app.shutdown_background_jobs()
 
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
@@ -2302,7 +2304,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual([entry["scope_month"] for entry in dirty_scopes], ["2026-05"])
         self.assertEqual(dirty_scopes[0]["reasons"], ["unit_overlap_coalesced"])
 
-    def test_get_api_workbench_prefers_cached_read_model_when_available(self) -> None:
+    def test_get_api_workbench_ignores_cached_read_model_when_available(self) -> None:
         app = build_application()
         cached_payload = {
             "month": "2026-03",
@@ -2333,13 +2335,13 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             generated_at="2026-04-08T11:00:00+00:00",
         )
 
-        with patch.object(app, "_build_raw_workbench_payload", side_effect=AssertionError("should not rebuild raw payload")):
-            response = app.handle_request("GET", "/api/workbench?month=2026-03")
+        response = app.handle_request("GET", "/api/workbench?month=2026-03")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
-        self.assertEqual(payload["summary"]["oa_count"], 99)
-        self.assertEqual(payload["paired"]["groups"][0]["oa_rows"][0]["id"], "oa-cached-001")
+        self.assertNotEqual(payload["summary"]["oa_count"], 99)
+        self.assertNotIn("oa-cached-001", json.dumps(payload, ensure_ascii=False))
+        self.assertIn(("2026-03", "global"), app._direct_workbench_payload_cache)
 
     def test_get_api_workbench_rebuilds_cached_mongo_read_model_when_attachment_parser_version_changes(self) -> None:
         app = build_application()
@@ -2403,13 +2405,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["summary"]["oa_count"], 1)
         self.assertEqual(payload["open"]["groups"][0]["oa_rows"][0]["id"], "oa-rebuilt-001")
-        read_model = app._workbench_read_model_service.get_read_model("2026-03")
-        assert read_model is not None
-        self.assertEqual(
-            read_model["payload"]["oa_attachment_invoice_parser_version"],
-            app._current_oa_attachment_invoice_parser_version(),
-        )
-        self.assertEqual(read_model["payload"]["workbench_read_model_schema_version"], WORKBENCH_READ_MODEL_SCHEMA_VERSION)
+        self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-03"))
+        self.assertEqual(app._direct_workbench_payload_cache[("2026-03", "global")]["summary"]["oa_count"], 1)
 
     def test_get_api_workbench_rebuilds_cached_read_model_from_old_oa_attachment_source_group_schema(self) -> None:
         app = build_application()
@@ -2488,9 +2485,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(build_raw.call_count, 2)
         payload = json.loads(response.body)
         self.assertEqual(payload["open"]["groups"][0]["oa_rows"][0]["id"], "oa-rebuilt-source")
-        read_model = app._workbench_read_model_service.get_read_model("2026-03")
-        assert read_model is not None
-        self.assertEqual(read_model["payload"]["workbench_read_model_schema_version"], WORKBENCH_READ_MODEL_SCHEMA_VERSION)
+        self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-03"))
+        self.assertEqual(app._direct_workbench_payload_cache[("2026-03", "global")]["open"]["groups"][0]["oa_rows"][0]["id"], "oa-rebuilt-source")
 
     def test_current_oa_attachment_invoice_parser_version_includes_source_schema_version(self) -> None:
         app = build_application()
@@ -2725,9 +2721,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(build_raw_payload.call_count, 1)
         payload = json.loads(response.body)
-        self.assertEqual(payload["oa_status"]["code"], "ready")
-        self.assertEqual(payload["summary"]["oa_count"], 1)
-        self.assertEqual(payload["open"]["groups"][0]["oa_rows"][0]["id"], "oa-stale-001")
+        self.assertEqual(payload["oa_status"]["code"], "error")
+        self.assertEqual(payload["summary"]["oa_count"], 0)
+        self.assertEqual(payload["open"]["groups"], [])
 
     def test_get_api_workbench_reports_oa_error_when_mongo_adapter_is_unavailable(self) -> None:
         app = build_application()
@@ -3305,7 +3301,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "explanation": "stale legacy salary auto close",
             }
         )
-        app._invalidate_workbench_read_models()
 
         response = app.handle_request("GET", "/api/workbench?month=2026-02")
         payload = json.loads(response.body)
@@ -3437,7 +3432,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "explanation": "stale legacy internal transfer auto close",
             }
         )
-        app._invalidate_workbench_read_models()
 
         response = app.handle_request("GET", "/api/workbench?month=2026-02")
         payload = json.loads(response.body)
@@ -3552,7 +3546,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "explanation": "stale single-row candidate",
                 }
             )
-        app._invalidate_workbench_read_models()
 
         response = app.handle_request("GET", "/api/workbench?month=2026-02")
         payload = json.loads(response.body)
@@ -3574,58 +3567,43 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertCountEqual([row["id"] for row in open_bank_rows], bank_row_ids)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(bank_row_ids[0]))
 
-    def test_get_api_workbench_ignored_prefers_cached_read_model_when_available(self) -> None:
+    def test_get_api_workbench_ignored_uses_direct_candidate_payload(self) -> None:
         app = build_application()
-        app._workbench_read_model_service.upsert_read_model(
-            scope_key="all",
-            payload={
-                "month": "all",
-                "summary": {
-                    "oa_count": 0,
-                    "bank_count": 0,
-                    "invoice_count": 0,
-                    "paired_count": 0,
-                    "open_count": 0,
-                    "exception_count": 0,
-                },
-                "paired": {"groups": []},
-                "open": {"groups": []},
-            },
-            ignored_rows=[
-                {
+        candidate_payload = {
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [],
+                "bank": [
+                    {
                     "id": "bk-ignored-001",
                     "type": "bank",
                     "counterparty_name": "测试忽略流水",
-                }
-            ],
-            generated_at="2026-04-08T12:00:00+00:00",
-        )
+                        "ignored": True,
+                    }
+                ],
+                "invoice": [],
+            },
+        }
+        app._build_raw_workbench_payload = lambda month: {"month": month}
+        app._apply_pair_relations_to_payload = lambda payload: payload
+        app._apply_candidate_matches_to_payload = lambda _payload, _month: candidate_payload
 
-        with patch.object(app, "_build_raw_workbench_payload", side_effect=AssertionError("should not rebuild raw payload")):
-            response = app.handle_request("GET", "/api/workbench/ignored?month=all")
+        response = app.handle_request("GET", "/api/workbench/ignored?month=all")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
         self.assertEqual(payload["month"], "all")
-        self.assertEqual(payload["rows"][0]["id"], "bk-ignored-001")
-
-    def test_get_api_workbench_ignored_uses_sql_read_model_without_rebuild(self) -> None:
-        class SqlReadRepository:
-            def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, object]]:
-                self.scope_key = scope_key
-                return [{"id": "bk-sql-ignored-001", "type": "bank"}]
-
-        app = build_application()
-        repository = SqlReadRepository()
-        app._workbench_sql_read_repository = repository
-
-        with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
-            response = app.handle_request("GET", "/api/workbench/ignored?month=all")
-
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.body)
-        self.assertEqual(repository.scope_key, "all")
-        self.assertEqual(payload["rows"], [{"id": "bk-sql-ignored-001", "type": "bank"}])
+        self.assertEqual(
+            payload["rows"],
+            [
+                {
+                    "id": "bk-ignored-001",
+                    "type": "bank",
+                    "counterparty_name": "测试忽略流水",
+                    "ignored": True,
+                }
+            ],
+        )
 
     def test_merge_live_workbench_keeps_oa_rows_when_live_bank_invoice_exist(self) -> None:
         live_payload = {
@@ -4026,7 +4004,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ["oa-current", "oa-att-inv-current-01", "oa-att-inv-current-02"],
         )
 
-    def test_row_detail_prefers_cached_read_model_before_query_service_sync(self) -> None:
+    def test_row_detail_prefers_direct_payload_cache_before_query_service_sync(self) -> None:
         app = build_application()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
@@ -4036,19 +4014,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             patch.object(
                 app._workbench_query_service,
                 "get_row_record",
-                side_effect=AssertionError("row detail should resolve from cached read model"),
+                side_effect=AssertionError("row detail should resolve from direct payload cache"),
             ),
         ):
             detail_payload = app._get_api_workbench_row_detail_payload(oa_row["id"])
 
         self.assertEqual(detail_payload["row"]["id"], oa_row["id"])
 
-    def test_opaque_oa_row_detail_prefers_month_read_model_without_full_oa_sync(self) -> None:
+    def test_opaque_oa_row_detail_prefers_month_direct_payload_without_full_oa_sync(self) -> None:
         app = build_application()
         row_id = "oa-exp-69898450db8c0a3633bd748c-0"
-        app._workbench_read_model_service.upsert_read_model(
-            scope_key="2026-02",
-            payload={
+        app._direct_workbench_payload_cache = {}
+        app._direct_workbench_payload_cache[("2026-02", "global")] = {
                 "month": "2026-02",
                 "summary": {
                     "oa_count": 1,
@@ -4094,16 +4071,14 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     ]
                 },
                 "exceptions": {"groups": []},
-            },
-            ignored_rows=[],
-        )
+        }
 
         with (
             patch.object(app._live_workbench_service, "get_row_detail", side_effect=KeyError(row_id)),
             patch.object(
                 app._workbench_query_service,
                 "get_row_record",
-                side_effect=AssertionError("opaque OA row detail should resolve from month read model"),
+                side_effect=AssertionError("opaque OA row detail should resolve from month direct payload"),
             ),
             patch.object(
                 app._workbench_query_service,
@@ -4111,7 +4086,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 side_effect=AssertionError("opaque OA row detail should not trigger all-scope OA sync"),
             ),
         ):
-            response = app.handle_request("GET", f"/api/workbench/rows/{row_id}")
+            response = app.handle_request("GET", f"/api/workbench/rows/{row_id}?month=2026-02")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
@@ -4296,11 +4271,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             [oa_row["id"], bank_row["id"], invoice_row["id"]],
         )
         self.assertEqual(confirm_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(confirm_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            confirm_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", confirm_payload)
+        self.assertNotIn("freshness_targets", confirm_payload)
+        self.assertNotIn("operation_barrier_targets", confirm_payload)
         self.assertNotIn("updated_rows", confirm_payload)
 
         updated_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -4322,11 +4295,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             [oa_row["id"], bank_row["id"], invoice_row["id"]],
         )
         self.assertEqual(cancel_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(cancel_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            cancel_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", cancel_payload)
+        self.assertNotIn("freshness_targets", cancel_payload)
+        self.assertNotIn("operation_barrier_targets", cancel_payload)
         self.assertNotIn("updated_rows", cancel_payload)
 
         app_for_cash_special = build_application()
@@ -4356,11 +4327,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         cash_pass_payload = json.loads(cash_pass_response.body)
         self.assertEqual(cash_pass_payload["action"], "confirm_cash_pass_through")
         self.assertEqual(cash_pass_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(cash_pass_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            cash_pass_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", cash_pass_payload)
+        self.assertNotIn("freshness_targets", cash_pass_payload)
+        self.assertNotIn("operation_barrier_targets", cash_pass_payload)
         cash_cancel_response = app_for_cash_special.handle_request(
             "POST",
             "/api/workbench/actions/cancel-cash-special",
@@ -4376,11 +4345,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         cash_cancel_payload = json.loads(cash_cancel_response.body)
         self.assertEqual(cash_cancel_payload["action"], "cancel_cash_special")
         self.assertEqual(cash_cancel_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(cash_cancel_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            cash_cancel_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", cash_cancel_payload)
+        self.assertNotIn("freshness_targets", cash_cancel_payload)
+        self.assertNotIn("operation_barrier_targets", cash_cancel_payload)
 
         app_for_cash_ticket = build_application()
         cash_ticket_open = json.loads(app_for_cash_ticket.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -4412,11 +4379,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         cash_ticket_payload = json.loads(cash_ticket_response.body)
         self.assertEqual(cash_ticket_payload["action"], "confirm_cash_ticket_purchase")
         self.assertEqual(cash_ticket_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(cash_ticket_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            cash_ticket_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", cash_ticket_payload)
+        self.assertNotIn("freshness_targets", cash_ticket_payload)
+        self.assertNotIn("operation_barrier_targets", cash_ticket_payload)
 
         app_for_bank_exception = build_application()
         initial_open_for_exception = json.loads(app_for_bank_exception.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -4440,11 +4405,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(update_bank_payload["action"], "update_bank_exception")
         self.assertEqual(update_bank_payload["exception_case_ids"], [update_bank_payload["exception_case_id"]])
         self.assertEqual(update_bank_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(update_bank_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            update_bank_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", update_bank_payload)
+        self.assertNotIn("freshness_targets", update_bank_payload)
+        self.assertNotIn("operation_barrier_targets", update_bank_payload)
         update_bank_case = app_for_bank_exception._workbench_exception_case_service.snapshot()["cases"][update_bank_payload["exception_case_id"]]
         self.assertEqual(update_bank_case["rule_version"], "exception_rules_v1")
         self.assertEqual(update_bank_case["resolution"]["action_code"], "manual_review")
@@ -4472,11 +4435,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(mark_payload["updated_rows"][0]["id"], open_invoice_after_confirm["id"])
         self.assertEqual(mark_payload["exception_case_ids"], [mark_payload["exception_case_id"]])
         self.assertEqual(mark_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(mark_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            mark_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", mark_payload)
+        self.assertNotIn("freshness_targets", mark_payload)
+        self.assertNotIn("operation_barrier_targets", mark_payload)
         mark_case = app_for_mark_exception._workbench_exception_case_service.snapshot()["cases"][mark_payload["exception_case_id"]]
         self.assertEqual(mark_case["rule_version"], "exception_rules_v1")
         self.assertEqual(mark_case["resolution"]["action_code"], "manual_review")
@@ -4568,10 +4529,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(payload["pair_relation"]["exception_case_id"], payload["case"]["id"])
         self.assertCountEqual(payload["affected_row_ids"], ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(
-            payload["freshness_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-05"}],
-        )
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
 
     def test_cancel_link_uses_existing_case_members_without_rebuilding_workbench(self) -> None:
         app = build_application()
@@ -4774,11 +4734,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(payload["amount_summary"]["bank_net_total"], "0.00")
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
         self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", payload)
+        self.assertNotIn("freshness_targets", payload)
+        self.assertNotIn("operation_barrier_targets", payload)
 
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["case_id"])
         self.assertIsNotNone(relation)
@@ -4881,28 +4839,26 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("invoice rows", json.loads(response.body)["message"])
 
-    def test_confirm_and_cancel_link_invalidate_cached_read_model_for_follow_up_get(self) -> None:
+    def test_confirm_and_cancel_link_are_visible_to_follow_up_direct_get(self) -> None:
         app = build_application()
         initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         oa_row = flatten_groups(initial_payload["open"]["groups"], "oa")[0]
         bank_row = flatten_groups(initial_payload["open"]["groups"], "bank")[0]
         invoice_row = flatten_groups(initial_payload["open"]["groups"], "invoice")[0]
 
-        with patch.object(app, "_schedule_workbench_read_model_persist"):
-            confirm_response = app.handle_request(
-                "POST",
-                "/api/workbench/actions/confirm-link",
-                json.dumps(
-                    {
-                        "month": "2026-03",
-                        "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
-                        "case_id": "CASE-HOT-READMODEL-001",
-                        "note": "read model invalidation regression covers documented mismatch path",
-                    }
-                ),
-            )
+        confirm_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
+                    "case_id": "CASE-HOT-DIRECT-001",
+                    "note": "direct follow-up get regression covers documented mismatch path",
+                }
+            ),
+        )
         self.assertEqual(confirm_response.status_code, 200)
-        self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-03"))
         confirmed_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
 
         self.assertIn(
@@ -4910,14 +4866,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             [row["id"] for row in flatten_groups(confirmed_payload["paired"]["groups"], "oa")],
         )
 
-        with patch.object(app, "_schedule_workbench_read_model_persist"):
-            cancel_response = app.handle_request(
-                "POST",
-                "/api/workbench/actions/cancel-link",
-                json.dumps({"month": "2026-03", "row_id": bank_row["id"], "comment": "reopen"}),
-            )
+        cancel_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/cancel-link",
+            json.dumps({"month": "2026-03", "row_id": bank_row["id"], "comment": "reopen"}),
+        )
         self.assertEqual(cancel_response.status_code, 200)
-        self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-03"))
         cancelled_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
 
         self.assertIn(
@@ -5090,10 +5044,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             result = app._execute_settings_data_reset(RESET_OA_AND_REBUILD_ACTION)
 
         self.assertEqual(result["action"], RESET_OA_AND_REBUILD_ACTION)
-        read_model = app._workbench_read_model_service.get_read_model("all")
-        self.assertIsNotNone(read_model)
-        assert read_model is not None
-        self.assertNotEqual(read_model["payload"]["summary"]["oa_count"], 999)
+        self.assertIsNone(app._workbench_read_model_service.get_read_model("all"))
 
     def test_confirm_link_resolves_selected_rows_without_rebuilding_grouped_workbench(self) -> None:
         app = build_application()
@@ -5238,7 +5189,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ],
         )
 
-    def test_confirm_link_expands_oa_attachment_context_from_all_scope_read_model_when_month_filter_hides_invoice(self) -> None:
+    def test_confirm_link_expands_oa_attachment_context_from_all_scope_direct_payload_when_month_filter_hides_invoice(self) -> None:
         app = build_application()
         oa_row = {
             "id": "oa-exp-202605-hidden-invoice",
@@ -5264,9 +5215,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             "amount": "100.00",
             "total_with_tax": "100.00",
         }
-        app._workbench_read_model_service.upsert_read_model(
-            scope_key="2026-05",
-            payload={
+        app._direct_workbench_payload_cache = {
+            ("2026-05", "global"): {
                 "month": "2026-05",
                 "summary": {
                     "oa_count": 1,
@@ -5291,11 +5241,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     ]
                 },
             },
-            ignored_rows=[],
-        )
-        app._workbench_read_model_service.upsert_read_model(
-            scope_key="all",
-            payload={
+            ("all", "global"): {
                 "month": "all",
                 "summary": {
                     "oa_count": 1,
@@ -5320,13 +5266,13 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     ]
                 },
             },
-            ignored_rows=[],
-        )
+        }
 
         request_body = {
             "month": "2026-05",
             "row_ids": ["oa-exp-202605-hidden-invoice", "bk-o-202605-hidden-invoice"],
             "case_id": "CASE-FULL-HIDDEN-INVOICE",
+            "note": "补全隐藏附件发票上下文",
         }
         preview_response = app.handle_request(
             "POST",
@@ -5580,7 +5526,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ["oa-att-inv-oa-exp-202605-repair-01"],
         )
 
-    def test_confirm_and_cancel_link_defer_read_model_persistence_to_background(self) -> None:
+    def test_confirm_and_cancel_link_do_not_schedule_workbench_read_model_persistence(self) -> None:
         app = build_application()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
 
@@ -5588,10 +5534,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         bank_row = flatten_groups(payload["open"]["groups"], "bank")[0]
         invoice_row = flatten_groups(payload["open"]["groups"], "invoice")[0]
 
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist") as schedule_pair_relation_persist,
-            patch.object(app, "_schedule_workbench_read_model_persist") as schedule_read_model_persist,
-        ):
+        with patch.object(app, "_schedule_workbench_pair_relation_persist") as schedule_pair_relation_persist:
             confirm_response = app._handle_live_workbench_confirm_link(
                 {
                     "month": "2026-03",
@@ -5611,18 +5554,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "action_name": "confirm_link",
             },
         )
-        schedule_read_model_persist.assert_called_once()
-        self.assertCountEqual(
-            schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
-            ["2026-03"],
-        )
-        self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
-        self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "confirm_link")
 
-        with (
-            patch.object(app, "_schedule_workbench_pair_relation_persist") as schedule_pair_relation_persist,
-            patch.object(app, "_schedule_workbench_read_model_persist") as schedule_read_model_persist,
-        ):
+        with patch.object(app, "_schedule_workbench_pair_relation_persist") as schedule_pair_relation_persist:
             cancel_response = app._handle_live_workbench_cancel_link(
                 {
                     "month": "2026-03",
@@ -5641,90 +5574,57 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "action_name": "cancel_link",
             },
         )
-        schedule_read_model_persist.assert_called_once()
-        self.assertCountEqual(
-            schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
-            ["2026-03", "all"],
-        )
-        self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
-        self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "cancel_link")
 
-    def test_mark_exception_invalidates_only_changed_scopes_and_rebuilds_in_background(self) -> None:
+    def test_mark_exception_invalidates_only_changed_scopes_without_read_model_persist(self) -> None:
         app = build_application()
         app._live_workbench_service = _StubLiveWorkbenchService()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
 
-        with (
-            patch.object(app, "_invalidate_workbench_read_models") as invalidate_all_read_models,
-            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate_read_model_scopes,
-            patch.object(app, "_schedule_workbench_read_model_persist") as schedule_read_model_persist,
-        ):
-            response = app.handle_request(
-                "POST",
-                "/api/workbench/actions/mark-exception",
-                json.dumps(
-                    {
-                        "month": "2026-03",
-                        "row_id": oa_row["id"],
-                        "exception_code": "pending_collection",
-                        "comment": "客户尚未付款",
-                    }
-                ),
-            )
+        response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/mark-exception",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_id": oa_row["id"],
+                    "exception_code": "pending_collection",
+                    "comment": "客户尚未付款",
+                }
+            ),
+        )
 
         self.assertEqual(response.status_code, 200)
-        invalidate_all_read_models.assert_not_called()
-        invalidate_read_model_scopes.assert_called_once()
-        self.assertCountEqual(invalidate_read_model_scopes.call_args.args[0], ["2026-03", "all"])
-        schedule_read_model_persist.assert_called_once()
-        # The lifecycle invalidation above still covers all; the operation-level
-        # persist target stays month-scoped so browser barriers do not wait on all.
-        self.assertCountEqual(
-            schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
-            ["2026-03"],
-        )
-        self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
-        self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "mark_exception")
+        response_payload = json.loads(response.body)
+        self.assertNotIn("read_model_scope_keys", response_payload)
+        self.assertNotIn("freshness_targets", response_payload)
 
-    def test_oa_bank_exception_invalidates_only_changed_scopes_and_rebuilds_in_background(self) -> None:
+    def test_oa_bank_exception_invalidates_only_changed_scopes_without_read_model_persist(self) -> None:
         app = build_application()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
         bank_row = flatten_groups(payload["open"]["groups"], "bank")[0]
 
-        with (
-            patch.object(app, "_invalidate_workbench_read_models") as invalidate_all_read_models,
-            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate_read_model_scopes,
-            patch.object(app, "_schedule_workbench_read_model_persist") as schedule_read_model_persist,
-        ):
-            response = app.handle_request(
-                "POST",
-                "/api/workbench/actions/oa-bank-exception",
-                json.dumps(
-                    {
-                        "month": "2026-03",
-                        "row_ids": [oa_row["id"], bank_row["id"]],
-                        "exception_code": "oa_bank_amount_mismatch",
-                        "exception_label": "金额不一致，继续异常",
-                        "comment": "付款金额与OA金额不一致，继续核查",
-                    }
-                ),
-            )
+        response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/oa-bank-exception",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "exception_code": "oa_bank_amount_mismatch",
+                    "exception_label": "金额不一致，继续异常",
+                    "comment": "付款金额与OA金额不一致，继续核查",
+                }
+            ),
+        )
 
         self.assertEqual(response.status_code, 200)
-        invalidate_all_read_models.assert_not_called()
-        invalidate_read_model_scopes.assert_called_once()
-        self.assertCountEqual(invalidate_read_model_scopes.call_args.args[0], ["2026-03", "all"])
-        schedule_read_model_persist.assert_called_once()
-        self.assertCountEqual(
-            schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
-            ["2026-03"],
-        )
-        self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
-        self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "oa_bank_exception")
+        response_payload = json.loads(response.body)
+        self.assertNotIn("read_model_scope_keys", response_payload)
+        self.assertNotIn("freshness_targets", response_payload)
 
-    def test_cancel_exception_invalidates_only_changed_scopes_and_rebuilds_in_background(self) -> None:
+    def test_cancel_exception_invalidates_only_changed_scopes_without_read_model_persist(self) -> None:
         app = build_application()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
@@ -5745,34 +5645,22 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         self.assertEqual(exception_response.status_code, 200)
 
-        with (
-            patch.object(app, "_invalidate_workbench_read_models") as invalidate_all_read_models,
-            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate_read_model_scopes,
-            patch.object(app, "_schedule_workbench_read_model_persist") as schedule_read_model_persist,
-        ):
-            cancel_response = app.handle_request(
-                "POST",
-                "/api/workbench/actions/cancel-exception",
-                json.dumps(
-                    {
-                        "month": "2026-03",
-                        "row_ids": [oa_row["id"], bank_row["id"]],
-                        "comment": "撤回异常处理",
-                    }
-                ),
-            )
+        cancel_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/cancel-exception",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "comment": "撤回异常处理",
+                }
+            ),
+        )
 
         self.assertEqual(cancel_response.status_code, 200)
-        invalidate_all_read_models.assert_not_called()
-        invalidate_read_model_scopes.assert_called_once()
-        self.assertCountEqual(invalidate_read_model_scopes.call_args.args[0], ["2026-03", "all"])
-        schedule_read_model_persist.assert_called_once()
-        self.assertCountEqual(
-            schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
-            ["2026-03", "all"],
-        )
-        self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
-        self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "cancel_exception")
+        cancel_payload = json.loads(cancel_response.body)
+        self.assertNotIn("read_model_scope_keys", cancel_payload)
+        self.assertNotIn("freshness_targets", cancel_payload)
 
     def test_confirm_link_emits_phased_timing_logs(self) -> None:
         app = build_application()
@@ -5783,7 +5671,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         with (
             patch.object(app, "_schedule_workbench_pair_relation_persist"),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
             patch.object(app, "_emit_workbench_action_timing") as emit_timing,
         ):
             response = app.handle_request(
@@ -5804,11 +5691,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIn("oa_auth", phases)
         self.assertIn("resolve_rows", phases)
         self.assertIn("pair_relation_update", phases)
-        self.assertIn("invalidate_read_model_scopes", phases)
         self.assertIn("schedule_background_persist", phases)
         self.assertIn("request_total", phases)
 
-    def test_background_persist_emits_timing_logs(self) -> None:
+    def test_pair_relation_background_persist_emits_timing_logs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._workbench_pair_relation_service.create_active_relation(
@@ -5819,12 +5705,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 created_by="system",
                 month_scope="2026-03",
             )
-            payload = app._build_api_workbench_payload("2026-03")
-            app._workbench_read_model_service.upsert_read_model(scope_key="2026-03", payload=payload, ignored_rows=[])
-            app._workbench_read_model_service.upsert_read_model(scope_key="all", payload=payload, ignored_rows=[])
-
             app._workbench_pair_relation_persist_version = 1
-            app._workbench_read_model_persist_version = 1
 
             with patch.object(app, "_emit_workbench_action_timing") as emit_timing:
                 app._persist_workbench_pair_relations_in_background(
@@ -5833,18 +5714,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     request_id="req-bg-001",
                     action_name="confirm_link",
                 )
-                app._rebuild_workbench_read_models_in_background(
-                    version=1,
-                    scope_keys=["2026-03", "all"],
-                    request_id="req-bg-001",
-                    action_name="confirm_link",
-                )
 
         phases = [call.kwargs["phase"] for call in emit_timing.call_args_list]
         self.assertIn("persist_pair_relations", phases)
-        self.assertIn("rebuild_read_model_scope", phases)
-        self.assertIn("persist_read_models", phases)
-        self.assertIn("background_total", phases)
 
     def test_confirm_and_cancel_link_rebuild_live_cache_only_once_per_action(self) -> None:
         app = build_application()
@@ -5961,7 +5833,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertCountEqual(exception_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
         self.assertEqual(exception_payload["action"], "oa_bank_exception")
 
-    def test_oa_bank_exception_prefers_cached_read_model_rows_before_query_service(self) -> None:
+    def test_oa_bank_exception_prefers_direct_payload_rows_before_query_service(self) -> None:
         app = build_application()
         initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         oa_row = flatten_groups(initial_payload["open"]["groups"], "oa")[0]
@@ -5974,12 +5846,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             patch.object(
                 app._workbench_query_service,
                 "get_row_record",
-                side_effect=AssertionError("should not hit query service when cached read model has selected rows"),
+                side_effect=AssertionError("should not hit query service when direct payload has selected rows"),
             ),
             patch.object(
                 app._live_workbench_service,
                 "get_rows_detail",
-                side_effect=AssertionError("should not hit live row detail when cached read model has selected rows"),
+                side_effect=AssertionError("should not hit live row detail when direct payload has selected rows"),
             ),
         ):
             response = app._handle_live_workbench_oa_bank_exception(
@@ -6185,11 +6057,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(cancel_payload["action"], "cancel_exception")
         self.assertEqual(cancel_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
         self.assertEqual(cancel_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(cancel_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            cancel_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", cancel_payload)
+        self.assertNotIn("freshness_targets", cancel_payload)
+        self.assertNotIn("operation_barrier_targets", cancel_payload)
 
         updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         updated_oa = next(row for row in flatten_groups(updated_payload["open"]["groups"], "oa") if row["id"] == oa_row["id"])
@@ -6389,11 +6259,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(ignore_payload["action"], "ignore_row")
         self.assertEqual(ignore_payload["exception_case_ids"], [ignore_payload["exception_case_id"]])
         self.assertEqual(ignore_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(ignore_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            ignore_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", ignore_payload)
+        self.assertNotIn("freshness_targets", ignore_payload)
+        self.assertNotIn("operation_barrier_targets", ignore_payload)
         ignored_case = app._workbench_exception_case_service.snapshot()["cases"][ignore_payload["exception_case_id"]]
         self.assertEqual(ignored_case["status"], "ignored")
 
@@ -6421,11 +6289,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(unignore_payload["action"], "unignore_row")
         self.assertEqual(unignore_payload["exception_case_ids"], [ignore_payload["exception_case_id"]])
         self.assertEqual(unignore_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(unignore_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            unignore_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", unignore_payload)
+        self.assertNotIn("freshness_targets", unignore_payload)
+        self.assertNotIn("operation_barrier_targets", unignore_payload)
         unignored_case = app._workbench_exception_case_service.snapshot()["cases"][ignore_payload["exception_case_id"]]
         self.assertEqual(unignored_case["status"], "cancelled")
 
@@ -6458,11 +6324,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response_payload["action"], "oa_bank_exception")
         self.assertEqual(response_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
         self.assertEqual(response_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(response_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            response_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", response_payload)
+        self.assertNotIn("freshness_targets", response_payload)
+        self.assertNotIn("operation_barrier_targets", response_payload)
         self.assertEqual(response_payload["exception_case_ids"], [response_payload["exception_case_id"]])
         exception_case = app._workbench_exception_case_service.snapshot()["cases"][response_payload["exception_case_id"]]
         self.assertEqual(exception_case["status"], "open")
@@ -6506,11 +6370,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response_payload["action"], "oa_bank_exception")
         self.assertCountEqual(response_payload["affected_row_ids"], [oa_row["id"], bank_row["id"], invoice_row["id"]])
         self.assertEqual(response_payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(response_payload["read_model_scope_keys"], ["2026-03"])
-        self.assertEqual(
-            response_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
-        )
+        self.assertNotIn("read_model_scope_keys", response_payload)
+        self.assertNotIn("freshness_targets", response_payload)
+        self.assertNotIn("operation_barrier_targets", response_payload)
         self.assertIn(response_payload["exception_case_id"], app._workbench_exception_case_service.snapshot()["cases"])
 
     def test_confirm_link_supports_cross_month_selection_in_all_time_view(self) -> None:
@@ -6565,7 +6427,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(reloaded_oa["oa_bank_relation"]["tone"], "warn")
         self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
 
-    def test_get_api_workbench_uses_in_memory_read_model_when_read_model_persist_fails(self) -> None:
+    def test_get_api_workbench_uses_direct_payload_cache_when_read_model_persist_fails(self) -> None:
         app = build_application()
         app._state_store = _FailingReadModelStateStore()
 
@@ -6575,7 +6437,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["month"], "2026-03")
         self.assertGreater(payload["summary"]["open_count"], 0)
-        self.assertIsNotNone(app._workbench_read_model_service.get_read_model("2026-03"))
+        self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-03"))
+        self.assertIn(("2026-03", "global"), app._direct_workbench_payload_cache)
 
     def test_oa_retention_filters_only_unrelated_old_oa_and_can_reinclude_after_new_bank_relation(self) -> None:
         app = build_application()
@@ -6993,7 +6856,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(status_payload["status"], "refreshing")
         self.assertCountEqual(status_payload["dirty_scopes"], ["2026-03", "all"])
 
-    def test_oa_sync_dirty_scope_rebuild_atomically_overwrites_cached_read_model(self) -> None:
+    def test_oa_sync_dirty_scope_rebuild_marks_synced_without_rebuilding_cached_read_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._workbench_read_model_service.upsert_read_model(
@@ -7022,14 +6885,20 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             }
 
             app._handle_oa_source_changed(["2026-03"], reason="oa_polling", schedule_rebuild=False)
-            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw:
+            with (
+                patch.object(app, "_schedule_or_run_workbench_auto_matching_for_scopes") as matching,
+                patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw,
+            ):
                 app._rebuild_oa_sync_dirty_scopes_once()
+                build_raw.assert_not_called()
+                matching.assert_called_once()
+                direct_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
             cached = app._workbench_read_model_service.get_read_model("2026-03")
             status_payload = json.loads(app.handle_request("GET", "/api/oa-sync/status").body)
 
-        build_raw.assert_any_call("2026-03")
         self.assertIsNotNone(cached)
-        self.assertEqual(cached["payload"]["summary"]["oa_count"], 2)
+        self.assertEqual(cached["payload"]["summary"]["oa_count"], 1)
+        self.assertEqual(direct_payload["summary"]["oa_count"], 2)
         self.assertEqual(status_payload["status"], "synced")
         self.assertEqual(status_payload["dirty_scopes"], [])
 
@@ -7058,7 +6927,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         }
 
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw:
-            isolated = app._get_or_build_workbench_read_model("2026-03", visibility_key="project:abc")
+            isolated = app._build_direct_workbench_payload_envelope("2026-03", visibility_key="project:abc")
 
         build_raw.assert_called_once_with("2026-03")
         self.assertEqual(isolated["scope_key"], "visibility:project:abc:2026-03")
@@ -7066,7 +6935,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         global_cached = app._workbench_read_model_service.get_read_model("2026-03")
         self.assertEqual(global_cached["payload"]["summary"]["oa_count"], 99)
 
-    def test_hot_rebuild_refreshes_existing_visibility_scoped_read_models(self) -> None:
+    def test_oa_sync_direct_refresh_does_not_rebuild_visibility_scoped_read_models(self) -> None:
         app = build_application()
         app._workbench_read_model_service.upsert_read_model(
             scope_key="visibility:user:test-user-id:2026-03",
@@ -7093,13 +6962,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             },
         }
 
-        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw:
-            app._hot_rebuild_workbench_read_model_scopes(["2026-03"])
+        with (
+            patch.object(app, "_schedule_or_run_workbench_auto_matching_for_scopes"),
+            patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw,
+        ):
+            app._refresh_workbench_direct_dependencies_for_oa_sync(["2026-03"])
+            build_raw.assert_not_called()
+            isolated = app._build_direct_workbench_payload_envelope("2026-03", visibility_key="user:test-user-id")
 
-        build_raw.assert_any_call("2026-03")
         cached = app._workbench_read_model_service.get_read_model("visibility:user:test-user-id:2026-03")
         self.assertIsNotNone(cached)
-        self.assertEqual(cached["payload"]["summary"]["oa_count"], 2)
+        self.assertEqual(cached["payload"]["summary"]["oa_count"], 1)
+        self.assertEqual(isolated["payload"]["summary"]["oa_count"], 2)
 
     def test_oa_sync_status_endpoint_returns_current_polling_status(self) -> None:
         app = build_application()
@@ -7205,19 +7079,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(rejected_response.status_code, 400)
         self.assertEqual(json.loads(rejected_response.body)["error"], "workbench_pair_relation_note_required")
 
-        with patch.object(app, "_schedule_workbench_read_model_persist"):
-            confirmed_response = app.handle_request(
-                "POST",
-                "/api/workbench/actions/confirm-link",
-                json.dumps(
-                    {
-                        "month": "2026-05",
-                        "row_ids": row_ids,
-                        "case_id": "CASE-AMOUNT-MISMATCH",
-                        "note": "发票尾差待复核",
-                    }
-                ),
-            )
+        confirmed_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-AMOUNT-MISMATCH",
+                    "note": "发票尾差待复核",
+                }
+            ),
+        )
 
         self.assertEqual(confirmed_response.status_code, 200)
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-AMOUNT-MISMATCH")
@@ -7300,10 +7173,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_batch_accounting_mismatch_note_projects_to_paired_bank_row(self) -> None:
         app = build_application()
         raw_payload = build_batch_accounting_raw_payload()
-        with (
-            patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
-        ):
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             self._submit_batch_accounting_mismatch_with_note(app, note="财务确认差额闭环")
             response = app.handle_request("GET", "/api/workbench?month=all")
 
@@ -7331,10 +7201,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         before_reminders = app._ledger_service.list_reminders()
         before_tasks = app._etc_reconciliation_task_service.snapshot()
 
-        with (
-            patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
-        ):
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             self._submit_batch_accounting_mismatch_with_note(app, note="财务确认差额闭环")
 
         self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], before_exception_cases)
@@ -7346,10 +7213,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_withdraw_batch_accounting_mismatch_removes_workbench_projection_and_preserves_history_notes(self) -> None:
         app = build_application()
         raw_payload = build_batch_accounting_raw_payload()
-        with (
-            patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload),
-            patch.object(app, "_schedule_workbench_read_model_persist"),
-        ):
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             submit_payload = self._submit_batch_accounting_mismatch_with_note(app, note="财务确认差额闭环")
             relation_id = str(submit_payload["relation_id"])
             withdraw_response = app.handle_request(
@@ -7795,19 +7659,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app.handle_request("GET", "/api/workbench?month=2026-06")
 
         row_ids = ["oa-etc-202606-001", "bk-etc-202606-001"]
-        with patch.object(app, "_schedule_workbench_read_model_persist"):
-            confirmed_response = app.handle_request(
-                "POST",
-                "/api/workbench/actions/confirm-link",
-                json.dumps(
-                    {
-                        "month": "2026-06",
-                        "row_ids": row_ids,
-                        "case_id": "CASE-ETC-MISMATCH",
-                        "note": "ETC批量提交与流水金额不一致，待复核",
-                    }
-                ),
-            )
+        confirmed_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(
+                {
+                    "month": "2026-06",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-ETC-MISMATCH",
+                    "note": "ETC批量提交与流水金额不一致，待复核",
+                }
+            ),
+        )
 
         self.assertEqual(confirmed_response.status_code, 200)
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-ETC-MISMATCH")

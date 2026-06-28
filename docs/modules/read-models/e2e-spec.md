@@ -1,35 +1,32 @@
-# Read Models Spec-first E2E Spec
+# Read Model E2E 规格
 
-本文件定义 read model / freshness / operation barrier 的端到端验收合同。它不是页面业务口径，页面业务仍以各页面模块 `e2e-spec.md` 为准；本模块只定义所有页面共同依赖的数据最新性和 worker 收敛边界。
+本模块没有用户页面。E2E 目标是证明页面级 read model 架构不再参与页面读取；业务页面 E2E 由各页面模块维护。
 
-## 模块目标
+## 场景
 
-用户在任意页面执行写操作、导入、规则保存或刷新后，页面不能把旧 projection、旧 Redis payload、缺 source/schema proof 的 SQL view 或未完成 worker 状态伪装成 fresh。只有后端 freshness/readiness/dirty/outbox 事实证明完成后，页面才能显示最终业务结果或允许关闭操作级同步状态。
-
-## Spec IDs
-
-| Spec ID | 用户可观察合同 | 必须证明 |
+| ID | 场景 | 验收 |
 | --- | --- | --- |
-| `READMODEL-E2E-001` | 页面读取 fresh read model 时显示业务数据、summary、分页、导出入口和状态提示一致。 | API payload 必须带 `read_model_status=fresh` 或等价 fresh 证明；Redis 只能缓存 fresh gate 后 payload。 |
-| `READMODEL-E2E-002` | 页面遇到 missing/stale/refreshing read model 时显示同步中/诊断状态，不能显示普通空态或旧 rows。 | API 需要返回 refreshing/stale/missing reason，并通过规范 scope 入队。 |
-| `READMODEL-E2E-003` | 写操作成功后，页面必须等待 operation barrier 或目标 read model fresh reload，不能只凭 POST 200 就显示已同步。 | `/api/operation-barrier/status` 或页面 fresh reload 证明 affected scopes 已 fresh。 |
-| `READMODEL-E2E-004` | 导入、关联、撤回、规则保存、data reset、project scope change 等跨页写操作必须产生正确 dirty/outbox/readiness fan-out。 | durable queue 事件、dirty scopes、readiness 和页面下游 fresh 证据一致。 |
-| `READMODEL-E2E-005` | 生产/staging direct read model apply gate 能把 critical scopes enqueue 到 worker 并收敛到 done/fresh。 | `read_model_slo_smoke --critical-only --apply` 通过；dry-run 只能证明 scope discovery。 |
-| `READMODEL-E2E-006` | 真实业务写入口必须能被 write-operation audit 关联到 required scopes 和 SLO。 | `write_operation_slo_audit` 有非空 matching samples 且通过 operation profile；无样本是 missing，不是 covered。 |
-| `READMODEL-E2E-007` | 非规范 scope、历史 failed/outbox、legacy readiness 不得污染当前 App Health。 | scope contract check 区分 covered historical failure 与 current blocker，repair 需要 audit/rollback。 |
+| `READMODEL-E2E-001` | 已迁移页面首屏、筛选、分页、summary、导出入口 | 页面通过 direct API 返回业务 DTO；payload 不包含 `read_model_status`、`refresh_enqueued` 或 operation barrier target fields |
+| `READMODEL-E2E-002` | 写操作后页面更新 | mutation 返回 affected ids/months、version、job 或 committed projection；前端 direct refetch 或应用 committed projection |
+| `READMODEL-E2E-003` | 真实后台任务 | import/OA/file migration/settings reset/Workbench matching 通过 job/outbox/worker heartbeat/current worker facts 验证，不作为页面 freshness proof |
+| `READMODEL-E2E-004` | 旧 page read-model 回归 | manifest/App Status registry 为空；`.read_model.refresh` lane、dirty/readiness runtime state 和 refresh gateway 不回流 |
 
-## 权限和角色
+## 权限
 
-本模块不直接决定页面权限。权限测试必须证明被禁止角色不会触发 mutating endpoint，也不会通过 read model refresh 绕过业务权限。admin-only runtime/readiness dashboard 的 authenticated gate 归 `app-health-operations` 与 `permissions-and-audit` 共同覆盖。
+本模块不定义页面权限。权限由业务 API/session owner 覆盖；runtime/ops 工具必须走对应运维权限和审计。
 
-## 失败与恢复场景
+## 禁止验收
 
-- Redis cache payload 缺 schema/source proof：必须 miss cache，走 SQL view 或 enqueue refresh。
-- SQL view 缺 schema/source proof：必须返回 non-fresh，不写 fresh cache。
-- dirty scope pending/processing/failed：页面必须显示 refreshing/blocked，不伪装 fresh。
-- worker 完成后 readiness fresh：页面可重读并显示最终结果。
-- write-operation audit 无样本：保持 missing，不得用 direct refresh 证据替代真实写链路证据。
+- 不用 worker drain、readiness fresh、dirty scope done 证明页面可读。
+- 不恢复 force refresh、scope repair、operation barrier 或 page refresh button。
+- 不把 Redis/RabbitMQ/frontend domain event 当状态事实源。
 
-## 外部风险
+## 最小验证
 
-真实 PostgreSQL/RabbitMQ/Redis/systemd worker、真实生产数据和 mutating write scenario 不能由本地 mock Browser E2E 完全证明。它们必须进入 staging/runtime gate，并在 `e2e-coverage.md` 中标为 `external-risk` 或 `partial`。
+```bash
+PYTHONPATH=backend/src python3 -m pytest \
+  tests/test_read_model_manifest.py \
+  tests/test_read_model_architecture_guards.py \
+  tests/test_direct_api_contract_harness.py \
+  -q
+```

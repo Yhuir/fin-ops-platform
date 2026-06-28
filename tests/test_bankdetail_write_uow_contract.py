@@ -64,14 +64,6 @@ class BankdetailWriteUowContractTests(unittest.TestCase):
                     "transaction": "begin",
                     "facts": ["bank_transaction_category"],
                     "audit": ["bank_detail_category_confirmed"],
-                    "dirty_scopes": [
-                        ("bank_detail", "2026-05"),
-                        ("turnover_ledger", "all"),
-                    ],
-                    "outbox": [
-                        "bank_detail.read_model.refresh",
-                        "turnover_ledger.read_model.refresh",
-                    ],
                     "transaction_end": "commit",
                 }
             ],
@@ -110,14 +102,6 @@ class BankdetailWriteUowContractTests(unittest.TestCase):
                     "transaction": "begin",
                     "facts": ["bank_auto_tag_rules"],
                     "audit": ["bank_auto_tag_rules_changed"],
-                    "dirty_scopes": [
-                        ("bank_detail", "2026-05"),
-                        ("turnover_ledger", "all"),
-                    ],
-                    "outbox": [
-                        "bank_detail.read_model.refresh",
-                        "turnover_ledger.read_model.refresh",
-                    ],
                     "lifecycle_events": ["bank_auto_tag_rules_changed"],
                     "transaction_end": "commit",
                 }
@@ -161,15 +145,8 @@ class BankdetailWriteUowContractTests(unittest.TestCase):
                     "transaction": "begin",
                     "facts": ["no_oa_bank_batch", "workbench_pair_relation"],
                     "audit": ["no_oa_bank_batch_submit"],
-                    "dirty_scopes": [
-                        ("no_oa_bank_batch", "all"),
-                        ("no_oa_bank_batch", "2026-05"),
-                        ("workbench", "case-001"),
-                    ],
-                    "outbox": [
-                        "no_oa_bank_batch.read_model.refresh",
-                        "workbench.read_model.refresh",
-                    ],
+                    "dirty_scopes": [],
+                    "outbox": [],
                     "lifecycle_events": ["no_oa_bank_batch_changed"],
                     "transaction_end": "commit",
                 }

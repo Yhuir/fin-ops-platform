@@ -8,7 +8,6 @@ from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 
 
@@ -216,22 +215,13 @@ def apply_etc_batch_invoice_link_backfill(
             linked.append(link)
 
     affected_months = _affected_months(auto_backfill_candidates)
-    enqueued_scopes: list[str] = []
-    if queue_repository is not None and affected_months:
-        gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
-        enqueued_scopes = gateway.enqueue_many(
-            "workbench",
-            affected_months + ["all"],
-            reason="etc_batch_invoice_link_backfill",
-            priority="high",
-            metadata={"reason": normalized_reason, "operator": normalized_operator},
-        )
+    _ = queue_repository
     return {
         "applied": True,
         "requested_count": len(auto_backfill_candidates),
         "linked_count": len(linked),
         "affected_workbench_scopes": affected_months + (["all"] if affected_months else []),
-        "enqueued_workbench_scopes": enqueued_scopes,
+        "enqueued_workbench_scopes": [],
         "rollback_plan": _rollback_plan(auto_backfill_candidates, link_ids=[str(item.get("id") or "") for item in linked]),
     }
 

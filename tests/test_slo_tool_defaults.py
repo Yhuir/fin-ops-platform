@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 from fin_ops_platform.tools import (
     http_slo_probe,
-    read_model_slo_smoke,
     runtime_sync_closure_gate,
     sse_smoke_probe,
     write_operation_e2e_smoke,
@@ -19,14 +18,12 @@ from fin_ops_platform.tools import (
 class SloToolDefaultTests(unittest.TestCase):
     def test_cli_defaults_match_p2p3_one_second_closure_targets(self) -> None:
         http_args = http_slo_probe.build_parser().parse_args([])
-        read_model_args = read_model_slo_smoke.build_parser().parse_args([])
         sse_args = sse_smoke_probe.build_parser().parse_args([])
         write_audit_args = write_operation_slo_audit.build_parser().parse_args([])
         write_e2e_args = write_operation_e2e_smoke.build_parser().parse_args(["--scenario", "/tmp/scenario.json"])
         closure_gate_args = runtime_sync_closure_gate.build_parser().parse_args([])
 
         self.assertEqual(http_args.target_ms, 1_000.0)
-        self.assertEqual(read_model_args.target_ms, 1_000.0)
         self.assertEqual(sse_args.target_ms, 1_000.0)
         self.assertEqual(write_audit_args.target_ms, 1_000.0)
         self.assertIsNone(write_audit_args.p99_target_ms)
@@ -38,7 +35,6 @@ class SloToolDefaultTests(unittest.TestCase):
         self.assertEqual(closure_gate_args.health_ready_target_ms, 1_000.0)
         self.assertEqual(closure_gate_args.health_ready_max_response_bytes, 50_000)
         self.assertEqual(closure_gate_args.health_ready_max_api_performance_endpoints, 20)
-        self.assertEqual(closure_gate_args.read_model_target_ms, 1_000.0)
         self.assertEqual(closure_gate_args.write_target_ms, 1_000.0)
 
     def test_http_sse_and_closure_gate_share_auth_env_defaults(self) -> None:
@@ -70,7 +66,6 @@ class SloToolDefaultTests(unittest.TestCase):
             "DATABASE_URL": "",
         }
         tools = (
-            ("read_model_slo_smoke", read_model_slo_smoke.main),
             ("write_operation_slo_audit", write_operation_slo_audit.main),
             ("runtime_sync_closure_gate", runtime_sync_closure_gate.main),
         )

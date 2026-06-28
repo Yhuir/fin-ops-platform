@@ -1,10 +1,10 @@
 # ETC票据管理 Spec-first E2E Spec
 
-本文件定义 `/etc-tickets` 页面在真实浏览器中的业务验收合同。测试必须保护 ETC 业务批次、发票明细、OA 草稿、人工提交、删除/reset、source file、Workbench summary fan-out、read model/worker 边界和权限，而不是保护当前组件实现细节。
+本文件定义 `/etc-tickets` 页面在真实浏览器中的业务验收合同。测试必须保护 ETC 业务批次、发票明细、OA 草稿、人工提交、删除/reset、source file、Workbench summary fan-out、派生数据/worker 边界和权限，而不是保护当前组件实现细节。
 
 ## 模块目标
 
-ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches` 为用户可见事实源。`etc_reconciliation_tasks` 只作为导入、核对、source file 和 workflow 状态。页面不能把 task-only 记录当成批次展示，也不能用本地事件伪造 OA 已提交、Workbench summary 已 fresh 或下游页面已收敛。
+ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches` 为用户可见事实源。`etc_reconciliation_tasks` 只作为导入、核对、source file 和 workflow 状态。页面不能把 task-only 记录当成批次展示，也不能用本地事件伪造 OA 已提交、Workbench summary 已收敛或下游页面已收敛。
 
 ## 用户角色
 
@@ -26,12 +26,12 @@ ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches
 | `ETC-TICKET-E2E-007` | task-only、新建批次和 durable import recovery | P0 | 新建批次可省略 `taskId`，后端创建 linked task + active business batch；创建失败 tombstone 新 task；durable import restart 后创建 OA 草稿前必须补齐 linked task 状态。 |
 | `ETC-TICKET-E2E-008` | Workbench summary fan-out | P0 | 人工已提交业务批次必须在 Workbench open 区形成折叠 `etc_invoice_summary`；已存在 active relation 时 open 区过滤陈旧 summary；delete/reset 后 summary 消失且散票恢复。 |
 | `ETC-TICKET-E2E-009` | 权限、旧入口和 regression | P0 | read-only 用户不得触发 OA 草稿、人工确认、删除/reset、source file/upload/import mutation；旧 `/api/etc/batches*` 不新增能力；已移除 ETC OA 自动检测入口和字段不得回归。 |
-| `ETC-TICKET-E2E-010` | 真实基础设施 worker drain | P1 | 真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储/Nginx 环境下，导入、source file、OA 草稿、人工确认、delete/reset、Workbench summary、税金/成本/search 最终页面收敛；该项必须在 staging/runtime smoke 验证。 |
+| `ETC-TICKET-E2E-010` | 真实基础设施 direct API 收敛 | P1 | 真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储/Nginx 环境下，导入、source file、OA 草稿、人工确认、delete/reset、Workbench summary、税金/成本/search direct API 最终收敛；该项必须在 staging/runtime smoke 验证。 |
 
 ## 不属于本地 deterministic E2E 的风险
 
 - 真实大 ZIP、票根网 PDF/XML/TXT 混合包、Nginx 上传超时、对象存储权限和 source file 大文件 I/O。
 - 真实 OA 草稿页面、附件上传、OA iframe/session/cookie 和人工确认后的真实 OA 系统状态。
 - 生产历史 ETC 迁移、orphan task 清理、旧 business batch pickle 和历史半迁移 relation。
-- 真实 PostgreSQL/RabbitMQ/Redis/systemd import/workbench/tax/cost/search worker drain 和长队列重试。
-- 真实 Workbench、税金抵扣、成本统计、search 全量重建后的最终页面展示。
+- 真实 PostgreSQL/RabbitMQ/Redis/systemd import/OA/file 后台任务、税金/成本 direct API 收敛和长队列重试。
+- 真实 Workbench、税金抵扣、成本统计和 Search direct API 在全量数据下的最终页面展示。

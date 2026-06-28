@@ -90,7 +90,6 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
                     },
                     "runtime_infrastructure": {
                         "queue_backlog": {"dead_lettered": 3},
-                        "dirty_scopes": {"done": 130021, "pending": 3},
                         "failed_jobs": 3,
                         "worker_metrics": [
                             {"status": "available"},
@@ -108,10 +107,9 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
 
         self.assertEqual(report["runtime_release_name"], "main-abc-20260616")
         self.assertEqual(report["runtime_blockers"]["queue_backlog"], {"dead_lettered": 3})
-        self.assertEqual(report["runtime_blockers"]["dirty_scopes"], {"pending": 3})
         self.assertEqual(report["runtime_blockers"]["failed_jobs"], 3)
         self.assertEqual(report["runtime_blockers"]["worker_status_counts"], {"available": 1, "stale": 1})
-        self.assertGreaterEqual(report["runtime_blocker_count"], 4)
+        self.assertGreaterEqual(report["runtime_blocker_count"], 3)
 
     def test_extracts_runtime_blockers_from_compact_worker_status_counts(self) -> None:
         report = collect_health_ready_payload(
@@ -121,7 +119,6 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
                     "status": "ready",
                     "runtime_infrastructure": {
                         "queue_backlog": {"done": 20},
-                        "dirty_scopes": {"done": 100},
                         "worker_metric_count": 2,
                         "worker_status_counts": {"available": 1, "mismatch": 1},
                     },

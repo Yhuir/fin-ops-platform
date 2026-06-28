@@ -4,7 +4,6 @@ import type {
   BankDetailAccountsResponse,
   BankDetailAutoCandidateCategory,
   BankDetailCategoryResolutionStatus,
-  BankDetailReadModelStatus,
   BankDetailExportRequest,
   BankDetailExportResponse,
   BankDetailTransaction,
@@ -25,7 +24,6 @@ import type {
 } from "./types";
 import { ApiClientError, apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
-import type { OperationBarrierTarget } from "../operationBarrier/api";
 
 type ApiBankDetailAccount = {
   account_identity?: string | null;
@@ -50,8 +48,6 @@ type ApiBankDetailAccountsResponse = {
   balance_account_count: number;
   missing_balance_account_count: number;
   total_balances_by_currency?: Record<string, string>;
-  balance_read_model_status?: string | null;
-  read_model_status?: string | null;
   cache_status?: string | null;
 };
 
@@ -152,7 +148,6 @@ type ApiBankDetailTransactionsResponse = {
   category_counts?: Record<string, number>;
   tag_dictionary?: Parameters<typeof mapBankTransactionTagDictionary>[0];
   bank_transaction_tags?: Parameters<typeof mapBankTransactionTagDictionary>[0];
-  read_model_status?: string | null;
   cache_status?: string | null;
 };
 
@@ -222,13 +217,6 @@ type ApiBankAutoTagRulesResponse = {
     side?: string | null;
   }>;
   permissions?: { can_save?: boolean };
-  read_model_status?: "fresh" | "refreshing" | string;
-  read_model_scope_keys?: unknown;
-  readModelScopeKeys?: unknown;
-  freshness_targets?: unknown;
-  freshnessTargets?: unknown;
-  operation_barrier_targets?: unknown;
-  operationBarrierTargets?: unknown;
 };
 
 const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
@@ -249,13 +237,6 @@ const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
   invalid_manual_category_assignment_target: "当前流水已有自动标签或候选确认状态，不能走人工待分类入口。",
   invalid_manual_category_assignment_candidate: "只能选择当前自动标签规则中的可用标签。",
 };
-
-function normalizeBankDetailReadModelStatus(value: unknown): BankDetailReadModelStatus {
-  if (value === "fresh" || value === "refreshing" || value === "stale" || value === "schema_mismatch" || value === "missing") {
-    return value;
-  }
-  return "refreshing";
-}
 
 function fieldErrorMessagesFromPayload(payload: unknown) {
   if (!payload || typeof payload !== "object" || !Array.isArray((payload as { field_errors?: unknown }).field_errors)) {
@@ -556,41 +537,6 @@ function stringList(values: unknown[] | undefined) {
   return Array.isArray(values) ? values.map(String).map((value) => value.trim()).filter(Boolean) : [];
 }
 
-function unknownStringList(value: unknown) {
-  return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
-}
-
-function readModelTargets(value: unknown): OperationBarrierTarget[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const targets: OperationBarrierTarget[] = [];
-  const seen = new Set<string>();
-  value.forEach((item) => {
-    if (!item || typeof item !== "object") {
-      return;
-    }
-    const raw = item as Record<string, unknown>;
-    const readModelKey = String(raw.readModelKey ?? raw.read_model_key ?? "").trim();
-    const scopeKey = String(raw.scopeKey ?? raw.scope_key ?? "").trim();
-    const scopeType = String(raw.scopeType ?? raw.scope_type ?? "").trim();
-    if (!readModelKey || !scopeKey) {
-      return;
-    }
-    const key = `${readModelKey}\u0000${scopeKey}\u0000${scopeType}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    targets.push({
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    });
-  });
-  return targets;
-}
-
 function mapAutoTagRuleConditions(rules: ApiBankAutoTagRuleConditions | undefined): BankAutoTagRuleConditions {
   return {
     matchFields: stringList(rules?.match_fields),
@@ -653,8 +599,6 @@ function mapAutoTagSystemRule(rule: ApiBankAutoTagSystemRule | undefined): BankA
 }
 
 function mapAutoTagRulesResponse(payload: ApiBankAutoTagRulesResponse): BankAutoTagRulesResponse {
-  const freshnessTargets = readModelTargets(payload.freshness_targets ?? payload.freshnessTargets);
-  const operationBarrierTargets = readModelTargets(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     version: Number(payload.version) || 1,
     systemRule: mapAutoTagSystemRule(payload.system_rule),
@@ -682,10 +626,6 @@ function mapAutoTagRulesResponse(payload: ApiBankAutoTagRulesResponse): BankAuto
       })).filter((option) => option.value && option.label)
       : [],
     permissions: { canSave: payload.permissions?.can_save !== false },
-    readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
-    readModelScopeKeys: unknownStringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
-    freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
   };
 }
 
@@ -759,8 +699,6 @@ export async function fetchBankDetailAccounts({
     balanceAccountCount: payload.balance_account_count,
     missingBalanceAccountCount: payload.missing_balance_account_count,
     totalBalancesByCurrency: payload.total_balances_by_currency ?? undefined,
-    balanceReadModelStatus: normalizeBankDetailReadModelStatus(payload.balance_read_model_status),
-    readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
     cacheStatus: payload.cache_status ?? null,
   };
 }
@@ -827,7 +765,6 @@ export async function fetchBankDetailTransactions({
     },
     categoryCounts: mapCategoryCounts(payload.category_counts),
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
-    readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
     cacheStatus: payload.cache_status ?? null,
   };
 }

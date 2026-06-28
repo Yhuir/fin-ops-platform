@@ -42,9 +42,11 @@ function responsePathMatches(responseUrl: string, pathname: string) {
   return new URL(responseUrl).pathname === pathname;
 }
 
-async function expectFreshReadModelResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
-  const payload = await (await responsePromise).json();
-  expect(payload).toMatchObject({ read_model_status: "fresh" });
+async function expectDirectPayloadResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
+  const payload = await (await responsePromise).json() as Record<string, unknown>;
+  expect(payload.read_model_status).toBeUndefined();
+  expect(payload.read_model_scope_key).toBeUndefined();
+  expect(payload.read_model_stale_reasons).toBeUndefined();
 }
 
 async function previewInvoiceFiles(
@@ -116,7 +118,7 @@ test.describe("invoice import browser flow", () => {
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
-  test("confirms invoice import and observes downstream invoice read models as fresh", async ({ page }) => {
+  test("confirms invoice import and observes downstream direct payloads", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       invoiceImportDownstreamFanout: true,
@@ -135,7 +137,7 @@ test.describe("invoice import browser flow", () => {
       && response.status() === 200);
     await page.goto("/output-invoice-collections");
     await expect(page.getByTestId("output-invoice-collections-page")).toBeVisible();
-    await expectFreshReadModelResponse(outputRowsResponse);
+    await expectDirectPayloadResponse(outputRowsResponse);
     await expect(page.getByText("XSFP-IMPORT-E2E-001")).toBeVisible();
     await expect(page.getByText("发票导入销项客户")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -146,7 +148,7 @@ test.describe("invoice import browser flow", () => {
       && response.status() === 200);
     await page.goto("/input-invoice-usage");
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
-    await expectFreshReadModelResponse(inputRowsResponse);
+    await expectDirectPayloadResponse(inputRowsResponse);
     await expect(page.getByText("SD-INV-IMPORT-E2E-001")).toBeVisible();
     await expect(page.getByText("发票导入进项供应商")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -157,7 +159,7 @@ test.describe("invoice import browser flow", () => {
       && response.status() === 200);
     await page.goto("/tax-offset");
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    await expectFreshReadModelResponse(taxOffsetResponse);
+    await expectDirectPayloadResponse(taxOffsetResponse);
     await expect(page.getByText("SD-INV-IMPORT-E2E-001")).toBeVisible();
     await expect(page.getByText("发票导入进项供应商")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -168,7 +170,7 @@ test.describe("invoice import browser flow", () => {
       && response.status() === 200);
     await page.goto("/pending-invoices");
     await expect(page.getByTestId("pending-invoices-page")).toBeVisible();
-    await expectFreshReadModelResponse(pendingRowsResponse);
+    await expectDirectPayloadResponse(pendingRowsResponse);
     const importedPendingRow = page.getByRole("row", { name: /SD-INV-IMPORT-E2E-001/ });
     await expect(importedPendingRow).toBeVisible();
     await expect(importedPendingRow).toContainText("发票导入进项供应商");
@@ -181,7 +183,7 @@ test.describe("invoice import browser flow", () => {
       && response.status() === 200);
     await page.goto("/oa-pending-payments");
     await expect(page.getByTestId("oa-pending-payments-page")).toBeVisible();
-    await expectFreshReadModelResponse(oaRowsResponse);
+    await expectDirectPayloadResponse(oaRowsResponse);
     await expect(page.getByText("发票导入待付款申请人")).toBeVisible();
     await expect(page.getByText("SD-INV-IMPORT-E2E-001")).toBeVisible();
     await expect(page.getByRole("row", { name: /发票导入待付款申请人/ })).toContainText("已支付");
@@ -193,7 +195,7 @@ test.describe("invoice import browser flow", () => {
       && response.status() === 200);
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    await expectFreshReadModelResponse(costRowsResponse);
+    await expectDirectPayloadResponse(costRowsResponse);
     await page.getByRole("button", { name: "按项目" }).click();
     const importedCostProject = page.getByRole("button", { name: /发票导入成本项目/ });
     await expect(importedCostProject).toBeVisible();

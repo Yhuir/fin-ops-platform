@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("batch accounting API", () => {
-  test("keeps missing read model status non-fresh", async () => {
+  test("maps empty direct payload without freshness fields", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
@@ -28,10 +28,16 @@ describe("batch accounting API", () => {
       bucket: "unsubmitted",
     });
 
-    expect(payload.readModelStatus).toBe("refreshing");
+    expect(payload).toMatchObject({
+      summary: { unsubmittedCount: 0, submittedCount: 0 },
+      bankRows: [],
+      oaRows: [],
+      relationsByBankRowId: {},
+      pagination: {},
+    });
   });
 
-  test("maps mutation operation barrier targets", async () => {
+  test("maps mutation affected scopes", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
@@ -40,12 +46,6 @@ describe("batch accounting API", () => {
         affected_row_ids: ["bank-1", "oa-1"],
         affected_months: ["2026-05"],
         affected_scope_keys: ["2026-05"],
-        freshness_targets: [
-          { read_model_key: "workbench_relation", scope_key: "2026-05" },
-        ],
-        operation_barrier_targets: [
-          { read_model_key: "workbench_relation", scope_key: "2026-05" },
-        ],
         message: "ok",
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
     );
@@ -60,9 +60,6 @@ describe("batch accounting API", () => {
     });
 
     expect(payload.affectedScopeKeys).toEqual(["2026-05"]);
-    expect(payload.operationBarrierTargets).toEqual([
-      { readModelKey: "workbench_relation", scopeKey: "2026-05" },
-    ]);
     expect(fetch).toHaveBeenCalledWith(
       "/api/batch-accounting/submit",
       expect.objectContaining({

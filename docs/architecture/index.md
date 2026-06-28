@@ -5,19 +5,20 @@
 - `../../ARCHITECTURE.md`：系统架构总览。
 - `system-overview.md`：模块边界和主要数据流。
 - `data-model.md`：核心领域实体和状态设计。
-- `module-boundaries/README.md`：模块边界、I/O、文件范围、read model 合同和 GSD 维护规则。
+- `direct-api-read-architecture.md`：页面 direct API 目标读架构和 read model 下线决策。
+- `module-boundaries/README.md`：模块边界、I/O、文件范围、direct API / legacy read model 合同和 GSD 维护规则。
 
 ## 专题
 
 - `oa-integration.md`：OA 页面壳体、登录复用、菜单权限和部署路径。
-- `persistence-and-read-models.md`：当前持久化、read model、缓存失效和性能演进。
-- `module-boundaries/read-model-contracts.md`：当前 read model manifest 合同、projection 目标态和验收要求。
+- `persistence-and-read-models.md`：当前持久化、legacy read model、direct API 迁移和性能演进。
+- `module-boundaries/read-model-contracts.md`：legacy read model manifest 合同和下线清单；不再作为新增设计方向。
 - `deployment.md`：部署形态、环境、反向代理和发布边界。
 - `backend-refactor/README.md`：Python-first 后端架构重构文档入口。
 - `backend-refactor/target-architecture.md`：Python-first 目标架构、组件边界和技术取舍。
 - `backend-refactor/module-refactor-plan.md`：模块拆分、职责、验收顺序和测试门禁。
 - `backend-refactor/runtime-call-chain.md`：静态调用链、动态运行时序和优化规则。
-- `backend-refactor/read-model-and-external-services.md`：Read Model、Redis、RabbitMQ、PostgreSQL、OA Mongo 和对象存储契约。
+- `backend-refactor/read-model-and-external-services.md`：历史 Read Model、Redis、RabbitMQ、PostgreSQL、OA Mongo 和对象存储契约；迁移时以 direct API 目标架构为准。
 - `backend-refactor/migration-roadmap.md`：分阶段重构路线、merge 策略和回滚口径。
 - `backend-refactor/ai-execution-rules.md`：Codex/Gemini 执行 prompt 时必须遵守的状态、测试和分支规则。
 - `backend-refactor/migration-state-log.md`：AI 状态机，记录 prompt 完成度、验证结果和下一步上下文。
@@ -27,4 +28,4 @@
 
 - `../app-architecture/README.md`：当前 app 架构维护入口。
 - `../app-architecture/pages.md`：页面、API client、刷新来源和页面间影响关系。
-- `../app-architecture/runtime-and-ownership.md`：运行时调用链、dirty/outbox、read model、worker 和模块 owner。
+- `../app-architecture/runtime-and-ownership.md`：运行时调用链、direct API 目标、legacy dirty/outbox/read model、worker 和模块 owner。

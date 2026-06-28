@@ -80,19 +80,6 @@ class ImportFactBootstrapConnection:
         return 1
 
 
-class RuntimeBootstrapQueue:
-    def __init__(self) -> None:
-        self.enqueued: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-        self.enqueued.append((scope_type, scope_key, reason))
-
-
-class MissingBankAccountBalanceRepository:
-    def list_bank_account_balances(self, **_kwargs: object) -> dict[str, object] | None:
-        raise RuntimeError('relation "read_model.bank_account_balances" does not exist')
-
-
 class RuntimeBootstrapTests(unittest.TestCase):
     def test_lightweight_bootstrap_does_not_call_full_state_load_and_exposes_repositories(self) -> None:
         store = LoadTrackingStore()
@@ -208,34 +195,30 @@ class RuntimeBootstrapTests(unittest.TestCase):
 
         self.assertNotIn("_initialize_runtime_services(self._load_persisted_state", source)
 
-    def test_production_postgres_workbench_requires_sql_read_model_without_sync_builder(self) -> None:
+    def test_production_postgres_workbench_uses_direct_payload_builder(self) -> None:
         app = object.__new__(server_module.Application)
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
         app._workbench_sql_read_repository = None
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": None})()
-        app._build_api_workbench_payload = lambda _month: (_ for _ in ()).throw(
-            AssertionError("production PostgreSQL workbench API must not synchronously build payload")
-        )
+        app._build_api_workbench_payload = lambda month: {"month": month, "rows": []}
 
         response = app._handle_api_workbench("2026-05")
 
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("read_model_unavailable", response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("2026-05", response.body)
 
-    def test_production_postgres_bank_details_transactions_do_not_fallback_to_legacy_service(self) -> None:
+    def test_production_postgres_bank_details_transactions_use_direct_service_payload(self) -> None:
         app = object.__new__(server_module.Application)
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
         app._bank_detail_sql_read_repository = None
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": None})()
         app._bank_details_service = type(
-            "LegacyBankDetails",
+            "DirectBankDetails",
             (),
             {
-                "list_transactions": lambda *args, **kwargs: (_ for _ in ()).throw(
-                    AssertionError("production bank details API must not fallback to legacy service")
-                ),
+                "list_transactions": lambda *args, **kwargs: {"rows": [], "pagination": {"total": 0}},
                 "_bank_transaction_tags_payload": lambda *args, **kwargs: {},
             },
         )()
@@ -253,22 +236,20 @@ class RuntimeBootstrapTests(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(response.status_code, 202)
-        self.assertIn("refreshing", response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("pagination", response.body)
 
-    def test_production_postgres_bank_details_accounts_do_not_fallback_to_legacy_service(self) -> None:
+    def test_production_postgres_bank_details_accounts_use_direct_service_payload(self) -> None:
         app = object.__new__(server_module.Application)
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
         app._bank_detail_sql_read_repository = None
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": None})()
         app._bank_details_service = type(
-            "LegacyBankDetails",
+            "DirectBankDetails",
             (),
             {
-                "list_accounts": lambda *args, **kwargs: (_ for _ in ()).throw(
-                    AssertionError("production bank details accounts API must not fallback to legacy service")
-                ),
+                "list_accounts": lambda *args, **kwargs: {"accounts": [], "total_balance": None},
             },
         )()
 
@@ -280,39 +261,8 @@ class RuntimeBootstrapTests(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(response.status_code, 202)
-        self.assertIn("refreshing", response.body)
-
-    def test_production_postgres_bank_details_accounts_missing_balance_table_returns_refreshing(self) -> None:
-        app = object.__new__(server_module.Application)
-        app._bootstrap_mode = "production"
-        app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
-        app._bank_detail_sql_read_repository = object()
-        app._bank_account_balance_sql_read_repository = MissingBankAccountBalanceRepository()
-        queue = RuntimeBootstrapQueue()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
-        app._bank_details_service = type(
-            "LegacyBankDetails",
-            (),
-            {
-                "list_accounts": lambda *args, **kwargs: (_ for _ in ()).throw(
-                    AssertionError("production bank details accounts API must not fallback to legacy service")
-                ),
-            },
-        )()
-
-        response = app._bank_details_routes().route(
-            "GET",
-            "/api/bank-details/accounts",
-            {"date_from": ["2026-04-01"], "date_to": ["2026-04-30"]},
-            None,
-            {},
-        )
-
-        self.assertEqual(response.status_code, 202)
-        self.assertIn("refreshing", response.body)
-        self.assertIn("bank_account_balance", response.body)
-        self.assertEqual(queue.enqueued, [("bank_account_balance", "all", "api_migration_missing")])
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("accounts", response.body)
 
     def test_production_snapshot_reads_are_confined_to_legacy_allowlist(self) -> None:
         allowed_paths = {
@@ -349,9 +299,9 @@ class RuntimeBootstrapTests(unittest.TestCase):
         source = Path("backend/src/fin_ops_platform/app/server.py").read_text(encoding="utf-8")
 
         self.assertIn("def _bank_transaction_tag_reader", source)
-        self.assertNotIn("category_provider=self._bank_transaction_effective_category_provider", source)
-        self.assertNotIn("effective_category_provider=self._bank_transaction_effective_category_provider", source)
         self.assertNotIn("self._bank_transaction_effective_category_provider.bulk_get_for_rows(", source)
+        self.assertNotIn("BankTransactionTagReadFacade", source)
+        self.assertNotIn("_bank_detail_sql_read_repository", source)
         self.assertIn("effective_category_provider=self._bank_transaction_tag_reader()", source)
 
     def test_runtime_worker_handlers_do_not_construct_effective_category_provider(self) -> None:
@@ -361,18 +311,15 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertNotIn("SearchService()", source)
         self.assertIn("_runtime_search_service(import_service)", source)
 
-    def test_standalone_worker_wires_bank_tag_facade_to_tag_consuming_read_models(self) -> None:
+    def test_standalone_worker_uses_direct_effective_category_provider(self) -> None:
         source = Path("backend/src/fin_ops_platform/app/worker.py").read_text(encoding="utf-8")
 
-        self.assertIn("BankTransactionTagReadFacade", source)
-        self.assertIn("SearchPendingSqlProjectionBuilder(", source)
-        self.assertIn("bank_transaction_tag_read_facade=bank_transaction_tag_read_facade", source)
-        self.assertIn("effective_category_provider=bank_transaction_tag_read_facade", source)
-        self.assertIn("TurnoverLedgerSqlProjectionBuilder(", source)
+        self.assertNotIn("BankTransactionTagReadFacade", source)
+        self.assertNotIn("bank_transaction_tag_read_facade", source)
+        self.assertNotIn("TurnoverLedgerSqlProjectionBuilder", source)
 
     def test_non_tag_downstream_modules_do_not_depend_on_bank_tag_facade(self) -> None:
         paths = [
-            Path("backend/src/fin_ops_platform/services/workbench_sql_projection.py"),
             Path("backend/src/fin_ops_platform/services/matching.py"),
             Path("backend/src/fin_ops_platform/services/reconciliation.py"),
             Path("backend/src/fin_ops_platform/services/input_invoice_usage_service.py"),
@@ -390,31 +337,16 @@ class RuntimeBootstrapTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_bank_transaction_tag_reader_uses_facade_only_for_postgres_runtime(self) -> None:
+    def test_bank_transaction_tag_reader_uses_direct_provider(self) -> None:
         app = object.__new__(server_module.Application)
         provider = object()
-        facade = object()
         app._bank_transaction_effective_category_provider = provider
-        app._bank_transaction_tag_read_facade = facade
 
-        app._bootstrap_mode = "production"
-        app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
-        self.assertIs(app._bank_transaction_tag_reader(), facade)
-
-        app._bootstrap_mode = "legacy"
         self.assertIs(app._bank_transaction_tag_reader(), provider)
 
-        app._bootstrap_mode = "production"
-        app._state_store = type("MongoStore", (), {"storage_backend": "mongo"})()
-        self.assertIs(app._bank_transaction_tag_reader(), provider)
-
-    def test_postgres_category_rebinding_keeps_downstream_services_on_facade(self) -> None:
+    def test_category_rebinding_keeps_downstream_services_on_direct_provider(self) -> None:
         app = object.__new__(server_module.Application)
-        facade = object()
         provider = object()
-        app._bootstrap_mode = "production"
-        app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
-        app._build_bank_transaction_tag_read_facade = lambda: facade
         app._turnover_ledger_service = type("TurnoverService", (), {})()
         app._live_workbench_service = type("LiveWorkbenchService", (), {})()
         app._pending_invoice_query_service = type("PendingInvoiceService", (), {})()
@@ -426,9 +358,9 @@ class RuntimeBootstrapTests(unittest.TestCase):
         )
 
         self.assertIs(app._bank_transaction_effective_category_provider, provider)
-        self.assertIs(app._turnover_ledger_service._category_provider, facade)
-        self.assertIs(app._live_workbench_service._category_provider, facade)
-        self.assertIs(app._pending_invoice_query_service._effective_category_provider, facade)
+        self.assertIs(app._turnover_ledger_service._category_provider, provider)
+        self.assertIs(app._live_workbench_service._category_provider, provider)
+        self.assertIs(app._pending_invoice_query_service._effective_category_provider, provider)
 
 
 if __name__ == "__main__":

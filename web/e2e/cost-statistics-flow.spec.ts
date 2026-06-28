@@ -5,8 +5,6 @@ import { expect, test, type Locator, type Page } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 type CostExplorerBrowserPayload = {
-  read_model_scope_key?: string;
-  read_model_status?: string;
   summary?: {
     row_count?: number;
     transaction_count?: number;
@@ -155,53 +153,23 @@ test.describe("cost statistics browser flow", () => {
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThanOrEqual(3);
   });
 
-  for (const scenario of [
-    {
-      status: "refreshing" as const,
-      message: "成本统计读模型正在刷新，当前结果生成后会自动更新。",
-    },
-    {
-      status: "stale" as const,
-      message: "成本统计读模型不是最新，当前结果刷新完成后会自动更新。",
-    },
-    {
-      status: "failed" as const,
-      message: "成本统计数据暂不可用，请等待后台刷新完成后重试。",
-    },
-  ]) {
-    test(`does not treat ${scenario.status} read model payloads as final empty cost data`, async ({ page }) => {
-      const browserErrors: string[] = [];
-      page.on("console", (message) => {
-        if (message.type() === "error") {
-          browserErrors.push(`console error: ${message.text()}`);
-        }
-      });
-      page.on("pageerror", (error) => browserErrors.push(`page error: ${error.message}`));
-      page.on("requestfailed", (request) => {
-        const failure = request.failure();
-        if (failure?.errorText === "net::ERR_ABORTED") {
-          return;
-        }
-        browserErrors.push(`request failed: ${request.method()} ${request.url()} ${failure?.errorText ?? ""}`.trim());
-      });
+  test("keeps direct explorer rows visible without page-level read model polling", async ({ page }) => {
+    const browserErrors = collectBrowserErrors(page);
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
-      await installDeterministicApiMocks(page, {
-        sessionMode: "full_access",
-        costStatisticsReadModelStatus: scenario.status,
-      });
+    await page.goto("/cost-statistics");
+    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-001" })).toBeVisible();
+    await expect(page.getByText("成本统计读模型正在刷新")).toHaveCount(0);
+    await expect(page.getByText("成本统计读模型不是最新")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "导出中心" })).toBeEnabled();
 
-      await page.goto("/cost-statistics");
-      await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-      await expect(page.getByRole("status").filter({ hasText: scenario.message })).toBeVisible();
-      await expect(page.getByText("待刷新")).toHaveCount(2);
-      await expect(page.getByText("--")).toBeVisible();
-      await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
-      await expect(page.getByText("云南溯源科技")).toHaveCount(0);
-      await expect(page.getByRole("grid", { name: "按时间统计表" })).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "导出中心" })).toBeDisabled();
-      expect(browserErrors).toEqual([]);
-    });
-  }
+    const initialExplorerGets = api.count("GET /api/cost-statistics/explorer");
+    await page.waitForTimeout(1200);
+    expect(api.count("GET /api/cost-statistics/explorer")).toBe(initialExplorerGets);
+    expect(browserErrors).toEqual([]);
+  });
 
   test("downloads the current time-view cost rows with request filters and cost fields", async ({ page }, testInfo) => {
     const browserErrors: string[] = [];
@@ -414,16 +382,11 @@ test.describe("cost statistics browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("does not treat non-fresh transaction detail or export responses as successful results", async ({ page }) => {
+  test("keeps transaction detail unavailable local while export remains direct", async ({ page }, testInfo) => {
     const browserErrors = collectBrowserErrors(page);
-    let downloadFired = false;
-    page.on("download", () => {
-      downloadFired = true;
-    });
     await installDeterministicApiMocks(page, {
       costStatisticsExportDownloadSuccess: true,
-      costStatisticsExportReadModelStatus: "stale",
-      costStatisticsTransactionDetailReadModelStatus: "stale",
+      costStatisticsTransactionDetailStatus: "stale",
       sessionMode: "full_access",
     });
 
@@ -453,25 +416,24 @@ test.describe("cost statistics browser flow", () => {
     });
     await exportDialog.getByRole("button", { name: "仅预览" }).click();
     const previewResponse = await previewResponsePromise;
-    expect(previewResponse.status()).toBe(409);
-    await expect(exportDialog.getByText("成本统计数据正在刷新，请稍后重试导出。")).toBeVisible();
-    await expect(exportDialog.getByRole("table", { name: "导出预览表" })).toHaveCount(0);
+    expect(previewResponse.status()).toBe(200);
+    await expect(exportDialog.getByText("成本统计数据正在刷新，请稍后重试导出。")).toHaveCount(0);
+    await expect(exportDialog.getByRole("table", { name: "导出预览表" })).toBeVisible();
 
     const exportResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "GET"
         && url.pathname.endsWith("/api/cost-statistics/export");
     });
+    const downloadPromise = page.waitForEvent("download");
     await exportDialog.getByRole("button", { name: "导出" }).click();
-    const exportResponse = await exportResponsePromise;
-    expect(exportResponse.status()).toBe(409);
-    await expect(exportDialog.getByText("成本统计数据正在刷新，请稍后重试导出。")).toBeVisible();
-    await page.waitForTimeout(250);
-    expect(downloadFired).toBe(false);
+    const [exportResponse, download] = await Promise.all([exportResponsePromise, downloadPromise]);
+    expect(exportResponse.status()).toBe(200);
+    await download.saveAs(testInfo.outputPath("cost-statistics-direct-export.xlsx"));
     expect(browserErrors.filter((error) => !error.includes("409 (Conflict)"))).toEqual([]);
   });
 
-  test("keeps large cost tables fresh, scrollable, and usable on narrow screens", async ({ page }) => {
+  test("keeps large cost tables direct, scrollable, and usable on narrow screens", async ({ page }) => {
     const browserErrors = collectBrowserErrors(page);
     await page.setViewportSize({ width: 390, height: 820 });
     await installDeterministicApiMocks(page, {
@@ -488,8 +450,8 @@ test.describe("cost statistics browser flow", () => {
     });
     await page.goto("/cost-statistics");
     const timeExplorerPayload = await (await timeExplorerResponsePromise).json() as CostExplorerBrowserPayload;
-    expect(timeExplorerPayload.read_model_status).toBe("fresh");
-    expect(timeExplorerPayload.read_model_scope_key).toBe("active:2026-03");
+    expect("read_model_status" in timeExplorerPayload).toBe(false);
+    expect("read_model_scope_key" in timeExplorerPayload).toBe(false);
     expect(timeExplorerPayload.summary?.row_count).toBeGreaterThanOrEqual(120);
 
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
@@ -513,8 +475,8 @@ test.describe("cost statistics browser flow", () => {
     });
     await page.getByRole("button", { name: "按项目" }).click();
     const projectExplorerPayload = await (await projectExplorerResponsePromise).json() as CostExplorerBrowserPayload;
-    expect(projectExplorerPayload.read_model_status).toBe("fresh");
-    expect(projectExplorerPayload.read_model_scope_key).toBe("active:all");
+    expect("read_model_status" in projectExplorerPayload).toBe(false);
+    expect("read_model_scope_key" in projectExplorerPayload).toBe(false);
 
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     const largeProject = page.getByRole("button", { name: /大型成本浏览器稳定性项目/ }).first();

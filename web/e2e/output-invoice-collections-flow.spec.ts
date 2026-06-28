@@ -561,26 +561,24 @@ test.describe("output invoice collections browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("shows read model refreshing diagnostics instead of stale rows or a true empty state", async ({ page }) => {
+  test("keeps direct rows visible without page-level read model polling", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      outputInvoiceCollectionReadModelStatus: "stale",
-      sessionMode: "full_access",
-    });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
     await page.goto("/output-invoice-collections");
     await expect(page.getByTestId("output-invoice-collections-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "销项发票收款情况" })).toBeVisible();
 
-    await expect(page.getByText("销项发票收款情况数据正在刷新")).toBeVisible();
-    await expect(page.getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeVisible();
+    await expect(page.getByText("销项发票收款情况数据正在刷新")).toHaveCount(0);
+    await expect(page.getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toHaveCount(0);
     await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
-    await expect(page.getByText("XSFP-E2E-0001")).toHaveCount(0);
-    await expect(page.getByText("output_invoice_collection_stale")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "状态/提醒" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "待出收据" })).toHaveCount(0);
+    await expect(page.getByText("XSFP-E2E-0001")).toBeVisible();
+    await expect(page.getByRole("button", { name: "状态/提醒" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "待出收据" })).toBeVisible();
 
-    expect(api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThanOrEqual(1);
+    const stableRowsCount = api.count("GET /api/output-invoice-collections/rows");
+    await page.waitForTimeout(1_200);
+    expect(api.count("GET /api/output-invoice-collections/rows")).toBe(stableRowsCount);
     expect(api.count("GET /api/output-invoice-collections/filter-options")).toBeGreaterThanOrEqual(1);
     expect(browserErrors).toEqual([]);
   });

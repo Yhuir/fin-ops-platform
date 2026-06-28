@@ -45,17 +45,3 @@ create index if not exists pending_invoice_rows_direction_month_page_idx
         trade_date desc,
         row_id
     );
-
-create index if not exists search_index_rows_generated_idx
-    on read_model.search_index_rows (
-        generated_at desc,
-        row_id
-    );
-
-create index if not exists search_index_rows_scope_status_generated_idx
-    on read_model.search_index_rows (
-        scope_month,
-        status,
-        generated_at desc,
-        row_id
-    );

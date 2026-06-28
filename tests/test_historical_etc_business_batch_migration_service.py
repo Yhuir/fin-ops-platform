@@ -76,7 +76,6 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
                 },
             )
             refreshes: list[tuple[list[str], str]] = []
-            invalidations: list[list[str]] = []
             persisted_relations: list[list[str]] = []
             original_update_relation_metadata = app._workbench_pair_relation_service.update_relation_metadata_for_case_id
 
@@ -108,10 +107,6 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
                         "history": history,
                         "changed_case_ids": [str(kwargs["case_id"])],
                         "affected_months": ["2026-02"],
-                        "read_model_status": "fresh",
-                        "read_model_stale_reasons": [],
-                        "read_model_scope_keys": ["2026-02"],
-                        "refresh_enqueued": False,
                     }
 
             relation_command_service = RecordingRelationCommandService()
@@ -121,7 +116,6 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
                 link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
                 refresh_after_etc_invoice_link=lambda months, reason: refreshes.append((list(months), reason)),
                 persist_pair_relations=lambda case_ids: persisted_relations.append(list(case_ids)),
-                invalidate_workbench_scopes=lambda scopes: invalidations.append(list(scopes)),
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
             )
 
@@ -173,7 +167,6 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
         self.assertEqual({invoice.business_batch_id for invoice in invoices}, {"etc_business_batch_hist_20260215_154900"})
         self.assertEqual(canonical_invoices, {})
         self.assertEqual(refreshes[-1], (["2026-01", "2026-02"], "historical_etc_business_batch_migration:ETC-OA-20260215-154900"))
-        self.assertEqual(invalidations[-1], ["all", "2026-01", "2026-02"])
         self.assertEqual(persisted_relations[-1], ["CASE-HIST-MIGRATION"])
         self.assertIsNotNone(relation)
         assert relation is not None
@@ -243,7 +236,6 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
-                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
             )
 

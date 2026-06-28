@@ -65,10 +65,6 @@ type ApiCostStatisticsExplorer = {
   time_rows: ApiCostTimeRow[];
   project_rows: ApiCostProjectExplorerRow[];
   expense_type_rows: ApiCostExpenseTypeExplorerRow[];
-  read_model_status?: string | null;
-  read_model_scope_key?: string | null;
-  read_model_generated_at?: string | null;
-  read_model_stale_reasons?: unknown[] | null;
 };
 
 type ApiCostProjectRow = {
@@ -134,17 +130,6 @@ function mapSummary(summary: ApiCostSummary) {
     transactionCount: summary.transaction_count,
     totalAmount: summary.total_amount,
   };
-}
-
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function stringList(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  return value.map((item) => String(item ?? "").trim()).filter(Boolean);
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
@@ -254,10 +239,6 @@ export async function fetchCostStatisticsExplorer(
       transactionCount: row.transaction_count,
       projectCount: row.project_count,
     })),
-    readModelStatus: optionalString(payload.read_model_status) as CostStatisticsExplorer["readModelStatus"],
-    readModelScopeKey: optionalString(payload.read_model_scope_key),
-    readModelGeneratedAt: optionalString(payload.read_model_generated_at),
-    readModelStaleReasons: stringList(payload.read_model_stale_reasons),
   };
   costExplorerCache.set(buildExplorerCacheKey(month, projectScope), {
     payload: mappedPayload,

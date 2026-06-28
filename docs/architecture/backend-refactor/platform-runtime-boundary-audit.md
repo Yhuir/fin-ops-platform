@@ -56,7 +56,7 @@ PF-P002 的结论是：当前 Python 后端已经具备若干生产级平台边�
 | `backend/src/fin_ops_platform/services/settings_data_reset_service.py` | Platform / Ops Reset | Workbench / OA / Imports | 高风险运维动作，必须保持 admin gate 和 audit。 |
 | `backend/src/fin_ops_platform/services/oa_identity_service.py` | Platform / OA Identity | Auth | OA user info / password verification adapter。 |
 | `backend/src/fin_ops_platform/services/oa_role_sync_service.py` | Platform / OA Role Sync | Settings | 从应用设置同步 OA role assignment。 |
-| `backend/src/fin_ops_platform/services/oa_projection_sync.py` | Platform / OA Projection Runtime | Workbench / Search / Pending | 从 OA source adapter 写 PostgreSQL projection，并标记下游 read model dirty。 |
+| `backend/src/fin_ops_platform/services/oa_projection_sync.py` | Platform / OA Projection Runtime | Workbench / Pending / Search direct payload | 从 OA source adapter 写 PostgreSQL projection，并标记 Workbench/Pending 等下游 read model dirty；Search 不进入 dirty/outbox，由 direct `/api/search` 读取。 |
 | `backend/src/fin_ops_platform/services/postgres_repositories/oa_projection.py` | Platform / OA Projection Repository | Workbench / Search / Pending | PostgreSQL OA projection repository 和 adapter。 |
 | `backend/src/fin_ops_platform/services/app_health_service.py` | Platform / Observability | Ops UI / SSE | app health payload 聚合。 |
 | `backend/src/fin_ops_platform/services/app_health_alert_service.py` | Platform / Observability | Ops | health alert 规则。 |

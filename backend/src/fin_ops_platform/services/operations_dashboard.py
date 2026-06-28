@@ -247,23 +247,6 @@ class OperationsDashboardService:
                 "status": "available",
             }
         except Exception:
-            pass
-        try:
-            row = self._connection.fetch_one(
-                """
-                select
-                  count(distinct row_id)::bigint as count,
-                  max(generated_at) as latest_synced_at
-                from read_model.workbench_rows
-                where source_kind = 'oa_attachment_invoice'
-                """
-            ) or {}
-            return {
-                "count": _optional_int(row.get("count")),
-                "latest_synced_at": row.get("latest_synced_at"),
-                "status": "available",
-            }
-        except Exception:
             warnings.append("invoice_oa_attachment_inventory_unknown")
             return {"count": None, "latest_synced_at": None, "status": "unknown"}
 
@@ -335,7 +318,6 @@ class OperationsDashboardService:
         return {
             "outbox": self._safe_metric("outbox_metrics_unavailable", warnings, self._runtime_repository.dashboard_outbox_metric),
             "queues": self._runtime_rows("rabbitmq_metrics_unavailable", warnings, self._runtime_repository.dashboard_queue_metrics),
-            "read_models": self._runtime_rows("read_model_metrics_unavailable", warnings, self._runtime_repository.dashboard_read_model_metrics),
             "workers": self._runtime_rows("worker_metrics_unavailable", warnings, self._runtime_repository.dashboard_worker_metrics),
         }
 

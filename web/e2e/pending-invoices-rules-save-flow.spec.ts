@@ -36,7 +36,7 @@ function startBrowserRuntimeErrorCapture(
 }
 
 test.describe("pending invoices rules save browser flow", () => {
-  test("saves expense rules through the pending invoice freshness barrier and refreshes rows", async ({ page }) => {
+  test("saves expense rules and directly refreshes pending invoice rows", async ({ page }) => {
     const browserErrors = startBrowserRuntimeErrorCapture(page);
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
@@ -63,18 +63,8 @@ test.describe("pending invoices rules save browser flow", () => {
       },
       version: 1,
     });
-
-    await expect.poll(() => api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
-    expect(api.lastBody("POST /api/operation-barrier/status")).toMatchObject({
-      targets: [
-        {
-          read_model_key: "pending_invoice",
-          scope_key: "expense:requires_invoice",
-        },
-      ],
-    });
     await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSave);
-    await expect(page.getByRole("status").filter({ hasText: "规则已保存，相关数据正在刷新。" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "规则已保存。" })).toBeVisible();
     await expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
@@ -94,7 +84,6 @@ test.describe("pending invoices rules save browser flow", () => {
 
     await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
     const rowsBeforeSave = api.count("GET /api/pending-invoices/rows");
-    const barrierBeforeSave = api.count("POST /api/operation-barrier/status");
 
     await page.getByRole("button", { name: "支出待找发票规则设置" }).click();
     await expect(page.getByTestId("pending-invoice-rules-grid")).toBeVisible();
@@ -114,16 +103,14 @@ test.describe("pending invoices rules save browser flow", () => {
     await expect(page.getByRole("alert")).toContainText("待找发票规则保存暂时失败，请重试。");
     await expect(page.getByRole("button", { name: "保存规则" })).toBeEnabled();
     await expect(statementAsInvoiceGroup.getByRole("checkbox", { name: "设备款" })).toBeChecked();
-    expect(api.count("POST /api/operation-barrier/status")).toBe(barrierBeforeSave);
     expect(api.count("GET /api/pending-invoices/rows")).toBe(rowsBeforeSave);
     await expect(page.getByRole("status").filter({ hasText: "规则已保存" })).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "全局操作进度" })).toHaveCount(0);
 
     await page.getByRole("button", { name: "保存规则" }).click();
     await expect.poll(() => api.count("PUT /api/pending-invoices/rules")).toBe(2);
-    await expect.poll(() => api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierBeforeSave);
     await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSave);
-    await expect(page.getByRole("status").filter({ hasText: "规则已保存，相关数据正在刷新。" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "规则已保存。" })).toBeVisible();
     await expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);

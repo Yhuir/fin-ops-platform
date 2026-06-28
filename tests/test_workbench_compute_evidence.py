@@ -81,23 +81,10 @@ class FakeWorkbenchComputeEvidenceConnection:
                     "consumed_count": 1,
                 }
             ]
-        if "from read_model.workbench_generations" in normalized and "read_model.workbench_group_rows" in normalized:
-            return [
-                {
-                    "scope_key": "2026-03",
-                    "row_count": 30,
-                    "oa_row_count": 10,
-                    "bank_row_count": 12,
-                    "invoice_row_count": 8,
-                    "active_relation_row_count": 18,
-                    "held_row_count": 2,
-                    "generated_at": "2026-06-24T01:00:00+00:00",
-                }
-            ]
         if "from pg_stat_statements" in normalized:
             return [
                 {
-                    "query": "select * from read_model.workbench_group_rows where scope_key = $1",
+                    "query": "select * from read_model.workbench_candidate_matches where scope_month = $1",
                     "calls": 10,
                     "total_exec_time": 70.0,
                     "mean_exec_time": 7.0,
@@ -167,11 +154,6 @@ class WorkbenchComputeEvidenceTests(unittest.TestCase):
             sections["candidate_decision_counts"]["data"]["decision_counts_by_scope"][0]["paired_count"],
             3,
         )
-        self.assertEqual(sections["active_generation_row_counts"]["data"][0]["held_row_count"], 2)
-        self.assertEqual(
-            sections["workbench_refresh_after_matching"]["data"]["p95_enqueue_to_done_ms"],
-            1400.0,
-        )
         self.assertTrue(sections["query_timing_evidence"]["data"]["required_metrics"]["query_timing_available"])
         self.assertEqual(sections["explain_probes"]["status"], "available")
         self.assertIn("database_writes", payload["forbidden_actions"])
@@ -188,7 +170,6 @@ class WorkbenchComputeEvidenceTests(unittest.TestCase):
         self.assertEqual(payload["admission_status"], "blocked_by_missing_real_evidence")
         self.assertTrue(payload["production_evidence_required"])
         self.assertIn("worker p95/p99 duration by scope", payload["missing_evidence_fields"])
-        self.assertIn("Workbench enqueue-to-fresh after matching", payload["missing_evidence_fields"])
         self.assertEqual(payload["sections"]["explain_probes"]["status"], "skipped")
 
     def test_main_returns_structured_configuration_missing_report(self) -> None:

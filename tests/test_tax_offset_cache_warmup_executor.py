@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime
 from types import SimpleNamespace
 
 from fin_ops_platform.services.tax_offset_cache_warmup_executor import TaxOffsetCacheWarmupExecutor
-from fin_ops_platform.services.tax_offset_read_model_service import TaxOffsetReadModelService
 from fin_ops_platform.services.tax_offset_runtime_service import TaxOffsetRuntimeService
 
 
@@ -42,10 +40,8 @@ class TaxOffsetCacheWarmupExecutorTests(unittest.TestCase):
         disabled_jobs = _BackgroundJobRecorder()
         disabled_executor = TaxOffsetCacheWarmupExecutor(
             runtime_service=TaxOffsetRuntimeService(),
-            read_model_service=TaxOffsetReadModelService(),
             background_job_service=disabled_jobs,
             month_payload_loader=lambda month: {"month": month},
-            persist_read_models=lambda **_kwargs: None,
             enabled_provider=lambda: False,
         )
 
@@ -57,10 +53,8 @@ class TaxOffsetCacheWarmupExecutorTests(unittest.TestCase):
         enabled_jobs = _BackgroundJobRecorder()
         enabled_executor = TaxOffsetCacheWarmupExecutor(
             runtime_service=TaxOffsetRuntimeService(),
-            read_model_service=TaxOffsetReadModelService(),
             background_job_service=enabled_jobs,
             month_payload_loader=lambda month: {"month": month},
-            persist_read_models=lambda **_kwargs: None,
             enabled_provider=lambda: True,
         )
 
@@ -84,10 +78,8 @@ class TaxOffsetCacheWarmupExecutorTests(unittest.TestCase):
         self.assertEqual(created["idempotency_key"], "tax_offset_cache_warmup:unit_enabled:2026-05,2026-04")
         self.assertEqual(len(enabled_jobs.run_calls), 1)
 
-    def test_run_job_persists_ready_read_model_and_reports_partial_failure(self) -> None:
-        read_models = TaxOffsetReadModelService()
+    def test_run_job_warms_direct_cache_job_without_read_model_persist(self) -> None:
         jobs = _BackgroundJobRecorder()
-        persisted: list[dict[str, object]] = []
 
         def load_payload(month: str) -> dict[str, object]:
             if month == "2026-04":
@@ -101,13 +93,10 @@ class TaxOffsetCacheWarmupExecutorTests(unittest.TestCase):
             }
 
         executor = TaxOffsetCacheWarmupExecutor(
-            runtime_service=TaxOffsetRuntimeService(read_model_service=read_models),
-            read_model_service=read_models,
+            runtime_service=TaxOffsetRuntimeService(),
             background_job_service=jobs,
             month_payload_loader=load_payload,
-            persist_read_models=lambda **kwargs: persisted.append(dict(kwargs)),
             enabled_provider=lambda: True,
-            clock=lambda: datetime(2026, 6, 24, 12, 0, 0),
         )
 
         result = executor.run_job(
@@ -118,32 +107,24 @@ class TaxOffsetCacheWarmupExecutorTests(unittest.TestCase):
         self.assertEqual(result, {"warmed": 1, "failed": 1})
         self.assertEqual(len(jobs.progress_calls), 2)
         self.assertEqual(jobs.progress_calls[0]["phase"], "build_tax_offset_cache")
-        self.assertEqual(persisted[0]["changed_scope_keys"], ["2026-05"])
-        self.assertEqual(persisted[0]["operation"], "tax_offset_cache_warmup")
-        self.assertIn("2026-05", persisted[0]["snapshot"]["read_models"])
-        persisted_model = persisted[0]["snapshot"]["read_models"]["2026-05"]
-        self.assertEqual(persisted_model["cache_status"], "ready")
-        self.assertEqual(persisted_model["generated_at"], "2026-06-24T12:00:00")
         self.assertEqual(jobs.succeeded_jobs[0]["status"], "partial_success")
         self.assertEqual(jobs.succeeded_jobs[0]["message"], "税金抵扣缓存预热部分完成。")
         self.assertEqual(jobs.succeeded_jobs[0]["result_summary"], {"warmed": 1, "failed": 1})
 
-    def test_run_job_noops_without_read_model_service(self) -> None:
+    def test_run_job_without_local_read_model_store_reports_warmup_without_persisting(self) -> None:
         jobs = _BackgroundJobRecorder()
         executor = TaxOffsetCacheWarmupExecutor(
             runtime_service=TaxOffsetRuntimeService(),
-            read_model_service=None,
             background_job_service=jobs,
             month_payload_loader=lambda month: {"month": month},
-            persist_read_models=lambda **_kwargs: None,
             enabled_provider=lambda: True,
         )
 
         result = executor.run_job(SimpleNamespace(job_id="tax-offset-cache-warmup-job-1"), months=["2026-05"])
 
-        self.assertEqual(result, {"warmed": 0, "failed": 0})
-        self.assertEqual(jobs.progress_calls, [])
-        self.assertEqual(jobs.succeeded_jobs, [])
+        self.assertEqual(result, {"warmed": 1, "failed": 0})
+        self.assertEqual(len(jobs.progress_calls), 1)
+        self.assertEqual(jobs.succeeded_jobs[0]["status"], "succeeded")
 
 
 if __name__ == "__main__":

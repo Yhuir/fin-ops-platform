@@ -29,6 +29,142 @@
 
 ## 历史记录
 
+## 2026-06-27 - historical ETC migration fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 historical ETC migration service test 中 fake relation command 残留的旧 read-model output fields。
+- 影响范围：`tests/test_historical_etc_business_batch_migration_service.py` 和 ETC 模块实施记录；不改变运行时代码、API shape、worker、projection 或 Workbench active generation。
+- 关键决策：测试替身不再制造 `read_model_status`、`read_model_scope_keys`、`refresh_enqueued` 或 `read_model_stale_reasons`；保留 direct `status` / `changed_case_ids` / `affected_months`。
+- 测试覆盖：完整 `tests.test_historical_etc_business_batch_migration_service` 通过。
+- 未测风险：ETC legacy downstream projection/worker/dirty scopes 和真实 worker drain 仍留待后续完整 family inventory。
+
+## 2026-06-27 - bank tag facade fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 bank transaction tag facade tests 中 fake repository 残留的旧 read-model output fields。
+- 影响范围：`tests/test_bank_details_sql_runtime.py` 和 bank-details 模块实施记录；不改变运行时代码、API shape、worker、projection、repository port 或 SQL repository tests。
+- 关键决策：facade-level fake repository 使用 direct `status` / `scope_keys` / `scope_signatures`，不再制造 `read_model_status` / `read_model_scope_keys` / `read_model_scope_signatures`；底层 bank-detail repository/SQL payload 兼容测试保留。
+- 测试覆盖：完整 `BankTransactionTagReadFacadeTests` 通过。
+- 未测风险：bank detail legacy projection/worker/manifest/dirty scopes 和账户余额 read model 仍留待后续完整 family inventory。
+
+## 2026-06-27 - lifecycle/workbench facade fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 invoice lifecycle 与 Workbench relation facade tests 中 fake repository 残留的旧 read-model output fields。
+- 影响范围：`tests/test_invoice_lifecycle_read_facade.py`、`tests/test_workbench_relation_read_facade.py` 和 Workbench relation 模块实施记录；不改变运行时代码、API shape、worker、projection、repository port 或 Workbench active generation。
+- 关键决策：facade-level fake repository 使用 direct `status` / `scope_keys`，不再制造 `read_model_status` / `read_model_scope_keys`；底层 repository port / SQL payload 兼容测试保留。
+- 测试覆盖：targeted invoice lifecycle facade 与 Workbench relation facade 回归通过。
+- 未测风险：invoice lifecycle / Workbench relation legacy projection、worker、manifest、dirty scopes 和 Workbench active generation 仍留待后续完整 family inventory。
+
+## 2026-06-27 - turnover facade fixture scope cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 turnover UoW tests 中 fake relation facade 残留的旧 read-model scope field。
+- 影响范围：`tests/test_turnover_ledger_uow_contract.py` 和 turnover 模块实施记录；不改变运行时代码、API shape、worker、projection 或 Workbench active generation。
+- 关键决策：测试替身使用 direct `scope_keys`，不再制造 `read_model_scope_keys`；保留 direct `status` / rows / groups。
+- 测试覆盖：targeted turnover manual closure withdraw / restore / command-service-required 回归通过。
+- 未测风险：turnover legacy projection/worker/dirty scopes 和真实 worker drain 仍留待后续完整 family inventory。
+
+## 2026-06-27 - pending invoice facade fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 pending invoice SQL projection tests 中 fake facade 残留的旧 read-model output fields。
+- 影响范围：`tests/test_search_pending_sql_runtime.py` 和 pending-invoices 模块实施记录；不改变运行时代码、API shape、worker、projection 或 manifest。
+- 关键决策：测试替身使用 direct `scope_keys`，不再制造 `read_model_scope_keys` 或 `refresh_enqueued`；保留 direct `status` / `stale_reasons`。
+- 测试覆盖：targeted pending invoice SQL projection relation/tag facade 回归通过。
+- 未测风险：pending invoice legacy projection/worker/manifest/dirty scopes 仍留待后续完整 family inventory。
+
+## 2026-06-27 - ETC direct fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 ETC 后端 tests 中 stale read-model-shaped fake command/facade fields。
+- 影响范围：`tests/test_etc_backend.py` 和 ETC 模块实施记录；不改变运行时代码、API shape、worker、projection 或 Workbench active generation。
+- 关键决策：测试替身不再制造 `read_model_status`、`read_model_scope_keys`、`refresh_enqueued` 或 `read_model_stale_reasons`；保留 direct `status` / `stale_reasons` / `affected_months`。
+- 测试覆盖：targeted `tests.test_etc_backend` business batch delete、historical repair 和 existing batch link 回归通过。
+- 未测风险：ETC legacy downstream projection/worker/dirty scopes 和真实 worker drain 仍留待后续完整 family inventory。
+
+## 2026-06-27 - bank/no-OA direct fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 bank-details 与 no-OA service/route tests 中 stale page freshness fixture fields。
+- 影响范围：`tests/test_bank_details_routes.py`、`tests/test_bank_details_service.py`、`tests/test_no_oa_bank_batch_service.py` 和对应模块实施记录；不改变运行时代码、API shape、worker、projection 或 Redis。
+- 关键决策：测试替身不再制造 `read_model_status`、`read_model_scope_keys` 或 `refresh_enqueued`；只保留 direct business payload / direct `scope_keys`。
+- 测试覆盖：完整 `tests.test_bank_details_routes`、`tests.test_bank_details_service`、`tests.test_no_oa_bank_batch_service` 通过。
+- 未测风险：bank detail/no-OA legacy projection、worker、manifest、dirty scopes 仍留待后续完整 family inventory。
+
+## 2026-06-27 - workbench import-state scope helper consolidation
+
+- 目标：继续 remove-read-models 主控闭环，合并 import processing / runtime worker 中重复的 Workbench import-state scope helper，并同步清理同测试中的旧 Search refresh 断言。
+- 影响范围：`workbench_read_model_refresh.py`、`import_processing_service.py`、`runtime_worker_handlers.py`、`tests/test_workbench_sql_runtime.py`、search/read-models 文档；不改变 Workbench active generation、worker event、manifest、dirty scopes 或 direct page API。
+- 关键决策：`workbench_scope_keys_for_import_state(...)` 成为 Workbench import-state scope 计算事实源；runtime import-state 继续不投递 Search read-model refresh。
+- 测试覆盖：Workbench import-state month/all scope regression、unaffected invoice relation regression、runtime worker read-model refresh scope suite。
+- 未测风险：Workbench active-generation compatibility 和 legacy Search SQL projection cleanup 仍留待完整 family inventory。
+
+## 2026-06-27 - pending invoice scope helper deletion
+
+- 目标：继续 remove-read-models 主控闭环，删除 pending invoice scope 列表的 app-owned helper 和 import-state 重复 helper。
+- 影响范围：pending invoice 服务层常量/import-state 函数、OA identity backfill、import processing、runtime worker handlers、`Application` invalidation wiring、SQL runtime scope contract test 和 architecture guard；不改变 legacy projection/worker/manifest/dirty-scope family。
+- 关键决策：`PENDING_INVOICE_BASE_SCOPE_KEYS` 成为 pending invoice base scope 的服务层事实源，`pending_invoice_scope_keys_for_import_state(...)` 成为 import-state scope 事实源，`Application` 不再拥有该列表。
+- 测试覆盖：targeted search-pending SQL runtime scope test、pending invoice rules enqueue API test、pending invoice OA identity backfill tests 和 read-model architecture guard。
+- 未测风险：pending invoice legacy projection/worker/manifest/dirty scopes、真实 worker drain 和旧 frontend operation-barrier e2e 残留仍未删除。
+
+## 2026-06-27 - cost statistics app invalidation wrapper deletion
+
+- 目标：继续 remove-read-models 主控闭环，删除成本统计 app-level read-model invalidation wrappers。
+- 影响范围：`Application` cost statistics invalidation wiring、cost statistics API/runtime tests、Workbench invalidation regression 和 architecture guard；不改变 legacy projection/worker/manifest/dirty-scope family。
+- 关键决策：纯 delegate 不再保留在 `Application`；调用点直接调用 `CostStatisticsRuntimeService`，让 runtime service 保持唯一的 scope/warmup/persistence owner。
+- 测试覆盖：`tests.test_cost_statistics_api`、`tests.test_cost_statistics_sql_runtime`、`tests.test_cost_statistics_runtime_service`、targeted Workbench SQL runtime regression 和 `tests.test_read_model_architecture_guards`。
+- 未测风险：成本统计 legacy projection/worker/manifest/dirty scopes、真实 worker drain、真实 Redis/PostgreSQL 和 Workbench active generation 仍未删除。
+
+## 2026-06-27 - input invoice usage payment rules app wrapper deletion
+
+- 目标：继续 remove-read-models 主控闭环，删除支付规则保存后的 app-level read-model refresh wrapper。
+- 影响范围：`backend/src/fin_ops_platform/app/server.py`、`tests/test_read_model_architecture_guards.py`、`tests/test_platform_runtime_boundary_guards.py`、`docs/modules/input-invoice-usage/implementation-notes.md`；不改变运行时合同。
+- 关键决策：保留保存支付规则后同时刷新 `input_invoice_usage` 与 `invoice_lifecycle` 的行为，只移除独立 `Application` helper 名称。
+- 测试覆盖：`tests.test_input_invoice_usage_api`、`tests.test_input_invoice_usage_payment_rules`、`tests.test_read_model_architecture_guards` 和 targeted platform guard 通过。
+- 未测风险：input usage / invoice lifecycle legacy projection、worker、manifest 和 dirty scopes 仍留待后续完整删除批次。
+
+## 2026-06-27 - input invoice usage OA reverse app wrapper deletion
+
+- 目标：继续 remove-read-models 主控闭环，删除 OA reverse 写后 read-model invalidation 的 app-level 一跳 wrapper。
+- 影响范围：`backend/src/fin_ops_platform/app/server.py`、`tests/test_read_model_architecture_guards.py`、`docs/modules/input-invoice-usage/implementation-notes.md`；不改变运行时合同。
+- 关键决策：保留现有 callback 注入和 legacy refresh 行为，但不再把它命名为独立 `Application` read-model helper。
+- 测试覆盖：`tests.test_input_invoice_usage_api`、`tests.test_input_invoice_usage_oa_reverse_service`、`tests.test_read_model_architecture_guards` 通过。
+- 未测风险：input invoice usage legacy projection/worker/manifest/dirty scopes 仍留待后续完整删除批次。
+
+## 2026-06-27 - bank-details auto-tag fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除银行明细 auto-tag API 测试替身中不再需要的页面级 freshness 字段。
+- 影响范围：`tests/test_bank_auto_tag_rules_api.py`、`docs/modules/bank-details/implementation-notes.md`；不改变运行时代码。
+- 关键决策：direct bank-details page reads 不应依赖或传播 `read_model_status` / `read_model_scope_keys`；测试替身现在只返回业务 payload，负向断言继续保护 API shape。
+- 测试覆盖：完整 `tests.test_bank_auto_tag_rules_api` 通过。
+- 未测风险：bank detail projection/worker/manifest/dirty scopes 仍存在，留给后续完整 family inventory。
+
+## 2026-06-27 - batch accounting stale freshness test/docs cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除批量账务 API 测试替身和模块文档中残留的页面级 read model freshness 合同。
+- 影响范围：`tests/test_batch_accounting_api.py`、`docs/modules/batch-accounting/tests.md`、`docs/modules/batch-accounting/implementation-notes.md`；不改变运行时代码。
+- 关键决策：`GET /api/batch-accounting`、submit 和 withdraw 不透出 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued` 或 operation barrier targets；测试替身不再制造这些旧字段。
+- 测试覆盖：完整 `tests.test_batch_accounting_api` 重新通过。
+- 未测风险：批量账务后端 direct query 迁移仍未完成，当前列表读取仍可能内部使用 relation context；worker/manifest/dirty scopes 留给后续完整 family inventory。
+
+## 2026-06-27 - stale tax SQL read-model API tests deletion
+
+- 目标：继续 remove-read-models 主控闭环，删除 `tests/test_tax_offset_sql_runtime.py` 中 6 个旧 API read-model freshness 测试。
+- 影响范围：tax offset SQL runtime tests、tax-offset 测试矩阵；不改变运行时代码。
+- 关键决策：`/api/tax-offset` 已转 direct API，不再返回 `read_model_status` 或通过 SQL/Redis fresh-gate 读取页面 payload；保留 SQL projection repository、worker all fan-out、runtime invalidation 和 Redis delete best-effort 覆盖。
+- 测试覆盖：完整 `tests.test_tax_offset_sql_runtime` 重新通过。
+- 未测风险：tax offset worker、manifest、deploy env、dirty scopes 和 DB 表仍需后续完整 family inventory。
+
+## 2026-06-27 - tax offset app invalidation wrapper deletion
+
+- 目标：继续 remove-read-models 主控闭环，删除 `Application._invalidate_tax_offset_read_model_scopes(...)` 这一层仅转发到 `TaxOffsetRuntimeService` 的 app helper。
+- 影响范围：`server.py` tax offset invalidation wiring、tax offset SQL runtime test、read model architecture guard 和 tax-offset 模块实施记录；不改变 tax offset API shape、worker event schema、scope policy、Redis envelope 或 shared runtime service。
+- 关键决策：直接调用 `TaxOffsetRuntimeService.invalidate_read_model_scopes(...)`；`ImportProcessingService` 继续接收 callback port，不直接依赖 runtime。
+- 测试覆盖：`tests/test_tax_offset_sql_runtime.py` 直接验证 runtime invalidation；architecture guard 防止 app helper 回归。
+- 未测风险：tax offset worker、manifest、deploy env、dirty scopes 和 DB 表仍需后续完整 family inventory。
+
+## 2026-06-27 - input usage / OA pending payment app enqueue helper deletion
+
+- 目标：继续 remove-read-models 主控闭环，删除两个仅转发到 refresh gateway 的 `Application` 专用 helper：`_enqueue_input_invoice_usage_read_model_refresh(...)` 与 `_enqueue_oa_pending_payment_read_model_refresh(...)`。
+- 影响范围：`server.py` refresh callback wiring、OA pending payment API tests、read model architecture guard，以及 input usage/OA pending payment 模块实施记录；不改变业务 API shape、worker event schema、scope policy 或 shared generic gateway。
+- 关键决策：直接复用 `_enqueue_generic_read_model_refreshes(...)`，不新增 producer；这是 app helper 删除，不是 shared refresh gateway/database cleanup。
+- 测试覆盖：`tests/test_oa_pending_payment_api.py` 改用 fake refresh gateway；architecture guard 防止两个专用 helper 回归。
+- 未测风险：input usage / OA pending payment worker、manifest、deploy env、dirty scopes 和 DB 表仍需后续完整 family inventory。
+
 ## 2026-06-26 - Read model production SLO optimization
 
 - 目标：压缩生产 read model refresh 的 hot path，使 scoped incremental projection 在高行数月份仍能满足 operation-to-fresh SLO。
@@ -66,7 +202,7 @@
 
 - 目标：执行 `read-models:no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit`，复核 no-OA 在 repository/persistence port 抽取后是否已有完整 freshness、force refresh、operation barrier、dirty/outbox、App Status/worker 和 derived lifecycle 本地闭环。
 - 影响范围：no-OA refresh gateway call sites、scope policy、manifest、runtime worker registry、App Status read model/domain registry、operation barrier usage、derived lifecycle map、modular IO state 和 no-OA/read-models 模块文档；不改变运行时代码。
-- 关键决策：refresh enqueue、scope policy、manifest/worker/App Status registration 和 frontend operation barrier 证据已 accounted；但 `Application._derived_lifecycle_no_oa_bank_batch_executor(...)` 仍拥有 no-OA derived lifecycle target/enqueue behavior，且 no-OA mutation persistence 仍有 broad state-store fallback。
+- 关键决策：refresh enqueue、scope policy、manifest/worker/App Status registration 和 frontend operation barrier 证据已 accounted。后续 slice 已把 no-OA derived lifecycle target/enqueue behavior 收敛到 `NoOaBankBatchDerivedLifecycleExecutor`；剩余 no-OA 风险集中在 mutation persistence fallback 和生产证据。
 - 文档影响：新增 boundary audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 no-OA/read-models 实施记录与测试矩阵；全局和模块 state-machine 定义不变。
 - 测试覆盖：本轮是 analysis/accounting only；下一实现 slice 必须新增 executor service-layer/static guard，并复跑 no-OA application/read-model/workbench integration 与 relevant lifecycle tests。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-freshness-derived-lifecycle-boundary-audit.md`。
@@ -77,7 +213,7 @@
 
 - 目标：执行 `read-models:search-query-freshness-service-extraction`，将 `/api/search` SQL miss/stale/source-version payload assembly 和 expected source-version proof 从 `Application` 收敛到显式 search query/freshness service。
 - 影响范围：`SearchQueryFreshnessService`、`SearchIndexSourceVersionsProvider`、`Application._handle_api_search(...)`、search runtime/API tests、platform guard、modular IO state 和 search/read-models 文档；不改变 API/UI/worker event/queue/schema/Redis 合同。
-- 关键决策：`SearchQueryFreshnessService` 拥有 SQL search payload miss/fresh/stale/source-version mismatch 行为；`Application` 只保留 HTTP 参数校验、HTTP status 映射、无 SQL repository 时的 legacy/local fallback 和 gateway callback 组装。`_enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)` 仍是下一边界，未在本切片关闭。
+- 关键决策：`SearchQueryFreshnessService` 拥有 SQL search payload miss/fresh/stale/source-version mismatch 行为；`Application` 只保留 HTTP 参数校验、HTTP status 映射和无 SQL repository 时的 legacy/local fallback。后续 slice 已删除 `_enqueue_search_read_model_refresh(...)` 与 `_invalidate_search_read_model_scopes(...)`，search refresh enqueue/invalidation 由 producer 边界负责。
 - 文档影响：新增 implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 search/read-models 实施记录与测试矩阵。
 - 测试覆盖：新增 `SearchQueryFreshnessServiceTests` 和 platform guard，防止 query freshness helper 回到 `server.py`；复跑 search API/runtime/manifest 回归。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-search-query-freshness-service-extraction.md`。
@@ -110,7 +246,7 @@
 
 - 目标：执行 `read-models:no-oa-bank-batch-derived-lifecycle-executor-port-extraction`，将 no-OA derived lifecycle target/enqueue behavior 从 `Application` 收敛到显式 executor。
 - 影响范围：`NoOaBankBatchDerivedLifecycleExecutor`、`Application` derived lifecycle wiring、executor tests、platform guard、modular IO state 和 no-OA/read-models 文档；不改变 API/UI/worker event/queue/schema/Redis 合同。
-- 关键决策：`NoOaBankBatchDerivedLifecycleExecutor` 拥有 scope extraction、month/all target selection、reason default、metadata forwarding 和 `enqueued_jobs` accounting；`Application` 只组装 `self._enqueue_no_oa_bank_batch_read_model_refreshes` 依赖。
+- 关键决策：`NoOaBankBatchDerivedLifecycleExecutor` 拥有 scope extraction、month/all target selection、reason default、metadata forwarding 和 `enqueued_jobs` accounting；`Application` 只组装 `NoOaBankBatchReadModelRefreshProducer` 依赖，不再保留 `_enqueue_no_oa_bank_batch_read_model_refreshes(...)`。
 - 文档影响：新增 implementation analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 no-OA/read-models 实施记录与测试矩阵。
 - 测试覆盖：新增 `tests/test_no_oa_bank_batch_derived_lifecycle_executor.py`；扩展 platform runtime boundary guard，防止 removed app-owned helper 回归。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-no-oa-bank-batch-derived-lifecycle-executor-port-extraction.md`。
@@ -219,7 +355,7 @@
 
 - 目标：执行 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`，审计外部往来台账 fresh gate、force refresh、all scope、Workbench relation source-version、operation barrier 和旧链路污染风险。
 - 影响范围：`TurnoverLedgerQueryService`、`TurnoverLedgerSqlProjectionBuilder`、`TurnoverLedgerReadModelRefreshService`、scope policy、manifest、App Status/worker registry、`Application` turnover clear/refresh helpers 和 modular IO state；不改变运行时代码。
-- 关键决策：已有本地证据证明 SQL fresh gate、month/all scope policy、manifest/App Status/worker 注册、Workbench relation source-version proof 和 operation barrier blocking 行为。但 `Application._enqueue_turnover_ledger_read_model_refreshes(...)` 仍拥有 refresh producer 行为，`Application._clear_turnover_ledger_read_model_best_effort(...)` 仍通过 broad `_workbench_sql_read_repository` 清理 turnover rows，因此不能进入 local closure/defer。
+- 关键决策：已有本地证据证明 SQL fresh gate、month/all scope policy、manifest/App Status/worker 注册、Workbench relation source-version proof 和 operation barrier blocking 行为。后续 producer/clear port extraction 已删除 `Application._enqueue_turnover_ledger_read_model_refreshes(...)` 和 `_clear_turnover_ledger_read_model_best_effort(...)`；turnover refresh/clear 由 `TurnoverLedgerReadModelRefreshProducer` 和 turnover-specific repository port 负责。
 - 文档影响：新增 freshness/barrier audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 read-models/turnover-ledger 实施记录。
 - 测试覆盖：本轮是 analysis/accounting only；下一轮实现必须新增/更新 producer/clear boundary guard。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-freshness-operation-barrier-audit.md`。
@@ -285,11 +421,11 @@
 
 - 目标：执行 `read-models:cost-statistics-refresh-freshness-operation-barrier-audit`，审计成本统计 fresh gate、force refresh、parent aggregate、operation barrier、compat worker 和 app-owned helper surface。
 - 影响范围：`CostStatisticsQueryService`、`CostStatisticsRuntimeService`、`CostStatisticsReadModelRefreshService`、`CostStatisticsSqlProjectionBuilder`、`Application._derived_lifecycle_cost_statistics_executor(...)`、runtime worker/App Status/scope policy/read model tests、modular IO state；不改变运行时代码。
-- 关键决策：现有代码/测试已覆盖 SQL fresh gate、production SQL repository unavailable、scope normalize/validate、parent aggregate from materialized shards、parent waits for missing/stale shards、primary `cost-statistics` worker 与 `cost-tax` compat lane。审计发现本地 implementation gap：`Application._derived_lifecycle_cost_statistics_executor(...)` 仍拥有 cost statistics derived lifecycle invalidation、warmup-vs-refresh fallback 和 `enqueued_jobs` accounting。
+- 关键决策：现有代码/测试已覆盖 SQL fresh gate、production SQL repository unavailable、scope normalize/validate、parent aggregate from materialized shards、parent waits for missing/stale shards、primary `cost-statistics` worker 与 `cost-tax` compat lane。后续 derived lifecycle executor extraction 已删除 `Application._derived_lifecycle_cost_statistics_executor(...)`；cost statistics lifecycle invalidation、warmup-vs-refresh fallback 和 `enqueued_jobs` accounting 由 `CostStatisticsDerivedLifecycleExecutor` 负责。
 - 文档影响：新增 freshness/barrier audit analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
-- 测试覆盖：本轮是 analysis/accounting only；下一轮必须新增/更新 derived lifecycle executor/static guard tests，并复跑 cost statistics runtime/read model tests。
+- 测试覆盖：本轮是 analysis/accounting only；后续已新增/更新 derived lifecycle executor/static guard tests，并复跑 cost statistics runtime/read model tests。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-refresh-freshness-operation-barrier-audit.md`。
-- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；cost statistics derived lifecycle executor extraction 是下一条本地实现边界。
+- 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；后续 derived lifecycle executor extraction 已关闭本地实现边界，下一步应继续生产证据和剩余兼容 fallback 收敛。
 - 后续事项：执行 `read-models:cost-statistics-derived-lifecycle-executor-port-extraction`；Go admission 继续 blocked。
 
 ## 2026-06-24 - Cost statistics repository port extraction
@@ -612,7 +748,7 @@
 
 - 目标：执行 `read-models:bank-detail-server-helper-quarantine`，移除 `server.py` 中已无调用者的银行明细 read/cache helper，并新增架构 guard 防止旧 read model helper 回归。
 - 影响范围：`server.py` dead helper removal、`BankDetailsApplicationService` read/cache owner guard、bank-details/read-models 文档和 modular IO state；不改 read model schema、worker、queue schema 或 API response shape。
-- 关键决策：bank detail scope summary、auto-tag freshness、refreshing payload、tag dictionary、Redis cache key/get/set 等 helper 的 owner 是 `BankDetailsApplicationService`。`Application._enqueue_bank_detail_read_model_refreshes(...)` 暂时保留为 gateway-backed wrapper，下一步继续处理 category side-effect callback。
+- 关键决策：bank detail scope summary、auto-tag freshness、refreshing payload、tag dictionary、Redis cache key/get/set 等 helper 的 owner 是 `BankDetailsApplicationService`。后续 refresh producer extraction 已删除 `Application._enqueue_bank_detail_read_model_refreshes(...)`；category side-effect callback 也已收敛到显式 side-effect port。
 - 文档影响：新增 analysis，更新 read-models/bank-details 实施记录和测试矩阵；共享 read model 状态机定义不变。
 - 测试覆盖：新增 `PlatformRuntimeBoundaryGuardTests.test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary`，覆盖 removed helper 不回归、service owner 存在和 refresh wrapper 不直接 SQL 写 job queue。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-bank-detail-server-helper-quarantine.md`。
@@ -664,7 +800,7 @@
 
 - 目标：执行 `read-models:legacy-read-path-removal-guards`，先把 direct `enqueue_read_model_refresh(...)` 调用点做静态分类，阻止后续旧 producer 绕过 `ReadModelRefreshGateway` / scope policy registry。
 - 影响范围：`tests/test_read_model_architecture_guards.py`、read-models 测试矩阵和 planning analysis；不改变 SQL、API、worker、前端、Redis/RabbitMQ 或生产 runtime 行为。
-- 关键决策：当前允许的 direct enqueue 只限 legacy app wrapper、cost/tax query repository-miss wrapper 和 cost/tax runtime cache invalidation wrapper；这些 wrapper 最终仍委托 gateway。新增 direct enqueue 必须删除、迁移到 gateway，或登记 compat-only owner/reason/deletion condition。
+- 关键决策：历史分类曾允许少量 gateway-backed wrapper；当前 `Application` legacy enqueue wrapper 已删除，保留的 direct enqueue 只能是登记过的 runtime/gateway 边界或事务内等价 writer。新增 direct enqueue 必须删除、迁移到 gateway，或登记 compat-only owner/reason/deletion condition。
 - 文档影响：同步 read-models 测试矩阵和 planning analysis；长期状态语义不变。
 - 测试覆盖：新增 `tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_direct_read_model_refresh_enqueue_calls_are_classified`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards -v`。
@@ -1346,7 +1482,7 @@
 ## 2026-06-24 - bank account balance refresh/freshness/operation-barrier audit
 
 - 目标：审计 `bank_account_balance` refresh enqueue、derived lifecycle、runtime import-state fan-out、all-only scope contract、operation barrier 和 Bank Detail fallback。
-- 结论：审计关闭为 `analysis-closed`，但模块仍为 `implementation-gap-open`。最高优先级实现缺口是 `Application._enqueue_bank_account_balance_read_model_refresh(...)` 仍拥有模块 refresh IO；下一条边界为 `read-models:bank-account-balance-refresh-producer-extraction`。
+- 结论：审计关闭为 `analysis-closed`；后续 refresh producer extraction 已删除 `Application._enqueue_bank_account_balance_read_model_refresh(...)`，账户余额 refresh IO 由 `BankAccountBalanceReadModelRefreshProducer` 负责。模块剩余风险转为 derived lifecycle/all-only scope contract/operation barrier、真实 PostgreSQL/worker/App Status/high-row/browser evidence 和兼容 fallback 清理。
 - 后续：producer extraction 后继续处理 derived lifecycle executor、all-only scope contract、dedicated operation barrier regression 和 Bank Detail fallback quarantine。
 
 ## 2026-06-24 - bank account balance refresh producer extraction

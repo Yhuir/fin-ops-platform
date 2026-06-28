@@ -141,7 +141,6 @@ def fetch_table_counts(database_url: str) -> dict[str, int]:
         "app.no_oa_bank_batches",
         "job.background_jobs",
         "read_model.workbench_candidate_matches",
-        "read_model.search_index_rows",
     ]
     sql = "\nunion all\n".join(f"select {sql_literal(table)}, count(*)::bigint from {table}" for table in tables) + ";"
     return fetch_counts(database_url, sql)

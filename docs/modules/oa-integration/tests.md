@@ -8,8 +8,8 @@
 | --- | --- | --- |
 | OA session / 权限 | `Admin-Token` -> Authorization、`/api/session/me`、无权限 403、只读/全操作/admin 分层 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_oa_identity_service.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx` |
 | OA Mongo 只读 adapter | 付款申请/报销/项目映射、字段变体、断连空结果、read status、backoff、附件发票 cache | `tests/test_mongo_oa_adapter.py`、`tests/test_mongo_oa_attachment_invoice_cache.py`、`tests/test_oa_attachment_invoice_service.py` |
-| OA 投影与 sync worker | 投影 upsert、结构化附件、legacy row id 迁移、下游 dirty scope、retention cutoff、API enqueue 不 inline sync | `tests/test_oa_projection_sql_runtime.py`、`tests/test_worker_oa_sync.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` |
-| OA 待付款 | rows/filter/detail API、read model stale/missing、权限、生命周期状态 | `tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_api.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
+| OA 投影与 sync worker | 投影 upsert、结构化附件、legacy row id 迁移、下游 direct API/cache warmup、retention cutoff、API enqueue 不 inline sync | `tests/test_oa_projection_sql_runtime.py`、`tests/test_worker_oa_sync.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` |
+| OA 待付款 | rows/filter/detail direct API、detail unavailable、权限、生命周期状态 | `tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_api.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
 | OA 手动搜索/导入 | fast search、完成状态限制、附件刷新、幂等导入、删除 marker、Workbench/Search invalidation | `tests/test_oa_manual_import_service.py`、`tests/test_oa_manual_import_api.py`、`web/src/test/SettingsOaManualSearchImportTable.test.tsx` |
 | OA applicant credentials | admin-only、保存/list/delete、password 不回显、repository 加密/解密、settings response 不泄漏 | `tests/test_oa_applicant_credentials_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`、`web/src/test/SettingsPage.test.tsx` |
 | 目标 OA 申请人登录 | RSA 加密、HTTP/网络/无效 JSON/无 token 失败、错误不泄露 password、缺凭据不尝试登录 | `tests/test_target_oa_applicant_token_provider.py` |
@@ -22,12 +22,12 @@
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_mongo_oa_adapter.py`、`tests/test_oa_manual_import_service.py`、`tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_etc_backend.py` | 保护 OA 字段映射、完成状态、反提状态机、ETC 人工确认和删除本地批次边界。 |
-| 2. Service-layer tests | 适用 | `tests/test_target_oa_applicant_token_provider.py`、`tests/test_oa_applicant_credentials_service.py`、`tests/test_oa_projection_sql_runtime.py`、`tests/test_oa_pending_payment_service.py` | 保护 service/repository/worker 编排、凭据脱敏、外部 OA 登录失败、投影和下游 dirty scope。 |
-| 3. API contract tests | 适用 | `tests/test_oa_applicant_credentials_api.py`、`tests/test_oa_manual_import_api.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_auth_guard.py`、`tests/test_session_api.py` | 保护 response shape、错误码、权限、read model status、idempotency/version conflict。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_oa_projection_sql_runtime.py`、`tests/test_worker_oa_sync.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_mongo_oa_adapter.py` | 保护 OA sync worker、projection repository、Mongo read status/backoff、App Status worker/readiness 注册。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/InputInvoiceUsage*.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/SettingsPage.test.tsx` | 保护 session bootstrap、权限态、OA 待付款 stale/detail、反提 drawer、ETC OA 操作、设置页凭据和手动导入。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_oa_projection_sql_runtime.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_etc_backend.py`、`tests/test_oa_manual_import_api.py` | 保护 OA sync -> projection -> downstream dirty、进项反提 -> 草稿 -> 人工确认、ETC 业务批次 -> OA 草稿 -> 人工确认、手动导入 -> Workbench sync。 |
-| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_platform_runtime_boundary_guards.py`、`tests/test_deploy_oa_script.py`、`tests/test_deploy_oa_nginx_config.py` | OA 集成横跨所有页面，任何改动都要先判断 session、权限、read model、Workbench、发票生命周期、税金/成本/search 是否受影响。 |
+| 2. Service-layer tests | 适用 | `tests/test_target_oa_applicant_token_provider.py`、`tests/test_oa_applicant_credentials_service.py`、`tests/test_oa_projection_sql_runtime.py`、`tests/test_oa_pending_payment_service.py` | 保护 service/repository/worker 编排、凭据脱敏、外部 OA 登录失败、投影和下游 direct API/cache warmup。 |
+| 3. API contract tests | 适用 | `tests/test_oa_applicant_credentials_api.py`、`tests/test_oa_manual_import_api.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_auth_guard.py`、`tests/test_session_api.py` | 保护 response shape、错误码、权限、direct payload status、idempotency/version conflict。 |
+| 4. Projection/cache/background job tests | 适用 | `tests/test_oa_projection_sql_runtime.py`、`tests/test_worker_oa_sync.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_mongo_oa_adapter.py` | 保护 OA sync worker、projection repository、Mongo read status/backoff、App Status worker/runtime 注册。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/InputInvoiceUsage*.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/SettingsOaManualSearchImportTable.test.tsx` | 保护 session bootstrap、权限态、OA 待付款 unavailable/detail、反提 drawer、ETC OA 操作、设置页凭据和手动导入；手动导入附件刷新/导入成功后直接重搜且不调用 legacy barrier。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_oa_projection_sql_runtime.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_etc_backend.py`、`tests/test_oa_manual_import_api.py` | 保护 OA sync -> projection -> downstream direct API/cache warmup、进项反提 -> 草稿 -> 人工确认、ETC 业务批次 -> OA 草稿 -> 人工确认、手动导入 -> Workbench sync。 |
+| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_platform_runtime_boundary_guards.py`、`tests/test_deploy_oa_script.py`、`tests/test_deploy_oa_nginx_config.py` | OA 集成横跨所有页面，任何改动都要先判断 session、权限、projection/direct API、Workbench、发票生命周期、税金/成本/search 是否受影响。 |
 
 ## 本轮新增回归
 
@@ -47,7 +47,7 @@
 | 场景 | 回归入口 | 保护点 |
 | --- | --- | --- |
 | OA session 首次校验因代理/OA 慢响应短暂超时 | `web/src/test/SessionGate.test.tsx` | 首次 `request_timeout` 保持“正在验证 OA 会话...”并自动重试，不能立刻落到错误页；成功重试后进入业务页面。 |
-| OA Mongo 短暂断连导致页面误认为 fresh | `tests/test_mongo_oa_adapter.py` | 断连返回空结果但 read status 为 error，并进入 backoff。 |
+| OA Mongo 短暂断连导致页面误认为数据可用 | `tests/test_mongo_oa_adapter.py` | 断连返回空结果但 read status 为 error，并进入 backoff。 |
 | OA lifecycle alias 导致附件发票 cross-OA blocker | 待补：`tests/test_mongo_oa_adapter.py`、`tests/test_audit_object_identity_tool.py`、alias policy/repository tests | `flowRequestId/processId` 缺失的进行中文档与带 `flowRequestId` 的已完成文档内容一致时，只能生成可审计 alias 候选；未批准 alias 仍 blocking，active alias 才可 canonicalize，且不得删除 OA 投影/cache。 |
 | OA sync API 在 HTTP 进程内直接同步 | `tests/test_oa_projection_sql_runtime.py` | 手动 sync API 只 enqueue worker job，不 inline sync。 |
 | OA 附件 OCR 残缺号码或未知证据被创建为正式发票 | `tests/test_oa_attachment_invoice_service.py::OAAttachmentInvoiceServiceTests::test_parse_files_does_not_return_unknown_evidence_with_invoice_number`、`tests/test_object_identity_policy.py::FinancialObjectIdentityPolicyTests::test_oa_attachment_invoice_evidence_classification_is_centralized`、`tests/test_invoice_attachment_recognition_service.py`、`tests/test_import_service.py::ImportNormalizationServiceTests::test_oa_attachment_allow_create_requires_formal_invoice_evidence`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_oa_attachment_invoice_cache_update_ignores_incomplete_ocr_identity` | 附件解析候选层、附件识别层、app cache update 路径和底层 `allow_create=True` 都必须要求正式发票 evidence type 或明确正式发票 document kind；残缺号码、非正式票据、未知证据、多义命中直接忽略，不得把未知 OCR 提升为 `app.invoices`。 |
@@ -61,12 +61,12 @@
 发布前或 staging 应至少人工/自动 smoke：
 
 1. OA iframe 打开 `/fin-ops/?embedded=oa` -> `/api/session/me` 成功 -> 只读用户看不到写入口，全操作用户可写，管理员可进设置高风险入口。
-2. OA sync `2026-05` -> 投影写入 -> Workbench / OA 待付款 / 进项使用 / App Status 显示 fresh 或 refreshing 一致。
+2. OA sync `2026-05` -> 投影写入 -> Workbench / OA 待付款 / 进项使用 / App Status 显示 current/syncing 一致。
 3. 设置页保存目标 OA 申请人凭据 -> 进项发票选择 -> 创建 OA 草稿 -> OA 页面可见 draft -> 用户人工确认 submitted/not_submitted。
 4. ETC 业务批次创建 OA 草稿 -> 撤销本地绑定或人工确认 submitted -> 删除本地批次不删除真实 OA 草稿/流程。
-5. OA Mongo 临时不可用 -> 页面/API 不把旧投影伪装为 fresh，App Status 暴露 blocked/degraded。
+5. OA Mongo 临时不可用 -> 页面/API 不把旧投影伪装为 current，App Status 暴露 blocked/degraded。
 
-P2/P3 一秒级闭环中，这些真实 OA 场景对应 `.planning/P2P3-CLOSURE-PLAN.md` 的 P2P3-013 staging gate。通过条件不是本地 mock 绿灯，而是真实 OA 登录、角色同步、目标申请人、草稿 URL、附件、人工 submitted/not_submitted、投影 freshness 和 App Status 语义均有 staging/production 证据。缺凭据、缺测试对象、只跑本地 stub 或只返回 `auth_missing` 时，状态保持 `staging-gated`。
+P2/P3 一秒级闭环中，这些真实 OA 场景对应 `.planning/P2P3-CLOSURE-PLAN.md` 的 P2P3-013 staging gate。通过条件不是本地 mock 绿灯，而是真实 OA 登录、角色同步、目标申请人、草稿 URL、附件、人工 submitted/not_submitted、投影状态和 App Status 语义均有 staging/production 证据。缺凭据、缺测试对象、只跑本地 stub 或只返回 `auth_missing` 时，状态保持 `staging-gated`。
 
 ## 现有验证命令
 
@@ -121,5 +121,5 @@ Nightly CI 应至少覆盖：
 - 真实 OA 登录接口、RSA 公钥、`openssl`、目标申请人账号状态、OA 草稿页面 URL 和 OA 返回 token shape 只能由 staging/生产前 smoke 证明。
 - 真实 OA Mongo 字段变体、历史附件、超大月份和索引性能不能由 stub 完全覆盖。
 - 真实 OA 菜单角色同步、同域 cookie、iframe 下载/跳转、Nginx 代理行为需要部署环境验证。
-- 真实 Postgres/RabbitMQ/Redis/systemd worker drain 和 App Status heartbeat 需要运行环境验证。
+- 真实 Postgres/RabbitMQ/Redis/systemd 后台任务、direct API 收敛和 App Status heartbeat 需要运行环境验证。
 - 全页面全角色矩阵成本高，当前由代表性 API/UI 权限测试和 `permissions-and-audit` 模块统一覆盖。

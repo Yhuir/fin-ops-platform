@@ -1,6 +1,6 @@
 # 测试闭环依赖地图
 
-本文是测试闭环的全局依赖地图。它先描述页面、API、read model、worker、domain event 和状态平面之间的关系，再指导各模块在 `docs/modules/<module>/tests.md` 中补齐影响面和测试缺口。
+本文是测试闭环的全局依赖地图。它先描述页面、API、direct read path、worker、domain event 和状态平面之间的关系，再指导各模块在 `docs/modules/<module>/tests.md` 中补齐影响面和测试缺口。
 
 本文件不是产品事实源。业务口径仍以 `docs/product-specs/` 为准；页面和运行时事实仍以 `docs/app-architecture/` 为准；本文件只把这些事实组织成测试闭环视角。
 
@@ -12,53 +12,53 @@
 - 前端跨页事件：`web/src/features/domainEvents.ts`
 - 后端 HTTP 分发：`backend/src/fin_ops_platform/app/server.py`、`backend/src/fin_ops_platform/app/routes_*.py`
 - 派生数据生命周期：`backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
-- Read model freshness：`backend/src/fin_ops_platform/services/read_model_query_gateway.py`
-- Read model refresh 入队：`backend/src/fin_ops_platform/services/read_model_refresh_gateway.py`
+- Direct API read path：`docs/architecture/direct-api-read-architecture.md`、各模块 query/application service 和 repository。
+- Legacy read model negative guards：`tests/test_read_model_manifest.py`、`tests/test_read_model_architecture_guards.py`、`tests/test_platform_runtime_boundary_guards.py`
 - Durable queue：`backend/src/fin_ops_platform/services/runtime_queue.py`
 - Worker registry：`backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 - App Status domain registry：`backend/src/fin_ops_platform/services/app_status_domain_registry.py`
-- App Status read model registry：`backend/src/fin_ops_platform/services/app_status_read_model_registry.py`
+- App Status read model registry：`backend/src/fin_ops_platform/services/app_status_read_model_registry.py`，当前为空 guard。
 
 ## 页面/API/后端 Owner Map
 
-| Module | Route | Page component | API client | 后端入口 | Read model / worker / status | 主要测试入口 |
+| Module | Route | Page component | API client | 后端入口 | Direct read / worker / status | 主要测试入口 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `reconciliation-workbench` | `/` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `web/src/features/workbench/api.ts` | `server.py` `/api/workbench*`、`routes_workbench.py` | `workbench`、`workbench_relation`、`workbench-matching`、App Status `workbench` | `tests/test_workbench_*`、`web/src/test/Workbench*.test.tsx` |
-| `tax-offset` | `/tax-offset` | `web/src/pages/TaxOffsetPage.tsx` | `web/src/features/tax/api.ts` | `routes_tax.py`、`server.py` `/api/tax-offset*` | `tax_offset`、`invoice_lifecycle`、`cost-tax`、`invoice-lifecycle` | `tests/test_tax_offset_*`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts` |
-| `cost-statistics` | `/cost-statistics` | `web/src/pages/CostStatisticsPage.tsx` | `web/src/features/cost-statistics/api.ts` | `routes_cost_statistics.py`、`server.py` `/api/cost-statistics*` | `cost_statistics`、`cost-tax` | `tests/test_cost_statistics_*`、`web/src/test/CostStatistics*.test.ts`、`web/e2e/cost-statistics-flow.spec.ts` |
-| `bank-details` | `/bank-details` | `web/src/pages/BankDetailsPage.tsx` | `web/src/features/bankDetails/api.ts` | `routes_bank_details.py`、`server.py` `/api/bank-details*` | `bank_detail`、`bank_account_balance`、`bank-detail`、`bank-account-balance` | `tests/test_bank_details_*`、`tests/test_bankdetail_*`、`web/src/test/BankDetails*.test.tsx` |
-| `pending-invoices` | `/pending-invoices` | `web/src/pages/PendingInvoicesPage.tsx` | `web/src/features/pendingInvoices/api.ts` | `routes_pending_invoices.py`、`server.py` `/api/pending-invoices*` | `pending_invoice`、`search`、`invoice_lifecycle`、`search-pending`、`invoice-lifecycle` | `tests/test_pending_invoice_*`、`web/src/test/PendingInvoices*.test.tsx` |
-| `input-invoice-usage` | `/input-invoice-usage` | `web/src/pages/InputInvoiceUsagePage.tsx` | `web/src/features/inputInvoiceUsage/api.ts` | `server.py` `/api/input-invoice-usage*` | `input_invoice_usage`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_input_invoice_usage_*`、`tests/test_invoice_usage_collection_*`、`web/src/test/InputInvoiceUsage*.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` |
-| `oa-pending-payments` | `/oa-pending-payments` | `web/src/pages/OaPendingPaymentsPage.tsx` | `web/src/features/oaPendingPayments/api.ts` | `routes_oa_pending_payments.py`、`server.py` `/api/oa-pending-payments*` | `oa_pending_payment`、`invoice_lifecycle`、`invoice-usage-collection`、`oa-sync` | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` |
-| `output-invoice-collections` | `/output-invoice-collections` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `web/src/features/outputInvoiceCollections/api.ts` | `routes_output_invoice_collections.py`、`server.py` `/api/output-invoice-collections*` | `output_invoice_collection`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_output_invoice_collection_*`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts` |
-| `no-oa-bank-batches` | `/no-oa-bank-batches` | `web/src/pages/NoOaBankBatchPage.tsx` | `web/src/features/noOaBankBatches/api.ts` | `routes_no_oa_bank_batches.py`、`server.py` `/api/no-oa-bank-batches*` | `no_oa_bank_batch`、`no-oa-bank-batch` | `tests/test_no_oa_bank_batch_*`、`web/src/test/NoOaBankBatch*.test.tsx`、`web/e2e/no-oa-bank-batches-flow.spec.ts` |
-| `batch-accounting` | `/batch-accounting` | `web/src/pages/BatchAccountingPage.tsx` | `web/src/features/batchAccounting/api.ts` | `server.py` `/api/batch-accounting*` | `workbench_relation`、`workbench-relation` | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、`web/e2e/batch-accounting-flow.spec.ts` |
-| `turnover-ledger` | `/turnover-ledger` | `web/src/pages/TurnoverLedgerPage.tsx` | `web/src/features/turnoverLedger/api.ts` | `routes_turnover_ledger.py`、`server.py` `/api/turnover-ledger*` | `turnover_ledger`、`turnover-ledger` | `tests/test_turnover_*`、`web/src/test/TurnoverLedger*.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` |
+| `reconciliation-workbench` | `/` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `web/src/features/workbench/api.ts` | `server.py` `/api/workbench*`、`routes_workbench.py` | direct Workbench API、`workbench-matching`、App Status `workbench` | `tests/test_workbench_*`、`web/src/test/Workbench*.test.tsx` |
+| `tax-offset` | `/tax-offset` | `web/src/pages/TaxOffsetPage.tsx` | `web/src/features/tax/api.ts` | `routes_tax.py`、`server.py` `/api/tax-offset*` | direct API；invoice lifecycle / tax certified import / cache warmup | `tests/test_tax_offset_*`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts` |
+| `cost-statistics` | `/cost-statistics` | `web/src/pages/CostStatisticsPage.tsx` | `web/src/features/cost-statistics/api.ts` | `routes_cost_statistics.py`、`server.py` `/api/cost-statistics*` | direct API；cost cache warmup | `tests/test_cost_statistics_*`、`web/src/test/CostStatistics*.test.ts`、`web/e2e/cost-statistics-flow.spec.ts` |
+| `bank-details` | `/bank-details` | `web/src/pages/BankDetailsPage.tsx` | `web/src/features/bankDetails/api.ts` | `routes_bank_details.py`、`server.py` `/api/bank-details*` | direct bank detail/accounts payload | `tests/test_bank_details_*`、`tests/test_bankdetail_*`、`web/src/test/BankDetails*.test.tsx` |
+| `pending-invoices` | `/pending-invoices` | `web/src/pages/PendingInvoicesPage.tsx` | `web/src/features/pendingInvoices/api.ts` | `routes_pending_invoices.py`、`server.py` `/api/pending-invoices*` | direct pending invoice payload | `tests/test_pending_invoice_*`、`web/src/test/PendingInvoices*.test.tsx` |
+| `input-invoice-usage` | `/input-invoice-usage` | `web/src/pages/InputInvoiceUsagePage.tsx` | `web/src/features/inputInvoiceUsage/api.ts` | `server.py` `/api/input-invoice-usage*` | direct input invoice usage payload | `tests/test_input_invoice_usage_*`、`tests/test_invoice_usage_collection_*`、`web/src/test/InputInvoiceUsage*.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` |
+| `oa-pending-payments` | `/oa-pending-payments` | `web/src/pages/OaPendingPaymentsPage.tsx` | `web/src/features/oaPendingPayments/api.ts` | `routes_oa_pending_payments.py`、`server.py` `/api/oa-pending-payments*` | direct OA pending payment payload、`oa-sync` | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` |
+| `output-invoice-collections` | `/output-invoice-collections` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `web/src/features/outputInvoiceCollections/api.ts` | `routes_output_invoice_collections.py`、`server.py` `/api/output-invoice-collections*` | direct output collection payload | `tests/test_output_invoice_collection_*`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts` |
+| `no-oa-bank-batches` | `/no-oa-bank-batches` | `web/src/pages/NoOaBankBatchPage.tsx` | `web/src/features/noOaBankBatches/api.ts` | `routes_no_oa_bank_batches.py`、`server.py` `/api/no-oa-bank-batches*` | direct no-OA payload | `tests/test_no_oa_bank_batch_*`、`web/src/test/NoOaBankBatch*.test.tsx`、`web/e2e/no-oa-bank-batches-flow.spec.ts` |
+| `batch-accounting` | `/batch-accounting` | `web/src/pages/BatchAccountingPage.tsx` | `web/src/features/batchAccounting/api.ts` | `server.py` `/api/batch-accounting*` | direct canonical relation context | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、`web/e2e/batch-accounting-flow.spec.ts` |
+| `turnover-ledger` | `/turnover-ledger` | `web/src/pages/TurnoverLedgerPage.tsx` | `web/src/features/turnoverLedger/api.ts` | `routes_turnover_ledger.py`、`server.py` `/api/turnover-ledger*` | direct turnover query service | `tests/test_turnover_*`、`web/src/test/TurnoverLedger*.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` |
 | `etc-tickets` | `/etc-tickets` | `web/src/pages/EtcTicketManagementPage.tsx` | `web/src/features/etc/api.ts` | `routes_etc.py`、`server.py` `/api/etc*` | `import` worker、ETC import/business batch state | `tests/test_etc_*`、`web/src/test/Etc*.test.tsx`、`web/e2e/etc-tickets-flow.spec.ts` |
 | `settings` | `/settings` | `web/src/pages/SettingsPage.tsx` | `web/src/features/workbench/api.ts` | `server.py` `/api/workbench/settings*` | `oa-sync`、`settings_refresh`、`oa_identity`、`state_store` | `tests/test_app_settings_service.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/SettingsPage.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` |
-| `app-health-operations` | `/operations/app-health` | `web/src/pages/AppHealthOperationsPage.tsx` | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard` | App Status domains、runtime workers、queue、readiness | `tests/test_app_health_*`、`tests/test_app_status_*`、`web/src/test/AppHealth*.test.tsx` |
+| `app-health-operations` | `/operations/app-health` | `web/src/pages/AppHealthOperationsPage.tsx` | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard` | App Status domains、runtime workers、queue、dependencies | `tests/test_app_health_*`、`tests/test_app_status_*`、`web/src/test/AppHealth*.test.tsx` |
 | `imports-bank-transactions` | `/imports/bank-transactions` | `web/src/pages/imports/ImportBankTransactionsPage.tsx` | `web/src/features/imports/api.ts` | `server.py` import endpoints | `import` worker、`bank_transaction_import`、`import.process.requested` | `tests/test_import_*`、`web/src/test/ImportsApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` |
 | `imports-invoices` | `/imports/invoices` | `web/src/pages/imports/ImportInvoicesPage.tsx` | `web/src/features/imports/api.ts` | `server.py` import endpoints | `import` worker、`invoice_import`、`import.process.requested` | `tests/test_import_*`、`web/src/test/ImportsApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` |
 | `imports-etc-invoices` | `/imports/etc-invoices` | `web/src/pages/imports/ImportEtcInvoicesPage.tsx` | `web/src/features/imports/api.ts`、`web/src/features/etc/api.ts` | `server.py` `/api/etc/import*` | `import` worker、`etc_invoice_import` | `tests/test_etc_backend.py`、`tests/test_import_*`、`web/src/test/EtcApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-etc-invoices-flow.spec.ts` |
 
 ## 模块细化：cost-statistics
 
-本节记录成本统计的浏览器测试闭环。业务事实源仍以 `docs/product-specs/`、`docs/modules/cost-statistics/`、`docs/dev/api-contracts.md` 和成本统计 read model 文档为准。
+本节记录成本统计的浏览器测试闭环。业务事实源仍以 `docs/product-specs/`、`docs/modules/cost-statistics/`、`docs/dev/api-contracts.md` 和 direct API 架构为准。
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/CostStatisticsPage.tsx` | time/project/bank/expenseType 视图、project scope、范围选择、drilldown、详情 modal、export center 和 read model refreshing/empty/error 状态不能漂移。 |
-| Frontend API mapper | `web/src/features/cost-statistics/api.ts` | explorer/export-preview/export/transaction detail 的 query 参数、project scope、read model status、错误 JSON message 和缓存 key 不能漂移。 |
-| API/service/read model | `/api/cost-statistics*`、`CostStatisticsService`、`CostStatisticsReadModelService` | project scope、export row-limit、parent/shard readiness、scope normalization 和 worker enqueue 必须保持一致。 |
+| Frontend page | `web/src/pages/CostStatisticsPage.tsx` | time/project/bank/expenseType 视图、project scope、范围选择、drilldown、详情 modal、export center 和 direct payload loading/empty/error 状态不能漂移。 |
+| Frontend API mapper | `web/src/features/cost-statistics/api.ts` | explorer/export-preview/export/transaction detail 的 query 参数、project scope、direct payload shape、错误 JSON message 和缓存 key不能漂移；不得重新消费 `read_model_status`。 |
+| API/direct query service | `/api/cost-statistics*`、`CostStatisticsService`、`CostStatisticsQueryService` | direct page payload、project scope、export row-limit、scope normalization 和错误 contract 必须保持一致；不得恢复 parent/shard readiness 或 worker enqueue。 |
 | Export center | `ExportCenterModal` | preview 与 download 必须携带当前 view/project scope/filter；结构化后端错误必须展示给用户，不得误当文件下载。 |
 
 当前 Browser e2e：
 
-- `web/e2e/cost-statistics-flow.spec.ts`：真实 Chromium 中进入成本统计页，验证 read model `refreshing` / `stale` / `failed` 不显示最终空态或旧数据，`read_export_only` time-view 导出中心可成功触发 download event 且请求/文件字段正确；同时验证按时间首屏，切到按项目并切换 `project_scope=all`，从项目到费用类型再到流水详情下钻，打开导出中心执行 project preview，并断言同步导出行数上限错误能在弹窗内显示；另有 390px 窄屏 120+ 行长字段 smoke，等待 explorer `read_model_status=fresh` 后验证按时间表和项目下钻表均可横向/纵向滚动、右侧列在 viewport 内、导出入口和选择器未被遮挡且无浏览器错误。
-- `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中确认 ETC 导入后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示 ETC 导入通行成本项目、通行费和服务商，证明 ETC import 子链路不是只停留在导入页 job feedback。
-- `web/e2e/no-oa-bank-batches-flow.spec.ts`：真实 Chromium 中 no-OA selected-row submit 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示免 OA 手续费成本项目、费用类型和银行流水字段，证明 no-OA submit 子链路不是只停留在本页 bucket 状态。
-- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中外部往来 manual closure confirm 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示外部往来闭环成本项目、费用类型和银行流水字段，证明 turnover closure 子链路不是只停留在周转页闭环 chip 状态。
-- `web/e2e/settings-data-reset-flow.spec.ts`：真实 Chromium 中设置页项目标记完成并保存后进入成本统计，等待 active/all `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，active scope 排除已完成项目，all scope 保留该项目和金额，证明 settings project scope 子链路不是只停留在设置页保存成功反馈。
+- `web/e2e/cost-statistics-flow.spec.ts`：真实 Chromium 中进入成本统计页，验证 direct explorer payload 的 loading/error/empty 防伪成功语义，`read_export_only` time-view 导出中心可成功触发 download event 且请求/文件字段正确；同时验证按时间首屏，切到按项目并切换 `project_scope=all`，从项目到费用类型再到流水详情下钻，打开导出中心执行 project preview，并断言同步导出行数上限错误能在弹窗内显示；另有 390px 窄屏 120+ 行长字段 smoke，等待 explorer 返回业务 rows/summary 且不含 `read_model_status` 后验证按时间表和项目下钻表均可横向/纵向滚动、右侧列在 viewport 内、导出入口和选择器未被遮挡且无浏览器错误。
+- `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中确认 ETC 导入后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 direct 业务 payload 且不含 `read_model_status`，并在按项目/流水视图展示 ETC 导入通行成本项目、通行费和服务商，证明 ETC import 子链路不是只停留在导入页 job feedback。
+- `web/e2e/no-oa-bank-batches-flow.spec.ts`：真实 Chromium 中 no-OA selected-row submit 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 direct 业务 payload 且不含 `read_model_status`，并在按项目/流水视图展示免 OA 手续费成本项目、费用类型和银行流水字段，证明 no-OA submit 子链路不是只停留在本页 bucket 状态。
+- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中外部往来 manual closure confirm 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 direct 业务 payload 且不含 `read_model_status`，并在按项目/流水视图展示外部往来闭环成本项目、费用类型和银行流水字段，证明 turnover closure 子链路不是只停留在周转页闭环 chip 状态。
+- `web/e2e/settings-data-reset-flow.spec.ts`：真实 Chromium 中设置页项目标记完成并保存后进入成本统计，等待 active/all `/api/cost-statistics/explorer` 返回 direct 业务 payload 且不含 `read_model_status`，active scope 排除已完成项目，all scope 保留该项目和金额，证明 settings project scope 子链路不是只停留在设置页保存成功反馈。
 
 ## 模块细化：input-invoice-usage
 
@@ -66,10 +66,10 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/InputInvoiceUsagePage.tsx` | rows/filter-options 并行加载、read model stale/refreshing、筛选/排序/导出、workflow drawer 状态不能互相污染。 |
+| Frontend page | `web/src/pages/InputInvoiceUsagePage.tsx` | rows/filter-options 并行加载、direct payload unavailable、筛选/排序/导出、workflow drawer 状态不能互相污染。 |
 | OA reverse drawer | `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx` | 候选子集必须重新 preview 并使用刷新后的 hash；草稿创建后只能展示用户可理解的提交确认，不暴露内部 batch 字段。 |
 | Frontend API mapper | `web/src/features/inputInvoiceUsage/api.ts` | snake_case/camelCase、preview/draft/manual-status/history shape、错误消息和权限字段不能漂移。 |
-| API/service/read model | `/api/input-invoice-usage*`、`InputInvoiceUsageQueryService`、`InputInvoiceUsageOaReverseService` | rows/filter/detail/export fresh gate、OA reverse preview hash、目标申请人 token、submitted history 和 relation command 边界必须保持一致。 |
+| API/service/projection | `/api/input-invoice-usage*`、`InputInvoiceUsageQueryService`、`InputInvoiceUsageOaReverseService` | rows/filter/detail/export direct contract、OA reverse preview hash、目标申请人 token、submitted history 和 relation command 边界必须保持一致。 |
 
 当前 Browser e2e：
 
@@ -81,10 +81,10 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/OaPendingPaymentsPage.tsx` | rows/filter-options 并行加载、read model refreshing/empty、搜索、表头筛选、排序、详情 drawer 和规则 drawer 不能漂移。 |
+| Frontend page | `web/src/pages/OaPendingPaymentsPage.tsx` | rows/filter-options 并行加载、direct payload refreshing/empty、搜索、表头筛选、排序、详情 drawer 和规则 drawer 不能漂移。 |
 | Grouped table | `web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx` | OA 主行、支出流水、进项发票、付款状态、金额/方向 chip、空值和 `+N` 关系展开必须稳定。 |
 | Frontend API mapper | `web/src/features/oaPendingPayments/api.ts` | rows/filter/detail query 参数、detail target kind、filters JSON encoding、camelCase/snake_case response shape 不能漂移。 |
-| API/service/read model | `/api/oa-pending-payments*`、`OaPendingPaymentApiRoutes`、`OaPendingPaymentQueryService`、`OaPendingPaymentReadModelService` | rows/filter/detail fresh gate、非法参数、detail unavailable、read model enqueue 和权限必须保持一致。 |
+| API/direct query service | `/api/oa-pending-payments*`、`OaPendingPaymentApiRoutes`、`OaPendingPaymentQueryService` | rows/filter/detail direct payload、非法参数、detail unavailable、权限和 legacy service 删除 guard 必须保持一致。 |
 
 当前 Browser e2e：
 
@@ -96,14 +96,14 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/TaxOffsetPage.tsx` | 试算、保存、认证导入后必须刷新当前月份 payload；read model refreshing/stale/missing/failed/unavailable 不能显示真实空态或允许保存。 |
+| Frontend page | `web/src/pages/TaxOffsetPage.tsx` | 试算、保存、认证导入后必须刷新当前月份 direct payload；loading/error/empty 和 source-version conflict 不能漂移，页面不得重新消费 legacy freshness 字段。 |
 | Certified import modal | `web/src/components/tax/CertifiedInvoiceImportModal.tsx` | React StrictMode effect replay 后 mounted guard 必须恢复；confirm 返回后必须关闭 modal 并调用页面刷新。 |
 | Frontend API mapper | `web/src/features/tax/api.ts` | preview/confirm/job payload、summary amount 和 source_versions shape 不能漂移。 |
-| API/read model | `/api/tax-offset*`、`TaxOffsetQueryService`、`TaxOffsetReadModelRefreshService` | miss/stale 必须走 freshness/enqueue；认证导入 confirm 必须 dirty tax offset month。 |
+| API/legacy backend snapshot | `/api/tax-offset*`、`TaxOffsetQueryService` | 页面 GET 由 query service 组装 direct payload；不再保留 `TaxOffsetReadModelRefreshService` / `tax_offset.read_model.refresh` worker lane；认证导入 confirm 必须影响 tax offset month。 |
 
 当前 Browser e2e：
 
-- `web/e2e/tax-offset-flow.spec.ts`：真实 Chromium 中进入税金抵扣页，验证 read-export 可读无保存/导入入口、forbidden/expired 零 tax protected API、admin 写入口可见；验证 390px 窄屏 81/92 行大表搜索、排序、筛选、共享横向滚动和按钮无遮挡；验证 `refreshing` / `missing` / `failed` read model 不显示真实空态、不泄露 stale reason、不允许保存计划，验证 `stale -> fresh` 自动重试恢复；同时覆盖取消一张进项计划后触发 calculate，保存计划，409 source/version conflict 错误可见且不显示保存成功/不伪刷新，再在页内 modal 上传认证结果 Excel、preview 行级计划内/外拆分、confirm 后等待 `/api/tax-offset` 刷新，验证已认证进项税额和已认证 drawer 更新。
+- `web/e2e/tax-offset-flow.spec.ts`：真实 Chromium 中进入税金抵扣页，验证 read-export 可读无保存/导入入口、forbidden/expired 零 tax protected API、admin 写入口可见；验证 390px 窄屏 81/92 行大表搜索、排序、筛选、共享横向滚动和按钮无遮挡；验证 direct tax offset payload 首屏展示且没有页面级 read model retry；同时覆盖取消一张进项计划后触发 calculate，保存计划，409 source/version conflict 错误可见且不显示保存成功/不伪刷新，再在页内 modal 上传认证结果 Excel、preview 行级计划内/外拆分、confirm 后直接刷新 `/api/tax-offset`，验证已认证进项税额和已认证 drawer 更新。
 
 ## 模块细化：turnover-ledger
 
@@ -111,28 +111,28 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/TurnoverLedgerPage.tsx` | `readModelStatus !== "fresh"` 必须禁用确认、撤回、流水选择和 extra 保存；domain event 只能作为刷新提示 |
+| Frontend page | `web/src/pages/TurnoverLedgerPage.tsx` | direct grouped payload 临时不可用或非最新诊断时必须防 false-empty 和危险写入；domain event 只能作为刷新提示 |
 | Frontend API mapper | `web/src/features/turnoverLedger/api.ts` | snake_case/camelCase、grouped shape、extra、closure、withdraw、blob export shape 不能漂移 |
 | Read facade/API routes | `TurnoverLedgerReadFacade`、`TurnoverLedgerApiRoutes` | grouped/legacy flat 兼容、导出、detail/extra contract |
-| Query service | `TurnoverLedgerQueryService` | stale/missing SQL read model 不能伪装 fresh；必须 enqueue `api_stale` / `api_miss` |
+| Query service | `TurnoverLedgerQueryService` | 页面 GET 返回 direct grouped payload；legacy SQL projection 不得污染页面响应，后台 projection 仍不得保存半成品 |
 | Business core | `TurnoverLedgerService`、`TurnoverRelationService`、`TurnoverLedgerExtraService` | deterministic 不是已闭环；人工闭环必须同组、同对方、同语义、一收一支、零差额 |
 | Write boundary | `TurnoverLedgerWriteFacade`、`TurnoverLedgerWriteUnitOfWork`、write adapters | stale precondition、idempotency、rollback、dirty/outbox 必须在同一写边界内被保护 |
-| Read model worker | `TurnoverLedgerReadModelRefreshService`、`TurnoverLedgerSqlProjectionBuilder` | projection 不得保存半成品；worker 必须 complete dirty scope |
-| App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | `turnover_ledger` domain 必须绑定 `turnover-ledger` worker 和 `turnover_ledger.read_model.refresh` |
+| Legacy projection | `TurnoverLedgerSqlProjectionBuilder` | legacy projection 不得保存半成品；页面读取不得依赖 projection freshness |
+| App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | `turnover_ledger` domain 不再绑定 turnover read model、worker 或 refresh job |
 
 `turnover-ledger` 写入 fan-out：
 
 | 写入动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| tag-selection 保存 | `turnover_ledger.read_model.refresh` | 往来款 |
+| tag-selection 保存 | direct grouped GET reload | 往来款 |
 | bank-row-tags batch | `bank_detail`、`workbench`、`turnover_ledger` refresh | 银行明细、关联台、往来款、成本统计、搜索 |
-| relation extra 保存 | `turnover_ledger.read_model.refresh`，前端 `turnoverLedgerExtraUpdated` | 往来款 |
+| relation extra 保存 | direct grouped GET reload，前端 `turnoverLedgerExtraUpdated` | 往来款 |
 | manual closure confirm | Turnover manual relation + Workbench active pair relation，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
 | withdraw | relation withdrawn + Workbench relation 恢复，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
 
 当前 Browser e2e：
 
-- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中进入外部往来款页，展开同一公司两条真实 flow rows，manual closure confirm 前触发 `turnover_ledger:all` fresh gate 与 grouped reload/rebind，写成功后等待后端 operation barrier，进入成本统计验证 `/api/cost-statistics/explorer` fresh 和闭环成本行，再从“收支闭环” flow row toolbar 撤回并验证 grouped payload 移除闭环 chip。
+- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中进入外部往来款页，展开同一公司两条真实 flow rows，manual closure confirm 前执行 grouped reload/rebind，写成功后 direct refetch grouped ledger，进入成本统计验证 `/api/cost-statistics/explorer` direct payload 和闭环成本行，再从“收支闭环” flow row toolbar 撤回并验证 grouped payload 移除闭环 chip。
 
 ## 模块细化：no-oa-bank-batches
 
@@ -141,20 +141,19 @@
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
 | Frontend page | `web/src/pages/NoOaBankBatchPage.tsx` | stale polling、route unmount cleanup、跨账户选择保护、internal_transfer batch submit、withdraw dialog |
-| Frontend API mapper | `web/src/features/noOaBankBatches/api.ts` | snake_case/camelCase、read_model_status、summary categories、detail rows、mutation errors、affected months |
+| Frontend API mapper | `web/src/features/noOaBankBatches/api.ts` | snake_case/camelCase、summary categories、detail rows、mutation errors、affected months；不得重新消费 legacy freshness fields |
 | Route facade | `routes_no_oa_bank_batches.py` | HTTP status、version conflict、actor mapping、partial failure aggregation、unknown batch/error shape |
-| Application service | `NoOaBankBatchApplicationService` | read model missing/stale 不同步 rebuild、after_mutation、durable queue enqueue、Workbench scope expansion |
+| Application service | `NoOaBankBatchApplicationService` | direct list/detail、tag selection、submit/withdraw、after_mutation、Workbench scope expansion；不得读取或刷新 no-OA page read model |
 | Business core | `NoOaBankBatchService` | draft/submitted/withdrawn/stale/conflict、internal_transfer pairing、active relation exclusion、legacy relation migration |
 | Tag selection | `NoOaBankBatchTagSelectionService` / `AppSettingsService` | tag selection version、inactive selected cleanup、auto-tag rules labels 即时反映 |
 | Write target contract | `bankdetail_write_uow.py` + `tests/test_bankdetail_write_uow_contract.py` | no-OA batch + Workbench pair relation + audit + dirty/outbox 同事务目标 |
-| Read model worker | `NoOaBankBatchReadModelRefreshService` | stale source version event 不得 rebuild/overwrite；worker 必须 complete dirty scope |
-| App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | `no_oa_bank_batches` domain 必须绑定 `no-oa-bank-batch` worker 和 `no_oa_bank_batch.read_model.refresh` |
+| App Status | `app_status_domain_registry.py`、`runtime_worker_registry.py` | `no_oa_bank_batches` domain 不得绑定 no-OA page read-model worker、readiness 或 refresh job |
 
 `no-oa-bank-batches` 写入 fan-out：
 
 | 写入动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| tag-selection 保存 | `no_oa_bank_batch.read_model.refresh` | 免 OA |
+| tag-selection 保存 | direct reload + `no_oa_bank_batch_changed` lifecycle | 免 OA、关联台、成本统计、搜索 |
 | submit-selection | `no_oa_bank_batch_changed`、Workbench pair relation、`workbenchRelationUpdated` | 免 OA、关联台、银行明细、成本统计、搜索 |
 | internal_transfer confirm-link | no-OA batch submit + `relation_mode=no_oa_bank_batch` | 关联台、免 OA、银行明细、成本统计、搜索 |
 | batch withdraw | pair relation cancel + `no_oa_bank_batch_changed`、`workbenchRelationUpdated` | 免 OA、关联台、银行明细、成本统计、搜索 |
@@ -162,7 +161,7 @@
 
 当前 Browser e2e：
 
-- `web/e2e/no-oa-bank-batches-flow.spec.ts`：真实 Chromium 中进入免 OA 流水批量处理页，选择未提交手续费流水，断言 `submit-selection` 请求体和 operation barrier fresh，进入成本统计验证 downstream fresh read model 与免 OA 成本行，回到已提交 bucket 撤回批次并确认撤回请求体，最后进入历史 bucket 验证已撤回只读。
+- `web/e2e/no-oa-bank-batches-flow.spec.ts`：真实 Chromium 中进入免 OA 流水批量处理页，选择未提交手续费流水，断言 `submit-selection` 请求体、direct refetch 和成本统计 downstream direct payload 与免 OA 成本行，回到已提交 bucket 撤回批次并确认撤回请求体，最后进入历史 bucket 验证已撤回只读。
 
 ## 模块细化：batch-accounting
 
@@ -170,28 +169,28 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/BatchAccountingPage.tsx` | `readModelStatus !== "fresh"` 必须禁用提交/撤回；bucket、年份、搜索、差额说明和选择缓存不能把旧选择带入新事实 |
-| Frontend API mapper | `web/src/features/batchAccounting/api.ts` | snake_case/camelCase、`read_model_status`、`relations_by_bank_row_id`、mutation `affected_months` / `version` shape 不能漂移 |
+| Frontend page | `web/src/pages/BatchAccountingPage.tsx` | direct relation payload 临时不可用或非最新诊断时必须防 false-empty 和危险写入；bucket、年份、搜索、差额说明和选择缓存不能把旧选择带入新事实 |
+| Frontend API mapper | `web/src/features/batchAccounting/api.ts` | snake_case/camelCase、`relations_by_bank_row_id`、mutation `affected_months` / `version` shape 不能漂移；不得重新消费 legacy freshness fields |
 | HTTP routes | `server.py` `/api/batch-accounting*` | GET 必须只读；submit/withdraw 必须映射错误码、actor、audit、lifecycle event |
 | Business service | `BatchAccountingService` | 金额不一致说明、active relation 排除、version conflict、合法日常报销 OA 行、历史 collision repair |
-| Relation read facade | `WorkbenchRelationReadFacade` | missing/stale/unavailable 不能伪装 fresh；non-fresh 时必须 enqueue refresh 并透出 reason/scope |
-| Relation projection | `WorkbenchRelationSqlProjectionBuilder`、`WorkbenchRelationDistributionMapper` | active batch relation、OA invoice snapshot、linked/unlinked rows、source version 和去重 |
+| Relation read facade | `WorkbenchRelationReadFacade` | app runtime 优先通过 canonical `WorkbenchRelationCommandService` 组装 relation context；legacy repository 只作 fallback，不提供页面 freshness proof |
+| Relation context mapper | `WorkbenchRelationDistributionMapper` | active batch relation、OA invoice snapshot、linked/unlinked rows、source version 和去重 |
 | Write target | `WorkbenchPairRelationService` | submit/withdraw 不能产生半写入；撤回只恢复真实 relation snapshot 并保留历史说明，OA invoice `existing_case` 显示归属不能恢复成 active relation |
-| Read model worker | `WorkbenchRelationReadModelRefreshService`、`workbench-relation` worker | `workbench_relation.read_model.refresh` 必须可注册、可观测、可重试 |
-| App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `batch_accounting` domain 必须绑定 `workbench_relation` readiness 和 relation refresh job |
+| Read path governance | removed workbench relation worker | 不再注册、观测或重试 `workbench_relation.read_model.refresh`；页面读取必须走 direct API/canonical relation context |
+| App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `batch_accounting` domain 不再绑定 `workbench_relation` readiness 或 relation refresh job |
 
 `batch-accounting` 写入 fan-out：
 
 | 写入动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| batch submit | Workbench pair relation + `batch_accounting_relation_changed` + `workbench_relation.read_model.refresh`；前端 `workbenchRelationUpdated` | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 |
-| batch withdraw | Workbench relation withdraw + snapshot restore + `batch_accounting_relation_changed` + `workbench_relation.read_model.refresh`；前端 `workbenchRelationUpdated` | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 |
-| legacy collision repair | 显式 service repair / mutation 路径；GET 列表不允许 repair | 批量账务、关联台 relation projection |
-| relation read model missing/stale | `WorkbenchRelationReadFacade` enqueue refresh | 批量账务 mutation 禁用、App Status busy/blocked |
+| batch submit | Workbench pair relation + `batch_accounting_relation_changed` + canonical relation direct refresh；前端 `workbenchRelationUpdated` | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 |
+| batch withdraw | Workbench relation withdraw + snapshot restore + `batch_accounting_relation_changed` + canonical relation direct refresh；前端 `workbenchRelationUpdated` | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 |
+| legacy collision repair | 显式 service repair / mutation 路径；GET 列表不允许 repair | 批量账务、关联台 relation context |
+| relation context unavailable | direct relation payload 返回明确 unavailable/error；不 enqueue page refresh | 批量账务 mutation 禁用、页面提示重试 |
 
 当前 Browser e2e：
 
-- `web/e2e/batch-accounting-flow.spec.ts`：真实 Chromium 中选择未提交批量账务银行流水和 OA 行，submit 后等待 `workbench_relation` operation barrier，再重新读取并在 submitted bucket 展示 relation/OA 明细；随后填写撤回原因，withdraw 后等待 barrier 并回到未提交状态。
+- `web/e2e/batch-accounting-flow.spec.ts`：真实 Chromium 中选择未提交批量账务银行流水和 OA 行，submit 后 direct refetch 并在 submitted bucket 展示 relation/OA 明细；随后填写撤回原因，withdraw 后 direct refetch 并回到未提交状态。
 
 ## 模块细化：imports-bank-transactions
 
@@ -213,7 +212,7 @@
 
 | 动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| file preview | 创建 `FileImportSession`，不应刷新业务 read model | 当前导入页 |
+| file preview | 创建 `FileImportSession`，不触发 downstream background 任务或页面刷新 | 当前导入页 |
 | file confirm queued | `file_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
 | file confirm processed | import facts 持久化、Workbench matching 入队、`_persist_state_with_workbench_invalidation` | 银行明细、关联台、往来款、成本统计、搜索 |
 | bank import lifecycle | `bank_import_confirmed` -> bank balance/detail、workbench、workbench relation、workbench matching、invoice lifecycle、cost、search | 银行明细、关联台、待找发票、成本统计、App Health |
@@ -243,7 +242,7 @@
 
 | 动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| file preview | 创建 `FileImportSession` 和 `ImportPreviewAuditCounts`，不应刷新业务 read model | 当前导入页 |
+| file preview | 创建 `FileImportSession` 和 `ImportPreviewAuditCounts`，不触发 downstream background 任务或页面刷新 | 当前导入页 |
 | file confirm queued | `file_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
 | file confirm processed | input/output invoice facts 持久化、source links、duplicate decisions、Workbench matching scope 计算 | 关联台、待找发票、税金抵扣、进项/销项/OA 待付款、成本统计、搜索 |
 | invoice import lifecycle | `invoice_import_confirmed` -> workbench、workbench relation、workbench matching、invoice lifecycle、tax offset、tax month cache、cost statistics、search | 关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计、App Health |
@@ -265,7 +264,7 @@
 | HTTP routes | `server.py` `/api/etc/import/preview`、`/api/etc/import/confirm`、reconciliation task 和 business batch routes | task version/hash 校验、structured error、idempotent job、queue unavailable、legacy import route |
 | Reconciliation task service | `EtcReconciliationTaskService` | ready/importing/imported/closed、confirmed item set hash、missing requirements、source files、delete/reopen invalidating preview |
 | Zip parser/filter | `etc_document_parsers.py`、`etc_reconciliation_zip_filter.py` | corrupted zip、重复发票、组合金额匹配、多 requirement 分配、非 ETC evidence |
-| ETC service | `EtcService` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success、delete/release |
+| ETC service | `EtcService` | import session version/hash、duplicate/idempotency、attachments、business batch merge、partial success、delete/release |
 | Import processing | `ImportProcessingService` | `etc_invoice_import.confirm` 创建/复用 task-scoped business batch、progress、mark imported/failed、保存 ETC metadata/PDF/XML 附件关系并只关联已存在 canonical invoice |
 | Derived lifecycle | `DerivedDataLifecycleService`、`runtime_worker_handlers.py` | `etc_import_confirmed` 刷新 Workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `imports_etc_invoices` 绑定 `import` worker 和 `etc_invoice_import` job；共享 `import.process.requested` envelope 仍需后续专项校准 |
@@ -274,8 +273,8 @@
 
 | 动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| ready task 查询 | 读取 confirmed reconciliation task，不刷新业务 read model | ETC 导入页 |
-| zip preview | `EtcZipFilterPreview` + `EtcImportSession` + audit，不刷新业务 read model | ETC 导入页 |
+| ready task 查询 | 读取 confirmed reconciliation task，不触发 downstream background 任务 | ETC 导入页 |
+| zip preview | `EtcZipFilterPreview` + `EtcImportSession` + audit，不触发 downstream background 任务 | ETC 导入页 |
 | confirm queued | `etc_invoice_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
 | confirm processed | ETC business batch、ETC invoice metadata/附件关系、已存在 canonical invoice 关联、task imported/failed | ETC 票据管理、关联台 summary、税金抵扣、成本统计、search |
 | lifecycle refresh | `etc_import_confirmed` -> workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search | 关联台、税金抵扣、成本统计、ETC 票据管理、App Health |
@@ -284,7 +283,7 @@
 
 当前 Browser e2e：
 
-- `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中加载 ready ETC 对账任务、选择 task、上传两份 zip、预览 audit/新增/重复/附件补齐/异常项、确认后展示 `etc_invoice_import` background job feedback，并进入 ETC 票据、税金抵扣和成本统计验证 downstream fresh read model 与导入影响行，同时断言没有走通用 `/imports/files/*` 导入端点。
+- `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中加载 ready ETC 对账任务、选择 task、上传两份 zip、预览 audit/新增/重复/附件补齐/异常项、确认后展示 `etc_invoice_import` background job feedback，并进入 ETC 票据、税金抵扣和成本统计验证 downstream direct payload 与导入影响行，同时断言没有走通用 `/imports/files/*` 导入端点。
 
 ## 模块细化：output-invoice-collections
 
@@ -292,39 +291,39 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | rows/filter-options 并行加载、`readModelStatus=refreshing` 自动 retry、route unmount cleanup、workflow drawer 状态、admin-only receipt settings |
-| Frontend API mapper | `web/src/features/outputInvoiceCollections/api.ts` | snake_case/camelCase、`read_model_status`、summary/bank/receipt/red relation/status rules shape |
+| Frontend page | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | rows/filter-options 并行加载、direct payload loading/error/retry、route unmount cleanup、workflow drawer 状态、admin-only receipt settings |
+| Frontend API mapper | `web/src/features/outputInvoiceCollections/api.ts` | snake_case/camelCase、summary/bank/receipt/red relation/status rules shape；不得重新消费 legacy freshness fields |
 | UI components | `web/src/components/outputInvoiceCollections/*` | 分组表格、筛选菜单、详情 drawer、收款状态 drawer、收据预览/历史 drawer、作废/重开 dialog |
-| HTTP routes | `OutputInvoiceCollectionApiRoutes` | SQL read model fresh gate、`202 refreshing`、权限 gate、structured error、receipt idempotency |
+| HTTP routes | `OutputInvoiceCollectionApiRoutes` | direct payload gate、权限 gate、structured error、receipt idempotency；不得恢复 `202 refreshing` page read-model contract |
 | Query service | `OutputInvoiceCollectionQueryService` | 销项发票聚合、状态规则、分页/筛选/排序、relation detail、receipt preview fallback |
 | Lifecycle write service | `OutputInvoiceCollectionLifecycleService` | 手动状态、提醒、红蓝票关系、expectedVersion、tenant/actor、transaction-bound enqueue |
 | Receipt service | `OutputInvoiceCollectionReceiptService` | preview/create/void/reissue/settings、正式收据幂等、状态冲突、真实 history |
-| Read model worker | `InvoiceUsageCollectionReadModelRefreshService` | `output_invoice_collection.read_model.refresh`、all scope fan-out、source_versions、dirty scope complete |
+| 已下线 read model worker | 无 | output collection 页面读路径已改为 direct QueryService payload |
 | Source versions | `output_invoice_collection_source_versions()` | lifecycle policy、status rules、receipt schema、OA projection sync 变更必须让旧 rows stale |
-| App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | domain/read model/worker/job 注册不同步会让页面 busy/blocked 状态误判 |
+| App Status | `app_status_domain_registry.py`、空 `app_status_read_model_registry.py` guard、`runtime_worker_registry.py` | domain/worker/job 注册不同步或重新注册 read model 会让全局状态误判 |
 
 `output-invoice-collections` 写入 fan-out：
 
 | 写入动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| rows read model miss/stale/source version mismatch | `output_invoice_collection.read_model.refresh`，reason `api_miss` / `api_stale` | 销项收款、App Status/App Health |
-| 手动收款状态保存/清空 | lifecycle fact + `output_invoice_collection` month scope，reason `lifecycle_status_changed` | 销项收款；通过 invoice lifecycle/readiness 间接影响税金、成本、search 的最终判断 |
+| direct rows read | 无 page refresh worker | 销项收款 rows 直接重读业务 payload |
+| 手动收款状态保存/清空 | lifecycle fact + affected month，reason `lifecycle_status_changed` | 销项收款；税金、成本、search 通过 direct payload 和生命周期事实判断 |
 | 收款提醒 upsert/cancel | lifecycle fact + `output_invoice_collection` month scope，reason `lifecycle_reminder_changed` / `lifecycle_reminder_cancelled` | 销项收款、App Status/App Health |
 | 红蓝票关系 confirm/delete | red relation fact + `output_invoice_collection` month scope，reason `lifecycle_red_relation_changed` / cancelled | 销项收款 rows、红蓝票 relation 字段 export-preview/download、税金抵扣、成本统计、search 的后续 smoke |
 | receipt create | formal receipt fact + `output_invoice_collection` month scope，reason `receipt_created` | 销项收款、收据 history、App Status/App Health |
 | receipt void/reissue | receipt status fact + `output_invoice_collection` month scope，reason `receipt_voided` / `receipt_reissued` | 销项收款、收据 history、App Status/App Health |
 | receipt settings update | receipt settings fact；不直接刷新历史 rows，后续新建 receipt 使用新设置 | 销项收款 admin drawer |
-| invoice lifecycle / pending invoice rules / invoice import | 先 `invoice_lifecycle.read_model.refresh`，再 `output_invoice_collection.read_model.refresh` | 销项收款、待找发票、进项使用、OA 待付款、税金、成本、search |
+| invoice lifecycle / pending invoice rules / invoice import | invoice lifecycle facts / affected domains；进项/销项/OA 待付款 direct API 自行重读 | 销项收款、待找发票、进项使用、OA 待付款、税金、成本、search |
 
 关键回归保护：
 
 - `tests/test_output_invoice_collection_service.py` 保护业务规则、分页/筛选/排序、receipt preview 和非法参数。
 - `tests/test_output_invoice_collection_lifecycle.py` 保护手动状态、提醒、红蓝票关系、receipt 幂等和 tenant scoped overlay。
 - `tests/test_output_invoice_collection_api.py` 保护 API contract、权限、structured error 和 SQL fresh overlay。
-- `tests/test_invoice_usage_collection_sql_runtime.py` 保护 output read model stale -> `202 refreshing`、source_versions、all scope expansion 和 RabbitMQ event registration。
+- `tests/test_invoice_usage_collection_sql_runtime.py` 仅作为 legacy regression guard；当前重点是 direct rows、source_versions、all scope expansion 和 RabbitMQ event registration 不恢复页面 read-model contract。
 - `web/src/test/OutputInvoiceCollectionsPage.test.tsx` 保护页面骨架、refreshing/empty、retry cleanup、workflow drawers 和 admin-only 设置。
 - `web/e2e/output-invoice-collections-flow.spec.ts` 用真实 Chromium 保护销项收款 rows/filter 首屏、收款状态/提醒保存、rows refresh、正式收据 create 和 history 展示。
-- `web/e2e/output-invoice-red-relation-fanout.spec.ts` 用真实 Chromium 保护红蓝票关系确认后 rows refresh、manual evidence 展示、relation 字段 export-preview/download、税金抵扣/成本统计下游 fresh read model，以及撤销后行状态恢复。
+- `web/e2e/output-invoice-red-relation-fanout.spec.ts` 用真实 Chromium 保护红蓝票关系确认后 rows refresh、manual evidence 展示、relation 字段 export-preview/download、税金抵扣/成本统计下游 direct payload，以及撤销后行状态恢复。
 
 ## 模块细化：etc-tickets
 
@@ -342,7 +341,7 @@
 | Import worker | `ImportProcessingService`、runtime import worker | `etc_invoice_import` job、同 session 重试/幂等、后台导入成功后的 business batch 与 ETC metadata/附件关系保存 |
 | Workbench projection | `WorkbenchSqlProjectionBuilder`、`WorkbenchPairRelationService` | submitted business batch -> `etc_invoice_summary`、active relation 排除 open summary、delete/reset 不恢复旧二栏 relation |
 | Ops tools | cleanup/migration tools | orphan task 清理显式 allowlist、历史迁移 dry-run/execute 不绕过 service 边界 |
-| App Status | import worker、Workbench read model、App Health | import job、Workbench dirty/readiness、ETC route/API smoke、Nginx HTML/502 风险 |
+| App Status | import worker、Workbench matching/direct payload、App Health | import job、Workbench matching/ETC route/API smoke、Nginx HTML/502 风险 |
 
 `etc-tickets` 写入 fan-out：
 
@@ -351,7 +350,7 @@
 | reconciliation task 创建/上传/confirm | task workflow state + source file metadata；对象存储失败不落半写入 | ETC 票据管理、导入页 ready task |
 | ETC ZIP preview/confirm | `etc_invoice_import` background job；成功后保存 ETC invoice metadata/PDF/XML、关联已存在 canonical invoice、同步 business batch | ETC 票据管理、导入页、税金抵扣、关联台 summary、App Status/App Health |
 | 创建 OA 草稿 | business batch `oa_confirmation_pending` + audit | ETC 票据管理、真实 OA 系统、App Status |
-| manual `submitted` | business batch submitted + linked task closed + Workbench dirty；前端 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、税金抵扣、成本统计、search |
+| manual `submitted` | business batch submitted + linked task closed + Workbench matching affected；前端 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、税金抵扣、成本统计；search 通过 direct `/api/search` payload 反映 |
 | manual `not_submitted` | 释放本地 ETC 发票占用 + audit；前端 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、税金抵扣、成本统计 |
 | business batch delete/reset | 本地批次/task/source/import/ETC metadata 清理；submitted summary 释放；可能取消 active relation | ETC 票据管理、关联台、税金抵扣、成本统计、search |
 | reconciliation task delete | 若绑定 business batch，委托同一 business batch delete；否则写 deleted tombstone | ETC 票据管理、导入页 ready task |
@@ -377,10 +376,10 @@
 | Frontend API mapper | `web/src/features/workbench/api.ts` | settings payload snake_case/camelCase、data reset job、credential payload、密码不入普通 settings save |
 | HTTP routes | `server.py` `/api/workbench/settings*` | GET/POST settings、项目 sync/create/delete、data reset、OA credential routes 的权限和 response shape |
 | Settings service | `AppSettingsService` | 项目范围、访问控制、银行映射、OA retention/import、OA invoice offset、银行标签、pending invoice 规则、audit/OA role sync |
-| Data reset service | `SettingsDataResetService` | protected targets、导入/文件/关联台/read model/dirty scope 清理、OA rebuild、progress、失败不泄密 |
+| Data reset service | `SettingsDataResetService` | protected targets、导入/文件/关联台/direct cache/background state 清理、OA rebuild、progress、失败不泄密 |
 | Credential service | `OaApplicantCredentialService`、repository、`TargetOaApplicantTokenProvider` | admin-only、pgcrypto 加密、列表不解密、目标 OA 登录失败不泄露密码 |
-| Derived lifecycle | `DerivedDataLifecycleService`、read model refresh gateway | 设置规则变化必须产生正确 fan-out；data reset 后旧 read model/cache 不能伪装 fresh |
-| App Status | app status registries、overview service | reset/job/dirty scope/worker busy 必须在全局状态平面可见 |
+| Derived lifecycle | `DerivedDataLifecycleService` | 设置规则变化必须产生正确 affected domain/month evidence；data reset 后旧 cache/session 不能伪装当前 payload |
+| App Status | app status registries、overview service | reset/job/worker/dependency 状态必须在全局状态平面可见 |
 
 `settings` 写入 fan-out：
 
@@ -389,10 +388,10 @@
 | pending invoice 规则保存 | `pending_invoice_rules_changed`，income/expense rule version 独立递增 | 待找发票、关联台、发票 lifecycle、进项发票使用、销项收款、OA 待付款、税金、成本、搜索 |
 | 银行标签/自动标签保存 | bank tag settings audit、`bank_auto_tag_rules_changed` 或等价 category lifecycle | 银行明细、免 OA、关联台候选、往来款、成本统计、搜索 |
 | 项目范围变化 | `project_scope_changed` 或等价 project scope dirty | 成本统计、搜索、关联台项目展示 |
-| 访问控制保存 | state store + OA role sync；不经过 read model | 全局页面可见性、写入权限、导出权限、数据重置和运维入口 |
+| 访问控制保存 | state store + OA role sync；不经过页面派生读取层 | 全局页面可见性、写入权限、导出权限、数据重置和运维入口 |
 | OA retention/import filters 保存 | state store；后续 OA reset/rebuild/sync 消费 | OA 待付款、进项/销项、税金、成本、关联台 |
 | OA 申请人凭据保存/删除 | 独立 credential repository；普通 settings payload 不变 | 进项发票使用 OA 反提草稿、目标 OA 登录/token provider |
-| data reset: bank transactions | 清理银行导入、file imports、matching、Workbench overrides/relations/read models/candidate matches/dirty scopes | 银行明细、关联台、免 OA、往来款、成本、搜索、App Status |
+| data reset: bank transactions | 清理银行导入、file imports、matching、Workbench overrides/relations/candidate matches、direct cache/background state | 银行明细、关联台、免 OA、往来款、成本、搜索、App Status |
 | data reset: invoices | 清理发票导入、税金认证、发票相关派生状态 | 待找发票、税金、进项/销项/OA 待付款、成本、关联台、App Status |
 | data reset: OA and rebuild | 按 retention cutoff 重建 OA 源，移除含 OA/附件发票的 relation，保留纯银行-发票 relation | OA 待付款、进项/销项、关联台、税金、成本、搜索、App Status |
 
@@ -401,9 +400,9 @@
 - `tests/test_app_settings_service.py` 保护 settings normalize、访问控制、银行标签、pending invoice 规则版本、历史非法映射、项目同步/手工项目和 OA role sync。
 - `tests/test_settings_data_reset_service.py` 保护 data reset protected targets、job API、password gate、OA rebuild、relation 保留/移除和失败不泄密。
 - `tests/test_oa_applicant_credentials_*`、`tests/test_target_oa_applicant_token_provider.py` 保护独立凭据事实源、PG 加密、无密码回显和目标 OA token provider。
-- `tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py` 保护 settings fan-out 到 read model/worker/App Status 的共享 contract。
+- `tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py` 保护 settings fan-out 到 affected domains、真实 worker 和 App Status 的共享 contract。
 - `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` 保护设置页、关联台内设置入口、data reset progress/reentry、admin-only 凭据和全局状态提示。
-- `web/e2e/settings-data-reset-flow.spec.ts` 保护真实 Chromium 下设置页 data reset：数据重置 section、影响确认、OA 密码复核、job create/polling、完成后 settings reload 和全局成功反馈；同一 spec 也覆盖项目标记完成 -> 保存 settings -> 成本统计 active/all fresh project scope。
+- `web/e2e/settings-data-reset-flow.spec.ts` 保护真实 Chromium 下设置页 data reset：数据重置 section、影响确认、OA 密码复核、job create/polling、完成后 settings reload 和全局成功反馈；同一 spec 也覆盖项目标记完成 -> 保存 settings -> 成本统计 active/all direct project scope。
 
 ## 模块细化：app-health-operations
 
@@ -415,20 +414,18 @@
 | Frontend global status | `web/src/components/shell/AppStatusIndicator.tsx`、`AppHealthStatusContext` | 状态必须来自全局 `app_status`；路由切换不改变 icon；admin 才显示运维入口 |
 | Frontend API mappers | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | malformed payload 不得默认 green；SSE/轮询/BroadcastChannel 只传播后端 snapshot |
 | HTTP routes | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard` | auth guard、SSE contract、dashboard cache、admin-only、`app_status` response shape |
-| Overview service | `AppStatusOverviewService` | green/yellow/red 优先级、readiness missing、critical failed/unavailable、worker/dependency/job/domain 映射 |
-| Runtime repository | `RuntimeMonitoringRepository` | dirty scopes/outbox/workers/readiness/RabbitMQ/API metrics 聚合；runtime unavailable 不能空 green |
-| Registries | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py`、`runtime_worker_registry.py` | 新页面/read model/worker/job/dependency 漏同步会让全局状态误判 |
-| Readiness tools | `app_status_readiness_backfill.py`、runtime queue ops | 只能从真实 projection 计算 readiness；dead letter resolve 必须检查 fresh readiness 和 active dirty scope |
+| Overview service | `AppStatusOverviewService` | green/yellow/red 优先级、domain/job/worker/dependency 映射、legacy read-model 空 registry guard |
+| Runtime repository | `RuntimeMonitoringRepository` | outbox/workers/jobs/RabbitMQ/API metrics 聚合；runtime unavailable 不能空 green |
+| Registries | `app_status_domain_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py`、`runtime_worker_registry.py`、空 `app_status_read_model_registry.py` guard | 新页面/domain/worker/job/dependency 漏同步或重新注册 read model 会让全局状态误判 |
+| Runtime queue ops | runtime queue ops | dead letter resolve 必须检查真实 runtime 前置条件；`app_status_readiness_backfill.py` 已删除 |
 
 `app-health-operations` 状态 fan-in / fan-out：
 
 | Runtime fact 来源 | App Status 结果 | 受影响体验 |
 | --- | --- | --- |
-| `read_model.app_status_readiness` fresh | domain ready/fresh | App Status 可 green；页面可把 read model 当 fresh |
-| registry read model 缺 readiness | domain missing busy/yellow | 对应页面不能把空 projection 当 ready |
-| critical read model failed/unavailable | domain blocked/red | 对应页面提示不可用，App Status 指向 AppHealth |
-| `job.read_model_dirty_scopes` pending/processing/stale | domain busy/yellow | 页面展示 refreshing/stale，而不是旧数据 fresh |
-| `job.outbox_events` backlog/failed/dead_lettered | domain busy/blocked 或 attention | worker/read model 收敛风险可见 |
+| empty read-model registry guard | regression if non-empty | App Status 不再把页面 read model readiness 当事实源 |
+| legacy readiness/dirty tables absent | regression if recreated | 页面 direct GET 不依赖 legacy freshness proof |
+| `job.outbox_events` backlog/failed/dead_lettered | domain busy/blocked 或 attention | 真实 worker/outbox 收敛风险可见 |
 | worker heartbeat missing/stale/mismatch | domain busy/blocked | 依赖该 worker 的页面不能假设任务会完成 |
 | background job queued/running/attention | overall/domain busy/yellow | 导入、数据重置、ETC 等任务进度出现在全局状态 |
 | dependency missing/unavailable | blocked/red 或 degraded | session/OA/Postgres/RabbitMQ/Redis 依赖异常可见 |
@@ -436,10 +433,10 @@
 
 关键回归保护：
 
-- `tests/test_app_health_api.py` 保护 `/api/app-health`、SSE、dashboard admin-only、dirty scopes、jobs、dependencies、cache stale after error。
-- `tests/test_app_status_overview_service.py` 保护 registry 一致性、状态优先级、readiness missing/failed、worker missing、runtime unavailable 和 API contract。
-- `tests/test_runtime_monitoring.py` 保护 queue backlog、failed jobs、stale dirty scopes、RabbitMQ、worker metrics 和 mismatch。
-- `tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_queue_ops.py` 保护 readiness 不伪造 fresh、dead letter resolve 前置条件。
+- `tests/test_app_health_api.py` 保护 `/api/app-health`、SSE、dashboard admin-only、jobs、dependencies、cache stale after error。
+- `tests/test_app_status_overview_service.py` 保护 registry 一致性、状态优先级、worker missing、runtime unavailable、empty read-model registry guard 和 API contract。
+- `tests/test_runtime_monitoring.py` 保护 queue backlog、failed jobs、RabbitMQ、worker metrics 和 mismatch。
+- `tests/test_runtime_queue_ops.py` 保护 dead letter resolve 前置条件；readiness backfill 测试已随工具删除。
 - `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` 保护 worker manifest、env examples 和 deploy runtime 配置。
 - `web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/AppStatusApi.test.ts`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/AppHealthBroadcast.test.tsx` 保护 dashboard、global icon、mapper、SSE/轮询和跨 tab sync。
 
@@ -471,10 +468,10 @@
 | 动作 | 权限 / 审计要求 | 受影响旧功能 |
 | --- | --- | --- |
 | settings access control 保存 | admin-only；admin 自动 allowed；OA role sync | `/api/session/me`、所有页面按钮、导出、数据重置、AppHealth dashboard |
-| 业务写入 / 关系确认撤回 | `can_mutate_data`；actor/tenant 取后端 session；audit + dirty/outbox 同事务 | 关联台、待找发票、批量账务、往来款、免 OA、银行明细 |
+| 业务写入 / 关系确认撤回 | `can_mutate_data`；actor/tenant 取后端 session；audit + canonical facts/outbox 同事务 | 关联台、待找发票、批量账务、往来款、免 OA、银行明细 |
 | 导出 | read_export_only 允许；错误/HTML 不当作文件 | 银行明细、成本、税金、进项/销项、往来款等导出 |
-| 数据重置 / OA 凭据 / AppHealth dashboard | admin-only；密码/token 不泄露 | 设置、App Health、进项 OA 反提、所有 read model |
-| worker/service 边界 | worker/service 不 import auth，不解析 cookie/header | runtime worker、read model refresh、platform boundary |
+| 数据重置 / OA 凭据 / AppHealth dashboard | admin-only；密码/token 不泄露 | 设置、App Health、进项 OA 反提、所有页面 |
+| worker/service 边界 | worker/service 不 import auth，不解析 cookie/header | runtime worker、platform boundary |
 
 关键回归保护：
 
@@ -533,7 +530,7 @@
 | Shared primitives | `TableCellStack`、`AmountCell`、`FinanceDirectionTag`、`FinanceStatusTag`、`EmptyValue`、`TruncatedCellText` | 金额/方向/状态/空值/长文本展示不一致，列角色对齐被破坏 |
 | Shared pagination | `FinanceTablePagination` | page clamp、summary、上一页/下一页 disabled、页码 callback |
 | Table session | `useFinanceTableSession`、`PageSessionStateContext` | page/state/user scope 泄漏、columnsVersion 变化后旧 sort/selection 污染新列、滚动恢复异常 |
-| Page wrappers | `*Table.tsx`、`*Page.tsx` | 各页面筛选/排序/分页/导出/drawer/read model 状态契约分散，不能只靠共享 primitive 测试 |
+| Page wrappers | `*Table.tsx`、`*Page.tsx` | 各页面筛选/排序/分页/导出/drawer/direct unavailable 状态契约分散，不能只靠共享 primitive 测试 |
 | CSS contracts | `web/src/app/styles.css` | 表格密度 token、列角色对齐、tag 尺寸、motion timing 被视觉重构误伤 |
 | Export drawers/dialogs | 各页面 export drawer/dialog | 当前 filters/sort/date/view 未带入导出，HTML/JSON 错误被当文件 |
 
@@ -545,8 +542,8 @@
 | 改 shared primitive | 税金、OA 待付款、导入、App Health、使用共享 primitive 的页面 | 金额右对齐、方向/状态 tag tone、空值文案、长文本 tooltip |
 | 改 pagination | 银行明细和使用共享分页的后续页面 | summary、边界页、disabled、callback page |
 | 改 `useFinanceTableSession` | 表格 session hook 使用方、未来迁移页面 | pagination/sort/selection/scroll restore、columnsVersion reset、user isolation |
-| 改页面级 table wrapper | 对应页面模块 | 旧筛选/排序/分页/search/export/drawer/stale/refreshing 行为 |
-| 改 export drawer/dialog | 对应 API/页面模块 | preview、download、错误反馈、当前 filters/sort/date/view、权限/stale disabled |
+| 改页面级 table wrapper | 对应页面模块 | 旧筛选/排序/分页/search/export/drawer/direct unavailable 行为 |
+| 改 export drawer/dialog | 对应 API/页面模块 | preview、download、错误反馈、当前 filters/sort/date/view、权限/direct unavailable disabled |
 
 关键回归保护：
 
@@ -564,7 +561,7 @@
 | OA session / auth | `app/auth.py`、`OAIdentityService`、`AccessControlService`、`web/src/features/session/api.ts` | `Admin-Token`、Authorization、`/api/session/me`、只读/全操作/admin 分层、OA 超时/无权限 |
 | OA Mongo adapter | `MongoOAAdapter` | 外部只读、字段变体、断连 read status、backoff、附件发票 identity/cache |
 | OA sync / projection | `OAProjectionSyncService`、`PostgresOAProjectionRepository`、`app/worker.py` | sync API 只能 enqueue，worker upsert 后必须 dirty 下游 scope，retention cutoff 不能误删 manual rows |
-| OA pending payment | `OaPendingPaymentApiRoutes`、`OaPendingPaymentQueryService` | rows/filter/detail shape、read model missing/stale、权限、发票生命周期状态 |
+| OA pending payment | `OaPendingPaymentApiRoutes`、`OaPendingPaymentQueryService` | rows/filter/detail direct shape、权限、发票生命周期状态 |
 | OA manual import | `OAManualImportService`、settings OA manual routes | 未完成 OA 单据不可导入、附件刷新失败、marker 删除/导入幂等、Workbench/Search invalidation |
 | Applicant credentials | `OaApplicantCredentialService`、Postgres credential repository | admin-only、password 不回显、pgcrypto key、settings response 不泄漏 |
 | Target applicant login | `OaLoginClient`、`TargetOaApplicantTokenProvider` | RSA/openssl、HTTP/网络/无效 JSON/无 token 失败不能伪装成功；错误不泄露 password |
@@ -581,14 +578,14 @@
 | OA manual import / delete marker | Workbench/Search invalidation，manual import state store | 设置、关联台、搜索、历史 OA 补录 |
 | Applicant credential save/delete | 无业务 dirty；影响后续 OA draft 创建 | 设置、进项 OA 反提、ETC OA 草稿 |
 | Target applicant login failure | structured error，不写本地成功状态 | 进项发票使用、ETC 票据 |
-| Input invoice OA reverse draft/revoke/manual status | input invoice usage read model invalidation、audit | 进项发票使用、OA 待付款/发票生命周期下游、App Status |
+| Input invoice OA reverse draft/revoke/manual status | input invoice usage direct payload affected、audit | 进项发票使用、OA 待付款/发票生命周期下游、App Status |
 | ETC OA draft/manual status/delete | ETC business batch / invoice occupation / summary relation lifecycle | ETC 票据、关联台、税金、成本、搜索 |
 | OA role sync | OA role assignment executor | OA 菜单可见性、app 权限、所有页面入口 |
 
 关键回归保护：
 
 - `tests/test_mongo_oa_adapter.py` 保护 OA Mongo 映射、断连、read status/backoff、附件发票 identity/cache。
-- `tests/test_oa_projection_sql_runtime.py`、`tests/test_worker_oa_sync.py` 保护 projection repository、sync worker、downstream dirty scopes 和 HTTP sync enqueue。
+- `tests/test_oa_projection_sql_runtime.py`、`tests/test_worker_oa_sync.py` 保护 projection repository、sync worker、downstream affected domains 和 HTTP sync enqueue。
 - `tests/test_oa_applicant_credentials_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_postgres_oa_applicant_credentials_repository.py` 保护凭据权限、脱敏和持久化。
 - `tests/test_target_oa_applicant_token_provider.py` 保护目标申请人登录 RSA、HTTP/network/JSON/token 失败和缺凭据不登录。
 - `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsage*.test.tsx` 保护进项 OA 反提状态机和 UI。
@@ -608,9 +605,9 @@
 | API contract | `server.py` `/api/workbench/settings/data-reset*` | admin-only、OA 密码校验、supported/protected targets、job create/query/active、并发 409、密码不泄露 |
 | Business service | `SettingsDataResetService` | bank/invoice/OA action 删除范围、protected target、state store save、import file delete、OA relation 保留/删除 |
 | Background job | `BackgroundJobService` type `settings_data_reset` | active/running/failed/partial/succeeded 状态、result_summary sanitize、App Health attention |
-| Derived lifecycle | `settings_reset_completed`、historical ETC repair、Workbench matching rebuild | reset 后旧 read model/cache 不得伪装 fresh；失败必须 partial/failed |
+| Derived lifecycle | `settings_reset_completed`、historical ETC repair、Workbench matching rebuild | reset 后旧 cache/session 不得伪装当前 direct payload；失败必须 partial/failed |
 | Backup/export | `tests/test_export_app_mongo.py`、operations runbooks | 本地只覆盖 legacy export 只读/manifest；真实 PostgreSQL PITR、对象存储和 runtime config 需 staging |
-| App Status/App Health | `app_health` API、App Status registries、runtime monitoring | reset job、dirty scope、worker readiness 和 dependency failure 必须被全局状态面暴露 |
+| App Status/App Health | `app_health` API、App Status registries、runtime monitoring | reset job、worker heartbeat 和 dependency failure 必须被全局状态面暴露 |
 
 当前 Browser e2e：
 
@@ -620,9 +617,9 @@
 
 | 重置动作 | 删除/清理 | 必须保留 | 受影响页面/状态 |
 | --- | --- | --- | --- |
-| `reset_bank_transactions` | 银行流水导入、银行相关 workbench/matching/read model 状态、银行导入文件 | 发票事实、OA 源表、app settings、import metadata | 银行明细、关联台、往来款、成本统计、search、App Health |
-| `reset_invoices` | 进/销项发票导入、税金认证、发票相关 workbench/matching/read model 状态、发票导入文件 | 银行流水事实、OA 源表、app settings、import metadata | 待找发票、税金、进项使用、销项收款、OA 待付款、成本统计、关联台、App Health |
-| `reset_oa_and_rebuild` | OA 衍生 override/relation/read model，随后按保留策略重建 | 纯银行+发票 relation、OA 附件发票缓存、protected targets | OA 待付款、进项使用、关联台、ETC、成本统计、search、App Health |
+| `reset_bank_transactions` | 银行流水导入、银行相关 workbench/matching/direct cache/background 状态、银行导入文件 | 发票事实、OA 源表、app settings、import metadata | 银行明细、关联台、往来款、成本统计、search、App Health |
+| `reset_invoices` | 进/销项发票导入、税金认证、发票相关 workbench/matching/direct cache/background 状态、发票导入文件 | 银行流水事实、OA 源表、app settings、import metadata | 待找发票、税金、进项使用、销项收款、OA 待付款、成本统计、关联台、App Health |
+| `reset_oa_and_rebuild` | OA 衍生 override/relation/direct cache，随后按保留策略重建 | 纯银行+发票 relation、OA 附件发票缓存、protected targets | OA 待付款、进项使用、关联台、ETC、成本统计、search、App Health |
 
 关键回归入口：
 
@@ -641,7 +638,7 @@
 | Nightly CI | `.github/workflows/nightly-ci.yml`、`scripts/verify.sh` | solo 开发漏跑全量后端、前端、browser e2e、build 或 docs，远端门禁失效 |
 | Release script | `scripts/deploy_oa.py`、`scripts/deploy-oa.sh` | release layout、storage preflight、helper contract、activation 顺序和 public route smoke 漂移 |
 | Deploy control | `deploy/oa/bin/finops-deploy-control.sh` | env/secrets/migrator/drop-in/restart/readiness/cleanup 任一环节出错会影响所有页面 |
-| Worker ensure | `deploy/oa/bin/finops-ensure-runtime-workers.sh`、`runtime_worker_manifest` | 新 worker/read model event 未部署，导致页面长期 refreshing/stale |
+| Worker ensure | `deploy/oa/bin/finops-ensure-runtime-workers.sh`、`runtime_worker_manifest` | 新真实 worker 或 legacy event 未部署，导致后台任务/runtime diagnostics 长期 busy |
 | Systemd/env/Nginx | `deploy/oa/systemd/*`、`deploy/oa/env/*`、`nginx.fin-ops.conf.example` | secret 错用、路径 fallback、API 被 SPA 吞掉、assets/cache 策略错误 |
 | Health/App Status | `/health`、`/health/ready`、App Health dashboard | systemd active 但 release/worker/runtime 未 ready 时误判成功 |
 
@@ -652,7 +649,7 @@
 | `bash scripts/verify.sh all` | 后端 check/unittest、前端 Vitest/build、deterministic Playwright browser smoke、docs check | 所有模块的自动化门禁 |
 | release upload/check-release | release layout、env contract、storage preflight | 发布前阻断错误包 |
 | activate/migration | PostgreSQL schema、API/worker Python env、systemd drop-in、frontend dist | 所有 API、worker 和页面 |
-| runtime worker ensure | required worker env/systemd/check command/restart | 所有 read model 页面、App Health |
+| runtime worker ensure | required worker env/systemd/check command/restart | 所有 worker-backed flows、App Health |
 | Nginx/public route smoke | `/fin-ops/`、`/fin-ops-api/`、`/fin-ops/api/` | session、权限、所有前端 API 请求 |
 | cleanup releases | release retention、active refs | rollback 能力和磁盘空间 |
 
@@ -666,70 +663,61 @@
 
 ## 写入动作影响图
 
-| 写入动作 | 典型入口 | Lifecycle event / dirty source | 受影响派生域 | 受影响页面 | 回归测试重点 |
+| 写入动作 | 典型入口 | Lifecycle event / affected source | 受影响派生域 | 受影响页面 | 回归测试重点 |
 | --- | --- | --- | --- | --- | --- |
-| 银行流水导入确认 | import API / import worker | `bank_import_confirmed` | bank balance/detail、workbench、workbench relation、workbench matching、invoice lifecycle、cost statistics、search | 银行明细、关联台、待找发票、成本统计、App Health | 导入确认幂等、dirty scope、worker 入队、旧页面不把 stale 当 fresh |
+| 银行流水导入确认 | import API / import worker | `bank_import_confirmed` | bank balance/detail、workbench、workbench relation、workbench matching、invoice lifecycle、cost statistics；search direct payload | 银行明细、关联台、待找发票、成本统计、App Health | 导入确认幂等、affected domain 记录、真实 worker 入队、旧页面不恢复 freshness fields；Search 不进入 outbox |
 | 发票导入确认 | import API / import worker | `invoice_import_confirmed` | workbench、workbench relation、workbench matching、invoice lifecycle、tax offset、cost statistics、search | 关联台、待找发票、税金抵扣、进项/销项/OA 待付款、成本统计 | API shape、source_versions、invoice lifecycle 先于下游页面 |
 | ETC 导入确认 | `/api/etc/import/confirm` | `etc_import_confirmed` | workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search | ETC、关联台、税金、成本 | ETC 汇总行、散票隐藏、历史修复状态、税金/成本刷新 |
-| OA 同步/重建 | OA sync worker / manual import | `oa_rebuilt`、`oa_attachment_invoice_cache_updated` | OA adapter cache、workbench、invoice lifecycle、tax/cost/search | 关联台、OA 待付款、进项/销项、税金、成本 | OA 源只读、附件发票 identity、worker readiness |
-| 关系确认/撤回 | workbench actions、batch accounting、turnover | `pair_relation_changed`、`batch_accounting_relation_changed`、`turnover_relation_changed` | bank detail、workbench、relation、invoice lifecycle、pending invoice、tax/cost/search | 关联台、银行明细、批量账务、往来款、待找发票、税金、成本 | stale write contract、idempotency、跨页刷新、关系 read model |
-| 批量账务提交/撤回 | `/api/batch-accounting/submit`、`/api/batch-accounting/{relation_id}/withdraw` | `batch_accounting_relation_changed` | workbench relation、workbench、invoice lifecycle、pending invoice、cost/search | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 | relation read model fresh gate、差额说明、撤回恢复、GET 只读 |
-| 标签/规则保存 | bank details、pending invoices、turnover | `bank_transaction_category_changed`、`bank_auto_tag_rules_changed`、`pending_invoice_rules_changed` | bank detail、no-OA、workbench/candidates/matching、invoice lifecycle、pending invoice、cost/search、tax | 银行明细、免 OA、关联台、待找发票、成本、税金 | 配置版本、scope 去重、不误伤无关页面 |
-| 税金认证导入 | tax offset import | `tax_certified_import_confirmed` | invoice lifecycle、tax offset、tax month cache、search | 税金抵扣、进项使用、App Health | import job、read model freshness、已认证状态 |
-| no-OA 批处理 | no-OA API | `no_oa_bank_batch_changed` | no-OA read model、workbench、relation、cost、search | 免 OA、关联台、成本 | 批量提交/撤回、read model stale polling |
-| 设置重置 / backfill | settings data reset | `settings_reset_completed`、`startup_stale_scan` | 多数 read model/cache/session cleanup | 所有列表页、App Health | protected targets 不删除、全局 busy/blocked、worker readiness |
+| OA 同步/重建 | OA sync worker / manual import | `oa_rebuilt`、`oa_attachment_invoice_cache_updated` | OA adapter cache、workbench、invoice lifecycle、tax/cost；search direct payload | 关联台、OA 待付款、进项/销项、税金、成本、搜索 | OA 源只读、附件发票 identity、worker heartbeat；Search 不进入 outbox |
+| 关系确认/撤回 | workbench actions、batch accounting、turnover | `pair_relation_changed`、`batch_accounting_relation_changed`、`turnover_relation_changed` | bank detail、workbench、relation、invoice lifecycle、pending invoice、tax/cost；search direct payload | 关联台、银行明细、批量账务、往来款、待找发票、税金、成本、搜索 | stale write contract、idempotency、跨页 direct refetch、canonical relation context；Search 不进入 outbox |
+| 批量账务提交/撤回 | `/api/batch-accounting/submit`、`/api/batch-accounting/{relation_id}/withdraw` | `batch_accounting_relation_changed` | workbench relation、workbench、invoice lifecycle、pending invoice、cost；search direct payload | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 | relation direct payload unavailable/error、差额说明、撤回恢复、GET 只读；Search 不进入 outbox |
+| 标签/规则保存 | bank details、pending invoices、turnover | `bank_transaction_category_changed`、`bank_auto_tag_rules_changed`、`pending_invoice_rules_changed` | bank detail、no-OA、workbench/candidates/matching、invoice lifecycle、pending invoice、cost、tax；search direct payload | 银行明细、免 OA、关联台、待找发票、成本、税金、搜索 | 配置版本、affected scope 去重、不误伤无关页面；Search 不进入 outbox |
+| 税金认证导入 | tax offset import | `tax_certified_import_confirmed` | invoice lifecycle、tax offset、tax month cache、search | 税金抵扣、进项使用、App Health | import job、direct payload、已认证状态 |
+| no-OA 批处理 | no-OA API | `no_oa_bank_batch_changed` | no-OA direct payload、workbench、relation、cost、search | 免 OA、关联台、成本 | 批量提交/撤回、direct reload、legacy freshness fields absent |
+| 设置重置 / backfill | settings data reset | `settings_reset_completed`、`startup_stale_scan` | direct cache/session/background cleanup | 所有列表页、App Health | protected targets 不删除、全局 busy/blocked、worker heartbeat |
 | 项目范围变化 | settings/project scope | `project_scope_changed` | cost statistics、search | 成本统计、搜索 | 成本统计 all/month scope、search 刷新 |
 | OA 反提草稿/提交确认 | input invoice usage OA reverse | service/API 状态写入，可能影响 invoice usage/OA 关系 | input invoice usage、invoice lifecycle、OA 关系、审计 | 进项发票使用、设置、App Health | 目标申请人凭据、preview stale、外部 OA 失败、提交历史、不泄露内部 id |
 
 ## 前端刷新与跨页事件图
 
-`web/src/features/domainEvents.ts` 定义的事件只作为同一浏览器会话内刷新提示，不是事实源。跨页面一致性必须以后端 facts、read model freshness、dirty scopes、worker readiness 为准。
+`web/src/features/domainEvents.ts` 定义的事件只作为同一浏览器会话内刷新提示，不是事实源。跨页面一致性必须以后端 facts、direct payload、durable outbox、background job 和 worker heartbeat 为准。
 
 | Event | 主要 emit 来源 | 主要 subscribe/use 来源 | 测试重点 |
 | --- | --- | --- | --- |
-| `workbenchRelationUpdated` | 关联台、批量账务、免 OA、往来款、待找发票 | 关联台、银行明细、成本统计 | affectedMonths 过滤、inactive 页面不 replay、后端 dirty scope 已存在 |
+| `workbenchRelationUpdated` | 关联台、批量账务、免 OA、往来款、待找发票 | 关联台、银行明细、成本统计 | affectedMonths 过滤、inactive 页面不 replay、后端 canonical facts 已存在 |
 | `bankTransactionCategoryUpdated` | 银行明细 | 关联台、成本统计、往来款、免 OA | 分类变更触发候选/成本刷新，不替代后端 lifecycle |
-| `bankAutoTagRulesUpdated` | 银行明细规则保存/重应用 | 免 OA、银行明细 | 规则版本 stale、no-OA read model 刷新 |
-| `turnoverRelationUpdated` | 往来款确认/撤回 | 关联台、成本统计 | workbench relation 与 turnover read model 一致 |
-| `turnoverLedgerExtraUpdated` | 往来款 extra 保存 | 当前主要局部消费 | 不应误触发无关 read model |
+| `bankAutoTagRulesUpdated` | 银行明细规则保存/重应用 | 免 OA、银行明细 | 规则版本变化、no-OA direct payload 重读 |
+| `turnoverRelationUpdated` | 往来款确认/撤回 | 关联台、成本统计 | workbench relation 与 turnover direct payload 一致 |
+| `turnoverLedgerExtraUpdated` | 往来款 extra 保存 | 当前主要局部消费 | 不应误触发无关页面重读 |
 | `invoiceFactUpdated` | 待找发票、ETC、发票相关动作 | 税金抵扣、成本统计 | invoice lifecycle 下游顺序、税金/成本刷新 |
 | `etcBusinessBatchUpdated` | ETC 业务批次 | 税金抵扣、成本统计 | ETC 提交/撤回后下游不 stale |
 
 相关测试入口：`web/src/test/domainEvents.test.ts`、`web/src/test/useActiveFinanceDomainEvent.test.tsx`。
 
-## Read Model / Worker 依赖图
+## Legacy Read Model Negative Guards / Worker 依赖图
 
-| Read model key | Scope type | Worker | Refresh event | 主要页面/API | 关键风险 |
-| --- | --- | --- | --- | --- | --- |
-| `workbench` | `workbench` | `workbench` | `workbench.read_model.refresh` | 关联台、搜索、成本间接依赖 | active generation 原子发布，不能读 building/failed 中间态 |
-| `workbench_relation` | `workbench_relation` | `workbench-relation` | `workbench_relation.read_model.refresh` | 批量账务、关联台、下游关系 | 非 fresh 时不能把空关系当全部未提交 |
-| `bank_detail` | `bank_detail` | `bank-detail` | `bank_detail.read_model.refresh` | 银行明细、免 OA 上游 | 标签规则版本、stale 后台刷新 |
-| `bank_account_balance` | `bank_account_balance` | `bank-account-balance` | `bank_account_balance.read_model.refresh` | 银行明细余额 | critical required；不能用 stale 覆盖 fresh total |
-| `pending_invoice` | `pending_invoice` | `search-pending` | `pending_invoice.read_model.refresh` | 待找发票 | 规则版本、人工发票、候选刷新 |
-| `search` | `search` | `search-pending` | `search.read_model.refresh` | 搜索/候选相关 | 多事件共同写入，避免全局误清 |
-| `invoice_lifecycle` | `invoice_lifecycle` | `invoice-lifecycle` | `invoice_lifecycle.read_model.refresh` | 待找发票、税金、进项/销项/OA 待付款 | 必须先于下游发票页面刷新 |
-| `input_invoice_usage` | `input_invoice_usage` | `invoice-usage-collection` | `input_invoice_usage.read_model.refresh` | 进项发票使用 | all scope source_versions 聚合、OA reverse 状态 |
-| `output_invoice_collection` | `output_invoice_collection` | `invoice-usage-collection` | `output_invoice_collection.read_model.refresh` | 销项收款 | 收款/红冲/提醒状态 shape |
-| `oa_pending_payment` | `oa_pending_payment` | `invoice-usage-collection` | `oa_pending_payment.read_model.refresh` | OA 待付款 | OA/bank/invoice 三类 detail shape |
-| `cost_statistics` | `cost_statistics` | `cost-tax` | `cost_statistics.read_model.refresh` | 成本统计 | all 父 scope 与 month shard readiness |
-| `tax_offset` | `tax_offset` | `cost-tax` | `tax_offset.read_model.refresh` | 税金抵扣 | 已认证发票、ETC、税金缓存 |
-| `no_oa_bank_batch` | `no_oa_bank_batch` | `no-oa-bank-batch` | `no_oa_bank_batch.read_model.refresh` | 免 OA 批次 | stale polling、规则版本 |
-| `turnover_ledger` | `turnover_ledger` | `turnover-ledger` | `turnover_ledger.read_model.refresh` | 往来款 | 人工闭环、extra、relation stale precondition |
+| Legacy family | Current contract | 主要页面/API | 关键测试风险 |
+| --- | --- | --- | --- |
+| page read-model manifest/registry | manifest 和 App Status read-model registry 必须为空 | 所有列表/统计页面 | `tests/test_read_model_manifest.py`、App Status tests 阻止重新注册页面 read model |
+| `.read_model.refresh` events | 不得作为页面刷新事件、worker event 或 SLO 事实源 | 关联台、银行明细、税金、发票、成本、往来款 | runtime registry/worker/boundary guards 阻止恢复 refresh lane |
+| `read_model_status` / `refresh_enqueued` payload fields | direct page API 不返回、不消费 | direct 页面 API 和前端 mapper | API contract/front-end mapper tests 断言 legacy fields absent |
+| dirty/readiness runtime tables | 不得作为 App Status 或页面 freshness proof | App Health/App Status | migration/drop-proof/runtime monitoring tests 阻止恢复依赖 |
+| real background workers | 仅保留 import、OA sync、file migration、settings reset、Workbench matching 等真实任务 | 导入、OA、ETC、设置、App Health | worker registry、outbox、RabbitMQ、job tests 保护真实异步任务 |
 
-共享测试入口：`tests/test_read_model_freshness.py`、`tests/test_read_model_query_gateway.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_readiness_reporter.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py`。
+共享测试入口：`tests/test_read_model_manifest.py`、`tests/test_read_model_architecture_guards.py`、`tests/test_app_status_overview_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py`。
 
 ## API Contract 风险图
 
-跨页面回归最常见的 API 字段包括：
+跨页面回归最常见的 current API 字段和禁止恢复的 legacy 字段包括：
 
-- `read_model_status`
-- `read_model_stale_reasons`
-- `read_model_scope_key` / `read_model_scope_keys`
-- `refresh_enqueued`
-- `refresh_reason`
+- 禁止恢复：`read_model_status`
+- 禁止恢复：`read_model_stale_reasons`
+- 禁止恢复：`read_model_scope_key` / `read_model_scope_keys`
+- 禁止恢复：`refresh_enqueued`
+- 禁止恢复：`refresh_reason`
 - `source_versions`
-- `read_model_generated_at`
-- `read_model_schema_version`
+- 禁止恢复：`read_model_generated_at`
+- 禁止恢复：`read_model_schema_version`
 - `job` / `job_id`
 - `version` / `expected_version`
 - `affected_months`
@@ -738,19 +726,19 @@
 - `summary`
 - `pagination`
 
-所有 read model 页面 API contract tests 不应只断言 `status_code == 200`。应断言关键字段、fresh/stale/refreshing 分支、权限失败、stale/conflict、外部依赖失败和空结果语义。
+所有 direct 页面 API contract tests 不应只断言 `status_code == 200`。应断言关键字段、direct unavailable/error 分支、权限失败、stale/conflict、外部依赖失败和空结果语义。
 
 ## 共享风险热点与测试映射
 
 | 风险热点 | 主要保护层 |
 | --- | --- |
-| read model fresh/stale/missing 被误判 | read model freshness unit tests、API contract tests、frontend stale/refreshing interaction tests |
+| direct payload unavailable / legacy projection 追赶被误判 | legacy negative guards、API contract tests、frontend direct unavailable interaction tests |
 | API response shape 被破坏 | API contract tests、frontend API mapper tests |
-| dirty scope 漏发或误发 | service-layer tests、DerivedDataLifecycleService tests、worker enqueue tests |
-| worker registry/readiness 未同步 | registry boundary tests、App Status overview tests |
-| Redis cache 伪造 fresh | ReadModelQueryGateway tests、cache hit/miss tests |
+| affected domain/source metadata 漏发或误发 | service-layer tests、DerivedDataLifecycleService tests、worker enqueue tests |
+| worker registry/heartbeat 未同步 | registry boundary tests、App Status overview tests |
+| Redis cache 绕过 direct payload validator/TTL | direct API contract tests、runtime/cache tests |
 | RabbitMQ 被误当事实源 | platform boundary guard tests、runtime docs |
-| 前端 domain event 被误当事实源 | domain event tests、integration tests requiring backend dirty scope |
+| 前端 domain event 被误当事实源 | domain event tests、integration tests requiring backend facts/direct payload/outbox evidence |
 | 权限/审计绕过 | auth guard tests、API 403 tests、frontend hidden/disabled tests、audit tests |
 | 导出字段变化 | export service tests、download/export-preview API tests |
 | migration/历史数据兼容 | migration tests、state store contract tests、production dry-run documented risk |

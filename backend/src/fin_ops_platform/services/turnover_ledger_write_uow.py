@@ -102,14 +102,6 @@ class TurnoverLedgerWriteUnitOfWork:
             )
             result = handler(context)
             refresh_requests = list(getattr(command, "refresh_requests", []) or [])
-            if not refresh_requests:
-                refresh_requests = [
-                    {
-                        "scope_type": "turnover_ledger",
-                        "scope_keys": list(getattr(command, "scope_keys", []) or ["all"]),
-                        "reason": str(getattr(command, "action_name", "") or "turnover_ledger_write"),
-                    }
-                ]
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
             for refresh_request in refresh_requests:

@@ -25,7 +25,6 @@ import {
 } from "../../features/imports/api";
 import { confirmEtcImportSession, fetchReadyEtcReconciliationTasks, previewEtcZipFiles } from "../../features/etc/api";
 import { fetchWorkbenchSettings, fetchWorkbenchWithProgress } from "../../features/workbench/api";
-import { waitForOperationFreshness } from "../../features/operationBarrier/api";
 import type {
   ImportBatchType,
   ImportFilePreview,
@@ -1249,11 +1248,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     const confirmedCount = payload.files.filter((file) => file.status === "confirmed").length;
     setProgress({ tone: "loading", label: `已导入 ${confirmedCount} 个文件，正在刷新关联台。` });
     try {
-      if (payload.operationBarrierTargets.length > 0) {
-        await waitForOperationFreshness(payload.operationBarrierTargets);
-      } else {
-        await fetchWorkbenchWithProgress(WORKBENCH_VIEW_MONTH);
-      }
+      await fetchWorkbenchWithProgress(WORKBENCH_VIEW_MONTH);
       setProgress({ tone: "success", label: `已导入 ${confirmedCount} 个文件。` });
     } catch {
       setProgress({ tone: "error", label: "导入已提交，关联台刷新失败。" });

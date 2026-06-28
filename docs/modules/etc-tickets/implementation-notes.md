@@ -28,6 +28,32 @@
 
 ## 历史记录
 
+## 2026-06-27 - ETC relation command fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 ETC 后端测试替身中旧 read-model freshness/scope 返回字段。
+- 影响范围：`tests/test_etc_backend.py`；不改变运行时代码、API shape、worker、projection 或 Workbench relation command 行为。
+- 关键决策：ETC 测试替身只保留 direct `status`、`stale_reasons`、`changed_case_ids`、`affected_months` 等业务/影响字段，不再制造 `read_model_status`、`read_model_scope_keys`、`refresh_enqueued` 或 `read_model_stale_reasons`。
+- 测试覆盖：targeted ETC business batch delete / historical repair / existing batch link tests 通过。
+- 未测风险：ETC import worker drain、下游税金/成本/Workbench projection 和真实历史迁移仍留待后续验证。
+
+## 2026-06-27 - historical ETC migration fixture freshness cleanup
+
+- 目标：继续 remove-read-models 主控闭环，删除 historical ETC migration service test 中 fake relation command 返回的旧 read-model freshness/scope 字段。
+- 影响范围：`tests/test_historical_etc_business_batch_migration_service.py`；不改变运行时代码、API shape、worker、projection 或 relation command 行为。
+- 关键决策：migration 测试替身只保留 direct `status`、`relation`、`history`、`changed_case_ids`、`affected_months`。
+- 测试覆盖：完整 `tests.test_historical_etc_business_batch_migration_service` 通过。
+- 未测风险：ETC import worker drain、下游税金/成本/Workbench projection 和真实历史迁移仍留待后续验证。
+
+## 2026-06-26 - ETC导入完成后移除前端operation barrier等待
+
+- 目标：ETC 票据页面消费 `etc_invoice_import` 后台 job 完成事件时，不再等待 `/api/operation-barrier/status` 或 job target fields，改为直接发 domain event 并重读业务批次/任务列表。
+- 影响范围：`web/src/pages/EtcTicketManagementPage.tsx`、`web/src/test/EtcTicketManagementPage.test.tsx`、ETC 票据和 ETC 导入模块边界文档。
+- 关键决策：本轮不改后台 job response shape，也不删除后端 operation barrier；旧 target 字段可继续作为后端兼容/诊断字段存在，但前端 background job mapper 不再暴露这些 target，ETC 票据页不再消费它们。
+- 文档影响：同步 `docs/modules/etc-tickets/boundary-io.md`、`docs/modules/imports-etc-invoices/boundary-io.md` 和本模块测试矩阵。
+- 测试覆盖：组件测试覆盖 completed ETC import job 后业务批次和任务列表重新 GET，且没有 `/api/operation-barrier/status` 请求。
+- 验证命令：`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`。
+- 未测风险：真实 import worker drain、下游税金/成本/Workbench 页面收敛仍由各自模块和 staging smoke 覆盖；本轮只删除 ETC 票据页面的前端等待层。
+
 ## 2026-06-25 - ETC business batch route owner local closure audit
 
 - 目标：审计 business-batch delete/revoke callback collapse 后，ETC business-batch route owner 本地实现支持是否已闭合。

@@ -1,6 +1,6 @@
 # 外部往来款管理 状态机
 
-> 修改 `外部往来款管理` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。
+> 修改 `外部往来款管理` 相关业务状态、UI 状态、direct API 数据流或 legacy projection 清理链路前必须读取本文件。
 
 ## 业务状态
 
@@ -16,7 +16,7 @@
 | 状态 | 含义 | 允许动作 |
 | --- | --- | --- |
 | `active` | 当前可用且属于外部往来的标签 code | 可被选择或取消选择 |
-| `selected` | 已保存为外部往来台账准入标签 | 列表/read model 纳入符合三层分类条件的银行流水 |
+| `selected` | 已保存为外部往来台账准入标签 | direct grouped GET 纳入符合三层分类条件的银行流水 |
 | `inactive_selected` | 历史保存但当前停用、未知或不再属于外部往来的标签 | GET 返回提示；下次保存后清理 |
 | `version_conflict` | PUT 的 `expected_version` 与当前版本不一致 | 返回 409；不得保存或刷新 |
 
@@ -24,7 +24,7 @@
 
 - `selected_tag_codes` 可为空，表示暂不拉取新的外部往来流水。
 - PUT 只能提交当前 `active_tags` 中存在且属于外部往来的 code。
-- 保存成功必须写审计，并触发 `turnover_ledger` read model refresh。
+- 保存成功必须写审计，并返回 affected scope diagnostics；页面随后直接重读 grouped ledger。
 
 ### 台账候选和分组
 
@@ -73,17 +73,17 @@
 same group flow rows selected
   -> one or more income rows + one or more expense rows
   -> amount delta == 0.00
-  -> frontend waits affected turnover_ledger month scopes fresh and reloads grouped ledger
+  -> frontend reloads grouped ledger and rebinds selected rows
   -> frontend rebinds selected bank row ids to latest same-group flow rows
   -> backend stale precondition passes
   -> Turnover manual confirmed relation
   -> Workbench active pair relation
   -> merge selected banks plus any selected banks' existing OA-bank active relations into one turnover_manual_closure case
   -> Workbench open relation until invoice/full business relation is completed in Workbench
-  -> turnover/workbench/workbench_relation dirty-outbox refresh
-  -> API 返回 operation freshness targets
-  -> frontend waits affected turnover_ledger month scopes + affected workbench_relation scopes as hard operation visibility targets
-  -> workbench month aggregate and other downstream read models converge in background SLO path
+  -> turnover/workbench/workbench_relation affected scopes and real outbox
+  -> API 返回 affected months/scopes scope-only envelope（不返回 legacy barrier targets）
+  -> frontend directly reloads grouped ledger
+  -> workbench/cost/search 等下游按各自 direct API、operation projection 或真实后台任务收敛
   -> frontend emits Workbench refresh event; post-write sync/reload blockage is warning, not mutation failure
 ```
 
@@ -115,7 +115,7 @@ manual confirmed relation
   -> withdrawn
   -> command service withdraws only turnover_manual_closure case
   -> restorable previous OA-bank relations are reactivated
-  -> turnover/workbench/workbench_relation dirty-outbox refresh
+  -> turnover/workbench/workbench_relation affected scopes and real outbox
 ```
 
 禁止：
@@ -142,7 +142,7 @@ manual confirmed relation
 | invalid | 利率类型、负数、日期或过长文本非法 |
 | stale | `expected_versions` 不匹配，拒绝保存 |
 
-extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `turnoverLedgerExtraUpdated` 作为刷新提示，但不能让无关页面依赖该事件作为事实源。
+extra 保存只影响 Turnover ledger direct payload 和局部 UI；前端可发 `turnoverLedgerExtraUpdated` 作为刷新提示，但不能让无关页面依赖该事件作为事实源。
 
 ## UI 状态
 
@@ -151,82 +151,76 @@ extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `tu
 | loading | 首次或筛选加载 grouped ledger | `web/src/test/TurnoverLedgerPage.test.tsx` |
 | empty | grouped response 无 groups 时展示空态 | `web/src/test/TurnoverLedgerPage.test.tsx` |
 | error | ledger/detail/export/extra API 失败时显示错误或 toast | `shows a business error when relation detail disappears after the ledger was rendered` |
-| stale/refreshing | `readModelStatus !== "fresh"` 时展示当前可用数据和诊断，不能把 grouped payload 当作最终业务结论；manual closure 发起/提交必须被阻断或先等 fresh 后重刷重绑，最终仍由后端 stale precondition/canonical write safety 兜底 | read model / page tests |
+| direct grouped payload | 页面展示 `/api/turnover-ledger?view=grouped` 返回的 rows/summary；GET 不返回旧同步字段 | page tests |
 | permission disabled | `canMutateData=false` 时禁用保存、确认、撤回等写动作 | API 403 + 前端 disabled tests |
 | tag drawer | 加载 active tags，保存 selected codes 后 reload ledger | `opens tag selection drawer, saves selected bank detail labels, and reloads ledger` |
-| closure drawer | 允许同组多条未闭环 flow rows；至少一收一支且收支合计差额为 0 才允许确认；仅已关联 OA 或发票但未闭环的 flow row 不阻断确认；点击确定前先等台账 fresh、reload grouped payload，并用最新 row versions 提交 | manual closure/cross-group/fresh-rebind tests |
+| closure drawer | 允许同组多条未闭环 flow rows；至少一收一支且收支合计差额为 0 才允许确认；仅已关联 OA 或发票但未闭环的 flow row 不阻断确认；点击确定前 reload grouped payload，并用最新 row versions 提交 | manual closure/cross-group/rebind tests |
 | extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
 | export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
-| operation pending | tag-selection、extra、confirm、withdraw 成功后显示全屏 overlay，等待 `turnover_ledger` operation barrier fresh，再 reload grouped ledger | operation overlay / page tests |
+| operation pending | tag-selection、extra、confirm、withdraw 成功后显示全屏 overlay，并直接 reload grouped ledger；不再等待 legacy barrier | operation overlay / page tests |
 | workbench relation feedback | grouped payload 中的 flow row 展示后端 projection 给出的正向 relation chip：`linked_oa=true` 显示“已关联 OA”，`linked_invoice=true` 显示“已关联 发票”，`cash_closure_linked=true` 显示“收支闭环”。未发生闭环时不显示负向闭环 chip。toolbar 的确认/撤回只看 `cash_closure_*` 字段，不看 OA/发票 chip；这些字段来自后端 projection，不来自前端本地事件 | API mapper / page tests |
 
 前端跨页事件：
 
 - confirm/withdraw 成功后发 `turnoverRelationUpdated` 和 `workbenchRelationUpdated`。
 - extra 保存成功后发 `turnoverLedgerExtraUpdated`。
-- 这些事件只提示当前浏览器刷新；后端 dirty/outbox/read model freshness 才是事实源。
+- 这些事件只提示当前浏览器刷新；后端 canonical facts、real outbox 和 direct reload 才是页面事实源。
 
-## Read Model / Worker 状态
+## Legacy Projection / Worker 清理状态
 
-Read model key：`turnover_ledger`
+Legacy key：`turnover_ledger`
 
 Scope type：`turnover_ledger`
 
-Scope key：正常写路径为 affected month scopes；`all` 仅作为 fan-out command 或无法在写前确定月份的例外路径。
+Scope key：正常写路径只返回 affected month diagnostics；`all` 仅作为 fan-out/未知月份诊断例外。
 
-Worker instance：`turnover-ledger`
+Worker instance：无 turnover 专用页面刷新 worker。
 
-Refresh event：`turnover_ledger.read_model.refresh`
+Refresh event：无 active turnover 页面刷新事件；写操作成功后页面直接重读 grouped ledger，下游模块按各自 direct API、operation projection 或真实后台 outbox 合同收敛。
 
-状态：
+Legacy projection 状态：
 
-| 状态 | 含义 | 页面/API 行为 |
+| 状态 | 含义 | 后续动作 |
 | --- | --- | --- |
-| `fresh` | read model source versions 与当前事实源一致 | 可读可写 |
-| `refreshing` | 缺失或 stale 后已入队刷新 | 可展示当前 payload 或空 payload；写动作由后端 stale precondition/canonical write safety 判定 |
-| `stale` | source versions 不一致 | 不得伪装 fresh；应 enqueue `api_stale` refresh |
-| `missing` | required SQL read model 缺失 | 返回 empty refreshing payload 并 enqueue `api_miss` |
-| `failed` | worker 或 readiness 记录失败 | App Status 标记 domain blocked |
-| `unavailable` | runtime repository / queue / readiness 不可用 | App Status 不得显示 green；按 blocked/busy 暴露 |
+| `present` | 历史 source versions 与旧事实源记录仍存在 | 仅供迁移清理/诊断；页面 grouped GET 不等待它。 |
+| `refreshing` | legacy 投影历史状态 | 不再由 active turnover worker 产生；写动作由后端 stale precondition/canonical write safety 判定。 |
+| `outdated` | source versions 不一致 | 不得伪装为页面事实；仅作为 legacy projection 下线前诊断。 |
+| `missing` | legacy SQL read model 缺失 | 仅作为后台兼容投影诊断；页面 direct grouped payload 不返回旧刷新状态合同。 |
+| `failed` | legacy 投影历史状态 | 不再阻塞 turnover App Status domain；页面合同不暴露 read-model status。 |
+| `unavailable` | runtime repository / queue 不可用 | App Status 不得显示 green；按 blocked/busy 暴露。 |
 
-refresh 触发来源：
+旧 refresh 触发来源已下线：
 
-- tag-selection 保存。
-- bank-row-tags batch，按 affected months refresh。
-- relation extra 保存。
-- manual closure confirm，按 affected months refresh；无法解析 affected months 时才退回 `all`。
-- withdraw，按 affected months refresh；cash closure withdraw 等写前无法解析 affected months 的例外路径可使用 `all` fan-out。
-- 底层银行流水分类、relation、extra、settings、source versions 变化。
+- tag-selection、bank-row-tags batch、relation extra、manual closure confirm/withdraw 不再 enqueue turnover 页面刷新。
+- 底层银行流水分类、relation、extra、settings、source versions 变化后，页面读取走 direct grouped GET；下游 workbench/workbench_relation/cost/search 按各自合同处理。
 
 worker 流程：
 
 ```text
-job.outbox_events / job.read_model_dirty_scopes
-  -> turnover-ledger worker consumes turnover_ledger.read_model.refresh
-  -> TurnoverLedgerReadModelRefreshService.handle_runtime_event
-  -> TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope
-  -> WorkbenchRelationReadFacade.get_by_row_ids(require_fresh=True)
-  -> fresh relation distribution enriches grouped payload; non-fresh relation context fails without saving
-  -> save_turnover_ledger_rows
-  -> complete dirty scope and readiness
+GET /api/turnover-ledger
+  -> TurnoverLedgerQueryService
+  -> TurnoverLedgerService direct grouped/flat payload
+  -> Workbench relation context from direct/read facade as required by the query path
+  -> frontend reloads grouped ledger after writes without waiting for turnover legacy sync metadata
 ```
 
 失败恢复：
 
 - worker handler event type 错误必须拒绝。
-- projection 失败不得保存半成品 read model。
-- dirty scope 未 complete 时 App Status 应保持 busy/blocked。
+- legacy projection 失败不得保存半成品。
+- 写操作 outbox 或真实后台任务未完成时 App Status 应按对应运行事实保持 busy/blocked。
 - 本地测试不能证明真实 RabbitMQ/Redis/systemd drain，发布前按运维 smoke 验证。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| 2026-06-26 | 普通 turnover 写操作从 `turnover_ledger:all` 收敛为 affected month scopes | bank-row-tags、manual closure confirm、relation confirm/withdraw、frontend pre/post operation barrier 默认等待 affected month scopes；`all` 只保留为 fan-out/未知月份例外，降低写后 read model 全量刷新长尾 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
-| 2026-06-23 | 补 read model manifest 合同守卫 | 不改变外部往来业务/UI/read model/worker 状态；锁定 `turnover_ledger` 为 `partitioned_scoped_incremental`、`all` 为 fan-out command，并保持 query owner、permission owner 和 repository ports 不与 cost/tax 混用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_cost_tax_and_turnover_manifest_preserve_summary_contracts` |
-| 2026-06-11 | 补齐外部往来款管理状态机 | 固定标签准入、候选/人工闭环、撤回、extra、UI stale、read model/worker 状态 | 待本轮模块验证命令 |
-| 2026-06-14 | tag-selection/extra/confirm/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `turnover_ledger` barrier fresh 并 reload，避免旧 grouped payload 暴露给用户 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
+| 2026-06-26 | 前端写后移除 legacy barrier 等待 | tag-selection、extra、manual closure confirm/withdraw 成功后直接 reload grouped ledger；后端写响应仅保留 affected scopes，不再返回 target envelope | `web/src/test/TurnoverLedgerPage.test.tsx` |
+| 2026-06-26 | 普通 turnover 写操作从 `turnover_ledger:all` 收敛为 affected month diagnostics | bank-row-tags、manual closure confirm、relation confirm/withdraw 的后端响应默认使用 affected month diagnostics；`all` 只保留为 fan-out/未知月份例外，降低写后全量诊断长尾 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
+| 2026-06-23 | 补 legacy manifest 合同守卫 | 不改变外部往来业务/UI 状态；锁定 `turnover_ledger` 历史合同，并保持 query owner、permission owner 和 repository ports 不与 cost/tax 混用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_cost_tax_and_turnover_manifest_preserve_summary_contracts` |
+| 2026-06-11 | 补齐外部往来款管理状态机 | 固定标签准入、候选/人工闭环、撤回、extra、UI version conflict、legacy projection/worker 清理状态 | 待本轮模块验证命令 |
+| 2026-06-14 | tag-selection/extra/confirm/withdraw 接入 operation overlay 与旧 barrier | 历史实现：写 API 成功后曾等待 `turnover_ledger` barrier fresh 并 reload；已被 2026-06-26 direct reload 合同取代 | `web/src/test/TurnoverLedgerPage.test.tsx` |
 | 2026-06-15 | manual closure 提交前刷新并重绑定所选 flow rows | 防止抽屉缓存旧 `categoryVersion` 导致后端 stale precondition 拒绝，也防止刷新后流水消失时误发 POST | `web/src/test/TurnoverLedgerPage.test.tsx` fresh-rebind/stale tests |
-| 2026-06-16 | grouped payload 投影 Workbench relation 状态 | 关联台反向变化可通过 fresh `workbench_relation` read model 反馈到流水台；relation 不 fresh 时不发布新的 turnover read model | `tests/test_turnover_ledger_read_model_refresh.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
+| 2026-06-16 | grouped payload 投影 Workbench relation 状态 | 关联台反向变化通过 Workbench relation read boundary 反馈到流水台；relation context 不可用时不得发布新的 turnover payload | `tests/test_turnover_ledger_read_facade.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
 | 2026-06-17 | 拆分 OA/业务单据关联展示与外部往来闭环状态 | OA/业务单据关联 chip 仅展示，不参与确认/撤回闭环判断；确认闭环可合并既有 OA-bank relation，撤回只撤回 `turnover_manual_closure` 并恢复旧 OA-bank relation | `tests/test_workbench_pair_relation_service.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/TurnoverLedgerPage.test.tsx` |
 | 2026-06-17 | grouped flow row 版本投影与 schema version 失效 | `category_version=0` 占位时 grouped payload 必须回退到 `manual_category_version` 或基础 `version`；版本语义变化必须 bump `turnover_ledger_schema_version`，让旧 read model stale/rebuild | `tests/test_turnover_ledger_service.py`、`tests/test_turnover_ledger_source_versions.py` |

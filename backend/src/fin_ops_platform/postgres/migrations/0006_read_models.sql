@@ -60,31 +60,6 @@ create table if not exists read_model.workbench_candidate_matches (
 create index if not exists workbench_candidate_matches_scope_idx on read_model.workbench_candidate_matches (scope_month, status);
 create index if not exists workbench_candidate_matches_row_ids_gin on read_model.workbench_candidate_matches using gin (row_ids);
 
-create table if not exists read_model.search_index_rows (
-    id uuid primary key default gen_random_uuid(),
-    row_id text not null unique,
-    source_kind text not null,
-    scope_month date,
-    status text,
-    title text,
-    subtitle text,
-    searchable_text text not null,
-    project_name text,
-    counterparty_name text,
-    amount numeric(20, 6),
-    source_versions jsonb not null default '{}'::jsonb,
-    generated_at timestamptz not null,
-    payload jsonb not null default '{}'::jsonb,
-    raw_payload jsonb not null default '{}'::jsonb,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
-);
-
-create index if not exists search_index_rows_scope_kind_idx on read_model.search_index_rows (scope_month, source_kind);
-create index if not exists search_index_rows_search_trgm on read_model.search_index_rows using gin (searchable_text gin_trgm_ops);
-create index if not exists search_index_rows_project_trgm on read_model.search_index_rows using gin (project_name gin_trgm_ops);
-create index if not exists search_index_rows_counterparty_trgm on read_model.search_index_rows using gin (counterparty_name gin_trgm_ops);
-
 create table if not exists read_model.cost_statistics_read_models (
     id uuid primary key default gen_random_uuid(),
     legacy_mongo_id text unique,

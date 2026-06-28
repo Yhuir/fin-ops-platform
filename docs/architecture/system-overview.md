@@ -13,7 +13,7 @@ React 财务运营前端
         v
 Python 财务运营后端
         |
-        +--> PostgreSQL：业务事实、设置、队列、审计和 SQL/read model
+        +--> PostgreSQL：业务事实、设置、队列、审计和 direct query/projection storage
         +--> MinIO/S3：上传文件和已迁移附件对象
         +--> Redis：短 TTL cache、pub/sub wakeup、辅助锁
         +--> OA Mongo：仅独立 worker 只读同步到 PostgreSQL projection
@@ -36,11 +36,11 @@ Python 财务运营后端
 ## 关键边界
 
 - HTTP 层不应承载复杂业务规则；规则沉淀到 service。
-- 生产 API 请求路径只读 PostgreSQL repository/read model，不访问 App Mongo snapshot、GridFS 或 OA Mongo fallback。
+- 生产页面 API 请求路径通过 PostgreSQL repository/direct query service 读取业务事实或 OA SQL projection，不访问 App Mongo snapshot、GridFS 或 OA Mongo fallback，也不依赖页面级 read model gate。
 - OA 原始库只允许 worker、迁移、shadow-read、audit 工具通过 adapter 只读访问，不让业务服务直接耦合 OA 原始表结构。
 - 工作台确认关系以 pair relation 为事实源，不以候选显示状态为事实源。
 - 导入文件、预览和确认必须通过导入服务和持久化层统一管理。
 
 ## 演进方向
 
-当前系统已经积累大量业务服务，后续生产级性能重构应优先拆出持久化 repository 和 read model 生成器，而不是直接重写业务规则。
+当前系统已经积累大量业务服务，后续生产级性能重构应优先拆出持久化 repository、direct query service 和必要的短 TTL response cache，而不是恢复页面级 read model 或直接重写业务规则。

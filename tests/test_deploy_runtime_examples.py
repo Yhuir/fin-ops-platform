@@ -67,13 +67,13 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertEqual([], missing_examples)
 
-    def test_rabbitmq_dispatcher_env_includes_invoice_usage_collection_events(self) -> None:
+    def test_rabbitmq_dispatcher_env_excludes_invoice_lifecycle_and_usage_collection_events(self) -> None:
         env_example = DISPATCHER_ENV.read_text()
 
-        self.assertIn("invoice_lifecycle.read_model.refresh", env_example)
-        self.assertIn("input_invoice_usage.read_model.refresh", env_example)
-        self.assertIn("output_invoice_collection.read_model.refresh", env_example)
-        self.assertIn("oa_pending_payment.read_model.refresh", env_example)
+        self.assertNotIn("invoice_lifecycle.read_model.refresh", env_example)
+        self.assertNotIn("input_invoice_usage.read_model.refresh", env_example)
+        self.assertNotIn("output_invoice_collection.read_model.refresh", env_example)
+        self.assertNotIn("oa_pending_payment.read_model.refresh", env_example)
 
     def test_shared_rabbitmq_worker_env_does_not_switch_all_workers_to_rabbitmq(self) -> None:
         env_example = RABBITMQ_WORKER_ENV.read_text(encoding="utf-8")
@@ -82,17 +82,11 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("RABBITMQ_URL=", env_example)
         self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=1", env_example)
 
-    def test_search_pending_workers_and_dispatcher_include_pending_invoice_refresh(self) -> None:
-        postgres_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending.env.example").read_text()
-        rabbitmq_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending-rabbitmq.env.example").read_text()
+    def test_dispatcher_no_longer_routes_pending_invoice_refresh(self) -> None:
         dispatcher_env = DISPATCHER_ENV.read_text()
 
-        for env_example in (postgres_worker_env, rabbitmq_worker_env):
-            self.assertIn("--enable-search-read-model-refresh", env_example)
-            self.assertIn("--enable-pending-invoice-read-model-refresh", env_example)
-            self.assertIn("--event-type search.read_model.refresh", env_example)
-            self.assertIn("--event-type pending_invoice.read_model.refresh", env_example)
-        self.assertIn("pending_invoice.read_model.refresh", dispatcher_env)
+        self.assertNotIn("search.read_model.refresh", dispatcher_env)
+        self.assertNotIn("pending_invoice.read_model.refresh", dispatcher_env)
 
 
 if __name__ == "__main__":

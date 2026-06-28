@@ -17,7 +17,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     TARGET_APPLICANTS,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+from fin_ops_platform.services.scope_keys import normalized_scope_keys
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
@@ -306,7 +306,6 @@ class InputInvoiceUsageOaReverseService:
         evidence_provider: InputInvoiceUsageOaEvidenceProvider | None = None,
         relation_writer: Callable[[InputInvoiceUsageOaReverseBatch, InputInvoiceUsageOaEvidence], None] | None = None,
         audit_recorder: Callable[[dict[str, object]], None] | None = None,
-        read_model_invalidator: Callable[[list[str], str], None] | None = None,
     ) -> None:
         self._query_service = query_service
         self._repository = repository
@@ -314,7 +313,6 @@ class InputInvoiceUsageOaReverseService:
         self._evidence_provider = evidence_provider
         self._relation_writer = relation_writer
         self._audit_recorder = audit_recorder
-        self._read_model_invalidator = read_model_invalidator
 
     def preview(self, request: dict[str, Any] | None, *, can_create_draft: bool = False) -> dict[str, object]:
         payload = dict(request or {})
@@ -549,7 +547,6 @@ class InputInvoiceUsageOaReverseService:
         self._bump_version(batch, actor_id=actor_id, event_type="oa_reverse_draft_created", before_status=before_status, after_status=batch.status)
         self._repository.save_batch(batch)
         self._record_external_audit(batch, "oa_reverse_draft_created", actor_id=actor_id)
-        self._invalidate_read_models(batch, "input_invoice_usage_oa_reverse_draft_created")
         return self.batch_payload(batch)
 
     def revoke_oa_draft(
@@ -593,7 +590,6 @@ class InputInvoiceUsageOaReverseService:
         self._bump_version(batch, actor_id=actor_id, event_type="oa_reverse_draft_revoked", before_status=before_status, after_status=batch.status, reason=normalized_reason)
         self._repository.save_batch(batch)
         self._record_external_audit(batch, "oa_reverse_draft_revoked", actor_id=actor_id)
-        self._invalidate_read_models(batch, "input_invoice_usage_oa_reverse_draft_revoked")
         return self.batch_payload(batch)
 
     def refresh_oa_status(
@@ -637,7 +633,6 @@ class InputInvoiceUsageOaReverseService:
         self._bump_version(batch, actor_id=actor_id, event_type="oa_reverse_status_detected", before_status=before_status, after_status=batch.status, reason=batch.oa_detection_reason)
         self._repository.save_batch(batch)
         self._record_external_audit(batch, "oa_reverse_status_detected", actor_id=actor_id)
-        self._invalidate_read_models(batch, "input_invoice_usage_oa_reverse_evidence_detected")
         return self.batch_payload(batch)
 
     def manual_oa_status(
@@ -706,7 +701,6 @@ class InputInvoiceUsageOaReverseService:
         self._bump_version(batch, actor_id=actor_id, event_type=event_type, before_status=before_status, after_status=batch.status, reason=normalized_reason)
         self._repository.save_batch(batch)
         self._record_external_audit(batch, event_type, actor_id=actor_id)
-        self._invalidate_read_models(batch, "input_invoice_usage_oa_reverse_manual_status_changed")
         return self.batch_payload(batch)
 
     @staticmethod
@@ -744,11 +738,7 @@ class InputInvoiceUsageOaReverseService:
             "canRevoke": _can_revoke_oa_draft(batch),
             "canRefreshStatus": batch.status in DETECTION_STATUSES,
             "canManualStatus": batch.status in MANUAL_FALLBACK_STATUSES,
-            **write_target_envelope(
-                read_model_key="input_invoice_usage",
-                scope_keys=scope_keys,
-                fallback_scope_key="all",
-            ),
+            "affected_scope_keys": normalized_scope_keys(scope_keys, fallback="all"),
         }
 
     @staticmethod
@@ -1028,20 +1018,6 @@ class InputInvoiceUsageOaReverseService:
                 },
             }
         )
-
-    def _invalidate_read_models(self, batch: InputInvoiceUsageOaReverseBatch, reason: str) -> None:
-        if self._read_model_invalidator is None:
-            return
-        months = sorted(
-            {
-                month
-                for row in list(batch.invoice_display_rows or [])
-                for month in [str(row.get("invoiceDate") or "")[:7]]
-                if len(month) == 7
-            }
-        )
-        self._read_model_invalidator(months or ["all"], reason)
-
 
 def _copy_batch(batch: InputInvoiceUsageOaReverseBatch | None) -> InputInvoiceUsageOaReverseBatch:
     if batch is None:

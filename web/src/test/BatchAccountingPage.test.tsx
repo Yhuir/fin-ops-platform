@@ -296,9 +296,6 @@ function installFetchMock() {
         message: "已撤回批量账务关联。",
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
-    if (url.pathname === "/api/operation-barrier/status") {
-      return jsonResponse({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
-    }
     return new Response(JSON.stringify({ message: `Unhandled ${url.pathname}` }), { status: 404, headers: { "Content-Type": "application/json" } });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -719,46 +716,7 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByLabelText("差额说明")).toHaveValue("");
   });
 
-  test("shows relation read model warning without blocking canonical submit", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async () => jsonResponse({
-      ...unsubmittedPayload,
-      read_model_status: "missing",
-      read_model_stale_reasons: ["read_model_missing"],
-      read_model_scope_keys: ["2026-01"],
-      refresh_enqueued: true,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
-
-    expect(await screen.findByText("关联台关系读模型 missing，正在刷新。")).toBeInTheDocument();
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
-    await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
-    expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
-  });
-
-  test("shows operation guidance when relation read model refresh is not enqueued", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({
-      ...unsubmittedPayload,
-      read_model_status: "missing",
-      read_model_stale_reasons: ["read_model_missing"],
-      read_model_scope_keys: ["2026-01"],
-      refresh_enqueued: false,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-
-    expect(await screen.findByText("关联台关系读模型 missing，刷新未入队，请检查系统状态。")).toBeInTheDocument();
-    expect(screen.getByText("read_model_missing")).toBeInTheDocument();
-    expect(screen.getByText("影响范围：2026-01")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
-  });
-
-  test("shows backend read model status and scope when mutation is rejected as non-fresh", async () => {
+  test("hides backend read-model details when submit is rejected", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -767,12 +725,8 @@ describe("BatchAccountingPage", () => {
       }
       if (url.pathname === "/api/batch-accounting/submit") {
         return jsonResponse({
-          error: "batch_accounting_read_model_not_fresh",
-          message: "关联台关系读模型 stale，请刷新后再处理。",
-          read_model_status: "stale",
-          read_model_stale_reasons: ["dirty_scope:2026-01"],
-          read_model_scope_keys: ["2026-01"],
-          refresh_enqueued: true,
+          error: "batch_accounting_relation_unavailable",
+          message: "关系状态正在更新，请刷新后重试。",
         }, 400);
       }
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
@@ -787,8 +741,9 @@ describe("BatchAccountingPage", () => {
     await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
 
     const overlay = await screen.findByRole("dialog", { name: "全局操作进度" });
-    expect(within(overlay).getByText("关联台关系读模型 stale，请刷新后再处理。 dirty_scope:2026-01 影响范围：2026-01")).toBeInTheDocument();
-    expect(screen.getAllByText("关联台关系读模型 stale，请刷新后再处理。 dirty_scope:2026-01 影响范围：2026-01").length).toBeGreaterThanOrEqual(1);
+    expect(within(overlay).getByText("批量账务关系状态正在更新，请刷新后重试。")).toBeInTheDocument();
+    expect(screen.getAllByText("批量账务关系状态正在更新，请刷新后重试。").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/读模型 stale/)).not.toBeInTheDocument();
   });
 
   test("clears cached bank and OA selection when refreshed bank rows disappear", async () => {
@@ -808,7 +763,6 @@ describe("BatchAccountingPage", () => {
           },
           bank_rows: [],
           oa_rows: unsubmittedPayload.oa_rows,
-          read_model_status: "fresh",
         });
       }
       return jsonResponse({

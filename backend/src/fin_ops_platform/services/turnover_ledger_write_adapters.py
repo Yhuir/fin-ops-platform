@@ -5,12 +5,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any, Callable
 
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-from fin_ops_platform.services.read_model_scope_policy import (
-    DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY,
-    ReadModelScopePolicyRegistry,
-)
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+from fin_ops_platform.services.scope_keys import normalized_scope_keys
 from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
@@ -408,8 +403,7 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             settings_port = TurnoverLedgerTagSelectionSettingsAdapter(
                 repository_factory=self._postgres_settings_repository_factory
@@ -485,8 +479,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             relation_repository = TurnoverLedgerRelationWritePort(
                 relation_service=self._relation_service,
@@ -508,8 +501,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
                 else None
             )
         else:
-            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
-                return None
             local_adapters = TurnoverLedgerLocalWithdrawRelationAdapterSet(
                 state_store=self._state_store,
                 relation_service=self._relation_service,
@@ -595,8 +586,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             relation_repository = TurnoverLedgerRelationWritePort(
                 relation_service=self._relation_service,
@@ -618,8 +608,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 else None
             )
         else:
-            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
-                return None
             local_adapters = TurnoverLedgerLocalConfirmRelationAdapterSet(
                 state_store=self._state_store,
                 relation_service=self._relation_service,
@@ -702,8 +690,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             bankdetail_port = TurnoverLedgerBankdetailWritePort(
                 category_service=self._category_service,
@@ -717,8 +704,6 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
-            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
-                return None
             local_adapters = TurnoverLedgerLocalBankRowTagsAdapterSet(
                 state_store=self._state_store,
                 category_service=self._category_service,
@@ -781,8 +766,7 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             extra_repository = TurnoverLedgerExtraRepositoryAdapter(
                 repository_factory=self._postgres_extra_repository_factory
@@ -793,8 +777,6 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
-            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
-                return None
             local_adapters = TurnoverLedgerLocalRelationExtraAdapterSet(
                 state_store=self._state_store,
                 routes=self._routes,
@@ -1092,41 +1074,6 @@ class TurnoverLedgerClosureLegacyFallbackFacade:
         }
 
 
-def _turnover_closure_visibility_freshness_targets(affected_months: list[str]) -> list[dict[str, str]]:
-    normalized_months: list[str] = []
-    for month in list(affected_months or []):
-        scope_key = str(month or "").strip()
-        if not scope_key or scope_key == "all" or scope_key in normalized_months:
-            continue
-        normalized_months.append(scope_key)
-    if not normalized_months:
-        return [{"read_model_key": "turnover_ledger", "scope_key": "all"}]
-    return [
-        *[
-            {"read_model_key": "turnover_ledger", "scope_key": scope_key}
-            for scope_key in normalized_months
-        ],
-        *[
-            {"read_model_key": "workbench_relation", "scope_key": scope_key}
-            for scope_key in normalized_months
-        ],
-    ]
-
-
-def _turnover_write_target_envelope(
-    affected_months: list[str],
-    *,
-    targets: list[dict[str, str]] | None = None,
-) -> dict[str, object]:
-    return write_target_envelope(
-        scope_keys=list(affected_months or []),
-        targets=targets
-        if targets is not None
-        else _turnover_closure_visibility_freshness_targets(affected_months),
-        fallback_scope_key="all",
-    )
-
-
 class TurnoverLedgerConfirmRequestBoundaryFacade:
     def __init__(
         self,
@@ -1166,7 +1113,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         result = self._facade.confirm_relation(**confirm_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
-        payload.update(_turnover_write_target_envelope(affected_months))
+        payload["affected_scope_keys"] = normalized_scope_keys(affected_months, fallback="all")
         return payload
 
     def confirm_zero_difference_closure_from_request(
@@ -1200,10 +1147,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
             raise RuntimeError("turnover ledger closure facade is not configured.")
         payload = dict(confirm(**closure_kwargs) or {})
         payload["affected_months"] = list(affected_months)
-        payload["freshness_targets"] = _turnover_closure_visibility_freshness_targets(
-            affected_months
-        )
-        payload.update(_turnover_write_target_envelope(affected_months, targets=payload["freshness_targets"]))
+        payload["affected_scope_keys"] = normalized_scope_keys(affected_months, fallback="all")
         return payload
 
     def withdraw_cash_closure_case_from_request(
@@ -1239,8 +1183,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
             if str(month).strip()
         ]
         payload["affected_months"] = affected_months
-        payload["freshness_targets"] = _turnover_closure_visibility_freshness_targets(affected_months)
-        payload.update(_turnover_write_target_envelope(affected_months, targets=payload["freshness_targets"]))
+        payload["affected_scope_keys"] = normalized_scope_keys(affected_months, fallback="all")
         return payload
 
 
@@ -1390,7 +1333,7 @@ class TurnoverLedgerWithdrawRequestBoundaryFacade:
         result = self._facade.withdraw_relation(**withdraw_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
-        payload.update(_turnover_write_target_envelope(affected_months))
+        payload["affected_scope_keys"] = normalized_scope_keys(affected_months, fallback="all")
         return payload
 
 
@@ -1440,7 +1383,7 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         payload["affected_months"] = list(affected_months)
         payload["turnover_ledger_invalidated"] = True
         payload["workbench_invalidated"] = True
-        payload.update(_turnover_write_target_envelope(affected_months))
+        payload["affected_scope_keys"] = normalized_scope_keys(affected_months, fallback="all")
         return payload
 
 
@@ -1501,7 +1444,7 @@ class TurnoverLedgerRelationExtraRequestBoundaryFacade:
         )
         response_payload = dict(result or {})
         response_payload["turnover_ledger_invalidated"] = True
-        response_payload.update(_turnover_write_target_envelope(list(scope_keys or ["all"])))
+        response_payload["affected_scope_keys"] = normalized_scope_keys(list(scope_keys or ["all"]), fallback="all")
         return response_payload
 
 
@@ -1529,10 +1472,7 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
             or {}
         )
         payload.update(
-            _turnover_write_target_envelope(
-                ["all"],
-                targets=[{"read_model_key": "turnover_ledger", "scope_key": "all"}],
-            )
+            {"affected_scope_keys": normalized_scope_keys(["all"], fallback="all")}
         )
         return payload
 
@@ -2168,7 +2108,11 @@ class TurnoverLedgerWorkbenchPairPort:
     def _command_precondition_error(exc: WorkbenchRelationCommandError) -> TurnoverLedgerWritePreconditionError:
         if exc.error_code == "workbench_relation_active_row_conflict":
             message = "银行流水已存在关联台闭环关系，请刷新后重试。"
-        elif exc.error_code in {"workbench_relation_read_model_not_fresh", "workbench_relation_read_model_unavailable"}:
+        elif exc.error_code in {
+            "workbench_relation_context_not_ready",
+            "workbench_relation_context_not_ready",
+            "workbench_relation_context_unavailable",
+        }:
             message = "关联台关系状态正在刷新，请稍后重试。"
         else:
             message = exc.message or exc.error_code
@@ -2224,7 +2168,7 @@ class TurnoverLedgerWorkbenchPairPort:
             payload = reader([str(row_id) for row_id in list(row_ids or []) if str(row_id).strip()])
         if not isinstance(payload, dict):
             return None
-        status = str(payload.get("status") or payload.get("read_model_status") or "fresh")
+        status = str(payload.get("status") or "fresh")
         if status != "fresh":
             raise TurnoverLedgerWritePreconditionError(
                 error_code="turnover_relation_conflict",
@@ -2457,13 +2401,11 @@ class TurnoverLedgerDirtyOutboxWriter:
         tenant_id: str = "default",
         priority: str = "normal",
         trace_id: str | None = None,
-        scope_policy_registry: ReadModelScopePolicyRegistry = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY,
     ) -> None:
         self._queue_repository = queue_repository
         self._tenant_id = str(tenant_id or "default")
         self._priority = str(priority or "normal")
         self._trace_id = str(trace_id).strip() if trace_id else None
-        self._scope_policy_registry = scope_policy_registry
 
     def enqueue_refresh(
         self,
@@ -2474,29 +2416,8 @@ class TurnoverLedgerDirtyOutboxWriter:
         reason: str,
         payload: dict[str, object] | None = None,
     ) -> list[Any]:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-        if not callable(enqueue):
-            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh_in_transaction.")
-        events = []
-        normalized_scope_type = str(scope_type or "").strip()
-        normalized_scope_keys = self._scope_policy_registry.normalize_and_validate(
-            normalized_scope_type,
-            [str(scope_key or "all") for scope_key in list(scope_keys or ["all"])],
-        )
-        for scope_key in normalized_scope_keys:
-            events.append(
-                enqueue(
-                    transaction=transaction,
-                    scope_type=normalized_scope_type,
-                    scope_key=scope_key,
-                    reason=reason,
-                    tenant_id=self._tenant_id,
-                    priority=self._priority,
-                    trace_id=self._trace_id,
-                    metadata={"action_name": str((payload or {}).get("action_name") or "").strip()},
-                )
-            )
-        return events
+        _ = transaction, scope_type, scope_keys, reason, payload
+        return []
 
 
 class TurnoverLedgerLocalDirtyOutboxWriter:
@@ -2512,20 +2433,8 @@ class TurnoverLedgerLocalDirtyOutboxWriter:
         reason: str,
         payload: dict[str, object] | None = None,
     ) -> list[Any]:
-        _ = transaction, payload
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not refresh_gateway.can_enqueue():
-            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
-        refresh_reason = (
-            "turnover_relation_extra_changed"
-            if reason == "relation_extra_update"
-            else reason
-        )
-        return refresh_gateway.enqueue_many_events(
-            scope_type,
-            [str(scope_key or "all") for scope_key in list(scope_keys or ["all"])],
-            reason=refresh_reason,
-        )
+        _ = transaction, scope_type, scope_keys, reason, payload
+        return []
 
 
 class TurnoverLedgerLocalRelationExtraConnection:

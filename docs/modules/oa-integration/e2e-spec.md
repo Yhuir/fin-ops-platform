@@ -7,8 +7,8 @@ OA 集成的 Spec-first 目标是证明真实 OA 登录、权限、Mongo 投影�
 | Spec ID | 用户可观察合同 | 必须证明 |
 | --- | --- | --- |
 | `OA-E2E-001` | OA iframe 或同域入口打开后，`/api/session/me` 能返回正确用户、access tier 和权限。 | 真实 OA token/session、app 内权限二次校验、expired/forbidden gate。 |
-| `OA-E2E-002` | OA Mongo 同步/投影失败时，页面不能把旧 OA projection 伪装 fresh。 | Mongo read status、worker projection、App Status/read model freshness 一致。 |
-| `OA-E2E-003` | OA 待付款页面 rows/filter/detail 在 fresh/non-fresh/权限状态下表现正确。 | OA pending page Browser + API/read model tests。 |
+| `OA-E2E-002` | OA Mongo 同步/投影失败时，页面不能把旧 OA projection 当成可用 direct payload。 | Mongo read status、worker projection、App Status 诊断一致。 |
+| `OA-E2E-003` | OA 待付款页面 rows/filter/detail 在可用、暂不可用和权限状态下表现正确。 | OA pending page Browser + API tests。 |
 | `OA-E2E-004` | 进项发票 OA 反提使用目标申请人创建草稿，preview hash/version/idempotency/失败恢复正确。 | 目标申请人凭据、OA login token、draft create、submitted history。 |
 | `OA-E2E-005` | ETC OA 草稿/人工确认只修改本系统状态，不自动删除真实 OA 草稿/流程。 | ETC Browser/API/service tests；真实 OA 草稿页面需 staging。 |
 | `OA-E2E-006` | Settings 中目标 OA 申请人凭据 admin-only，保存/list/delete 不回显 password。 | API/前端/权限矩阵测试。 |

@@ -286,37 +286,6 @@ export type WorkbenchSummary = {
   zoneCounts: Record<WorkbenchZoneId, WorkbenchZoneCounts>;
 };
 
-export type WorkbenchReadModelStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable" | (string & {});
-
-export type WorkbenchRefreshScopeStatus = {
-  scopeKey: string;
-  status: string;
-  updatedAt: string | null;
-  lastError: string | null;
-  sourceVersion: number | null;
-};
-
-export type WorkbenchRefreshStatus = {
-  scopeKey: string;
-  readModelStatus: WorkbenchReadModelStatus;
-  consistencyStatus: string | null;
-  generatedAt: string | null;
-  activeGenerationId: string | null;
-  readModelVersion: string | number | null;
-  dirtyScopes: WorkbenchRefreshScopeStatus[];
-  runningScopes: string[];
-  processedCount: number | null;
-  totalCount: number | null;
-  workerLagSeconds: number | null;
-  lastError: string | null;
-  retryable: boolean;
-};
-
-export type WorkbenchRefreshStatusEvent = {
-  event: string;
-  status: WorkbenchRefreshStatus;
-};
-
 export type WorkbenchZoneCounts = {
   groups: number;
   oa: number;
@@ -346,7 +315,6 @@ export type WorkbenchZonePageInfo = {
   total: number;
   rowCounts: Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">;
   hasMore: boolean;
-  readModelStatus: WorkbenchReadModelStatus;
 };
 
 export type WorkbenchInvoiceInventory = {
@@ -483,21 +451,12 @@ export type OaManualImportEntry = {
   audit?: Record<string, unknown>;
 };
 
-export type OaManualReadModelTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
-};
-
 export type OaManualImportResult = {
   imported: string[];
   alreadyImported: string[];
   failed: Array<Record<string, unknown>>;
   rows: OaManualSearchRow[];
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: OaManualReadModelTarget[];
-  operationBarrierTargets: OaManualReadModelTarget[];
 };
 
 export type OaManualImportList = {
@@ -509,9 +468,6 @@ export type OaManualImportRemovalResult = {
   removed: boolean;
   rowId: string;
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: OaManualReadModelTarget[];
-  operationBarrierTargets: OaManualReadModelTarget[];
 };
 
 export type OaManualAttachmentRefreshResult = {
@@ -523,9 +479,6 @@ export type OaManualAttachmentRefreshResult = {
   }>;
   errors: Array<Record<string, unknown>>;
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  freshnessTargets: OaManualReadModelTarget[];
-  operationBarrierTargets: OaManualReadModelTarget[];
 };
 
 export type OaManualSearchFilters = {

@@ -72,7 +72,6 @@ export default function InputInvoiceUsageExportDrawer({
     }
   }
 
-  const refreshing = preview?.readModelStatus === "refreshing";
   return (
     <AppDrawer
       className="input-invoice-usage-export-drawer"
@@ -84,7 +83,7 @@ export default function InputInvoiceUsageExportDrawer({
           </button>
           <button
             className="input-invoice-usage-button input-invoice-usage-button--primary"
-            disabled={!preview || loading || downloading || refreshing}
+            disabled={!preview || loading || downloading}
             onClick={handleDownload}
             type="button"
           >
@@ -106,7 +105,6 @@ export default function InputInvoiceUsageExportDrawer({
           </div>
         ) : null}
         {error ? <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--error" role="alert">{error}</div> : null}
-        {refreshing ? <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--info" role="status">导出数据准备中，请稍后再试。</div> : null}
         {downloadedFileName ? <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--success" role="status">已生成 {downloadedFileName}</div> : null}
         {preview ? (
           <>

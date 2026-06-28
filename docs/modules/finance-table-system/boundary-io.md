@@ -20,7 +20,7 @@
 ### 不负责
 
 - 不拥有任何业务 API。
-- 不判断 read model freshness。
+- 不判断页面 direct payload 可用性。
 - 不在通用组件中写页面业务规则。
 
 ## 输入 I/O
@@ -70,4 +70,4 @@
 
 ## 当前缺口和删除条件
 
-- 页面迁移到 FinanceTable 时必须保留该页面 API/read model 边界，不把业务逻辑推入通用组件。
+- 页面迁移到 FinanceTable 时必须保留该页面 API 边界，不把业务逻辑推入通用组件。

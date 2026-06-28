@@ -19,9 +19,8 @@ class FreshNoOaRelationFacade:
             "status": "fresh",
             "rows": [],
             "groups": [],
-            "read_model_scope_keys": list(kwargs.get("scope_keys_hint") or ["2026-03"]),
+            "scope_keys": list(kwargs.get("scope_keys_hint") or ["2026-03"]),
             "stale_reasons": [],
-            "refresh_enqueued": False,
         }
 
 

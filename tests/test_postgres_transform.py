@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fin_ops_platform.postgres.migrate import run_psql
 from fin_ops_platform.tools.postgres_transform import (
+    ALL_DOMAINS,
     JsonValue,
     StagingRecord,
     build_transaction_sql,
@@ -26,13 +27,13 @@ def record(source: str, legacy: str, payload: dict[str, object]) -> StagingRecor
 def test_stable_target_id_is_deterministic_and_table_scoped() -> None:
     first = stable_target_id("invoices", "abc", "app", "invoices")
     second = stable_target_id("invoices", "abc", "app", "invoices")
-    other = stable_target_id("invoices", "abc", "read_model", "search_index_rows")
+    other = stable_target_id("invoices", "abc", "read_model", "pending_invoice_rows")
 
     assert first == second
     assert first != other
 
 
-def test_transform_plan_builds_core_rows_and_generated_search_rows() -> None:
+def test_transform_plan_builds_core_rows_without_generated_search_rows() -> None:
     export_row = {
         "export_id": "export-1",
         "source_database": "fin_ops_platform_app",
@@ -60,7 +61,33 @@ def test_transform_plan_builds_core_rows_and_generated_search_rows() -> None:
     assert not plan.blockers
     assert plan.table_counts()["app.invoices"] == 1
     assert plan.table_counts()["app.bank_transactions"] == 1
-    assert plan.table_counts()["read_model.search_index_rows"] == 2
+    assert "read_model.search_index_rows" not in plan.table_counts()
+
+
+def test_transform_plan_does_not_import_legacy_page_read_model_collections() -> None:
+    plan = build_transform_plan(
+        export_row={
+            "export_id": "export-1",
+            "source_database": "fin_ops_platform_app",
+            "status": "imported",
+            "manifest": {"total_records": 4},
+        },
+        records=[
+            record("workbench_read_models", "workbench:2026-05", {"scope_key": "2026-05"}),
+            record("workbench_candidate_matches", "candidate-1", {"candidate_key": "candidate-1"}),
+            record("cost_statistics_read_models", "active:2026-05", {"scope_key": "active:2026-05"}),
+            record("tax_offset_read_models", "2026-05", {"scope_key": "2026-05"}),
+        ],
+    )
+
+    assert "read_models" not in ALL_DOMAINS
+    assert plan.table_counts() == {}
+    assert plan.warnings == [
+        "unmapped_source_collection:cost_statistics_read_models",
+        "unmapped_source_collection:tax_offset_read_models",
+        "unmapped_source_collection:workbench_candidate_matches",
+        "unmapped_source_collection:workbench_read_models",
+    ]
 
 
 def test_target_upsert_sql_casts_jsonb_and_text_values() -> None:

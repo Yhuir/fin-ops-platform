@@ -4,7 +4,6 @@ from http import HTTPStatus
 from typing import Any, Callable
 from urllib.parse import unquote
 
-from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentError, OaPendingPaymentQueryService
 
@@ -21,7 +20,6 @@ class OaPendingPaymentApiRoutes:
         self,
         query_service: OaPendingPaymentQueryService,
         *,
-        read_model_service: OaPendingPaymentReadModelService | None = None,
         command_service: OaPendingPaymentCommandService | None = None,
         resolve_read_session: ReadSessionResolver | None = None,
         write_auth_context: WriteAuthContext | None = None,
@@ -30,7 +28,6 @@ class OaPendingPaymentApiRoutes:
         error_response: ErrorResponse | None = None,
     ) -> None:
         self._query_service = query_service
-        self._read_model_service = read_model_service
         self._command_service = command_service
         self._resolve_read_session = resolve_read_session
         self._write_auth_context = write_auth_context
@@ -89,9 +86,6 @@ class OaPendingPaymentApiRoutes:
         return None
 
     def rows(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        if self._read_model_service is not None:
-            payload = self._read_model_service.rows(query)
-            return _read_model_status_code(payload), payload
         payload = self._query_service.list_rows(
             page=query.get("page", [1])[0],
             page_size=query.get("page_size", [50])[0],
@@ -107,8 +101,6 @@ class OaPendingPaymentApiRoutes:
         return HTTPStatus.OK, payload
 
     def filter_options(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        if self._read_model_service is not None:
-            return self._read_model_service.filter_options(query)
         return HTTPStatus.OK, self._query_service.filter_options(
             keyword=query.get("keyword", [None])[0],
             month=query.get("month", [None])[0],
@@ -119,23 +111,15 @@ class OaPendingPaymentApiRoutes:
         )
 
     def oa_detail(self, oa_id: str) -> dict[str, Any]:
-        if self._read_model_service is not None:
-            return self._read_model_service.oa_detail(oa_id)
         return self._query_service.oa_detail(oa_id)
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
-        if self._read_model_service is not None:
-            return self._read_model_service.bank_transaction_detail(bank_transaction_id)
         return self._query_service.bank_transaction_detail(bank_transaction_id)
 
     def invoice_detail(self, invoice_id: str) -> dict[str, Any]:
-        if self._read_model_service is not None:
-            return self._read_model_service.invoice_detail(invoice_id)
         return self._query_service.invoice_detail(invoice_id)
 
     def relation_details(self, row_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
-        if self._read_model_service is not None:
-            return self._read_model_service.relation_details(row_id, kind=query.get("kind", [""])[0])
         return self._query_service.row_relation_details(row_id, kind=query.get("kind", [""])[0])
 
     def confirm_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
@@ -204,7 +188,7 @@ class OaPendingPaymentApiRoutes:
         return self._write_auth_context(headers)
 
     def _detail_response(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]]:
-        return _read_model_status_code(payload), payload
+        return HTTPStatus.OK, payload
 
     def _json(self, status_code: HTTPStatus, payload: object) -> Any:
         if not callable(self._json_response):
@@ -227,7 +211,3 @@ class OaPendingPaymentApiRoutes:
                 }
             },
         )
-
-
-def _read_model_status_code(payload: dict[str, Any]) -> HTTPStatus:
-    return HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK

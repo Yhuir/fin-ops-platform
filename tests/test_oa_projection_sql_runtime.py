@@ -109,11 +109,7 @@ def oa_record_with_attachment_files(row_id: str = "oa-exp-files", month: str = "
 
 
 class QueueRecorder:
-    def __init__(self) -> None:
-        self.refreshes: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-        self.refreshes.append((scope_type, scope_key, reason))
+    pass
 
 
 class OAProjectionConnection:
@@ -339,10 +335,6 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result["upserted_count"], 1)
         self.assertEqual([record.id for record in repository.records], ["oa-pay-001"])
-        self.assertIn(("workbench", "2026-05", "oa_projection_sync"), queue.refreshes)
-        self.assertIn(("workbench", "all", "oa_projection_sync"), queue.refreshes)
-        self.assertIn(("search", "2026-05", "oa_projection_sync"), queue.refreshes)
-        self.assertIn(("pending_invoice", "expense:all", "oa_projection_sync"), queue.refreshes)
         self.assertEqual(repository.runs[0]["status"], "succeeded")
 
     def test_oa_sync_all_scope_respects_retention_cutoff_months(self) -> None:
@@ -448,8 +440,6 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(repository.pruned_cutoff_months, ["2026-01"])
         self.assertEqual(result["pruned_count"], 1)
-        self.assertIn(("workbench", "2025-12", "oa_projection_sync"), queue.refreshes)
-        self.assertIn(("search", "2025-12", "oa_projection_sync"), queue.refreshes)
 
     def test_oa_sync_projection_preserves_source_bound_invoice_attachment_facts(self) -> None:
         from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService

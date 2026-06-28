@@ -19,11 +19,13 @@
 
 ## 当前边界
 
-Worker 不得依赖 Application、app.server、app.auth 或 HTTP response。Worker lifecycle 触发 read model refresh 时必须通过统一 refresh gateway 入队，由 registry/policy 先完成 scope normalize、validate 和 dedupe，避免 worker 直接投递过期或非法 scope contract。
+页面 read model worker 是 legacy 下线对象。新增 worker 只允许用于导入、OA 同步、文件迁移、外部系统同步、受控修复等真实异步任务；不得新增页面 read model refresh worker。Direct API 目标读架构见 `docs/architecture/direct-api-read-architecture.md`。
 
-同一 read model 的 parent/aggregate 依赖必须避免抢占真实 shard work。`*_read_model_not_fresh parent_scope_keys=...` 可以补投 same-scope parent shard；当前 event 必须使用 retry 级退避，让 `YYYY-MM` shard 或其他依赖先完成，不能用亚秒级 retry 反复重发 `all` 聚合事件。
+Worker 不得依赖 Application、app.server、app.auth 或 HTTP response。Legacy read-model refresh gateway 和页面 `.read_model.refresh` parser 是下线对象；真实后台 worker 只能围绕导入、OA 同步、文件迁移、外部系统同步、受控修复或非页面派生任务，使用明确 registry 完成 event type 声明和运行治理。
 
-当前 P2/P3 closure 的性能门禁是首屏 API 或 direct refresh p95 <= 1000ms；写操作 operation-to-fresh 还要求 p99 <= 3000ms。历史 5 秒 SLO 记录是旧基线，不是当前验收上限。Worker 优化必须保留 PostgreSQL durable queue、dirty scope、outbox 和 readiness 事实源，不得通过跳过 freshness 或缓存 stale payload 达标。
+legacy `*_read_model_not_fresh` 只允许让当前 event 短延迟 defer；不得补投页面 refresh、parent shard 或 `all` 聚合事件。
+
+当前 P2/P3 closure 的性能门禁是首屏 API 或 direct refresh p95 <= 1000ms；写操作 operation-to-outbox-done 还要求 p99 <= 3000ms。历史 5 秒 SLO 记录是旧基线，不是当前验收上限。Worker 优化必须保留 PostgreSQL durable outbox、worker heartbeat 和 RabbitMQ transport 事实源；legacy dirty scope/readiness 不得恢复为页面 freshness 或健康证明。
 
 ## 维护触发器
 

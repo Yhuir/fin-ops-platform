@@ -20,9 +20,9 @@
 ## 2026-06-24 - refresh/freshness/operation-barrier audit
 
 - 目标：在实现前审计账户余额 refresh enqueue、derived lifecycle、runtime import-state fan-out、scope policy、operation barrier 和 compat fallback。
-- 结论：`Application._enqueue_bank_account_balance_read_model_refresh(...)` 仍是最高优先级本地 implementation gap；它虽然走 `ReadModelRefreshGateway`，但模块 IO 边界仍在 app 层。
-- 相关缺口：`Application._derived_lifecycle_bank_account_balance_executor(...)` 仍直接组装 invalidated scope 和 enqueued job；runtime import-state fan-out 仍使用 generic `_enqueue_scopes("bank_account_balance", ["all"])`；scope policy 接受 month/all 但 worker/storage 只接受 `all`；dedicated operation barrier regression 和 Bank Detail fallback quarantine 仍待补齐。
-- 决策：下一条边界为 `read-models:bank-account-balance-refresh-producer-extraction`。先抽 `BankAccountBalanceReadModelRefreshProducer`，保持 `bank_account_balance:all` all-only 语义，再处理 derived lifecycle、scope contract、operation barrier 和 fallback。
+- 结论：refresh producer extraction 已删除 `Application._enqueue_bank_account_balance_read_model_refresh(...)`；模块 refresh IO 由 `BankAccountBalanceReadModelRefreshProducer` 负责。
+- 相关缺口：refresh producer extraction 已完成；后续继续处理 derived lifecycle executor、all-only scope contract、dedicated operation barrier regression 和 Bank Detail fallback quarantine。
+- 决策：`BankAccountBalanceReadModelRefreshProducer` 已成为 `bank_account_balance:all` refresh 边界；下一步继续收敛 derived lifecycle、scope contract、operation barrier 和 fallback。
 
 ## 2026-06-24 - refresh producer extraction
 

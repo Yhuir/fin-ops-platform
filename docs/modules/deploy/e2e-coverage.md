@@ -21,6 +21,6 @@ bash scripts/verify.sh docs
 
 ## 下一步
 
-1. 每次发布后记录 release、health ready、systemd WorkingDirectory、worker readiness 和 public session route。
+1. 每次发布后记录 release、health ready、systemd WorkingDirectory、required worker runtime 和 public session route。
 2. 获取 GitHub Actions 远端启用状态或保留为 documented-risk。
 3. 对 rollback/PITR/backup restore 建 staging smoke，不把 deploy script unit tests 当成生产恢复证明。

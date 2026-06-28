@@ -105,7 +105,7 @@ def _classification_for(
         ]
     if any(check in failed_checks for check in ("authenticated_http_slo", "sse_first_event_smoke")):
         return "authenticated-smoke-required", ["Inspect auth, API prefix, Nginx fallback, first-event latency, p95 samples, and freshness status before optimizing."]
-    if any(check in failed_checks for check in ("read_model_direct_smoke", "write_operation_audit", "write_operation_e2e")):
+    if any(check in failed_checks for check in ("write_operation_audit", "write_operation_e2e")):
         return "durable-evidence-required", ["Inspect sample counts, outbox status, dirty scope status, readiness status, p95/p99 latency, and scenario/apply requirements."]
     if status == "fail":
         return "gate-failed", ["Inspect the gate JSON errors and failed checks, then fix the narrowest runtime/tooling/config gap before rerunning."]

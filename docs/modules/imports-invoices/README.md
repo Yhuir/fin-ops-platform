@@ -48,7 +48,7 @@
 
 当前发票导入支持每个文件指定 `input_invoice` 或 `output_invoice` batch type。前端预览调用 `/imports/files/preview`，以 multipart `file_overrides` 传 `template_code=invoice_export` 和 `batch_type`；确认调用 `/imports/files/confirm`，返回后台 job 或已确认 session。后端兼容 legacy `/imports/preview`、`/imports/confirm`，但页面默认走 file/session API。
 
-导入确认不是下游 fresh 的事实源。确认只能说明发票事实写入或确认 job 已排队；关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计和搜索必须通过 derived lifecycle、dirty scope、read model freshness 与 worker readiness 判断是否可读。
+导入确认不是下游页面已收敛的事实源。确认只能说明发票事实写入或确认 job 已排队；关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计和搜索必须通过 direct API 重新读取、derived lifecycle、真实后台任务和业务依赖恢复判断是否可读。
 
 核心 fan-out：
 
@@ -65,9 +65,9 @@
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
 - 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
+- API contract、DTO shape、错误字段、权限校验、状态值或 direct payload 字段变化。
+- 业务状态、UI 状态、direct API/派生数据状态、worker 状态或状态流转变化。
+- 跨页面 direct refetch、domain event、derived lifecycle、真实后台任务、outbox 或缓存边界变化。
 - 测试入口、回归范围、验证命令或未测风险变化。
 
 ## 本目录文件

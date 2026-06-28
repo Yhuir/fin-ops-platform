@@ -11,11 +11,7 @@ def _json(response):
 
 
 class _ReadModelQueue:
-    def __init__(self) -> None:
-        self.enqueued: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-        self.enqueued.append((scope_type, scope_key, reason))
+    pass
 
 
 class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
@@ -109,13 +105,11 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             headers={"Content-Type": "application/json"},
         )
         app._no_oa_bank_batch_application_service().refresh_batches()
-        app._workbench_sql_read_repository = None
         enabled_batches = _json(app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted"))
 
         self.assertEqual(save_response.status_code, 200)
         self.assertEqual(_json(save_response)["selected_tag_codes"], ["fee"])
         self.assertEqual([batch["batch_type"] for batch in enabled_batches["batches"]], ["fee"])
-        self.assertIn(("no_oa_bank_batch", "all", "no_oa_bank_batch_tag_selection_changed"), queue.enqueued)
 
     def test_new_auto_tag_rule_is_available_but_not_selected_by_default(self) -> None:
         app = build_application()

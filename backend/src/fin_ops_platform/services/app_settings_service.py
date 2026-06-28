@@ -411,13 +411,11 @@ class AppSettingsService:
         self,
         *,
         can_save: bool = True,
-        read_model_status: str | None = None,
     ) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
         return BankTransactionCategoryService.auto_tag_rules_payload(
             self._snapshot["bank_transaction_tags"],
             can_save=can_save,
-            read_model_status=read_model_status,
         )
 
     def update_bank_auto_tag_rules(

@@ -7,7 +7,7 @@
 - 状态：partial
 - 当前边界可信度：high
 - 目标边界：部署模块负责发布、runtime worker/systemd/env/nginx/verify，不承载业务逻辑。
-- 当前缺口：新增 read model/worker 时必须同步 deploy examples 和 runtime worker manifest。
+- 当前缺口：legacy read model 下线或新增真实后台 worker 时必须同步 deploy examples 和 runtime worker manifest；不得新增页面 read model worker。
 - 旧代码删除条件：旧部署脚本或 systemd example 无引用且 README/operations 已迁移。
 
 ## 职责边界
@@ -70,4 +70,4 @@
 
 ## 当前缺口和删除条件
 
-- 新增 worker/read model 是 deploy-impacting change，必须同步 examples、docs、tests。
+- 新增真实后台 worker 或下线 legacy read model 是 deploy-impacting change，必须同步 examples、docs、tests；不得新增页面 read model worker。

@@ -127,10 +127,9 @@ test.describe("no-OA bank batches browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps visible rows while a stale no-OA read model refreshes to fresh", async ({ page }) => {
+  test("keeps visible rows without page-level read model polling", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      noOaBankBatchReadModelStatuses: ["stale", "fresh"],
       sessionMode: "full_access",
     });
 
@@ -145,15 +144,9 @@ test.describe("no-OA bank batches browser flow", () => {
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
     await expect(page.getByText("当前标签下暂无流水")).toHaveCount(0);
-
-    await expect.poll(() => api.count("GET /api/no-oa-bank-batches"), {
-      timeout: 3_000,
-    }).toBeGreaterThanOrEqual(2);
-
-    await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
-    await expect(draftTable).toBeVisible();
-    await expect(draftTable.getByText("网银手续费")).toBeVisible();
-    await expect(page.getByText("当前标签下暂无流水")).toHaveCount(0);
+    const stableListRequestCount = api.count("GET /api/no-oa-bank-batches");
+    await page.waitForTimeout(1_200);
+    expect(api.count("GET /api/no-oa-bank-batches")).toBe(stableListRequestCount);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
@@ -188,7 +181,7 @@ test.describe("no-OA bank batches browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("saves tag scope through the freshness barrier and reloads the no-OA list", async ({ page }) => {
+  test("saves tag scope and directly reloads the no-OA list", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
@@ -212,10 +205,6 @@ test.describe("no-OA bank batches browser flow", () => {
       response.url().endsWith("/api/no-oa-bank-batches/tag-selection")
       && response.request().method() === "PUT",
     );
-    const barrierRequest = page.waitForRequest((request) =>
-      request.url().endsWith("/api/operation-barrier/status")
-      && request.method() === "POST",
-    );
     await tagDrawer.getByRole("button", { name: "保存" }).click();
 
     const saveBody = JSON.parse((await saveRequest).postData() ?? "{}") as {
@@ -227,22 +216,15 @@ test.describe("no-OA bank batches browser flow", () => {
       selected_tag_codes: ["fee", "salary"],
     });
     expect((await saveResponse).status()).toBe(200);
-    const barrierBody = JSON.parse((await barrierRequest).postData() ?? "{}") as {
-      targets?: Array<{ read_model_key?: string; readModelKey?: string; scope_key?: string; scopeKey?: string }>;
-    };
-    expect(barrierBody.targets).toEqual([
-      { read_model_key: "no_oa_bank_batch", scope_key: "all" },
-    ]);
     await expect(page.getByText("免OA流水标签范围已保存")).toBeVisible();
     await expect(tagDrawer).toHaveCount(0);
     expect(api.count("PUT /api/no-oa-bank-batches/tag-selection")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThanOrEqual(1);
     expect(api.count("GET /api/no-oa-bank-batches")).toBeGreaterThanOrEqual(2);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
 
-  test("submits a selected no-OA bank row, waits for freshness, and withdraws the submitted batch", async ({ page }) => {
+  test("submits a selected no-OA bank row, directly reloads, and withdraws the submitted batch", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       noOaCostFanout: true,
@@ -271,19 +253,13 @@ test.describe("no-OA bank batches browser flow", () => {
       response.url().endsWith("/api/no-oa-bank-batches/submit-selection")
         && response.request().method() === "POST",
     );
-    const submitBarrierResponse = page.waitForResponse((response) =>
-      response.url().endsWith("/api/operation-barrier/status")
-        && response.request().method() === "POST",
-    );
     await page.getByRole("button", { name: "提交批次" }).click();
     const submitBody = JSON.parse((await submitRequest).postData() ?? "{}") as {
       transaction_ids?: string[];
     };
     expect(submitBody.transaction_ids).toEqual(["no-oa-bank-e2e-001"]);
     expect((await submitResponse).status()).toBe(200);
-    expect((await submitBarrierResponse).status()).toBe(200);
     expect(api.count("POST /api/no-oa-bank-batches/submit-selection")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThanOrEqual(1);
     await expect(page.getByText("选中流水已提交")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
@@ -293,8 +269,8 @@ test.describe("no-OA bank batches browser flow", () => {
       && response.status() === 200);
     await page.getByRole("link", { name: "成本统计" }).click();
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    const costPayload = await (await costExplorerResponse).json() as { read_model_status?: string };
-    expect(costPayload.read_model_status).toBe("fresh");
+    const costPayload = await (await costExplorerResponse).json() as Record<string, unknown>;
+    expect("read_model_status" in costPayload).toBe(false);
     await page.getByRole("button", { name: "按项目" }).click();
     const noOaCostProject = page.getByRole("button", { name: /免OA手续费成本项目/ });
     await expect(noOaCostProject).toBeVisible();

@@ -96,8 +96,6 @@ class FakeConnection:
                     "raw_payload": {"normalized_payload": {"operation_type": "confirm_link"}},
                 },
             ]
-        if "from read_model.app_status_readiness" in normalized:
-            return [{"read_model_key": "workbench_relation", "status": "fresh", "scope_key": "all"}]
         return []
 
     def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:

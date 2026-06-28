@@ -32,12 +32,6 @@ export type BackgroundJob = {
   message: string;
   resultSummary: Record<string, unknown>;
   affectedScopeKeys: string[];
-  readModelScopeKeys: string[];
-  operationBarrierTargets: Array<{
-    readModelKey: string;
-    scopeKey: string;
-    scopeType?: string;
-  }>;
   source: Record<string, unknown>;
   retryable: boolean;
   retryMode: string;

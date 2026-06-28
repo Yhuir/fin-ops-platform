@@ -55,15 +55,6 @@ function requestUrls(fetchMock: ReturnType<typeof installMockApiFetch>, pathname
     .filter((url) => url.pathname === pathname);
 }
 
-function operationBarrierRequests(fetchMock: ReturnType<typeof installMockApiFetch>) {
-  return fetchMock.mock.calls
-    .filter(([input, init]) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST";
-    })
-    .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
-}
-
 function findTransactionRequest(
   fetchMock: ReturnType<typeof installMockApiFetch>,
   predicate: (url: URL) => boolean,
@@ -529,28 +520,7 @@ describe("Bank details page", () => {
 
   test("saving automatic tag rules refreshes bank details", async () => {
     const user = userEvent.setup();
-    const baseFetchMock = installMockApiFetch({
-      bankDetailTransactionReadModelStatuses: ["refreshing", "refreshing", "fresh"],
-    });
-    let releaseBarrier: (() => void) | null = null;
-    const barrierGate = new Promise<void>((resolve) => {
-      releaseBarrier = resolve;
-    });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST") {
-        await barrierGate;
-        return new Response(JSON.stringify({
-          status: "fresh",
-          fresh: true,
-          targets: [],
-          blocked_targets: [],
-          refreshing_targets: [],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      return baseFetchMock(input, init);
-    }) as ReturnType<typeof installMockApiFetch>;
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = installMockApiFetch();
     const autoTagRulesListener = vi.fn();
     window.addEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
     renderBankDetailsPage();
@@ -566,16 +536,6 @@ describe("Bank details page", () => {
       await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
       await waitFor(() => {
-        expect(operationBarrierRequests(fetchMock).at(-1)).toMatchObject({
-          targets: [
-            { read_model_key: "bank_detail", scope_key: "2026-05" },
-          ],
-        });
-      });
-      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBe(initialTransactionRequests);
-      releaseBarrier?.();
-
-      await waitFor(() => {
         expect(autoTagRulesListener).toHaveBeenCalled();
         expect(autoTagRulesListener.mock.calls[0][0].detail).toEqual(expect.objectContaining({
           version: 2,
@@ -587,7 +547,7 @@ describe("Bank details page", () => {
         expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
       });
       await waitFor(() => {
-        expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests + 2);
+        expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
         expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
       }, { timeout: 4000 });
       const saveCall = fetchMock.mock.calls.find(([input, init]) => (
@@ -600,41 +560,13 @@ describe("Bank details page", () => {
         date_to: "2026-12-31",
       });
     } finally {
-      releaseBarrier?.();
       window.removeEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
     }
   });
 
-  test("does not report saved automatic tag rules as failed when post-save freshness sync is blocked", async () => {
+  test("saves automatic tag rules without operation barrier polling", async () => {
     const user = userEvent.setup();
-    const baseFetchMock = installMockApiFetch();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST") {
-        const body = JSON.parse(String(init?.body ?? "{}")) as { targets?: Array<Record<string, unknown>> };
-        const requestedTarget = body.targets?.[0] ?? { read_model_key: "bank_detail", scope_key: "2026-05" };
-        const blockedTarget = {
-          read_model_key: String(requestedTarget.read_model_key ?? "bank_detail"),
-          scope_type: "snapshot",
-          scope_key: String(requestedTarget.scope_key ?? "2026-05"),
-          status: "blocked",
-          fresh: false,
-          blocking: true,
-          raw_status: "failed",
-          reason: "read_model_dirty_scope_failed",
-          last_error: "bank_detail_refresh_pending",
-        };
-        return new Response(JSON.stringify({
-          status: "blocked",
-          fresh: false,
-          targets: [blockedTarget],
-          blocked_targets: [blockedTarget],
-          refreshing_targets: [],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      return baseFetchMock(input, init);
-    }) as ReturnType<typeof installMockApiFetch>;
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = installMockApiFetch();
 
     renderBankDetailsPage();
 
@@ -652,15 +584,13 @@ describe("Bank details page", () => {
       });
       expect(saveCall).toBeDefined();
     });
-    expect(await screen.findByText("规则已保存，后台同步尚未完成，请稍后刷新。")).toBeInTheDocument();
+    expect((await screen.findAllByText("规则已保存，银行明细已刷新。")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
   });
 
   test("reapplying automatic tag rules refreshes bank details without saving changes", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      bankDetailTransactionReadModelStatuses: ["refreshing", "fresh"],
-    });
+    const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
@@ -671,12 +601,6 @@ describe("Bank details page", () => {
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
     await user.click(within(drawer).getByRole("button", { name: "重新应用规则" }));
 
-    await waitFor(() => {
-      expect(
-        screen.queryAllByText("已提交重新应用，银行明细正在刷新。").length
-        + screen.queryAllByText("重新应用已完成，银行明细已刷新。").length,
-      ).toBeGreaterThan(0);
-    });
     await waitFor(() => {
       expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
@@ -695,13 +619,9 @@ describe("Bank details page", () => {
     expect(saveCall).toBeFalsy();
   });
 
-  test("retains the last fresh rows while read-model refresh details stay hidden", async () => {
+  test("ignores legacy refresh details and keeps rows visible after rule save", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      bankDetailAccountReadModelStatuses: ["fresh"],
-      bankDetailTransactionReadModelStatuses: ["refreshing", "fresh"],
-      bankDetailRefreshingTransactionsEmpty: true,
-    });
+    const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
@@ -725,11 +645,8 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 
-  test("unmounts bank detail retry timers while away and refetches after route remount", async () => {
-    const fetchMock = installMockApiFetch({
-      bankDetailInitialAccountReadModelStatus: "fresh",
-      bankDetailInitialTransactionReadModelStatus: "refreshing",
-    });
+  test("does not run background retry timers while away and refetches after route remount", async () => {
+    const fetchMock = installMockApiFetch();
 
     renderAuthenticatedAppAt("/bank-details");
 
@@ -757,9 +674,7 @@ describe("Bank details page", () => {
   test("does not replace a fresh total balance with a stale post-rule-save account payload", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      bankDetailAccountReadModelStatuses: ["stale"],
       bankDetailPostSaveAccountsTotalBalance: "116395.83",
-      bankDetailTransactionReadModelStatuses: ["stale", "fresh"],
     });
     renderBankDetailsPage();
 
@@ -785,11 +700,8 @@ describe("Bank details page", () => {
     expect(within(page).queryAllByText("116,395.83")).toHaveLength(0);
   });
 
-  test("shows existing bank rows while the read-model schema is being upgraded", async () => {
-    installMockApiFetch({
-      bankDetailInitialAccountReadModelStatus: "schema_mismatch",
-      bankDetailInitialTransactionReadModelStatus: "schema_mismatch",
-    });
+  test("does not show legacy read model upgrade diagnostics", async () => {
+    installMockApiFetch();
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
@@ -1387,7 +1299,6 @@ describe("Bank details page", () => {
 
   test("saving auto tag rules refreshes transactions without refetching account balances", async () => {
     const fetchMock = installMockApiFetch({
-      bankDetailAccountReadModelStatuses: ["fresh", "fresh"],
       bankDetailPostSaveAccountsTotalBalance: "999999.99",
       bankDetailPostSaveTransactionLabel: "规则保存后流水",
     });

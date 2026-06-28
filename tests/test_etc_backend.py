@@ -659,7 +659,12 @@ class EtcServiceTests(unittest.TestCase):
             calls.append(request)
             full_url = getattr(request, "full_url")
             if full_url.endswith("/file/upload"):
-                return FakeHTTPResponse({"code": 200, "data": {"url": "/profile/etc.pdf"}})
+                return FakeHTTPResponse(
+                    {
+                        "code": 200,
+                        "data": {"url": "http://127.0.0.1:9300/fileManager/2026/06/22/etc.pdf"},
+                    }
+                )
             if full_url.endswith("/forms/form/2/records/record"):
                 return FakeHTTPResponse({"code": 200, "data": "oa-draft-001"})
             raise AssertionError(full_url)
@@ -679,7 +684,7 @@ class EtcServiceTests(unittest.TestCase):
                     payload={"formId": 2, "isDraft": True, "data": {"cause": "ETC批量提交"}},
                 )
 
-        self.assertEqual(file_id, "/profile/etc.pdf")
+        self.assertEqual(file_id, "/fileManager/2026/06/22/etc.pdf")
         self.assertEqual(draft_id, "oa-draft-001")
         self.assertIn("formId=2", draft_url)
         self.assertEqual(len(calls), 2)
@@ -3590,56 +3595,22 @@ class EtcApiTests(unittest.TestCase):
 
             app._workbench_pair_relation_service.cancel_active_relations_for_row_ids = forbidden_direct_cancel
 
-            class FreshRelationFacade:
-                def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
-                    self.requested_row_ids = list(row_ids)
-                    return {
-                        "read_model_status": "fresh",
-                        "read_model_scope_keys": ["2026-02"],
-                        "stale_reasons": [],
-                        "refresh_enqueued": False,
-                        "rows": [
-                            {
-                                "row_id": summary_row_id,
-                                "group_ids": ["CASE-ETC-COMMAND"],
-                            }
-                        ],
-                        "groups": [
-                            {
-                                "group_id": "CASE-ETC-COMMAND",
-                                "scope_month": "2026-02",
-                                "payload": {
-                                    "relation_mode": "manual_confirmed",
-                                    "row_ids": ["oa-etc-command", "txn-etc-command", summary_row_id],
-                                    "row_types": ["oa", "bank", "invoice"],
-                                    "amount_check": {"external_etc_batch_id": "ETC-COMMAND-202602"},
-                                },
-                            }
-                        ],
-                        "source_versions": {},
-                    }
-
             class RecordingRelationCommandService:
                 def __init__(self) -> None:
                     self.cancel_calls: list[dict[str, object]] = []
 
-                def cancel_relation(self, **kwargs: object) -> dict[str, object]:
+                def cancel_relations_for_row_ids(self, **kwargs: object) -> dict[str, object]:
                     self.cancel_calls.append(dict(kwargs))
-                    relation = original_cancel_relation(str(kwargs["case_id"]))
+                    relation = original_cancel_relation("CASE-ETC-COMMAND")
                     return {
                         "status": "cancelled",
                         "relation": relation,
-                        "changed_case_ids": [str(kwargs["case_id"])],
+                        "changed_case_ids": ["CASE-ETC-COMMAND"],
                         "affected_months": ["2026-02"],
-                        "read_model_status": "fresh",
-                        "read_model_stale_reasons": [],
-                        "read_model_scope_keys": ["2026-02"],
-                        "refresh_enqueued": False,
                     }
 
             command_service = RecordingRelationCommandService()
             persisted_case_ids: list[list[str]] = []
-            app._workbench_relation_read_facade = lambda: FreshRelationFacade()
             app._workbench_relation_command_service = lambda **_kwargs: command_service
             app._persist_workbench_pair_relations = lambda *, changed_case_ids: persisted_case_ids.append(list(changed_case_ids))
 
@@ -3649,7 +3620,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(changed_months, ["2026-02"])
         self.assertIsNone(active_after)
         self.assertEqual(len(command_service.cancel_calls), 1)
-        self.assertEqual(command_service.cancel_calls[0]["case_id"], "CASE-ETC-COMMAND")
+        self.assertIn(summary_row_id, command_service.cancel_calls[0]["row_ids"])
         self.assertEqual(command_service.cancel_calls[0]["history_operation_type"], "etc_summary_unmerged")
         self.assertEqual(persisted_case_ids, [["CASE-ETC-COMMAND"]])
 
@@ -3677,10 +3648,7 @@ class EtcApiTests(unittest.TestCase):
                 def get_by_row_ids(self, _row_ids: list[str], **_kwargs: object) -> dict[str, object]:
                     return {
                         "status": "stale",
-                        "read_model_status": "stale",
-                        "read_model_scope_keys": ["2026-02"],
                         "stale_reasons": ["test_stale_relation_projection"],
-                        "refresh_enqueued": True,
                         "rows": [],
                         "groups": [],
                     }
@@ -5374,10 +5342,6 @@ class EtcApiTests(unittest.TestCase):
                         "relation": relation,
                         "changed_case_ids": [str(kwargs["case_id"])],
                         "affected_months": [],
-                        "read_model_status": "fresh",
-                        "read_model_stale_reasons": [],
-                        "read_model_scope_keys": ["all"],
-                        "refresh_enqueued": False,
                     }
 
             relation_command_service = RecordingRelationCommandService()
@@ -5393,7 +5357,6 @@ class EtcApiTests(unittest.TestCase):
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
-                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
             )
             service.seed_bundle_from_upload(
@@ -5466,7 +5429,6 @@ class EtcApiTests(unittest.TestCase):
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
-                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
             )
             service.seed_bundle_from_upload(
@@ -5567,10 +5529,6 @@ class EtcApiTests(unittest.TestCase):
                         "history": history,
                         "changed_case_ids": [str(kwargs["case_id"])],
                         "affected_months": ["2026-02"],
-                        "read_model_status": "fresh",
-                        "read_model_stale_reasons": [],
-                        "read_model_scope_keys": ["2026-02"],
-                        "refresh_enqueued": False,
                     }
 
             relation_command_service = RecordingRelationCommandService()
@@ -5584,7 +5542,6 @@ class EtcApiTests(unittest.TestCase):
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
-                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
             )
 
@@ -5723,7 +5680,6 @@ class EtcApiTests(unittest.TestCase):
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
-                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
             )
 
@@ -5803,10 +5759,6 @@ class EtcApiTests(unittest.TestCase):
                         "history": history,
                         "changed_case_ids": [str(kwargs["case_id"])],
                         "affected_months": ["2026-02"],
-                        "read_model_status": "fresh",
-                        "read_model_stale_reasons": [],
-                        "read_model_scope_keys": ["2026-02"],
-                        "refresh_enqueued": False,
                     }
 
             relation_command_service = RecordingRelationCommandService()
@@ -5820,7 +5772,6 @@ class EtcApiTests(unittest.TestCase):
                 persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
-                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
                 persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
             )
             spec = ExistingEtcBatchLinkSpec(

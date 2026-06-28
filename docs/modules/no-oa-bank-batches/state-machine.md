@@ -1,6 +1,6 @@
 # 免OA流水批量处理 状态机
 
-> 修改 `免OA流水批量处理` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。
+> 修改 `免OA流水批量处理` 相关业务状态、UI 状态、direct API 数据流或 legacy projection 清理状态前必须读取本文件。
 
 ## 业务状态
 
@@ -18,7 +18,7 @@
 | `active` | 当前可用银行自动标签规则 | 可被选择或取消 |
 | `selected` | 已保存为免 OA 候选准入标签 | 后续未提交候选纳入该 tag code |
 | `inactive_selected` | 历史选择但当前停用或不可用 | GET 返回提示；保存后清理 |
-| `version_conflict` | PUT 的 `expected_version` 过期 | 返回 409；不得保存或刷新 |
+| `version_conflict` | PUT 的 `expected_version` 过期 | 返回 409；不得保存，页面需重新读取当前版本 |
 
 规则：
 
@@ -34,13 +34,13 @@
 - Bankdetail 分类 facts。
 - No OA batch snapshot。
 - Workbench pair relation。
-- No OA SQL read model。
+- No OA public snapshot / historical SQL projection cleanup.
 
 状态：
 
 | 状态 | 含义 | 允许动作 |
 | --- | --- | --- |
-| `draft` | 未提交候选批次；兼容旧 SQL/read model 中 `status=unsubmitted,status_bucket=unsubmitted` 的同义投影 | 可查看 detail；普通候选可选择行提交；internal_transfer 走 batch submit |
+| `draft` | 未提交候选批次；兼容旧 SQL projection 中 `status=unsubmitted,status_bucket=unsubmitted` 的同义投影 | 可查看 detail；普通候选可选择行提交；internal_transfer 走 batch submit |
 | `submitted` | 已提交免 OA 批次并写入 Workbench pair relation | 可撤回 |
 | `withdrawn` | 已撤回批次 | 只读；如果源流水仍 current，可重新生成 draft |
 
@@ -66,7 +66,7 @@
 - 已提交/已撤回批次详情使用提交时冻结的 `row_tag_snapshot`；银行明细当前标签变化只影响新的未提交候选，不覆盖历史批次内流水标签。
 - 同月、同银行账户、同 category code 是 submit-selection 的硬约束。
 - 前端 API mapper 和后端公开投影必须把旧 `status=unsubmitted,status_bucket=unsubmitted` 归一为 canonical `draft` 语义，并设置为可提交；页面操作能力由 `noOaBankBatches/policy.ts` 统一判断，避免状态徽标和右侧 checkbox/提交按钮分裂。
-- 持久化必须保存公开生命周期 snapshot：`draft/submitted/withdrawn`。`conflict/stale/superseded` 不得继续写入主 read model；生产历史数据用 `repair_no_oa_bank_batch_lifecycle` dry-run/apply 清理。
+- 持久化必须保存公开生命周期 snapshot：`draft/submitted/withdrawn`。`conflict/stale/superseded` 不得继续写入公开主列表；生产历史数据用 `repair_no_oa_bank_batch_lifecycle` dry-run/apply 清理。
 
 ### Submit Selection
 
@@ -84,7 +84,7 @@ draft candidate rows selected
   -> category_code currently selected
   -> submitted no-OA batch
   -> Workbench pair relation relation_mode=no_oa_bank_batch
-  -> no_oa_bank_batch / workbench / influenced read models refresh
+  -> no_oa_bank_batch_changed lifecycle event + direct page refetch
 ```
 
 禁止：
@@ -127,7 +127,7 @@ submitted no-OA batch
   -> reason provided
   -> pair relation cancelled
   -> batch status withdrawn
-  -> no_oa_bank_batch_changed lifecycle + read model refresh
+  -> no_oa_bank_batch_changed lifecycle event + direct page refetch
 ```
 
 禁止：
@@ -145,94 +145,52 @@ submitted no-OA batch
 | loading | 首次加载、月份/bucket 变化时显示加载 | `web/src/test/NoOaBankBatchPage.test.tsx` |
 | empty | 未选择标签或当前筛选无批次时显示空态 | page tests |
 | error | list/detail/tag/submit/withdraw API 失败显示反馈 | API/page tests |
-| stale/refreshing | `readModelStatus !== "fresh"` 时保持当前 rows 可见并后台轮询 | `shows read model stale state and reloads until the no OA read model is fresh` |
-| route inactive | 页面卸载或 inactive 后停止 stale polling / event replay | `cleans up stale read model retry reload after route unmount`、`useActiveFinanceDomainEvent` tests |
+| direct list | 页面直接消费业务 rows/summary/pagination，不消费旧同步状态，也不做基于 legacy projection 的后台轮询 | `keeps visible rows without page-level read model polling` |
+| route inactive | 页面卸载或 inactive 后停止 domain event replay | `useActiveFinanceDomainEvent` tests |
 | permission disabled | 无 mutation 权限时提交、撤回、保存标签不可用或 API 403 | route/API tests |
-| tag drawer | 打开时重新 fetch tag selection；保存后 reload list | tag drawer tests |
+| tag drawer | 打开时重新 fetch tag selection；保存后 refetch list | tag drawer tests |
 | selection guard | 只允许一个银行账户区域的 rows 同时被选择 | `prevents selecting rows from another bank before clearing the current bank region` |
 | ordinary row selection | 普通未提交 draft 语义批次显示行级 checkbox；兼容旧 `status=unsubmitted` 投影；不受旧批次级 `can_submit` flag 控制 | `keeps draft row selection available when legacy read model rows omit can_submit`、`keeps ordinary unsubmitted rows selectable when legacy read model uses unsubmitted status`、`NoOaBankBatchPolicy.test.ts` |
 | public lifecycle filter | `status=stale/conflict/superseded` 为内部兼容/诊断状态，不进入未提交主列表、summary 或 pagination；生产历史行通过 public snapshot/repair 清理 | `filters unsubmitted stale batches out of the main list`、`does not expose internal transfer conflicts in the main list` |
 | internal transfer action | internal_transfer draft 走 batch submit endpoint，不走 selected rows submit | `submits internal transfer draft batches through the batch endpoint` |
-| operation pending | submit-selection、submit、withdraw、tag-selection 保存成功后显示全屏 overlay，等待 `no_oa_bank_batch` operation barrier fresh，再 reload list/detail/tag selection | operation overlay / page tests |
-| relation-backed stale projection | SQL read model 返回 `status=stale` 且 `status_bucket=submitted` 或 `can_withdraw=true` 时，list/detail/mutation payload 和前端 mapper 对用户投影为 `submitted`，清空复核类阻断提示，仍显示撤回入口 | `test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`presents relation-backed stale batches as submitted without review prompts` |
+| operation pending | submit-selection、submit、withdraw、tag-selection 保存成功后显示全屏 overlay，direct refetch list/detail/tag selection，且不得请求 operation barrier 或 legacy target wait | operation overlay / page tests |
+| relation-backed stale projection | 旧 snapshot 返回 `status=stale` 且 `status_bucket=submitted` 或 `can_withdraw=true` 时，list/detail/mutation payload 和前端 mapper 对用户投影为 `submitted`，清空复核类阻断提示，仍显示撤回入口；页面 list 不再从 SQL read model 取数 | `test_list_batches_uses_direct_service_not_read_model_repository`、`presents relation-backed stale batches as submitted without review prompts` |
 | withdrawn history | 历史 bucket 只读，不显示提交/撤回动作 | `shows withdrawn history as read-only` |
 
 前端跨页事件：
 
 - submit/withdraw 成功后发 `workbenchRelationUpdated`，携带 `affectedMonths`。
-- `bankTransactionCategoryUpdated` 和 `bankAutoTagRulesUpdated` 会刷新 tag selection、list 和 detail cache。
-- 事件只作为同浏览器刷新提示；一致性事实源仍是后端 dirty/outbox/read model freshness。
+- `bankTransactionCategoryUpdated` 和 `bankAutoTagRulesUpdated` 会触发 tag selection、list 和 detail cache refetch。
+- 事件只作为同浏览器 refetch 提示；一致性事实源是后端 canonical facts、relation/outbox 和 direct API 重新读取结果。
 
-## Read Model / Worker 状态
+## Legacy Projection / Worker 清理状态
 
-Read model key：`no_oa_bank_batch`
+no-OA 页面不再拥有 page-level projection runtime。以下运行时对象已删除：
 
-Scope type：`no_oa_bank_batch`
+- legacy key / scope type：`no_oa_bank_batch`
+- worker instance：`no-oa-bank-batch`
+- refresh event：`no_oa_bank_batch.read_model.refresh`
+- repository/worker/producer：`no_oa_bank_batch_read_model_repository.py`、`no_oa_bank_batch_read_model_refresh.py`、`no_oa_bank_batch_read_model_refresh_producer.py`
 
-Scope key：`all` 或 `YYYY-MM`。`all` 表示全量 snapshot 重建；月份 scope 只读取目标月银行流水，并在保存前与其它月份现有批次合并，不能删除其它月份批次。
+现行规则：
 
-Worker instance：`no-oa-bank-batch`
-
-Refresh event：`no_oa_bank_batch.read_model.refresh`
-
-状态：
-
-| 状态 | 含义 | 页面/API 行为 |
-| --- | --- | --- |
-| `fresh` | SQL read model 与当前 source versions 一致 | 正常展示和允许可用写动作 |
-| `refreshing` | 后台刷新中 | 前端保持当前 rows，后台重试 |
-| `stale` | source versions 不一致 | API 返回当前可用 rows + stale reasons + refresh enqueue |
-| `missing` | SQL read model 缺失 | API 返回空 payload + refresh enqueue，不同步重建 |
-| `schema_mismatch` | read model schema 不兼容 | 按非 fresh 处理，等待 worker 重建 |
-| `unavailable` | repository/queue 不可用 | App Status 不得 green，页面按错误或 busy/blocked 处理 |
-| `failed` | worker/readiness 失败 | App Status domain blocked |
-
-refresh 触发来源：
-
-- tag selection 保存。
-- submit-selection / submit batch / bulk submit。
-- withdraw。
-- bank auto tag rules changed。
-- bank transaction category changed。
-- Workbench confirm-link internal transfer path。
-- runtime repair。
-- `startup_stale_scan` 默认关闭；启用时只标记 stale workbench matching dirty scopes，不直接刷新免 OA read model。
-
-worker 流程：
-
-```text
-job.outbox_events / job.read_model_dirty_scopes
-  -> no-oa-bank-batch worker consumes no_oa_bank_batch.read_model.refresh
-  -> NoOaBankBatchReadModelRefreshService.handle_runtime_event
-  -> 读取目标 scope 银行流水、Bankdetail tag read model 和 Workbench relation source_versions metadata
-  -> 如果现有 SQL read model source_versions summary 与当前依赖 source_versions 完全一致，skip rebuild，只 complete dirty scope
-  -> 否则 NoOaBankBatchApplicationService.refresh_batches_from_prepared_rows(scope_key)
-  -> all scope: 读取全量银行流水并生成完整 no-OA snapshot
-  -> YYYY-MM scope: 只读取目标月银行流水，只替换目标月批次，保留其它月份批次
-  -> scoped persistence 保存合并后的 public snapshot，并删除 snapshot 缺席批次行
-  -> complete dirty scope and readiness
-```
-
-失败恢复：
-
-- worker handler event type 或 scope type 错误必须拒绝。
-- stale source version event 必须 skip，不得 rebuild 或覆盖 read model。
-- unchanged source_versions event 必须 skip，不得 rebuild 或覆盖 read model；skip 前必须已经读取 Bankdetail 和 Workbench relation 依赖 source_versions，但不得为了 skip proof 加载完整 relation rows 或 no-OA batch payload rows。
-- 读取 Bankdetail tag/read model 时遇到 `*_read_model_not_fresh` 必须保持 `refreshing`/defer，不得把 no-OA readiness 标记为 `failed`。
-- GET list/detail 不得为了 missing/stale 同步 rebuild 全量批次。
-- 本地测试不能证明真实 RabbitMQ/Redis/systemd drain，发布前按运维 smoke 验证。
+- `GET /api/no-oa-bank-batches` list/detail 只从 `NoOaBankBatchService` 和 direct relation/category providers 组装业务 payload。
+- tag selection、submit、withdraw 和 Workbench internal transfer 写入后只触发 canonical fact 更新、audit、Workbench/cost/search 等真实下游 lifecycle；不得写 no-OA page projection scope 或 outbox event。
+- App Status 的 `no_oa_bank_batches` domain 不绑定 no-OA page projection worker/readiness/job type。
+- 生产历史修复仍通过 no-OA lifecycle repair / legacy relation migration 的业务边界执行，不通过 read-model refresh worker。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| 2026-06-11 | 补齐免 OA 流水批量处理状态机 | 固定 tag selection、batch lifecycle、internal transfer from Workbench、UI stale polling、read model/worker 状态 | 待本轮模块验证命令 |
+| 2026-06-11 | 补齐免 OA 流水批量处理状态机 | 固定 tag selection、batch lifecycle、internal transfer from Workbench、legacy projection/worker 清理状态 | 待本轮模块验证命令 |
 | 2026-06-11 | 固定内部往来双入口闭环 | Workbench/no-OA 同一组内部往来幂等复用同一 no-OA fact；存量两行 manual internal-transfer relation 迁移；active relation row 独占；SQL read model 保存清理缺席旧批次 | `pytest` no-OA service/workbench integration、pair relation service 目标用例 |
-| 2026-06-14 | no-OA 月度 read model refresh 和依赖未 fresh 状态收敛 | `no_oa_bank_batch` scope policy 支持 `all`/月份；月度 worker 不全量读取、不删除其它月份批次；Bankdetail 依赖未 fresh 时记录 refreshing，不再污染 failed blocker | `tests.test_no_oa_bank_batch_read_model_refresh`、`tests.test_no_oa_bank_batch_workbench_integration`、`tests.test_read_model_readiness_reporter`、`tests.test_read_model_refresh_gateway` |
-| 2026-06-14 | submit/withdraw/tag-selection 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `no_oa_bank_batch` barrier fresh 并 reload，避免旧批次/旧候选暴露给用户 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
-| 2026-06-17 | Browser e2e 补齐选择提交/撤回/历史只读闭环 | 真实 Chromium 保护未提交选择、`submit-selection` 请求体、operation barrier、已提交 bucket 撤回 dialog、withdraw 请求体和历史只读状态 | `cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts` |
+| 2026-06-14 | no-OA 月度 read model refresh 和依赖未 fresh 状态收敛 | 历史 worker/runtime 行为，已于 2026-06-28 随 no-OA page read-model family 删除 | 历史记录 |
+| 2026-06-14 | submit/withdraw/tag-selection 接入 operation overlay 与旧 barrier | 历史实现：写 API 成功后等待 `no_oa_bank_batch` barrier 并 reload，避免旧批次/旧候选暴露给用户；2026-06-27 后页面合同已迁移为直接业务 payload/refetch，不再消费旧同步字段 | `web/src/test/NoOaBankBatchPage.test.tsx` |
+| 2026-06-17 | Browser e2e 补齐选择提交/撤回/历史只读闭环 | 真实 Chromium 保护未提交选择、`submit-selection` 请求体、已提交 bucket 撤回 dialog、withdraw 请求体、direct refetch 和历史只读状态；旧 operation barrier 断言已删除 | `cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts` |
 | 2026-06-17 | read-only 写入口门禁接入权限矩阵 | `read_export_only` 用户可查看批次和标签范围，但不能提交、撤回、批量勾选或保存 tag selection；权限矩阵归 `permissions-and-audit` 统一覆盖 | `cd web && npx playwright test e2e/permissions-role-matrix.spec.ts`、`cd web && npm test -- --run src/test/NoOaBankBatchPage.test.tsx` |
-| 2026-06-17 | relation-backed stale 用户可见状态收敛 | SQL read model 中仍有 active no-OA relation 的旧 `stale` 批次按已提交展示并可撤回；页面不显示“分类已变更，需复核”提示 | `tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`web/src/test/NoOaBankBatchPage.test.tsx` |
-| 2026-06-23 | read-side manifest 合同守卫 | 仅锁定 `no_oa_bank_batch` 的 self-managed freshness、`scoped_incremental`、fan-out `all`、`no-oa-bank-batch` worker、query/permission owner 和 repository port；不改变业务/UI/read model/worker 状态定义 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_search_and_no_oa_bank_batch_manifest_preserve_read_side_contracts` |
-| 2026-06-26 | unchanged source_versions worker fast-path | worker 从 state_store 注入 no-OA SQL read repository，先读取 Bankdetail tag 与 Workbench relation metadata source_versions，再比较现有 SQL source_versions summary；一致时只 complete dirty scope，不 rebuild、不保存 snapshot、不加载完整 relation rows/batch payload rows | `tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save` |
+| 2026-06-17 | relation-backed stale 用户可见状态收敛 | 旧 snapshot 中仍有 active no-OA relation 的旧 `stale` 批次按已提交展示并可撤回；页面不显示“分类已变更，需复核”提示；页面 list 不再从 SQL read model 取数 | `tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_list_batches_uses_direct_service_not_read_model_repository`、`web/src/test/NoOaBankBatchPage.test.tsx` |
+| 2026-06-23 | read-side manifest 合同守卫 | 历史 no-OA manifest/worker 合同，已于 2026-06-28 删除；当前 guard 断言 no-OA manifest entry 不存在 | `tests/test_read_model_manifest.py` |
+| 2026-06-26 | unchanged source_versions worker fast-path | 历史 no-OA worker fast-path，已于 2026-06-28 删除；当前页面 list 直接读取业务事实，不再需要 read-model source_versions skip | 历史记录 |
+| 2026-06-28 | no-OA page read-model runtime family removed | 删除 no-OA page read-model repository/refresh worker/producer、runtime worker/App Status/readiness/manifest/scope policy/deploy/env/UoW outbox 绑定；页面保持 direct service list/detail | `PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_workbench_integration.py tests/test_bankdetail_write_uow_contract.py tests/test_app_status_overview_service.py tests/test_no_oa_bank_batch_application_service.py tests/test_no_oa_bank_batch_api.py tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_runtime_worker_registry.py tests/test_read_model_manifest.py tests/test_platform_runtime_boundary_guards.py -q --tb=short` |
 | 2026-06-26 | submitted + cancelled relation 历史归一 | 历史 `submitted` 批次若其 no-OA Workbench relation 已取消，public snapshot 归一为 `withdrawn` 且不可撤回，避免页面把已撤回历史误当可撤回样本 | `tests/test_no_oa_bank_batch_lifecycle_repair.py::test_public_lifecycle_repair_normalizes_cancelled_submitted_relation_to_withdrawn` |

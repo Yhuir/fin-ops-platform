@@ -120,7 +120,7 @@ describe("Cost statistics export API", () => {
     );
   });
 
-  test("maps read model status metadata from explorer payloads", async () => {
+  test("maps direct explorer payloads", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         month: "2026-03",
@@ -132,19 +132,22 @@ describe("Cost statistics export API", () => {
         time_rows: [],
         project_rows: [],
         expense_type_rows: [],
-        read_model_status: "refreshing",
-        read_model_scope_key: "active:2026-03",
-        read_model_generated_at: "2026-06-01T00:00:00",
-        read_model_stale_reasons: ["workbench_scope_key"],
       }), { status: 202 }),
     ) as typeof fetch;
 
     const payload = await fetchCostStatisticsExplorer("2026-03", undefined, "active");
 
-    expect(payload.readModelStatus).toBe("refreshing");
-    expect(payload.readModelScopeKey).toBe("active:2026-03");
-    expect(payload.readModelGeneratedAt).toBe("2026-06-01T00:00:00");
-    expect(payload.readModelStaleReasons).toEqual(["workbench_scope_key"]);
+    expect(payload).toEqual({
+      month: "2026-03",
+      summary: {
+        rowCount: 0,
+        transactionCount: 0,
+        totalAmount: "0.00",
+      },
+      timeRows: [],
+      projectRows: [],
+      expenseTypeRows: [],
+    });
   });
 
   test("caches explorer payloads by month and project scope for fast page re-entry", async () => {

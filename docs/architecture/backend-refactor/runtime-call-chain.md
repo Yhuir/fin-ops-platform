@@ -146,7 +146,7 @@ outbox/durable queue event
 - `GET /api/workbench/group-rows`
 - pair relation confirm/cancel。
 - exception preview/apply/revert。
-- `GET /api/workbench/events` SSE。
+- Workbench page read-model SSE 已移除；页面使用 direct API refetch 或 mutation operation projection。
 
 重点看：
 
@@ -161,8 +161,7 @@ PF-P004 已补充 Workbench `query/read-model` 子域事实链路，完整计划
 - `GET /api/workbench/summary` 由 `_handle_api_workbench_summary` 读取 `PostgresReadModelRepository.get_workbench_summary(scope_key)`；missing 或 source_version stale 时 enqueue `workbench.read_model.refresh`，不在请求线程同步 rebuild。
 - `GET /api/workbench/groups` 由 `_handle_api_workbench_groups` 读取 refresh status，fresh 时才允许使用 Redis versioned page cache；cache miss 后读取 `get_workbench_groups_page(...)`，底层 pin active generation 并读结构化 `workbench_groups` / `workbench_group_rows`。
 - `GET /api/workbench/groups/detail` 由 `_handle_api_workbench_group_detail` 读取 `get_workbench_group_detail(...)`；当前 stale/missing 语义不如 summary/groups 明确，后续必须先补 characterization tests。
-- `GET /api/workbench/refresh-status` 聚合 dirty scope、source_version、outbox backlog、worker heartbeat、active/building/failed generation 和 consistency 状态。
-- `GET /api/workbench/events` 是 SSE status polling，不是 Redis PubSub；已经设置 `X-Accel-Buffering: no`，但断连退出、线程占用和 heartbeat event 契约需要测试锁定。
+- Workbench 后台状态由 App Health、dirty scope、outbox backlog、worker heartbeat、active/building/failed generation 和 consistency 巡检聚合；公开 `/api/workbench/refresh-status` 与 `/api/workbench/events` 已移除。
 - 兼容期 `GET /api/workbench` 仍可能在 SQL read model unavailable 时 fallback legacy builder；这是高风险读路径，后续必须先锁定 response contract 再收口。
 - Row detail 当前存在 `LiveWorkbenchService`、cached read model、`WorkbenchQueryService` route 多级 fallback；后续不得直接重写，必须先锁定 fallback 顺序、字段完整度和 override 应用顺序。
 - Worker refresh 由 `app/worker.py` 在启用 `--enable-workbench-read-model-refresh` 时注册 `workbench.read_model.refresh` handler，`RuntimeQueueRepository.enqueue_read_model_refresh` 同步维护 dirty scope source_version 和 outbox event，`WorkbenchReadModelRefreshService` 调用 `WorkbenchSqlProjectionBuilder` 写 building generation，验证后切 active generation。
@@ -183,7 +182,7 @@ PF-P004 已补充 Workbench `query/read-model` 子域事实链路，完整计划
 重点看：
 
 - `server.py` 中 `_handle_api_turnover_ledger*` 到 `TurnoverLedgerApiRoutes`、`TurnoverLedgerService`、`TurnoverRelationService`。
-- 读路径是否优先读取 PostgreSQL `read_model.turnover_ledger_rows`，stale 时是否降级到同步重建。
+- 读路径是否保持 direct `TurnoverLedgerService` payload，不恢复 PostgreSQL `read_model.turnover_ledger_rows`、stale gate 或同步重建。
 - confirm/withdraw 是否同事务写 relation、audit、dirty scope 和 derived lifecycle event。
 - `turnover_relation_changed` 如何影响 Workbench candidate grouping 和 source version。
 - `turnover_ledger_extras` 是否仍存在 legacy full snapshot fallback。
@@ -195,11 +194,8 @@ GET /api/turnover-ledger?view=grouped
   -> Application._handle_api_turnover_ledger
   -> TurnoverLedgerApiRoutes.list_ledger
   -> TurnoverLedgerQueryService.list_ledger
-  -> read_repository.list_turnover_ledger_view(scope_key="all")
-  -> compare expected source_versions
-  -> fresh: return SQL payload
-  -> stale/miss: RuntimeQueueRepository.enqueue_read_model_refresh(turnover_ledger, all)
-  -> route facade normalizes grouped payload
+  -> TurnoverLedgerService.list_grouped_ledger / list_ledger
+  -> route facade returns direct grouped payload
 ```
 
 ```text
@@ -212,22 +208,12 @@ POST /api/turnover-ledger/relations/confirm
   -> _after_turnover_relation_mutation
   -> _persist_turnover_relations_best_effort
   -> _invalidate_workbench_after_bank_transaction_categories
-  -> _clear_turnover_ledger_read_model_best_effort
-  -> _enqueue_turnover_ledger_read_model_refreshes
-```
-
-```text
-turnover_ledger.read_model.refresh event
-  -> app/worker.py
-  -> TurnoverLedgerReadModelRefreshService.handle_runtime_event
-  -> TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope
-  -> PostgresReadModelRepository.save_turnover_ledger_rows
-  -> RuntimeQueueRepository.complete_read_model_refresh(source_version)
+  -> direct page reload / downstream lifecycle events
 ```
 
 PF-P046 风险判断：
 
-- Query service 已具备 SQL read model freshness gate，但仍保留 PostgreSQL-not-required 时的 legacy builder fallback。
+- Query service 已移除 SQL read model freshness gate；页面 GET 只走 direct builder。
 - Runtime queue 已提供 dirty scope + outbox 同事务 primitive；Turnover 写 handler 尚未把 relation facts/audit 和 dirty/outbox 纳入一个显式 UoW。
 - `/api/turnover-ledger/bank-row-tags/batch` 由 Turnover API 写 Bankdetail category facts，必须在后续 tests 中锁定 ownership 和 side effects。
 

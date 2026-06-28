@@ -27,23 +27,23 @@ function startStrictBrowserErrorCapture(page: Page) {
   return errors;
 }
 
-test.describe("OA pending payments read model freshness browser flow", () => {
-  test("shows rows refreshing diagnostics instead of a true empty state", async ({ page }) => {
+test.describe("OA pending payments direct rows browser flow", () => {
+  test("keeps direct rows visible without page-level read model polling", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
-      oaPendingPaymentReadModelStatus: "refreshing",
       sessionMode: "full_access",
     });
 
     await gotoAndExpectPageReady(page, "/oa-pending-payments", "oa-pending-payments-page", { diagnostics });
 
-    await expect(page.getByText("OA 待付款核对数据正在刷新")).toBeVisible();
-    await expect(page.getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeVisible();
+    await expect(page.getByText("浏览器付款申请人")).toBeVisible();
+    await expect(page.getByText("OA 待付款核对数据正在刷新")).toHaveCount(0);
+    await expect(page.getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toHaveCount(0);
     await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
     await expect(page.getByText("oa_pending_payment_source_version_missing")).toHaveCount(0);
-    expect(api.count("GET /api/oa-pending-payments/rows")).toBeGreaterThanOrEqual(1);
-    expect(api.count("GET /api/oa-pending-payments/filter-options")).toBeGreaterThanOrEqual(1);
+    expect(api.count("GET /api/oa-pending-payments/rows")).toBeLessThanOrEqual(2);
+    expect(api.count("GET /api/oa-pending-payments/filter-options")).toBeLessThanOrEqual(2);
     expect(browserErrors).toEqual([]);
     diagnostics.dispose();
   });
