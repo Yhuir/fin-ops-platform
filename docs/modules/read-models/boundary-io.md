@@ -1,14 +1,23 @@
 # Read Model 模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-06-28
 
 ## 模块化状态
 
-- 状态：partial
+- 状态：PSCIP-L4 closed
 - 当前边界可信度：high
-- 目标边界：所有页面 read model 通过 manifest、scope policy、refresh gateway、runtime worker、freshness/status gate 形成可验证闭环。
-- 当前缺口：部分页面仍存在历史 service/read facade 和特殊例外，后续变更必须逐页面核验旧路径是否还被调用。
-- 旧代码删除条件：manifest、registry、API、frontend、tests、生产 drain 验证全部证明旧路径不再参与 fresh 读取。
+- 目标边界：所有当前 App Status read model 通过 manifest、scope policy、refresh gateway、runtime worker、freshness/status gate 和 operation barrier 形成可验证闭环。
+- 当前闭环：14 个当前 App Status read model 已完成 Read Model 模块化 PSCIP-L4，`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 以显式例外语义闭环。
+- 当前非阻塞风险：Search 曾有一次生产 grouped-run 高延迟样本，targeted rerun 通过；Workbench groups admin smoke 有一次 probe shape `400`，不是 stale-as-fresh 证据。
+- 旧代码删除条件：legacy/local compat path 仍可保留为明确隔离路径；删除前必须证明对应页面 API、worker、测试和生产脚本不再调用该路径。
+
+## 闭环证据
+
+- 最终报告：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`
+- 生产证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`
+- 远端闭环提交：`c771b894 docs: close read model production evidence`
+- 生产 runtime 证据：`/health/ready` ready，scope contract `ok=true`，`violation_count=0`，current uncovered outbox failure count `0`，dirty/outbox/readiness 收敛。
+- 生产 SLO：`read_model_slo_smoke --apply --critical-only --target-ms 5000` grouped run 14/15 pass；唯一 Search grouped miss targeted rerun `499.357ms` pass。
 
 ## 职责边界
 
@@ -61,7 +70,7 @@
 | Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py` |
 | Frontend | `web/src/features/operationBarrier/api.ts` |
 | Scripts | `scripts/check-read-model-scope-contracts.py` |
-| Production evidence | `docs/operations/read-model-production-evidence-runbook.md` |
+| Production evidence | `docs/operations/read-model-production-evidence-runbook.md`、`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`、`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md` |
 | Tests | `tests/test_read_model_*.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` |
 
 ## 依赖方向
@@ -77,8 +86,9 @@
 - Gateway/freshness：`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_query_gateway.py`、`tests/test_read_model_freshness.py`。
 - Write target envelope：`tests/test_read_model_write_targets.py`，以及 batch/no-OA/OA pending/pending invoice/turnover、bank-detail、input-invoice-usage OA reverse、output-invoice-collections、tax-offset、workbench relation action、general/file import、ETC import job completion、OA manual import/create/refresh/remove 的 API/service/page tests。
 
-## 当前缺口和删除条件
+## 维护风险和删除条件
 
 - 新增 read model 必须同时更新 manifest、scope policy、registry、tests、docs。
 - 删除旧 read path 前必须证明所有页面 API 和 worker 均通过新 freshness/status 边界。
-- 剩余未闭合重点是生产证据和 legacy compat path 删除/隔离；未完成前不能宣称全页面 PSCIP-L4。
+- legacy compat path 删除不是当前 PSCIP-L4 blocker；它必须继续保持生产 fail-closed、不能绕过 fresh gate，也不能新增未登记 dirty/outbox/readiness 写入。
+- Search 高行数 refresh latency 仍需在后续生产 evidence sweep 中观察；单次高延迟不是当前 stale-as-fresh 或 readiness blocker。

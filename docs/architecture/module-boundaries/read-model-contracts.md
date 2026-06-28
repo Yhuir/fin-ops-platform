@@ -2,7 +2,7 @@
 
 本文件记录当前所有页面和资源 read model 的目标边界。可执行事实源是 `backend/src/fin_ops_platform/services/read_model_manifest.py` 与 `backend/src/fin_ops_platform/services/runtime_worker_registry.py`；本文档用于开发前审阅和变更后的长期维护。
 
-扫描日期：2026-06-26。
+扫描日期：2026-06-28。
 
 ## 全局目标态
 
@@ -13,6 +13,16 @@
 - Incremental Projection：写操作只污染受影响 scope；worker 投影只重算受影响范围，除非 manifest 明确把 all 定义为 fan-out 或可查询父聚合。
 
 查询端必须经过 freshness/status/enqueue 边界；页面不能读取旧 read model 却返回 fresh。Redis 只能缓存 fresh gate 之后的 payload；RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
+
+## 当前验收状态
+
+- 状态：PSCIP-L4 closed。
+- 适用范围：当前 14 个 App Status read model。
+- 例外语义：`workbench` 保留 active generation 原子发布；`bank_account_balance` 为 all-only projection；`pending_invoice` 使用 page-first explicit scopes 并拒绝裸 `all`；`cost_statistics` 使用 month shards plus queryable parent aggregate。
+- 最终报告：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`。
+- 生产证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`。
+- 生产结果：scope contract `ok=true`、`violation_count=0`、current uncovered outbox failure count `0`；critical SLO grouped run 14/15 pass，唯一 Search miss targeted rerun pass。
+- 残余风险：Search 单次 grouped-run 高延迟样本需继续观察；Workbench groups admin smoke 的 `400` 是 probe shape 问题，不是 stale-as-fresh 证据。
 
 ## Manifest 合同表
 

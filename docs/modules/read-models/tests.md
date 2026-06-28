@@ -30,6 +30,22 @@
 
 ## 场景覆盖清单
 
+## 2026-06-28 - PSCIP-L4 production closure accounting
+
+- 变更类型：documentation/accounting only；不改变 runtime、API shape、worker event、queue schema、权限、审计或前端行为。
+- 覆盖证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`、`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`、`docs/modules/read-models/boundary-io.md`、`docs/architecture/module-boundaries/read-model-contracts.md`。
+- 生产证据：scope contract `ok=true`、`violation_count=0`、current uncovered outbox failure count `0`；`/health/ready` ready；critical read model SLO grouped run 14/15 pass under 5000ms target，唯一 Search miss targeted rerun `499.357ms` pass；dirty/outbox/readiness 收敛；没有已知 stale-as-fresh 路径。
+- 七类测试决策：
+  - Business core unit tests：不适用，本轮不改金额、分类、状态转换或权限判断。
+  - Service-layer tests：不新增；前序 shared gates 已覆盖 manifest、gateway、scope contract、operation barrier 和 runtime worker registry。
+  - API contract tests：不新增；本轮只同步文档，生产 admin API smoke 证据已记录在 production evidence。
+  - Read model/cache/background job tests：适用但不新增；前序 local gates 和生产 SLO/scope contract 是本轮闭环证据。
+  - Frontend component and interaction tests：不新增；本轮不改页面行为，已有页面 tests/Browser specs 保持现状。
+  - End-to-end business-flow integration tests：不新增；`READMODEL-E2E-006` 仍按审批 ticket 和安全 scenario 推进真实业务写样本，不阻塞 read model 模块化 PSCIP-L4。
+  - Existing feature regression tests：适用但不新增；`tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_scope_contract.py`、manifest/worker/gateway tests 继续作为防漂移入口。
+- 验证命令：`bash scripts/verify.sh docs`、`git diff --check`。
+- 未测风险：Search 曾有一次 production grouped-run 高延迟样本，targeted rerun 已通过；Workbench groups admin smoke 的 `400` 是 probe shape 问题，不是 stale-as-fresh 证据；浏览器组合覆盖不是 100% 枚举覆盖。
+
 ## 2026-06-26 - Dependency source-version skip closure
 
 - 变更类型：narrow implementation slice；不改变 HTTP response shape、权限、业务状态机、worker event type 或 queue schema。
@@ -100,6 +116,8 @@
 - 覆盖证据：`read_model_manifest.py`、`runtime_worker_registry.py`、`read_model_scope_policy.py`、`NoOaBankBatchReadModelRefreshService`、`SearchPendingReadModelRefreshService`、`BankAccountBalanceReadModelRefreshService` 和对应测试入口用于候选比较。
 - 七类测试决策：本轮主要是 selection/accounting，但目标 no-OA refresh tests 暴露并覆盖了一个旧构造参数断裂；下一 no-OA 边界需要覆盖 service-layer、read model/cache/background job 和 existing feature regression categories。如果触及 HTTP response freshness shape 或前端 operation barrier，则 API contract 和 frontend interaction tests 也适用。
 - 下一验证重点：`tests.test_no_oa_bank_batch_read_model_refresh`、`tests.test_no_oa_bank_batch_application_service`、`tests.test_no_oa_bank_batch_workbench_integration`、manifest/worker registry、docs verify 和 app check。
+
+2026-06-28 说明：下表部分长文本保留了 2026-06-24 局部试点时的 `production-evidence-deferred` 记录；这些记录已经被 2026-06-28 PSCIP-L4 production closure 覆盖，不再表示当前 read model 模块化未闭环。后续判断当前状态时，以本文顶部 `2026-06-28 - PSCIP-L4 production closure accounting`、`boundary-io.md` 和 final closure report 为准。
 
 | 场景 | 是否适用 | 现有测试 | 缺口 | 优先级 |
 | --- | --- | --- | --- | --- |

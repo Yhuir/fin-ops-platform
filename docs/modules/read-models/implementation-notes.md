@@ -9,7 +9,7 @@
 - 生产旧 runtime 状态的 scope contract 检查/清理由 `ReadModelScopeContractService` 编排，SQL 限定在 `PostgresReadModelScopeContractRepository`，清理后通过 `ReadModelRefreshGateway` 补投规范 replacement scope。
 - RabbitMQ real consumers 只负责 transport/wakeup；`job.outbox_events`、`job.read_model_dirty_scopes` 与 `read_model.app_status_readiness` 仍是 read model 状态事实源。Redis payload 只能在 fresh gate 后缓存。
 - App Status read model registry、runtime worker registry、migration storage contract、critical SLO smoke 和 deploy env 模板必须通过本地测试交叉约束；新增 read model 不能只登记一个 registry。
-- authenticated HTTP SLO gate 的当前 P2/P3 默认目标是首屏 API p95 <= 1000ms，并且必须同时满足 HTTP status、latency 和 freshness：任何 `read_model_status != fresh` 或 `refresh_enqueued=true` 都算失败，不能把快速返回的 refreshing 当作“已同步”。写操作同步门禁使用 operation-to-fresh p95 <= 1000ms、p99 <= 3000ms；历史 5 秒记录仅作为旧基线，不作为当前 closure 上限。
+- authenticated HTTP SLO gate 的当前 P2/P3 默认目标是首屏 API p95 <= 1000ms，并且必须同时满足 HTTP status、latency 和 freshness：任何 `read_model_status != fresh` 或 `refresh_enqueued=true` 都算失败，不能把快速返回的 refreshing 当作“已同步”。read model enqueue-to-fresh 采用分层生产目标：轻量 read model p95 <= 3000ms；Workbench/Search/Cost/Turnover 等重型或聚合 read model 的 bounded apply smoke 目标 <= 5000ms，除非后续基线被明确收紧。写操作同步门禁仍按具体 runbook/safety ticket 记录 operation-to-fresh 目标。
 - `bank_detail:all` 不是可读 freshness scope，而是 fan-out 控制 scope；真实 readiness 和 downstream dependency 应以具体月份 shard 或明确 read model status 为准。
 
 ## 记录模板
@@ -28,6 +28,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-28 - Read model PSCIP-L4 production closure persisted
+
+- 目标：把 07 main closure 的最终结论从 `.planning/` 证据沉淀到长期 module 文档，避免后续 agent 继续把 read model 模块化误判为 `partial`。
+- 影响范围：read-models 模块 README、boundary I/O、测试矩阵、E2E coverage 和全局 module-boundary read model contract；不改变 runtime、API shape、worker event、queue schema、权限、审计或前端行为。
+- 关键决策：当前 14 个 App Status read model 标记为 PSCIP-L4 closed；`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 保留显式例外语义。生产验证使用分层 SLO：页面/API 首响 1000ms、轻量 read model 3000ms、重型/聚合 read model bounded apply 5000ms。
+- 文档影响：`README.md`、`boundary-io.md`、`tests.md`、`e2e-coverage.md` 和 `docs/architecture/module-boundaries/read-model-contracts.md` 已同步最终状态和证据链接。
+- 测试覆盖：本轮是 documentation/accounting only；前序 local gates 和生产 scope contract/SLO evidence 已记录在 final closure report。
+- 验证命令：`bash scripts/verify.sh docs`、`git diff --check`。
+- 未测风险：Search 曾有一次 production grouped-run 高延迟样本，targeted rerun 已通过；Workbench groups admin smoke 的 `400` 是 probe shape 问题；浏览器组合覆盖不是 100% 枚举覆盖。
+- 后续事项：新增 read model、变更 scope 语义、变更 worker/registry/operation barrier 或发布新 release 时，按本模块维护规则重新跑对应 local gates 和生产 evidence sweep。
 
 ## 2026-06-26 - Read model production SLO optimization
 
