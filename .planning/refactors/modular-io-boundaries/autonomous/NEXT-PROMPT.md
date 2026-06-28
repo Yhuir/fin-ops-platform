@@ -1,85 +1,89 @@
 # Next Prompt
 
-Continue the user-authorized `main-read-model-closure` run.
+Continue the user-authorized `main-read-model-closure` run from the expanded 2026-06-26 controller.
 
 ## Current State
 
 - Branch: `main`.
-- Current main commit: `93617a1e74e33e1ff77db6cd68ceb619b9401a76`.
-- Backup branch: `codex/backup-main-before-read-model-closure-20260625-230543`.
+- Current main commit at reconciliation start: `aa9b2232e261db2e4efe5776a7784705ab2e760d`.
+- Backup branch: `codex/backup-main-before-read-model-closure-20260626-050615`.
 - Controller prompt: `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`.
-- Latest completed boundary: `main-read-model-closure:approval-gated-current-main-deploy-or-hard-stop`.
-- Evidence gap report: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-equivalent-evidence-gap-2026-06-25.md`.
-- Controlled deploy/evidence runbook: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-controlled-deploy-evidence-runbook-2026-06-25.md`.
-- Approval hard-stop report: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-approval-gated-deploy-hard-stop-2026-06-25.md`.
-- Local closure audit: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-local-owner-split-closure-audit-2026-06-25.md`.
-- Local PSCIP-L3 owner split is complete for all known non-Workbench App Status read models.
-- Workbench remains the documented active-generation exception and must not be mechanically converted.
-- PSCIP-L4 is not proven.
+- Latest reconciliation: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-26.md`.
+- Previous local owner split audit: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-local-owner-split-closure-audit-2026-06-25.md`.
+- Previous production evidence gap: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-equivalent-evidence-gap-2026-06-25.md`.
+- Previous deploy runbook: `.planning/refactors/modular-io-boundaries/analysis/read-model-main-controlled-deploy-evidence-runbook-2026-06-25.md`.
+- User has now approved production rollout, root SSH production validation, low-risk production samples, production business-operation validation, sample restore, and bounded DB restore for validation samples that lack business inverse.
+- Admin Token was acquired through secure popup for the current controller session. Never print, hash, encode, persist or copy it into prompts, logs, files or worker prompts.
 
-## Evidence Summary
+## Updated Objective
 
-- Production is reachable read-only through `finops-prod-root`.
-- Production service is running release commit `67271c7f67291a2fcf393f1fa0ad33be9e84f413`, not current `main`.
-- Current `main` includes owner split commits after that release, so existing production evidence cannot prove current-main PSCIP-L4.
-- A current-code/local-backend probe over SSH-tunneled production dependencies showed:
-  - `bank_details`, `no_oa_bank_batch`, and `workbench` sampled endpoints were fresh.
-  - `search` was `stale`.
-  - `cost_statistics` and `tax_offset` were `refreshing`.
-  - Fresh gates did not report sampled stale/mismatched payloads as fresh.
-- Local SSH-tunnel latency is not acceptable as production performance evidence.
-- No production DB write, deploy, queue mutation, readiness mutation, worker replay, service restart or secret output occurred.
-- A controlled deploy/evidence runbook now exists, but deploy/restart/apply/write-smoke operations still require explicit approval.
-- Pre-approval read-only checks confirmed production is healthy but still on `dev-67271c7f-modular-io-gate-r3`, not current `main`; current production `/health.runtime_infrastructure` was empty, so it cannot prove PSCIP-L4 worker/dirty/outbox/readiness convergence.
+The target is no longer only repository owner split or production L4 evidence. Complete all page read/write Read Model closure:
 
-## Required First Steps On Resume
-
-1. Confirm `git status --short --branch`; stop if unrelated dirty files would be committed.
-2. Confirm `main` is fast-forward synced with `origin/main`.
-3. Read:
-   - `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-equivalent-evidence-gap-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-controlled-deploy-evidence-runbook-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-approval-gated-deploy-hard-stop-2026-06-25.md`
-   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-local-owner-split-closure-audit-2026-06-25.md`
-   - `deploy/oa/README.md`
-   - `scripts/deploy-oa.sh`
-   - `scripts/deploy_oa.py`
-   - `docs/operations/runtime-worker-governance.md`
-4. Use CodeGraph before code edits. If the boundary is deployment/evidence-only, code edits are not expected.
+- every page read API must expose explicit fresh/stale/refreshing/failed/missing/unavailable behavior;
+- every page write API that affects page data must expose affected read model scopes, freshness targets, operation barrier targets, job/version or a documented non-applicability proof;
+- frontend mutations must wait for operation barrier or fresh reload before final fresh state;
+- dirty scope/outbox/worker/projection/readiness/API/UI must be traceable;
+- old read model code, old modules, old fallback and default-fresh assumptions must be deleted or hard-quarantined from normal production read/write/refresh paths;
+- production samples must be applied through business API/UI/command and restored by business inverse or the preapproved bounded DB restore protocol.
 
 ## Next Boundary
 
-`main-read-model-closure:awaiting-production-rollout-approval`
+`main-read-model-closure:wave-1-static-guard-and-write-target-inventory`
 
 Goal:
-- Wait for explicit production rollout approval, then deploy current `main` using `.planning/refactors/modular-io-boundaries/analysis/read-model-main-controlled-deploy-evidence-runbook-2026-06-25.md` and collect PSCIP-L4 evidence.
-- If approval is still not available, do not create another plan-only loop; keep PSCIP-L4 unclaimed and report the existing blocker `deploy-approval-required`.
+
+- Build source-backed inventory for all page read/write operations and their read model targets.
+- Add or strengthen guard tests that prevent stale-as-fresh and old path pollution from regressing.
+- Do not run production mutation yet; finish local guard/inventory first.
+
+Required first steps:
+
+1. Confirm `git status --short --branch`; stop only for unrelated dirty files.
+2. Confirm `main` remains fast-forward synced with `origin/main`.
+3. Read:
+   - `AGENTS.md`
+   - `.planning/refactors/modular-io-boundaries/prompts/07-read-model-main-closure-controller.md`
+   - `.planning/refactors/modular-io-boundaries/analysis/read-model-main-closure-reconciliation-2026-06-26.md`
+   - `docs/architecture/module-boundaries/read-model-contracts.md`
+   - `docs/architecture/module-boundaries/inventory.md`
+   - `docs/modules/read-models/boundary-io.md`
+   - `docs/modules/runtime-workers/boundary-io.md`
+   - all directly affected page/module `boundary-io.md` files.
+4. Use CodeGraph before shared code edits. Use `codegraph_impact` before modifying shared guard/helper symbols.
+
+Implementation tasks:
+
+- Inspect and extend `tests/test_read_model_architecture_guards.py` and `tests/test_platform_runtime_boundary_guards.py`.
+- Add a guard or report-backed test for route/service `read_model_status="fresh"` assignments. Allow only assignments proven to originate from fresh gate/projection owner/test fixtures.
+- Add a guard or report-backed test for frontend defaulting missing/unknown read model status to `fresh`. Allow only safe initial local placeholders that cannot render final fresh state without a backend payload.
+- Add a guard or report-backed test for normal production reachability of:
+  - `backend/src/fin_ops_platform/app/routes_legacy_workbench_actions.py`
+  - `backend/src/fin_ops_platform/app/routes_etc_legacy_batches.py`
+  - turnover ledger legacy fallback facades in `turnover_ledger_write_adapters.py`
+  - legacy Workbench stale payload fallback in `server.py`
+- Generate an inventory artifact under `.planning/refactors/modular-io-boundaries/analysis/` listing every page mutation route/API and whether its response already exposes `freshness_targets`, affected scopes, barrier targets or equivalent proof.
+- Update module docs only if the source-backed boundary facts change; otherwise record docs not applicable for this wave.
 
 Acceptance:
-- Deployment approval must name target commit, release name, allowed operation class, rollback path, and whether read model SLO `--apply` and mutating write-operation smoke are allowed.
-- If deployment is approved, deploy current `main` using the repository production entrypoint and collect post-deploy evidence:
-  - release identity equals current `main`;
-  - `/health` and `/health/ready` are ready;
-  - App Status readiness is fresh for all manifest read models;
-  - dirty scopes/outbox/dead-letter facts converge;
-  - required workers are current and healthy;
-  - sampled API/browser endpoints return fresh or correct stale/refreshing status;
-  - hot-path/high-row query plan or latency evidence is collected for Workbench, search, bank detail, no-OA bank batch, turnover ledger, cost statistics, and tax offset.
-- If deployment is not approved or cannot be performed safely, do not claim PSCIP-L4. Write a precise deploy/evidence hard-stop report and keep the goal active or blocked only after the strict blocked-audit threshold is met.
-- No production DB write, queue mutation, readiness mutation, worker replay, force refresh, or repair unless a committed/recorded explicit-scope runbook is approved.
-- Do not implement Go, Go Fiber or Go Worker.
-- This boundary is deploy/evidence only; any Go hot-path work remains separately admission-gated by performance evidence, rollback proof, and an explicit implementation prompt.
-- Update this `NEXT-PROMPT.md` and `autonomous/JOURNAL.md` at the end of the boundary.
 
-Suggested local verification before any deploy/evidence action:
+- Do not implement Go, Go Fiber or Go Worker.
+- Guard tests are executable and either fail on real gaps that must be fixed in Wave 2/3 or pass with an explicit allowlist that names owner and deletion condition.
+- Inventory covers at least these modules: workbench, batch accounting, bank details/balance, pending invoices, input invoice usage, OA pending payments, output invoice collections, cost statistics, tax offset, no-OA bank batches, turnover ledger, imports/OA-driven updates.
+- No secret values are printed or written.
+- No production DB write, queue mutation, readiness mutation, force refresh, repair or mutating HTTP sample in this wave.
+
+Verification:
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_runtime_worker_registry -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards tests.test_platform_runtime_boundary_guards -v
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_manifest tests.test_runtime_worker_registry -v
 bash scripts/verify.sh docs
 git diff --check
 ```
 
-Do not claim global closure without production/equivalent freshness and performance evidence from the current main implementation.
+End of boundary:
+
+- Update `.planning/refactors/modular-io-boundaries/autonomous/JOURNAL.md`.
+- Update this `NEXT-PROMPT.md` with the next executable wave.
+- Commit verified Wave 1 artifacts on `main`.
+- Immediately continue to Wave 2 if safe implementation work remains.
