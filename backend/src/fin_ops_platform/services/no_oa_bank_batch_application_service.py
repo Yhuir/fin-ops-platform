@@ -14,6 +14,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
 )
 from fin_ops_platform.services.no_oa_bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NoOaBankBatchService,
@@ -281,6 +282,7 @@ class NoOaBankBatchApplicationService:
         actor: str,
         expected_version: int | None,
         note: str | None,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
         persist: bool = True,
     ) -> dict[str, object]:
         previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
@@ -296,8 +298,13 @@ class NoOaBankBatchApplicationService:
                 note=note,
             )
             if not already_submitted:
-                self._confirm_relation_for_batch(batch, actor=actor, note=note)
-            result = self._mutation_result(batch, status="submitted", persist=persist)
+                self._confirm_relation_for_batch(batch, actor=actor, note=note, relation_mode=relation_mode)
+            result = self._mutation_result(
+                batch,
+                status="submitted",
+                persist=persist,
+                read_model_key=self._read_model_key_for_relation_mode(relation_mode),
+            )
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
             raise
@@ -309,6 +316,7 @@ class NoOaBankBatchApplicationService:
         row_ids: list[str],
         actor: str,
         note: str | None,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> dict[str, object]:
         previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
         previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
@@ -324,13 +332,18 @@ class NoOaBankBatchApplicationService:
                 categories_by_transaction_id=categories_by_transaction_id,
                 active_relations=self._workbench_relation_active_relations_for_bank_rows(bank_rows),
                 source_versions=self.no_oa_bank_batch_source_versions(),
-                eligible_batch_types=self.selected_tag_codes(),
+                eligible_batch_types=self._eligible_tag_codes_for_relation_mode(relation_mode),
                 row_ids=row_ids,
                 actor=actor,
                 note=note,
             )
-            self._confirm_relation_for_batch(batch, actor=actor, note=note)
-            result = self._mutation_result(batch, status="submitted", persist=True)
+            self._confirm_relation_for_batch(batch, actor=actor, note=note, relation_mode=relation_mode)
+            result = self._mutation_result(
+                batch,
+                status="submitted",
+                persist=True,
+                read_model_key=self._read_model_key_for_relation_mode(relation_mode),
+            )
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
             raise
@@ -394,9 +407,172 @@ class NoOaBankBatchApplicationService:
             raise
         return result
 
-    def _confirm_relation_for_batch(self, batch: dict[str, object], *, actor: str, note: str | None) -> None:
+    def rebaseline_submitted_no_oa_batches_dry_run(self) -> dict[str, object]:
+        candidates = self._submitted_no_oa_rebaseline_candidates()
+        return self._rebaseline_no_oa_manifest(candidates, applied=False)
+
+    def apply_submitted_no_oa_rebaseline(
+        self,
+        *,
+        actor: str,
+        reason: str | None,
+        manifest: object | None,
+    ) -> dict[str, object]:
+        previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
+        previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
+        candidates = self._submitted_no_oa_rebaseline_candidates()
+        self._assert_rebaseline_manifest_matches(candidates, manifest)
+        withdrawn_batches: list[dict[str, object]] = []
+        changed_case_ids: list[str] = []
+        affected_months: set[str] = set()
+        resolved_reason = str(reason or "").strip() or "流水规则批量处理 rebaseline：撤回历史免OA已提交批次"
+        try:
+            for candidate in candidates:
+                batch_id = str(candidate.get("batch_id") or "").strip()
+                if not batch_id:
+                    continue
+                before_batch = self._no_oa_bank_batch_service.get_batch(batch_id)
+                already_withdrawn = str(before_batch.get("status") or "") == "withdrawn"
+                withdrawn = self._no_oa_bank_batch_service.withdraw_batch(
+                    batch_id,
+                    actor=actor,
+                    expected_version=int(before_batch.get("version") or 1),
+                    reason=resolved_reason,
+                )
+                if not already_withdrawn:
+                    self._cancel_relation_for_batch(
+                        withdrawn,
+                        actor=actor,
+                        reason=resolved_reason,
+                        history_operation_type="bank_flow_rule_rebaseline_no_oa_withdraw",
+                        idempotency_operation="rebaseline_no_oa_withdraw",
+                    )
+                withdrawn_batches.append(withdrawn)
+                relation_case_id = str(withdrawn.get("relation_case_id") or withdrawn.get("batch_id") or "").strip()
+                if relation_case_id:
+                    changed_case_ids.append(relation_case_id)
+                affected_months.update(self.affected_months(withdrawn))
+            workbench_rebuild_queued = self.after_mutation(
+                sorted(affected_months),
+                changed_case_ids=changed_case_ids,
+                persist=True,
+                action_name="bank_flow_rule_rebaseline_no_oa",
+            )
+        except Exception:
+            self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
+            raise
+        manifest = self._rebaseline_no_oa_manifest(withdrawn_batches, applied=True)
+        return {
+            **manifest,
+            "workbench_rebuild_queued": workbench_rebuild_queued,
+        }
+
+    def _submitted_no_oa_rebaseline_candidates(self) -> list[dict[str, object]]:
+        return [
+            batch
+            for batch in self._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
+            if str(batch.get("status") or "").strip() == "submitted"
+        ]
+
+    def _assert_rebaseline_manifest_matches(self, candidates: list[dict[str, object]], manifest: object | None) -> None:
+        if not isinstance(manifest, dict):
+            raise ValueError("bank_flow_rule_rebaseline_manifest_required")
+        expected_rows = manifest.get("batches")
+        if not isinstance(expected_rows, list):
+            raise ValueError("bank_flow_rule_rebaseline_manifest_required")
+
+        def key(row: dict[str, object]) -> tuple[str, int]:
+            return str(row.get("batch_id") or "").strip(), int(row.get("version") or 1)
+
+        expected = sorted(
+            key(row)
+            for row in expected_rows
+            if isinstance(row, dict) and str(row.get("batch_id") or "").strip()
+        )
+        actual = sorted(key(row) for row in candidates)
+        if not actual and expected and self._rebaseline_manifest_already_applied(expected):
+            return
+        if expected != actual:
+            raise ValueError("bank_flow_rule_rebaseline_manifest_mismatch")
+
+    def _rebaseline_manifest_already_applied(self, expected: list[tuple[str, int]]) -> bool:
+        for batch_id, _version in expected:
+            try:
+                batch = self._no_oa_bank_batch_service.get_batch(batch_id)
+            except KeyError:
+                return False
+            if str(batch.get("status") or "").strip() != "withdrawn":
+                return False
+        return True
+
+    @staticmethod
+    def _rebaseline_no_oa_manifest(batches: list[dict[str, object]], *, applied: bool) -> dict[str, object]:
+        affected_months = sorted({
+            str(batch.get("scope_month") or "").strip()
+            for batch in batches
+            if str(batch.get("scope_month") or "").strip()
+        })
+        rows = [
+            {
+                "batch_id": str(batch.get("batch_id") or ""),
+                "batch_type": str(batch.get("batch_type") or ""),
+                "batch_label": str(batch.get("batch_label") or ""),
+                "relation_case_id": str(batch.get("relation_case_id") or batch.get("batch_id") or ""),
+                "scope_month": str(batch.get("scope_month") or ""),
+                "row_ids": [str(row_id) for row_id in list(batch.get("row_ids") or [])],
+                "row_count": int(batch.get("row_count") or len(list(batch.get("row_ids") or []))),
+                "version": int(batch.get("version") or 1),
+                "status": str(batch.get("status") or ""),
+            }
+            for batch in batches
+        ]
+        return {
+            "dry_run": not applied,
+            "applied": applied,
+            "summary": {
+                "candidate_count": len(rows),
+                "batch_count": len(rows),
+                "row_count": sum(int(row.get("row_count") or 0) for row in rows),
+                "affected_months": affected_months,
+            },
+            "batches": rows,
+            "risks": [],
+        }
+
+    def _eligible_tag_codes_for_relation_mode(self, relation_mode: str) -> set[str]:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            payload = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+            return {
+                str(tag.get("code") or "").strip()
+                for tag in list(payload.get("active_tags") or [])
+                if isinstance(tag, dict) and str(tag.get("code") or "").strip()
+            }
+        return set(self.selected_tag_codes())
+
+    @staticmethod
+    def _read_model_key_for_relation_mode(relation_mode: str) -> str:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return BANK_FLOW_RULE_BATCH_RELATION_MODE
+        return "no_oa_bank_batch"
+
+    def _confirm_relation_for_batch(
+        self,
+        batch: dict[str, object],
+        *,
+        actor: str,
+        note: str | None,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> None:
         relation_command_service = self._require_relation_command_service()
         payload = self._no_oa_bank_batch_service.relation_command_payload_for_batch(batch, note=note)
+        special_metadata = payload.get("special_metadata") if isinstance(payload.get("special_metadata"), dict) else {}
+        requirement_metadata = self._no_oa_paired_requirement_metadata(str(batch.get("batch_type") or ""))
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            requirement_metadata = self._bank_flow_rule_requirement_metadata(batch, requirement_metadata)
+        payload["special_metadata"] = {
+            **special_metadata,
+            **requirement_metadata,
+        }
         case_id = str(payload.get("case_id") or "").strip()
         if not case_id:
             raise ValueError("no_oa_bank_batch_relation_case_id_required")
@@ -405,7 +581,7 @@ class NoOaBankBatchApplicationService:
                 case_id=case_id,
                 row_ids=list(payload.get("row_ids") or []),
                 row_types=list(payload.get("row_types") or []),
-                relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
+                relation_mode=relation_mode,
                 actor_id=str(actor or ""),
                 month_scope=str(payload.get("month_scope") or "all"),
                 note=str(payload.get("note") or ""),
@@ -417,12 +593,56 @@ class NoOaBankBatchApplicationService:
                     if str(tag).strip()
                 ],
                 idempotency_key=self._relation_idempotency_key(batch, operation="submit"),
-                history_operation_type="no_oa_bank_batch_submit",
+                history_operation_type=(
+                    "bank_flow_rule_batch_submit"
+                    if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
+                    else "no_oa_bank_batch_submit"
+                ),
             )
         except WorkbenchRelationCommandError as exc:
             raise self._relation_command_error(exc) from exc
 
-    def _cancel_relation_for_batch(self, batch: dict[str, object], *, actor: str, reason: str | None) -> None:
+    def _bank_flow_rule_requirement_metadata(
+        self,
+        batch: dict[str, object],
+        requirement_metadata: dict[str, object],
+    ) -> dict[str, object]:
+        tag_code = str(requirement_metadata.get("paired_requirement_tag_code") or batch.get("batch_type") or "").strip()
+        requires_oa = bool(requirement_metadata.get("paired_requires_oa"))
+        requires_invoice = bool(requirement_metadata.get("paired_requires_invoice"))
+        return {
+            "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            "source_batch_id": str(batch.get("batch_id") or ""),
+            "flow_rule_tag_code": tag_code,
+            "flow_rule_version": int(requirement_metadata.get("paired_requirement_version") or 1),
+            "requires_oa": requires_oa,
+            "requires_invoice": requires_invoice,
+            "source_row_count": int(batch.get("row_count") or len(list(batch.get("row_ids") or []))),
+            "collapsed_bank_rows": int(batch.get("row_count") or 0) > 3,
+        }
+
+    def _no_oa_paired_requirement_metadata(self, batch_type: str) -> dict[str, object]:
+        tag_code = str(batch_type or "").strip()
+        payload = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+        requirements = payload.get("requirements_by_tag_code") if isinstance(payload.get("requirements_by_tag_code"), dict) else {}
+        rule = requirements.get(tag_code) if isinstance(requirements.get(tag_code), dict) else {}
+        return {
+            "paired_requires_oa": bool(rule.get("requires_oa")),
+            "paired_requires_invoice": bool(rule.get("requires_invoice")),
+            "paired_requirement_tag_code": tag_code,
+            "paired_requirement_version": int(payload.get("version") or 1),
+        }
+
+    def _cancel_relation_for_batch(
+        self,
+        batch: dict[str, object],
+        *,
+        actor: str,
+        reason: str | None,
+        history_operation_type: str = "no_oa_bank_batch_withdraw",
+        idempotency_operation: str = "withdraw",
+    ) -> None:
         relation_command_service = self._require_relation_command_service()
         case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         if not case_id:
@@ -432,8 +652,8 @@ class NoOaBankBatchApplicationService:
                 case_id=case_id,
                 actor_id=str(actor or ""),
                 reason=reason,
-                idempotency_key=self._relation_idempotency_key(batch, operation="withdraw"),
-                history_operation_type="no_oa_bank_batch_withdraw",
+                idempotency_key=self._relation_idempotency_key(batch, operation=idempotency_operation),
+                history_operation_type=history_operation_type,
             )
         except WorkbenchRelationCommandError as exc:
             raise self._relation_command_error(exc) from exc
@@ -1171,7 +1391,14 @@ class NoOaBankBatchApplicationService:
             return snapshot()
         return {"batches": {}}
 
-    def _mutation_result(self, batch: dict[str, object], *, status: str, persist: bool) -> dict[str, object]:
+    def _mutation_result(
+        self,
+        batch: dict[str, object],
+        *,
+        status: str,
+        persist: bool,
+        read_model_key: str = "no_oa_bank_batch",
+    ) -> dict[str, object]:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         relation = self.pair_relation_snapshot_by_case_id(relation_case_id)
         affected_months = self.affected_months(batch)
@@ -1190,7 +1417,7 @@ class NoOaBankBatchApplicationService:
             "pair_relation": relation or {},
             "affected_months": affected_months,
             **write_target_envelope(
-                read_model_key="no_oa_bank_batch",
+                read_model_key=read_model_key,
                 scope_keys=affected_months,
                 fallback_scope_key="all",
             ),

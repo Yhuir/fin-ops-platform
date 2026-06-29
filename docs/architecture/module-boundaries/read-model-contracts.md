@@ -26,7 +26,7 @@
 ## 当前验收状态
 
 - 状态：PSCIP-L4 closed。
-- 适用范围：当前 14 个 App Status read model。
+- 适用范围：当前 14 个 App Status read model；`bank_flow_rule_batch` 当前不是独立可执行 manifest/worker。流水规则批量处理对外使用 `bank_flow_rule_batch` operation target，底层 freshness/readiness 由 `OperationFreshnessBarrierService` 映射到 `no_oa_bank_batch` 迁移底座。
 - 例外语义：`workbench` 保留 active generation 原子发布；`bank_account_balance` 为 all-only projection；`pending_invoice` 使用 page-first explicit scopes 并拒绝裸 `all`；`cost_statistics` 使用 month shards plus queryable parent aggregate。
 - 最终报告：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`。
 - 生产证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`。
@@ -41,6 +41,7 @@
 | `workbench_relation` | `workbench_relation` | `scoped_incremental_distribution` | `fan_out_command` | 关系事实源按关联影响范围分发；跨月 relation 必须在每个受影响 scope 写入所有成员 row 索引，`rows` 唯一键为 `(tenant_id, scope_key, row_id)` | `workbench-relation` | `WorkbenchRelationReadFacade` | `WorkbenchRelationReadModelRepositoryPort` | `downstream_page_api_session` | `tests/test_workbench_relation_read_facade.py`、`tests/test_workbench_relation_sql_projection.py` |
 | `bank_detail` | `bank_detail` | `partitioned_scoped_incremental` | `fan_out_command` | 银行明细按页面 scope / 月份等业务范围刷新 | `bank-detail` | `BankDetailsApplicationService` | `BankDetailReadModelRepositoryPort` | `bank_details_api_session` | `tests/test_bank_details_sql_runtime.py` |
 | `bank_account_balance` | `bank_account_balance` | `partitioned_scoped_incremental` | `fan_out_command` | 当前为 global all scope only | `bank-account-balance` | `BankDetailsApplicationService` | `BankAccountBalanceReadModelRepositoryPort` | `bank_details_api_session` | `tests/test_bank_account_balance_read_model.py` |
+| `bank_flow_rule_batch` | alias to `no_oa_bank_batch` | `transition_alias` | `fan_out_command via no-OA` | implemented-transition；当前未注册独立 manifest/worker，operation barrier 对外保留新 key，底层复用 `no_oa_bank_batch` readiness/scope | `no-oa-bank-batch` | `BankFlowRuleBatchApplicationService` via no-OA migration base | `NoOaBankBatchReadModelRepositoryPort` | `bank_flow_rule_batch_api_session` | `tests/test_operation_freshness_barrier.py`、`tests/test_no_oa_bank_batch_tag_selection_api.py` |
 | `pending_invoice` | `pending_invoice` | `scoped_incremental` | `forbidden_bare_all` | `direction:filter_group[:YYYY-MM]` 页面 scope | `pending-invoice`；辅助 `search-pending` | `PendingInvoiceReadModelService` | `PendingInvoiceReadModelRepositoryPort` | `pending_invoices_api_session` | `tests/test_pending_invoice_service.py` |
 | `search` | `search` | `partitioned_scoped_index` | `fan_out_command` | search source + month scope | `search`；辅助 `search-pending`、`search-secondary`、`search-tertiary` | Search read API | `SearchReadModelRepositoryPort` | `search_api_session` | `tests/test_search_pending_sql_runtime.py` |
 | `invoice_lifecycle` | `invoice_lifecycle` | `scoped_incremental` | `fan_out_command` | 发票生命周期按受影响发票/方向 scope 刷新 | `invoice-lifecycle`；辅助 `invoice-lifecycle-secondary` | `InvoiceLifecycleReadFacade` | `InvoiceLifecycleReadModelRepositoryPort` | `invoice_lifecycle_page_api_session` | `tests/test_invoice_lifecycle_read_model_refresh.py` |

@@ -10,7 +10,10 @@ import re
 from typing import Any
 
 from fin_ops_platform.services.imports import normalize_name
-from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
+from fin_ops_platform.services.no_oa_bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    NO_OA_BANK_BATCH_RELATION_MODE,
+)
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_parent_oa_id,
     oa_attachment_source_ids,
@@ -28,7 +31,7 @@ SINGLE_BANK_AUTO_PAIRED_CODES = {"salary_personal_auto_match"}
 MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
 OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
 OA_BANK_SETTLEMENT_PAIRED_CODES = {"personal_advance_repayment_settlement"}
-NO_OA_BANK_BATCH_PAIRED_CODES = {NO_OA_BANK_BATCH_RELATION_MODE}
+NO_OA_BANK_BATCH_PAIRED_CODES = {NO_OA_BANK_BATCH_RELATION_MODE, BANK_FLOW_RULE_BATCH_RELATION_MODE}
 TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
 AUTO_PAIRED_CODES = {
     *SINGLE_BANK_AUTO_PAIRED_CODES,
@@ -1053,7 +1056,10 @@ class WorkbenchCandidateGroupingService:
             return False
         if len(group.bank_rows) < 2:
             return False
-        if any(self._relation_code(row) != NO_OA_BANK_BATCH_RELATION_MODE for row in group.bank_rows):
+        relation_codes = {self._relation_code(row) for row in group.bank_rows}
+        if not relation_codes.issubset(NO_OA_BANK_BATCH_PAIRED_CODES):
+            return False
+        if relation_codes == {BANK_FLOW_RULE_BATCH_RELATION_MODE} and len(group.bank_rows) <= 3:
             return False
         source_batch_ids = {
             source_batch_id
@@ -1067,7 +1073,7 @@ class WorkbenchCandidateGroupingService:
     def _apply_no_oa_bank_batch_collapsed_summary(self, payload: dict[str, Any]) -> None:
         bank_rows = [row for row in list(payload.get("bank_rows") or []) if isinstance(row, dict)]
         summary_row = self._no_oa_bank_batch_summary_row(bank_rows)
-        payload["relation_mode"] = NO_OA_BANK_BATCH_RELATION_MODE
+        payload["relation_mode"] = self._relation_code(bank_rows[0]) or NO_OA_BANK_BATCH_RELATION_MODE
         payload["display_mode"] = "collapsed_summary"
         payload["default_collapsed"] = True
         payload["summary_row"] = summary_row
@@ -1306,6 +1312,9 @@ class WorkbenchCandidateGroupingService:
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
         if self._is_turnover_manual_closure_group(group):
             return row_type_count >= 3 and self._is_confirmed_active_relation_group(group)
+        relation_codes = {self._relation_code(row) for row in rows}
+        if relation_codes and relation_codes.issubset(NO_OA_BANK_BATCH_PAIRED_CODES):
+            return self._no_oa_group_has_required_row_types(group)
         if row_type_count == 1 and group.bank_rows and not group.oa_rows and not group.invoice_rows:
             relation_codes = {
                 str(row.get("invoice_relation", {}).get("code", ""))
@@ -1314,8 +1323,6 @@ class WorkbenchCandidateGroupingService:
             if relation_codes and relation_codes.issubset(SINGLE_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) == 1:
                 return True
             if relation_codes and relation_codes.issubset(MULTI_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) >= 2:
-                return True
-            if relation_codes and relation_codes.issubset(NO_OA_BANK_BATCH_PAIRED_CODES):
                 return True
         if row_type_count == 2 and group.oa_rows and group.invoice_rows and not group.bank_rows:
             relation_codes = {
@@ -1336,6 +1343,27 @@ class WorkbenchCandidateGroupingService:
             if any(self._is_batch_accounting_relation_row(row) for row in [*group.oa_rows, *group.bank_rows]):
                 return True
         return row_type_count >= 3
+
+    def _no_oa_group_has_required_row_types(self, group: CandidateGroup) -> bool:
+        if not group.bank_rows:
+            return False
+        rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+        requires_oa = any(
+            self._no_oa_paired_requirement(row, "paired_requires_oa")
+            or self._no_oa_paired_requirement(row, "requires_oa")
+            for row in rows
+        )
+        requires_invoice = any(
+            self._no_oa_paired_requirement(row, "paired_requires_invoice")
+            or self._no_oa_paired_requirement(row, "requires_invoice")
+            for row in rows
+        )
+        return (not requires_oa or bool(group.oa_rows)) and (not requires_invoice or bool(group.invoice_rows))
+
+    @staticmethod
+    def _no_oa_paired_requirement(row: dict[str, Any], key: str) -> bool:
+        metadata = row.get("special_metadata")
+        return isinstance(metadata, dict) and bool(metadata.get(key))
 
     def _is_turnover_manual_closure_group(self, group: CandidateGroup) -> bool:
         rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]

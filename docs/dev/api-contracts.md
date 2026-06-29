@@ -13,7 +13,8 @@
 - `/api/session/*`：OA 会话和当前用户。
 - `/api/workbench*`：关联工作台查询、详情、动作、异常、设置。
 - `/imports/*`：导入预览、确认、模板、批次和文件会话。
-- `/api/no-oa-bank-batches/*`：免 OA 批次。
+- `/api/bank-flow-rule-batches/*`：流水规则批量处理，计划新增。
+- `/api/no-oa-bank-batches/*`：免 OA 批次 legacy。
 - `/api/etc/business-batches*`：ETC 用户可见业务批次、补充导入、OA 草稿和 OA 提交人工确认。
 - `/api/tax-offset*`：税金抵扣和已认证导入。
 - `/api/cost-statistics*`：成本统计、下钻和导出。
@@ -27,7 +28,7 @@
 
 `GET /api/workbench/settings`
 
-返回关联台和设置页共享的平台设置 payload。响应可包含 `bank_transaction_tags`，用于前端展示当前银行明细标签事实和配置待找发票/免 OA/往来款等下游规则候选。
+返回关联台和设置页共享的平台设置 payload。响应可包含 `bank_transaction_tags`，用于前端展示当前银行明细标签事实和配置待找发票、流水规则批量处理、免 OA legacy、往来款等下游规则候选。
 
 `POST /api/workbench/settings`
 
@@ -37,7 +38,7 @@
 - `AppSettingsService.update_settings(...)` 不暴露 `bank_transaction_tags` 写参数；银行明细自动标签规则只能通过银行明细自动标签 API 或复用该 application service 的恢复工具保存。
 - 前端 settings/workbench API mapper 不得把 GET 得到的 `bank_transaction_tags` 原样回传到该接口，避免把规则内部元数据洗成只剩 label/path/status 的展示字典。
 - 银行明细标签定义、自动匹配规则、外部往来 `turnover_action_type` / `turnover_role` 等元数据只能通过 `/api/bank-details/auto-tag-rules`、`/api/bank-details/auto-tag-rules/file-replacement` 或相关银行明细规则 service 保存。
-- 待找发票、免 OA、往来款标签选择等下游规则只能引用当前 active 银行明细标签 code；保存这些下游规则不得递增 `bank_transaction_tags.version`。
+- 待找发票、流水规则批量处理、免 OA legacy、往来款标签选择等下游规则只能引用当前 active 银行明细标签 code；保存这些下游规则不得递增 `bank_transaction_tags.version`。
 
 ## 日常报销批量账务管理 API
 
@@ -128,7 +129,7 @@
 | `read_model_status` | 保存后固定表示相关 read model 正在刷新，通常为 `refreshing`。 |
 | `derived_data_lifecycle` | `pending_invoice_rules_changed` lifecycle 执行摘要，包含 affected domains、skipped domains、invalidated scopes 和 enqueued jobs。 |
 
-规则变更只通过 `pending_invoice_rules_changed` 进入派生数据生命周期。该事件刷新发票生命周期、待找发票、关联台、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和搜索相关 read model；不得刷新 `turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。
+规则变更只通过 `pending_invoice_rules_changed` 进入派生数据生命周期。该事件刷新发票生命周期、待找发票、关联台、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和搜索相关 read model；不得刷新 `turnover_ledger`、`bank_flow_rule_batch`、`no_oa_bank_batch`、`bank_account_balance`。
 
 当 lifecycle 入队成本统计刷新时，`derived_data_lifecycle.enqueued_jobs` 必须报告真实 durable queue 事件 `cost_statistics.read_model.refresh`。`cost_statistics_cache_warmup` 只代表 legacy/background cache warmup，不能用于描述待找发票规则变更触发的 read model refresh。
 
@@ -167,7 +168,118 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 前端必须对 `overall.level/color/reason`、domain `key/level/status/reason`、task `job_id/status` 做 fail-closed 校验。关键字段缺失或非法时，不能把 payload 默认解释为 `ok/green/ready`。
 
+## 流水规则批量处理 API
+
+状态：planned。以下合同用于后续实现 `bank-flow-rule-batches`，当前生产代码仍以 legacy no-OA API 为主。
+
+`GET /api/bank-flow-rule-batches/tag-rules`
+
+返回流水规则批量处理右侧抽屉所需的标签和 OA/发票闭环要求。该接口只读取银行明细 active 标签作为左侧事实，不创建或修改银行标签。
+
+响应字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `version` | 本模块规则版本，用于保存时乐观锁。 |
+| `bank_auto_tag_rules_version` | 当前银行明细自动标签规则版本；前端可用它判断左侧标签事实是否变化。 |
+| `active_tags` | 银行明细 active 标签，只读展示 `收支类型 / 流水主标签 / 流水子标签`。 |
+| `rules` | 当前可用标签的闭环要求列表。每行包含 `tag_code`、`requires_oa`、`requires_invoice`。 |
+| `requirements_by_tag_code` | `rules` 的 code map 形式。 |
+| `permissions` | 当前用户读取、保存、提交、rebaseline 权限。 |
+
+`active_tags[*]` 至少包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `code` | 银行明细标签稳定身份。 |
+| `direction` | `income`、`expense` 或 `all`。 |
+| `primary_label` | 流水主标签。 |
+| `sub_label` | 流水子标签；为空时前端可显示主标签。 |
+| `status` | 当前只返回 `active`。 |
+
+`rules[*].requires_oa=true` 表示该标签的流水必须有关联 OA row 才能进入关联台已配对区；`rules[*].requires_invoice=true` 表示必须有关联发票 row。未勾选表示该项不是进入已配对区的前置条件。新增或未配置标签默认 `requires_oa=true, requires_invoice=true`。
+
+`PUT /api/bank-flow-rule-batches/tag-rules`
+
+请求示例：
+
+```json
+{
+  "expected_version": 3,
+  "rules": [
+    { "tag_code": "bank_fee", "requires_oa": false, "requires_invoice": false },
+    { "tag_code": "project_payment", "requires_oa": true, "requires_invoice": true }
+  ]
+}
+```
+
+保存规则：
+
+- `expected_version` 必填；版本不一致返回 `409 bank_flow_rule_batch_tag_rules_version_conflict`。
+- 请求不能包含 `selected_tag_codes`；旧字段不得作为新规则事实写入。
+- 只能提交当前 `active_tags` 中存在且可用的标签 code；未知、停用、重复 code 返回业务错误。
+- 成功后返回与 GET 相同结构，写审计动作 `bank_flow_rule_batch_tag_rules_updated`。
+- 保存后触发 `bank_flow_rule_batch`、`workbench`、`workbench_relation` 等受影响 read model refresh；不能递增 `bank_transaction_tags.version`。
+
+`GET /api/bank-flow-rule-batches`
+
+查询流水规则批量处理列表。常用查询参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `month` | `YYYY-MM` 月份。 |
+| `bucket` | `candidate`、`submitted`、`withdrawn` 或 `all`。 |
+| `account_key` | 银行账户筛选。 |
+| `tag_code` | 银行标签筛选。 |
+| `page` / `page_size` | 分页；`page_size` 上限由后端固定。 |
+
+响应必须包含 summary、rows、pagination、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`。非 fresh 时前端不能把空 rows 当真实无候选。
+
+`POST /api/bank-flow-rule-batches/submit-selection`
+
+提交当前页面选中的银行流水，生成一个流水规则批量处理批次并通过 relation command service 创建 active relation。
+
+请求示例：
+
+```json
+{
+  "transaction_ids": ["bank-row-001", "bank-row-002", "bank-row-003", "bank-row-004"],
+  "expected_rule_version": 8,
+  "note": ""
+}
+```
+
+提交规则：
+
+- `transaction_ids` 必填、不能为空、不能重复。
+- 实现初期要求所有流水来自同一月份、同一银行账户、同一当前有效银行标签；后续放宽必须更新本 API 和模块状态机。
+- 提交前必须重查银行流水、标签、active relation 占用和规则版本。
+- 成功后写入 `relation_mode=bank_flow_rule_batch`，并在 relation `special_metadata` 写入 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`。
+- 关联台按 metadata 判断 open/paired；`source_row_count > 3` 时默认折叠。
+- 成功响应返回 `batch_id`、`case_id`、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。
+
+`POST /api/bank-flow-rule-batches/rebaseline-no-oa/dry-run`
+
+生成历史 submitted no-OA 批次撤回计划，不改变事实。
+
+响应至少包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `manifest_id` | dry-run 计划身份。 |
+| `candidate_batches` | 待撤回旧 no-OA submitted 批次。 |
+| `candidate_relations` | 待通过 command service 撤回的旧 relation。 |
+| `affected_transaction_ids` | 释放的银行流水 ID。 |
+| `affected_months` | 受影响月份。 |
+| `blocked_items` | 不能自动处理的批次和原因。 |
+
+`POST /api/bank-flow-rule-batches/rebaseline-no-oa/apply`
+
+按 dry-run manifest 撤回历史 submitted no-OA 批次。apply 必须幂等、审计，并通过 `WorkbenchRelationCommandService` 撤销旧 `relation_mode=no_oa_bank_batch`。成功后旧批次标记为 rebaseline withdrawn，银行 rows 回到可按新规则处理的状态；不得自动重新提交。
+
 ## 免 OA 流水批量处理 API
+
+状态：legacy。新通用功能应实现 `流水规则批量处理 API`，不要继续扩展本节为新的通用规则合同。
 
 `GET /api/no-oa-bank-batches/tag-selection`
 
@@ -179,9 +291,11 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | --- | --- |
 | `version` | 免 OA 标签准入配置版本，用于保存时乐观锁。 |
 | `bank_auto_tag_rules_version` | 当前银行明细自动标签规则版本；前端可用它判断标签事实源是否已变化。 |
-| `selected_tag_codes` | 当前已保存、仍处于可用状态的标签 code 列表。首次为空数组，后续由用户保存决定。 |
+| `selected_tag_codes` | 兼容字段：当前仍可用、且 `OA/发票` 都不需要的标签 code 列表。首次为空数组；新调用方应以 `rules` 为准。 |
 | `inactive_selected_tag_codes` | 历史配置中已停用或不可用的标签 code；不参与候选生成，保存后会被清理。 |
-| `active_tags` | 银行明细自动标签规则中的可用标签，供抽屉按主/子标签层级展示。 |
+| `active_tags` | 银行明细自动标签规则中的可用标签，供抽屉以只读 grid 展示 `收支类型 / 流水主标签 / 流水子标签`。 |
+| `rules` | 当前可用标签的闭环要求列表。每行包含 `tag_code`、`requires_oa`、`requires_invoice`；`true` 表示必须有对应 OA 或发票行才能进入关联台已配对区。 |
+| `requirements_by_tag_code` | `rules` 的 code map 形式，便于后端服务和前端 draft 合并。 |
 
 `active_tags[*]` 至少包含：
 
@@ -191,6 +305,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `label` | 标签显示名称。 |
 | `path` | 标签路径，可用于审计或调试。 |
 | `status` | 当前只返回 `active`。 |
+| `direction` | 银行自动标签规则收支方向；前端显示为收入、支出或全部。 |
 | `output_primary_label` / `output_sub_label` | 免 OA 页面展示的主/子标签。`output_sub_label` 可为空，前端显示为“主标签本身”。 |
 
 免 OA 标签准入不返回第三层流水分类字段。外部往来流水的“个人往来 / 公司往来 / 银行往来 / 业务往来”只属于银行明细候选确认或人工补分类时选择的流水级分类，不作为免 OA 自动规则保存或展示。
@@ -202,14 +317,20 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 ```json
 {
   "expected_version": 3,
-  "selected_tag_codes": ["fee", "salary"]
+  "rules": [
+    { "tag_code": "fee", "requires_oa": false, "requires_invoice": false },
+    { "tag_code": "salary", "requires_oa": true, "requires_invoice": false }
+  ],
+  "selected_tag_codes": ["fee"]
 }
 ```
 
 保存规则：
 
 - `expected_version` 必填；版本不一致返回 `409 no_oa_bank_batch_tag_selection_version_conflict`。
-- `selected_tag_codes` 可为空数组，表示免 OA 页面暂不生成新的未提交候选。
+- `rules` 是当前主合同；`selected_tag_codes` 只用于旧调用方兼容。旧调用方只传 `selected_tag_codes` 时，后端解释为这些标签 `requires_oa=false, requires_invoice=false`。
+- `rules[*].requires_oa=true` 表示该标签流水必须关联 OA 才能进入关联台已配对区；`requires_invoice=true` 表示必须关联发票才可进入已配对区。未勾选表示该项不是进入已配对的前置条件。
+- 只有 `requires_oa=false` 且 `requires_invoice=false` 的标签会派生到 `selected_tag_codes`，并进入免 OA 未提交候选。新增银行自动标签若没有保存过规则，默认 `requires_oa=true, requires_invoice=true`，避免新增标签自动放行到免 OA 候选。
 - 只能提交当前 `active_tags` 中存在且处于可用状态的标签 code；未知或停用标签返回业务错误。
 - 成功后返回与 GET 相同结构，并写审计动作 `no_oa_bank_batch_tag_selection_updated`。
 - 保存后只影响后续未提交候选；已提交历史批次继续可见并允许按批次撤回。
@@ -254,7 +375,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `transaction_ids` 必填且不能为空，不能重复。
 - 所有流水必须来自同一月份、同一银行账户、同一 `category_code`，且该 `category_code` 必须在当前免 OA 标签准入范围内。
 - 只提交请求中的流水；同银行区域内未选中的流水不提交。
-- 成功后写入 `relation_mode=no_oa_bank_batch`，返回 `affected_months` 和 `workbench_rebuild_queued` 供前端刷新关联台。
+- 成功后写入 `relation_mode=no_oa_bank_batch`，并在 relation `special_metadata` 写入 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code` 和 `paired_requirement_version`；关联台分组按这些字段判断是否可进入已配对区，返回 `affected_months` 和 `workbench_rebuild_queued` 供前端刷新关联台。
 
 `POST /api/no-oa-bank-batches/{batch_id}/withdraw`
 
@@ -571,9 +692,9 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 普通维护 UI 保存时，所有规则固定提交 `account_scope={"type":"any","values":[]}` 和 `rules.regex_any=[]`。后端继续兼容读取旧数据中的账户范围和正则字段，但普通维护 UI 不生成这些高级条件。
 - 可用标签必须至少填写 `exact_any`、`contains_any` 或 `contains_all` 中的一类；`none_of` 只能为空或配合正向条件使用，不能单独构成命中。
 - `match_fields` 只能使用 `field_options` 中的语义字段，且不能为空。
-- 停用已被待找发票规则或免 OA 批量标签选择引用的标签时，后端同步移除这些引用、写入审计，并在保存成功后触发相关 read model 刷新。
+- 停用已被待找发票规则、流水规则批量处理或免 OA legacy 批量标签选择引用的标签时，后端同步移除或标记这些引用、写入审计，并在保存成功后触发相关 read model 刷新。
 - 成功后返回与 GET 相同结构，并写审计动作 `bank_auto_tag_rules_updated`。
-- 成功保存只标记派生数据 dirty/enqueue 后台刷新，不在 API 请求热路径同步扫描全量银行流水、免 OA 批次、关联台或待找发票 read model。
+- 成功保存只标记派生数据 dirty/enqueue 后台刷新，不在 API 请求热路径同步扫描全量银行流水、流水规则批量处理、免 OA 批次、关联台或待找发票 read model。
 
 重新应用当前规则：
 
@@ -595,7 +716,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 请求体为空时使用仓库内 `fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json` 作为生产基准规则；也可提交同结构 JSON 或 `{ "source": ... }`。
 - 后端用文件内普通规则替换当前普通自动标签规则，保留 `内部往来款` 系统规则；能按主标签+子标签复用的标签沿用原 code，无法复用的生成新 code，不在文件内的旧普通规则归档。
 - 文件内普通规则全部写入 priority `2`，并用 `sort_order` 保留文件顺序；`内部往来款` 仍是固定系统规则 priority `1`。
-- 被归档标签若被待找发票规则或免 OA 批量标签选择引用，后端同步移除引用并审计。
+- 被归档标签若被待找发票规则、流水规则批量处理或免 OA legacy 批量标签选择引用，后端同步移除或标记引用并审计。
 - 成功后触发 `bank_auto_tag_rules_changed` 生命周期事件和银行明细 read model 刷新。
 
 错误响应保持 JSON envelope：

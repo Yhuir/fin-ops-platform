@@ -4,9 +4,21 @@
 - 类型: 页面模块
 - Route: `/no-oa-bank-batches`
 - Page key: `no-oa-bank-batches`
+- 状态: legacy。新功能方向为 `docs/modules/bank-flow-rule-batches/README.md` 的“流水规则批量处理”；不要继续在本模块扩展新的通用流水规则职责。
+
+## 迁移说明
+
+免 OA 流水批量处理已被重新定义为流水规则批量处理的历史前身。后续实现应新增 `bank-flow-rule-batches` route/service/read model，并逐步迁移或删除本模块主入口。
+
+迁移目标：
+
+- 旧 `selected_tag_codes` 不作为新规则事实迁移；所有数据按新 `requires_oa` / `requires_invoice` 规则重新处理。
+- 历史已提交 no-OA 批次通过受控 rebaseline dry-run/apply 撤回到未处理状态。
+- 本模块在迁移完成后只保留历史查询、审计或受控工具边界，不能继续作为通用流水批量提交入口。
 
 ## 修改前必读
 
+- `docs/modules/bank-flow-rule-batches/README.md`
 - `docs/product-specs/bank-turnover-and-no-oa.md`
 - `docs/operations/object-identity-dedup.md`
 - `docs/app-architecture/runtime-and-ownership.md`
@@ -40,12 +52,12 @@
 当前有效边界：
 
 - 候选来源：银行明细有效分类和免 OA 标签准入；未提交候选必须排除已被 Workbench active relation 占用的流水。
-- 标签准入：`GET/PUT /api/no-oa-bank-batches/tag-selection` 只读取银行明细自动标签规则中的可用标签，不保存第三层外部往来分类字段。
+- 标签规则：`GET/PUT /api/no-oa-bank-batches/tag-selection` 只读取银行明细自动标签规则中的可用标签，不保存第三层外部往来分类字段。抽屉左侧 `收支类型 / 流水主标签 / 流水子标签` 只读并跟随银行明细自动标签增减；右侧只维护 `OA / 发票` 两个闭环要求勾选。`rules` 是主合同，`selected_tag_codes` 仅派生表示 OA/发票都不需要的兼容 code 列表。
 - 读取路径：`GET /api/no-oa-bank-batches` 优先读 `no_oa_bank_batch` SQL read model；missing/stale 时只 enqueue refresh，不在 GET 热路径同步重建批次。带 `month=YYYY-MM` 的查询必须刷新同一个月 scope；只有未指定有效月份时才使用 `all`。
 - 首屏分页：`GET /api/no-oa-bank-batches` 支持显式 `page/page_size` 或 `pageSize`，`page_size` 上限为 200。前端列表默认以 `page=1&page_size=200` 读取，并渲染分页控件；切换月份、状态 bucket 或页码时必须清空当前选择、详情缓存和详情错误，避免跨 scope 操作旧批次。
-- 提交路径：`submit-selection` 只提交用户当前选择的流水；要求同月、同银行账户、同 `category_code`，且 code 在当前免 OA 标签准入范围内。
+- 提交路径：`submit-selection` 只提交用户当前选择的流水；要求同月、同银行账户、同 `category_code`，且 code 在当前免 OA 标签规则中 `requires_oa=false` 且 `requires_invoice=false`。
 - 提交事实冻结：提交时必须把批次内每条银行流水的有效标签写入 `row_tag_snapshot`，并随 `relation_mode=no_oa_bank_batch` 的 `special_metadata` 一起保存。提交后的 `submitted/withdrawn` 批次详情优先展示提交时标签；银行明细后续改标签只影响新的 `draft` 候选，不得覆盖已提交批次内流水标签。
-- Relation 写入：`submit-selection`、单批次 submit、关联台 internal transfer submit、withdraw、legacy migration、submitted repair 和 submitted single-side consolidation 都必须通过 `WorkbenchRelationCommandService` 写入或撤销 `relation_mode=no_oa_bank_batch`；`NoOaBankBatchService` 在常规写入口只负责批次状态机和 relation command payload，legacy/repair/consolidation 路径只负责识别修复意图并委托 command service。缺 command service 时 fail fast，不回退 direct pair mutation。银行明细标签变化不得触发 submitted batch 的 category drift cleanup。
+- Relation 写入：`submit-selection`、单批次 submit、关联台 internal transfer submit、withdraw、legacy migration、submitted repair 和 submitted single-side consolidation 都必须通过 `WorkbenchRelationCommandService` 写入或撤销 `relation_mode=no_oa_bank_batch`；`NoOaBankBatchService` 在常规写入口只负责批次状态机和 relation command payload，legacy/repair/consolidation 路径只负责识别修复意图并委托 command service。提交 relation 时必须在 `special_metadata` 写入 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code` 和 `paired_requirement_version`，关联台已配对区按这些字段判断缺 OA/发票的 no-OA relation 是否应降回 open。缺 command service 时 fail fast，不回退 direct pair mutation。银行明细标签变化不得触发 submitted batch 的 category drift cleanup。
 - Freshness 与写安全：`workbench_relation` distribution non-fresh 只影响读侧候选和 App Status 诊断；submit/withdraw 写入必须通过 `WorkbenchRelationCommandService` 的 canonical relation、idempotency、row occupation、owner 状态、权限/session 和 DB 可写性校验。只有目标写模型或 canonical 写安全不可确认时才阻断写入，不因普通 distribution 追赶中全局禁用操作。
 - 内部往来：关联台 confirm-link 选中两条 `internal_transfer` 银行流水时，最终事实必须归入免 OA 批次，并写 `relation_mode=no_oa_bank_batch`，不能直接写普通 `manual_confirmed`；免 OA 页面先提交或关联台先提交都必须收敛到同一个 submitted batch / active relation，不能形成第二条 active relation。
 - 历史归并：当 `internal_transfer` 已纳入免 OA 标签准入时，存量两行、全银行流水、同金额、不同账户、收支成对且有效分类均为 `internal_transfer` 的 `manual_confirmed` active relation，可由显式兼容 repair 路径通过 command service 迁移为 submitted no-OA 批次；如果同一 row set 已存在 current submitted no-OA batch，迁移复用该 batch 的 relation case，不创建第二条 active relation。`no_oa_bank_batch.read_model.refresh` worker 不执行 relation repair 或 pair relation 持久化。

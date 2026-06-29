@@ -95,7 +95,7 @@ export function renderAuthenticatedAppAt(
                       <Link to="/bank-details">银行明细</Link>
                       <Link to="/input-invoice-usage">进项发票使用情况</Link>
                       <Link to="/output-invoice-collections">销项发票收款情况</Link>
-                      <Link to="/no-oa-bank-batches">免OA流水批量处理</Link>
+                      <Link to="/bank-flow-rule-batches">流水规则批量处理</Link>
                     </nav>
                     <main>
                       <AppRouter />

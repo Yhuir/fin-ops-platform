@@ -73,7 +73,7 @@ const pendingInvoicesPage = lazyPage(() => import("../pages/PendingInvoicesPage"
 const inputInvoiceUsagePage = lazyPage(() => import("../pages/InputInvoiceUsagePage"));
 const oaPendingPaymentsPage = lazyPage(() => import("../pages/OaPendingPaymentsPage"));
 const outputInvoiceCollectionsPage = lazyPage(() => import("../pages/OutputInvoiceCollectionsPage"));
-const noOaBankBatchPage = lazyPage(() => import("../pages/NoOaBankBatchPage"));
+const bankFlowRuleBatchPage = lazyPage(() => import("../pages/NoOaBankBatchPage"));
 const batchAccountingPage = lazyPage(() => import("../pages/BatchAccountingPage"));
 const turnoverLedgerPage = lazyPage(() => import("../pages/TurnoverLedgerPage"));
 const etcTicketManagementPage = lazyPage(() => import("../pages/EtcTicketManagementPage"));
@@ -114,11 +114,11 @@ export const appPageDefinitions: AppPageDefinition[] = [
     sidebar: { group: "finance", label: "OA待付款核对", icon: ClipboardCheck },
   },
   {
-    path: "/no-oa-bank-batches",
-    pageKey: "no-oa-bank-batches",
-    component: noOaBankBatchPage.component,
-    preload: noOaBankBatchPage.preload,
-    sidebar: { group: "finance", label: "免OA流水批量处理", icon: ListChecks },
+    path: "/bank-flow-rule-batches",
+    pageKey: "bank-flow-rule-batches",
+    component: bankFlowRuleBatchPage.component,
+    preload: bankFlowRuleBatchPage.preload,
+    sidebar: { group: "finance", label: "流水规则批量处理", icon: ListChecks },
   },
   {
     path: "/batch-accounting",

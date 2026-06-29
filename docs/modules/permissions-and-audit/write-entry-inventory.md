@@ -148,7 +148,7 @@
 | `bank-details:auto-tag-rules` | `bank-details` | 自动标签规则抽屉 | read-export 下新增标签、重新应用规则、保存禁用，且复扫 visible enabled 写控件候选。 |
 | `bank-details:category-confirmation` | `bank-details` | 银行明细行内分类确认入口 | read-export 下待确认分类按钮禁用，分类菜单不打开，category-confirmation durable mutation 零调用，且复扫候选。 |
 | `bank-details:manual-category-assignment` | `bank-details` | 银行明细未匹配人工分类入口 | read-export 下待分类按钮禁用，人工分类菜单不打开，category-assignment durable mutation 零调用，且复扫候选。 |
-| `no-oa-bank-batches:tag-drawer` | `no-oa-bank-batches` | 免 OA 流水标签管理抽屉 | read-export 下提交/撤回入口不可见，标签全选/清空/保存禁用，且复扫候选。 |
+| `no-oa-bank-batches:tag-drawer` | `no-oa-bank-batches` | 免 OA 流水标签管理抽屉 | read-export 下提交/撤回入口不可见，标签规则 OA/发票复选框和保存禁用，且复扫候选。 |
 | `pending-invoices:expense-rules` | `pending-invoices` | 支出待找发票规则抽屉 | read-export 下选择发票禁用、规则保存禁用，且复扫候选。 |
 | `pending-invoices:income-rules` | `pending-invoices` | 收入待找发票规则抽屉 | read-export 下收入规则保存禁用、规则 PUT 零调用，且复扫候选。 |
 | `pending-invoices:income-batch` | `pending-invoices` | 收入批量状态区 | read-export 下标记无需开票/现金收入禁用，且复扫候选。 |
@@ -190,7 +190,7 @@
 | `imports-etc-invoices` | zip 选择、preview、confirm import | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-etc-invoices-flow.spec.ts` 覆盖 full_access 主链路 | 同上。 |
 | `pending-invoices` | 选择已有发票、收入批量状态、规则保存 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下选择已有发票、支出/收入规则保存、收入状态按钮禁用且零 mutation；`web/e2e/pending-invoices-*` 覆盖 full_access 主链路；后端/API guard 覆盖 mutation 拒绝 | 新增待找发票写入口时补同类 Browser 断言。 |
 | `tax-offset` | 保存计划、已认证发票导入 | `covered-browser` | `web/e2e/tax-offset-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 新增税金 mutation 时补。 |
-| `no-oa-bank-batches` | 标签准入保存、提交批次、撤回批次、内部往来提交 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/no-oa-bank-batches-flow.spec.ts`、组件/API tests | 新增 batch command 时补。 |
+| `no-oa-bank-batches` | 标签准入保存、提交批次、撤回批次、内部往来提交 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/bank-flow-rule-batches-flow.spec.ts`、组件/API tests | 新增 batch command 时补。 |
 | `batch-accounting` | 关联 OA 项与流水、撤回关联 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下选择 OA 后 submit disabled、已提交 bucket 撤回关联 disabled 且 submit/withdraw 零 mutation；`web/e2e/batch-accounting-flow.spec.ts` 覆盖 full_access submit/withdraw | 新增 batch accounting command 时补同类 Browser 断言。 |
 | `turnover-ledger` | 标签准入保存、确认闭环、撤回闭环、extra 保存/confirm/withdraw、导出 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖标签抽屉保存 disabled、flow checkbox disabled、extra 编辑入口 disabled、确认闭环 disabled 且零 mutation；extra 抽屉内部保存/confirm/withdraw 因只读角色无法进入写入口，组件/API 覆盖内部按钮和 guard；`web/e2e/turnover-ledger-flow.spec.ts` 覆盖 full_access 主链路 | 新增 turnover 写入口或把 extra 改成只读可打开时，必须补对应 Browser 断言。 |
 | `input-invoice-usage` | 支付规则保存、OA reverse 草稿创建 | `covered-browser` | `web/e2e/input-invoice-usage-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开支付状态规则抽屉和以发票反提 OA 工作流，断言规则只读、OA reverse preview 不可创建草稿、durable write endpoints 零调用并复跑 DOM 写控件候选扫描 | 新增 payment/OA 写入口时补。 |

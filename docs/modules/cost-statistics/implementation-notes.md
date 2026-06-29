@@ -257,16 +257,16 @@
 ## 2026-06-19 - no-OA submit 到成本统计 Browser fan-out
 
 - 目标：继续推进 `COST-E2E-010`，用真实 Chromium 证明 no-OA 手续费批次提交后，成本统计不是依赖本页状态或静态数据，而是重新读取自己的 fresh read model 并展示 no-OA 成本行。
-- 影响范围：`web/e2e/no-oa-bank-batches-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、成本统计和 no-OA 测试矩阵、Spec-first 覆盖矩阵和全局 testing closure state。
+- 影响范围：`web/e2e/bank-flow-rule-batches-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、成本统计和 no-OA 测试矩阵、Spec-first 覆盖矩阵和全局 testing closure state。
 - 关键决策：
   - 新增 opt-in deterministic mock `noOaCostFanout`，仅在 no-OA 批次已提交且测试显式启用时，把 `no-oa-bank-e2e-001` 作为 `2026-05` 的免 OA 手续费成本行暴露给成本统计；默认成本统计 mock 不变。
   - Browser 流保持 no-OA 主链路：选择未提交流水 -> submit-selection -> operation barrier -> 成本统计 fresh explorer -> 按项目/费用类型/流水表展示 `免OA手续费成本项目`、`手续费`、`网银手续费` 和 `建设银行` -> 回 no-OA 完成撤回和历史只读断言。
   - 首次运行失败属于测试 selector bug：`/手续费/` 同时匹配项目按钮和费用类型按钮；已收窄为 `/手续费 1 条流水/`，未发现产品逻辑问题。
 - 文档影响：更新 `e2e-coverage.md`、`tests.md`、本实施记录、`docs/modules/no-oa-bank-batches/tests.md`、`docs/modules/no-oa-bank-batches/implementation-notes.md`、`docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/testing-closure-state.md` 和 `docs/dev/testing-closure-dependency-map.md`。
 - 测试覆盖：
-  - 更新 `web/e2e/no-oa-bank-batches-flow.spec.ts`。
+  - 更新 `web/e2e/bank-flow-rule-batches-flow.spec.ts`。
   - 更新 `web/e2e/fixtures/apiMocks.ts` 的 no-OA -> cost statistics fan-out mock。
-- 验证命令：`cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts --project=chromium`。
+- 验证命令：`cd web && npx playwright test e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium`。
 - 未测风险：未连接真实 PostgreSQL/RabbitMQ/Redis/systemd `no-oa-bank-batch` 与 `cost-statistics` worker；真实 enqueue-to-fresh drain、生产历史 no-OA 批次和大数据页面性能仍需 staging/production smoke。
 - 后续事项：继续补真实基础设施 worker drain、更多导入变体或 `COST-E2E-008` 大数据宽表/视觉稳定性。
 

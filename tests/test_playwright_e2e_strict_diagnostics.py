@@ -84,7 +84,7 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
             "pending invoices income status": (E2E_DIR / "pending-invoices-income-status-flow.spec.ts").read_text(encoding="utf-8"),
             "output invoice red relation": (E2E_DIR / "output-invoice-red-relation-fanout.spec.ts").read_text(encoding="utf-8"),
             "batch accounting submit and withdraw": (E2E_DIR / "batch-accounting-flow.spec.ts").read_text(encoding="utf-8"),
-            "no-OA tag, submit, fan-out, and withdraw": (E2E_DIR / "no-oa-bank-batches-flow.spec.ts").read_text(encoding="utf-8"),
+            "bank flow rule tag, submit, fan-out, and withdraw": (E2E_DIR / "bank-flow-rule-batches-flow.spec.ts").read_text(encoding="utf-8"),
             "turnover tag, closure, fan-out, and withdraw": (E2E_DIR / "turnover-ledger-flow.spec.ts").read_text(encoding="utf-8"),
             "settings reset and project-scope fan-out": (E2E_DIR / "settings-data-reset-flow.spec.ts").read_text(encoding="utf-8"),
             "ETC OA draft and manual submitted": (E2E_DIR / "etc-tickets-flow.spec.ts").read_text(encoding="utf-8"),

@@ -151,9 +151,9 @@ Notes:
 | Batch actions | `查看<account>流水`, selected batch `全选`/`清空`, internal transfer `提交内部往来批次`, submitted batch `撤回批次`. |
 | Detail table | Accessible table name `<account>流水`; columns `交易时间`、`对方户名`、`金额`、`摘要/用途/备注`、`分类来源`; draft non-internal-transfer rows include account select-all and row checkboxes. |
 | Row content | Direction tag (`收`/`支` or backend label), right-aligned tabular amount, bank/account tag, summary/purpose/remark, category source label `自动`/`人工`. |
-| Tag drawer | Right drawer/dialog name `免OA流水标签管理`; close label `关闭免OA流水标签管理`; version caption; actions `全选`/`清空`/`保存`; inactive selected warning; main and child tag checkboxes including `主标签本身`. |
+| Tag drawer | Right drawer/dialog name `免OA流水标签管理`; close label `关闭免OA流水标签管理`; compact grid columns `收支类型`、`流水主标签`、`流水子标签`、`OA`、`发票`; action `保存`; inactive selected warning; bank tag labels are read-only and OA/发票 are checkboxes. |
 | Withdraw dialog | Dialog title `撤回批次`; warning copy `撤回后会取消关联台闭环关系，相关流水回到未配对区域。`; field `撤回原因`; buttons `取消` and `确认撤回`; submit disabled without reason. |
-| Snackbar/status feedback | Success/warning/error feedback remains user visible: `免OA流水标签范围已保存`, `选中流水已提交`, `内部往来批次已提交`, `批次已撤回`, selection warning and API error messages. |
+| Snackbar/status feedback | Success/warning/error feedback remains user visible: `免OA流水规则已保存`, `选中流水已提交`, `内部往来批次已提交`, `批次已撤回`, selection warning and API error messages. |
 | Read model stale handling | Stale/read-model-refresh detail text stays hidden; page keeps current rows visible while background polling runs; retry timers are cleaned up when the route unmounts. |
 
 ## API / Read Model Boundary

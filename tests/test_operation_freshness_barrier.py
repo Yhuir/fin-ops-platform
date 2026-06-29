@@ -70,6 +70,33 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
         self.assertFalse(payload["fresh"])
         self.assertEqual(payload["refreshing_targets"][0]["scope_key"], "2026-05")
 
+    def test_bank_flow_rule_batch_target_reuses_no_oa_readiness(self) -> None:
+        service = OperationFreshnessBarrierService(
+            runtime_snapshot_provider=lambda: {
+                "read_model_statuses": {
+                    "no_oa_bank_batch": {
+                        "status": "fresh",
+                        "scopes": [
+                            {
+                                "scope_type": "no_oa_bank_batch",
+                                "scope_key": "2026-05",
+                                "status": "fresh",
+                            }
+                        ],
+                    }
+                },
+                "outbox_statuses": {},
+                "worker_statuses": {"no-oa-bank-batch": {"status": "ready"}},
+            }
+        )
+
+        payload = service.status_payload([OperationFreshnessTarget("bank_flow_rule_batch", "2026-05")])
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["targets"][0]["read_model_key"], "bank_flow_rule_batch")
+        self.assertEqual(payload["targets"][0]["scope_type"], "no_oa_bank_batch")
+        self.assertEqual(payload["targets"][0]["worker_status"], "ready")
+
     def test_target_scope_outbox_pending_keeps_target_refreshing_when_readiness_was_fresh(self) -> None:
         service = OperationFreshnessBarrierService(
             runtime_snapshot_provider=lambda: {

@@ -16,8 +16,6 @@ import { renderAuthenticatedAppAt } from "./renderHelpers";
 const tagSelectionPayload = {
   version: 3,
   bank_auto_tag_rules_version: 7,
-  selected_tag_codes: ["fee", "salary", "holiday_bonus", "internal_transfer"],
-  inactive_selected_tag_codes: [],
   active_tags: [
     { code: "fee", label: "手续费", output_primary_label: "费用", output_sub_label: "手续费", status: "active" },
     { code: "salary", label: "工资", output_primary_label: "人工成本", output_sub_label: "工资", status: "active" },
@@ -34,6 +32,14 @@ const tagSelectionPayload = {
       status: "active",
     },
     { code: "custom_no_sub", label: "其他免OA", output_primary_label: "其他免OA", output_sub_label: "", status: "active" },
+  ],
+  rules: [
+    { tag_code: "fee", requires_oa: false, requires_invoice: false },
+    { tag_code: "salary", requires_oa: false, requires_invoice: false },
+    { tag_code: "holiday_bonus", requires_oa: false, requires_invoice: false },
+    { tag_code: "internal_transfer", requires_oa: false, requires_invoice: false },
+    { tag_code: "external_borrow_out", requires_oa: true, requires_invoice: true },
+    { tag_code: "custom_no_sub", requires_oa: true, requires_invoice: true },
   ],
 };
 
@@ -302,7 +308,7 @@ function renderPage(accessTier: SessionAccessTier = "full_access") {
   return render(
     <GlobalOperationOverlayProvider>
       <SessionContext.Provider value={sessionValue(accessTier)}>
-        <PageRuntimeProvider value={{ pageKey: "no-oa-bank-batches", active: true, activationGeneration: 0 }}>
+        <PageRuntimeProvider value={{ pageKey: "bank-flow-rule-batches", active: true, activationGeneration: 0 }}>
           <NoOaBankBatchPage />
         </PageRuntimeProvider>
       </SessionContext.Provider>
@@ -400,48 +406,48 @@ function installFetchMock(payload = listPayload, options: { listFailuresBeforeSu
   let listFailuresRemaining = options.listFailuresBeforeSuccess ?? 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-    if (url.pathname === "/api/no-oa-bank-batches/tag-selection" && (!init?.method || init.method === "GET")) {
+    if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && (!init?.method || init.method === "GET")) {
       return jsonResponse(tagSelectionPayload);
     }
-    if (url.pathname === "/api/no-oa-bank-batches/tag-selection" && init?.method === "PUT") {
+    if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && init?.method === "PUT") {
       const body = JSON.parse(String(init.body ?? "{}"));
-      return jsonResponse({ ...tagSelectionPayload, version: 4, selected_tag_codes: body.selected_tag_codes ?? [] });
+      return jsonResponse({ ...tagSelectionPayload, version: 4, rules: body.rules ?? [] });
     }
-    if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+    if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
       if (listFailuresRemaining > 0) {
         listFailuresRemaining -= 1;
         return jsonResponse({
           error: "no_oa_bank_batch_temporarily_unavailable",
-          message: "免OA流水批次加载暂时失败，请刷新后重试。",
+          message: "流水规则批次加载暂时失败，请刷新后重试。",
         }, 503);
       }
       return jsonResponse(withPagination(payload, url));
     }
-    if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+    if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
       return jsonResponse(feeDetailPayload);
     }
-    if (url.pathname === "/api/no-oa-bank-batches/batch-draft-holiday") {
+    if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-holiday") {
       return jsonResponse({ batch: payload.batches[1], tag_counts: { holiday_bonus: 5 }, direction_counts: { expense: 5 }, rows: [] });
     }
-    if (url.pathname === "/api/no-oa-bank-batches/batch-submitted-salary") {
+    if (url.pathname === "/api/bank-flow-rule-batches/batch-submitted-salary") {
       return jsonResponse({ batch: payload.batches[2], tag_counts: { salary: 8 }, direction_counts: { expense: 8 }, rows: [] });
     }
-    if (url.pathname === "/api/no-oa-bank-batches/batch-conflict-transfer") {
+    if (url.pathname === "/api/bank-flow-rule-batches/batch-conflict-transfer") {
       return jsonResponse(conflictTransferDetailPayload);
     }
-    if (url.pathname === "/api/no-oa-bank-batches/batch-draft-transfer") {
+    if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer") {
       return jsonResponse({ batch: payload.batches[4], tag_counts: { internal_transfer: 2 }, direction_counts: { income: 1, expense: 1 }, rows: [] });
     }
-    if (url.pathname === "/api/no-oa-bank-batches/batch-withdrawn-fee") {
+    if (url.pathname === "/api/bank-flow-rule-batches/batch-withdrawn-fee") {
       return jsonResponse({ batch: payload.batches[5], tag_counts: { fee: 1 }, direction_counts: { expense: 1 }, rows: [] });
     }
-    if (url.pathname === "/api/no-oa-bank-batches/batch-draft-transfer/submit") {
+    if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer/submit") {
       return jsonResponse({ batch: payload.batches[4], affected_months: ["2026-05"], workbench_rebuild_queued: true, results: [] });
     }
-    if (url.pathname === "/api/no-oa-bank-batches/submit-selection") {
+    if (url.pathname === "/api/bank-flow-rule-batches/submit-selection") {
       return jsonResponse({ batch: payload.batches[0], affected_months: ["2026-05"], workbench_rebuild_queued: true, results: [] });
     }
-    if (url.pathname === "/api/no-oa-bank-batches/batch-submitted-salary/withdraw") {
+    if (url.pathname === "/api/bank-flow-rule-batches/batch-submitted-salary/withdraw") {
       return jsonResponse({ batch: payload.batches[2], affected_months: ["2026-05"], workbench_rebuild_queued: true, results: [] });
     }
     if (url.pathname === "/api/operation-barrier/status") {
@@ -488,16 +494,16 @@ describe("NoOaBankBatchPage", () => {
     const missingPrimitiveTargets = [
       pageSource.includes("PageScaffold") ? null : "NoOaBankBatchPage.tsx should keep PageScaffold",
       pageSource.includes("StatePanel") ? null : "NoOaBankBatchPage.tsx should keep StatePanel for loading/empty/error states",
-      /AppDrawer|no-oa-bank-batch.*drawer|no-oa-bank-batches.*drawer/.test(pageSource)
+      /AppDrawer|no-oa-bank-batch.*drawer|bank-flow-rule-batches.*drawer/.test(pageSource)
         ? null
         : "Tag management should use AppDrawer or a project drawer class",
-      /AppDialog|no-oa-bank-batch.*dialog|no-oa-bank-batches.*dialog/.test(pageSource)
+      /AppDialog|no-oa-bank-batch.*dialog|bank-flow-rule-batches.*dialog/.test(pageSource)
         ? null
         : "Withdraw confirmation should use AppDialog or a project dialog class",
-      /finance-table|no-oa-bank-batch.*table|no-oa-bank-batches.*table/.test(pageSource)
+      /finance-table|no-oa-bank-batch.*table|bank-flow-rule-batches.*table/.test(pageSource)
         ? null
         : "Transaction details should use a project dense table class",
-      /no-oa-bank-batch.*rail|no-oa-bank-batches.*rail/.test(pageSource)
+      /no-oa-bank-batch.*rail|bank-flow-rule-batches.*rail/.test(pageSource)
         ? null
         : "Main and child label rails should use project rail classes",
     ].filter(Boolean);
@@ -535,7 +541,10 @@ describe("NoOaBankBatchPage", () => {
     const bankTagsRule = cssRule(styles, ".no-oa-bank-batches-bank-tags,\\n.no-oa-bank-batches-relation-cell");
     const bankDetailTagRule = cssRule(styles, ".no-oa-bank-batches-tag--bank-detail");
     const drawerRule = cssRule(styles, ".no-oa-bank-batches-drawer");
-    const drawerGroupsRule = cssRule(styles, ".no-oa-bank-batches-drawer__groups");
+    const drawerGridWrapRule = cssRule(styles, ".no-oa-bank-batches-drawer__grid-wrap");
+    const drawerGridRule = cssRule(styles, ".no-oa-bank-batches-drawer__grid");
+    const drawerGridCellRule = cssRule(styles, ".no-oa-bank-batches-drawer__grid th,\\n.no-oa-bank-batches-drawer__grid td");
+    const drawerCheckColRule = cssRule(styles, ".no-oa-bank-batches-drawer__check-col");
     const drawerCloseRule = cssRule(styles, ".no-oa-bank-batches-drawer__close");
     const textareaRule = cssRule(styles, ".no-oa-bank-batches-dialog__field textarea");
     const paginationButtonRule = cssRule(styles, ".no-oa-bank-batches-pagination__button");
@@ -568,7 +577,11 @@ describe("NoOaBankBatchPage", () => {
     expect(bankDetailTagRule).toContain("var(--fp-primary)");
     expect(drawerRule).toContain("min(960px, 92vw)");
     expect(drawerRule).toContain("box-shadow: var(--fp-shadow-drawer)");
-    expect(drawerGroupsRule).toContain("repeat(auto-fit, minmax(260px, 1fr))");
+    expect(drawerGridWrapRule).toContain("overflow: auto");
+    expect(drawerGridRule).toContain("border-collapse: collapse");
+    expect(drawerGridRule).toContain("min-width: 620px");
+    expect(drawerGridCellRule).toContain("white-space: nowrap");
+    expect(drawerCheckColRule).toContain("width: 64px");
     expect(paginationButtonRule).toContain("width: 30px");
     expect(paginationButtonRule).toContain("height: 30px");
     expect(toastRule).toContain("box-shadow: var(--fp-shadow-popover)");
@@ -581,18 +594,18 @@ describe("NoOaBankBatchPage", () => {
     const fetchMock = installFetchMock();
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
     await waitFor(() => {
       const firstGet = fetchMock.mock.calls.find(([input, init]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET");
+        return url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET");
       });
       expect(firstGet).toBeTruthy();
       const url = new URL(typeof firstGet?.[0] === "string" ? firstGet[0] : firstGet?.[0] instanceof URL ? firstGet[0].toString() : firstGet?.[0].url ?? "", "http://localhost");
       expect(url.searchParams.get("page")).toBe("1");
       expect(url.searchParams.get("page_size")).toBe("200");
     });
-    expect(screen.getByRole("button", { name: "免OA流水标签管理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "流水规则标签管理" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "未提交 3" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
     expect(screen.getByLabelText("月份")).toBeInTheDocument();
@@ -603,7 +616,7 @@ describe("NoOaBankBatchPage", () => {
     await waitFor(() => {
       expect(within(primaryRegion).getByRole("button", { name: "费用 1批 · 2条" })).toHaveAttribute("aria-pressed", "true");
     });
-    expect(screen.getByRole("group", { name: "免OA批次分页" })).toHaveTextContent("1-3 / 3");
+    expect(screen.getByRole("group", { name: "流水规则批次分页" })).toHaveTextContent("1-3 / 3");
     expect(within(primaryRegion).getByRole("button", { name: "福利 1批 · 5条" })).toBeInTheDocument();
 
     const subRegion = screen.getByRole("region", { name: "子标签" });
@@ -628,18 +641,18 @@ describe("NoOaBankBatchPage", () => {
     const fetchMock = installFetchMock();
     renderPage("read_export_only");
 
-    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
-    expect(screen.getByText("当前账号仅支持查看和导出，不能提交、撤回或保存免OA流水批次。")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
+    expect(screen.getByText("当前账号仅支持查看和导出，不能提交、撤回或保存流水规则批次。")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "提交批次" })).not.toBeInTheDocument();
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
     const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 bank-row-001" });
     expect(rowCheckbox).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "免OA流水标签管理" }));
-    const drawer = await screen.findByRole("dialog", { name: "免OA流水标签管理" });
-    expect(within(drawer).getByRole("button", { name: "全选" })).toBeDisabled();
-    expect(within(drawer).getByRole("button", { name: "清空" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "流水规则标签管理" }));
+    const drawer = await screen.findByRole("dialog", { name: "流水规则标签管理" });
+    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要OA" })).toBeDisabled();
+    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要发票" })).toBeDisabled();
     expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
 
     expect(fetchMock.mock.calls.some(([, init]) => ["POST", "PUT", "PATCH", "DELETE"].includes(String(init?.method ?? "GET")))).toBe(false);
@@ -650,14 +663,14 @@ describe("NoOaBankBatchPage", () => {
     const fetchMock = installFetchMock(listPayload, { listFailuresBeforeSuccess: 1 });
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
-    expect(await screen.findByText("免OA流水批次加载暂时失败，请刷新后重试。")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
+    expect(await screen.findByText("流水规则批次加载暂时失败，请刷新后重试。")).toBeInTheDocument();
     expect(screen.queryByText("当前标签下暂无流水")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "刷新" }));
 
     await waitFor(() => {
-      expect(screen.queryByText("免OA流水批次加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
+      expect(screen.queryByText("流水规则批次加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "未提交 3" })).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByRole("button", { name: "费用 1批 · 2条" })).toBeInTheDocument();
     });
@@ -665,7 +678,7 @@ describe("NoOaBankBatchPage", () => {
 
     const listRequests = fetchMock.mock.calls.filter(([input, init]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET");
+      return url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET");
     });
     expect(listRequests.length).toBeGreaterThanOrEqual(2);
   });
@@ -675,13 +688,13 @@ describe("NoOaBankBatchPage", () => {
     const payload = largeListPayload();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
+      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
         return jsonResponse(tagSelectionPayload);
       }
-      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+      if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
         return jsonResponse(withPagination(payload, url));
       }
-      const detailMatch = url.pathname.match(/^\/api\/no-oa-bank-batches\/(batch-large-\d{3})$/);
+      const detailMatch = url.pathname.match(/^\/api\/bank-flow-rule-batches\/(batch-large-\d{3})$/);
       if (detailMatch) {
         const batch = payload.batches.find((item) => item.batch_id === detailMatch[1]) ?? payload.batches[0];
         return jsonResponse({
@@ -717,17 +730,17 @@ describe("NoOaBankBatchPage", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(within(screen.getByRole("group", { name: "免OA批次分页" })).getByText("1-200 / 205")).toBeInTheDocument();
+      expect(within(screen.getByRole("group", { name: "流水规则批次分页" })).getByText("1-200 / 205")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "费用 200批 · 200条" })).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByRole("button", { name: "手续费 200批 · 200条" })).toHaveAttribute("aria-pressed", "true");
     });
     expect(screen.getByText("建设银行0000")).toBeInTheDocument();
     expect(screen.queryByText("建设银行0204")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "免OA批次分页下一页" }));
+    await user.click(screen.getByRole("button", { name: "流水规则批次分页下一页" }));
 
     await waitFor(() => {
-      expect(within(screen.getByRole("group", { name: "免OA批次分页" })).getByText("201-205 / 205")).toBeInTheDocument();
+      expect(within(screen.getByRole("group", { name: "流水规则批次分页" })).getByText("201-205 / 205")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "费用 5批 · 5条" })).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByRole("button", { name: "手续费 5批 · 5条" })).toHaveAttribute("aria-pressed", "true");
     });
@@ -735,7 +748,7 @@ describe("NoOaBankBatchPage", () => {
     expect(screen.queryByText("建设银行0000")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/no-oa-bank-batches"
+      return url.pathname === "/api/bank-flow-rule-batches"
         && url.searchParams.get("page") === "2"
         && url.searchParams.get("page_size") === "200";
     })).toBe(true);
@@ -791,41 +804,56 @@ describe("NoOaBankBatchPage", () => {
     await waitFor(() => expect(holidayChild).toHaveAttribute("aria-pressed", "true"));
   });
 
-  test("saves drawer tag selection with main and child tag toggles", async () => {
+  test("saves drawer tag requirement rules from compact grid", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "免OA流水标签管理" }));
-    const drawer = screen.getByRole("dialog", { name: "免OA流水标签管理" });
+    await user.click(await screen.findByRole("button", { name: "流水规则标签管理" }));
+    const drawer = screen.getByRole("dialog", { name: "流水规则标签管理" });
     expect(within(drawer).queryByText("版本 3")).not.toBeInTheDocument();
-    await user.click(within(drawer).getByRole("button", { name: "清空" }));
-    expect(within(drawer).getByRole("checkbox", { name: "费用" })).not.toBeChecked();
-    await user.click(within(drawer).getByRole("checkbox", { name: "费用" }));
-    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费" })).toBeChecked();
-    await user.click(within(drawer).getByRole("checkbox", { name: "费用 / 手续费" }));
-    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费" })).not.toBeChecked();
-    await user.click(within(drawer).getByRole("button", { name: "全选" }));
+    expect(within(drawer).getByRole("columnheader", { name: "收支类型" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("columnheader", { name: "流水主标签" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("columnheader", { name: "流水子标签" })).toBeInTheDocument();
+    expect(within(drawer).getByText("费用")).toBeInTheDocument();
+    expect(within(drawer).getByText("手续费")).toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "全选" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "清空" })).not.toBeInTheDocument();
+
+    const feeRequiresOa = within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要OA" });
+    const feeRequiresInvoice = within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要发票" });
+    const salaryRequiresInvoice = within(drawer).getByRole("checkbox", { name: "人工成本 / 工资 需要发票" });
+    expect(feeRequiresOa).not.toBeChecked();
+    expect(feeRequiresInvoice).not.toBeChecked();
+    await user.click(feeRequiresOa);
+    await user.click(salaryRequiresInvoice);
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/no-oa-bank-batches/tag-selection",
+        "/api/bank-flow-rule-batches/tag-rules",
         expect.objectContaining({
           method: "PUT",
           body: JSON.stringify({
             expected_version: 3,
-            selected_tag_codes: ["fee", "salary", "holiday_bonus", "internal_transfer", "external_borrow_out", "custom_no_sub"],
+            rules: [
+              { tag_code: "fee", requires_oa: true, requires_invoice: false },
+              { tag_code: "salary", requires_oa: false, requires_invoice: true },
+              { tag_code: "holiday_bonus", requires_oa: false, requires_invoice: false },
+              { tag_code: "internal_transfer", requires_oa: false, requires_invoice: false },
+              { tag_code: "external_borrow_out", requires_oa: true, requires_invoice: true },
+              { tag_code: "custom_no_sub", requires_oa: true, requires_invoice: true },
+            ],
           }),
         }),
       );
     });
     expect(operationBarrierRequests(fetchMock).at(-1)).toMatchObject({
       targets: [
-        { read_model_key: "no_oa_bank_batch", scope_key: "all" },
+        { read_model_key: "bank_flow_rule_batch", scope_key: "all" },
       ],
     });
-    expect(await screen.findByText("免OA流水标签范围已保存")).toBeInTheDocument();
+    expect(await screen.findByText("流水规则已保存")).toBeInTheDocument();
   });
 
   test("opening tag drawer refetches the latest no OA tag selection", async () => {
@@ -836,15 +864,15 @@ describe("NoOaBankBatchPage", () => {
     await screen.findByText("网银手续费");
     const callsBeforeOpen = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/no-oa-bank-batches/tag-selection";
+      return url.pathname === "/api/bank-flow-rule-batches/tag-rules";
     }).length;
 
-    await user.click(screen.getByRole("button", { name: "免OA流水标签管理" }));
+    await user.click(screen.getByRole("button", { name: "流水规则标签管理" }));
 
     await waitFor(() => {
       const callsAfterOpen = fetchMock.mock.calls.filter(([input]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/no-oa-bank-batches/tag-selection";
+        return url.pathname === "/api/bank-flow-rule-batches/tag-rules";
       }).length;
       expect(callsAfterOpen).toBeGreaterThan(callsBeforeOpen);
     });
@@ -855,13 +883,13 @@ describe("NoOaBankBatchPage", () => {
     let currentSelection = tagSelectionPayload;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/no-oa-bank-batches/tag-selection" && (!init?.method || init.method === "GET")) {
+      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && (!init?.method || init.method === "GET")) {
         return jsonResponse(currentSelection);
       }
-      if (url.pathname === "/api/no-oa-bank-batches") {
+      if (url.pathname === "/api/bank-flow-rule-batches") {
         return jsonResponse({ ...listPayload, batches: batchesForBucket(listPayload, url.searchParams.get("bucket")) });
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
         return jsonResponse(feeDetailPayload);
       }
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
@@ -869,9 +897,9 @@ describe("NoOaBankBatchPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "免OA流水标签管理" }));
-    const drawer = screen.getByRole("dialog", { name: "免OA流水标签管理" });
-    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "流水规则标签管理" }));
+    const drawer = screen.getByRole("dialog", { name: "流水规则标签管理" });
+    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要OA" })).toBeInTheDocument();
 
     currentSelection = {
       ...tagSelectionPayload,
@@ -886,8 +914,8 @@ describe("NoOaBankBatchPage", () => {
       window.dispatchEvent(new CustomEvent("bankAutoTagRulesUpdated", { detail: { version: 8 } }));
     });
 
-    expect(await within(drawer).findByRole("checkbox", { name: "银行费用 / 手续费自动规则" })).toBeInTheDocument();
-    expect(within(drawer).queryByRole("checkbox", { name: "费用 / 手续费" })).not.toBeInTheDocument();
+    expect(await within(drawer).findByRole("checkbox", { name: "银行费用 / 手续费自动规则 需要OA" })).toBeInTheDocument();
+    expect(within(drawer).queryByRole("checkbox", { name: "费用 / 手续费 需要OA" })).not.toBeInTheDocument();
   });
 
   test("drawer shows only bank auto rule main and child labels for external turnover tags", async () => {
@@ -895,11 +923,13 @@ describe("NoOaBankBatchPage", () => {
     installFetchMock();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "免OA流水标签管理" }));
-    const drawer = screen.getByRole("dialog", { name: "免OA流水标签管理" });
+    await user.click(await screen.findByRole("button", { name: "流水规则标签管理" }));
+    const drawer = screen.getByRole("dialog", { name: "流水规则标签管理" });
 
-    expect(within(drawer).getByRole("checkbox", { name: "外部往来款付款" })).toBeInTheDocument();
-    expect(within(drawer).getByRole("checkbox", { name: "外部往来款付款 / 借出款" })).toBeInTheDocument();
+    expect(within(drawer).getByText("外部往来款付款")).toBeInTheDocument();
+    expect(within(drawer).getByText("借出款")).toBeInTheDocument();
+    expect(within(drawer).getByRole("checkbox", { name: "外部往来款付款 / 借出款 需要OA" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("checkbox", { name: "外部往来款付款 / 借出款 需要发票" })).toBeInTheDocument();
     expect(within(drawer).queryByText("个人往来")).not.toBeInTheDocument();
     expect(within(drawer).queryByText("公司往来")).not.toBeInTheDocument();
     expect(within(drawer).queryByText("银行往来")).not.toBeInTheDocument();
@@ -919,7 +949,7 @@ describe("NoOaBankBatchPage", () => {
 
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith(
-          "/api/no-oa-bank-batches/submit-selection",
+          "/api/bank-flow-rule-batches/submit-selection",
           expect.objectContaining({
             method: "POST",
             body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
@@ -951,7 +981,7 @@ describe("NoOaBankBatchPage", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/no-oa-bank-batches/submit-selection",
+        "/api/bank-flow-rule-batches/submit-selection",
         expect.objectContaining({
           body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
           method: "POST",
@@ -983,7 +1013,7 @@ describe("NoOaBankBatchPage", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/no-oa-bank-batches/submit-selection",
+        "/api/bank-flow-rule-batches/submit-selection",
         expect.objectContaining({
           body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
           method: "POST",
@@ -1036,16 +1066,16 @@ describe("NoOaBankBatchPage", () => {
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
+      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
         return jsonResponse(tagSelectionPayload);
       }
-      if (url.pathname === "/api/no-oa-bank-batches") {
+      if (url.pathname === "/api/bank-flow-rule-batches") {
         return jsonResponse({ ...payload, batches: batchesForBucket(payload, url.searchParams.get("bucket")) });
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
         return jsonResponse(feeDetailPayload);
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee-boc") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee-boc") {
         return jsonResponse({
           batch: secondFeeBatch,
           tag_counts: { fee: 1 },
@@ -1053,7 +1083,7 @@ describe("NoOaBankBatchPage", () => {
           rows: [{ ...feeDetailPayload.rows[0], transaction_id: "bank-row-002", account_key: "boc:7001", bank_name: "中国银行", account_last4: "7001" }],
         });
       }
-      if (url.pathname === "/api/no-oa-bank-batches/submit-selection") {
+      if (url.pathname === "/api/bank-flow-rule-batches/submit-selection") {
         return jsonResponse({ affected_case_ids: [], affected_months: ["2026-05"] });
       }
       if (url.pathname === "/api/operation-barrier/status") {
@@ -1077,7 +1107,7 @@ describe("NoOaBankBatchPage", () => {
     await user.click(screen.getByRole("button", { name: "提交批次" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/no-oa-bank-batches/submit-selection",
+        "/api/bank-flow-rule-batches/submit-selection",
         expect.objectContaining({
           body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
           method: "POST",
@@ -1103,7 +1133,7 @@ describe("NoOaBankBatchPage", () => {
 
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith(
-          "/api/no-oa-bank-batches/batch-submitted-salary/withdraw",
+          "/api/bank-flow-rule-batches/batch-submitted-salary/withdraw",
           expect.objectContaining({
             method: "POST",
             body: JSON.stringify({ expected_version: 2, reason: "金额复核" }),
@@ -1176,7 +1206,7 @@ describe("NoOaBankBatchPage", () => {
 
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith(
-          "/api/no-oa-bank-batches/batch-draft-transfer/submit",
+          "/api/bank-flow-rule-batches/batch-draft-transfer/submit",
           expect.objectContaining({
             method: "POST",
             body: JSON.stringify({ expected_version: 1, note: "" }),
@@ -1184,7 +1214,7 @@ describe("NoOaBankBatchPage", () => {
         );
       });
       expect(fetchMock).not.toHaveBeenCalledWith(
-        "/api/no-oa-bank-batches/submit-selection",
+        "/api/bank-flow-rule-batches/submit-selection",
         expect.anything(),
       );
       expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-05"] });
@@ -1215,7 +1245,7 @@ describe("NoOaBankBatchPage", () => {
     await screen.findByText("网银手续费");
     const initialDetailCalls = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/no-oa-bank-batches/batch-draft-fee";
+      return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
     }).length;
 
     act(() => {
@@ -1225,14 +1255,14 @@ describe("NoOaBankBatchPage", () => {
     await waitFor(() => {
       const tagSelectionCalls = fetchMock.mock.calls.filter(([input]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/no-oa-bank-batches/tag-selection";
+        return url.pathname === "/api/bank-flow-rule-batches/tag-rules";
       });
       expect(tagSelectionCalls.length).toBeGreaterThan(1);
     });
     await waitFor(() => {
       const detailCalls = fetchMock.mock.calls.filter(([input]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/no-oa-bank-batches/batch-draft-fee";
+        return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
       });
       expect(detailCalls.length).toBeGreaterThan(initialDetailCalls);
     });
@@ -1245,7 +1275,7 @@ describe("NoOaBankBatchPage", () => {
     await screen.findByText("网银手续费");
     const initialDetailCalls = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/no-oa-bank-batches/batch-draft-fee";
+      return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
     }).length;
 
     act(() => {
@@ -1255,14 +1285,14 @@ describe("NoOaBankBatchPage", () => {
     await waitFor(() => {
       const tagSelectionCalls = fetchMock.mock.calls.filter(([input]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/no-oa-bank-batches/tag-selection";
+        return url.pathname === "/api/bank-flow-rule-batches/tag-rules";
       });
       expect(tagSelectionCalls.length).toBeGreaterThan(1);
     });
     await waitFor(() => {
       const detailCalls = fetchMock.mock.calls.filter(([input]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/no-oa-bank-batches/batch-draft-fee";
+        return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee";
       });
       expect(detailCalls.length).toBeGreaterThan(initialDetailCalls);
     });
@@ -1272,10 +1302,10 @@ describe("NoOaBankBatchPage", () => {
     let listCallCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
+      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
         return jsonResponse(tagSelectionPayload);
       }
-      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+      if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
         listCallCount += 1;
         return jsonResponse({
           ...listPayload,
@@ -1284,13 +1314,13 @@ describe("NoOaBankBatchPage", () => {
           read_model_stale_reasons: listCallCount === 1 ? ["bank_auto_tag_rules_version_mismatch"] : [],
         });
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
         return jsonResponse(feeDetailPayload);
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-holiday") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-holiday") {
         return jsonResponse({ batch: listPayload.batches[1], tag_counts: { holiday_bonus: 5 }, direction_counts: { expense: 5 }, rows: [] });
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-conflict-transfer") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-conflict-transfer") {
         return jsonResponse({ batch: listPayload.batches[3], tag_counts: { internal_transfer: 3 }, direction_counts: { income: 1, expense: 2 }, rows: [] });
       }
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
@@ -1299,7 +1329,7 @@ describe("NoOaBankBatchPage", () => {
 
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
     expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(listCallCount).toBeGreaterThan(1);
@@ -1313,10 +1343,10 @@ describe("NoOaBankBatchPage", () => {
     let listCallCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
+      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
         return jsonResponse(tagSelectionPayload);
       }
-      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+      if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
         listCallCount += 1;
         return jsonResponse({
           ...listPayload,
@@ -1325,23 +1355,23 @@ describe("NoOaBankBatchPage", () => {
           read_model_stale_reasons: ["bank_auto_tag_rules_version_mismatch"],
         });
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
         return jsonResponse(feeDetailPayload);
       }
       return jsonResponse({});
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderAuthenticatedAppAt("/no-oa-bank-batches");
+    renderAuthenticatedAppAt("/bank-flow-rule-batches");
 
-    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
     await waitFor(() => {
       expect(listCallCount).toBe(1);
     });
 
     fireEvent.click(screen.getByRole("link", { name: "设置" }));
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "免OA流水批量处理" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "流水规则批量处理" })).not.toBeInTheDocument();
     vi.useFakeTimers();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
@@ -1350,8 +1380,8 @@ describe("NoOaBankBatchPage", () => {
     expect(listCallCount).toBe(1);
 
     vi.useRealTimers();
-    fireEvent.click(screen.getByRole("link", { name: "免OA流水批量处理" }));
-    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "流水规则批量处理" }));
+    expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
 
     expect(listCallCount).toBeGreaterThan(1);
   });
@@ -1362,10 +1392,10 @@ describe("NoOaBankBatchPage", () => {
     let resolveSecondList: ((response: Response) => void) | null = null;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
+      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
         return jsonResponse(tagSelectionPayload);
       }
-      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+      if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
         listCallCount += 1;
         if (listCallCount === 1) {
           return jsonResponse({
@@ -1380,13 +1410,13 @@ describe("NoOaBankBatchPage", () => {
           resolveSecondList = resolve;
         });
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
         return jsonResponse(feeDetailPayload);
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-holiday") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-holiday") {
         return jsonResponse({ batch: listPayload.batches[1], tag_counts: { holiday_bonus: 5 }, direction_counts: { expense: 5 }, rows: [] });
       }
-      if (url.pathname === "/api/no-oa-bank-batches/batch-conflict-transfer") {
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-conflict-transfer") {
         return jsonResponse({ batch: listPayload.batches[3], tag_counts: { internal_transfer: 3 }, direction_counts: { income: 1, expense: 2 }, rows: [] });
       }
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
@@ -1424,8 +1454,8 @@ describe("NoOaBankBatchPage", () => {
     expect(financeItems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          label: "免OA流水批量处理",
-          to: "/no-oa-bank-batches",
+          label: "流水规则批量处理",
+          to: "/bank-flow-rule-batches",
         }),
       ]),
     );

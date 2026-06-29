@@ -178,8 +178,15 @@ export type NoOaBankBatchTagDefinition = {
   path: string[];
   source: string;
   status: string;
+  direction: string;
   outputPrimaryLabel: string;
   outputSubLabel: string;
+};
+
+export type NoOaBankBatchTagRule = {
+  tagCode: string;
+  requiresOa: boolean;
+  requiresInvoice: boolean;
 };
 
 export type NoOaBankBatchTagSelection = {
@@ -188,16 +195,49 @@ export type NoOaBankBatchTagSelection = {
   selectedTagCodes: string[];
   inactiveSelectedTagCodes: string[];
   activeTags: NoOaBankBatchTagDefinition[];
+  rules: NoOaBankBatchTagRule[];
+  requirementsByTagCode: Record<string, { requiresOa: boolean; requiresInvoice: boolean }>;
 };
 
 export type SaveNoOaBankBatchTagSelectionRequest = {
   expectedVersion: number;
-  selectedTagCodes: string[];
+  rules: NoOaBankBatchTagRule[];
   signal?: AbortSignal;
 };
 
 export type SubmitNoOaBankBatchSelectionRequest = {
   transactionIds: string[];
   note?: string;
+  signal?: AbortSignal;
+};
+
+export type NoOaBankBatchRebaselineBatch = {
+  batchId: string;
+  batchType: string;
+  batchLabel: string;
+  relationCaseId: string;
+  scopeMonth: string;
+  rowIds: string[];
+  rowCount: number;
+  version: number;
+  status: string;
+};
+
+export type NoOaBankBatchRebaselineManifest = {
+  dryRun: boolean;
+  applied: boolean;
+  summary: {
+    candidateCount: number;
+    batchCount: number;
+    rowCount: number;
+    affectedMonths: string[];
+  };
+  batches: NoOaBankBatchRebaselineBatch[];
+  risks: string[];
+};
+
+export type ApplyNoOaBankBatchRebaselineRequest = {
+  manifest: NoOaBankBatchRebaselineManifest;
+  reason: string;
   signal?: AbortSignal;
 };

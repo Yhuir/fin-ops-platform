@@ -25,6 +25,7 @@ confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirme
 | `manual_confirmed` | 关联台 | 是 | 普通人工确认 OA/银行/发票关系。 |
 | `pending_invoice_attach_existing` | 待找发票 | 是 | 选择已有发票并挂接银行流水。 |
 | `pending_invoice_manual_invoice` | 待找发票 | 是 | 人工补票确认后建立关系。 |
+| `bank_flow_rule_batch` | 流水规则批量处理 | 是 | 从流水规则批量处理页提交的银行流水批量关系。是否进入关联台 paired 由 metadata 中 OA/发票 requirement 是否满足决定。 |
 | `no_oa_bank_batch` | 免 OA 批次 | 是 | 免 OA 批次提交和 internal transfer confirm-link 统一使用。 |
 | `turnover_manual_closure` | 外部往来 | 是 | 手工零差额闭环对应的 relation。通常只含 bank rows；当所选银行流水已处于 OA-bank relation 时，可由外部往来确认闭环合并为包含 `oa` + `bank` rows 的同一 active case。不得包含 invoice；包含发票或其他业务 row type 的完整关系必须在关联台处理。 |
 | `batch_accounting` | 批量账务 | 是 | 日常报销 OA 与银行流水批量账务关系。 |

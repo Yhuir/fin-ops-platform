@@ -6384,6 +6384,42 @@ textarea {
   padding: 1px var(--fp-space-1);
 }
 
+.no-oa-bank-batches-rebaseline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fp-space-2);
+  padding: 0 var(--fp-space-1);
+}
+
+.no-oa-bank-batches-rebaseline__summary {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 700;
+}
+
+.no-oa-bank-batches-rebaseline__reason {
+  display: inline-flex;
+  min-width: min(100%, 320px);
+  align-items: center;
+  gap: var(--fp-space-1);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 800;
+}
+
+.no-oa-bank-batches-rebaseline__reason input {
+  min-width: 0;
+  flex: 1 1 180px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  font: inherit;
+  font-weight: 700;
+  padding: 6px 8px;
+}
+
 .no-oa-bank-batches-button {
   display: inline-flex;
   min-height: 34px;
@@ -7110,54 +7146,45 @@ textarea {
   width: 100%;
 }
 
-.no-oa-bank-batches-drawer__groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  align-items: start;
-  gap: var(--fp-space-3);
-}
-
-.no-oa-bank-batches-drawer__group {
-  display: grid;
-  gap: var(--fp-space-2);
+.no-oa-bank-batches-drawer__grid-wrap {
+  overflow: auto;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: color-mix(in srgb, var(--fp-surface-muted) 30%, var(--fp-surface));
-  padding: var(--fp-space-3);
 }
 
-.no-oa-bank-batches-drawer__group:first-child {
-  padding-top: var(--fp-space-3);
+.no-oa-bank-batches-drawer__grid {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  background: var(--fp-surface);
+  font-size: var(--fp-text-caption);
 }
 
-.no-oa-bank-batches-drawer__group:last-child {
-  padding-bottom: var(--fp-space-3);
+.no-oa-bank-batches-drawer__grid th,
+.no-oa-bank-batches-drawer__grid td {
+  border-right: 1px solid var(--fp-border);
+  border-bottom: 1px solid var(--fp-border);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
-.no-oa-bank-batches-drawer__main-check,
-.no-oa-bank-batches-drawer__child-check {
-  display: flex;
-  align-items: center;
-  gap: var(--fp-space-2);
-  color: var(--fp-text-primary);
-  cursor: pointer;
-  font-size: var(--fp-text-body);
-  line-height: 1.35;
+.no-oa-bank-batches-drawer__grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-secondary);
+  font-weight: 850;
 }
 
-.no-oa-bank-batches-drawer__main-check {
-  font-weight: 900;
+.no-oa-bank-batches-drawer__grid tr:last-child td {
+  border-bottom: 0;
 }
 
-.no-oa-bank-batches-drawer__child-check {
-  font-weight: 700;
-}
-
-.no-oa-bank-batches-drawer__children {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--fp-space-2);
-  padding-left: var(--fp-space-4);
+.no-oa-bank-batches-drawer__check-col {
+  width: 64px;
+  text-align: center !important;
 }
 
 .no-oa-bank-batches-dialog {
@@ -7263,6 +7290,7 @@ textarea {
 @media (max-width: 960px) {
   .no-oa-bank-batches-actions,
   .no-oa-bank-batches-filter,
+  .no-oa-bank-batches-rebaseline,
   .no-oa-bank-batches-segment,
   .no-oa-bank-batches-pagination,
   .no-oa-bank-batches-button,
@@ -7273,6 +7301,10 @@ textarea {
   .no-oa-bank-batches-filter {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .no-oa-bank-batches-rebaseline__reason {
+    width: 100%;
   }
 
   .no-oa-bank-batches-segment__button {
@@ -7304,10 +7336,6 @@ textarea {
     width: 100vw;
   }
 
-  .no-oa-bank-batches-drawer__groups,
-  .no-oa-bank-batches-drawer__children {
-    grid-template-columns: 1fr;
-  }
 }
 
 .pending-invoices-page {
@@ -23002,6 +23030,15 @@ body.column-layout-dragging {
   font-weight: 850;
   text-align: left;
   background: #f4f7fb;
+}
+
+.etc-invoice-header-total {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
 }
 
 .etc-invoice-number-column {

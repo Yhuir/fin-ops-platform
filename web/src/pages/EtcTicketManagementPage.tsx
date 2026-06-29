@@ -75,12 +75,16 @@ function formatMoney(value: string | number) {
   return parsed.toFixed(2);
 }
 
-function sumInvoiceTotalAmount(items: EtcInvoice[]) {
+function sumInvoiceMoney(items: EtcInvoice[], key: "totalAmount" | "taxAmount") {
   const totalCents = items.reduce((sum, item) => {
-    const parsed = Number(item.totalAmount);
+    const parsed = Number(item[key]);
     return Number.isFinite(parsed) ? sum + Math.round(parsed * 100) : sum;
   }, 0);
   return (totalCents / 100).toFixed(2);
+}
+
+function sumInvoiceTotalAmount(items: EtcInvoice[]) {
+  return sumInvoiceMoney(items, "totalAmount");
 }
 
 function formatDateRange(startDate: string | null, endDate: string | null) {
@@ -2124,50 +2128,65 @@ export default function EtcTicketManagementPage() {
       loadingText,
       tableKey,
     }: { ariaLabel: string; emptyText: string; loadingText: string; tableKey: string },
-  ) => (
-    <div className="etc-invoice-table-container">
-      <table
-        key={tableKey}
-        aria-label={ariaLabel}
-        className="etc-invoice-table"
-      >
-        <thead>
-          <tr>
-            <th className="etc-invoice-number-column">发票号码</th>
-            <th className="etc-invoice-issue-column">开票日期</th>
-            <th className="etc-invoice-passage-column">通行日期</th>
-            <th className="etc-invoice-plate-column">车牌</th>
-            <th className="etc-invoice-seller-column">销方</th>
-            <th className="etc-invoice-money-column">金额</th>
-            <th className="etc-invoice-tax-column">税额</th>
-            <th className="etc-invoice-attachment-column">附件状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
+  ) => {
+    const totalAmount = sumInvoiceMoney(rows, "totalAmount");
+    const totalTaxAmount = sumInvoiceMoney(rows, "taxAmount");
+
+    return (
+      <div className="etc-invoice-table-container">
+        <table
+          key={tableKey}
+          aria-label={ariaLabel}
+          className="etc-invoice-table"
+        >
+          <thead>
             <tr>
-              <td colSpan={8} className="etc-invoice-table-empty">
-                {loadingText || emptyText}
-              </td>
+              <th className="etc-invoice-number-column">发票号码</th>
+              <th className="etc-invoice-issue-column">开票日期</th>
+              <th className="etc-invoice-passage-column">通行日期</th>
+              <th className="etc-invoice-plate-column">车牌</th>
+              <th className="etc-invoice-seller-column">销方</th>
+              <th className="etc-invoice-money-column">
+                <span className="etc-invoice-header-total">
+                  <span>金额</span>
+                  <span>{totalAmount}</span>
+                </span>
+              </th>
+              <th className="etc-invoice-tax-column">
+                <span className="etc-invoice-header-total">
+                  <span>税额</span>
+                  <span>{totalTaxAmount}</span>
+                </span>
+              </th>
+              <th className="etc-invoice-attachment-column">附件状态</th>
             </tr>
-          ) : (
-            rows.map((invoice) => (
-              <tr key={invoice.id}>
-                <td>{invoice.invoiceNumber}</td>
-                <td>{invoice.issueDate}</td>
-                <td>{formatDateRange(invoice.passageStartDate, invoice.passageEndDate)}</td>
-                <td>{invoice.plateNumber || "-"}</td>
-                <td>{invoice.sellerName || "-"}</td>
-                <td className="etc-invoice-money-cell">{formatMoney(invoice.totalAmount)}</td>
-                <td className="etc-invoice-money-cell">{formatMoney(invoice.taxAmount)}</td>
-                <td>{attachmentLabel(invoice)}</td>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="etc-invoice-table-empty">
+                  {loadingText || emptyText}
+                </td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
+            ) : (
+              rows.map((invoice) => (
+                <tr key={invoice.id}>
+                  <td>{invoice.invoiceNumber}</td>
+                  <td>{invoice.issueDate}</td>
+                  <td>{formatDateRange(invoice.passageStartDate, invoice.passageEndDate)}</td>
+                  <td>{invoice.plateNumber || "-"}</td>
+                  <td>{invoice.sellerName || "-"}</td>
+                  <td className="etc-invoice-money-cell">{formatMoney(invoice.totalAmount)}</td>
+                  <td className="etc-invoice-money-cell">{formatMoney(invoice.taxAmount)}</td>
+                  <td>{attachmentLabel(invoice)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
     <div data-testid="etc-ticket-management-page">

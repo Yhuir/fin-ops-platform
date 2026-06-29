@@ -153,6 +153,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 - `oa_invoice_offset_auto_match`：OA 附件发票冲抵自动闭环关系。
 - `pending_invoice_attach_existing_invoice`：待找发票选择已有发票。`pending_invoice_attach_existing` 仅作为迁移期兼容 mode，不再新增生产写入。
 - `pending_invoice_manual_invoice`：待找发票人工补票后建立关系。
+- `bank_flow_rule_batch`：流水规则批量处理页提交的银行流水批量关系；是否进入 paired 由 OA/发票 requirement metadata 决定。
 - `no_oa_bank_batch`：免 OA 批次提交或 internal transfer confirm-link 收敛。
 - `turnover_manual_closure`：外部往来人工零差额闭环。
 - `batch_accounting`：批量账务提交。

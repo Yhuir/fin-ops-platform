@@ -2016,7 +2016,12 @@ class Application:
             output_collection_response = self._output_invoice_collection_routes().route(method, route_path, query, body, headers)
             if output_collection_response is not None:
                 return output_collection_response
-        if route_path == "/api/no-oa-bank-batches" or route_path.startswith("/api/no-oa-bank-batches/"):
+        if (
+            route_path == "/api/no-oa-bank-batches"
+            or route_path.startswith("/api/no-oa-bank-batches/")
+            or route_path == "/api/bank-flow-rule-batches"
+            or route_path.startswith("/api/bank-flow-rule-batches/")
+        ):
             no_oa_bank_batch_response = self._no_oa_bank_batch_routes().route(method, route_path, query, body, headers)
             if no_oa_bank_batch_response is not None:
                 return no_oa_bank_batch_response
@@ -2422,6 +2427,14 @@ class Application:
                 "/api/no-oa-bank-batches/{batch_id}",
                 "/api/no-oa-bank-batches/{batch_id}/submit",
                 "/api/no-oa-bank-batches/{batch_id}/withdraw",
+                "/api/bank-flow-rule-batches",
+                "/api/bank-flow-rule-batches/tag-rules",
+                "/api/bank-flow-rule-batches/submit-selection",
+                "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run",
+                "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
+                "/api/bank-flow-rule-batches/{batch_id}",
+                "/api/bank-flow-rule-batches/{batch_id}/submit",
+                "/api/bank-flow-rule-batches/{batch_id}/withdraw",
                 "/api/batch-accounting",
                 "/api/batch-accounting/submit",
                 "/api/batch-accounting/{relation_id}/withdraw",

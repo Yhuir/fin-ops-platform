@@ -27,7 +27,7 @@ from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRe
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 READ_MODEL_STATUS = "live_query"
-SOURCE_VERSION = "input-invoice-usage:v1"
+SOURCE_VERSION = "input-invoice-usage:v2-linked-relation-amount-totals"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
@@ -787,6 +787,9 @@ class InputInvoiceUsageQueryService:
                 if bank_id in bank_map
             ):
                 return True
+        totals = self._matched_linked_relation_amount_totals(line_items, relations, context=context)
+        if _within_cent(totals["oa"], invoice_total) and _within_cent(totals["bank"], invoice_total):
+            return True
         return False
 
     def _has_invoice_oa_amount_match(
@@ -806,7 +809,45 @@ class InputInvoiceUsageQueryService:
             oa_records = context.oa_records_by_id(oa_ids)
             if any(_within_cent(_decimal(record.amount), invoice_total) for record in oa_records.values()):
                 return True
+        totals = self._matched_linked_relation_amount_totals(line_items, relations, context=context)
+        if _within_cent(totals["oa"], invoice_total):
+            return True
         return False
+
+    def _matched_linked_relation_amount_totals(
+        self,
+        line_items: list[Invoice],
+        relations: list[dict[str, Any]],
+        *,
+        context: DistributedInvoiceRelationContext,
+    ) -> dict[str, Decimal]:
+        invoice_lookup_ids = set(self._invoice_relation_lookup_ids(line_items))
+        oa_ids: list[str] = []
+        bank_ids: list[str] = []
+        seen_oa: set[str] = set()
+        seen_bank: set[str] = set()
+        for relation in relations:
+            if not self._relation_is_confirmed(relation) or not self._relation_amount_check_is_matched(relation):
+                continue
+            typed_rows = [
+                (row_id, self._canonical_relation_row_type(row_type, row_id))
+                for row_id, row_type in self._typed_relation_rows(relation)
+            ]
+            if not any(row_type == "invoice" and row_id in invoice_lookup_ids for row_id, row_type in typed_rows):
+                continue
+            for row_id, row_type in typed_rows:
+                if row_type == "oa" and row_id not in seen_oa:
+                    seen_oa.add(row_id)
+                    oa_ids.append(row_id)
+                elif row_type == "bank" and row_id not in seen_bank:
+                    seen_bank.add(row_id)
+                    bank_ids.append(row_id)
+        oa_records = context.oa_records_by_id(oa_ids)
+        bank_map = context.bank_transactions_by_id()
+        return {
+            "oa": sum((_decimal(oa_records[oa_id].amount) for oa_id in oa_ids if oa_id in oa_records), start=ZERO),
+            "bank": sum((_decimal(bank_map[bank_id].amount) for bank_id in bank_ids if bank_id in bank_map), start=ZERO),
+        }
 
     def _parse_filters(self, filters: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         if filters in (None, ""):
@@ -1015,8 +1056,19 @@ class InputInvoiceUsageQueryService:
         return typed
 
     def _relation_has_invoice_oa_bank(self, relation: dict[str, Any]) -> bool:
-        types = {row_type for _, row_type in self._typed_relation_rows(relation)}
+        types = {self._canonical_relation_row_type(row_type, row_id) for row_id, row_type in self._typed_relation_rows(relation)}
         return {"invoice", "oa", "bank"}.issubset(types)
+
+    @staticmethod
+    def _canonical_relation_row_type(row_type: str, row_id: str = "") -> str:
+        normalized = str(row_type or "").strip()
+        if normalized in {"input_invoice", "output_invoice"}:
+            return "invoice"
+        if normalized == "bank_transaction":
+            return "bank"
+        if normalized:
+            return normalized
+        return _infer_row_type(row_id)
 
     @staticmethod
     def _relation_amount_check_is_matched(relation: dict[str, Any]) -> bool:

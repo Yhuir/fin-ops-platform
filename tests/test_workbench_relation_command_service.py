@@ -601,6 +601,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
     def test_relation_mode_registry_rejects_automatic_decision_as_write_fact(self) -> None:
         self.assertIn("manual_confirmed", VALID_WORKBENCH_RELATION_MODES)
         self.assertIn("etc_batch_invoice_link", VALID_WORKBENCH_RELATION_MODES)
+        self.assertIn("bank_flow_rule_batch", VALID_WORKBENCH_RELATION_MODES)
         self.assertNotIn("automatic_decision", VALID_WORKBENCH_RELATION_MODES)
         service = WorkbenchRelationCommandService(
             relation_repository=FakeRelationRepository(),

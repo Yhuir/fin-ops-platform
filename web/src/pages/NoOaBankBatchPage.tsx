@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent } from "react";
+import type { KeyboardEvent } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
@@ -19,6 +19,8 @@ import {
   fetchNoOaBankBatchDetail,
   fetchNoOaBankBatchTagSelection,
   fetchNoOaBankBatches,
+  applyNoOaBankBatchRebaseline,
+  dryRunNoOaBankBatchRebaseline,
   saveNoOaBankBatchTagSelection,
   submitNoOaBankBatch,
   submitNoOaBankBatchSelection,
@@ -40,7 +42,9 @@ import type {
   NoOaBankBatchDetailRow,
   NoOaBankBatchSummaryCategory,
   NoOaBankBatchTagDefinition,
+  NoOaBankBatchTagRule,
   NoOaBankBatchTagSelection,
+  NoOaBankBatchRebaselineManifest,
 } from "../features/noOaBankBatches/types";
 
 const EMPTY_BATCHES: NoOaBankBatchesResponse = {
@@ -64,12 +68,15 @@ const EMPTY_TAG_SELECTION: NoOaBankBatchTagSelection = {
   selectedTagCodes: [],
   inactiveSelectedTagCodes: [],
   activeTags: [],
+  rules: [],
+  requirementsByTagCode: {},
 };
 
 const SELF_SUB_LABEL = "主标签本身";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const NO_OA_READ_MODEL_REFRESH_RETRY_MS = 1000;
 const NO_OA_BANK_BATCH_PAGE_SIZE = 200;
+const BANK_FLOW_RULE_BATCH_READ_MODEL_KEY = "bank_flow_rule_batch";
 
 type BatchStatusMeta = { label: string; color: "default" | "primary" | "success" | "warning" | "error" };
 
@@ -208,7 +215,7 @@ function mutationBarrierTargets(
 ) {
   return result.operationBarrierTargets && result.operationBarrierTargets.length > 0
     ? result.operationBarrierTargets
-    : operationBarrierTargetsFromMonths("no_oa_bank_batch", result.affectedMonths ?? [], fallbackScopeKey);
+    : operationBarrierTargetsFromMonths(BANK_FLOW_RULE_BATCH_READ_MODEL_KEY, result.affectedMonths ?? [], fallbackScopeKey);
 }
 
 type NoOaTagNode = {
@@ -217,6 +224,8 @@ type NoOaTagNode = {
   primaryLabel: string;
   subLabel: string;
 };
+
+type NoOaDraftRequirements = Record<string, { requiresOa: boolean; requiresInvoice: boolean }>;
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -245,8 +254,25 @@ function tagSubLabel(tag: NoOaBankBatchTagDefinition | NoOaBankBatchSummaryCateg
   return "batchType" in tag ? cleanText(tag.categorySubLabel) : "";
 }
 
-function tagDisplayLabel(node: NoOaTagNode) {
-  return node.subLabel ? `${node.primaryLabel} / ${node.subLabel}` : node.primaryLabel;
+function directionLabel(value: string) {
+  if (value === "income") {
+    return "收入";
+  }
+  if (value === "expense") {
+    return "支出";
+  }
+  return "全部";
+}
+
+function requirementsFromSelection(selection: NoOaBankBatchTagSelection): NoOaDraftRequirements {
+  return Object.fromEntries(selection.rules.map((rule) => [
+    rule.tagCode,
+    { requiresOa: rule.requiresOa, requiresInvoice: rule.requiresInvoice },
+  ]));
+}
+
+function requirementFor(requirements: NoOaDraftRequirements, tagCode: string) {
+  return requirements[tagCode] ?? { requiresOa: true, requiresInvoice: true };
 }
 
 function handleButtonKeyDown(event: KeyboardEvent<HTMLElement>, action: () => void) {
@@ -307,37 +333,6 @@ type LabelRailProps = {
   onSelect: (key: string) => void;
 };
 
-type NativeCheckboxProps = {
-  ariaLabel?: string;
-  checked: boolean;
-  className?: string;
-  disabled?: boolean;
-  indeterminate?: boolean;
-  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
-};
-
-function NativeCheckbox({ ariaLabel, checked, className, disabled = false, indeterminate = false, onChange }: NativeCheckboxProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.indeterminate = indeterminate;
-    }
-  }, [indeterminate]);
-
-  return (
-    <input
-      aria-label={ariaLabel}
-      checked={checked}
-      className={className}
-      disabled={disabled}
-      onChange={onChange}
-      ref={inputRef}
-      type="checkbox"
-    />
-  );
-}
-
 function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey, onSelect }: LabelRailProps) {
   return (
     <section aria-label={ariaLabel} className="no-oa-bank-batches-rail" role="region">
@@ -390,14 +385,14 @@ function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey
 
 export default function NoOaBankBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
-  const { active } = useOptionalPageActivation("no-oa-bank-batches");
+  const { active } = useOptionalPageActivation("bank-flow-rule-batches");
   const { canMutateData } = useSessionPermissions();
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<NoOaBankBatchStatusBucket>("unsubmitted");
   const [payload, setPayload] = useState<NoOaBankBatchesResponse>(EMPTY_BATCHES);
   const [tagSelection, setTagSelection] = useState<NoOaBankBatchTagSelection>(EMPTY_TAG_SELECTION);
   const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
-  const [draftSelectedTagCodes, setDraftSelectedTagCodes] = useState<Set<string>>(() => new Set());
+  const [draftTagRequirements, setDraftTagRequirements] = useState<NoOaDraftRequirements>(() => ({}));
   const [selectedPrimaryLabel, setSelectedPrimaryLabel] = useState("");
   const [selectedSubKey, setSelectedSubKey] = useState("");
   const [details, setDetails] = useState<Record<string, NoOaBankBatchDetail>>({});
@@ -413,6 +408,8 @@ export default function NoOaBankBatchPage() {
   const [error, setError] = useState<string | null>(null);
   const [withdrawTarget, setWithdrawTarget] = useState<NoOaBankBatch | null>(null);
   const [withdrawReason, setWithdrawReason] = useState("");
+  const [rebaselineManifest, setRebaselineManifest] = useState<NoOaBankBatchRebaselineManifest | null>(null);
+  const [rebaselineReason, setRebaselineReason] = useState("历史免OA已提交批次按流水规则重新处理");
   const [feedback, setFeedback] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const batchRequestSeqRef = useRef(0);
@@ -427,11 +424,11 @@ export default function NoOaBankBatchPage() {
     fetchNoOaBankBatchTagSelection(signal)
       .then((nextSelection) => {
         setTagSelection(nextSelection);
-        setDraftSelectedTagCodes(new Set(nextSelection.selectedTagCodes));
+        setDraftTagRequirements(requirementsFromSelection(nextSelection));
       })
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {
-          setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "免OA标签配置加载失败" });
+          setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "流水标签配置加载失败" });
         }
       })
       .finally(() => setTagLoading(false));
@@ -493,7 +490,7 @@ export default function NoOaBankBatchPage() {
           return;
         }
         if (!background && !isAbortLikeError(caught)) {
-          setError(caught instanceof Error ? caught.message : "免OA流水批次加载失败");
+          setError(caught instanceof Error ? caught.message : "流水规则批次加载失败");
         }
       })
       .finally(() => {
@@ -543,9 +540,6 @@ export default function NoOaBankBatchPage() {
   const tagNodesByCode = useMemo(() => {
     const nodes = new Map<string, NoOaTagNode>();
     tagSelection.activeTags.forEach((tag) => {
-      if (!tagSelection.selectedTagCodes.includes(tag.code)) {
-        return;
-      }
       nodes.set(tag.code, {
         code: tag.code,
         label: tag.label || tag.code,
@@ -574,7 +568,7 @@ export default function NoOaBankBatchPage() {
       }
     });
     return nodes;
-  }, [payload.batches, payload.summary.categories, tagSelection.activeTags, tagSelection.selectedTagCodes]);
+  }, [payload.batches, payload.summary.categories, tagSelection.activeTags]);
 
   const visibleBucketBatches = useMemo(
     () => payload.batches.filter((batch) => statusBucketFor(batch) === bucket),
@@ -807,7 +801,7 @@ export default function NoOaBankBatchPage() {
     }
     const transactionIds = Array.from(selectedTransactionIds);
     const result = await runOperation({
-      loadingMessage: "正在提交选中免OA流水...",
+      loadingMessage: "正在提交选中流水规则...",
       action: async ({ setMessage }) => {
         setMutating(true);
         try {
@@ -815,11 +809,11 @@ export default function NoOaBankBatchPage() {
             transactionIds,
             note: "",
           });
-          setMessage("正在等待免OA批次读模型同步...");
+          setMessage("正在等待流水规则批次读模型同步...");
           await waitForOperationFreshness(
             mutationBarrierTargets(submitResult, month),
           );
-          setMessage("正在刷新免OA流水批次...");
+          setMessage("正在刷新流水规则批次...");
           await reloadBatchesAfterMutation();
           return submitResult;
         } finally {
@@ -840,7 +834,7 @@ export default function NoOaBankBatchPage() {
       return;
     }
     const result = await runOperation({
-      loadingMessage: "正在提交内部往来免OA批次...",
+      loadingMessage: "正在提交内部往来流水规则批次...",
       action: async ({ setMessage }) => {
         setMutating(true);
         try {
@@ -849,11 +843,11 @@ export default function NoOaBankBatchPage() {
             expectedVersion: batch.version,
             note: "",
           });
-          setMessage("正在等待免OA批次读模型同步...");
+          setMessage("正在等待流水规则批次读模型同步...");
           await waitForOperationFreshness(
             mutationBarrierTargets(submitResult, batch.scopeMonth || month),
           );
-          setMessage("正在刷新免OA流水批次...");
+          setMessage("正在刷新流水规则批次...");
           await reloadBatchesAfterMutation();
           return submitResult;
         } finally {
@@ -876,7 +870,7 @@ export default function NoOaBankBatchPage() {
     const target = withdrawTarget;
     const reason = withdrawReason.trim();
     const result = await runOperation({
-      loadingMessage: "正在撤回免OA流水批次...",
+      loadingMessage: "正在撤回流水规则批次...",
       action: async ({ setMessage }) => {
         setMutating(true);
         try {
@@ -887,11 +881,11 @@ export default function NoOaBankBatchPage() {
           });
           setWithdrawTarget(null);
           setWithdrawReason("");
-          setMessage("正在等待免OA批次读模型同步...");
+          setMessage("正在等待流水规则批次读模型同步...");
           await waitForOperationFreshness(
             mutationBarrierTargets(withdrawResult, target.scopeMonth || month),
           );
-          setMessage("正在刷新免OA流水批次...");
+          setMessage("正在刷新流水规则批次...");
           await reloadBatchesAfterMutation();
           return withdrawResult;
         } finally {
@@ -907,51 +901,142 @@ export default function NoOaBankBatchPage() {
     }
   };
 
+  const handleRebaselineDryRun = async () => {
+    if (!canMutateData || mutating) {
+      return;
+    }
+    const result = await runOperation({
+      loadingMessage: "正在扫描历史免OA已提交批次...",
+      action: async () => {
+        setMutating(true);
+        try {
+          return await dryRunNoOaBankBatchRebaseline();
+        } finally {
+          setMutating(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "历史免OA扫描失败",
+    });
+    if (result.status === "success") {
+      setRebaselineManifest(result.value);
+      const count = result.value.summary.batchCount;
+      setFeedback({
+        severity: count > 0 ? "warning" : "success",
+        message: count > 0 ? `已生成历史免OA重算清单：${count} 批` : "没有历史免OA已提交批次需要重算",
+      });
+    } else {
+      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "历史免OA扫描失败" });
+    }
+  };
+
+  const handleApplyRebaseline = async () => {
+    if (!canMutateData || mutating || !rebaselineManifest || rebaselineManifest.summary.batchCount === 0) {
+      return;
+    }
+    const manifest = rebaselineManifest;
+    const reason = rebaselineReason.trim() || "历史免OA已提交批次按流水规则重新处理";
+    const result = await runOperation({
+      loadingMessage: "正在撤回历史免OA已提交批次...",
+      action: async ({ setMessage }) => {
+        setMutating(true);
+        try {
+          const applied = await applyNoOaBankBatchRebaseline({ manifest, reason });
+          setMessage("正在等待流水规则批次读模型同步...");
+          await waitForOperationFreshness(
+            operationBarrierTargetsFromMonths(
+              BANK_FLOW_RULE_BATCH_READ_MODEL_KEY,
+              applied.summary.affectedMonths,
+              "all",
+            ),
+          );
+          setMessage("正在刷新流水规则批次...");
+          await reloadBatchesAfterMutation();
+          return applied;
+        } finally {
+          setMutating(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "历史免OA重算应用失败",
+    });
+    if (result.status === "success") {
+      setRebaselineManifest(result.value);
+      setFeedback({ severity: "success", message: `历史免OA已撤回 ${result.value.summary.batchCount} 批` });
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+        affectedMonths: result.value.summary.affectedMonths,
+        affectedScopeKeys: result.value.summary.affectedMonths,
+      });
+    } else {
+      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "历史免OA重算应用失败" });
+    }
+  };
+
   const saveTagSelection = async () => {
     if (!canMutateData || mutating) {
       return;
     }
-    const selectedTagCodes = Array.from(draftSelectedTagCodes);
+    const rules: NoOaBankBatchTagRule[] = tagSelection.activeTags.map((tag) => {
+      const requirement = requirementFor(draftTagRequirements, tag.code);
+      return {
+        tagCode: tag.code,
+        requiresOa: requirement.requiresOa,
+        requiresInvoice: requirement.requiresInvoice,
+      };
+    });
     const result = await runOperation({
-      loadingMessage: "正在保存免OA流水标签范围...",
+      loadingMessage: "正在保存流水规则...",
       action: async ({ setMessage }) => {
         setMutating(true);
         try {
           const saved = await saveNoOaBankBatchTagSelection({
             expectedVersion: tagSelection.version,
-            selectedTagCodes,
+            rules,
           });
           setTagSelection(saved);
-          setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
+          setDraftTagRequirements(requirementsFromSelection(saved));
           setTagDrawerOpen(false);
           setDetails({});
           setDetailErrors({});
-          setMessage("正在等待免OA批次读模型同步...");
-          await waitForOperationFreshness(operationBarrierTargets("no_oa_bank_batch", ["all"]));
-          setMessage("正在刷新免OA流水批次...");
+          setMessage("正在等待流水规则批次读模型同步...");
+          await waitForOperationFreshness(operationBarrierTargets(BANK_FLOW_RULE_BATCH_READ_MODEL_KEY, ["all"]));
+          setMessage("正在刷新流水规则批次...");
           await reloadBatchesAfterMutation();
           return saved;
         } finally {
           setMutating(false);
         }
       },
-      errorMessage: (caught) => caught instanceof Error ? caught.message : "保存免OA标签范围失败",
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "保存流水规则失败",
     });
     if (result.status === "success") {
-      setFeedback({ severity: "success", message: "免OA流水标签范围已保存" });
+      setFeedback({ severity: "success", message: "流水规则已保存" });
     } else {
-      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "保存免OA标签范围失败" });
+      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "保存流水规则失败" });
     }
   };
 
-  const drawerGroups = useMemo(() => {
-    const groups = new Map<string, NoOaBankBatchTagDefinition[]>();
-    tagSelection.activeTags.forEach((tag) => {
-      const primary = tagPrimaryLabel(tag) || tag.label || tag.code;
-      groups.set(primary, [...(groups.get(primary) ?? []), tag]);
+  const drawerRows = useMemo(() => tagSelection.activeTags.map((tag) => ({
+    tag,
+    direction: directionLabel(tag.direction),
+    primaryLabel: tagPrimaryLabel(tag) || tag.label || tag.code,
+    subLabel: tagSubLabel(tag) || SELF_SUB_LABEL,
+  })), [tagSelection.activeTags]);
+
+  const updateDraftRequirement = (
+    tagCode: string,
+    field: "requiresOa" | "requiresInvoice",
+    checked: boolean,
+  ) => {
+    setDraftTagRequirements((current) => {
+      const currentRule = requirementFor(current, tagCode);
+      return {
+        ...current,
+        [tagCode]: {
+          ...currentRule,
+          [field]: checked,
+        },
+      };
     });
-    return Array.from(groups.entries()).map(([primaryLabel, tags]) => ({ primaryLabel, tags }));
-  }, [tagSelection.activeTags]);
+  };
 
   const unsubmittedCount = payload.summary.draftCount;
   const resetListScope = useCallback(() => {
@@ -986,7 +1071,7 @@ export default function NoOaBankBatchPage() {
 
   return (
     <PageScaffold
-      title="免OA流水批量处理"
+      title="流水规则批量处理"
       actions={(
         <div className="no-oa-bank-batches-actions">
           <button
@@ -998,7 +1083,7 @@ export default function NoOaBankBatchPage() {
               setTagDrawerOpen(true);
             }}
           >
-            免OA流水标签管理
+            流水规则标签管理
           </button>
           <button
             className="no-oa-bank-batches-button"
@@ -1017,7 +1102,7 @@ export default function NoOaBankBatchPage() {
       )}
     >
       {!canMutateData ? (
-        <StatePanel compact tone="warning">当前账号仅支持查看和导出，不能提交、撤回或保存免OA流水批次。</StatePanel>
+        <StatePanel compact tone="warning">当前账号仅支持查看和导出，不能提交、撤回或保存流水规则批次。</StatePanel>
       ) : null}
       <div aria-label="批次筛选" className="no-oa-bank-batches-filter" role="region">
         <div aria-label="批次状态" className="no-oa-bank-batches-segment" role="group">
@@ -1052,7 +1137,7 @@ export default function NoOaBankBatchPage() {
         </label>
         <PageControls
           disabled={loading}
-          label="免OA批次分页"
+          label="流水规则批次分页"
           onNext={() => handlePageChange(listPagination.page + 1)}
           onPrevious={() => handlePageChange(listPagination.page - 1)}
           page={listPagination.page}
@@ -1076,12 +1161,54 @@ export default function NoOaBankBatchPage() {
           ) : null}
       </div>
 
+      {canMutateData ? (
+        <div aria-label="历史免OA重算" className="no-oa-bank-batches-rebaseline" role="region">
+          <button
+            className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
+            disabled={mutating}
+            onClick={handleRebaselineDryRun}
+            type="button"
+          >
+            扫描历史免OA
+          </button>
+          {rebaselineManifest ? (
+            <>
+              <span className="no-oa-bank-batches-rebaseline__summary">
+                待撤回 {rebaselineManifest.summary.batchCount} 批 / {rebaselineManifest.summary.rowCount} 条
+                {rebaselineManifest.summary.affectedMonths.length > 0
+                  ? ` / ${rebaselineManifest.summary.affectedMonths.join("、")}`
+                  : ""}
+              </span>
+              <label className="no-oa-bank-batches-rebaseline__reason">
+                <span>原因</span>
+                <input
+                  value={rebaselineReason}
+                  onChange={(event) => setRebaselineReason(event.target.value)}
+                />
+              </label>
+              <button
+                className="no-oa-bank-batches-button no-oa-bank-batches-button--compact no-oa-bank-batches-button--primary"
+                disabled={mutating || rebaselineManifest.summary.batchCount === 0}
+                onClick={handleApplyRebaseline}
+                type="button"
+              >
+                应用重算
+              </button>
+            </>
+          ) : (
+            <span className="no-oa-bank-batches-rebaseline__summary">
+              先 dry-run，再按清单撤回旧免OA已提交批次
+            </span>
+          )}
+        </div>
+      ) : null}
+
       {error ? <StatePanel tone="error" title={error} /> : null}
 
       <div className="no-oa-bank-batches-layout">
         <LabelRail
           ariaLabel="主标签"
-          emptyTitle="请先在标签管理中选择免OA标签"
+          emptyTitle="请先在标签管理中选择流水标签"
           groups={primaryGroups.map((group) => ({
             key: group.primaryLabel,
             label: group.primaryLabel,
@@ -1318,18 +1445,18 @@ export default function NoOaBankBatchPage() {
       {tagDrawerOpen ? (
         <div className="no-oa-bank-batches-drawer-shell">
           <button
-            aria-label="关闭免OA流水标签管理"
+            aria-label="关闭流水规则标签管理"
             className="no-oa-bank-batches-drawer-shell__backdrop"
             onClick={() => setTagDrawerOpen(false)}
             type="button"
           />
-          <aside aria-label="免OA流水标签管理" className="no-oa-bank-batches-drawer" role="dialog">
+          <aside aria-label="流水规则标签管理" className="no-oa-bank-batches-drawer" role="dialog">
             <header className="no-oa-bank-batches-drawer__header">
               <div>
-                <h2 className="no-oa-bank-batches-drawer__title">免OA流水标签管理</h2>
+                <h2 className="no-oa-bank-batches-drawer__title">流水规则标签管理</h2>
               </div>
               <button
-                aria-label="关闭免OA流水标签管理"
+                aria-label="关闭流水规则标签管理"
                 className="no-oa-bank-batches-drawer__close"
                 onClick={() => setTagDrawerOpen(false)}
                 type="button"
@@ -1343,84 +1470,55 @@ export default function NoOaBankBatchPage() {
                   已停用标签不再生效：{tagSelection.inactiveSelectedTagCodes.join("、")}。保存后会清理这些引用。
                 </div>
               ) : null}
-              <div className="no-oa-bank-batches-drawer__groups">
-                {drawerGroups.map((group) => {
-                  const codes = group.tags.map((tag) => tag.code);
-                  const checkedCount = codes.filter((code) => draftSelectedTagCodes.has(code)).length;
-                  const allChecked = checkedCount === codes.length && codes.length > 0;
-                  return (
-                    <section className="no-oa-bank-batches-drawer__group" key={group.primaryLabel}>
-                      <label className="no-oa-bank-batches-drawer__main-check">
-                        <NativeCheckbox
-                          checked={allChecked}
-                          className="no-oa-bank-batches-checkbox"
-                          disabled={!canMutateData}
-                          indeterminate={checkedCount > 0 && !allChecked}
-                          onChange={(event) => {
-                            setDraftSelectedTagCodes((current) => {
-                              const next = new Set(current);
-                              codes.forEach((code) => {
-                                if (event.target.checked) {
-                                  next.add(code);
-                                } else {
-                                  next.delete(code);
-                                }
-                              });
-                              return next;
-                            });
-                          }}
-                        />
-                        <span>{group.primaryLabel}</span>
-                      </label>
-                      <div className="no-oa-bank-batches-drawer__children">
-                        {group.tags.map((tag) => {
-                          const node = { code: tag.code, label: tag.label, primaryLabel: tagPrimaryLabel(tag), subLabel: tagSubLabel(tag) };
-                          return (
-                            <label className="no-oa-bank-batches-drawer__child-check" key={tag.code}>
-                              <NativeCheckbox
-                                checked={draftSelectedTagCodes.has(tag.code)}
-                                className="no-oa-bank-batches-checkbox"
-                                disabled={!canMutateData}
-                                onChange={(event) => {
-                                  setDraftSelectedTagCodes((current) => {
-                                    const next = new Set(current);
-                                    if (event.target.checked) {
-                                      next.add(tag.code);
-                                    } else {
-                                      next.delete(tag.code);
-                                    }
-                                    return next;
-                                  });
-                                }}
-                              />
-                              <span>{node.subLabel ? tagDisplayLabel(node) : SELF_SUB_LABEL}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  );
-                })}
+              <div className="no-oa-bank-batches-drawer__grid-wrap">
+                <table className="no-oa-bank-batches-drawer__grid">
+                  <thead>
+                    <tr>
+                      <th scope="col">收支类型</th>
+                      <th scope="col">流水主标签</th>
+                      <th scope="col">流水子标签</th>
+                      <th className="no-oa-bank-batches-drawer__check-col" scope="col">OA</th>
+                      <th className="no-oa-bank-batches-drawer__check-col" scope="col">发票</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drawerRows.map(({ tag, direction, primaryLabel, subLabel }) => {
+                      const rule = requirementFor(draftTagRequirements, tag.code);
+                      const rowLabel = subLabel === SELF_SUB_LABEL ? primaryLabel : `${primaryLabel} / ${subLabel}`;
+                      return (
+                        <tr key={tag.code}>
+                          <td>{direction}</td>
+                          <td>{primaryLabel}</td>
+                          <td>{subLabel}</td>
+                          <td className="no-oa-bank-batches-drawer__check-col">
+                            <input
+                              aria-label={`${rowLabel} 需要OA`}
+                              checked={rule.requiresOa}
+                              className="no-oa-bank-batches-checkbox"
+                              disabled={!canMutateData || tagLoading}
+                              onChange={(event) => updateDraftRequirement(tag.code, "requiresOa", event.target.checked)}
+                              type="checkbox"
+                            />
+                          </td>
+                          <td className="no-oa-bank-batches-drawer__check-col">
+                            <input
+                              aria-label={`${rowLabel} 需要发票`}
+                              checked={rule.requiresInvoice}
+                              className="no-oa-bank-batches-checkbox"
+                              disabled={!canMutateData || tagLoading}
+                              onChange={(event) => updateDraftRequirement(tag.code, "requiresInvoice", event.target.checked)}
+                              type="checkbox"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
             <footer className="no-oa-bank-batches-drawer__footer">
               <div className="no-oa-bank-batches-drawer__actions">
-                <button
-                  className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
-                  disabled={!canMutateData}
-                  onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))}
-                  type="button"
-                >
-                  全选
-                </button>
-                <button
-                  className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
-                  disabled={!canMutateData}
-                  onClick={() => setDraftSelectedTagCodes(new Set())}
-                  type="button"
-                >
-                  清空
-                </button>
                 <button
                   className="no-oa-bank-batches-button no-oa-bank-batches-button--compact no-oa-bank-batches-button--primary"
                   disabled={!canMutateData || mutating}

@@ -39,6 +39,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 使用情况 rows/details | 前端页面 | fresh/status 可见 |
+| 支付状态 | rows/filter/export/read model | 只消费 `workbench_relation` distribution 中 confirmed/linked 关系；多 OA/多流水用 linked 合计与发票价税合计比对；candidate 不参与 `已付款` 判断 |
 | OA reverse 结果 | API/OA | 业务写后触发 dirty scope |
 | OA reverse 写后 freshness target | API/frontend/operation barrier | `read_model_key=input_invoice_usage`、`scope_key=<invoice month>` |
 | Dirty scope | runtime queue | `input_invoice_usage.read_model.refresh` |

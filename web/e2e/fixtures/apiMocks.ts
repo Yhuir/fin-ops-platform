@@ -181,6 +181,7 @@ type ApiMockOptions = {
   workbenchInitialExceptionApplied?: boolean;
   workbenchInitialRelationConfirmed?: boolean;
   workbenchInitialRowIgnored?: boolean;
+  workbenchBankFlowRuleBatchScenario?: boolean;
   workbenchLargeDataset?: boolean;
   workbenchPageEmpty?: boolean;
   workbenchPageStatus?: WorkbenchPageMockStatus;
@@ -692,6 +693,202 @@ function buildWorkbenchGroup(zone: WorkbenchZone, linked: boolean, includeCashSp
       amount_delta: "0.00",
       requires_note: false,
     },
+  };
+}
+
+function bankFlowRuleBankRow(
+  index: number,
+  overrides: Record<string, unknown> = {},
+) {
+  const suffix = String(index).padStart(3, "0");
+  return {
+    id: `bk-flow-rule-e2e-${suffix}`,
+    type: "bank",
+    case_id: "bank_flow_rule_batch_e2e_fee",
+    relation_mode: "bank_flow_rule_batch",
+    trade_time: `2026-05-0${index} 10:20:00`,
+    debit_amount: "8.80",
+    credit_amount: "",
+    counterparty_name: "建设银行",
+    payment_account_label: "建设银行 8106",
+    remark: `流水规则手续费明细 ${index}`,
+    invoice_relation: { code: "bank_flow_rule_batch", label: "流水规则批次", tone: "success" },
+    display_tags: ["流水规则", "手续费"],
+    available_actions: ["detail", "view_relation"],
+    special_metadata: {
+      source: "bank_flow_rule_batch",
+      source_batch_id: "bank_flow_rule_batch_e2e_fee",
+      relation_mode: "bank_flow_rule_batch",
+      flow_rule_tag_code: "fee",
+      flow_rule_version: 3,
+      requires_oa: false,
+      requires_invoice: false,
+      source_row_count: 4,
+      collapsed_bank_rows: true,
+    },
+    ...overrides,
+  };
+}
+
+function bankFlowRuleInvoiceRow() {
+  return {
+    id: "iv-flow-rule-e2e-needs-invoice",
+    type: "invoice",
+    source_kind: "manual_input_invoice",
+    case_id: "bank_flow_rule_batch_e2e_invoice_required",
+    seller_tax_no: "91330108MA27B4011D",
+    seller_name: "建设银行",
+    buyer_tax_no: "91310000MA1F99088Q",
+    buyer_name: "杭州溯源科技有限公司",
+    issue_date: "2026-05-09",
+    amount: "19.90",
+    tax_rate: "6%",
+    tax_amount: "1.13",
+    total_with_tax: "19.90",
+    invoice_type: "进项普票",
+    invoice_bank_relation: { code: "pending_bank_flow_rule_batch", label: "待确认流水规则批次", tone: "warn" },
+    available_actions: ["detail", "confirm_link"],
+    detail_fields: {
+      发票号码: "BFR-INV-E2E-001",
+      来源: "浏览器 e2e 补票候选",
+    },
+  };
+}
+
+function bankFlowRuleInvoiceRequiredGroup(zone: WorkbenchZone, linked: boolean) {
+  const bankRow = bankFlowRuleBankRow(9, {
+    id: "bk-flow-rule-e2e-needs-invoice",
+    case_id: "bank_flow_rule_batch_e2e_invoice_required",
+    remark: linked ? "补齐发票后进入已配对" : "需要发票后才进入已配对",
+    debit_amount: "19.90",
+    invoice_relation: {
+      code: linked ? "fully_linked" : "bank_flow_rule_batch_requires_invoice",
+      label: linked ? "完全关联" : "需补发票",
+      tone: linked ? "success" : "warn",
+    },
+    available_actions: linked ? ["detail", "view_relation"] : ["detail", "confirm_link"],
+    special_metadata: {
+      source: "bank_flow_rule_batch",
+      source_batch_id: "bank_flow_rule_batch_e2e_invoice_required",
+      relation_mode: "bank_flow_rule_batch",
+      flow_rule_tag_code: "fee",
+      flow_rule_version: 3,
+      requires_oa: false,
+      requires_invoice: true,
+      source_row_count: 1,
+      collapsed_bank_rows: false,
+    },
+  });
+  const invoiceRow = {
+    ...bankFlowRuleInvoiceRow(),
+    invoice_bank_relation: {
+      code: linked ? "fully_linked" : "pending_bank_flow_rule_batch",
+      label: linked ? "完全关联" : "待确认流水规则批次",
+      tone: linked ? "success" : "warn",
+    },
+    available_actions: linked ? ["detail", "view_relation"] : ["detail", "confirm_link"],
+  };
+  return {
+    group_id: "bank-flow-rule-batch:bank_flow_rule_batch_e2e_invoice_required",
+    group_type: zone === "paired" ? "manual_confirmed" : "candidate",
+    match_confidence: zone === "paired" ? "high" : "medium",
+    reason: linked ? "流水规则已补齐发票" : "流水规则待补发票",
+    relation_mode: "bank_flow_rule_batch",
+    oa_rows: [],
+    bank_rows: [bankRow],
+    invoice_rows: [invoiceRow],
+    can_withdraw: false,
+  };
+}
+
+function bankFlowRuleWorkbenchGroups(zone: WorkbenchZone, invoiceRequiredConfirmed = false) {
+  const invoiceRequiredGroup = bankFlowRuleInvoiceRequiredGroup(zone, invoiceRequiredConfirmed);
+  if (zone === "paired") {
+    const collapsedRows = [1, 2, 3, 4].map((index) => bankFlowRuleBankRow(index));
+    const summaryRow = {
+      ...bankFlowRuleBankRow(0, {
+        id: "bank-flow-rule-summary-e2e-fee",
+        source_kind: "bank_flow_rule_batch_summary",
+        trade_time: "2026-05",
+        debit_amount: "35.20",
+        counterparty_name: "流水规则手续费批次",
+        remark: "4 条手续费流水",
+      }),
+      special_metadata: {
+        source: "bank_flow_rule_batch",
+        source_batch_id: "bank_flow_rule_batch_e2e_fee",
+        relation_mode: "bank_flow_rule_batch",
+        flow_rule_tag_code: "fee",
+        flow_rule_version: 3,
+        requires_oa: false,
+        requires_invoice: false,
+        source_row_count: 4,
+        collapsed_bank_rows: true,
+      },
+    };
+    return [{
+      group_id: "bank-flow-rule-batch:bank_flow_rule_batch_e2e_fee",
+      group_type: "manual_confirmed",
+      match_confidence: "high",
+      reason: "流水规则手续费批次",
+      relation_mode: "bank_flow_rule_batch",
+      display_mode: "collapsed_summary",
+      default_collapsed: true,
+      summary_row: summaryRow,
+      collapsed_rows: { bank: collapsedRows, oa: [], invoice: [] },
+      row_counts: { oa: 0, bank: 4, invoice: 0 },
+      display_row_counts: { oa: 0, bank: 1, invoice: 0 },
+      oa_rows: [],
+      bank_rows: [summaryRow],
+      invoice_rows: [],
+      can_withdraw: false,
+    }, ...(invoiceRequiredConfirmed ? [invoiceRequiredGroup] : [])];
+  }
+  return invoiceRequiredConfirmed ? [] : [invoiceRequiredGroup];
+}
+
+function bankFlowRuleConfirmPreviewPayload() {
+  return {
+    operation: "confirm_link",
+    operation_type: "confirm_link",
+    preview_id: "bank-flow-rule-confirm-preview",
+    submit_expected_versions: { bank_flow_rule_batch_e2e_invoice_required: 1 },
+    candidate_keys: ["bank_flow_rule_batch_e2e_invoice_required"],
+    can_submit: true,
+    requires_note: false,
+    message: "确认后将把 1 条流水和 1 条发票按流水规则闭环。",
+    before: { groups: [bankFlowRuleInvoiceRequiredGroup("open", false)] },
+    after: { groups: [bankFlowRuleInvoiceRequiredGroup("paired", true)] },
+    amount_summary: {
+      before: { oa_total: "0.00", bank_total: "19.90", invoice_total: "19.90" },
+      after: { oa_total: "0.00", bank_total: "19.90", invoice_total: "19.90" },
+      status: "matched",
+      direction: "payment",
+      mismatch_fields: [],
+    },
+  };
+}
+
+function bankFlowRuleConfirmResultPayload() {
+  return {
+    success: true,
+    action: "confirm_link",
+    month: "all",
+    affected_row_ids: ["bk-flow-rule-e2e-needs-invoice", "iv-flow-rule-e2e-needs-invoice"],
+    case_id: "bank_flow_rule_batch_e2e_invoice_required",
+    affected_months: ["2026-05"],
+    affected_scope_keys: ["2026-05"],
+    freshness_targets: [
+      { read_model_key: "workbench_relation", scope_key: "2026-05" },
+      { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
+    ],
+    operation_projection: {
+      after: {
+        paired_groups: [bankFlowRuleInvoiceRequiredGroup("paired", true)],
+        open_groups: [],
+      },
+    },
+    message: "已确认流水规则批次补票关联。",
   };
 }
 
@@ -4759,17 +4956,58 @@ function noOaBankBatchMutationPayload(status: NoOaBrowserBatchStatus) {
   return {
     batch: noOaBankBatch(status),
     affected_months: ["2026-05"],
+    affected_scope_keys: ["2026-05"],
+    read_model_scope_keys: ["2026-05"],
+    freshness_targets: [
+      { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
+    ],
+    operation_barrier_targets: [
+      { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
+    ],
     workbench_rebuild_queued: true,
     results: [],
   };
 }
 
-function noOaBankBatchTagSelectionPayload(selectedTagCodes = ["fee"]) {
+function noOaRebaselineManifest(applied = false) {
+  return {
+    dry_run: !applied,
+    applied,
+    summary: {
+      candidate_count: 1,
+      batch_count: 1,
+      row_count: 1,
+      affected_months: ["2026-05"],
+    },
+    batches: [
+      {
+        batch_id: "legacy-no-oa-batch-e2e-001",
+        batch_type: "fee",
+        batch_label: "手续费",
+        relation_case_id: "legacy-no-oa-batch-e2e-001",
+        scope_month: "2026-05",
+        row_ids: ["legacy-no-oa-bank-e2e-001"],
+        row_count: 1,
+        version: 2,
+        status: applied ? "withdrawn" : "submitted",
+      },
+    ],
+    risks: [],
+  };
+}
+
+const defaultNoOaBankBatchTagRules = [
+  { tag_code: "fee", requires_oa: false, requires_invoice: false },
+  { tag_code: "salary", requires_oa: false, requires_invoice: false },
+];
+
+function noOaBankBatchTagSelectionPayload(
+  rules: Array<{ tag_code?: string; requires_oa?: boolean; requires_invoice?: boolean }> = defaultNoOaBankBatchTagRules,
+  salarySubLabel = "工资",
+) {
   return {
     version: 3,
     bank_auto_tag_rules_version: 7,
-    selected_tag_codes: selectedTagCodes,
-    inactive_selected_tag_codes: [],
     active_tags: [
       {
         code: "fee",
@@ -4780,12 +5018,13 @@ function noOaBankBatchTagSelectionPayload(selectedTagCodes = ["fee"]) {
       },
       {
         code: "salary",
-        label: "工资",
+        label: salarySubLabel,
         output_primary_label: "人工成本",
-        output_sub_label: "工资",
+        output_sub_label: salarySubLabel,
         status: "active",
       },
     ],
+    rules,
   };
 }
 
@@ -7433,7 +7672,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let noOaBankBatchFailuresRemaining =
     options.noOaBankBatchFailuresBeforeSuccess ?? (options.noOaBankBatchFailOnce ? 1 : 0);
   let noOaBankBatchesRequestCount = 0;
-  let noOaSelectedTagCodes = ["fee"];
+  let noOaTagRules = [...defaultNoOaBankBatchTagRules];
+  let noOaRebaselineApplied = false;
   let turnoverLedgerFailuresRemaining =
     options.turnoverLedgerFailuresBeforeSuccess ?? (options.turnoverLedgerFailOnce ? 1 : 0);
   let turnoverLedgerRequestCount = 0;
@@ -8346,27 +8586,29 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       });
     }
 
-    if (path === "/api/no-oa-bank-batches/tag-selection" && request.method() === "PUT") {
-      const body = parseJsonBody(request.postData()) as { selected_tag_codes?: unknown };
-      if (Array.isArray(body.selected_tag_codes)) {
-        noOaSelectedTagCodes = body.selected_tag_codes.filter((code): code is string => typeof code === "string");
+    if (path === "/api/bank-flow-rule-batches/tag-rules" && request.method() === "PUT") {
+      const body = parseJsonBody(request.postData()) as {
+        rules?: Array<{ tag_code?: string; requires_oa?: boolean; requires_invoice?: boolean }>;
+      };
+      if (Array.isArray(body.rules)) {
+        noOaTagRules = body.rules;
       }
       return json(route, {
-        ...noOaBankBatchTagSelectionPayload(noOaSelectedTagCodes),
+        ...noOaBankBatchTagSelectionPayload(noOaTagRules, bankAutoTagRulesSalarySubLabel),
         version: 4,
       });
     }
 
-    if (path === "/api/no-oa-bank-batches/tag-selection") {
-      return json(route, noOaBankBatchTagSelectionPayload(noOaSelectedTagCodes));
+    if (path === "/api/bank-flow-rule-batches/tag-rules") {
+      return json(route, noOaBankBatchTagSelectionPayload(noOaTagRules, bankAutoTagRulesSalarySubLabel));
     }
 
-    if (path === "/api/no-oa-bank-batches") {
+    if (path === "/api/bank-flow-rule-batches") {
       if (noOaBankBatchFailuresRemaining > 0) {
         noOaBankBatchFailuresRemaining -= 1;
         return json(route, {
           error: "no_oa_bank_batch_temporarily_unavailable",
-          message: "免OA流水批次加载暂时失败，请刷新后重试。",
+          message: "流水规则批次加载暂时失败，请刷新后重试。",
         }, 503);
       }
       const readModelStatuses = options.noOaBankBatchReadModelStatuses;
@@ -8382,7 +8624,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       ));
     }
 
-    const noOaBankBatchDetailMatch = path.match(/^\/api\/no-oa-bank-batches\/([^/]+)$/);
+    const noOaBankBatchDetailMatch = path.match(/^\/api\/bank-flow-rule-batches\/([^/]+)$/);
     if (noOaBankBatchDetailMatch && request.method() === "GET") {
       return json(route, noOaBankBatchDetailPayload(
         noOaBankBatchStatus,
@@ -8391,12 +8633,29 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       ));
     }
 
-    if (path === "/api/no-oa-bank-batches/submit-selection") {
+    if (path === "/api/bank-flow-rule-batches/submit-selection") {
       noOaBankBatchStatus = "submitted";
       return json(route, noOaBankBatchMutationPayload(noOaBankBatchStatus));
     }
 
-    if (path === "/api/no-oa-bank-batches/no-oa-batch-e2e-001/withdraw") {
+    if (path === "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run") {
+      return json(route, noOaRebaselineManifest(noOaRebaselineApplied));
+    }
+
+    if (path === "/api/bank-flow-rule-batches/rebaseline-no-oa/apply") {
+      const body = parseJsonBody(request.postData()) as { manifest?: unknown; dry_run_manifest?: unknown };
+      const manifest = body.manifest ?? body.dry_run_manifest;
+      if (!manifest || typeof manifest !== "object") {
+        return json(route, {
+          error: "bank_flow_rule_rebaseline_manifest_required",
+          message: "需要先生成 dry-run 清单。",
+        }, 400);
+      }
+      noOaRebaselineApplied = true;
+      return json(route, noOaRebaselineManifest(true));
+    }
+
+    if (path === "/api/bank-flow-rule-batches/no-oa-batch-e2e-001/withdraw") {
       noOaBankBatchStatus = "withdrawn";
       return json(route, noOaBankBatchMutationPayload(noOaBankBatchStatus));
     }
@@ -8643,6 +8902,36 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench") {
+      if (options.workbenchBankFlowRuleBatchScenario) {
+        const pairedGroups = bankFlowRuleWorkbenchGroups("paired", relationConfirmed);
+        const openGroups = bankFlowRuleWorkbenchGroups("open", relationConfirmed);
+        return json(route, {
+          month: "all",
+          summary: {
+            oa_count: 0,
+            bank_count: 5,
+            invoice_count: relationConfirmed ? 1 : 0,
+            paired_count: relationConfirmed ? 2 : 1,
+            open_count: relationConfirmed ? 0 : 1,
+            exception_count: 0,
+            ignored_count: 0,
+          },
+          oa_status: { code: "ready", message: "OA 已同步" },
+          invoice_inventory: {
+            system_total: 0,
+            manual_import_total: 0,
+            workbench_visible_total: 0,
+            hidden_submitted_etc_total: 0,
+            extra_etc_total: 0,
+            etc_summary_batch_count: 0,
+            oa_attachment_total: 0,
+          },
+          paired: { groups: pairedGroups },
+          open: { groups: openGroups },
+          read_model_status: "fresh",
+          generated_at: "2026-06-17T01:00:00Z",
+        });
+      }
       return json(route, legacyWorkbenchPayload(
         relationConfirmed,
         candidateSplitSuppressed,
@@ -8767,6 +9056,32 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/summary") {
+      if (options.workbenchBankFlowRuleBatchScenario) {
+        return json(route, {
+          month: "all",
+          summary: {
+            oa_count: 0,
+            bank_count: 5,
+            invoice_count: relationConfirmed ? 1 : 0,
+            paired_count: relationConfirmed ? 2 : 1,
+            open_count: relationConfirmed ? 0 : 1,
+            exception_count: 0,
+            ignored_count: 0,
+          },
+          oa_status: { code: "ready", message: "OA 已同步" },
+          invoice_inventory: {
+            system_total: 0,
+            manual_import_total: 0,
+            workbench_visible_total: 0,
+            hidden_submitted_etc_total: 0,
+            extra_etc_total: 0,
+            etc_summary_batch_count: 0,
+            oa_attachment_total: 0,
+          },
+          read_model_status: "fresh",
+          generated_at: "2026-06-17T01:00:00Z",
+        });
+      }
       return json(route, workbenchSummaryPayload(
         relationConfirmed,
         candidateSplitSuppressed,
@@ -8788,6 +9103,24 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const zone = url.searchParams.get("zone") === "paired" ? "paired" : "open";
       const requestedPage = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
       const requestedPageSize = Number.parseInt(url.searchParams.get("page_size") ?? "50", 10);
+      if (options.workbenchBankFlowRuleBatchScenario) {
+        const allGroups = bankFlowRuleWorkbenchGroups(zone, relationConfirmed);
+        const boundedPage = Math.max(1, Number.isFinite(requestedPage) ? requestedPage : 1);
+        const boundedPageSize = Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 50);
+        const start = (boundedPage - 1) * boundedPageSize;
+        const pageGroups = allGroups.slice(start, start + boundedPageSize);
+        return json(route, {
+          month: "all",
+          zone,
+          page: boundedPage,
+          page_size: boundedPageSize,
+          total: allGroups.length,
+          row_counts: countWorkbenchRows(allGroups),
+          has_more: start + pageGroups.length < allGroups.length,
+          groups: pageGroups,
+          read_model_status: "fresh",
+        });
+      }
       return json(route, workbenchGroupsPayload(
         zone,
         relationConfirmed,
@@ -8837,6 +9170,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/actions/confirm-link/preview") {
+      if (options.workbenchBankFlowRuleBatchScenario) {
+        return json(route, bankFlowRuleConfirmPreviewPayload());
+      }
       return json(route, confirmPreviewPayload());
     }
 
@@ -8867,6 +9203,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       relationConfirmed = true;
       candidateSplitSuppressed = false;
+      if (options.workbenchBankFlowRuleBatchScenario) {
+        return json(route, bankFlowRuleConfirmResultPayload());
+      }
       return json(route, confirmResultPayload());
     }
 

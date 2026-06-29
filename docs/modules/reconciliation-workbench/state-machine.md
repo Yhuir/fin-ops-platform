@@ -7,9 +7,9 @@
 | 状态域 | 状态 | 事实源 | 允许流转 |
 | --- | --- | --- | --- |
 | Candidate group | `open` | active workbench generation、候选规则、exception/open relation projection | 候选未完整闭环，等待发票/OA/银行/人工确认。可通过 confirm/exception/no-OA/turnover 等动作流转。 |
-| Candidate group | `paired` | active pair relation、closed exception relation、active generation paired zone | confirm 成功、closed exception、免 OA/往来款等 relation 写入后进入。 |
+| Candidate group | `paired` | active pair relation、closed exception relation、active generation paired zone | confirm 成功、closed exception、流水规则批量处理/免 OA/往来款等 relation 满足闭环要求后进入。 |
 | Candidate group | `ignored` | exception/ignore case fact | 用户忽略发票或异常 case 后进入；unignore 后回到 open。 |
-| Pair relation | `active` | `app.workbench_pair_relations` / repository | confirm、特殊规则、免 OA、turnover、batch accounting 等写入。 |
+| Pair relation | `active` | `app.workbench_pair_relations` / repository | confirm、特殊规则、流水规则批量处理、免 OA、turnover、batch accounting 等写入。 |
 | Pair relation | `withdrawn` / cancelled | relation audit/history、撤回动作 | cancel/withdraw 后进入；必须恢复或重建受影响 open group。 |
 | Exception case | `open` | exception case service/projection | preview/apply 等动作创建，影响 open zone row display。 |
 | Exception case | `closed` | exception relation/projection | 三方闭合、OA 免单等处理完成后进入 paired/processed 展示。 |
@@ -32,7 +32,8 @@
 - 关联台确认/撤回是跨页面事实，必须产生 affected scopes/months、审计和下游 refresh 信号。
 - 进行中 OA 在 OA 待付款核对页面关联的支出流水会写入 Workbench active relation，并在关联台银行行展示“已关联进行中OA”chip。由于进行中 OA 尚不属于普通 completed OA 关联台主流程，这类流水仍可能出现在 open/未配对上下文，但不得被当作未占用流水重复确认到其他 active case。
 - 普通 `relation_mode=manual_confirmed` 两栏 relation 是 Workbench active pair relation 事实源，允许 OA+银行、OA+发票、银行+发票任意两栏先确认并占用 row；但两栏只表示 partial relation，关联台必须保留 canonical `case:<case_id>` open/candidate group，不能进入 paired。只有 OA + 银行 + 发票三栏完整，或显式业务例外，才能进入 paired。若 matching engine 产出唯一三栏 `paired` decision，且该 decision 正好补齐一个普通两栏 active relation 的剩余栏，后台可以通过 relation command service 原子替换原 case 为三栏 relation，并把 decision 标记为 `consumed`；这不是把任意两栏直接放宽为 paired。
-- 显式 paired 例外必须在后端分区 policy 中白名单表达，不能回退到“任意两栏 confirmed active relation 都 paired”的宽泛规则。当前例外包括 no-OA 批次/内部转账、工资或个人自动闭合、个人暂借款还清、OA 附件发票冲抵、批量账务、ETC summary/batch relation 和 processed/closed exception projection。
+- 显式 paired 例外必须在后端分区 policy 中白名单表达，不能回退到“任意两栏 confirmed active relation 都 paired”的宽泛规则。当前例外包括流水规则批量处理中 OA/发票 requirement 已满足的批量 relation、no-OA 批次/内部转账、工资或个人自动闭合、个人暂借款还清、OA 附件发票冲抵、批量账务、ETC summary/batch relation 和 processed/closed exception projection。
+- `relation_mode=bank_flow_rule_batch` 的分区规则：若 `requires_oa=true` 则必须存在 OA row；若 `requires_invoice=true` 则必须存在发票 row；两者都为 false 时银行-only relation 可 paired。缺 metadata 或 metadata 不完整时 fail closed 到 open/诊断状态。银行流水数大于 3 条时默认折叠展示，原始 rows 必须可展开。
 - 外部往来 `relation_mode=turnover_manual_closure` 是 Workbench active pair relation 事实源；同一个 active case 下两条及以上银行流水形成的外部往来闭环必须保留 canonical `case:<case_id>` ownership 和“收支闭环”证据，但未补齐 OA + 银行 + 发票三栏前必须留在 open/candidate 区。若闭环确认合并了既有 OA-bank relation，OA rows 与银行流水必须在同一个 case 中展示，但仍要等发票栏补齐后才进入 paired。
 
 禁止流转：
@@ -76,7 +77,7 @@ Refresh 触发来源：
 
 - 导入确认、OA 同步、发票/银行/ETC 变化和设置变化。
 - 关联台确认/撤回、exception apply/cancel、ignore/unignore。
-- 下游模块如 no-OA、turnover、batch accounting 通过 relation/dirty outbox 影响关联台。
+- 下游模块如流水规则批量处理、no-OA、turnover、batch accounting 通过 relation/dirty outbox 影响关联台。
 - worker `workbench.read_model.refresh` 发布 active generation；matching dirty worker 重建候选。
 - `workbench:all` aggregate-only refresh 如果携带 `parent_scope_keys`，必须等这些 parent month shard 的 `workbench` scope 真实 fresh 后再聚合；parent 仍 pending/processing/failed/stale 时返回 `workbench_read_model_not_fresh` 并由 runtime worker defer，不能把暂态 parent/member mismatch 写成 failed all generation。若 all-scope 聚合前发现 parent active generation 自身存在 metadata/actual count mismatch、重复 owner 或 active relation open membership 等 consistency failure，也必须返回 `workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=...`，由 runtime worker 重刷对应 parent month scope 后再重试 aggregate-only all；不得发布新的 failed all generation。
 - `/api/workbench/refresh-status` 和 App Health 的 current-effective 状态以同一 scope 合并后的当前事实为准：同一 scope 旧 `failed` 或旧 generation consistency failure 已被新的 `pending`/`processing` dirty scope 或 building generation 覆盖时展示 `refreshing/rebuilding`，旧 `last_error` 只作为历史诊断，不再弹出当前失败横幅，也不能把 `workbench_read_model` dependency 提升为全局 blocked。没有 active repair 的 generation consistency failure 仍是 `failed`。

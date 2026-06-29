@@ -1,22 +1,38 @@
 # 免OA流水批量处理 测试矩阵
 
+> Legacy: 新通用方向为 `docs/modules/bank-flow-rule-batches/tests.md`。本文保留迁移完成前 no-OA 旧模块测试入口；不要把这里的 `selected_tag_codes` 兼容测试作为新流水规则批量处理的验收标准。
+
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
 ## 影响面清单
 
 | 影响面 | 当前事实源 | 需要保护的行为 |
 | --- | --- | --- |
-| 页面和 API client | `web/src/pages/NoOaBankBatchPage.tsx`、`web/src/features/noOaBankBatches/api.ts` | 三栏布局、标签抽屉、右侧流水行级银行明细标签、提交选择、内部往来提交、撤回 dialog、stale retry、首屏 GET 暂时失败刷新恢复、跨账户选择保护 |
+| 页面和 API client | `web/src/pages/NoOaBankBatchPage.tsx`、`web/src/features/noOaBankBatches/api.ts` | 三栏布局、标签规则 grid 抽屉、右侧流水行级银行明细标签、提交选择、内部往来提交、撤回 dialog、stale retry、首屏 GET 暂时失败刷新恢复、跨账户选择保护 |
 | Operation overlay | `GlobalOperationOverlayProvider`、`web/src/features/operationBarrier/api.ts` | submit-selection、submit、withdraw、tag-selection 保存后等待 `no_oa_bank_batch` barrier fresh，再 reload；失败不假装同步 |
-| API contract | `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`、`docs/dev/api-contracts.md` | list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit 的 response shape、错误码、version、affected months、relation read model freshness 字段 |
+| API contract | `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`、`docs/dev/api-contracts.md` | list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit 的 response shape、错误码、version、`rules` / `requirements_by_tag_code`、affected months、relation read model freshness 字段 |
 | Business core | `NoOaBankBatchService`、`NoOaManagedRulePolicy` | draft/submitted/withdrawn/stale/conflict、内部往来配对、active relation 占用排除、提交时 `row_tag_snapshot` 冻结、legacy relation migration/repair/consolidation command 委托 |
-| Application service | `NoOaBankBatchApplicationService` | read model fallback、tag selection、submit/withdraw、relation command service 委托、rollback、after_mutation、derived lifecycle、durable queue enqueue |
+| Application service | `NoOaBankBatchApplicationService` | read model fallback、tag selection rules、submit/withdraw、relation command service 委托、relation metadata、rollback、after_mutation、derived lifecycle、durable queue enqueue |
 | Write contract | `bankdetail_write_uow.py`、`tests/test_bankdetail_write_uow_contract.py` | stale expected version、batch + Workbench pair relation + audit + dirty/outbox 同事务目标 |
 | Read model / worker | `NoOaBankBatchReadModelRefreshService`、`runtime_worker_registry.py` | missing/stale 不同步重建、source version 保护、worker complete dirty scope、refresh 不执行 relation repair 写入、月度 scope 不全量读取且不删除其它月份批次 |
 | 跨页面影响 | Bank Details、Workbench、Cost Statistics、Search、App Status | no-OA 提交/撤回影响 Workbench relation、银行明细关系状态、成本统计、搜索候选和 App Status |
 | 前端跨页事件 | `web/src/features/domainEvents.ts` | submit/withdraw 后发 `workbenchRelationUpdated`；分类/规则更新刷新 no-OA list/detail/tag drawer；draft 详情用当前标签，submitted/withdrawn 详情用提交时冻结标签 |
 
 ## 现有测试入口
+
+## 2026-06-29 - no-OA 标签规则 grid 与关联台 paired 要求
+
+- 变更类型：feature redesign。
+- 背景：免 OA 标签管理抽屉从可编辑主/子标签勾选树改为紧凑 xlsx/grid 样式；左侧 `收支类型 / 流水主标签 / 流水子标签` 只读来自银行明细自动标签，右侧只维护 `OA / 发票` 要求。勾选表示进入关联台已配对区前必须具备对应 row type。
+- 新增/更新测试：
+  - `web/src/test/NoOaBankBatchApi.test.ts`：映射 `rules`、`requirements_by_tag_code`，保存时发送 `rules` 并派生兼容 `selected_tag_codes`。
+  - `web/src/test/NoOaBankBatchPage.test.tsx`：覆盖紧凑 grid、只读银行标签列、权限禁用、标签变更刷新、保存 rules 和 operation barrier。
+  - `tests/test_app_settings_service.py`：覆盖规则保存、版本、审计、银行标签归档清理和新增标签默认要求 OA/发票。
+  - `tests/test_no_oa_bank_batch_tag_selection_api.py`：覆盖 requires 发票时不生成免 OA 候选、无要求规则才进入候选、relation metadata。
+  - `tests/test_workbench_candidate_grouping.py`：覆盖 no-OA relation 缺少勾选要求的发票时降回 open，补齐后进入 paired。
+- 七类测试决策：Business core 适用并通过候选生成和分组规则覆盖；Service-layer 适用并覆盖设置保存、审计、relation metadata；API contract 适用并覆盖 GET/PUT mapping 和兼容字段；Read model/cache/background job 适用但无新增 worker，本轮通过 no-OA operation barrier 和已有 read model 回归保护；Frontend component and interaction 适用并覆盖抽屉 grid、禁用态、保存；End-to-end business-flow integration 部分适用，关联台 paired/open 通过候选分组服务测试覆盖，真实浏览器全链路仍按现有 Browser/staging 风险管理；Existing feature regression 适用并覆盖旧 selected_tag_codes 兼容、inactive cleanup、分页/stale/提交/撤回既有页面测试。
+- 验证结果：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_candidate_grouping tests.test_app_settings_service tests.test_no_oa_bank_batch_tag_selection_api -v`、`npm test -- --run NoOaBankBatchApi.test.ts NoOaBankBatchPage.test.tsx` 通过。
+- 未测风险：本轮未跑完整 `scripts/verify.sh`、Browser E2E、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain；生产历史 relation metadata 为空的旧 no-OA relation 按兼容逻辑继续视为无需 OA/发票。
 
 ## 2026-06-26 - Cancelled relation lifecycle normalization
 
@@ -179,7 +195,7 @@ git diff --check
 - `web/src/test/NoOaBankBatchPage.test.tsx`
 - `web/src/test/domainEvents.test.ts`
 - `web/src/test/useActiveFinanceDomainEvent.test.tsx`
-- `web/e2e/no-oa-bank-batches-flow.spec.ts`
+- `web/e2e/bank-flow-rule-batches-flow.spec.ts`
 
 ## 七类测试适用性
 
@@ -189,8 +205,8 @@ git diff --check
 | 2. Service-layer tests | 适用 | `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_no_oa_bank_batch_lifecycle_repair.py`、`tests/test_bankdetail_write_uow_contract.py` | 已覆盖 relation command service 委托、relation metadata 携带 `row_tag_snapshot`、submitted detail 在银行标签变更后仍展示提交时标签、after_mutation persist/non-persist、durable queue enqueue、stale expected version、显式 list 分页首屏上限、relation-backed stale SQL read model row 用户可见投影、异常批次不进入公开 API/summary/detail、生产修复 dry-run 纯函数删除/归一报告、batch/relation/audit/dirty/outbox 同事务目标和 rollback。 |
 | 3. API contract tests | 适用 | `tests/test_no_oa_bank_batch_api.py`、`tests/test_no_oa_bank_batch_routes.py`、`tests/test_no_oa_bank_batch_tag_selection_api.py` | 已覆盖 list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit、显式分页 `invalid_paging` 结构化 400、409 version conflict、relation freshness 诊断、404 unknown、invalid JSON、persistence error、partial results。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`tests/test_no_oa_bank_batch_read_model_refresh.py`、`tests/test_postgres_state_store_integration.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 missing SQL read model 不同步重建、stale SQL source versions 不伪装 fresh、detail 不刷新全量、PostgreSQL save public snapshot 清理缺席旧 no-OA read model row、worker stale source version skip、worker refresh 不执行 relation repair 写入且只保存公开生命周期、月度 refresh 只读目标月并保留其它月份批次、依赖 Bankdetail non-fresh 时不写 failed readiness、worker registry/App Status 登记。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/NoOaBankBatchApi.test.ts`、`web/src/test/NoOaBankBatchPolicy.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/e2e/no-oa-bank-batches-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 已覆盖三栏布局、tag drawer、主/子标签键盘操作、首屏 `page/page_size=200` 分页接入、首屏 GET 暂时失败错误态、防普通空态和刷新恢复、页码切换后重置选择/详情、提交选择、旧 read model payload 缺 `can_submit` 时普通 draft 行仍显示 checkbox、旧 read model payload 使用 `status=unsubmitted,status_bucket=unsubmitted` 时归一为 draft/canSubmit 并保留提交入口、非公开 `conflict/stale` 不进入主列表、普通类型与 internal_transfer 的 policy 分流、跨账户选择保护、内部往来 batch submit、撤回、operation overlay、stale polling、route unmount cleanup、relation-backed stale 不显示复核提示、read-only 禁用提交/撤回/tag scope 保存；真实 Chromium 覆盖 `GET /api/no-oa-bank-batches` 暂时 503 后错误态、防普通空态、手动刷新恢复和无可见错误残留，也覆盖 `read_model_status=stale -> fresh` 期间保持可见 rows、不显示普通空态并自动重读、七个普通 draft 类型逐个显示可操作 checkbox、标签准入保存、`no_oa_bank_batch:all` barrier、列表重读、选择未提交流水、提交、operation barrier、成本统计 fresh read model 下游展示、切 bucket、撤回 dialog、历史只读、权限矩阵，并在成功反馈后检查没有操作失败/同步失败/read model 失败等可见错误残留。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`web/e2e/no-oa-bank-batches-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 已覆盖 Workbench confirm internal transfer 走 no-OA batch、no-OA 页面先提交后 Workbench 再确认同一组时复用同一 fact、同账户多条手续费通过 submit-selection 后进入关联台已配对折叠组、非内部往来保持 manual relation、混合 internal transfer 拒绝、no-OA relation 配对/撤回回到 open；Playwright 覆盖 list GET 暂时失败 -> 手动刷新 -> fresh list、stale no-OA read model -> background reload -> fresh list、七个普通 draft 类型 checkbox、tag selection save -> barrier -> reload list、selected-row submit -> operation barrier -> cost statistics fresh read model -> submitted bucket -> withdraw -> history 只读，以及 read-only 用户不能写的浏览器权限闭环和成功后可见错误残留检查。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/NoOaBankBatchApi.test.ts`、`web/src/test/NoOaBankBatchPolicy.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/e2e/bank-flow-rule-batches-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 已覆盖三栏布局、tag drawer、主/子标签键盘操作、首屏 `page/page_size=200` 分页接入、首屏 GET 暂时失败错误态、防普通空态和刷新恢复、页码切换后重置选择/详情、提交选择、旧 read model payload 缺 `can_submit` 时普通 draft 行仍显示 checkbox、旧 read model payload 使用 `status=unsubmitted,status_bucket=unsubmitted` 时归一为 draft/canSubmit 并保留提交入口、非公开 `conflict/stale` 不进入主列表、普通类型与 internal_transfer 的 policy 分流、跨账户选择保护、内部往来 batch submit、撤回、operation overlay、stale polling、route unmount cleanup、relation-backed stale 不显示复核提示、read-only 禁用提交/撤回/tag scope 保存；真实 Chromium 覆盖 `GET /api/no-oa-bank-batches` 暂时 503 后错误态、防普通空态、手动刷新恢复和无可见错误残留，也覆盖 `read_model_status=stale -> fresh` 期间保持可见 rows、不显示普通空态并自动重读、七个普通 draft 类型逐个显示可操作 checkbox、标签准入保存、`no_oa_bank_batch:all` barrier、列表重读、选择未提交流水、提交、operation barrier、成本统计 fresh read model 下游展示、切 bucket、撤回 dialog、历史只读、权限矩阵，并在成功反馈后检查没有操作失败/同步失败/read model 失败等可见错误残留。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`web/e2e/bank-flow-rule-batches-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 已覆盖 Workbench confirm internal transfer 走 no-OA batch、no-OA 页面先提交后 Workbench 再确认同一组时复用同一 fact、同账户多条手续费通过 submit-selection 后进入关联台已配对折叠组、非内部往来保持 manual relation、混合 internal transfer 拒绝、no-OA relation 配对/撤回回到 open；Playwright 覆盖 list GET 暂时失败 -> 手动刷新 -> fresh list、stale no-OA read model -> background reload -> fresh list、七个普通 draft 类型 checkbox、tag selection save -> barrier -> reload list、selected-row submit -> operation barrier -> cost statistics fresh read model -> submitted bucket -> withdraw -> history 只读，以及 read-only 用户不能写的浏览器权限闭环和成功后可见错误残留检查。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_pair_relation_service.py`、`tests/test_bank_auto_tag_rules_api.py`、domain event tests | 已保护旧 summary/category labels、legacy relation collapsed summaries、active relation row 独占、legacy repair 不回退 direct pair write、Bankdetail tag/rule changes refresh no-OA、前端事件不在 route unmount 后 replay；新增 e2e 防止首屏加载失败被伪装为空态、标签保存、提交/撤回按钮、bucket 数量、请求体、freshness barrier、read-only 门禁和“成功但报错提示仍显示”在真实浏览器中回归。 |
 
 当前闭环新增了内部往来双入口幂等、两行 manual internal-transfer 历史迁移、active relation row 独占、PostgreSQL no-OA read model 缺席行清理测试。后续不为了覆盖率新增低价值测试，但任何线上复现都必须先补最小失败测试。
@@ -322,7 +338,7 @@ git diff --check
 | read model fresh empty | `test_no_oa_repository_returns_fresh_empty_rows_when_readiness_is_fresh`、`test_no_oa_repository_keeps_missing_when_readiness_is_absent_or_refreshing` |
 | read model 月度 freshness gate | `test_no_oa_repository_does_not_treat_all_fresh_as_month_fresh_when_month_is_dirty`、`test_no_oa_repository_accepts_month_fresh_without_all_readiness_record` |
 | list 显式分页首屏保护 | `test_list_batches_explicit_pagination_protects_first_screen_slo`、`test_list_batches_invalid_paging_returns_structured_400`、前端 `uses backend pagination for no OA first-screen batches` |
-| Browser list GET 暂时失败恢复 | `web/src/test/NoOaBankBatchPage.test.tsx::recovers after a transient no OA batch list failure when refreshed`、`web/e2e/no-oa-bank-batches-flow.spec.ts::recovers list after a transient load failure when refreshed` |
+| Browser list GET 暂时失败恢复 | `web/src/test/NoOaBankBatchPage.test.tsx::recovers after a transient no OA batch list failure when refreshed`、`web/e2e/bank-flow-rule-batches-flow.spec.ts::recovers list after a transient load failure when refreshed` |
 | read model scope policy | `tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_no_oa_bank_batch_policy_accepts_all_and_month_scopes_only` |
 | worker stale source version / relation repair 边界 | `test_stale_source_version_does_not_rebuild_or_overwrite_read_model`、`test_refresh_does_not_repair_workbench_relations_from_read_model_path` |
 | worker 月度刷新和 Bankdetail 依赖 | `test_month_scope_refresh_reads_only_month_and_preserves_other_month_batches`、`test_refresh_reads_effective_categories_once_for_same_rows`、`tests/test_read_model_readiness_reporter.py::ReadModelReadinessReporterTests::test_dependency_not_fresh_exception_records_refreshing_not_failed` |
@@ -330,13 +346,13 @@ git diff --check
 | 前端 operation-to-fresh closure | `submit-selection`、单批次 submit、withdraw、tag-selection 保存后保持全屏 overlay；tag-selection 等待 `no_oa_bank_batch:all` barrier fresh，其它写操作按 affected month 等待 fresh，再 reload |
 | 前端旧 can_submit flag 不得隐藏普通行级选择 | `web/src/test/NoOaBankBatchPage.test.tsx::keeps draft row selection available when legacy read model rows omit can_submit` |
 | 前端旧 unsubmitted status 不得隐藏普通行级选择 | `web/src/test/NoOaBankBatchApi.test.ts::maps legacy unsubmitted batch status to draft in the unsubmitted bucket`、`web/src/test/NoOaBankBatchPolicy.test.ts`、`web/src/test/NoOaBankBatchPage.test.tsx::keeps ordinary unsubmitted rows selectable when legacy read model uses unsubmitted status` |
-| 前端普通可提交类型均显示行级选择 | `web/e2e/no-oa-bank-batches-flow.spec.ts::shows selectable checkboxes for every ordinary draft no-OA batch type` |
+| 前端普通可提交类型均显示行级选择 | `web/e2e/bank-flow-rule-batches-flow.spec.ts::shows selectable checkboxes for every ordinary draft no-OA batch type` |
 | 前端内部异常状态不得进入未提交主列表 | `web/src/test/NoOaBankBatchPage.test.tsx::filters unsubmitted stale batches out of the main list`、`web/src/test/NoOaBankBatchPage.test.tsx::does not expose internal transfer conflicts in the main list` |
 | submitted detail 使用提交时标签快照 | `tests/test_no_oa_bank_batch_service.py::NoOaBankBatchServiceTests::test_submitted_batch_snapshot_freezes_row_tags`、`tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_submitted_batch_detail_keeps_submitted_row_tags_after_bank_category_changes` |
 | 前端分类/规则事件刷新 | `refreshes tag selection, list, and detail cache after bank transaction category updates`、`refreshes tag selection, list, and detail cache after bank auto tag rules update` |
-| Browser selected-row submit/withdraw/cost fan-out flow | `web/e2e/no-oa-bank-batches-flow.spec.ts`，成功后检查无可见错误残留 |
+| Browser selected-row submit/withdraw/cost fan-out flow | `web/e2e/bank-flow-rule-batches-flow.spec.ts`，成功后检查无可见错误残留 |
 | no-OA 多行手续费提交后关联台折叠显示 | `tests/test_no_oa_bank_batch_workbench_integration.py::NoOaBankBatchWorkbenchIntegrationTests::test_submit_selection_fee_rows_render_as_collapsed_paired_workbench_group` |
-| Browser tag selection save/barrier/reload flow | `web/e2e/no-oa-bank-batches-flow.spec.ts`，成功后检查无可见错误残留 |
+| Browser tag selection save/barrier/reload flow | `web/e2e/bank-flow-rule-batches-flow.spec.ts`，成功后检查无可见错误残留 |
 | Browser read-only no-OA write gates | `web/e2e/permissions-role-matrix.spec.ts`、`web/src/test/NoOaBankBatchPage.test.tsx` read-export regression |
 
 ## 历史 bug 回归库
@@ -359,13 +375,13 @@ git diff --check
 | submitted no-OA batch 对应 relation 已取消或暂缺时，旧 `oa_bank_exact_sum` decision 继续复用 batch 内银行流水 | `tests/test_workbench_reconciliation_decision_cleanup.py::WorkbenchReconciliationDecisionCleanupServiceTests::test_plan_expires_decisions_overlapping_submitted_no_oa_batches`、`tests/test_workbench_reconciliation_decision_store.py::WorkbenchReconciliationDecisionStoreTests::test_repository_cleanup_audit_lists_active_relation_overlaps_in_matching_window` |
 | 标签规则变更后 no-OA 标签选择或候选未刷新 | `tests/test_bank_auto_tag_rules_api.py`、前端 category/rules event tests |
 | route unmount 后 stale polling 继续 replay | `web/src/test/NoOaBankBatchPage.test.tsx` route unmount cleanup test |
-| no-OA list 首屏 GET 失败后同时显示普通空态，误导用户以为当前条件下没有流水 | `web/src/test/NoOaBankBatchPage.test.tsx::recovers after a transient no OA batch list failure when refreshed`、`web/e2e/no-oa-bank-batches-flow.spec.ts::recovers list after a transient load failure when refreshed` |
+| no-OA list 首屏 GET 失败后同时显示普通空态，误导用户以为当前条件下没有流水 | `web/src/test/NoOaBankBatchPage.test.tsx::recovers after a transient no OA batch list failure when refreshed`、`web/e2e/bank-flow-rule-batches-flow.spec.ts::recovers list after a transient load failure when refreshed` |
 | 右侧流水栏缺少每条银行流水的银行明细有效标签，导致用户只能看到批次标签，无法逐行核对分类事实 | `web/src/test/NoOaBankBatchApi.test.ts::maps batch detail rows`、`web/src/test/NoOaBankBatchPage.test.tsx::renders tag management and compact main/sub/transaction layout without account search or debug fields` |
 | 普通未提交 draft 流水 checkbox 被旧批次级 `can_submit` flag 隐藏，导致用户无法选择流水走 `submit-selection` | `web/src/test/NoOaBankBatchPage.test.tsx::keeps draft row selection available when legacy read model rows omit can_submit` |
 | 普通未提交流水在旧 SQL/read model 中以 `status=unsubmitted` 返回，页面状态徽标可显示待提交但右侧流水栏没有 checkbox | `web/src/test/NoOaBankBatchApi.test.ts::maps legacy unsubmitted batch status to draft in the unsubmitted bucket`、`web/src/test/NoOaBankBatchPolicy.test.ts`、`web/src/test/NoOaBankBatchPage.test.tsx::keeps ordinary unsubmitted rows selectable when legacy read model uses unsubmitted status` |
 | `status=stale/conflict/superseded` 的旧异常批次进入未提交主列表，造成“待提交但无 checkbox”或不可提交候选占用分页 | `tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_sql_read_model_exception_batches_are_not_public_payload`、`web/src/test/NoOaBankBatchPage.test.tsx::filters unsubmitted stale batches out of the main list`、`web/src/test/NoOaBankBatchPage.test.tsx::does not expose internal transfer conflicts in the main list` |
 | 写操作成功但 no-OA read model 仍 refreshing 时页面提前可操作，导致用户看到旧批次或重复提交 | `web/src/test/NoOaBankBatchPage.test.tsx` operation overlay 回归、`web/src/test/OperationBarrierApi.test.ts` |
-| 2026-06-17 标签准入保存等待当前月份 scope 而不是后端实际 dirty 的 `all` scope，overlay 提前释放后列表仍需手动刷新 | `web/src/test/NoOaBankBatchPage.test.tsx::saves tag selection through the global overlay and reloads after the barrier is fresh`、`web/e2e/no-oa-bank-batches-flow.spec.ts::saves tag scope through the freshness barrier and reloads the no-OA list` |
+| 2026-06-17 标签准入保存等待当前月份 scope 而不是后端实际 dirty 的 `all` scope，overlay 提前释放后列表仍需手动刷新 | `web/src/test/NoOaBankBatchPage.test.tsx::saves tag selection through the global overlay and reloads after the barrier is fresh`、`web/e2e/bank-flow-rule-batches-flow.spec.ts::saves tag scope through the freshness barrier and reloads the no-OA list` |
 | 2026-06-17 SQL read model 返回 `status=stale,status_bucket=submitted` 时，页面显示“分类已变更，需复核”而不是已提交/可撤回 | `test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`web/src/test/NoOaBankBatchApi.test.ts::maps relation-backed stale batches as submitted`、`web/src/test/NoOaBankBatchPage.test.tsx::presents relation-backed stale batches as submitted without review prompts` |
 
 新增线上或手工发现 bug 时，必须先在本节补复现测试名称，再修实现。
@@ -417,7 +433,7 @@ cd web && npm test -- --run src/test/NoOaBankBatchApi.test.ts src/test/NoOaBankB
 Browser e2e 目标验证：
 
 ```bash
-cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts
+cd web && npx playwright test e2e/bank-flow-rule-batches-flow.spec.ts
 cd web && npx playwright test e2e/permissions-role-matrix.spec.ts
 cd web && npm run e2e:smoke
 ```

@@ -6,6 +6,7 @@ import type {
   NoOaBankBatchReadModelStatus,
   ReadModelOperationBarrierTarget,
   NoOaBankBatchTagDefinition,
+  NoOaBankBatchTagRule,
   NoOaBankBatchTagSelection,
   NoOaBankBatchMutationResult,
   NoOaBankBatchesRequest,
@@ -17,6 +18,8 @@ import type {
   SubmitNoOaBankBatchRequest,
   SubmitNoOaBankBatchSelectionRequest,
   WithdrawNoOaBankBatchRequest,
+  ApplyNoOaBankBatchRebaselineRequest,
+  NoOaBankBatchRebaselineManifest,
 } from "./types";
 import { apiRequestJson } from "../apiClient";
 
@@ -112,10 +115,21 @@ type ApiNoOaBankBatchTagDefinition = {
   path?: unknown[] | null;
   source?: string | null;
   status?: string | null;
+  direction?: string | null;
   output_primary_label?: string | null;
   outputPrimaryLabel?: string | null;
   output_sub_label?: string | null;
   outputSubLabel?: string | null;
+};
+
+type ApiNoOaBankBatchTagRule = {
+  tag_code?: string | null;
+  tagCode?: string | null;
+  code?: string | null;
+  requires_oa?: unknown;
+  requiresOa?: unknown;
+  requires_invoice?: unknown;
+  requiresInvoice?: unknown;
 };
 
 type ApiNoOaBankBatchTagSelection = {
@@ -128,6 +142,9 @@ type ApiNoOaBankBatchTagSelection = {
   inactiveSelectedTagCodes?: unknown[] | null;
   active_tags?: ApiNoOaBankBatchTagDefinition[] | null;
   activeTags?: ApiNoOaBankBatchTagDefinition[] | null;
+  rules?: ApiNoOaBankBatchTagRule[] | null;
+  requirements_by_tag_code?: Record<string, ApiNoOaBankBatchTagRule> | null;
+  requirementsByTagCode?: Record<string, ApiNoOaBankBatchTagRule> | null;
 };
 
 type ApiNoOaBankBatchesResponse = {
@@ -217,6 +234,43 @@ type ApiNoOaBankBatchMutationResult = {
   results?: Array<Record<string, unknown>>;
 };
 
+type ApiNoOaBankBatchRebaselineBatch = {
+  batch_id?: string | null;
+  batchId?: string | null;
+  batch_type?: string | null;
+  batchType?: string | null;
+  batch_label?: string | null;
+  batchLabel?: string | null;
+  relation_case_id?: string | null;
+  relationCaseId?: string | null;
+  scope_month?: string | null;
+  scopeMonth?: string | null;
+  row_ids?: unknown[] | null;
+  rowIds?: unknown[] | null;
+  row_count?: number | null;
+  rowCount?: number | null;
+  version?: number | null;
+  status?: string | null;
+};
+
+type ApiNoOaBankBatchRebaselineManifest = {
+  dry_run?: boolean | null;
+  dryRun?: boolean | null;
+  applied?: boolean | null;
+  summary?: {
+    candidate_count?: number | null;
+    candidateCount?: number | null;
+    batch_count?: number | null;
+    batchCount?: number | null;
+    row_count?: number | null;
+    rowCount?: number | null;
+    affected_months?: unknown[] | null;
+    affectedMonths?: unknown[] | null;
+  } | null;
+  batches?: ApiNoOaBankBatchRebaselineBatch[] | null;
+  risks?: unknown[] | null;
+};
+
 async function requestJson<T>(url: string, init: RequestInit = {}) {
   return apiRequestJson<T>(url, init);
 }
@@ -244,6 +298,10 @@ function stringList(value: string[] | undefined) {
 
 function unknownStringList(value: unknown) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function booleanValue(value: unknown) {
+  return value === true || value === 1 || value === "1" || value === "true";
 }
 
 function normalizeReadModelStatus(value: string | null | undefined): NoOaBankBatchReadModelStatus {
@@ -415,20 +473,61 @@ function mapTagDefinition(tag: ApiNoOaBankBatchTagDefinition = {}): NoOaBankBatc
     path: unknownStringList(tag.path),
     source: text(tag.source),
     status: text(tag.status, "active"),
+    direction: text(tag.direction, "any"),
     outputPrimaryLabel: text(tag.output_primary_label ?? tag.outputPrimaryLabel),
     outputSubLabel: text(tag.output_sub_label ?? tag.outputSubLabel),
   };
 }
 
+function mapTagRule(rule: ApiNoOaBankBatchTagRule = {}): NoOaBankBatchTagRule {
+  return {
+    tagCode: text(rule.tag_code ?? rule.tagCode ?? rule.code),
+    requiresOa: booleanValue(rule.requires_oa ?? rule.requiresOa),
+    requiresInvoice: booleanValue(rule.requires_invoice ?? rule.requiresInvoice),
+  };
+}
+
 function mapTagSelection(payload: ApiNoOaBankBatchTagSelection = {}): NoOaBankBatchTagSelection {
+  const activeTags = Array.isArray(payload.active_tags ?? payload.activeTags)
+    ? (payload.active_tags ?? payload.activeTags ?? []).map(mapTagDefinition)
+    : [];
+  const selectedTagCodes = unknownStringList(payload.selected_tag_codes ?? payload.selectedTagCodes);
+  const rulesByCode = new Map<string, NoOaBankBatchTagRule>();
+  if (Array.isArray(payload.rules)) {
+    payload.rules.map(mapTagRule).forEach((rule) => {
+      if (rule.tagCode) {
+        rulesByCode.set(rule.tagCode, rule);
+      }
+    });
+  }
+  const requirementsByCode = payload.requirements_by_tag_code ?? payload.requirementsByTagCode;
+  if (requirementsByCode && typeof requirementsByCode === "object") {
+    Object.entries(requirementsByCode).forEach(([tagCode, rule]) => {
+      const rulePayload = rule && typeof rule === "object" ? rule : {};
+      rulesByCode.set(tagCode, mapTagRule({ ...rulePayload, tag_code: tagCode }));
+    });
+  }
+  selectedTagCodes.forEach((tagCode) => {
+    if (!rulesByCode.has(tagCode)) {
+      rulesByCode.set(tagCode, { tagCode, requiresOa: false, requiresInvoice: false });
+    }
+  });
+  const rules = activeTags.map((tag) => rulesByCode.get(tag.code) ?? {
+    tagCode: tag.code,
+    requiresOa: true,
+    requiresInvoice: true,
+  });
   return {
     version: numberValue(payload.version),
     bankAutoTagRulesVersion: numberValue(payload.bank_auto_tag_rules_version ?? payload.bankAutoTagRulesVersion),
-    selectedTagCodes: unknownStringList(payload.selected_tag_codes ?? payload.selectedTagCodes),
+    selectedTagCodes,
     inactiveSelectedTagCodes: unknownStringList(payload.inactive_selected_tag_codes ?? payload.inactiveSelectedTagCodes),
-    activeTags: Array.isArray(payload.active_tags ?? payload.activeTags)
-      ? (payload.active_tags ?? payload.activeTags ?? []).map(mapTagDefinition)
-      : [],
+    activeTags,
+    rules,
+    requirementsByTagCode: Object.fromEntries(rules.map((rule) => [
+      rule.tagCode,
+      { requiresOa: rule.requiresOa, requiresInvoice: rule.requiresInvoice },
+    ])),
   };
 }
 
@@ -479,6 +578,59 @@ function mapMutationResult(payload: ApiNoOaBankBatchMutationResult): NoOaBankBat
   };
 }
 
+function mapRebaselineManifest(payload: ApiNoOaBankBatchRebaselineManifest = {}): NoOaBankBatchRebaselineManifest {
+  const summary = payload.summary ?? {};
+  return {
+    dryRun: Boolean(payload.dry_run ?? payload.dryRun),
+    applied: Boolean(payload.applied),
+    summary: {
+      candidateCount: numberValue(summary.candidate_count ?? summary.candidateCount),
+      batchCount: numberValue(summary.batch_count ?? summary.batchCount),
+      rowCount: numberValue(summary.row_count ?? summary.rowCount),
+      affectedMonths: unknownStringList(summary.affected_months ?? summary.affectedMonths),
+    },
+    batches: Array.isArray(payload.batches)
+      ? payload.batches.map((batch) => ({
+        batchId: text(batch.batch_id ?? batch.batchId),
+        batchType: text(batch.batch_type ?? batch.batchType),
+        batchLabel: text(batch.batch_label ?? batch.batchLabel),
+        relationCaseId: text(batch.relation_case_id ?? batch.relationCaseId),
+        scopeMonth: text(batch.scope_month ?? batch.scopeMonth),
+        rowIds: unknownStringList(batch.row_ids ?? batch.rowIds),
+        rowCount: numberValue(batch.row_count ?? batch.rowCount),
+        version: numberValue(batch.version),
+        status: text(batch.status),
+      }))
+      : [],
+    risks: unknownStringList(payload.risks),
+  };
+}
+
+function rebaselineManifestPayload(manifest: NoOaBankBatchRebaselineManifest) {
+  return {
+    dry_run: manifest.dryRun,
+    applied: manifest.applied,
+    summary: {
+      candidate_count: manifest.summary.candidateCount,
+      batch_count: manifest.summary.batchCount,
+      row_count: manifest.summary.rowCount,
+      affected_months: manifest.summary.affectedMonths,
+    },
+    batches: manifest.batches.map((batch) => ({
+      batch_id: batch.batchId,
+      batch_type: batch.batchType,
+      batch_label: batch.batchLabel,
+      relation_case_id: batch.relationCaseId,
+      scope_month: batch.scopeMonth,
+      row_ids: batch.rowIds,
+      row_count: batch.rowCount,
+      version: batch.version,
+      status: batch.status,
+    })),
+    risks: manifest.risks,
+  };
+}
+
 export async function fetchNoOaBankBatches({
   month,
   type,
@@ -513,7 +665,7 @@ export async function fetchNoOaBankBatches({
   }
   const query = params.toString();
   const payload = await requestJson<ApiNoOaBankBatchesResponse>(
-    `/api/no-oa-bank-batches${query ? `?${query}` : ""}`,
+    `/api/bank-flow-rule-batches${query ? `?${query}` : ""}`,
     { method: "GET", signal },
   );
   return {
@@ -527,7 +679,7 @@ export async function fetchNoOaBankBatches({
 
 export async function fetchNoOaBankBatchTagSelection(signal?: AbortSignal): Promise<NoOaBankBatchTagSelection> {
   const payload = await requestJson<ApiNoOaBankBatchTagSelection>(
-    "/api/no-oa-bank-batches/tag-selection",
+    "/api/bank-flow-rule-batches/tag-rules",
     { method: "GET", signal },
   );
   return mapTagSelection(payload);
@@ -535,15 +687,22 @@ export async function fetchNoOaBankBatchTagSelection(signal?: AbortSignal): Prom
 
 export async function saveNoOaBankBatchTagSelection({
   expectedVersion,
-  selectedTagCodes,
+  rules,
   signal,
 }: SaveNoOaBankBatchTagSelectionRequest): Promise<NoOaBankBatchTagSelection> {
   const payload = await requestJson<ApiNoOaBankBatchTagSelection>(
-    "/api/no-oa-bank-batches/tag-selection",
+    "/api/bank-flow-rule-batches/tag-rules",
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expected_version: expectedVersion, selected_tag_codes: selectedTagCodes }),
+      body: JSON.stringify({
+        expected_version: expectedVersion,
+        rules: rules.map((rule) => ({
+          tag_code: rule.tagCode,
+          requires_oa: rule.requiresOa,
+          requires_invoice: rule.requiresInvoice,
+        })),
+      }),
       signal,
     },
   );
@@ -552,7 +711,7 @@ export async function saveNoOaBankBatchTagSelection({
 
 export async function fetchNoOaBankBatchDetail(batchId: string, signal?: AbortSignal): Promise<NoOaBankBatchDetail> {
   const payload = await requestJson<ApiNoOaBankBatchDetail>(
-    `/api/no-oa-bank-batches/${encodeURIComponent(batchId)}`,
+    `/api/bank-flow-rule-batches/${encodeURIComponent(batchId)}`,
     { method: "GET", signal },
   );
   return {
@@ -570,7 +729,7 @@ export async function submitNoOaBankBatch({
   signal,
 }: SubmitNoOaBankBatchRequest): Promise<NoOaBankBatchMutationResult> {
   const payload = await requestJson<ApiNoOaBankBatchMutationResult>(
-    `/api/no-oa-bank-batches/${encodeURIComponent(batchId)}/submit`,
+    `/api/bank-flow-rule-batches/${encodeURIComponent(batchId)}/submit`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -588,7 +747,7 @@ export async function withdrawNoOaBankBatch({
   signal,
 }: WithdrawNoOaBankBatchRequest): Promise<NoOaBankBatchMutationResult> {
   const payload = await requestJson<ApiNoOaBankBatchMutationResult>(
-    `/api/no-oa-bank-batches/${encodeURIComponent(batchId)}/withdraw`,
+    `/api/bank-flow-rule-batches/${encodeURIComponent(batchId)}/withdraw`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -604,7 +763,7 @@ export async function submitNoOaBankBatches({
   signal,
 }: SubmitNoOaBankBatchesRequest): Promise<NoOaBankBatchMutationResult> {
   const payload = await requestJson<ApiNoOaBankBatchMutationResult>(
-    "/api/no-oa-bank-batches/submit",
+    "/api/bank-flow-rule-batches/submit",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -626,7 +785,7 @@ export async function submitNoOaBankBatchSelection({
   signal,
 }: SubmitNoOaBankBatchSelectionRequest): Promise<NoOaBankBatchMutationResult> {
   const payload = await requestJson<ApiNoOaBankBatchMutationResult>(
-    "/api/no-oa-bank-batches/submit-selection",
+    "/api/bank-flow-rule-batches/submit-selection",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -635,4 +794,37 @@ export async function submitNoOaBankBatchSelection({
     },
   );
   return mapMutationResult(payload);
+}
+
+export async function dryRunNoOaBankBatchRebaseline(signal?: AbortSignal): Promise<NoOaBankBatchRebaselineManifest> {
+  const payload = await requestJson<ApiNoOaBankBatchRebaselineManifest>(
+    "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+      signal,
+    },
+  );
+  return mapRebaselineManifest(payload);
+}
+
+export async function applyNoOaBankBatchRebaseline({
+  manifest,
+  reason,
+  signal,
+}: ApplyNoOaBankBatchRebaselineRequest): Promise<NoOaBankBatchRebaselineManifest> {
+  const payload = await requestJson<ApiNoOaBankBatchRebaselineManifest>(
+    "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reason,
+        manifest: rebaselineManifestPayload(manifest),
+      }),
+      signal,
+    },
+  );
+  return mapRebaselineManifest(payload);
 }

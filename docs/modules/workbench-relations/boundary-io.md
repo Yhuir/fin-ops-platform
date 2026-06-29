@@ -29,6 +29,8 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 关系写命令 | workbench、batch accounting、pending invoice、no-OA、turnover、ETC 修复工具 | 必须包含关系对象、方向、操作上下文和审计身份 |
+| no-OA relation metadata | `NoOaBankBatchApplicationService` | legacy `special_metadata` 可包含 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code`、`paired_requirement_version`；关系事实源负责原样保存和投影，不拥有标签规则解释 |
+| 流水规则批量处理 relation metadata | `BankFlowRuleBatchApplicationService` | `relation_mode=bank_flow_rule_batch`；`special_metadata` 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；关系事实源只保存和分发，不解释银行标签规则 |
 | 关系读请求 | 下游 read facade/service | 只暴露 read facade 或 repository port |
 | Refresh scope | `workbench_relation` manifest | month scope；`all` 只允许 fan-out command |
 
@@ -57,7 +59,7 @@
 | Backend services | `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`、`workbench_relation_command_service.py`、`workbench_relation_read_facade.py`、`workbench_relation_sql_projection.py`、`workbench_relation_read_model_refresh.py` |
 | Adapters | `backend/src/fin_ops_platform/services/workbench_relation_command_repository_adapter.py`、`workbench_relation_repository.py` |
 | Repository / SQL | `backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py`、`postgres_repositories/workbench.py` |
-| Downstream callers | `pending_invoice_service.py`、`no_oa_bank_batch_*`、`turnover_ledger_*`、`batch_accounting_service.py`、`input_invoice_usage_oa_reverse_service.py`、ETC migration/repair services |
+| Downstream callers | `pending_invoice_service.py`、`bank_flow_rule_batch_*`、`no_oa_bank_batch_*`、`turnover_ledger_*`、`batch_accounting_service.py`、`input_invoice_usage_oa_reverse_service.py`、ETC migration/repair services |
 | Tools | `backend/src/fin_ops_platform/tools/link_existing_etc_batches.py`、`migrate_historical_etc_business_batches.py` |
 | Tests | `tests/test_workbench_relation_*.py`、`tests/test_workbench_pair_relation_*.py`、downstream fan-out e2e specs |
 
@@ -84,6 +86,6 @@
 - Owned facts: `app.workbench_pair_relations`、`app.workbench_pair_relation_history`。
 - Allowed writes: `WorkbenchRelationCommandService`、relation UoW、明确 migration/repair adapter。
 - Allowed reads: `WorkbenchRelationReadFacade`、relation repository/read ports。
-- Downstream outputs: workbench_relation、workbench、pending invoice、input/output invoice usage、OA pending、tax、cost、search dirty scopes 或 owner producer 输出。
+- Downstream outputs: workbench_relation、workbench、bank_flow_rule_batch、pending invoice、input/output invoice usage、OA pending、tax、cost、search dirty scopes 或 owner producer 输出。
 - Forbidden paths: 调用方不得直接改关系表、不得自行拼 confirmed relation 状态、不得通过 legacy fallback 绕过 command service。
 - Old code deletion: direct pair relation write fallback、旧关系修复半写入和调用方内联关系状态机必须删除；离线 migration/audit/rollback 工具保留不算 closure。

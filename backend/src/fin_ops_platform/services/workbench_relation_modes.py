@@ -13,6 +13,7 @@ VALID_WORKBENCH_RELATION_MODES = frozenset(
         "pending_invoice_attach_existing",
         "pending_invoice_manual_invoice",
         "no_oa_bank_batch",
+        "bank_flow_rule_batch",
         "turnover_manual_closure",
         "batch_accounting",
         "etc_business_batch",

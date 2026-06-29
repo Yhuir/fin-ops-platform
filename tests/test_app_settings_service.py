@@ -274,6 +274,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(settings["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"], [])
         self.assertEqual(settings["pending_invoice_tag_groups"]["version"], pending_rules_version_before_replacement + 1)
         self.assertEqual(settings["no_oa_bank_batch_tag_selection"]["selected_tag_codes"], [])
+        self.assertNotIn("salary", settings["no_oa_bank_batch_tag_selection"]["requirements_by_tag_code"])
         self.assertEqual(
             settings["no_oa_bank_batch_tag_selection"]["version"],
             3,
@@ -361,6 +362,61 @@ class AppSettingsServiceTests(unittest.TestCase):
         fee_tag = next(tag for tag in updated_selection["active_tags"] if tag["code"] == "fee")
         self.assertEqual(fee_tag["output_primary_label"], "运营费用")
         self.assertEqual(fee_tag["output_sub_label"], "银行手续费")
+        fee_rule = next(rule for rule in initial_selection["rules"] if rule["tag_code"] == "fee")
+        self.assertTrue(fee_rule["requires_oa"])
+        self.assertTrue(fee_rule["requires_invoice"])
+
+    def test_no_oa_tag_selection_saves_requirement_rules_with_version_and_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "path": ["费用", "手续费"],
+                        "source": "system",
+                        "status": "active",
+                        "output_primary_label": "费用",
+                        "output_sub_label": "手续费",
+                        "direction": "expense",
+                        "account_scope": {"type": "any", "values": []},
+                        "rules": {
+                            "match_fields": ["summary_text"],
+                            "contains_any": ["手续费"],
+                            "contains_all": [],
+                            "exact_any": [],
+                            "regex_any": [],
+                            "none_of": [],
+                        },
+                    },
+                ],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+
+            saved = app._app_settings_service.update_no_oa_bank_batch_tag_selection(
+                {
+                    "expected_version": selection["version"],
+                    "rules": [{"tag_code": "fee", "requires_oa": True, "requires_invoice": False}],
+                },
+                actor_id="settings-owner",
+            )
+
+        self.assertEqual(saved["version"], selection["version"] + 1)
+        self.assertEqual(saved["selected_tag_codes"], [])
+        self.assertEqual(
+            saved["requirements_by_tag_code"]["fee"],
+            {"requires_oa": True, "requires_invoice": False},
+        )
+        fee_rule = next(rule for rule in saved["rules"] if rule["tag_code"] == "fee")
+        self.assertEqual(fee_rule, {"tag_code": "fee", "requires_oa": True, "requires_invoice": False})
+        audit = app._audit_service.as_dicts()[-1]
+        self.assertEqual(audit["action"], "no_oa_bank_batch_tag_selection_updated")
+        self.assertEqual(
+            audit["metadata"]["new_rules"],
+            {"fee": {"requires_oa": True, "requires_invoice": False}},
+        )
 
     def test_settings_payload_includes_bank_transaction_tags_and_pending_invoice_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

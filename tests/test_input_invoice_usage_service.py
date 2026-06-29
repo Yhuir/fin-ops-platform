@@ -370,6 +370,31 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["inv-fallback"]["paymentStatus"]["code"], "pending")
         self.assertIn("不能证明", rows["inv-fallback"]["paymentStatus"]["reason"])
 
+    def test_payment_status_uses_linked_oa_and_bank_totals_for_multi_relation(self) -> None:
+        vendor = self._counterparty("vendor", "昭通市昭阳区豪然精品酒店")
+        invoice = self._invoice("inv-split-paid", "9300", vendor, total_with_tax="4450.00")
+        bank = self._bank_transaction("bank-split-paid", "4450.00")
+        oa_records = [
+            self._oa("oa-split-a", "刘际涛", "1980.00"),
+            self._oa("oa-split-b", "刘际涛", "2470.00"),
+        ]
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-invoice-paid", [invoice.id, "oa-split-a", "oa-split-b", bank.id], amount_matched=True)
+        service = self._service(
+            invoices=[invoice],
+            transactions=[bank],
+            pair_service=pair_service,
+            oa_projection=StaticOAProjection(oa_records),
+        )
+
+        row = service.list_rows(page_size=20)["rows"][0]
+
+        self.assertEqual(row["oa"]["relationCount"], 2)
+        self.assertEqual(row["oa"]["amount"], "4450.00")
+        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertEqual(row["paymentStatus"]["label"], "已付款")
+
     def test_no_bank_oa_rules_prioritize_offset_applicants_before_waiting_payment(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         zhou = self._invoice("inv-zhou", "9101", vendor, total_with_tax="50.00")

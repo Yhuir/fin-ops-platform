@@ -62,6 +62,7 @@ type WaitForOperationFreshnessOptions = {
 
 const READ_MODEL_LABELS: Record<string, string> = {
   bank_detail: "银行流水",
+  bank_flow_rule_batch: "流水规则批次",
   input_invoice_usage: "进项发票使用情况",
   no_oa_bank_batch: "无 OA 银行批次",
   oa_pending_payment: "OA 待付款核对",

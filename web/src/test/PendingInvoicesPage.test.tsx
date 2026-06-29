@@ -851,6 +851,12 @@ function pendingInvoiceRulesRequests(fetchMock: ReturnType<typeof installPending
   });
 }
 
+function pendingInvoiceRelationRequests(fetchMock: ReturnType<typeof installPendingInvoiceFetch>) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+    .filter((url) => url.pathname === "/api/pending-invoices/rows/txn-invoice-not-paid/relation-detail");
+}
+
 function operationBarrierRequests(fetchMock: ReturnType<typeof installPendingInvoiceFetch>) {
   return fetchMock.mock.calls
     .filter(([input, init]) => {
@@ -1187,6 +1193,7 @@ describe("Pending invoices page", () => {
     expect(screen.getByText("建设项目二期")).toBeInTheDocument();
     expect(screen.getAllByText("case-old").length).toBeGreaterThanOrEqual(1);
     await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
+    expect(pendingInvoiceRelationRequests(fetchMock).map((url) => url.searchParams.get("kind"))).toEqual(["invoice", "bank", "oa"]);
 
     await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
     expect(await screen.findByRole("heading", { name: "支出待找发票规则设置" })).toBeInTheDocument();

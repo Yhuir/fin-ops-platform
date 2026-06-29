@@ -12,7 +12,7 @@ const routePaths = [
   "/fin-ops/output-invoice-collections",
   "/fin-ops/tax-offset",
   "/fin-ops/cost-statistics",
-  "/fin-ops/no-oa-bank-batches",
+  "/fin-ops/bank-flow-rule-batches",
   "/fin-ops/batch-accounting",
   "/fin-ops/turnover-ledger",
   "/fin-ops/etc-tickets",

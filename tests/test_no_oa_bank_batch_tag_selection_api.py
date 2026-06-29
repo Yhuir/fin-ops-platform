@@ -19,6 +19,30 @@ class _ReadModelQueue:
 
 
 class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
+    def test_bank_flow_rule_tag_rules_hide_and_reject_selected_tag_codes(self) -> None:
+        app = build_application()
+        payload = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
+
+        self.assertIn("active_tags", payload)
+        self.assertIn("rules", payload)
+        self.assertNotIn("selected_tag_codes", payload)
+        self.assertNotIn("inactive_selected_tag_codes", payload)
+
+        response = app.handle_request(
+            "PUT",
+            "/api/bank-flow-rule-batches/tag-rules",
+            body=json.dumps({
+                "expected_version": payload["version"],
+                "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}],
+                "selected_tag_codes": ["fee"],
+            }),
+            headers={"Content-Type": "application/json"},
+        )
+        error = _json(response)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(error["error"], "bank_flow_rule_batch_selected_tag_codes_forbidden")
+
     def test_tag_selection_active_tags_are_bank_auto_rule_tags_only(self) -> None:
         app = build_application()
         auto_rules = app._app_settings_service.get_bank_auto_tag_rules_payload()
@@ -100,12 +124,36 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(selection_payload["bank_auto_tag_rules_version"], 1)
         self.assertEqual(selection_payload["selected_tag_codes"], [])
         self.assertIn("fee", [tag["code"] for tag in selection_payload["active_tags"]])
+        initial_fee_rule = next(rule for rule in selection_payload["rules"] if rule["tag_code"] == "fee")
+        self.assertTrue(initial_fee_rule["requires_oa"])
+        self.assertTrue(initial_fee_rule["requires_invoice"])
         self.assertEqual(empty_batches["batches"], [])
 
         save_response = app.handle_request(
             "PUT",
             "/api/no-oa-bank-batches/tag-selection",
-            body=json.dumps({"expected_version": selection_payload["version"], "selected_tag_codes": ["fee"]}),
+            body=json.dumps({
+                "expected_version": selection_payload["version"],
+                "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": True}],
+            }),
+            headers={"Content-Type": "application/json"},
+        )
+        app._no_oa_bank_batch_application_service().refresh_batches()
+        app._workbench_sql_read_repository = None
+        still_blocked_batches = _json(app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted"))
+
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(_json(save_response)["selected_tag_codes"], [])
+        self.assertEqual(still_blocked_batches["batches"], [])
+
+        next_selection = _json(save_response)
+        save_response = app.handle_request(
+            "PUT",
+            "/api/no-oa-bank-batches/tag-selection",
+            body=json.dumps({
+                "expected_version": next_selection["version"],
+                "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}],
+            }),
             headers={"Content-Type": "application/json"},
         )
         app._no_oa_bank_batch_application_service().refresh_batches()
@@ -114,6 +162,10 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
 
         self.assertEqual(save_response.status_code, 200)
         self.assertEqual(_json(save_response)["selected_tag_codes"], ["fee"])
+        self.assertEqual(
+            _json(save_response)["requirements_by_tag_code"]["fee"],
+            {"requires_oa": False, "requires_invoice": False},
+        )
         self.assertEqual([batch["batch_type"] for batch in enabled_batches["batches"]], ["fee"])
         self.assertIn(("no_oa_bank_batch", "all", "no_oa_bank_batch_tag_selection_changed"), queue.enqueued)
 
@@ -154,6 +206,9 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(updated_selection["selected_tag_codes"], initial_selection["selected_tag_codes"])
         self.assertEqual(len(new_tag_codes), 1)
         self.assertNotIn(new_tag_codes[0], updated_selection["selected_tag_codes"])
+        new_tag_rule = next(rule for rule in updated_selection["rules"] if rule["tag_code"] == new_tag_codes[0])
+        self.assertTrue(new_tag_rule["requires_oa"])
+        self.assertTrue(new_tag_rule["requires_invoice"])
 
     def test_archived_selected_tag_is_removed_by_auto_tag_rule_update(self) -> None:
         app = build_application()
@@ -183,6 +238,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(updated["bank_auto_tag_rules_version"], current["version"] + 1)
         self.assertNotIn("salary", [tag["code"] for tag in updated["active_tags"]])
         self.assertEqual(updated["inactive_selected_tag_codes"], [])
+        self.assertNotIn("salary", updated["requirements_by_tag_code"])
         audit = app._audit_service.as_dicts()[-1]
         self.assertEqual(
             audit["metadata"]["detached_no_oa_bank_batch_tag_references"],
@@ -252,6 +308,161 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertIsNotNone(relation)
         self.assertEqual(relation["relation_mode"], "no_oa_bank_batch")
         self.assertEqual(relation["row_ids"], [row_ids[0]])
+        self.assertEqual(
+            relation["special_metadata"]["paired_requirement_tag_code"],
+            "fee",
+        )
+        self.assertFalse(relation["special_metadata"]["paired_requires_oa"])
+        self.assertFalse(relation["special_metadata"]["paired_requires_invoice"])
+
+    def test_bank_flow_rule_submit_selection_uses_new_relation_mode_and_rule_metadata(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="fees-bank-flow.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-03",
+                    "trade_time": "2026-05-03 10:20:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "8.80",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_id = app._import_service.list_transactions()[0].id
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "fee"}],
+            actor="tester",
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/submit-selection",
+            body=json.dumps({"transaction_ids": [row_id], "note": "提交流水规则"}),
+            headers={"Content-Type": "application/json"},
+        )
+        payload = _json(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["batch"]["status"], "submitted")
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+        self.assertIsNotNone(relation)
+        self.assertEqual(relation["relation_mode"], "bank_flow_rule_batch")
+        metadata = relation["special_metadata"]
+        self.assertEqual(metadata["source"], "bank_flow_rule_batch")
+        self.assertEqual(metadata["flow_rule_tag_code"], "fee")
+        self.assertTrue(metadata["requires_oa"])
+        self.assertTrue(metadata["requires_invoice"])
+        self.assertEqual(metadata["source_row_count"], 1)
+        self.assertFalse(metadata["collapsed_bank_rows"])
+        self.assertEqual(
+            payload["operation_barrier_targets"],
+            [{"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}],
+        )
+
+    def test_bank_flow_rule_rebaseline_no_oa_dry_run_and_apply_withdraw_submitted_history(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="fees-rebaseline.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-03",
+                    "trade_time": "2026-05-03 10:20:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "8.80",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_id = app._import_service.list_transactions()[0].id
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "fee"}],
+            actor="tester",
+        )
+        version = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))["version"]
+        app.handle_request(
+            "PUT",
+            "/api/no-oa-bank-batches/tag-selection",
+            body=json.dumps({"expected_version": version, "selected_tag_codes": ["fee"]}),
+            headers={"Content-Type": "application/json"},
+        )
+        submit_response = app.handle_request(
+            "POST",
+            "/api/no-oa-bank-batches/submit-selection",
+            body=json.dumps({"transaction_ids": [row_id], "note": "旧免OA提交"}),
+            headers={"Content-Type": "application/json"},
+        )
+        batch_id = _json(submit_response)["batch"]["batch_id"]
+        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))
+
+        dry_run_response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run",
+            body=json.dumps({}),
+            headers={"Content-Type": "application/json"},
+        )
+        dry_run = _json(dry_run_response)
+
+        self.assertEqual(dry_run_response.status_code, 200)
+        self.assertTrue(dry_run["dry_run"])
+        self.assertFalse(dry_run["applied"])
+        self.assertEqual(dry_run["summary"]["candidate_count"], 1)
+        self.assertEqual(dry_run["batches"][0]["batch_id"], batch_id)
+        self.assertEqual(app._no_oa_bank_batch_service.get_batch(batch_id)["status"], "submitted")
+
+        missing_manifest_response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
+            body=json.dumps({"reason": "缺 dry-run manifest"}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(missing_manifest_response.status_code, 400)
+        self.assertEqual(_json(missing_manifest_response)["error"], "bank_flow_rule_rebaseline_manifest_required")
+
+        stale_manifest = {**dry_run, "batches": [{**dry_run["batches"][0], "version": 999}]}
+        stale_manifest_response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
+            body=json.dumps({"reason": "陈旧 dry-run manifest", "manifest": stale_manifest}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(stale_manifest_response.status_code, 400)
+        self.assertEqual(_json(stale_manifest_response)["error"], "bank_flow_rule_rebaseline_manifest_mismatch")
+
+        apply_response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
+            body=json.dumps({"reason": "全部重新过流水规则", "manifest": dry_run}),
+            headers={"Content-Type": "application/json"},
+        )
+        applied = _json(apply_response)
+
+        self.assertEqual(apply_response.status_code, 200)
+        self.assertTrue(applied["applied"])
+        self.assertFalse(applied["dry_run"])
+        self.assertEqual(applied["summary"]["candidate_count"], 1)
+        self.assertEqual(app._no_oa_bank_batch_service.get_batch(batch_id)["status"], "withdrawn")
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))
+
+        second_apply = _json(app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
+            body=json.dumps({"reason": "重复执行", "manifest": dry_run}),
+            headers={"Content-Type": "application/json"},
+        ))
+        self.assertEqual(second_apply["summary"]["candidate_count"], 0)
 
     def test_selected_row_submit_rejects_cross_bank_selection(self) -> None:
         app = build_application()

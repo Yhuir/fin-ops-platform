@@ -1,10 +1,12 @@
 # 免OA流水批量处理 状态机
 
+> Legacy: 新通用方向为 `docs/modules/bank-flow-rule-batches/state-machine.md` 的流水规则批量处理。本文只描述迁移完成前 no-OA 旧模块行为和历史兼容状态。
+
 > 修改 `免OA流水批量处理` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。
 
 ## 业务状态
 
-### 标签准入
+### 标签闭环规则
 
 事实源：
 
@@ -15,17 +17,21 @@
 
 | 状态 | 含义 | 允许动作 |
 | --- | --- | --- |
-| `active` | 当前可用银行自动标签规则 | 可被选择或取消 |
-| `selected` | 已保存为免 OA 候选准入标签 | 后续未提交候选纳入该 tag code |
-| `inactive_selected` | 历史选择但当前停用或不可用 | GET 返回提示；保存后清理 |
+| `active` | 当前可用银行自动标签规则 | 左侧只读展示，不允许在 no-OA 抽屉新增、编辑或删除标签 |
+| `rule_requires` | 已保存 OA/发票闭环要求 | 可勾选或取消 `OA`、`发票` 要求 |
+| `selected` | 兼容状态：`requires_oa=false` 且 `requires_invoice=false` 的标签 | 后续未提交候选纳入该 tag code |
+| `inactive_selected` | 历史选择或规则引用但当前停用或不可用 | GET 返回提示；保存或银行标签归档后清理 |
 | `version_conflict` | PUT 的 `expected_version` 过期 | 返回 409；不得保存或刷新 |
 
 规则：
 
-- 首次 `selected_tag_codes` 为空数组，不自动选中所有标签。
-- `selected_tag_codes` 可为空，表示暂不生成新的未提交候选。
-- 免 OA 标签准入不保存外部往来第三层分类字段。
+- 首次 `selected_tag_codes` 为空数组，不自动放行所有标签。
+- `rules` 是主合同；旧 `selected_tag_codes` 只兼容为这些标签 `requires_oa=false` 且 `requires_invoice=false`。
+- 新增银行自动标签默认 `requires_oa=true` 且 `requires_invoice=true`，避免新增标签自动进入免 OA 未提交候选或关联台已配对。
+- `selected_tag_codes` 可为空，表示免 OA 页面暂不生成新的未提交候选。
+- 免 OA 标签规则不保存外部往来第三层分类字段。
 - 自动标签规则变更时，已停用引用必须从 no-OA tag selection 中移除并审计。
+- no-OA 抽屉左侧 `收支类型 / 流水主标签 / 流水子标签` 只来自银行明细自动标签事实源，用户不能在该抽屉新增、编辑或删除标签。
 
 ### 批次状态
 
@@ -60,7 +66,7 @@
 
 候选生成规则：
 
-- 未提交候选只来自当前 tag selection 中的 tag code。
+- 未提交候选只来自当前 tag selection 中 `requires_oa=false` 且 `requires_invoice=false` 的 tag code。
 - 未提交候选必须排除被 Workbench active relation 占用的银行流水。
 - 已提交历史批次即使标签不再准入，也继续可见并按状态管理。
 - 已提交/已撤回批次详情使用提交时冻结的 `row_tag_snapshot`；银行明细当前标签变化只影响新的未提交候选，不覆盖历史批次内流水标签。
@@ -81,9 +87,10 @@
 draft candidate rows selected
   -> transaction_ids non-empty and unique
   -> same month + same bank account + same category_code
-  -> category_code currently selected
+  -> category_code currently selected by no-requirement rule
   -> submitted no-OA batch
   -> Workbench pair relation relation_mode=no_oa_bank_batch
+  -> relation special_metadata carries paired_requires_oa / paired_requires_invoice
   -> no_oa_bank_batch / workbench / influenced read models refresh
 ```
 
@@ -92,7 +99,7 @@ draft candidate rows selected
 - 跨银行账户选择。
 - 跨月份选择。
 - 跨 category code 选择。
-- 未在当前 tag selection 中的 category code。
+- 未在当前 no-requirement tag rule 中的 category code。
 - 单边 internal transfer 选择。
 - 已被 active relation 占用的流水。
 
@@ -230,7 +237,7 @@ job.outbox_events / job.read_model_dirty_scopes
 | 2026-06-11 | 固定内部往来双入口闭环 | Workbench/no-OA 同一组内部往来幂等复用同一 no-OA fact；存量两行 manual internal-transfer relation 迁移；active relation row 独占；SQL read model 保存清理缺席旧批次 | `pytest` no-OA service/workbench integration、pair relation service 目标用例 |
 | 2026-06-14 | no-OA 月度 read model refresh 和依赖未 fresh 状态收敛 | `no_oa_bank_batch` scope policy 支持 `all`/月份；月度 worker 不全量读取、不删除其它月份批次；Bankdetail 依赖未 fresh 时记录 refreshing，不再污染 failed blocker | `tests.test_no_oa_bank_batch_read_model_refresh`、`tests.test_no_oa_bank_batch_workbench_integration`、`tests.test_read_model_readiness_reporter`、`tests.test_read_model_refresh_gateway` |
 | 2026-06-14 | submit/withdraw/tag-selection 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `no_oa_bank_batch` barrier fresh 并 reload，避免旧批次/旧候选暴露给用户 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
-| 2026-06-17 | Browser e2e 补齐选择提交/撤回/历史只读闭环 | 真实 Chromium 保护未提交选择、`submit-selection` 请求体、operation barrier、已提交 bucket 撤回 dialog、withdraw 请求体和历史只读状态 | `cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts` |
+| 2026-06-17 | Browser e2e 补齐选择提交/撤回/历史只读闭环 | 真实 Chromium 保护未提交选择、`submit-selection` 请求体、operation barrier、已提交 bucket 撤回 dialog、withdraw 请求体和历史只读状态 | `cd web && npx playwright test e2e/bank-flow-rule-batches-flow.spec.ts` |
 | 2026-06-17 | read-only 写入口门禁接入权限矩阵 | `read_export_only` 用户可查看批次和标签范围，但不能提交、撤回、批量勾选或保存 tag selection；权限矩阵归 `permissions-and-audit` 统一覆盖 | `cd web && npx playwright test e2e/permissions-role-matrix.spec.ts`、`cd web && npm test -- --run src/test/NoOaBankBatchPage.test.tsx` |
 | 2026-06-17 | relation-backed stale 用户可见状态收敛 | SQL read model 中仍有 active no-OA relation 的旧 `stale` 批次按已提交展示并可撤回；页面不显示“分类已变更，需复核”提示 | `tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`web/src/test/NoOaBankBatchPage.test.tsx` |
 | 2026-06-23 | read-side manifest 合同守卫 | 仅锁定 `no_oa_bank_batch` 的 self-managed freshness、`scoped_incremental`、fan-out `all`、`no-oa-bank-batch` worker、query/permission owner 和 repository port；不改变业务/UI/read model/worker 状态定义 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_search_and_no_oa_bank_batch_manifest_preserve_read_side_contracts` |

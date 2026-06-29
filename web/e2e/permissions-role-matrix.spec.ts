@@ -76,10 +76,10 @@ const readablePages: PageExpectation[] = [
     },
   },
   {
-    path: "/no-oa-bank-batches",
-    label: "免OA流水批量处理",
+    path: "/bank-flow-rule-batches",
+    label: "流水规则批量处理",
     assertReady: async (page) => {
-      await expect(page.getByRole("heading", { name: "免OA流水批量处理" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     },
   },
   {
@@ -290,17 +290,17 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
     },
   },
   {
-    id: "no-oa-bank-batches:tag-drawer",
-    label: "no-OA tag management drawer",
+    id: "bank-flow-rule-batches:tag-drawer",
+    label: "bank flow rule tag management drawer",
     verify: async (page) => {
-      await page.goto("/no-oa-bank-batches");
-      await expect(page.getByText("当前账号仅支持查看和导出，不能提交、撤回或保存免OA流水批次。")).toBeVisible();
+      await page.goto("/bank-flow-rule-batches");
+      await expect(page.getByText("当前账号仅支持查看和导出，不能提交、撤回或保存流水规则批次。")).toBeVisible();
       await expect(page.getByRole("button", { name: "提交批次" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "撤回批次" })).toHaveCount(0);
-      await page.getByRole("button", { name: "免OA流水标签管理" }).click();
-      const tagDrawer = page.getByRole("dialog", { name: "免OA流水标签管理" });
-      await expect(tagDrawer.getByRole("button", { name: "全选" })).toBeDisabled();
-      await expect(tagDrawer.getByRole("button", { name: "清空" })).toBeDisabled();
+      await page.getByRole("button", { name: "流水规则标签管理" }).click();
+      const tagDrawer = page.getByRole("dialog", { name: "流水规则标签管理" });
+      await expect(tagDrawer.getByRole("button", { name: "全选" })).toHaveCount(0);
+      await expect(tagDrawer.getByRole("button", { name: "清空" })).toHaveCount(0);
       await expect(tagDrawer.getByRole("button", { name: "保存" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page);
     },
@@ -818,8 +818,8 @@ test.describe("permissions browser role matrix", () => {
     await expect(page.getByText("当前账号仅支持查看和导出，不能导入文件。")).toHaveCount(0);
     await expect(page.locator("input[type='file']")).toBeEnabled();
 
-    await page.goto("/no-oa-bank-batches");
-    await expect(page.getByText("当前账号仅支持查看和导出，不能提交、撤回或保存免OA流水批次。")).toHaveCount(0);
+    await page.goto("/bank-flow-rule-batches");
+    await expect(page.getByText("当前账号仅支持查看和导出，不能提交、撤回或保存流水规则批次。")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "提交批次" })).toBeVisible();
 
     await page.goto("/operations/app-health");

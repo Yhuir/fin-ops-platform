@@ -106,6 +106,13 @@ function resolveCollapsedSummaryCopy(
       totalLabel: (count) => `实际 ${count} 张发票`,
     };
   }
+  if (group.relationMode === "bank_flow_rule_batch") {
+    return {
+      detailLabel: "流水规则批次明细",
+      countUnit: "条",
+      totalLabel: (count) => `实际 ${count} 条流水`,
+    };
+  }
 
   return {
     detailLabel: "免OA批次明细",

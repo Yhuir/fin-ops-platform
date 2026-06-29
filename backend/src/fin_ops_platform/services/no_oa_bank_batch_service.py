@@ -18,6 +18,7 @@ from fin_ops_platform.services.workbench_relation_command_service import Workben
 
 NO_OA_BANK_BATCH_SCHEMA_VERSION = "2026-05-no-oa-bank-batch-v1"
 NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"
+BANK_FLOW_RULE_BATCH_RELATION_MODE = "bank_flow_rule_batch"
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
 

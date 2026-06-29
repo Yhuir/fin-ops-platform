@@ -551,7 +551,7 @@ describe("Workbench candidate grouping layout", () => {
           { status: 200 },
         );
       }
-      if (url.pathname === "/api/no-oa-bank-batches/NOOA-202603-FEE/withdraw") {
+      if (url.pathname === "/api/bank-flow-rule-batches/NOOA-202603-FEE/withdraw") {
         expect(init?.method).toBe("POST");
         expect(JSON.parse(String(init?.body))).toEqual({
           expected_version: 7,
@@ -1044,7 +1044,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getAllByRole("button", { name: "展开免OA批次明细，1 条" })).toHaveLength(2);
   });
 
-  test("withdraws no-OA summaries through the no-OA batch API instead of ordinary cancel-link", async () => {
+  test("withdraws no-OA summaries through the bank flow rule batch API instead of ordinary cancel-link", async () => {
     const fetchMock = mockWorkbenchPageFetch();
     const relationListener = vi.fn();
     window.addEventListener("workbenchRelationUpdated", relationListener);
@@ -1059,7 +1059,7 @@ describe("Workbench candidate grouping layout", () => {
 
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith(
-          "/api/no-oa-bank-batches/NOOA-202603-FEE/withdraw",
+          "/api/bank-flow-rule-batches/NOOA-202603-FEE/withdraw",
           expect.objectContaining({ method: "POST" }),
         );
       });

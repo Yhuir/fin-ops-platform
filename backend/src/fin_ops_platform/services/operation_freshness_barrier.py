@@ -16,6 +16,9 @@ BUSY_READ_MODEL_STATUSES = {
 }
 BLOCKED_OUTBOX_STATUSES = {"failed", "dead_lettered", "publish_failed"}
 BUSY_OUTBOX_STATUSES = {"pending", "processing", "publishing"}
+READ_MODEL_STATUS_SOURCE_KEYS = {
+    "bank_flow_rule_batch": "no_oa_bank_batch",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +34,7 @@ class OperationFreshnessTarget:
         scope_type = _clean_text(payload.get("scope_type")) or None
         if not read_model_key:
             raise ValueError("read_model_key is required")
-        definition = APP_STATUS_READ_MODEL_REGISTRY.get(read_model_key)
+        definition = _definition_for_target(read_model_key)
         return cls(
             read_model_key=read_model_key,
             scope_key=scope_key,
@@ -94,7 +97,7 @@ class OperationFreshnessBarrierService:
         outbox_statuses: dict[str, Any],
         worker_statuses: dict[str, Any],
     ) -> dict[str, Any]:
-        definition = APP_STATUS_READ_MODEL_REGISTRY.get(target.read_model_key)
+        definition = _definition_for_target(target.read_model_key)
         scope_type = target.scope_type or (definition.scope_type if definition is not None else target.read_model_key)
         base = {
             "read_model_key": target.read_model_key,
@@ -117,7 +120,7 @@ class OperationFreshnessBarrierService:
                 "reason": "runtime_unavailable",
                 "last_error": runtime_status.get("last_error"),
             }
-        read_model_payload = _dict(read_model_statuses.get(target.read_model_key))
+        read_model_payload = _dict(read_model_statuses.get(READ_MODEL_STATUS_SOURCE_KEYS.get(target.read_model_key, target.read_model_key)))
         read_model_scope = _matching_scope(read_model_payload, scope_type=scope_type, scope_key=target.scope_key)
         raw_status = _clean_text((read_model_scope or read_model_payload).get("status")) or "missing"
         target_status = _barrier_status(raw_status)
@@ -200,6 +203,13 @@ def _barrier_status(status: str) -> str:
     if normalized in BUSY_READ_MODEL_STATUSES:
         return "refreshing"
     return "refreshing"
+
+
+def _definition_for_target(read_model_key: str) -> Any:
+    normalized = _clean_text(read_model_key)
+    return APP_STATUS_READ_MODEL_REGISTRY.get(normalized) or APP_STATUS_READ_MODEL_REGISTRY.get(
+        READ_MODEL_STATUS_SOURCE_KEYS.get(normalized, "")
+    )
 
 
 def _matching_scope(payload: dict[str, Any], *, scope_type: str, scope_key: str) -> dict[str, Any] | None:

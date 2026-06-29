@@ -4,6 +4,74 @@ from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCand
 
 
 class WorkbenchCandidateGroupingTests(unittest.TestCase):
+    def test_bank_flow_rule_batch_collapses_only_when_more_than_three_bank_rows(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        batch_id = "bank_flow_rule_fee_001"
+        rows = [
+            bank_flow_rule_row(f"bk-flow-fee-{index}", batch_id=batch_id, debit_amount="10.00")
+            for index in range(1, 5)
+        ]
+
+        payload = service.group_payload("2026-05", oa_rows=[], bank_rows=rows, invoice_rows=[])
+
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["relation_mode"], "bank_flow_rule_batch")
+        self.assertEqual(group["display_mode"], "collapsed_summary")
+        self.assertTrue(group["default_collapsed"])
+        self.assertEqual(len(group["collapsed_rows"]["bank"]), 4)
+
+        three_row_payload = service.group_payload("2026-05", oa_rows=[], bank_rows=rows[:3], invoice_rows=[])
+        three_row_group = three_row_payload["paired"]["groups"][0]
+        self.assertEqual(three_row_group["relation_mode"], "bank_flow_rule_batch")
+        self.assertNotEqual(three_row_group.get("display_mode"), "collapsed_summary")
+
+    def test_bank_flow_rule_batch_requires_invoice_before_paired(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        bank_row = bank_flow_rule_row("bk-flow-fee-001", requires_invoice=True)
+
+        payload = service.group_payload("2026-05", oa_rows=[], bank_rows=[bank_row], invoice_rows=[])
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        self.assertEqual(payload["open"]["groups"][0]["relation_mode"], "bank_flow_rule_batch")
+
+    def test_bank_flow_rule_batch_requires_oa_and_invoice_before_paired(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        batch_id = "bank_flow_rule_batch_fee_both_required"
+        bank_row = bank_flow_rule_row(
+            "bk-flow-fee-both-required",
+            batch_id=batch_id,
+            requires_oa=True,
+            requires_invoice=True,
+        )
+        oa = bank_flow_rule_oa_row("oa-flow-fee-both-required", batch_id=batch_id)
+        invoice = bank_flow_rule_invoice_row("iv-flow-fee-both-required", batch_id=batch_id)
+
+        missing_oa = service.group_payload("2026-05", oa_rows=[], bank_rows=[bank_row], invoice_rows=[invoice])
+        self.assertEqual(missing_oa["summary"]["paired_count"], 0)
+        self.assertEqual(missing_oa["summary"]["open_count"], 1)
+        self.assertIn(
+            "bk-flow-fee-both-required",
+            [row["id"] for row in flatten_groups(missing_oa["open"]["groups"], "bank")],
+        )
+
+        missing_invoice = service.group_payload("2026-05", oa_rows=[oa], bank_rows=[bank_row], invoice_rows=[])
+        self.assertEqual(missing_invoice["summary"]["paired_count"], 0)
+        self.assertEqual(missing_invoice["summary"]["open_count"], 1)
+        self.assertIn(
+            "bk-flow-fee-both-required",
+            [row["id"] for row in flatten_groups(missing_invoice["open"]["groups"], "bank")],
+        )
+
+        complete = service.group_payload("2026-05", oa_rows=[oa], bank_rows=[bank_row], invoice_rows=[invoice])
+        self.assertEqual(complete["summary"]["paired_count"], 1)
+        self.assertEqual(complete["summary"]["open_count"], 0)
+        paired_group = complete["paired"]["groups"][0]
+        self.assertEqual(paired_group["relation_mode"], "bank_flow_rule_batch")
+        self.assertEqual([row["id"] for row in paired_group["oa_rows"]], ["oa-flow-fee-both-required"])
+        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], ["bk-flow-fee-both-required"])
+        self.assertEqual([row["id"] for row in paired_group["invoice_rows"]], ["iv-flow-fee-both-required"])
+
     def test_no_oa_bank_batch_group_collapses_to_summary_and_preserves_bank_rows(self) -> None:
         service = WorkbenchCandidateGroupingService()
         batch_id = "no_oa_batch_fee_001"
@@ -139,6 +207,64 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertNotIn("collapsed_rows", group)
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-no-oa-fee-single"])
         self.assertEqual(group["bank_rows"][0]["special_metadata"]["source_batch_id"], batch_id)
+
+    def test_no_oa_bank_batch_requires_checked_row_types_before_paired(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        batch_id = "no_oa_batch_fee_requires_invoice"
+        missing_invoice = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                no_oa_bank_row(
+                    "bk-no-oa-fee-requires-invoice",
+                    batch_id=batch_id,
+                    debit_amount="12.00",
+                    remark="需要发票后才闭环",
+                    requires_invoice=True,
+                ),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(missing_invoice["summary"]["paired_count"], 0)
+        self.assertIn(
+            "bk-no-oa-fee-requires-invoice",
+            [row["id"] for row in flatten_groups(missing_invoice["open"]["groups"], "bank")],
+        )
+
+        with_invoice = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                no_oa_bank_row(
+                    "bk-no-oa-fee-requires-invoice",
+                    batch_id=batch_id,
+                    debit_amount="12.00",
+                    remark="需要发票后才闭环",
+                    requires_invoice=True,
+                ),
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-no-oa-fee-001",
+                    "type": "invoice",
+                    "case_id": batch_id,
+                    "amount": "12.00",
+                    "seller_name": "建设银行",
+                    "invoice_bank_relation": {"code": "no_oa_bank_batch", "label": "已匹配：手续费", "tone": "success"},
+                    "special_metadata": {
+                        "source": "no_oa_bank_batch",
+                        "source_batch_id": batch_id,
+                        "relation_mode": "no_oa_bank_batch",
+                    },
+                }
+            ],
+        )
+
+        self.assertEqual(with_invoice["summary"]["paired_count"], 1)
+        paired_group = with_invoice["paired"]["groups"][0]
+        self.assertEqual(paired_group["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual([row["id"] for row in paired_group["invoice_rows"]], ["iv-no-oa-fee-001"])
 
     def test_mixed_no_oa_and_manual_relation_group_does_not_collapse(self) -> None:
         service = WorkbenchCandidateGroupingService()
@@ -2315,6 +2441,8 @@ def no_oa_bank_row(
     remark: str,
     batch_version: int | None = None,
     case_id: str | None = None,
+    requires_oa: bool = False,
+    requires_invoice: bool = False,
 ) -> dict[str, object]:
     metadata: dict[str, object] = {
         "source": "no_oa_bank_batch",
@@ -2324,6 +2452,9 @@ def no_oa_bank_row(
         "withdrawable": True,
         "relation_mode": "no_oa_bank_batch",
         "display_tags": ["免OA", "手续费"],
+        "paired_requires_oa": requires_oa,
+        "paired_requires_invoice": requires_invoice,
+        "paired_requirement_tag_code": "fee",
     }
     if batch_version is not None:
         metadata["batch_version"] = batch_version
@@ -2344,6 +2475,71 @@ def no_oa_bank_row(
         "tags": ["免OA", "手续费"],
         "display_tags": ["免OA", "手续费"],
         "special_metadata": metadata,
+    }
+
+
+def bank_flow_rule_row(
+    row_id: str,
+    *,
+    batch_id: str = "bank_flow_rule_batch_fee_001",
+    debit_amount: str = "10.00",
+    requires_oa: bool = False,
+    requires_invoice: bool = False,
+) -> dict[str, object]:
+    row = no_oa_bank_row(row_id, batch_id=batch_id, debit_amount=debit_amount, remark="流水规则明细")
+    metadata = dict(row["special_metadata"])
+    metadata.update({
+        "source": "bank_flow_rule_batch",
+        "relation_mode": "bank_flow_rule_batch",
+        "flow_rule_tag_code": "fee",
+        "flow_rule_version": 1,
+        "requires_oa": requires_oa,
+        "requires_invoice": requires_invoice,
+        "source_row_count": 4,
+        "collapsed_bank_rows": True,
+    })
+    metadata.pop("paired_requires_oa", None)
+    metadata.pop("paired_requires_invoice", None)
+    row["relation_mode"] = "bank_flow_rule_batch"
+    row["invoice_relation"] = {"code": "bank_flow_rule_batch", "label": "已匹配：流水规则", "tone": "success"}
+    row["special_metadata"] = metadata
+    return row
+
+
+def bank_flow_rule_oa_row(row_id: str, *, batch_id: str) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "oa",
+        "case_id": batch_id,
+        "relation_mode": "bank_flow_rule_batch",
+        "amount": "10.00",
+        "counterparty_name": "建设银行",
+        "apply_type": "费用报销",
+        "oa_bank_relation": {"code": "bank_flow_rule_batch", "label": "已匹配：流水规则", "tone": "success"},
+        "special_metadata": {
+            "source": "bank_flow_rule_batch",
+            "source_batch_id": batch_id,
+            "relation_mode": "bank_flow_rule_batch",
+        },
+    }
+
+
+def bank_flow_rule_invoice_row(row_id: str, *, batch_id: str) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "invoice",
+        "case_id": batch_id,
+        "relation_mode": "bank_flow_rule_batch",
+        "amount": "10.00",
+        "total_with_tax": "10.00",
+        "seller_name": "建设银行",
+        "invoice_type": "进项发票",
+        "invoice_bank_relation": {"code": "bank_flow_rule_batch", "label": "已匹配：流水规则", "tone": "success"},
+        "special_metadata": {
+            "source": "bank_flow_rule_batch",
+            "source_batch_id": batch_id,
+            "relation_mode": "bank_flow_rule_batch",
+        },
     }
 
 

@@ -17,12 +17,12 @@
 - 银行流水列表、账户筛选、标签/分类展示、自动标签规则、导出。
 - 维护 `bank_detail` scoped read model freshness。
 - 标签/分类/自动规则写操作返回统一 write target envelope，包含 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。
-- 为下游 workbench/no-OA/turnover 关系提供银行流水身份和标签读取边界。
+- 为下游 workbench、流水规则批量处理、no-OA legacy、turnover 关系提供银行流水身份和标签读取边界。
 
 ### 不负责
 
 - 不拥有银行流水导入流程。
-- 不直接维护 no-OA、外部往来款或关联台关系事实。
+- 不直接维护流水规则批量处理、no-OA、外部往来款或关联台关系事实。
 - 不绕过 bank detail service/UoW 直接写标签副作用。
 
 ## 输入 I/O
@@ -40,7 +40,7 @@
 | --- | --- | --- |
 | 银行明细列表/账户/标签 payload | 前端页面 | 必须带 freshness/status |
 | 自动标签规则写入结果 | 前端页面 | 前端优先等待服务端返回的 `operation_barrier_targets`；缺少/未知 read model status 默认按 `refreshing` 处理 |
-| 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播 |
+| 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播；`bank-flow-rule-batches` 只能读取 active 标签并维护自身 OA/发票规则 |
 | 导出文件 | 用户下载 | 复用当前查询边界，不绕过权限 |
 
 ## 持久化与投影
@@ -88,6 +88,6 @@
 - Shared facts: `app.bank_transactions` 由银行流水导入 owner 正式化；本模块通过受控 write/read port 维护分类、标签和展示上下文。
 - Allowed writes: BankDetailsApplicationService、category/rule/confirmation services、bank detail write UoW。
 - Allowed reads: bank detail query/read ports、bank transaction identity/category service。
-- Downstream outputs: bank_detail、bank_account_balance、turnover_ledger、no_oa_bank_batch、workbench、search dirty scopes 或 owner producer 输出。
+- Downstream outputs: bank_detail、bank_account_balance、bank_flow_rule_batch、turnover_ledger、no_oa_bank_batch、workbench、search dirty scopes 或 owner producer 输出。
 - Forbidden paths: turnover、no-OA 或前端不得直接写银行分类表；read model rows 不得反向成为分类事实源。
 - Old code deletion: 旧 snapshot 分类、前端推断分类和直接跨模块分类写入必须删除；migration/audit/rollback 工具保留不算 closure。

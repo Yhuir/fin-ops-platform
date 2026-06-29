@@ -4047,7 +4047,10 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("table", { name: "ETC发票明细" })).toBeInTheDocument();
+    const invoiceTable = await within(page).findByRole("table", { name: "ETC发票明细" });
+    expect(invoiceTable).toBeInTheDocument();
+    expect(within(invoiceTable).getByRole("columnheader", { name: "金额 32.26" })).toBeInTheDocument();
+    expect(within(invoiceTable).getByRole("columnheader", { name: "税额 1.82" })).toBeInTheDocument();
     expect(within(page).queryByRole("grid", { name: "ETC发票明细" })).not.toBeInTheDocument();
     expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
     expect(within(page).queryByText("ETC-2026-003")).not.toBeInTheDocument();

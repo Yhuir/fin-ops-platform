@@ -35,11 +35,12 @@
 | `cost-statistics` | 成本统计 | 页面模块 | `/cost-statistics` | `cost-statistics/README.md` |
 | `bank-details` | 银行明细 | 页面模块 | `/bank-details` | `bank-details/README.md` |
 | `bank-account-balance` | 银行账户余额 | 资源/API 模块 | `/api/bank-details/accounts` | `bank-account-balance/README.md` |
+| `bank-flow-rule-batches` | 流水规则批量处理 | 页面模块 | `/bank-flow-rule-batches` | `bank-flow-rule-batches/README.md` |
 | `pending-invoices` | 待找发票 | 页面模块 | `/pending-invoices` | `pending-invoices/README.md` |
 | `input-invoice-usage` | 进项发票使用情况 | 页面模块 | `/input-invoice-usage` | `input-invoice-usage/README.md` |
 | `oa-pending-payments` | OA待付款核对 | 页面模块 | `/oa-pending-payments` | `oa-pending-payments/README.md` |
 | `output-invoice-collections` | 销项发票收款情况 | 页面模块 | `/output-invoice-collections` | `output-invoice-collections/README.md` |
-| `no-oa-bank-batches` | 免OA流水批量处理 | 页面模块 | `/no-oa-bank-batches` | `no-oa-bank-batches/README.md` |
+| `no-oa-bank-batches` | 免OA流水批量处理 | legacy 页面模块 | `/no-oa-bank-batches` | `no-oa-bank-batches/README.md` |
 | `search` | 搜索索引 | 资源/API 模块 | `/api/search` | `search/README.md` |
 | `batch-accounting` | 批量账务 | 页面模块 | `/batch-accounting` | `batch-accounting/README.md` |
 | `turnover-ledger` | 外部往来款管理 | 页面模块 | `/turnover-ledger` | `turnover-ledger/README.md` |

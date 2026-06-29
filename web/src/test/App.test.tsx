@@ -54,7 +54,7 @@ describe("Finance operations shell", () => {
     expect(iconByLabel.get("进项发票使用情况")).toBe(FileInput);
     expect(iconByLabel.get("OA待付款核对")).toBe(ClipboardCheck);
     expect(iconByLabel.get("销项发票收款情况")).toBe(FileOutput);
-    expect(iconByLabel.get("免OA流水批量处理")).toBe(ListChecks);
+    expect(iconByLabel.get("流水规则批量处理")).toBe(ListChecks);
     expect(iconByLabel.get("批量账务")).toBe(WalletCards);
     expect(iconByLabel.get("ETC票据管理")).toBe(Ticket);
     expect(iconByLabel.get("银行流水导入")).toBe(Inbox);
@@ -68,7 +68,7 @@ describe("Finance operations shell", () => {
     ])).toHaveLength(4);
     expect(new Set([
       iconByLabel.get("银行明细"),
-      iconByLabel.get("免OA流水批量处理"),
+      iconByLabel.get("流水规则批量处理"),
       iconByLabel.get("批量账务"),
       iconByLabel.get("银行流水导入"),
     ])).toHaveLength(4);

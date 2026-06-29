@@ -65,6 +65,7 @@ PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS = PENDING_INVOICE_GROUP_LABELS_BY_DIRECT
 DEFAULT_NO_OA_BANK_BATCH_TAG_SELECTION = {
     "version": 1,
     "selected_tag_codes": [],
+    "requirements_by_tag_code": {},
 }
 DEFAULT_TURNOVER_LEDGER_TAG_SELECTION = {
     "version": 1,
@@ -607,6 +608,8 @@ class AppSettingsService:
             {
                 "version": int(current.get("version") or 1) + 1,
                 "selected_tag_codes": payload.get("selected_tag_codes"),
+                "rules": payload.get("rules"),
+                "requirements_by_tag_code": payload.get("requirements_by_tag_code"),
             },
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             validate=True,
@@ -624,6 +627,8 @@ class AppSettingsService:
                 "new_version": int(next_selection.get("version") or 1),
                 "old_selected_tag_codes": list(current.get("selected_tag_codes") or []),
                 "new_selected_tag_codes": list(next_selection.get("selected_tag_codes") or []),
+                "old_rules": dict(current.get("requirements_by_tag_code") or {}),
+                "new_rules": dict(next_selection.get("requirements_by_tag_code") or {}),
             }
         )
         return self.get_no_oa_bank_batch_tag_selection_payload()
@@ -1369,12 +1374,9 @@ class AppSettingsService:
             for definition in AppSettingsService._no_oa_bank_batch_auto_rule_tags(bank_transaction_tags)
             if str(definition.get("code") or "").strip()
         }
-        selected_tag_codes: list[str] = []
-        seen: set[str] = set()
-        for item in list(raw_payload.get("selected_tag_codes") or []):
-            tag_code = str(item or "").strip()
-            if not tag_code or tag_code in seen:
-                continue
+        requirements_by_tag_code: dict[str, dict[str, bool]] = {}
+
+        def ensure_active(tag_code: str) -> bool:
             definition = definitions_by_code.get(tag_code)
             if not isinstance(definition, dict):
                 if validate:
@@ -1382,19 +1384,57 @@ class AppSettingsService:
                         "unknown_bank_transaction_tag",
                         f"Unknown bank transaction tag code in no-OA selection: {tag_code}",
                     )
-                continue
+                return False
             if str(definition.get("status") or "active") != "active":
                 if validate:
                     raise AppSettingsValidationError(
                         "archived_bank_transaction_tag",
                         f"Archived bank transaction tag cannot enter no-OA selection: {tag_code}",
                     )
+                return False
+            return True
+
+        raw_rules = raw_payload.get("rules")
+        if isinstance(raw_rules, list):
+            for item in raw_rules:
+                if not isinstance(item, dict):
+                    continue
+                tag_code = str(item.get("tag_code") or item.get("code") or "").strip()
+                if not tag_code or not ensure_active(tag_code):
+                    continue
+                requirements_by_tag_code[tag_code] = {
+                    "requires_oa": bool(item.get("requires_oa")),
+                    "requires_invoice": bool(item.get("requires_invoice")),
+                }
+
+        raw_requirements = raw_payload.get("requirements_by_tag_code")
+        if isinstance(raw_requirements, dict):
+            for raw_code, item in raw_requirements.items():
+                tag_code = str(raw_code or "").strip()
+                if not tag_code or not ensure_active(tag_code):
+                    continue
+                rule = item if isinstance(item, dict) else {}
+                requirements_by_tag_code[tag_code] = {
+                    "requires_oa": bool(rule.get("requires_oa")),
+                    "requires_invoice": bool(rule.get("requires_invoice")),
+                }
+
+        for item in list(raw_payload.get("selected_tag_codes") or []):
+            tag_code = str(item or "").strip()
+            if not tag_code or tag_code in requirements_by_tag_code:
                 continue
-            seen.add(tag_code)
-            selected_tag_codes.append(tag_code)
+            if not ensure_active(tag_code):
+                continue
+            requirements_by_tag_code[tag_code] = {"requires_oa": False, "requires_invoice": False}
+        selected_tag_codes = [
+            code
+            for code, rule in requirements_by_tag_code.items()
+            if not bool(rule.get("requires_oa")) and not bool(rule.get("requires_invoice"))
+        ]
         return {
             "version": version,
             "selected_tag_codes": selected_tag_codes,
+            "requirements_by_tag_code": requirements_by_tag_code,
         }
 
     @staticmethod
@@ -1405,15 +1445,37 @@ class AppSettingsService:
     ) -> dict[str, Any]:
         active_tags = AppSettingsService._no_oa_bank_batch_auto_rule_tags(bank_transaction_tags)
         active_codes = {tag["code"] for tag in active_tags}
+        raw_requirements = payload.get("requirements_by_tag_code") if isinstance(payload.get("requirements_by_tag_code"), dict) else {}
+        requirements_by_tag_code = {
+            str(code): {
+                "requires_oa": bool(rule.get("requires_oa")) if isinstance(rule, dict) else False,
+                "requires_invoice": bool(rule.get("requires_invoice")) if isinstance(rule, dict) else False,
+            }
+            for code, rule in dict(raw_requirements or {}).items()
+            if str(code)
+        }
+        if not requirements_by_tag_code:
+            for tag_code in list(payload.get("selected_tag_codes") or []):
+                code = str(tag_code or "").strip()
+                if code:
+                    requirements_by_tag_code[code] = {"requires_oa": False, "requires_invoice": False}
         selected = [
-            str(tag_code)
-            for tag_code in list(payload.get("selected_tag_codes") or [])
-            if str(tag_code) in active_codes
+            code
+            for code, rule in requirements_by_tag_code.items()
+            if code in active_codes and not rule["requires_oa"] and not rule["requires_invoice"]
         ]
         inactive_selected = [
-            str(tag_code)
-            for tag_code in list(payload.get("selected_tag_codes") or [])
-            if str(tag_code) and str(tag_code) not in active_codes
+            code
+            for code in requirements_by_tag_code
+            if code not in active_codes
+        ]
+        rules = [
+            {
+                "tag_code": tag["code"],
+                "requires_oa": bool(requirements_by_tag_code.get(tag["code"], {}).get("requires_oa", True)),
+                "requires_invoice": bool(requirements_by_tag_code.get(tag["code"], {}).get("requires_invoice", True)),
+            }
+            for tag in active_tags
         ]
         return {
             "version": int(payload.get("version") or 1),
@@ -1421,6 +1483,14 @@ class AppSettingsService:
             "selected_tag_codes": selected,
             "inactive_selected_tag_codes": inactive_selected,
             "active_tags": active_tags,
+            "rules": rules,
+            "requirements_by_tag_code": {
+                rule["tag_code"]: {
+                    "requires_oa": rule["requires_oa"],
+                    "requires_invoice": rule["requires_invoice"],
+                }
+                for rule in rules
+            },
         }
 
     @staticmethod
@@ -1451,6 +1521,7 @@ class AppSettingsService:
                 "path": list(system_definition.get("path") or []),
                 "source": str(system_rule.get("source") or system_definition.get("source") or "system"),
                 "status": str(system_rule.get("status") or system_definition.get("status") or "active"),
+                "direction": str(system_rule.get("direction") or system_definition.get("direction") or "any"),
                 "output_primary_label": str(
                     system_definition.get("output_primary_label")
                     or system_rule.get("label")
@@ -1474,6 +1545,7 @@ class AppSettingsService:
                 "path": list(rule.get("path") or definitions_by_code.get(code, {}).get("path") or []),
                 "source": str(rule.get("source") or definitions_by_code.get(code, {}).get("source") or "custom"),
                 "status": str(rule.get("status") or "active"),
+                "direction": str(rule.get("direction") or definitions_by_code.get(code, {}).get("direction") or "any"),
                 "output_primary_label": str(rule.get("output_primary_label") or rule.get("label") or code),
                 "output_sub_label": str(rule.get("output_sub_label") or ""),
             })
@@ -1846,6 +1918,8 @@ class AppSettingsService:
                 "new_version": int(event.get("new_version") or 0),
                 "old_selected_tag_codes": list(event.get("old_selected_tag_codes") or []),
                 "new_selected_tag_codes": list(event.get("new_selected_tag_codes") or []),
+                "old_rules": dict(event.get("old_rules") or {}),
+                "new_rules": dict(event.get("new_rules") or {}),
             },
         )
 
@@ -1962,6 +2036,7 @@ class AppSettingsService:
         normalized_codes = {str(code or "").strip() for code in tag_codes if str(code or "").strip()}
         raw_payload = value if isinstance(value, dict) else {}
         selected: list[str] = []
+        requirements: dict[str, dict[str, bool]] = {}
         detached: list[dict[str, str]] = []
         seen: set[str] = set()
         for item in list(raw_payload.get("selected_tag_codes") or []):
@@ -1973,12 +2048,27 @@ class AppSettingsService:
                 detached.append({"tag_code": tag_code})
                 continue
             selected.append(tag_code)
+            requirements.setdefault(tag_code, {"requires_oa": False, "requires_invoice": False})
+        for raw_code, raw_rule in dict(raw_payload.get("requirements_by_tag_code") or {}).items():
+            tag_code = str(raw_code or "").strip()
+            if not tag_code:
+                continue
+            if tag_code in normalized_codes:
+                if {"tag_code": tag_code} not in detached:
+                    detached.append({"tag_code": tag_code})
+                continue
+            rule = raw_rule if isinstance(raw_rule, dict) else {}
+            requirements[tag_code] = {
+                "requires_oa": bool(rule.get("requires_oa")),
+                "requires_invoice": bool(rule.get("requires_invoice")),
+            }
         current_version = BankTransactionCategoryService._normalize_version(raw_payload.get("version", 1)) or 1
         next_version = current_version + 1 if detached else current_version
         return {
             **dict(raw_payload),
             "version": next_version,
             "selected_tag_codes": selected,
+            "requirements_by_tag_code": requirements,
         }, detached
 
     @staticmethod

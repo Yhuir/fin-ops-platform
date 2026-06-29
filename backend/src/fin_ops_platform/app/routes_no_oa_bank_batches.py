@@ -10,6 +10,7 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
     NoOaBankBatchPersistenceError,
 )
+from fin_ops_platform.services.no_oa_bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 MutationSessionResolver = Callable[[dict[str, str] | None], OARequestSession | Any]
@@ -39,6 +40,31 @@ class NoOaBankBatchApiRoutes:
         body: str | bytes | None,
         headers: dict[str, str] | None,
     ) -> Any | None:
+        if method == "GET" and route_path == "/api/bank-flow-rule-batches":
+            return self._json_response_for(*self.list_batches(query))
+        if method == "GET" and route_path == "/api/bank-flow-rule-batches/tag-rules":
+            return self._json_response_for(*self.bank_flow_tag_rules())
+        if method == "PUT" and route_path == "/api/bank-flow-rule-batches/tag-rules":
+            return self._json_write(
+                body,
+                headers,
+                lambda payload, session: self.update_bank_flow_tag_rules(payload, session=session),
+            )
+        if method == "POST" and route_path == "/api/bank-flow-rule-batches/submit-selection":
+            return self._json_write(
+                body,
+                headers,
+                lambda payload, session: self.submit_selection(
+                    payload,
+                    session=session,
+                    relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                ),
+            )
+        if method == "POST" and route_path == "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run":
+            return self._json_write(body, headers, lambda payload, session: self.rebaseline_no_oa_dry_run(payload, session=session))
+        if method == "POST" and route_path == "/api/bank-flow-rule-batches/rebaseline-no-oa/apply":
+            return self._json_write(body, headers, lambda payload, session: self.apply_rebaseline_no_oa(payload, session=session))
+
         if method == "GET" and route_path == "/api/no-oa-bank-batches":
             return self._json_response_for(*self.list_batches(query))
         if method == "GET" and route_path == "/api/no-oa-bank-batches/tag-selection":
@@ -54,20 +80,48 @@ class NoOaBankBatchApiRoutes:
         if method == "POST" and route_path == "/api/no-oa-bank-batches/submit-selection":
             return self._json_write(body, headers, lambda payload, session: self.submit_selection(payload, session=session))
 
-        batch_prefix = "/api/no-oa-bank-batches/"
+        batch_prefix = self._batch_prefix(route_path)
         submit_suffix = "/submit"
         withdraw_suffix = "/withdraw"
-        if not route_path.startswith(batch_prefix):
+        if batch_prefix is None:
             return None
         if method == "GET":
             batch_id = unquote(route_path[len(batch_prefix):])
             return self._json_response_for(*self.detail(batch_id))
         if method == "POST" and route_path.endswith(submit_suffix):
             batch_id = unquote(route_path[len(batch_prefix):-len(submit_suffix)])
-            return self._json_write(body, headers, lambda payload, session: self.submit_batch(batch_id, payload, session=session))
+            relation_mode = (
+                BANK_FLOW_RULE_BATCH_RELATION_MODE
+                if batch_prefix == "/api/bank-flow-rule-batches/"
+                else "no_oa_bank_batch"
+            )
+            return self._json_write(
+                body,
+                headers,
+                lambda payload, session: self.submit_batch(
+                    batch_id,
+                    payload,
+                    session=session,
+                    relation_mode=relation_mode,
+                ),
+            )
         if method == "POST" and route_path.endswith(withdraw_suffix):
             batch_id = unquote(route_path[len(batch_prefix):-len(withdraw_suffix)])
-            return self._json_write(body, headers, lambda payload, session: self.withdraw_batch(batch_id, payload, session=session))
+            read_model_key = (
+                BANK_FLOW_RULE_BATCH_RELATION_MODE
+                if batch_prefix == "/api/bank-flow-rule-batches/"
+                else "no_oa_bank_batch"
+            )
+            return self._json_write(
+                body,
+                headers,
+                lambda payload, session: self.withdraw_batch(
+                    batch_id,
+                    payload,
+                    session=session,
+                    read_model_key=read_model_key,
+                ),
+            )
         return None
 
     def list_batches(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
@@ -84,6 +138,28 @@ class NoOaBankBatchApiRoutes:
 
     def tag_selection(self) -> tuple[HTTPStatus, dict[str, Any]]:
         return HTTPStatus.OK, self._application_service.tag_selection_payload()
+
+    def bank_flow_tag_rules(self) -> tuple[HTTPStatus, dict[str, Any]]:
+        return HTTPStatus.OK, self._bank_flow_tag_rules_payload(self._application_service.tag_selection_payload())
+
+    def update_bank_flow_tag_rules(
+        self,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        if "selected_tag_codes" in payload or "selectedTagCodes" in payload:
+            return HTTPStatus.BAD_REQUEST, {
+                "error": "bank_flow_rule_batch_selected_tag_codes_forbidden",
+                "message": "流水规则批量处理不接受 selected_tag_codes，请提交 rules。",
+            }
+        status, result = self.update_tag_selection(payload, session=session)
+        if status == HTTPStatus.OK:
+            return status, self._bank_flow_tag_rules_payload(result)
+        if result.get("error") == "no_oa_bank_batch_tag_selection_version_conflict":
+            result = dict(result)
+            result["error"] = "bank_flow_rule_batch_tag_rules_version_conflict"
+        return status, result
 
     def update_tag_selection(
         self,
@@ -105,12 +181,40 @@ class NoOaBankBatchApiRoutes:
             return status, {"error": exc.error_code, "message": str(exc)}
         return HTTPStatus.OK, result
 
+    def rebaseline_no_oa_dry_run(
+        self,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        del payload, session
+        return HTTPStatus.OK, self._application_service.rebaseline_submitted_no_oa_batches_dry_run()
+
+    def apply_rebaseline_no_oa(
+        self,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            result = self._application_service.apply_submitted_no_oa_rebaseline(
+                actor=self._actor(payload, session),
+                reason=str(payload.get("reason") or payload.get("note") or "").strip() or None,
+                manifest=payload.get("manifest") or payload.get("dry_run_manifest"),
+            )
+        except NoOaBankBatchPersistenceError as exc:
+            return self._persistence_error_response(exc)
+        except ValueError as exc:
+            return self._value_error_response(exc)
+        return HTTPStatus.OK, result
+
     def submit_batch(
         self,
         batch_id: str,
         payload: dict[str, Any],
         *,
         session: OARequestSession,
+        relation_mode: str = "no_oa_bank_batch",
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
             result = self._application_service.submit_batch(
@@ -118,6 +222,7 @@ class NoOaBankBatchApiRoutes:
                 actor=self._actor(payload, session),
                 expected_version=self._optional_int(payload.get("expected_version")),
                 note=str(payload.get("note") or "").strip() or None,
+                relation_mode=relation_mode,
             )
         except KeyError:
             return self._unknown_batch_response()
@@ -133,6 +238,7 @@ class NoOaBankBatchApiRoutes:
         payload: dict[str, Any],
         *,
         session: OARequestSession,
+        read_model_key: str = "no_oa_bank_batch",
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
             result = self._application_service.withdraw_batch(
@@ -147,6 +253,11 @@ class NoOaBankBatchApiRoutes:
             return self._persistence_error_response(exc)
         except ValueError as exc:
             return self._value_error_response(exc)
+        result.update(write_target_envelope(
+            read_model_key=read_model_key,
+            scope_keys=result.get("affected_months"),
+            fallback_scope_key="all",
+        ))
         return HTTPStatus.OK, result
 
     def submit_selection(
@@ -154,6 +265,7 @@ class NoOaBankBatchApiRoutes:
         payload: dict[str, Any],
         *,
         session: OARequestSession,
+        relation_mode: str = "no_oa_bank_batch",
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         raw_transaction_ids = payload.get("transaction_ids")
         if not isinstance(raw_transaction_ids, list):
@@ -166,6 +278,7 @@ class NoOaBankBatchApiRoutes:
                 row_ids=[str(row_id) for row_id in raw_transaction_ids],
                 actor=self._actor(payload, session),
                 note=str(payload.get("note") or "").strip() or None,
+                relation_mode=relation_mode,
             )
         except NoOaBankBatchPersistenceError as exc:
             return self._persistence_error_response(exc)
@@ -238,6 +351,27 @@ class NoOaBankBatchApiRoutes:
                 fallback_scope_key="all",
             ),
             "workbench_rebuild_queued": workbench_rebuild_queued,
+        }
+
+    @staticmethod
+    def _batch_prefix(route_path: str) -> str | None:
+        for prefix in ("/api/no-oa-bank-batches/", "/api/bank-flow-rule-batches/"):
+            if route_path.startswith(prefix):
+                return prefix
+        return None
+
+    @staticmethod
+    def _bank_flow_tag_rules_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in dict(payload).items()
+            if key
+            not in {
+                "selected_tag_codes",
+                "selectedTagCodes",
+                "inactive_selected_tag_codes",
+                "inactiveSelectedTagCodes",
+            }
         }
 
     @staticmethod
