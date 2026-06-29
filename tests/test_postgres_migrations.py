@@ -419,6 +419,32 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
 
         self.assertIn("0004 skipped-accepted-checksum-drift oa_projection_sync", stdout.getvalue())
 
+    def test_apply_checksum_mismatch_reports_applied_and_current_checksums(self) -> None:
+        migration = migrate.Migration(
+            version="0099",
+            name="example",
+            path=MIGRATIONS_DIR / "0077_workbench_relation_rows_scope_unique.sql",
+            checksum_sha256="b" * 64,
+        )
+        applied = {
+            "0099": migrate.AppliedMigration(
+                version="0099",
+                name="example",
+                checksum_sha256="a" * 64,
+            )
+        }
+        stdout = StringIO()
+
+        with patch("fin_ops_platform.postgres.migrate.assert_safe_target"), patch(
+            "fin_ops_platform.postgres.migrate.ensure_metadata_table"
+        ), patch("fin_ops_platform.postgres.migrate.fetch_applied_migrations", return_value=applied):
+            with self.assertRaises(migrate.MigrationError) as error:
+                migrate.apply_migrations("postgresql://user:pw@127.0.0.1:5432/fin_ops", [migration], stdout)
+
+        self.assertIn("Applied migration checksum mismatch: 0099 example", str(error.exception))
+        self.assertIn("applied=" + "a" * 64, str(error.exception))
+        self.assertIn("current=" + "b" * 64, str(error.exception))
+
     def test_ensure_metadata_table_does_not_require_create_when_table_exists(self) -> None:
         with patch("fin_ops_platform.postgres.migrate.run_psql", return_value="exists") as run_psql:
             migrate.ensure_metadata_table("postgresql://user:pw@127.0.0.1:5432/fin_ops")

@@ -309,7 +309,11 @@ def apply_migrations(database_url: str, migrations: Sequence[Migration], stdout:
                 if is_accepted_checksum_drift(migration, existing, accepted):
                     print(f"{migration.version} skipped-accepted-checksum-drift {migration.name}", file=stdout)
                     continue
-                raise MigrationError(f"Applied migration checksum mismatch: {migration.version}")
+                raise MigrationError(
+                    "Applied migration checksum mismatch: "
+                    f"{migration.version} {migration.name} "
+                    f"applied={existing.checksum_sha256} current={migration.checksum_sha256}"
+                )
             print(f"{migration.version} skipped {migration.name}", file=stdout)
             continue
         start = time.perf_counter()
