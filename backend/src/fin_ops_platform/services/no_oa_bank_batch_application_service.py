@@ -470,13 +470,17 @@ class NoOaBankBatchApplicationService:
                     reason=resolved_reason,
                 )
                 if not already_withdrawn:
-                    self._cancel_relation_for_batch(
-                        withdrawn,
-                        actor=actor,
-                        reason=resolved_reason,
-                        history_operation_type="bank_flow_rule_batch_reset_submitted_withdraw",
-                        idempotency_operation="bank_flow_rule_batch_reset_submitted",
-                    )
+                    try:
+                        self._cancel_relation_for_batch(
+                            withdrawn,
+                            actor=actor,
+                            reason=resolved_reason,
+                            history_operation_type="bank_flow_rule_batch_reset_submitted_withdraw",
+                            idempotency_operation="bank_flow_rule_batch_reset_submitted",
+                        )
+                    except NoOaBankBatchRelationMutationError as exc:
+                        if exc.error_code != "no_oa_bank_batch_relation_not_found":
+                            raise
                 withdrawn_batches.append(withdrawn)
                 relation_case_id = str(withdrawn.get("relation_case_id") or withdrawn.get("batch_id") or "").strip()
                 if relation_case_id:

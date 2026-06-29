@@ -423,6 +423,53 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         unsubmitted = _json(app.handle_request("GET", "/api/bank-flow-rule-batches?bucket=unsubmitted"))
         self.assertEqual([batch["batch_type"] for batch in unsubmitted["batches"]], ["fee"])
 
+    def test_bank_flow_rule_reset_submitted_tolerates_missing_active_relation(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="fees-bank-flow-reset-missing-relation.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-03",
+                    "trade_time": "2026-05-03 10:20:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "8.80",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_id = app._import_service.list_transactions()[0].id
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "fee"}],
+            actor="tester",
+        )
+        submit_response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/submit-selection",
+            body=json.dumps({"transaction_ids": [row_id], "note": "提交流水规则"}),
+            headers={"Content-Type": "application/json"},
+        )
+        batch_id = _json(submit_response)["batch"]["batch_id"]
+        app._workbench_pair_relation_service.cancel_relation(batch_id)
+
+        reset_response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/reset-submitted",
+            body=json.dumps({"reason": "全部重新过流水规则"}),
+            headers={"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(_json(reset_response)["results"], [{"batch_id": batch_id, "status": "withdrawn"}])
+        self.assertEqual(app._no_oa_bank_batch_service.get_batch(batch_id)["status"], "withdrawn")
+        unsubmitted = _json(app.handle_request("GET", "/api/bank-flow-rule-batches?bucket=unsubmitted"))
+        self.assertEqual([batch["batch_type"] for batch in unsubmitted["batches"]], ["fee"])
+
     def test_bank_flow_rule_rebaseline_no_oa_dry_run_and_apply_withdraw_submitted_history(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
