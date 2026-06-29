@@ -48,7 +48,7 @@
 - Repository owner：`WorkbenchRelationReadModelRepositoryPort`
 - Query owner：`WorkbenchRelationReadFacade`
 - 跨月关系合同：一个 active relation 可同时包含 OA、银行流水、进项/销项发票等不同月份对象。每个被重建的 `workbench_relation` month scope 必须保存该 scope 内 relation group 涉及的所有成员 row 索引，而不仅是当前月份原生对象；下游页面按自身 row id 读取时必须能发现跨月 group。
-- 旧逻辑已废弃：`read_model.workbench_relation_rows` 不允许再使用 `(tenant_id, row_id)` 全局唯一覆盖模型；迁移 `0077_workbench_relation_rows_scope_unique.sql` 将唯一键改为 `(tenant_id, scope_key, row_id)`，避免最后一次重建的月份覆盖其它月份的关系索引。
+- 旧逻辑已废弃：`read_model.workbench_relation_rows` 不允许再使用 `(tenant_id, row_id)` 全局唯一覆盖模型；迁移 `0077_workbench_relation_rows_scope_unique.sql` 建立目标约束，`0078_workbench_relation_rows_scope_unique_repair.sql` 为已应用早期 0077 的环境做幂等 forward repair，避免最后一次重建的月份覆盖其它月份的关系索引。
 
 ## 文件范围
 

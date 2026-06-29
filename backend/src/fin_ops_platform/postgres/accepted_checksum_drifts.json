@@ -46,5 +46,13 @@
     "current_checksum_sha256": "4ae11018160c184cb3592fad19834bd8a8faf4ed8b00ce9a4844db78cf07872d",
     "accepted_at": "2026-05-22",
     "reason": "Production fin_ops applied the initial 0018 migration after pg_stat_statements had been created by the database owner. The repository baseline now makes extension creation privilege-tolerant so non-superuser staging migrators can apply the table/index migration; future schema changes must use a new migration."
+  },
+  {
+    "version": "0077",
+    "name": "workbench_relation_rows_scope_unique",
+    "applied_checksum_sha256": "37bcb0c4c80b5da9f3639c253feecdcac59d2d5edeb78febe907c9fa47fbc5de",
+    "current_checksum_sha256": "32ce9d2e90eb3179c64066d1b3434969500b8b5a8fbbff0a336f4660741e142b",
+    "accepted_at": "2026-06-29",
+    "reason": "Production fin_ops applied an earlier 0077 during release activation before this repository baseline was finalized. Migration 0078 carries the idempotent forward repair; do not edit 0077 again."
   }
 ]

@@ -89,6 +89,7 @@ EXPECTED_MIGRATION_FILES = [
     "0075_etc_batch_invoice_links_runtime_grants.sql",
     "0076_outbox_read_model_refresh_metric_attention.sql",
     "0077_workbench_relation_rows_scope_unique.sql",
+    "0078_workbench_relation_rows_scope_unique_repair.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
