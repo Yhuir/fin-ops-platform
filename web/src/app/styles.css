@@ -7169,6 +7169,10 @@ textarea {
   white-space: nowrap;
 }
 
+.no-oa-bank-batches-drawer__grid tbody tr > td:not(.no-oa-bank-batches-drawer__direction-cell) {
+  background: var(--no-oa-bank-batches-drawer-group-bg, var(--fp-surface));
+}
+
 .no-oa-bank-batches-drawer__grid th {
   position: sticky;
   top: 0;
@@ -7184,6 +7188,17 @@ textarea {
 
 .no-oa-bank-batches-drawer__check-col {
   width: 64px;
+  text-align: center !important;
+}
+
+.no-oa-bank-batches-drawer__direction-cell,
+.no-oa-bank-batches-drawer__primary-cell {
+  color: var(--fp-text-primary);
+  font-weight: 900;
+}
+
+.no-oa-bank-batches-drawer__direction-cell {
+  background: color-mix(in srgb, var(--fp-surface-muted) 54%, var(--fp-surface));
   text-align: center !important;
 }
 

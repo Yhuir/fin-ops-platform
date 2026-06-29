@@ -73,6 +73,27 @@
 - 独立 `bank_flow_rule_batch` 投影表/worker 尚未拆出，当前 readiness 仍复用 no-OA worker。
 - “补齐 OA/发票后从 open 进入 paired”的完整跨页浏览器动作仍需后续接入真实补票/补 OA 流程测试。
 
+## 2026-06-30 标签规则抽屉分组 UI slice
+
+目标：
+
+- 将“流水规则标签管理”右侧抽屉继续保持紧凑 xlsx/grid 形态。
+- `收支类型` 按连续方向合并单元格，同一方向只显示一次。
+- `流水主标签` 按主标签合并单元格，同一主标签只显示一次。
+- 同一 `流水主标签` 下的不同子标签共享同一行组背景色；不同主标签使用不同背景色。
+
+边界说明：
+
+- 只调整前端展示层 view model、table `rowSpan` 和样式。
+- 不改变 `active_tags` 事实来源、`requirements_by_tag_code` 持久化、保存 payload、权限、read model、operation barrier 或 Workbench paired/open 判定。
+
+验证：
+
+- `npm --prefix web test -- --run src/test/NoOaBankBatchPage.test.tsx`
+- `npm --prefix web run build`
+- `npm --prefix web run e2e -- e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium`
+- `git diff --check`
+
 ## 2026-06-29 已提交批次重置 slice
 
 目标：

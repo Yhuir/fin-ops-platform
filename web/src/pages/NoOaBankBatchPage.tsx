@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
@@ -228,6 +228,20 @@ type NoOaTagNode = {
 
 type NoOaDraftRequirements = Record<string, { requiresOa: boolean; requiresInvoice: boolean }>;
 
+type TagDrawerRow = {
+  tag: NoOaBankBatchTagDefinition;
+  direction: string;
+  directionKey: string;
+  directionRowSpan: number;
+  isDirectionStart: boolean;
+  primaryLabel: string;
+  primaryKey: string;
+  primaryRowSpan: number;
+  primaryGroupIndex: number;
+  isPrimaryStart: boolean;
+  subLabel: string;
+};
+
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -263,6 +277,92 @@ function directionLabel(value: string) {
     return "支出";
   }
   return "全部";
+}
+
+function drawerDirectionSortKey(value: string) {
+  if (value === "expense") {
+    return 0;
+  }
+  if (value === "income") {
+    return 1;
+  }
+  if (value === "any") {
+    return 2;
+  }
+  return 3;
+}
+
+function tagDrawerGroupColor(index: number) {
+  return `hsl(${(198 + index * 43) % 360} 56% 94%)`;
+}
+
+function buildTagDrawerRows(tags: NoOaBankBatchTagDefinition[]): TagDrawerRow[] {
+  const baseRows = tags.map((tag, index) => {
+    const directionKey = cleanText(tag.direction) || "any";
+    const primaryLabel = tagPrimaryLabel(tag) || tag.label || tag.code;
+    return {
+      tag,
+      index,
+      direction: directionLabel(directionKey),
+      directionKey,
+      primaryLabel,
+      primaryKey: `${directionKey}\u0000${primaryLabel}`,
+      subLabel: tagSubLabel(tag) || SELF_SUB_LABEL,
+    };
+  });
+  const firstPrimaryIndexByKey = new Map<string, number>();
+  baseRows.forEach((row) => {
+    if (!firstPrimaryIndexByKey.has(row.primaryKey)) {
+      firstPrimaryIndexByKey.set(row.primaryKey, row.index);
+    }
+  });
+
+  const primaryColorIndexByLabel = new Map<string, number>();
+  const sortedRows = [...baseRows].sort((left, right) => {
+    const directionDelta = drawerDirectionSortKey(left.directionKey) - drawerDirectionSortKey(right.directionKey);
+    if (directionDelta !== 0) {
+      return directionDelta;
+    }
+    const primaryDelta = (firstPrimaryIndexByKey.get(left.primaryKey) ?? left.index)
+      - (firstPrimaryIndexByKey.get(right.primaryKey) ?? right.index);
+    return primaryDelta !== 0 ? primaryDelta : left.index - right.index;
+  });
+  const rows: TagDrawerRow[] = sortedRows.map((row) => {
+    if (!primaryColorIndexByLabel.has(row.primaryLabel)) {
+      primaryColorIndexByLabel.set(row.primaryLabel, primaryColorIndexByLabel.size);
+    }
+    return {
+      tag: row.tag,
+      direction: row.direction,
+      directionKey: row.directionKey,
+      directionRowSpan: 0,
+      isDirectionStart: false,
+      primaryLabel: row.primaryLabel,
+      primaryKey: row.primaryKey,
+      primaryRowSpan: 0,
+      primaryGroupIndex: primaryColorIndexByLabel.get(row.primaryLabel) ?? 0,
+      isPrimaryStart: false,
+      subLabel: row.subLabel,
+    };
+  });
+
+  rows.forEach((row, index) => {
+    if (index === 0 || rows[index - 1].directionKey !== row.directionKey) {
+      row.isDirectionStart = true;
+      row.directionRowSpan = rows.slice(index).findIndex((candidate) => candidate.directionKey !== row.directionKey);
+      if (row.directionRowSpan === -1) {
+        row.directionRowSpan = rows.length - index;
+      }
+    }
+    if (index === 0 || rows[index - 1].primaryKey !== row.primaryKey) {
+      row.isPrimaryStart = true;
+      row.primaryRowSpan = rows.slice(index).findIndex((candidate) => candidate.primaryKey !== row.primaryKey);
+      if (row.primaryRowSpan === -1) {
+        row.primaryRowSpan = rows.length - index;
+      }
+    }
+  });
+  return rows;
 }
 
 function requirementsFromSelection(selection: NoOaBankBatchTagSelection): NoOaDraftRequirements {
@@ -1049,12 +1149,7 @@ export default function NoOaBankBatchPage() {
     }
   };
 
-  const drawerRows = useMemo(() => tagSelection.activeTags.map((tag) => ({
-    tag,
-    direction: directionLabel(tag.direction),
-    primaryLabel: tagPrimaryLabel(tag) || tag.label || tag.code,
-    subLabel: tagSubLabel(tag) || SELF_SUB_LABEL,
-  })), [tagSelection.activeTags]);
+  const drawerRows = useMemo(() => buildTagDrawerRows(tagSelection.activeTags), [tagSelection.activeTags]);
 
   const updateDraftRequirement = (
     tagCode: string,
@@ -1527,13 +1622,39 @@ export default function NoOaBankBatchPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {drawerRows.map(({ tag, direction, primaryLabel, subLabel }) => {
+                    {drawerRows.map(({
+                      tag,
+                      direction,
+                      directionRowSpan,
+                      isDirectionStart,
+                      primaryLabel,
+                      primaryRowSpan,
+                      primaryGroupIndex,
+                      isPrimaryStart,
+                      subLabel,
+                    }) => {
                       const rule = requirementFor(draftTagRequirements, tag.code);
                       const rowLabel = subLabel === SELF_SUB_LABEL ? primaryLabel : `${primaryLabel} / ${subLabel}`;
                       return (
-                        <tr key={tag.code}>
-                          <td>{direction}</td>
-                          <td>{primaryLabel}</td>
+                        <tr
+                          className="no-oa-bank-batches-drawer__grid-row"
+                          data-primary-label={primaryLabel}
+                          data-tag-code={tag.code}
+                          key={tag.code}
+                          style={{
+                            "--no-oa-bank-batches-drawer-group-bg": tagDrawerGroupColor(primaryGroupIndex),
+                          } as CSSProperties}
+                        >
+                          {isDirectionStart ? (
+                            <td className="no-oa-bank-batches-drawer__direction-cell" rowSpan={directionRowSpan}>
+                              {direction}
+                            </td>
+                          ) : null}
+                          {isPrimaryStart ? (
+                            <td className="no-oa-bank-batches-drawer__primary-cell" rowSpan={primaryRowSpan}>
+                              {primaryLabel}
+                            </td>
+                          ) : null}
                           <td>{subLabel}</td>
                           <td className="no-oa-bank-batches-drawer__check-col">
                             <input

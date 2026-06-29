@@ -402,16 +402,17 @@ function largeListPayload(total = 205) {
   };
 }
 
-function installFetchMock(payload = listPayload, options: { listFailuresBeforeSuccess?: number } = {}) {
+function installFetchMock(payload = listPayload, options: { listFailuresBeforeSuccess?: number; tagSelection?: Record<string, unknown> } = {}) {
   let listFailuresRemaining = options.listFailuresBeforeSuccess ?? 0;
+  const tagSelection = options.tagSelection ?? tagSelectionPayload;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && (!init?.method || init.method === "GET")) {
-      return jsonResponse(tagSelectionPayload);
+      return jsonResponse(tagSelection);
     }
     if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && init?.method === "PUT") {
       const body = JSON.parse(String(init.body ?? "{}"));
-      return jsonResponse({ ...tagSelectionPayload, version: 4, rules: body.rules ?? [] });
+      return jsonResponse({ ...tagSelection, version: 4, rules: body.rules ?? [] });
     }
     if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
       if (listFailuresRemaining > 0) {
@@ -862,6 +863,47 @@ describe("NoOaBankBatchPage", () => {
       ],
     });
     expect(await screen.findByText("流水规则已保存")).toBeInTheDocument();
+  });
+
+  test("groups tag drawer direction and main label cells with shared main-label background", async () => {
+    const user = userEvent.setup();
+    installFetchMock(listPayload, {
+      tagSelection: {
+        ...tagSelectionPayload,
+        active_tags: [
+          { code: "fee", label: "手续费", direction: "expense", output_primary_label: "费用", output_sub_label: "手续费", status: "active" },
+          { code: "repair_fee", label: "修理费", direction: "expense", output_primary_label: "费用", output_sub_label: "修理费", status: "active" },
+          { code: "salary", label: "工资", direction: "expense", output_primary_label: "人工成本", output_sub_label: "工资", status: "active" },
+          { code: "project_income", label: "工程款收入", direction: "income", output_primary_label: "工程款收入", output_sub_label: "", status: "active" },
+        ],
+        rules: [
+          { tag_code: "fee", requires_oa: false, requires_invoice: false },
+          { tag_code: "repair_fee", requires_oa: true, requires_invoice: true },
+          { tag_code: "salary", requires_oa: false, requires_invoice: false },
+          { tag_code: "project_income", requires_oa: false, requires_invoice: true },
+        ],
+      },
+    });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "流水规则标签管理" }));
+    const drawer = screen.getByRole("dialog", { name: "流水规则标签管理" });
+
+    expect(within(drawer).getAllByText("支出")).toHaveLength(1);
+    expect(within(drawer).getAllByText("收入")).toHaveLength(1);
+    expect(within(drawer).getAllByText("费用")).toHaveLength(1);
+    expect(within(drawer).getByText("支出").closest("td")).toHaveAttribute("rowspan", "3");
+    expect(within(drawer).getByText("收入").closest("td")).toHaveAttribute("rowspan", "1");
+    expect(within(drawer).getByText("费用").closest("td")).toHaveAttribute("rowspan", "2");
+
+    const feeRow = within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要OA" }).closest("tr") as HTMLTableRowElement;
+    const repairRow = within(drawer).getByRole("checkbox", { name: "费用 / 修理费 需要OA" }).closest("tr") as HTMLTableRowElement;
+    const salaryRow = within(drawer).getByRole("checkbox", { name: "人工成本 / 工资 需要OA" }).closest("tr") as HTMLTableRowElement;
+    const feeBackground = feeRow.style.getPropertyValue("--no-oa-bank-batches-drawer-group-bg");
+
+    expect(feeBackground).toBeTruthy();
+    expect(repairRow.style.getPropertyValue("--no-oa-bank-batches-drawer-group-bg")).toBe(feeBackground);
+    expect(salaryRow.style.getPropertyValue("--no-oa-bank-batches-drawer-group-bg")).not.toBe(feeBackground);
   });
 
   test("opening tag drawer refetches the latest no OA tag selection", async () => {
