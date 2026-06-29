@@ -90,6 +90,7 @@ EXPECTED_MIGRATIONS = [
     "0074_etc_batch_invoice_links.sql",
     "0075_etc_batch_invoice_links_runtime_grants.sql",
     "0076_outbox_read_model_refresh_metric_attention.sql",
+    "0077_workbench_relation_rows_scope_unique.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -232,7 +233,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 77)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 78)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -248,6 +249,14 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
 
         self.assertIn("workbench_relation_rows_scope_status_type_idx", sql)
         self.assertIn("workbench_relation_groups_tenant_group_idx", sql)
+
+    def test_workbench_relation_rows_are_scope_unique(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("drop constraint if exists workbench_relation_rows_tenant_id_row_id_key", sql)
+        self.assertIn("workbench_relation_rows_tenant_scope_row_key", sql)
+        self.assertIn("unique (tenant_id, scope_key, row_id)", sql)
+        self.assertIn("workbench_relation_rows_tenant_row_idx", sql)
 
     def test_workbench_unused_write_indexes_are_dropped(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

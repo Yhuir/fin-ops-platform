@@ -2,7 +2,7 @@
 
 本文件记录当前所有页面和资源 read model 的目标边界。可执行事实源是 `backend/src/fin_ops_platform/services/read_model_manifest.py` 与 `backend/src/fin_ops_platform/services/runtime_worker_registry.py`；本文档用于开发前审阅和变更后的长期维护。
 
-扫描日期：2026-06-28。
+扫描日期：2026-06-29。
 
 ## 全局目标态
 
@@ -29,7 +29,7 @@
 | Read model | Scope | Projection | `all` 语义 | Partition / Scope 说明 | Worker | Query owner | Repository owner | 权限边界 | 核心测试 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `workbench` | `workbench` | `active_generation_scoped_publish` | `active_month_shard_aggregate` | active generation + month shard；特殊原子发布模型 | `workbench` | `WorkbenchQueryFacade` | `PostgresReadModelRepository.workbench` | `workbench_api_session` | `tests/test_workbench_sql_runtime.py` |
-| `workbench_relation` | `workbench_relation` | `scoped_incremental_distribution` | `fan_out_command` | 关系事实源按关联影响范围分发 | `workbench-relation` | `WorkbenchRelationReadFacade` | `WorkbenchRelationReadModelRepositoryPort` | `downstream_page_api_session` | `tests/test_workbench_relation_read_facade.py` |
+| `workbench_relation` | `workbench_relation` | `scoped_incremental_distribution` | `fan_out_command` | 关系事实源按关联影响范围分发；跨月 relation 必须在每个受影响 scope 写入所有成员 row 索引，`rows` 唯一键为 `(tenant_id, scope_key, row_id)` | `workbench-relation` | `WorkbenchRelationReadFacade` | `WorkbenchRelationReadModelRepositoryPort` | `downstream_page_api_session` | `tests/test_workbench_relation_read_facade.py`、`tests/test_workbench_relation_sql_projection.py` |
 | `bank_detail` | `bank_detail` | `partitioned_scoped_incremental` | `fan_out_command` | 银行明细按页面 scope / 月份等业务范围刷新 | `bank-detail` | `BankDetailsApplicationService` | `BankDetailReadModelRepositoryPort` | `bank_details_api_session` | `tests/test_bank_details_sql_runtime.py` |
 | `bank_account_balance` | `bank_account_balance` | `partitioned_scoped_incremental` | `fan_out_command` | 当前为 global all scope only | `bank-account-balance` | `BankDetailsApplicationService` | `BankAccountBalanceReadModelRepositoryPort` | `bank_details_api_session` | `tests/test_bank_account_balance_read_model.py` |
 | `pending_invoice` | `pending_invoice` | `scoped_incremental` | `forbidden_bare_all` | `direction:filter_group[:YYYY-MM]` 页面 scope | `pending-invoice`；辅助 `search-pending` | `PendingInvoiceReadModelService` | `PendingInvoiceReadModelRepositoryPort` | `pending_invoices_api_session` | `tests/test_pending_invoice_service.py` |

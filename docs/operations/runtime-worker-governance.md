@@ -640,6 +640,9 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 涉及 OA、银行流水、进项发票、销项发票通用关系展示和发票生命周期展示的页面，必须先回填
 `workbench_relation` read model，再回填 `invoice_lifecycle` read model，最后回填页面自己的 read model。推荐顺序：
 
+2026-06-29 起，`read_model.workbench_relation_rows` 使用 `(tenant_id, scope_key, row_id)` 作为 scope 内唯一键。发布包含该迁移后，必须重建目标
+`workbench_relation` month shards，让跨月 relation 的每个成员 row 索引补齐到受影响 scope；不能只依赖迁移本身修复旧读模型行。
+
 1. 启动并检查 `workbench-relation` worker，确认
    `workbench_relation.read_model.refresh` 可 claim。
 2. 对历史月份 enqueue `workbench_relation` scope；`all` 只作为 fan-out 入口，实际重建必须落到

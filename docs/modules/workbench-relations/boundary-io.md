@@ -1,6 +1,6 @@
 # 关联台关系事实源模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-06-29
 
 ## 模块化状态
 
@@ -37,7 +37,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 关系事实 | repository | 原子持久化关系状态和审计 |
-| 关系 read model | `workbench_relation` projection | scoped incremental distribution |
+| 关系 read model | `workbench_relation` projection | scoped incremental distribution；`rows` 是 scope 内 row 索引，唯一键为 `(tenant_id, scope_key, row_id)` |
 | 下游 dirty scope | runtime queue/lifecycle | 按受影响页面 fan-out |
 
 ## 持久化与投影
@@ -47,6 +47,8 @@
 - Worker：`workbench-relation`
 - Repository owner：`WorkbenchRelationReadModelRepositoryPort`
 - Query owner：`WorkbenchRelationReadFacade`
+- 跨月关系合同：一个 active relation 可同时包含 OA、银行流水、进项/销项发票等不同月份对象。每个被重建的 `workbench_relation` month scope 必须保存该 scope 内 relation group 涉及的所有成员 row 索引，而不仅是当前月份原生对象；下游页面按自身 row id 读取时必须能发现跨月 group。
+- 旧逻辑已废弃：`read_model.workbench_relation_rows` 不允许再使用 `(tenant_id, row_id)` 全局唯一覆盖模型；迁移 `0077_workbench_relation_rows_scope_unique.sql` 将唯一键改为 `(tenant_id, scope_key, row_id)`，避免最后一次重建的月份覆盖其它月份的关系索引。
 
 ## 文件范围
 
@@ -69,6 +71,7 @@
 
 - Core/service：`tests/test_workbench_relation_command_service.py`、`tests/test_workbench_relation_read_facade.py`。
 - Projection：`tests/test_workbench_relation_sql_projection.py`。
+- Cross-month regression：`tests/test_workbench_relation_sql_projection.py::test_rebuild_indexes_cross_month_relation_members_in_current_scope`。
 - E2E fan-out：`web/e2e/workbench-relation-fanout.spec.ts`、`workbench-relations-*.spec.ts`。
 
 ## 当前缺口和删除条件

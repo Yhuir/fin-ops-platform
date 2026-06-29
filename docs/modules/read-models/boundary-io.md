@@ -1,6 +1,6 @@
 # Read Model 模块边界与 I/O
 
-日期：2026-06-28
+日期：2026-06-29
 
 ## 模块化状态
 
@@ -90,5 +90,6 @@
 
 - 新增 read model 必须同时更新 manifest、scope policy、registry、tests、docs。
 - 删除旧 read path 前必须证明所有页面 API 和 worker 均通过新 freshness/status 边界。
+- `workbench_relation` 的 `rows` 索引是 scope 内唯一，不是 row 全局唯一；跨月 relation 必须在每个受影响 scope 写入所有成员 row 索引，禁止恢复旧的 `(tenant_id, row_id)` 覆盖模型。
 - legacy compat path 删除不是当前 PSCIP-L4 blocker；它必须继续保持生产 fail-closed、不能绕过 fresh gate，也不能新增未登记 dirty/outbox/readiness 写入。
 - Search 高行数 refresh latency 仍需在后续生产 evidence sweep 中观察；单次高延迟不是当前 stale-as-fresh 或 readiness blocker。

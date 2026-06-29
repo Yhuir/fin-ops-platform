@@ -3252,9 +3252,8 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                     source_versions, payload, raw_payload, generated_at
                 )
                 values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()))
-                on conflict (tenant_id, row_id) do update set
+                on conflict (tenant_id, scope_key, row_id) do update set
                     row_type = excluded.row_type,
-                    scope_key = excluded.scope_key,
                     scope_month = excluded.scope_month,
                     relation_status = excluded.relation_status,
                     group_ids = excluded.group_ids,
@@ -3342,7 +3341,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             from read_model.workbench_relation_rows
             where tenant_id = %s
               and row_id = any(%s)
-            order by array_position(%s::text[], row_id)
+            order by array_position(%s::text[], row_id), scope_key
             """,
             (tenant_id, normalized_ids, normalized_ids),
         )

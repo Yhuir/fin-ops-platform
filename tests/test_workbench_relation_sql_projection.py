@@ -151,6 +151,100 @@ class WorkbenchRelationProjectionConnection:
         }
 
 
+class CrossMonthRelationProjectionConnection(WorkbenchRelationProjectionConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transaction_relation_claims" in normalized:
+            self.sql_statements.append(sql)
+            return []
+        if "from app.bank_transactions" in normalized:
+            self.sql_statements.append(sql)
+            explicit_ids = set(params[0]) if params and isinstance(params[0], list) else set()
+            month = str(params[1])[:7] if len(params) > 1 else ""
+            if month == "2026-04" or "bank-nanjing" in explicit_ids:
+                return [
+                    {
+                        "row_id": "bank-nanjing",
+                        "counterparty_name_raw": "南京联升仪表有限公司",
+                        "trade_time": "2026-04-23 17:22:27",
+                        "txn_date": "2026-04-23",
+                        "amount": "584.50",
+                        "txn_direction": "outflow",
+                        "summary": "货款",
+                        "remark": "",
+                        "bank_serial_no": "3847",
+                        "account_name": "交行 3847",
+                        "account_no": "622200003847",
+                        "txn_month": "2026-04-01",
+                    }
+                ]
+            return []
+        if "from app.oa_applications" in normalized:
+            self.sql_statements.append(sql)
+            explicit_ids = set(params[1]) if len(params) > 1 and isinstance(params[1], list) else set()
+            month = str(params[0])[:7] if params else ""
+            if month == "2026-04" or "oa-yang" in explicit_ids:
+                return [
+                    {
+                        "row_id": "oa-yang",
+                        "form_id": "OA-YANG",
+                        "form_type": "支付申请",
+                        "status": "completed",
+                        "applicant": "杨丽萍",
+                        "application_date": "2026-04-21",
+                        "project_name": "大理卷烟厂余热综合利用项目",
+                        "amount": "584.50",
+                    }
+                ]
+            return []
+        if "from app.invoices" in normalized:
+            self.sql_statements.append(sql)
+            explicit_ids = set(params[1]) if len(params) > 1 and isinstance(params[1], list) else set()
+            month = str(params[0])[:7] if params else ""
+            if month == "2026-05" or "input-invoice-nanjing" in explicit_ids:
+                return [
+                    {
+                        "row_id": "input-invoice-nanjing",
+                        "invoice_type": "input",
+                        "invoice_code": None,
+                        "invoice_no": "26322000003919774666",
+                        "digital_invoice_no": "26322000003919774666",
+                        "invoice_date": "2026-05-19",
+                        "invoice_month": "2026-05-01",
+                        "seller_name": "南京联升仪表有限公司",
+                        "seller_tax_no": "91320191MA1MW2LL48",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052520",
+                        "amount": "517.26",
+                        "total_with_tax": "584.50",
+                        "raw_payload": {},
+                    }
+                ]
+            return []
+        if "from app.workbench_pair_relations" in normalized:
+            self.sql_statements.append(sql)
+            requested_ids = set(params[1]) if len(params) > 1 and isinstance(params[1], list) else set()
+            relation_ids = {"oa-yang", "bank-nanjing", "input-invoice-nanjing"}
+            if requested_ids & relation_ids:
+                return [
+                    {
+                        "case_id": "case-nanjing-cross-month",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "2026-04-01",
+                        "row_ids": ["oa-yang", "bank-nanjing", "input-invoice-nanjing"],
+                        "row_types": ["oa", "bank", "invoice"],
+                        "amount_check": {"matched": True},
+                        "source_versions": {},
+                        "raw_payload": {},
+                    }
+                ]
+            return []
+        if "from read_model.workbench_reconciliation_decisions" in normalized:
+            self.sql_statements.append(sql)
+            return []
+        return []
+
+
 class FailIfFetchAllRelationProjectionConnection(WorkbenchRelationProjectionConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
         raise AssertionError("source-version unchanged projection should not scan source rows")
@@ -326,6 +420,30 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
             linked["linked_input_invoices"][0]["object_identity_key"],
             "265320000000992",
         )
+
+    def test_rebuild_indexes_cross_month_relation_members_in_current_scope(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = CrossMonthRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        builder.rebuild_workbench_relation_read_model_scope("2026-04")
+
+        saved = repository.saved[0]
+        self.assertEqual(saved["scope_key"], "2026-04")
+        group = saved["groups"][0]
+        self.assertEqual(group["group_id"], "case-nanjing-cross-month")
+        self.assertEqual(group["input_invoice_ids"], ["input-invoice-nanjing"])
+        rows_by_id = {row["row_id"]: row for row in saved["rows"]}
+        self.assertIn("input-invoice-nanjing", rows_by_id)
+        invoice_row = rows_by_id["input-invoice-nanjing"]
+        self.assertEqual(invoice_row["scope_key"], "2026-04")
+        self.assertEqual(invoice_row["relation_status"], "linked")
+        self.assertEqual(invoice_row["group_ids"], ["case-nanjing-cross-month"])
+        self.assertEqual([row["id"] for row in invoice_row["linked_oa"]], ["oa-yang"])
+        self.assertEqual([row["id"] for row in invoice_row["linked_bank_transactions"]], ["bank-nanjing"])
 
     def test_rebuild_distributes_open_reconciliation_decision_as_candidate_relation(self) -> None:
         repository = CaptureWorkbenchRelationRepository()

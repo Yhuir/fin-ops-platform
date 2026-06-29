@@ -100,7 +100,7 @@ class WorkbenchRelationSqlProjectionBuilder:
                 groups=relation_groups_by_row_id.get(row_id, []),
                 month=normalized_scope,
             )
-            for row_id in sorted(monthly_objects)
+            for row_id in sorted(objects)
             if row_id in objects
         ]
         self._read_model_repository.save_workbench_relation_distribution(
