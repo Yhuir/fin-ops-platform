@@ -83,7 +83,6 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --check
 - `worker-cost-tax`：`--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh`
 - `worker-import`：`--enable-import-job-processing --worker-kind import-job --event-type import.process.requested`
 - `worker-workbench-matching`：`--enable-workbench-matching --worker-kind workbench-matching`
-- `worker-file-migration`：可选迁移 worker，只有 legacy GridFS 与对象存储 secret 已配置时才启用
 
 最小生产正确性先用 PostgreSQL polling worker，不需要 RabbitMQ。标准 release 发布会自动运行服务器
 root-owned helper `/usr/local/sbin/finops-ensure-runtime-workers`，确保常驻 worker 矩阵安装、开机自启并重启到当前 release。

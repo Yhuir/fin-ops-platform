@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from pymongo.errors import NetworkTimeout
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
 

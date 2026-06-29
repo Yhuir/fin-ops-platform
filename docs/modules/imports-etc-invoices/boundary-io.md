@@ -78,3 +78,13 @@
 ## 当前缺口和删除条件
 
 - ETC zip parser/filter 变更必须覆盖导入、票据管理和关联台候选回归。
+
+## Canonical facts ownership
+
+- Owned facts: `app.etc_invoices`、ETC 导入 session/batch facts、与 ETC 发票导入直接相关的 `app.import_*` facts。
+- Shared facts: `app.invoices` 仍由 canonical invoice pool owner 管理；ETC 只能通过受控 existing-link/promotion port 关联，不创建第二发票池。
+- Allowed writes: ETC import preview/confirm/job、ETC import processing service、受控 batch invoice link adapter。
+- Allowed reads: ETC import/query ports、canonical invoice existing-link ports。
+- Downstream outputs: ETC tickets、workbench、workbench_relation、tax/cost/search read model dirty scopes 或 owner producer 输出。
+- Forbidden paths: `app.etc_invoices` 不得被当作 canonical invoice pool；ETC metadata 不得绕过 invoice owner 直接写 `app.invoices`。
+- Old code deletion: 旧 ETC 导入 fallback、pickle/import snapshot 写事实路径必须删除；historical repair 工具保留不算 closure。

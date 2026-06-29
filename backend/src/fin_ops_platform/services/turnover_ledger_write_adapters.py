@@ -325,63 +325,6 @@ class TurnoverLedgerLocalRuntimeSupport:
             )
 
 
-class TurnoverLedgerTagSelectionLegacyFallbackFacade:
-    def __init__(
-        self,
-        *,
-        app_settings_service: Any,
-        clear_read_model: Callable[[], None],
-        enqueue_refresh: Callable[[list[str]], None],
-    ) -> None:
-        self._app_settings_service = app_settings_service
-        self._clear_read_model = clear_read_model
-        self._enqueue_refresh = enqueue_refresh
-
-    def update_tag_selection(
-        self,
-        *,
-        payload: dict[str, object],
-        actor_id: str,
-        tenant_id: str,
-        scope_keys: list[str],
-        idempotency_key: str | None = None,
-    ) -> dict[str, object]:
-        _ = tenant_id, idempotency_key
-        result = self._app_settings_service.update_turnover_ledger_tag_selection(
-            payload,
-            actor_id=actor_id,
-        )
-        self._clear_read_model()
-        self._enqueue_refresh(list(scope_keys or ["all"]))
-        return result
-
-
-class TurnoverLedgerTagSelectionLegacyFallbackAdapterSet:
-    def __init__(
-        self,
-        *,
-        app_settings_service: Any,
-        clear_read_model: Callable[[], None],
-        enqueue_refresh: Callable[..., None],
-    ) -> None:
-        self._app_settings_service = app_settings_service
-        self._clear_read_model = clear_read_model
-        self._enqueue_refresh = enqueue_refresh
-
-    def facade(self) -> TurnoverLedgerTagSelectionLegacyFallbackFacade:
-        return TurnoverLedgerTagSelectionLegacyFallbackFacade(
-            app_settings_service=self._app_settings_service,
-            clear_read_model=self._clear_read_model,
-            enqueue_refresh=self.enqueue_refresh,
-        )
-
-    def enqueue_refresh(self, scope_keys: list[str]) -> None:
-        self._enqueue_refresh(
-            list(scope_keys or []),
-            reason="turnover_ledger_tag_selection_changed",
-        )
-
-
 class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
     def __init__(
         self,
@@ -874,75 +817,6 @@ class TurnoverLedgerLocalRelationExtraAdapterSet:
             )
 
 
-class TurnoverLedgerRelationExtraLegacyFallbackFacade:
-    def __init__(
-        self,
-        *,
-        routes: Any,
-        persist_extra: Callable[[], None],
-        clear_read_model: Callable[[], None],
-        enqueue_refresh: Callable[[list[str]], None],
-    ) -> None:
-        self._routes = routes
-        self._persist_extra = persist_extra
-        self._clear_read_model = clear_read_model
-        self._enqueue_refresh = enqueue_refresh
-
-    def update_relation_extra(
-        self,
-        *,
-        relation_id: str,
-        payload: dict[str, object],
-        actor_id: str,
-        tenant_id: str,
-        scope_keys: list[str],
-        expected_versions: dict[str, object] | None = None,
-        idempotency_key: str | None = None,
-    ) -> dict[str, object]:
-        _ = tenant_id, expected_versions, idempotency_key
-        result = self._routes.update_relation_extra(
-            relation_id,
-            payload,
-            actor=actor_id,
-        )
-        self._persist_extra()
-        self._clear_read_model()
-        self._enqueue_refresh(list(scope_keys or ["all"]))
-        return result
-
-
-class TurnoverLedgerRelationExtraLegacyFallbackAdapterSet:
-    def __init__(
-        self,
-        *,
-        routes: Any,
-        persist_extra_best_effort: Callable[..., None],
-        clear_read_model: Callable[[], None],
-        enqueue_refresh: Callable[..., None],
-    ) -> None:
-        self._routes = routes
-        self._persist_extra_best_effort = persist_extra_best_effort
-        self._clear_read_model = clear_read_model
-        self._enqueue_refresh = enqueue_refresh
-
-    def facade(self) -> TurnoverLedgerRelationExtraLegacyFallbackFacade:
-        return TurnoverLedgerRelationExtraLegacyFallbackFacade(
-            routes=self._routes,
-            persist_extra=self.persist_extra,
-            clear_read_model=self._clear_read_model,
-            enqueue_refresh=self.enqueue_refresh,
-        )
-
-    def persist_extra(self) -> None:
-        self._persist_extra_best_effort(operation="turnover_ledger_extra_updated")
-
-    def enqueue_refresh(self, scope_keys: list[str]) -> None:
-        self._enqueue_refresh(
-            list(scope_keys or []),
-            reason="turnover_relation_extra_changed",
-        )
-
-
 class TurnoverLedgerRelationMutationInvalidationLegacyAdapter:
     def __init__(
         self,
@@ -966,130 +840,6 @@ class TurnoverLedgerRelationMutationInvalidationLegacyAdapter:
             ["all"],
             reason="turnover_relation_changed",
         )
-
-
-class TurnoverLedgerConfirmLegacyFallbackFacade:
-    def __init__(
-        self,
-        *,
-        relation_rebuild: Callable[[], None],
-        routes: Any,
-        after_mutation: Callable[[list[str]], None],
-    ) -> None:
-        self._relation_rebuild = relation_rebuild
-        self._routes = routes
-        self._after_mutation = after_mutation
-
-    def confirm_relation(
-        self,
-        *,
-        bank_row_ids: list[str],
-        actor_id: str,
-        tenant_id: str,
-        note: str | None,
-        affected_months: list[str],
-        expected_versions: dict[str, object] | None = None,
-        idempotency_key: str | None = None,
-    ) -> dict[str, object]:
-        _ = tenant_id, expected_versions, idempotency_key
-        self._relation_rebuild()
-        result = self._routes.confirm_relation(
-            bank_row_ids=list(bank_row_ids or []),
-            actor=actor_id,
-            note=note,
-        )
-        self._after_mutation(list(affected_months or []))
-        return dict(result or {})
-
-
-class TurnoverLedgerClosureLegacyFallbackFacade:
-    def __init__(
-        self,
-        *,
-        relation_rebuild: Callable[[], None],
-        routes: Any,
-        after_mutation: Callable[[list[str]], None],
-        relation_command_service_factory: Callable[..., Any] | None = None,
-        relation_facade: Any | None = None,
-    ) -> None:
-        self._relation_rebuild = relation_rebuild
-        self._routes = routes
-        self._after_mutation = after_mutation
-        self._pair_port = TurnoverLedgerWorkbenchPairPort(
-            relation_command_service_factory=relation_command_service_factory,
-            relation_facade=relation_facade,
-        )
-
-    def confirm_zero_difference_closure(
-        self,
-        *,
-        bank_row_ids: list[str],
-        actor_id: str,
-        tenant_id: str,
-        note: str | None,
-        affected_months: list[str],
-        expected_versions: dict[str, object] | None = None,
-        idempotency_key: str | None = None,
-    ) -> dict[str, object]:
-        _ = tenant_id, expected_versions, idempotency_key
-        self._pair_port.assert_turnover_manual_closure_write_precondition(
-            bank_row_ids=list(bank_row_ids or []),
-            affected_months=list(affected_months or []),
-            transaction=SimpleNamespace(),
-        )
-        self._relation_rebuild()
-        relation = dict(
-            self._routes.confirm_zero_difference_closure(
-                bank_row_ids=list(bank_row_ids or []),
-                actor=actor_id,
-                note=note,
-            )
-            or {}
-        )
-        pair_relation = self._pair_port.create_turnover_manual_closure(
-            relation=relation,
-            bank_row_ids=list(bank_row_ids or []),
-            actor_id=actor_id,
-            note=note,
-            affected_months=list(affected_months or []),
-            transaction=SimpleNamespace(),
-        )
-        self._after_mutation(list(affected_months or []))
-        return {
-            "turnover_relation": relation,
-            "relation": relation,
-            "workbench_pair_relation": dict(pair_relation or {}),
-            "affected_months": list(affected_months or []),
-        }
-
-    def withdraw_cash_closure_case(
-        self,
-        *,
-        cash_closure_case_id: str,
-        actor_id: str,
-        tenant_id: str,
-        note: str | None,
-        idempotency_key: str | None = None,
-    ) -> dict[str, object]:
-        _ = tenant_id, idempotency_key
-        pair_relation = self._pair_port.withdraw_cash_closure_case(
-            case_id=cash_closure_case_id,
-            actor_id=actor_id,
-            note=note,
-            transaction=SimpleNamespace(),
-        )
-        affected_months = [
-            str(month)
-            for month in list(pair_relation.get("affected_months") or [])
-            if str(month).strip()
-        ]
-        self._after_mutation(list(affected_months))
-        return {
-            "relation_id": "",
-            "status": "withdrawn",
-            "workbench_pair_relation": dict(pair_relation or {}),
-            "affected_months": list(affected_months),
-        }
 
 
 def _turnover_closure_visibility_freshness_targets(affected_months: list[str]) -> list[dict[str, str]]:
@@ -1163,6 +913,8 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         }
         if idempotency_key:
             confirm_kwargs["idempotency_key"] = idempotency_key
+        if self._facade is None:
+            raise RuntimeError("turnover confirm write facade is unavailable.")
         result = self._facade.confirm_relation(**confirm_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
@@ -1195,6 +947,8 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         }
         if idempotency_key:
             closure_kwargs["idempotency_key"] = idempotency_key
+        if self._facade is None:
+            raise RuntimeError("turnover closure write facade is unavailable.")
         confirm = getattr(self._facade, "confirm_zero_difference_closure", None)
         if not callable(confirm):
             raise RuntimeError("turnover ledger closure facade is not configured.")
@@ -1221,6 +975,8 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
                 "invalid_cash_closure_case_id",
                 "cash_closure_case_id is required.",
             )
+        if self._facade is None:
+            raise RuntimeError("turnover cash closure withdraw facade is unavailable.")
         withdraw = getattr(self._facade, "withdraw_cash_closure_case", None)
         if not callable(withdraw):
             raise RuntimeError("turnover ledger cash closure withdraw facade is not configured.")
@@ -1387,6 +1143,8 @@ class TurnoverLedgerWithdrawRequestBoundaryFacade:
         }
         if normalized_idempotency_key:
             withdraw_kwargs["idempotency_key"] = normalized_idempotency_key
+        if self._facade is None:
+            raise RuntimeError("turnover withdraw write facade is unavailable.")
         result = self._facade.withdraw_relation(**withdraw_kwargs)
         payload = dict(result or {})
         payload["affected_months"] = list(affected_months)
@@ -1399,12 +1157,10 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         self,
         *,
         facade_provider: Callable[[], Any],
-        legacy_fallback_provider: Callable[[], Any],
         target_validator: Callable[[list[str]], None],
         affected_months_resolver: Callable[[list[str]], list[str]],
     ) -> None:
         self._facade_provider = facade_provider
-        self._legacy_fallback_provider = legacy_fallback_provider
         self._target_validator = target_validator
         self._affected_months_resolver = affected_months_resolver
 
@@ -1426,7 +1182,7 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         affected_months = self._affected_months_resolver(list(transaction_ids))
         facade = self._facade_provider()
         if facade is None:
-            facade = self._legacy_fallback_provider()
+            raise RuntimeError("turnover bank row tags write facade is unavailable.")
         update_kwargs = {
             "updates": normalized_updates,
             "actor_id": actor_id,
@@ -1490,6 +1246,8 @@ class TurnoverLedgerRelationExtraRequestBoundaryFacade:
                         message="往来款补充信息已更新，请刷新后重试。",
                     )
         facade = self._facade_provider()
+        if facade is None:
+            raise RuntimeError("turnover relation extra write facade is unavailable.")
         result = facade.update_relation_extra(
             relation_id=relation_id,
             payload=normalized_payload,
@@ -1518,6 +1276,8 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
         idempotency_key: str | None = None,
     ) -> dict[str, object]:
         facade = self._facade_provider()
+        if facade is None:
+            raise RuntimeError("turnover tag selection write facade is unavailable.")
         payload = dict(
             facade.update_tag_selection(
                 payload=dict(payload or {}),
@@ -1535,151 +1295,6 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
             )
         )
         return payload
-
-
-class TurnoverLedgerConfirmLegacyFallbackAdapterSet:
-    def __init__(
-        self,
-        *,
-        relation_service: Any,
-        bank_rows_provider: Callable[[], list[dict[str, object]]],
-        routes: Any,
-        after_mutation: Callable[[list[str]], None],
-    ) -> None:
-        self._relation_service = relation_service
-        self._bank_rows_provider = bank_rows_provider
-        self._routes = routes
-        self._after_mutation = after_mutation
-
-    def facade(self) -> TurnoverLedgerConfirmLegacyFallbackFacade:
-        return TurnoverLedgerConfirmLegacyFallbackFacade(
-            relation_rebuild=self.relation_rebuild,
-            routes=self._routes,
-            after_mutation=self._after_mutation,
-        )
-
-    def relation_rebuild(self) -> None:
-        rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
-        if callable(rebuild):
-            rebuild(self._bank_rows_provider())
-
-
-class TurnoverLedgerWithdrawLegacyFallbackFacade:
-    def __init__(
-        self,
-        *,
-        routes: Any,
-        after_mutation: Callable[[list[str]], None],
-        relation_command_service_factory: Callable[..., Any] | None = None,
-        relation_facade: Any | None = None,
-    ) -> None:
-        self._routes = routes
-        self._after_mutation = after_mutation
-        self._pair_port = (
-            TurnoverLedgerWorkbenchPairPort(
-                relation_command_service_factory=relation_command_service_factory,
-                relation_facade=relation_facade,
-            )
-            if relation_command_service_factory is not None
-            else None
-        )
-
-    def withdraw_relation(
-        self,
-        *,
-        relation_id: str,
-        actor_id: str,
-        tenant_id: str,
-        note: str | None,
-        affected_months: list[str],
-        expected_versions: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        _ = tenant_id, expected_versions
-        if self._pair_port is not None:
-            self._pair_port.assert_turnover_manual_closure_withdrawable(
-                relation_id=relation_id,
-                transaction=SimpleNamespace(),
-            )
-        result = self._routes.withdraw_relation(
-            relation_id=relation_id,
-            actor=actor_id,
-            note=note,
-        )
-        if self._pair_port is not None:
-            relation = dict(result.get("relation") if isinstance(result.get("relation"), dict) else result)
-            result["workbench_pair_relation"] = self._pair_port.withdraw_turnover_manual_closure(
-                relation=relation,
-                actor_id=actor_id,
-                note=note,
-                transaction=SimpleNamespace(),
-            )
-        self._after_mutation(list(affected_months or []))
-        return dict(result or {})
-
-
-class TurnoverLedgerBankRowTagsLegacyFallbackFacade:
-    def __init__(
-        self,
-        *,
-        category_service: Any,
-        save_category_snapshot: Callable[[dict[str, object]], None],
-        relation_rebuild: Callable[[list[dict[str, object]]], None],
-        bank_rows_provider: Callable[[], list[dict[str, object]]],
-        after_mutation: Callable[[list[str]], None],
-    ) -> None:
-        self._category_service = category_service
-        self._save_category_snapshot = save_category_snapshot
-        self._relation_rebuild = relation_rebuild
-        self._bank_rows_provider = bank_rows_provider
-        self._after_mutation = after_mutation
-
-    def update_bank_row_tags_batch(
-        self,
-        *,
-        updates: list[dict[str, object]],
-        actor_id: str,
-        tenant_id: str,
-        affected_months: list[str],
-        idempotency_key: str | None = None,
-    ) -> dict[str, object]:
-        _ = tenant_id, idempotency_key
-        result = self._category_service.apply_turnover_updates(
-            [dict(update) for update in list(updates or [])],
-            actor=actor_id,
-        )
-        self._save_category_snapshot(dict(self._category_service.snapshot() or {}))
-        self._relation_rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
-        self._after_mutation(list(affected_months or []))
-        return dict(result or {})
-
-
-class TurnoverLedgerBankRowTagsLegacyFallbackAdapterSet:
-    def __init__(
-        self,
-        *,
-        state_store: Any,
-        category_service: Any,
-        relation_rebuild: Callable[[list[dict[str, object]]], None],
-        bank_rows_provider: Callable[[], list[dict[str, object]]],
-        after_mutation: Callable[[list[str]], None],
-    ) -> None:
-        self._state_store = state_store
-        self._category_service = category_service
-        self._relation_rebuild = relation_rebuild
-        self._bank_rows_provider = bank_rows_provider
-        self._after_mutation = after_mutation
-
-    def facade(self) -> TurnoverLedgerBankRowTagsLegacyFallbackFacade:
-        return TurnoverLedgerBankRowTagsLegacyFallbackFacade(
-            category_service=self._category_service,
-            save_category_snapshot=self.save_category_snapshot,
-            relation_rebuild=self._relation_rebuild,
-            bank_rows_provider=self._bank_rows_provider,
-            after_mutation=self._after_mutation,
-        )
-
-    def save_category_snapshot(self, snapshot: dict[str, object]) -> None:
-        self._state_store.save_bank_transaction_categories(dict(snapshot))
 
 
 class TurnoverLedgerRelationRepositoryAdapter:

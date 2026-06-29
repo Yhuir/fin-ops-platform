@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 
 
 class FakeOperationsDashboardConnection:

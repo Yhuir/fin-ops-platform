@@ -81,3 +81,13 @@
 - 将本文件补齐的后端入口同步到模块 README。
 - 删除旧查询路径前，必须验证写标签、自动规则、导出和 stale/refreshing UI。
 - 后续删除旧路径时，不得删除自动规则 response envelope 或前端 unknown-status fail-closed 断言。
+
+## Canonical facts ownership
+
+- Owned facts: `app.bank_transaction_categories`、`app.bank_transaction_category_events`、`app.bank_transaction_category_confirmations`。
+- Shared facts: `app.bank_transactions` 由银行流水导入 owner 正式化；本模块通过受控 write/read port 维护分类、标签和展示上下文。
+- Allowed writes: BankDetailsApplicationService、category/rule/confirmation services、bank detail write UoW。
+- Allowed reads: bank detail query/read ports、bank transaction identity/category service。
+- Downstream outputs: bank_detail、bank_account_balance、turnover_ledger、no_oa_bank_batch、workbench、search dirty scopes 或 owner producer 输出。
+- Forbidden paths: turnover、no-OA 或前端不得直接写银行分类表；read model rows 不得反向成为分类事实源。
+- Old code deletion: 旧 snapshot 分类、前端推断分类和直接跨模块分类写入必须删除；migration/audit/rollback 工具保留不算 closure。

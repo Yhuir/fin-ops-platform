@@ -30,7 +30,7 @@
 - 派生数据：`Application._execute_derived_data_lifecycle_event("settings_reset_completed", include_all=True, ...)`
 - 前端入口：`web/src/pages/SettingsPage.tsx`、`web/src/components/workbench/SettingsDataResetDialogs.tsx`
 - 共享状态提示：`web/src/components/shell/AppStatusIndicator.tsx`、`web/src/pages/AppHealthOperationsPage.tsx`
-- 备份/导出参考：`tests/test_export_app_mongo.py`、`scripts/reset_demo_db.sh`
+- 备份/恢复参考：`scripts/reset_demo_db.sh` 和 operations runbooks；旧 App Mongo export 工具已删除。
 
 ## 当前边界
 

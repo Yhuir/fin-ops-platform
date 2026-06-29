@@ -28,7 +28,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services |
+| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；已导入任务详情通过 `/api/etc/invoices?importBatchId=...` 读取 canonical ETC invoice list |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
 | 历史修复/迁移 | tools | 只作为显式运维入口 |
 
@@ -54,8 +54,8 @@
 | --- | --- |
 | Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` |
 | Frontend feature/components | `web/src/features/etc/*`、`web/src/components/workbench/CandidateGroupGrid.tsx` |
-| Backend route | `routes_etc.py`、`routes_etc_import.py`、`routes_etc_invoices.py`、`routes_etc_legacy_batches.py`、`routes_etc_reconciliation.py` |
-| Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_reconciliation_*`、`etc_legacy_batch_*`、`invoice_attachment_recognition_service.py` |
+| Backend route | `routes_etc.py`、`routes_etc_import.py`、`routes_etc_invoices.py`、`routes_etc_reconciliation.py` |
+| Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_reconciliation_*`、`invoice_attachment_recognition_service.py` |
 | Workbench integration | `workbench_sql_projection.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
 | Tools | `cleanup_orphan_etc_reconciliation_tasks.py`、`migrate_historical_etc_business_batches.py`、`link_existing_etc_batches.py` |
 | Tests | `tests/test_etc_*.py`、`web/src/test/Etc*.test.*`、`web/e2e/etc-tickets-flow.spec.ts` |
@@ -70,7 +70,6 @@
 
 - `tests/test_etc_backend.py`
 - `tests/test_etc_reconciliation_service.py`
-- `tests/test_etc_legacy_batch_lifecycle_service.py`
 - `tests/test_import_processing_service.py`
 - `web/src/test/EtcTicketManagementPage.test.tsx`
 - `web/e2e/etc-tickets-flow.spec.ts`
@@ -79,3 +78,13 @@
 
 - 历史 migration/repair service 必须保留删除条件。
 - ETC 变更必须检查 workbench candidate 和 invoice lifecycle fan-out。
+
+## Canonical facts ownership
+
+- Owned facts: `app.etc_invoices`、`app.etc_import_sessions`、`app.etc_import_batches`、`app.etc_submission_batches`、`app.etc_business_batches`、`app.etc_reconciliation_tasks`、`app.etc_reconciliation_files`、`app.historical_etc_repair_*`、`app.etc_batch_invoice_links`。
+- Shared facts: `app.invoices` 由 canonical invoice pool owner 管理；ETC 只能通过受控 link/promotion port 关联。
+- Allowed writes: ETC import service/job、business batch service、reconciliation service、受控 historical repair/backfill tools。
+- Allowed reads: ETC business batch API、ETC services、canonical invoice existing-link ports。
+- Downstream outputs: workbench、workbench_relation、tax/cost/search dirty scopes 或 owner producer 输出。
+- Forbidden paths: legacy ETC batch pickle、OA detection metadata 或 ETC invoice rows 不得替代 canonical invoice pool；ETC repair 不得绕过 relation command service。
+- Old code deletion: 生产主链路的 legacy `/api/etc/batches*` source-of-truth fallback、route owner、read facade、delete/lifecycle service 和后端兼容测试已删除；页面已导入任务详情改走 `/api/etc/invoices?importBatchId=...`。historical repair/backfill 工具保留不算 closure，仍需按工具 owner/dry-run/deletion 条件单独收口。

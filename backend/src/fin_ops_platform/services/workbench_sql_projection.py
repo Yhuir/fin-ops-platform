@@ -38,7 +38,7 @@ from fin_ops_platform.services.workbench_query_service import (
     WorkbenchQueryService,
 )
 from fin_ops_platform.services.workbench_relation_alignment_service import WorkbenchRelationAlignmentService
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
     OA_INVOICE_OFFSET_AUTO_MATCH,
@@ -170,7 +170,7 @@ class WorkbenchSqlProjectionBuilder:
                         "source_version": resolved_source_version,
                         "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
                         "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
-                        "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+                        "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
                         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
                     },
                 },
@@ -832,7 +832,7 @@ class WorkbenchSqlProjectionBuilder:
         )
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
         grouped["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
-        grouped["oa_attachment_invoice_parser_version"] = MongoOAAdapter._attachment_invoice_cache_parser_version()
+        grouped["oa_attachment_invoice_parser_version"] = attachment_invoice_cache_parser_version()
         grouped["oa_projection_sync_version"] = OA_PROJECTION_SYNC_VERSION
         return grouped
 

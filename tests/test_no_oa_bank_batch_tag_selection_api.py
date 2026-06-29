@@ -2,7 +2,7 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
 
 

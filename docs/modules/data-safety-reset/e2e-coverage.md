@@ -14,7 +14,7 @@
 ## 当前验证入口
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_settings_data_reset_service tests.test_app_health_api tests.test_background_job_service tests.test_export_app_mongo tests.test_runtime_state_policy -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_settings_data_reset_service tests.test_app_health_api tests.test_background_job_service tests.test_runtime_state_policy -v
 cd web && npx playwright test e2e/settings-data-reset-flow.spec.ts --project=chromium
 ```
 

@@ -79,3 +79,12 @@
 
 - 模板识别变更必须覆盖预览、确认、失败恢复和 downstream freshness。
 - 删除旧同步导入路径前，必须证明确认响应/job result 仍能给出 bank detail + account balance 的 operation barrier targets。
+
+## Canonical facts ownership
+
+- Owned facts: `app.bank_transactions` 的导入正式化事实，以及对应 `app.import_batches`、`app.import_batch_rows`、`app.import_files`、`app.file_objects` 中的银行流水导入事实。
+- Allowed writes: bank transaction import preview/confirm/job、import processing service、受控去重/正式化 repository。
+- Allowed reads: bank transaction repository/query ports、bank detail/import API。
+- Downstream outputs: bank_detail、bank_account_balance、workbench、turnover_ledger、no_oa_bank_batch、search read model dirty scopes 或 owner producer 输出。
+- Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或前端 payload 直接补写银行流水。
+- Old code deletion: 旧同步银行流水导入、snapshot 银行流水 fallback 和直接跨模块写银行事实路径必须删除；migration/audit/rollback 工具保留不算 closure。

@@ -13,8 +13,6 @@ import type {
   EtcBusinessBatchSummary,
   EtcBusinessBatchVersionedPayload,
   EtcBatchDetail,
-  EtcBatchListPayload,
-  EtcBatchQuery,
   EtcBatchStatus,
   EtcBatchSummary,
   EtcCreateBusinessBatchPayload,
@@ -145,21 +143,6 @@ type ApiEtcBatch = {
   invoiceItems?: ApiEtcInvoice[];
   items?: ApiEtcInvoice[];
   summary?: ApiEtcBatch | null;
-};
-
-type ApiEtcBatchPayload = {
-  counts?: {
-    unsubmitted?: number;
-    submitted?: number;
-  };
-  items?: ApiEtcBatch[];
-  batches?: ApiEtcBatch[];
-  pagination?: {
-    page?: number;
-    page_size?: number;
-    pageSize?: number;
-    total?: number;
-  };
 };
 
 type ApiEnvelope<T> = {
@@ -358,17 +341,6 @@ type ApiEtcImportItem = {
   filter_status?: string;
   requirementId?: string | null;
   requirement_id?: string | null;
-};
-
-type ApiEtcOaDraftPayload = {
-  batchId?: string;
-  batch_id?: string;
-  etcBatchId?: string;
-  etc_batch_id?: string;
-  oaDraftId?: string;
-  oa_draft_id?: string;
-  oaDraftUrl?: string;
-  oa_draft_url?: string;
 };
 
 type ApiEtcReconciliationTask = {
@@ -1448,6 +1420,9 @@ export async function fetchEtcInvoices(query: EtcInvoiceQuery = {}): Promise<Etc
   if (query.keyword) {
     params.set("keyword", query.keyword);
   }
+  if (query.importBatchId) {
+    params.set("importBatchId", query.importBatchId);
+  }
   params.set("page", String(query.page ?? 1));
   params.set("page_size", String(query.pageSize ?? 100));
 
@@ -1627,56 +1602,6 @@ export async function deleteEtcBusinessBatch(
   });
 }
 
-export async function fetchEtcBatches(query: EtcBatchQuery = {}): Promise<EtcBatchListPayload> {
-  const params = new URLSearchParams();
-  if (query.status) {
-    params.set("status", query.status);
-  }
-  if (query.month) {
-    params.set("month", query.month);
-  }
-  if (query.plate) {
-    params.set("plate", query.plate);
-  }
-  if (query.keyword) {
-    params.set("keyword", query.keyword);
-  }
-  params.set("page", String(query.page ?? 1));
-  params.set("page_size", String(query.pageSize ?? 100));
-
-  const payload = await requestJson<ApiEtcBatchPayload>(`/api/etc/batches?${params.toString()}`, {
-    method: "GET",
-    signal: query.signal,
-  });
-  const items = (payload.items ?? payload.batches ?? []).map(mapBatchSummary);
-  return {
-    counts: {
-      unsubmitted: payload.counts?.unsubmitted ?? 0,
-      submitted: payload.counts?.submitted ?? 0,
-    },
-    items,
-    pagination: {
-      page: payload.pagination?.page ?? query.page ?? 1,
-      pageSize: payload.pagination?.pageSize ?? payload.pagination?.page_size ?? query.pageSize ?? 100,
-      total: payload.pagination?.total ?? items.length,
-    },
-  };
-}
-
-export async function fetchEtcBatchDetail(batchId: string, signal?: AbortSignal): Promise<EtcBatchDetail> {
-  const payload = await requestJson<ApiEtcBatch | { item?: ApiEtcBatch; detail?: ApiEtcBatch }>(
-    `/api/etc/batches/${encodeURIComponent(batchId)}`,
-    {
-      method: "GET",
-      signal,
-    },
-  );
-  const batch = "item" in payload || "detail" in payload
-    ? (payload.item ?? payload.detail ?? {})
-    : payload;
-  return mapBatchDetail(batch as ApiEtcBatch);
-}
-
 export async function importEtcZipFiles(files: File[], taskId?: string): Promise<EtcImportSummary> {
   return previewEtcZipFiles(files, taskId);
 }
@@ -1710,52 +1635,6 @@ export async function confirmEtcImportSession(sessionId: string, taskId?: string
     timeoutMessage: "ETC zip 确认导入超时，请检查后端导入状态后再刷新页面。",
   });
   return mapEtcImportConfirmResult(payload);
-}
-
-export async function createEtcOaDraft(invoiceIds: string[]): Promise<EtcOaDraftPayload> {
-  const payload = await requestJson<ApiEtcOaDraftPayload>("/api/etc/batches/draft", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ invoiceIds }),
-  });
-  return {
-    batchId: payload.batchId ?? payload.batch_id ?? "",
-    etcBatchId: payload.etcBatchId ?? payload.etc_batch_id ?? "",
-    oaDraftId: payload.oaDraftId ?? payload.oa_draft_id ?? "",
-    oaDraftUrl: payload.oaDraftUrl ?? payload.oa_draft_url ?? "",
-  };
-}
-
-export async function createEtcOaDraftForBatch(batchId: string): Promise<EtcOaDraftPayload> {
-  const payload = await requestJson<ApiEtcOaDraftPayload>(`/api/etc/batches/${encodeURIComponent(batchId)}/draft`, {
-    method: "POST",
-  });
-  return {
-    batchId: payload.batchId ?? payload.batch_id ?? batchId,
-    etcBatchId: payload.etcBatchId ?? payload.etc_batch_id ?? "",
-    oaDraftId: payload.oaDraftId ?? payload.oa_draft_id ?? "",
-    oaDraftUrl: payload.oaDraftUrl ?? payload.oa_draft_url ?? "",
-  };
-}
-
-export async function confirmEtcBatchSubmitted(batchId: string): Promise<void> {
-  await requestJson(`/api/etc/batches/${encodeURIComponent(batchId)}/confirm-submitted`, {
-    method: "POST",
-  });
-}
-
-export async function markEtcBatchNotSubmitted(batchId: string): Promise<void> {
-  await requestJson(`/api/etc/batches/${encodeURIComponent(batchId)}/mark-not-submitted`, {
-    method: "POST",
-  });
-}
-
-export async function deleteEtcBatch(batchId: string): Promise<void> {
-  await requestJson(`/api/etc/batches/${encodeURIComponent(batchId)}`, {
-    method: "DELETE",
-  });
 }
 
 export async function revokeEtcSubmittedInvoices(invoiceIds: string[]): Promise<void> {

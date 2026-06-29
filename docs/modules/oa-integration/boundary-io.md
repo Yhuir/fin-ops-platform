@@ -76,3 +76,12 @@
 
 - OA token/credential 变更必须同步 permissions/security docs。
 - 删除旧 OA projection path 前必须验证 source version 和 downstream freshness。
+
+## Canonical facts ownership
+
+- Owned facts: `app.oa_applications`、`app.oa_application_items`、`app.oa_attachments`、`app.oa_sync_runs`、`app.oa_sync_watermarks`、`app.oa_attachment_invoice_cache*`、`app.manual_oa_imports`、`app.oa_applicant_credentials`。
+- Allowed writes: OA sync worker、manual OA import service、OA credential service、受控 attachment repair tools。
+- Allowed reads: OA projection adapters/read ports、OA integration APIs。
+- Downstream outputs: workbench、pending invoice、OA pending、invoice lifecycle、search dirty scopes 或 owner producer 输出。
+- Forbidden paths: production API 不得直接读 OA Mongo；OA cache 不得当作正式发票池；OA credential 不得通过 settings snapshot fallback 写入。
+- Old code deletion: direct Mongo runtime adapter fallback、OA snapshot fallback 和绕过 projection 的 API 读取必须删除；migration/audit/rollback 工具保留不算 closure。

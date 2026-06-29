@@ -75,7 +75,7 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         self.assertIn("input_invoice_usage.read_model.refresh", dispatcher_command)
         self.assertIn("output_invoice_collection.read_model.refresh", dispatcher_command)
         self.assertIn("bank_account_balance.read_model.refresh", dispatcher_command)
-        self.assertIn("file_object.gridfs_migration", dispatcher_command)
+        self.assertNotIn("file_object.gridfs_migration", dispatcher_command)
         self.assertIn("import.process.requested", dispatcher_command)
         worker_env = runner.calls[4][1]
         self.assertEqual(worker_env["FIN_OPS_QUEUE_BACKEND"], "rabbitmq")
@@ -107,7 +107,7 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         report = json.loads(stdout.getvalue())
         self.assertEqual(report["include_optional_workers"], True)
         check_names = [check["name"] for check in report["checks"]]
-        self.assertIn("rabbitmq.consumer_worker_check.file_migration", check_names)
+        self.assertNotIn("rabbitmq.consumer_worker_check.file_migration", check_names)
 
     def test_apply_topology_adds_explicit_apply_command(self) -> None:
         runner = FakeRunner()

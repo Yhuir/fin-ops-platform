@@ -55,7 +55,9 @@ class HttpSloProbeTests(unittest.TestCase):
             "background_jobs_active",
         ):
             self.assertIn(name, api_probe_names)
+        self.assertNotIn("etc_batches", api_probe_names)
         probe_paths = {probe.name: probe.path for probe in http_slo_probe.DEFAULT_API_PROBES}
+        self.assertNotIn("/api/etc/batches", "\n".join(probe_paths.values()))
         self.assertIn("date_from=", probe_paths["bank_details_transactions"])
         self.assertIn("date_to=", probe_paths["bank_details_transactions"])
         self.assertIn("page=1", probe_paths["workbench_groups_all_paired"])

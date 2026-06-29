@@ -267,18 +267,6 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         read_model_key="bank_account_balance",
         read_model_scope_type="bank_account_balance",
     ),
-    RuntimeWorkerRegistration(
-        instance_name="file-migration",
-        worker_kind="file-object-migration",
-        handler_flags=("--enable-file-object-migration",),
-        event_types=("file_object.gridfs_migration",),
-        required=False,
-        rabbitmq_eligible=True,
-        env_example="fin-ops.worker.file-migration.env.example",
-        rabbitmq_env_example="fin-ops.worker.file-migration-rabbitmq.env.example",
-        heartbeat_stale_after_seconds=900,
-        dependencies=("postgres", "legacy_gridfs", "object_storage"),
-    ),
 )
 
 

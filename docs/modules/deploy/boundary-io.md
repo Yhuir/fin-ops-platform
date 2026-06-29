@@ -54,7 +54,7 @@
 | Deploy control | `deploy/oa/bin/finops-deploy-control.sh`、`finops-ensure-runtime-workers.sh` |
 | Examples | `deploy/oa/nginx.fin-ops.conf.example`、`deploy/oa/systemd/*.service.example`、`deploy/oa/env/*.env.example` |
 | Worker manifest | `backend/src/fin_ops_platform/tools/runtime_worker_manifest.py`、`runtime_worker_registry.py` |
-| Tests | `tests/test_deploy_*.py`、`tests/test_cutover_preflight.py`、`tests/test_runtime_worker_registry.py` |
+| Tests | `tests/test_deploy_*.py`、`tests/test_runtime_worker_registry.py` |
 
 ## 依赖方向
 

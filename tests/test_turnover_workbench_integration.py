@@ -8,7 +8,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.app.server import Application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
 
 
@@ -497,7 +498,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(
             payload["freshness_targets"],
             [
-                {"read_model_key": "turnover_ledger", "scope_key": "all"},
+                {"read_model_key": "turnover_ledger", "scope_key": "2026-03"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
             ],
         )

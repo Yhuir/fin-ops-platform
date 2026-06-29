@@ -110,7 +110,7 @@ npm run build
 App Mongo 可配置：
 
 - `.runtime/fin_ops_platform/app_mongo_config.json`
-- 或环境变量 `FIN_OPS_APP_MONGO_*`
+- 或旧的 app Mongo 环境配置；当前生产 runtime 不再读取这类配置。
 
 PostgreSQL primary runtime 下，App Mongo 只保留为迁移观察期回滚、shadow-read 或审计参考，不作为日常 app 事实源。保留该配置会让 `runtime-check` 继续读取旧 app Mongo 数据；`backend` / `all` 验证不会读取它。
 

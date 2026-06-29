@@ -345,8 +345,6 @@ sudo systemctl enable --now fin-ops-worker@import.service
 
 这些实例分别加载 `/etc/fin-ops/fin-ops.worker.<instance>.env`。如果仍使用
 PostgreSQL polling，这些文件应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。
-`file-migration` 是可选迁移 worker，只有 legacy GridFS 和对象存储 secret 已配置时才加入
-`FINOPS_OPTIONAL_WORKERS=file-migration`。
 
 生产 systemd worker 使用 registration contract：
 

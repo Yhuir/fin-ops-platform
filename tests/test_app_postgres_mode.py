@@ -151,11 +151,10 @@ class FakeStore:
 
 
 class AppPostgresModeTests(unittest.TestCase):
-    def test_default_build_application_does_not_require_postgres_url(self) -> None:
+    def test_default_build_application_requires_postgres_backend(self) -> None:
         with TemporaryDirectory() as temp_dir, patch.dict("os.environ", {}, clear=True):
-            app = build_application(data_dir=Path(temp_dir))
-
-        self.assertEqual(app.readiness_summary()["storage"]["backend"], "local_pickle")
+            with self.assertRaisesRegex(ValueError, "requires FIN_OPS_APP_STORAGE_BACKEND=postgres"):
+                build_application(data_dir=Path(temp_dir))
 
     def test_postgres_backend_without_database_url_fails_clearly(self) -> None:
         with TemporaryDirectory() as temp_dir, patch.dict("os.environ", {"FIN_OPS_APP_STORAGE_BACKEND": "postgres"}, clear=True):

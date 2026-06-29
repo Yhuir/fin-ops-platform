@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.historical_etc_business_batch_migration_service import (
     HistoricalEtcBusinessBatchMigrationService,
     HistoricalEtcBusinessBatchMigrationSpec,

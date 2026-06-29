@@ -83,3 +83,12 @@
 - cache warmup/rebuild worker 变更必须同步 runtime registry 和 deploy env。
 - 删除旧 cache/read path 前必须证明页面不会读 stale 数据。
 - 队列化认证导入的 job result 若未来暴露给页面刷新，也必须携带与直接确认路径等价的 `tax_offset` operation barrier targets。
+
+## Canonical facts ownership
+
+- Owned facts: `app.tax_certified_import_sessions`、`app.tax_certified_import_batches`、`app.tax_certified_import_records`、`app.tax_offset_plans`。
+- Allowed writes: certified import confirm、tax plan service、tax offset application service。
+- Allowed reads: tax query/application service、tax certified import repository/read ports。
+- Downstream outputs: tax_offset、cost_statistics、invoice_lifecycle dirty scopes 或 owner producer 输出。
+- Forbidden paths: 其它模块不得直接写认证抵扣或计划表；tax read model 不得反向成为抵扣事实源。
+- Old code deletion: 旧认证抵扣 snapshot、旧计划 fallback 和直接 SQL 写税金事实路径必须删除；migration/audit/rollback 工具保留不算 closure。

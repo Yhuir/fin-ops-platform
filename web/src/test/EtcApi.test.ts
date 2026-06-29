@@ -1,26 +1,21 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
-  confirmEtcBatchSubmitted,
   confirmEtcImportSession,
   confirmEtcReconciliationTask,
   createEtcReconciliationTask,
   createEtcBusinessBatch,
   createEtcBusinessBatchOaDraft,
-  createEtcOaDraft,
   deleteEtcBusinessBatch,
-  deleteEtcBatch,
   deleteEtcReconciliationTask,
   deleteEtcReconciliationTaskImportedInvoices,
   fetchEtcBusinessBatchDetail,
   fetchEtcBusinessBatches,
-  fetchEtcBatchDetail,
   fetchEtcReconciliationTask,
   fetchEtcReconciliationTasks,
   fetchReadyEtcReconciliationTasks,
   fetchEtcInvoices,
   manualEtcBusinessBatchOaStatus,
-  markEtcBatchNotSubmitted,
   patchEtcReconciliationItem,
   previewEtcZipFiles,
   refreshEtcReconciliationMatches,
@@ -311,12 +306,17 @@ describe("etc api", () => {
     document.cookie = "Admin-Token=mock-cookie-token";
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      if (url === "/api/etc/batches/draft") {
+      if (url === "/api/etc/business-batches/etc_business_batch_001/oa-draft") {
         return new Response(
           JSON.stringify({
-            batchId: "etc_batch_001",
-            oaDraftId: "oa_draft_001",
-            oaDraftUrl: "https://oa.example.test/draft/001",
+            ok: true,
+            data: {
+              businessBatchId: "etc_business_batch_001",
+              status: "oa_confirmation_pending",
+              version: 8,
+              oaDraftId: "oa_draft_001",
+              oaDraftUrl: "https://oa.example.test/draft/001",
+            },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -328,36 +328,33 @@ describe("etc api", () => {
     });
     global.fetch = fetchMock as typeof fetch;
 
-    const draftResult = await createEtcOaDraft(["etc-inv-001"]);
-    await confirmEtcBatchSubmitted("etc_batch_001");
-    await markEtcBatchNotSubmitted("etc_batch_001");
+    const draftResult = await createEtcBusinessBatchOaDraft("etc_business_batch_001", { expectedVersion: 7 });
+    await deleteEtcBusinessBatch("etc_business_batch_001", { expectedVersion: 8, reason: "测试删除" });
     await revokeEtcSubmittedInvoices(["etc-inv-002"]);
-    await deleteEtcBatch("etc_batch_001");
     await deleteEtcReconciliationTask("etc-recon-task-001", 3);
     await deleteEtcReconciliationTaskImportedInvoices("etc-recon-task-001", 4);
 
     expect(draftResult.oaDraftUrl).toBe("https://oa.example.test/draft/001");
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "/api/etc/batches/draft",
+      "/api/etc/business-batches/etc_business_batch_001/oa-draft",
       expect.objectContaining({
         method: "POST",
         credentials: "include",
-        body: JSON.stringify({ invoiceIds: ["etc-inv-001"] }),
+        body: JSON.stringify({ expectedVersion: 7 }),
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "/api/etc/batches/etc_batch_001/confirm-submitted",
-      expect.objectContaining({ method: "POST", credentials: "include" }),
+      "/api/etc/business-batches/etc_business_batch_001",
+      expect.objectContaining({
+        method: "DELETE",
+        credentials: "include",
+        body: JSON.stringify({ expectedVersion: 8, reason: "测试删除" }),
+      }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      "/api/etc/batches/etc_batch_001/mark-not-submitted",
-      expect.objectContaining({ method: "POST", credentials: "include" }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
       "/api/etc/invoices/revoke-submitted",
       expect.objectContaining({
         method: "POST",
@@ -366,12 +363,7 @@ describe("etc api", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      5,
-      "/api/etc/batches/etc_batch_001",
-      expect.objectContaining({ method: "DELETE", credentials: "include" }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      6,
+      4,
       "/api/etc/reconciliation-tasks/etc-recon-task-001",
       expect.objectContaining({
         method: "DELETE",
@@ -380,7 +372,7 @@ describe("etc api", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      7,
+      5,
       "/api/etc/reconciliation-tasks/etc-recon-task-001/imported-invoices",
       expect.objectContaining({
         method: "DELETE",
@@ -403,7 +395,7 @@ describe("etc api", () => {
     ));
     global.fetch = fetchMock as typeof fetch;
 
-    await expect(createEtcOaDraft(["etc-inv-001"])).rejects.toThrow("ETC 接口返回了 HTML 页面");
+    await expect(createEtcBusinessBatchOaDraft("etc_business_batch_001")).rejects.toThrow("ETC 接口返回了 HTML 页面");
   });
 
   test("prefers API error messages over raw error codes", async () => {
@@ -424,19 +416,23 @@ describe("etc api", () => {
   test("retries alternate API entrypoint when current ETC endpoint returns HTML", async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      if (url === "/api/etc/batches/draft") {
+      if (url === "/api/etc/business-batches/etc_business_batch_001/oa-draft") {
         return new Response("<html><head><title>405 Not Allowed</title></head></html>", {
           status: 405,
           headers: { "Content-Type": "text/html" },
         });
       }
-      if (url === "/fin-ops-api/api/etc/batches/draft") {
+      if (url === "/fin-ops-api/api/etc/business-batches/etc_business_batch_001/oa-draft") {
         return new Response(
           JSON.stringify({
-            batchId: "etc_batch_001",
-            etcBatchId: "etc_20260503_001",
-            oaDraftId: "oa_draft_001",
-            oaDraftUrl: "https://oa.example.test/draft/001",
+            ok: true,
+            data: {
+              businessBatchId: "etc_business_batch_001",
+              status: "oa_confirmation_pending",
+              version: 8,
+              oaDraftId: "oa_draft_001",
+              oaDraftUrl: "https://oa.example.test/draft/001",
+            },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -445,12 +441,12 @@ describe("etc api", () => {
     });
     global.fetch = fetchMock as typeof fetch;
 
-    const draftResult = await createEtcOaDraft(["etc-inv-001"]);
+    const draftResult = await createEtcBusinessBatchOaDraft("etc_business_batch_001");
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/etc/batches/draft",
-      "/fin-ops-api/api/etc/batches/draft",
+      "/api/etc/business-batches/etc_business_batch_001/oa-draft",
+      "/fin-ops-api/api/etc/business-batches/etc_business_batch_001/oa-draft",
     ]);
     expect(draftResult.oaDraftUrl).toBe("https://oa.example.test/draft/001");
   });
@@ -1012,31 +1008,12 @@ describe("etc api", () => {
     });
   });
 
-  test("maps ETC batch detail summary fields from nested backend payload", async () => {
+  test("passes import batch id when fetching ETC invoices", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          batch: {
-            id: "etc_import_batch_0004",
-          },
-          summary: {
-            id: "etc_import_batch_0004",
-            batch_id: "etc_import_batch_0004",
-            etc_batch_id: "etc_import_batch_0004",
-            external_batch_id: "etc_import_batch_0004",
-            status: "unsubmitted",
-            source_type: "etc_import",
-            invoice_count: 36,
-            total_amount: "1673.30",
-            tax_amount: "48.74",
-            passage_start_date: "2026-03-27",
-            passage_end_date: "2026-04-27",
-            plate_count: 3,
-            plate_summary: [
-              { plate_number: "云ADA0381", invoice_count: 30, total_amount: "1334.49" },
-            ],
-          },
-          invoiceItems: [
+          counts: { unsubmitted: 1, submitted: 0 },
+          items: [
             {
               id: "etc_invoice_0001",
               invoice_number: "26537911970300092160",
@@ -1054,24 +1031,29 @@ describe("etc api", () => {
               has_xml: true,
             },
           ],
+          pagination: {
+            page: 1,
+            page_size: 500,
+            total: 1,
+          },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
     global.fetch = fetchMock as typeof fetch;
 
-    const detail = await fetchEtcBatchDetail("etc_import_batch_0004");
+    const payload = await fetchEtcInvoices({ importBatchId: "etc_import_batch_0004", page: 1, pageSize: 500 });
 
-    expect(detail.id).toBe("etc_import_batch_0004");
-    expect(detail.invoiceCount).toBe(36);
-    expect(detail.totalAmount).toBe("1673.30");
-    expect(detail.taxAmount).toBe("48.74");
-    expect(detail.passageStartDate).toBe("2026-03-27");
-    expect(detail.passageEndDate).toBe("2026-04-27");
-    expect(detail.plateSummary).toEqual([
-      { plateNumber: "云ADA0381", invoiceCount: 30, totalAmount: "1334.49" },
-    ]);
-    expect(detail.invoiceItems).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/etc/invoices?importBatchId=etc_import_batch_0004&page=1&page_size=500",
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]).toMatchObject({
+      id: "etc_invoice_0001",
+      invoiceNumber: "26537911970300092160",
+      totalAmount: "23.50",
+    });
   });
 
   test("maps stale reconciliation task preview errors to a re-preview message", async () => {

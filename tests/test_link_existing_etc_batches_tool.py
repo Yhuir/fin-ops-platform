@@ -41,6 +41,17 @@ class _RelationService:
         return self._relation
 
 
+def _app(*, import_service: object, etc_service: object, relation_service: object, identity_repository: object | None = None) -> object:
+    return SimpleNamespace(
+        tool_runtime_ports=lambda: SimpleNamespace(
+            import_service=import_service,
+            etc_service=etc_service,
+            workbench_relation_reader=relation_service,
+            object_identity_repository=identity_repository if identity_repository is not None else import_service,
+        )
+    )
+
+
 def _spec(*invoice_numbers: str) -> ExistingEtcBatchLinkSpec:
     return ExistingEtcBatchLinkSpec(
         label="历史 ETC",
@@ -59,11 +70,10 @@ class LinkExistingEtcBatchesToolTests(unittest.TestCase):
                 "ETC-001": SimpleNamespace(total_with_tax=Decimal("70.00")),
             }
         )
-        app = SimpleNamespace(
-            _import_fact_repository=None,
-            _import_service=import_service,
-            _etc_service=_EtcService({"ETC-002": SimpleNamespace(invoice_number="ETC-002", total_amount=Decimal("30.00"))}),
-            _workbench_pair_relation_service=_RelationService({"case_id": "case-1"}),
+        app = _app(
+            import_service=import_service,
+            etc_service=_EtcService({"ETC-002": SimpleNamespace(invoice_number="ETC-002", total_amount=Decimal("30.00"))}),
+            relation_service=_RelationService({"case_id": "case-1"}),
         )
 
         payload = _dry_run_spec(app, _spec("ETC-001", "ETC-002"))
@@ -76,12 +86,7 @@ class LinkExistingEtcBatchesToolTests(unittest.TestCase):
 
     def test_dry_run_reports_missing_invoice_without_full_scan(self) -> None:
         import_service = _ImportServiceWithoutListInvoices({})
-        app = SimpleNamespace(
-            _import_fact_repository=None,
-            _import_service=import_service,
-            _etc_service=_EtcService({}),
-            _workbench_pair_relation_service=_RelationService({"case_id": "case-1"}),
-        )
+        app = _app(import_service=import_service, etc_service=_EtcService({}), relation_service=_RelationService({"case_id": "case-1"}))
 
         payload = _dry_run_spec(app, _spec("ETC-MISSING"))
 
@@ -91,11 +96,11 @@ class LinkExistingEtcBatchesToolTests(unittest.TestCase):
         self.assertEqual(import_service.queries, ["ETC-MISSING"])
 
     def test_dry_run_returns_unavailable_when_identity_repository_is_missing(self) -> None:
-        app = SimpleNamespace(
-            _import_fact_repository=None,
-            _import_service=SimpleNamespace(),
-            _etc_service=_EtcService({}),
-            _workbench_pair_relation_service=_RelationService({"case_id": "case-1"}),
+        app = _app(
+            import_service=SimpleNamespace(),
+            etc_service=_EtcService({}),
+            relation_service=_RelationService({"case_id": "case-1"}),
+            identity_repository=SimpleNamespace(),
         )
 
         payload = _dry_run_spec(app, _spec("ETC-001"))

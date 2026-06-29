@@ -80,3 +80,13 @@
 
 - 读 facade 从 `app/` 下继续迁移前，先补测试保护。
 - 方式 B 可控样本验证优先通过业务操作恢复；若生产样本没有业务恢复路径，可按用户批准的 bounded DB restore protocol 使用精确 predicate 恢复到操作前快照，不得通过 DB 伪造 read model freshness。
+
+## Canonical facts ownership
+
+- Owned facts: `app.turnover_relations`、`app.turnover_relation_events`、`app.turnover_ledger_extras`。
+- Shared facts: relation facts 由 `workbench-relations` owner 管理；银行分类 facts 由 `bank-details` owner 管理。
+- Allowed writes: turnover write facade、write UoW、turnover relation service。
+- Allowed reads: turnover query service/read ports、turnover ledger read model boundary。
+- Downstream outputs: turnover_ledger、workbench_relation、workbench、cost、search dirty scopes 或 owner producer 输出。
+- Forbidden paths: legacy fallback facade 不得进入 production normal write path；不能直接写 workbench relation 或 bank category facts。
+- Old code deletion: turnover legacy fallback adapters、direct relation fallback 和 snapshot bank-row source fallback 必须删除；migration/audit/rollback 工具保留不算 closure。

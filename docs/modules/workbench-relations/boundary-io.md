@@ -75,3 +75,12 @@
 
 - 每个历史修复工具保留时必须写明迁移/兼容理由。
 - 删除旧关系路径前必须证明确认关联和撤回都可通过业务逻辑恢复到原状态。
+
+## Canonical facts ownership
+
+- Owned facts: `app.workbench_pair_relations`、`app.workbench_pair_relation_history`。
+- Allowed writes: `WorkbenchRelationCommandService`、relation UoW、明确 migration/repair adapter。
+- Allowed reads: `WorkbenchRelationReadFacade`、relation repository/read ports。
+- Downstream outputs: workbench_relation、workbench、pending invoice、input/output invoice usage、OA pending、tax、cost、search dirty scopes 或 owner producer 输出。
+- Forbidden paths: 调用方不得直接改关系表、不得自行拼 confirmed relation 状态、不得通过 legacy fallback 绕过 command service。
+- Old code deletion: direct pair relation write fallback、旧关系修复半写入和调用方内联关系状态机必须删除；离线 migration/audit/rollback 工具保留不算 closure。

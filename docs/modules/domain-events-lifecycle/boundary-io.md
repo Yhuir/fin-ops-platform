@@ -64,7 +64,6 @@
 ## 测试与验证
 
 - `tests/test_derived_data_lifecycle_service.py`
-- `tests/test_runtime_convergence_closure.py`
 - `web/src/test/domainEvents.test.ts`
 
 ## 当前缺口和删除条件

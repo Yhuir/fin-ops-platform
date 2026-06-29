@@ -6,7 +6,8 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app import server as server_module
-from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.app.server import Application
+from tests.app_test_support import build_local_state_application as build_application
 
 
 class CapturedThread:

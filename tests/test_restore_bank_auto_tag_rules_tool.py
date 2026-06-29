@@ -71,7 +71,7 @@ class RestoreBankAutoTagRulesToolTests(unittest.TestCase):
         self.assertIn("--confirm-write is required", str(raised.exception))
 
     def test_main_dry_run_reports_planned_tag_dictionary_not_current_settings(self) -> None:
-        class FakeSettingsService:
+        class FakeRuntime:
             def get_settings_payload(self) -> dict[str, object]:
                 return {
                     "bank_transaction_tags": {
@@ -81,9 +81,6 @@ class RestoreBankAutoTagRulesToolTests(unittest.TestCase):
                         ],
                     }
                 }
-
-        class FakeApplication:
-            _app_settings_service = FakeSettingsService()
 
         planned_result = {
             "old_version": 1,
@@ -115,7 +112,7 @@ class RestoreBankAutoTagRulesToolTests(unittest.TestCase):
             source.write_bytes(b"not parsed because build_restore_plan is mocked")
             stdout = StringIO()
             with (
-                patch("fin_ops_platform.tools.restore_bank_auto_tag_rules.build_application", return_value=FakeApplication()),
+                patch("fin_ops_platform.tools.restore_bank_auto_tag_rules.bank_auto_tag_rules_runtime", return_value=FakeRuntime()),
                 patch("fin_ops_platform.tools.restore_bank_auto_tag_rules.build_restore_plan", return_value=planned_result),
                 patch("sys.stdout", stdout),
             ):

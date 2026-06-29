@@ -99,7 +99,7 @@ App Mongo 旧数据可以在迁移观察期继续保留，用于回滚参考、s
 
 - 确认生产 API、worker、read model refresh、维护脚本和导出工具均使用 PostgreSQL primary。
 - 导出并归档 app Mongo 旧集合或 snapshot，记录归档位置、时间和负责人。
-- 先禁用 `FIN_OPS_APP_MONGO_*` 与 `.runtime/fin_ops_platform/app_mongo_config.json`，观察 `runtime-check`、`/health`、worker、关键页面和导出。
+- 确认 `.runtime/fin_ops_platform/app_mongo_config.json` 不再被生产 runtime 读取，观察 `runtime-check`、`/health`、worker、关键页面和导出。
 - 禁止用 app Mongo 旧 snapshot 回写 PostgreSQL；差异只能通过审计 repair、补偿脚本或 outbox 重投递修复。
 - 不得删除 OA Mongo 配置或数据。OA Mongo 是外部只读来源，和 app Mongo 退役不是同一件事。
 
@@ -128,16 +128,7 @@ bash scripts/verify.sh backend
 bash scripts/verify.sh runtime-check
 ```
 
-运行时 SQL/read-model 收敛报告：
-
-```bash
-PYTHONPATH=backend/src \
-python3 -m fin_ops_platform.tools.run_runtime_convergence_closure \
-  --json \
-  --require-real-infra \
-  --run-unit-tests \
-  --output /tmp/finops-runtime-convergence-closure-require-real-infra.json
-```
+旧运行时 SQL/read-model 收敛报告工具已删除。当前收口验证使用分项 gate：`scripts/verify.sh runtime-check`、RabbitMQ staging preflight、deploy examples tests、worker `--check` 和对应模块测试。
 
 RabbitMQ staging preflight 如启用 RabbitMQ：
 
@@ -152,9 +143,8 @@ python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight \
   --output /tmp/finops-rabbitmq-staging-preflight.json
 ```
 
-默认只检查 registry 中 `required=true` 且 `rabbitmq_eligible=true` 的 worker，避免未启用的 optional
-worker 例如 `file-migration` 因缺少 legacy GridFS 或对象存储配置阻塞灰度。如果本次发布明确要启用
-optional worker，再加 `--include-optional-workers`，并先补齐对应 dependency 和 env。
+默认只检查 registry 中 `required=true` 且 `rabbitmq_eligible=true` 的 worker。`--include-optional-workers`
+只用于未来显式登记的 optional worker；当前没有 legacy GridFS file-migration worker。
 
 生产 RabbitMQ worker env 拆分：
 

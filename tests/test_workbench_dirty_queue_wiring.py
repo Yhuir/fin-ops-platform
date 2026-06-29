@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import fin_ops_platform.app.server as server_module
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.app.worker import build_parser
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,

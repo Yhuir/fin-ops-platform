@@ -85,14 +85,14 @@ class NightlyCITests(unittest.TestCase):
         for production_spec in production_specs:
             self.assertNotIn(f"e2e/{production_spec}", listed_specs)
 
-    def test_backend_verification_uses_clean_app_state_by_default(self) -> None:
+    def test_backend_verification_checks_postgres_only_startup_contract_by_default(self) -> None:
         script = VERIFY_SCRIPT_PATH.read_text(encoding="utf-8")
 
         self.assertIn('verify_data_dir="$(mktemp -d)"', script)
-        self.assertIn(
-            'FIN_OPS_DATA_DIR="$verify_data_dir" PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check',
-            script,
-        )
+        self.assertIn('FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL:-}', script)
+        self.assertIn('requires FIN_OPS_APP_STORAGE_BACKEND=postgres', script)
+        self.assertIn('FIN_OPS_APP_STORAGE_BACKEND="${FIN_OPS_APP_STORAGE_BACKEND:-postgres}"', script)
+        self.assertIn("python3 -m fin_ops_platform.app.main --check", script)
         self.assertIn('rm -rf "$verify_data_dir"', script)
         self.assertRegex(
             script,

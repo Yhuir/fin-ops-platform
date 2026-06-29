@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services import etc_service as etc_service_module
 from fin_ops_platform.services.etc_service import (
@@ -702,6 +702,32 @@ class EtcServiceTests(unittest.TestCase):
         self.assertIsNotNone(store.saved_snapshot)
         self.assertEqual(total, 1)
         self.assertEqual(invoices[0].invoice_number, "ETC001")
+
+    def test_service_filters_invoices_by_import_batch_id(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+
+            service.import_zips([UploadedEtcZipFile("first.zip", etc_zip(["ETC001"]))])
+            first_batch_id = service.list_import_batches()[0].id
+            service.import_zips([UploadedEtcZipFile("second.zip", etc_zip(["ETC002"]))])
+            second_batch_id = service.list_import_batches()[1].id
+
+            first_invoices, first_total, first_counts = service.list_invoices(
+                import_batch_id=first_batch_id,
+                page=1,
+                page_size=20,
+            )
+            second_invoices, second_total, _second_counts = service.list_invoices(
+                import_batch_id=second_batch_id,
+                page=1,
+                page_size=20,
+            )
+
+        self.assertEqual(first_total, 1)
+        self.assertEqual([invoice.invoice_number for invoice in first_invoices], ["ETC001"])
+        self.assertEqual(first_counts["current"], 1)
+        self.assertEqual(second_total, 1)
+        self.assertEqual([invoice.invoice_number for invoice in second_invoices], ["ETC002"])
 
     def test_state_store_invoice_attachments_survive_service_reload_for_oa_draft(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1565,12 +1591,15 @@ class EtcApiTests(unittest.TestCase):
             json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
         )
         self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+        business_batch = json.loads(
+            app.handle_request("GET", f"/api/etc/business-batches?taskId={task_id}").body
+        )["data"]["items"][0]
         draft_response = app.handle_request(
             "POST",
-            "/api/etc/batches/draft",
-            json.dumps({"invoiceIds": ["etc_invoice_0001"]}),
+            f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
+            json.dumps({"expectedVersion": business_batch["version"]}),
         )
-        return task_id, json.loads(draft_response.body)
+        return task_id, json.loads(draft_response.body)["data"]["businessBatch"]
 
     def _import_supplement_reconciliation_zip(self, app) -> tuple[str, str]:
         task_id = self._create_ready_reconciliation_task_with_supplement(app)
@@ -2526,42 +2555,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(response.body), {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
         self.assertEqual(missing.status_code, 404)
 
-    def test_delete_imported_reconciliation_task_cascades_imported_invoices(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            task_id, _preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
-            confirm_response = app.handle_request(
-                "POST",
-                "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
-            )
-            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
-            imported_task = app._etc_reconciliation_task_service.get_task(task_id)
-
-            stale_response = app.handle_request(
-                "DELETE",
-                f"/api/etc/reconciliation-tasks/{task_id}",
-                body=json.dumps({"expectedVersion": imported_task.version - 1}),
-            )
-            response = app.handle_request(
-                "DELETE",
-                f"/api/etc/reconciliation-tasks/{task_id}",
-                body=json.dumps({"expectedVersion": imported_task.version}),
-            )
-            missing = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
-            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
-            batches = json.loads(app.handle_request("GET", "/api/etc/batches?status=unsubmitted").body)
-
-        self.assertEqual(stale_response.status_code, 409)
-        self.assertEqual(json.loads(stale_response.body)["error"], "task_version_conflict")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(json.loads(response.body), {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
-        self.assertEqual(missing.status_code, 404)
-        self.assertEqual(invoices["total"], 0)
-        self.assertEqual(batches["items"], [])
-        self.assertEqual(app._etc_service.list_import_batches(), [])
-        self.assertEqual(app._import_service.list_invoices(), [])
-
     def test_delete_imported_reconciliation_task_tolerates_missing_import_batch_container(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -2624,127 +2617,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(invoices["total"], 0)
         self.assertEqual(app._import_service.list_invoices(), [])
-
-    def test_delete_etc_batch_route_deletes_unsubmitted_and_submitted(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.import_zips([UploadedEtcZipFile("unsubmitted.zip", etc_zip(["ETC001"]))])
-            batches_payload = json.loads(app.handle_request("GET", "/api/etc/batches?status=unsubmitted").body)
-            batch_id = batches_payload["items"][0]["id"]
-
-            delete_response = app.handle_request("DELETE", f"/fin-ops-api/api/etc/batches/{batch_id}")
-            unsubmitted_after_delete = json.loads(app.handle_request("GET", "/api/etc/batches?status=unsubmitted").body)
-
-            app._etc_service.import_zips([UploadedEtcZipFile("submitted.zip", etc_zip(["ETC002"]))])
-            draft = app._etc_service.create_oa_draft(["etc_invoice_0002"], oa_client=FakeEtcOAClient())
-            app._etc_service.confirm_submitted(draft.batch_id)
-            submitted_delete = app.handle_request("DELETE", f"/api/etc/batches/{draft.batch_id}")
-            submitted_after_delete = json.loads(app.handle_request("GET", "/api/etc/batches?status=submitted").body)
-
-        self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual(json.loads(delete_response.body), {"deleted": True, "batchId": batch_id, "kind": "import_batch"})
-        self.assertEqual(unsubmitted_after_delete["items"], [])
-        self.assertEqual(submitted_delete.status_code, 200)
-        self.assertEqual(json.loads(submitted_delete.body), {"deleted": True, "batchId": draft.batch_id, "kind": "submission_batch"})
-        self.assertEqual(submitted_after_delete["items"], [])
-
-    def test_delete_etc_submission_batch_route_cascades_mutable_batch_contents(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-            app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001", "ETC002"]))])
-            draft = app._etc_service.create_oa_draft(["etc_invoice_0001", "etc_invoice_0002"])
-            app._etc_service.update_invoice_status(["etc_invoice_0001", "etc_invoice_0002"], EtcInvoiceStatus.SUBMITTED)
-
-            delete_response = app.handle_request("DELETE", f"/api/etc/batches/{draft.batch_id}")
-            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
-            batches = json.loads(app.handle_request("GET", "/api/etc/batches?status=unsubmitted").body)
-
-        self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual(json.loads(delete_response.body), {"deleted": True, "batchId": draft.batch_id, "kind": "submission_batch"})
-        self.assertEqual(invoices["total"], 0)
-        self.assertEqual(batches["items"], [])
-        self.assertEqual(app._etc_service.list_import_batches(), [])
-
-    def test_delete_etc_submission_batch_route_repairs_stale_invoice_references(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-            app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001", "ETC002"]))])
-            draft = app._etc_service.create_oa_draft(["etc_invoice_0001", "etc_invoice_0002"])
-            app._etc_service._invoices.clear()
-            app._etc_service._invoice_numbers.clear()
-            app._etc_service._import_batches.clear()
-
-            delete_response = app.handle_request("DELETE", f"/api/etc/batches/{draft.batch_id}")
-            detail_response = app.handle_request("GET", f"/api/etc/batches/{draft.batch_id}")
-
-        self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual(json.loads(delete_response.body), {"deleted": True, "batchId": draft.batch_id, "kind": "submission_batch"})
-        self.assertEqual(detail_response.status_code, 404)
-
-    def test_etc_business_batch_api_and_legacy_batches_use_unified_view(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            create_response = app.handle_request(
-                "POST",
-                "/api/etc/business-batches",
-                json.dumps({"taskId": "ETC-TASK-001", "ownerUserId": "alice", "ownerOrgId": "finance"}),
-            )
-            created = json.loads(create_response.body)["data"]["businessBatch"]
-            preview_body, preview_headers = multipart(
-                {"invoices.zip": etc_zip(["ETC001"])},
-                {"expectedVersion": str(created["version"])},
-            )
-            preview_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
-                preview_body,
-                preview_headers,
-            )
-            preview = json.loads(preview_response.body)["data"]
-            confirm_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
-                json.dumps({
-                    "sessionId": preview["sessionId"],
-                    "expectedVersion": preview["businessBatch"]["version"],
-                }),
-            )
-            confirmed = json.loads(confirm_response.body)["data"]["businessBatch"]
-            draft_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": confirmed["version"]}),
-            )
-            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
-            detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
-            list_response = app.handle_request("GET", "/api/etc/business-batches")
-            legacy_response = app.handle_request("GET", "/api/etc/batches")
-            delete_response = app.handle_request(
-                "DELETE",
-                f"/api/etc/business-batches/{created['businessBatchId']}",
-                json.dumps({"expectedVersion": drafted["version"], "reason": "api_delete_unsubmitted_draft"}),
-            )
-            deleted_detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
-            deleted_list_response = app.handle_request("GET", "/api/etc/business-batches")
-            deleted_legacy_response = app.handle_request("GET", "/api/etc/batches")
-
-        self.assertEqual(create_response.status_code, 201)
-        self.assertEqual(preview_response.status_code, 200)
-        self.assertEqual(confirm_response.status_code, 200)
-        self.assertEqual(draft_response.status_code, 200)
-        self.assertEqual(json.loads(detail_response.body)["data"]["businessBatch"]["businessBatchId"], created["businessBatchId"])
-        self.assertEqual(json.loads(list_response.body)["data"]["items"][0]["businessBatchId"], created["businessBatchId"])
-        legacy_items = json.loads(legacy_response.body)["items"]
-        self.assertEqual([item["id"] for item in legacy_items], [created["businessBatchId"]])
-        self.assertEqual(legacy_items[0]["source_type"], "etc_business_batch")
-        self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual(deleted_detail_response.status_code, 404)
-        self.assertEqual(json.loads(deleted_list_response.body)["data"]["items"], [])
-        self.assertEqual(json.loads(deleted_legacy_response.body)["items"], [])
 
     def test_etc_business_batch_oa_draft_revoke_route_resets_batch_and_invoices(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3203,77 +3075,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(june_payload["total"], 0)
         self.assertEqual(june_payload["items"], [])
 
-    def test_historical_business_batch_lists_by_scope_month_and_reported_amount(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.import_historical_invoices_from_records(
-                records=[
-                    {
-                        "invoice_number": "ETC-HIST-SCOPE-001",
-                        "issue_date": "2026-01-04",
-                        "passage_start_date": "2026-01-04",
-                        "passage_end_date": "2026-01-04",
-                        "plate_number": "云ADA0381",
-                        "seller_name": "云南昆玉高速公路开发有限公司",
-                        "seller_tax_no": "91530000ETC001",
-                        "buyer_name": "云南溯源科技有限公司",
-                        "buyer_tax_no": "915300007194052520",
-                        "amount_without_tax": "22.80",
-                        "tax_amount": "0.70",
-                        "total_amount": "23.50",
-                    },
-                    {
-                        "invoice_number": "ETC-HIST-SCOPE-002",
-                        "issue_date": "2026-01-05",
-                        "passage_start_date": "2026-01-05",
-                        "passage_end_date": "2026-01-05",
-                        "plate_number": "云ADA0381",
-                        "seller_name": "云南昆玉高速公路开发有限公司",
-                        "seller_tax_no": "91530000ETC001",
-                        "buyer_name": "云南溯源科技有限公司",
-                        "buyer_tax_no": "915300007194052520",
-                        "amount_without_tax": "20.88",
-                        "tax_amount": "0.64",
-                        "total_amount": "21.52",
-                    },
-                ],
-                source_name="historical-scope-test",
-            )
-            submitted_batch = app._etc_service.create_historical_submitted_batch(
-                case_id="CASE-HIST-SCOPE",
-                external_batch_id="ETC-OA-20260215-154900",
-                invoice_numbers=["ETC-HIST-SCOPE-001", "ETC-HIST-SCOPE-002"],
-                linked_oa_row_id="oa-hist-scope",
-                oa_amount=Decimal("1549.00"),
-                note="旧批次已提交 OA",
-            )
-            business_batch = app._etc_service.create_historical_submitted_business_batch(
-                business_batch_id="etc_business_batch_hist_20260215_154900",
-                task_id="ETC-RECON-HIST-20260215-154900",
-                submission_batch_id=submitted_batch.id,
-                external_etc_batch_id="ETC-OA-20260215-154900",
-                reported_amount=Decimal("1549.00"),
-                relation_case_id="CASE-HIST-SCOPE",
-                linked_oa_row_id="oa-hist-scope",
-                gap_reason="旧 OA 金额包含骑行费。",
-                scope_month="2026-02",
-            )
-
-            legacy_payload = json.loads(app.handle_request("GET", "/api/etc/batches?status=submitted&month=2026-02").body)
-            business_payload = json.loads(
-                app.handle_request("GET", "/api/etc/business-batches?status=submitted&month=2026-02").body
-            )["data"]
-
-        self.assertEqual(legacy_payload["counts"]["submitted"], 1)
-        self.assertEqual(legacy_payload["counts"]["current"], 1)
-        self.assertEqual(legacy_payload["items"][0]["id"], business_batch.business_batch_id)
-        self.assertEqual(legacy_payload["items"][0]["total_amount"], "1549.00")
-        self.assertEqual(legacy_payload["items"][0]["scope_month"], "2026-02")
-        self.assertEqual(business_payload["counts"], {"active": 0, "submitted": 1})
-        self.assertEqual(business_payload["total"], 1)
-        self.assertEqual(business_payload["items"][0]["businessBatchId"], business_batch.business_batch_id)
-        self.assertEqual(business_payload["items"][0]["invoiceSummary"]["amount"], "1549.00")
-
     def test_etc_business_manual_submitted_creates_open_workbench_summary_with_reported_amount(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -3413,58 +3214,6 @@ class EtcApiTests(unittest.TestCase):
         scattered_etc_rows = [row for row in after_rows if row.get("source_kind") == "etc_invoice"]
         self.assertEqual(scattered_etc_rows, [])
         self.assertEqual(canonical_invoices, {})
-        self.assertEqual({invoice.status for invoice in etc_invoices}, {EtcInvoiceStatus.UNSUBMITTED})
-        self.assertEqual({invoice.current_batch_id for invoice in etc_invoices}, {None})
-
-    def test_legacy_submission_batch_delete_delegates_to_business_batch_reset(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
-            self.assertEqual(preview_response.status_code, 200)
-            confirm_response = app.handle_request(
-                "POST",
-                "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
-            )
-            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
-            business_batch = json.loads(
-                app.handle_request("GET", f"/api/etc/business-batches?taskId={task_id}").body
-            )["data"]["items"][0]
-            draft_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": business_batch["version"]}),
-            )
-            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
-            manual_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{drafted['businessBatchId']}/manual-oa-status",
-                json.dumps({
-                    "decision": "submitted",
-                    "reason": "用户确认 OA 草稿已提交。",
-                    "expectedVersion": drafted["version"],
-                }),
-            )
-            manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
-
-            delete_response = app.handle_request(
-                "DELETE",
-                f"/api/etc/batches/{manual_payload['submissionBatchId']}",
-            )
-            submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=submitted").body)["data"]
-            task_response = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
-            etc_invoices = app._etc_service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
-
-        self.assertEqual(manual_response.status_code, 200)
-        self.assertEqual(delete_response.status_code, 200)
-        delete_payload = json.loads(delete_response.body)["data"]
-        self.assertEqual(delete_payload["kind"], "submitted_business_batch_reset")
-        self.assertEqual(delete_payload["businessBatchId"], manual_payload["businessBatchId"])
-        self.assertEqual(delete_payload["submissionBatchId"], manual_payload["submissionBatchId"])
-        self.assertEqual(submitted_batches["total"], 0)
-        self.assertEqual(task_response.status_code, 404)
         self.assertEqual({invoice.status for invoice in etc_invoices}, {EtcInvoiceStatus.UNSUBMITTED})
         self.assertEqual({invoice.current_batch_id for invoice in etc_invoices}, {None})
 
@@ -3844,27 +3593,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(app._etc_service.list_batches(), [])
         self.assertEqual(app._import_service.list_invoices(), [])
 
-    def test_etc_business_batch_delete_is_idempotent_for_stale_business_ids(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            business_response = app.handle_request(
-                "DELETE",
-                "/api/etc/business-batches/etc_business_batch_0002",
-                json.dumps({"reason": "stale_row_cleanup"}),
-            )
-            legacy_response = app.handle_request("DELETE", "/api/etc/batches/etc_business_batch_0002")
-
-        expected = {
-            "deleted": True,
-            "businessBatchId": "etc_business_batch_0002",
-            "kind": "business_batch",
-        }
-        self.assertEqual(business_response.status_code, 200)
-        self.assertEqual(json.loads(business_response.body)["data"], expected)
-        self.assertEqual(legacy_response.status_code, 200)
-        self.assertEqual(json.loads(legacy_response.body)["data"], expected)
-
     def test_reconciliation_item_patch_conflict_returns_task_version_conflict(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -4130,30 +3858,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(task.status.value, "imported")
         self.assertEqual(ready["tasks"], [])
 
-    def test_task_aware_etc_import_does_not_create_independent_batch_list_item(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
-
-            confirm_response = app.handle_request(
-                "POST",
-                "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
-            )
-            completed_job = self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
-            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
-            batch_list = json.loads(app.handle_request("GET", "/api/etc/batches").body)
-
-        self.assertEqual(preview_response.status_code, 200)
-        self.assertEqual(completed_job["status"], "succeeded")
-        self.assertEqual(task_payload["status"], "imported")
-        self.assertIsNotNone(task_payload["importBatchId"])
-        self.assertTrue(task_payload["hasImportedInvoices"])
-        self.assertEqual(task_payload["importedInvoiceCount"], 1)
-        self.assertEqual(task_payload["importedInvoiceAmount"], "13.07")
-        self.assertEqual(batch_list["items"], [])
-        self.assertEqual(batch_list["counts"]["unsubmitted"], 0)
-
     def test_remove_reconciliation_task_imported_invoices_allows_reimport(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -4226,110 +3930,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(final_task_payload["status"], "imported")
         self.assertTrue(final_task_payload["hasImportedInvoices"])
         self.assertEqual(final_invoices["total"], 1)
-
-    def test_remove_reconciliation_task_imported_invoices_deletes_unsubmitted_oa_draft(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
-            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
-            draft_payload = json.loads(draft_response.body)
-            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/mark-not-submitted")
-            linked_task = app._etc_reconciliation_task_service.get_task(task_id)
-
-            remove_response = app.handle_request(
-                "DELETE",
-                f"/api/etc/reconciliation-tasks/{task_id}/imported-invoices",
-                json.dumps({"expectedVersion": linked_task.version, "actor": "alice"}),
-            )
-            removed_payload = json.loads(remove_response.body)
-            invoices_after_remove = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
-
-        self.assertEqual(draft_response.status_code, 200)
-        self.assertEqual(remove_response.status_code, 200)
-        self.assertEqual(removed_payload["status"], "ready_for_import")
-        self.assertIsNone(removed_payload["importBatchId"])
-        self.assertIsNone(removed_payload["oaDraftBatchId"])
-        self.assertIsNone(removed_payload["etcBatchId"])
-        self.assertEqual(invoices_after_remove["total"], 0)
-        self.assertEqual(app._etc_service.list_import_batches(), [])
-
-    def test_remove_reconciliation_task_imported_invoices_repairs_missing_unsubmitted_oa_draft_link(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
-            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
-            draft_payload = json.loads(draft_response.body)
-            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/mark-not-submitted")
-            app._etc_service._batches.pop(draft_payload["batchId"])
-            linked_task = app._etc_reconciliation_task_service.get_task(task_id)
-
-            remove_response = app.handle_request(
-                "DELETE",
-                f"/api/etc/reconciliation-tasks/{task_id}/imported-invoices",
-                json.dumps({"expectedVersion": linked_task.version, "actor": "alice"}),
-            )
-            removed_payload = json.loads(remove_response.body)
-            invoices_after_remove = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
-
-        self.assertEqual(remove_response.status_code, 200)
-        self.assertEqual(removed_payload["status"], "ready_for_import")
-        self.assertIsNone(removed_payload["importBatchId"])
-        self.assertIsNone(removed_payload["oaDraftBatchId"])
-        self.assertIsNone(removed_payload["etcBatchId"])
-        self.assertEqual(invoices_after_remove["total"], 0)
-        self.assertEqual(app._etc_service.list_import_batches(), [])
-
-    def test_unsubmitted_oa_draft_batch_is_listed_and_deletable(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
-            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
-            draft_payload = json.loads(draft_response.body)
-            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/mark-not-submitted")
-            unsubmitted_before_delete = json.loads(app.handle_request("GET", "/api/etc/batches?status=unsubmitted").body)
-            delete_response = app.handle_request("DELETE", f"/api/etc/batches/{draft_payload['batchId']}")
-            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
-
-        listed_ids = [item["id"] for item in unsubmitted_before_delete["items"]]
-        self.assertIn(draft_payload["batchId"], listed_ids)
-        self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual(json.loads(delete_response.body)["kind"], "submission_batch")
-        self.assertIsNone(task_payload["oaDraftBatchId"])
-        self.assertIsNone(task_payload["etcBatchId"])
-
-    def test_delete_missing_unsubmitted_oa_draft_batch_repairs_reconciliation_task_link(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
-            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
-            draft_payload = json.loads(draft_response.body)
-            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/mark-not-submitted")
-            app._etc_service._batches.pop(draft_payload["batchId"])
-
-            delete_response = app.handle_request("DELETE", f"/api/etc/batches/{draft_payload['batchId']}")
-            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
-            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
-
-        self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual(json.loads(delete_response.body), {
-            "deleted": True,
-            "batchId": draft_payload["batchId"],
-            "kind": "missing_submission_batch",
-        })
-        self.assertIsNone(task_payload["oaDraftBatchId"])
-        self.assertIsNone(task_payload["etcBatchId"])
-        self.assertIsNone(task_payload["importBatchId"])
-        self.assertEqual(task_payload["status"], "ready_for_import")
-        self.assertEqual(invoices["total"], 0)
-        self.assertEqual(app._etc_service.list_import_batches(), [])
 
     def test_task_aware_etc_import_confirm_imports_sum_matched_invoices_only(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -4747,154 +4347,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(confirm_response.body)["error"], "preview_stale")
         self.assertEqual(json.loads(query_response.body)["total"], 0)
 
-    def test_confirmed_etc_submission_replaces_scatter_invoice_with_open_summary_in_workbench(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id, preview_response, _preview_payload = self._preview_task_zip(app, ["ETC001"])
-            session_id = json.loads(preview_response.body)["sessionId"]
-            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
-            job = json.loads(confirm_response.body)["job"]
-            self._wait_for_job(app, job["job_id"])
-            before_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            draft_response = app.handle_request(
-                "POST",
-                "/api/etc/batches/draft",
-                json.dumps({"invoiceIds": ["etc_invoice_0001"]}),
-            )
-            draft_payload = json.loads(draft_response.body)
-            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/confirm-submitted")
-            after_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            canonical_invoices = app._import_service.list_invoices()
-
-        before_invoice_rows = [
-            row
-            for group in before_payload["open"]["groups"]
-            for row in group["invoice_rows"]
-        ]
-        after_invoice_rows = [
-            row
-            for group in after_payload["open"]["groups"]
-            for row in group["invoice_rows"]
-        ]
-        self.assertEqual(before_invoice_rows, [])
-        self.assertEqual(len(after_invoice_rows), 1)
-        self.assertEqual(after_invoice_rows[0]["source_kind"], "etc_invoice_summary")
-        self.assertEqual(after_invoice_rows[0]["total_with_tax"], "13.07")
-        self.assertEqual(after_invoice_rows[0]["invoice_bank_relation"]["code"], "pending_oa_bank_match")
-        self.assertIn("ETC批量提交", after_invoice_rows[0]["tags"])
-        self.assertEqual(canonical_invoices, [])
-
-    def test_confirmed_etc_submission_renders_folded_invoice_summary_for_matching_oa(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-            manual_preview = app._import_service.preview_import(
-                batch_type=BatchType.INPUT_INVOICE,
-                source_name="input-invoices.xlsx",
-                imported_by="finance",
-                rows=[
-                    {
-                        "digital_invoice_no": "ETC001",
-                        "counterparty_name": "云南高速公路联网收费管理有限公司",
-                        "seller_name": "云南高速公路联网收费管理有限公司",
-                        "seller_tax_no": "915300007194052520",
-                        "buyer_name": "云南溯源科技有限公司",
-                        "buyer_tax_no": "915300007194052521",
-                        "amount": "13.07",
-                        "total_with_tax": "13.07",
-                        "tax_amount": "0.39",
-                        "invoice_date": "2026-02-27",
-                    }
-                ],
-            )
-            app._import_service.confirm_import(manual_preview.id)
-
-            task_id, preview_response, _preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
-            session_id = json.loads(preview_response.body)["sessionId"]
-            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
-            job = json.loads(confirm_response.body)["job"]
-            self._wait_for_job(app, job["job_id"])
-            draft_response = app.handle_request(
-                "POST",
-                "/api/etc/batches/draft",
-                json.dumps({"invoiceIds": ["etc_invoice_0001", "etc_invoice_0002"]}),
-            )
-            draft_payload = json.loads(draft_response.body)
-            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/confirm-submitted")
-            raw_payload = {
-                "month": "2026-02",
-                "oa_status": {"code": "ready", "message": "OA 已同步"},
-                "summary": {
-                    "oa_count": 1,
-                    "bank_count": 0,
-                    "invoice_count": 0,
-                    "paired_count": 0,
-                    "open_count": 1,
-                    "exception_count": 0,
-                },
-                "paired": {"oa": [], "bank": [], "invoice": []},
-                "open": {
-                    "oa": [
-                        {
-                            "id": "oa-etc-202602-001",
-                            "type": "oa",
-                            "source": "etc_batch",
-                            "etc_batch_id": draft_payload["etcBatchId"],
-                            "etcBatchId": draft_payload["etcBatchId"],
-                            "tags": ["ETC批量提交"],
-                            "case_id": "",
-                            "applicant": "张三",
-                            "apply_type": "支付申请",
-                            "amount": "27.14",
-                            "counterparty_name": "云南高速通行费",
-                            "reason": f"ETC批量提交\netc_batch_id={draft_payload['etcBatchId']}",
-                            "oa_bank_relation": {"code": "pending_match", "label": "待找流水", "tone": "warn"},
-                            "available_actions": ["detail"],
-                        }
-                    ],
-                    "bank": [],
-                    "invoice": [],
-                },
-            }
-            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
-                payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            invoice_rows = [
-                row
-                for group in payload["open"]["groups"]
-                for row in group["invoice_rows"]
-            ]
-            detail_response = app.handle_request("GET", f"/api/workbench/rows/{invoice_rows[0]['id']}")
-            detail_payload = json.loads(detail_response.body)
-
-        self.assertEqual(len(invoice_rows), 1)
-        self.assertEqual(payload["summary"]["invoice_count"], 0)
-        self.assertEqual(
-            payload["invoice_inventory"],
-            {
-                "system_total": 1,
-                "manual_import_total": 1,
-                "workbench_visible_total": 0,
-                "hidden_submitted_etc_total": 1,
-                "extra_etc_total": 0,
-                "etc_summary_batch_count": 1,
-                "oa_attachment_total": 0,
-            },
-        )
-        summary_row = invoice_rows[0]
-        self.assertEqual(summary_row["source_kind"], "etc_invoice_summary")
-        self.assertEqual(summary_row["seller_name"], "ETC发票 2 张")
-        self.assertEqual(summary_row["etc_invoice_count"], 2)
-        self.assertEqual(summary_row["total_with_tax"], "27.14")
-        self.assertEqual(summary_row["etc_batch_id"], draft_payload["etcBatchId"])
-        self.assertIn("ETC", summary_row["tags"])
-        self.assertIn("已关联ETC发票", summary_row["tags"])
-        self.assertEqual(detail_response.status_code, 200)
-        self.assertEqual(detail_payload["row"]["id"], summary_row["id"])
-        self.assertIn("ETC001", detail_payload["row"]["detail_fields"]["发票清单"])
-        self.assertIn("ETC002", detail_payload["row"]["detail_fields"]["发票清单"])
-
     def test_etc_invoice_api_reports_attachment_existence_flags(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -5007,89 +4459,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(query_response.body)["total"], 1)
         self.assertEqual(json.loads(task_response.body)["status"], "ready_for_import")
 
-    def test_import_query_revoke_and_batch_api_round_trip(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
-            preview_payload = json.loads(preview_response.body)
-            before_confirm_response = app.handle_request("GET", "/api/etc/invoices?status=unsubmitted&month=2026-02&page=1&page_size=1")
-            import_confirm_response = app.handle_request(
-                "POST",
-                "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
-            )
-            import_confirm_payload = json.loads(import_confirm_response.body)
-            self._wait_for_job(app, import_confirm_payload["job"]["job_id"])
-            query_response = app.handle_request("GET", "/api/etc/invoices?status=unsubmitted&month=2026-02&page=1&page_size=1")
-            draft_response = app.handle_request(
-                "POST",
-                "/api/etc/batches/draft",
-                json.dumps({"invoiceIds": ["etc_invoice_0001", "etc_invoice_0002"]}),
-            )
-            draft_payload = json.loads(draft_response.body)
-            confirm_response = app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/confirm-submitted")
-            revoke_response = app.handle_request(
-                "POST",
-                "/api/etc/invoices/revoke-submitted",
-                json.dumps({"invoiceIds": ["etc_invoice_0001", "etc_invoice_0002"]}),
-            )
-            not_submitted_response = app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/mark-not-submitted")
-
-        self.assertEqual(preview_response.status_code, 200)
-        self.assertEqual(preview_payload["summary"]["imported"], 2)
-        self.assertEqual(preview_payload["imported"], 2)
-        self.assertEqual(before_confirm_response.status_code, 200)
-        self.assertEqual(json.loads(before_confirm_response.body)["total"], 0)
-        self.assertEqual(import_confirm_response.status_code, 202)
-        self.assertEqual(import_confirm_payload["job"]["type"], "etc_invoice_import")
-        self.assertEqual(import_confirm_payload["job"]["total"], 2)
-        self.assertEqual(query_response.status_code, 200)
-        query_payload = json.loads(query_response.body)
-        self.assertEqual(query_payload["total"], 2)
-        self.assertEqual(query_payload["pageSize"], 1)
-        self.assertEqual(query_payload["counts"], {"unsubmitted": 2, "submitted": 0, "current": 2})
-        self.assertEqual(draft_response.status_code, 200)
-        self.assertEqual(draft_payload["oaDraftId"], "oa-draft-001")
-        self.assertEqual(confirm_response.status_code, 200)
-        self.assertEqual(json.loads(confirm_response.body)["batch"]["status"], "submitted_confirmed")
-        self.assertEqual(revoke_response.status_code, 200)
-        self.assertEqual(json.loads(revoke_response.body)["updated"], 2)
-        self.assertEqual(not_submitted_response.status_code, 200)
-        self.assertEqual(json.loads(not_submitted_response.body)["batch"]["status"], "not_submitted")
-
-    def test_reconciliation_backed_submitted_batch_detail_includes_supplement_metadata(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            _task_id, draft_payload = self._import_supplement_reconciliation_zip_and_create_draft(app)
-            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/confirm-submitted")
-            list_response = app.handle_request("GET", "/api/etc/batches?status=submitted&month=2026-02")
-            detail_response = app.handle_request("GET", f"/api/etc/batches/{draft_payload['batchId']}")
-
-        self.assertEqual(list_response.status_code, 200)
-        list_payload = json.loads(list_response.body)
-        summary = list_payload["items"][0]
-        self.assertEqual(summary["oaTotalAmount"], "101.07")
-        self.assertEqual(summary["etcInvoiceAmount"], "13.07")
-        self.assertEqual(summary["supplementAmount"], "88.00")
-        self.assertEqual(summary["etcInvoiceCount"], 1)
-        self.assertEqual(summary["supplementCount"], 1)
-        self.assertEqual(summary["displayCountText"], "ETC票 1 + 补充凭证 1")
-        self.assertEqual(summary["passage_start_date"], "2026-02-25")
-        self.assertEqual(summary["passage_end_date"], "2026-02-28")
-        self.assertEqual(summary["statementPeriodStart"], "2026-02-01")
-        self.assertEqual(summary["statementPeriodEnd"], "2026-02-28")
-
-        self.assertEqual(detail_response.status_code, 200)
-        detail_payload = json.loads(detail_response.body)
-        self.assertEqual(detail_payload["summary"]["displayCountText"], "ETC票 1 + 补充凭证 1")
-        self.assertEqual(detail_payload["supplementItems"][0]["tags"], ["ETC补充凭证"])
-        self.assertEqual(detail_payload["supplementItems"][0]["amount"], "88.00")
-        self.assertEqual(len(detail_payload["invoiceItems"]), 1)
-
     def test_reconciliation_backed_oa_draft_uploads_supplements_and_uses_oa_total(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -5105,196 +4474,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(payload["data"]["amount"], "101.07")
         uploaded_names = [item["name"] for item in payload["data"]["field101"]["list"]]
         self.assertEqual(uploaded_names, ["ETC001.pdf", "supplement-ride.pdf"])
-
-    def test_reconciliation_import_batch_route_creates_oa_draft(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            fake_oa = FakeEtcOAClient()
-            app._etc_service.oa_client = fake_oa
-
-            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
-            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
-            draft_payload = json.loads(draft_response.body)
-            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
-
-        self.assertEqual(draft_response.status_code, 200)
-        self.assertEqual(draft_payload["oaDraftId"], "oa-draft-001")
-        self.assertEqual(task_payload["oaDraftBatchId"], draft_payload["batchId"])
-        self.assertEqual(task_payload["etcBatchId"], draft_payload["etcBatchId"])
-        payload = fake_oa.draft_payloads[0]["payload"]
-        self.assertEqual(payload["data"]["amount"], "101.07")
-        uploaded_names = [item["name"] for item in payload["data"]["field101"]["list"]]
-        self.assertEqual(uploaded_names, ["ETC001.pdf", "supplement-ride.pdf"])
-
-    def test_missing_durable_supplement_file_blocks_reconciliation_oa_draft(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id = self._create_ready_reconciliation_task_with_supplement(app)
-            task = app._etc_reconciliation_task_service.get_task(task_id)
-            Path(task.submission_supplement_attachments[0].stored_path).unlink()
-            body, headers = multipart(
-                {"etc.zip": zip_bytes({"xml/ETC001.xml": etc_xml("ETC001", issue_date="2026-02-25"), "pdf/ETC001.pdf": fake_pdf("ETC001")})},
-                fields={"task_id": task_id},
-            )
-            preview_payload = json.loads(app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers).body)
-            confirm_response = app.handle_request(
-                "POST",
-                "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
-            )
-            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
-            draft_response = app.handle_request("POST", "/api/etc/batches/draft", json.dumps({"invoiceIds": ["etc_invoice_0001"]}))
-
-        self.assertEqual(draft_response.status_code, 400)
-        payload = json.loads(draft_response.body)
-        self.assertEqual(payload["error"], "invalid_etc_draft_request")
-        self.assertIn("supplement", payload["message"].lower())
-
-    def test_reconciliation_supplement_enters_workbench_with_required_tag(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            _task_id, draft_payload = self._import_supplement_reconciliation_zip_and_create_draft(app)
-            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/confirm-submitted")
-            workbench_response = app.handle_request("GET", "/api/workbench?month=2026-02")
-
-        self.assertEqual(workbench_response.status_code, 200)
-        payload = json.loads(workbench_response.body)
-        invoice_rows = [
-            row
-            for section in ("paired", "open")
-            for group in payload.get(section, {}).get("groups", [])
-            for row in group.get("invoice_rows", [])
-        ]
-        supplement_rows = [row for row in invoice_rows if "ETC补充凭证" in row.get("tags", [])]
-        self.assertEqual(len(supplement_rows), 1)
-        self.assertEqual(supplement_rows[0]["source_kind"], "etc_supplement_evidence")
-        self.assertEqual(supplement_rows[0]["etc_invoice_count"], 0)
-
-    def test_confirming_reconciliation_backed_oa_submission_finalizes_task(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id, draft_payload = self._import_supplement_reconciliation_zip_and_create_draft(app)
-            confirm_response = app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/confirm-submitted")
-            ready_response = app.handle_request("GET", "/api/etc/reconciliation-tasks/ready-for-import")
-            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
-
-        self.assertEqual(confirm_response.status_code, 200)
-        self.assertEqual(json.loads(confirm_response.body)["batch"]["status"], "submitted_confirmed")
-        self.assertEqual(task_payload["status"], "closed")
-        self.assertIsNotNone(task_payload["submittedConfirmedAt"])
-        self.assertIn("oa_draft_created", [event["event_type"] for event in task_payload["auditEvents"]])
-        self.assertIn("oa_submitted_confirmed", [event["event_type"] for event in task_payload["auditEvents"]])
-        self.assertEqual(json.loads(ready_response.body)["tasks"], [])
-
-    def test_etc_batch_query_api_returns_counts_summary_plate_summary_and_items(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.import_zips(
-                [
-                    UploadedEtcZipFile(
-                        "historical.zip",
-                        zip_bytes(
-                            {
-                                "xml/ETC001.xml": etc_xml(
-                                    "ETC001",
-                                    issue_date="2026-01-15",
-                                    plate_number="云ADA0381",
-                                    total_amount="10.00",
-                                ),
-                                "pdf/ETC001.pdf": fake_pdf("ETC001"),
-                                "xml/ETC002.xml": etc_xml(
-                                    "ETC002",
-                                    issue_date="2026-01-20",
-                                    plate_number="云A361SY",
-                                    total_amount="20.00",
-                                ),
-                                "pdf/ETC002.pdf": fake_pdf("ETC002"),
-                            }
-                        ),
-                    )
-                ]
-            )
-            batch = app._etc_service.create_historical_submitted_batch(
-                case_id="etc-historical-2026-01",
-                external_batch_id="ETC-HIST-2026-01",
-                invoice_numbers=["ETC001", "ETC002"],
-                linked_oa_row_id="oa-exp-1994",
-                oa_amount=Decimal("31.00"),
-                note="历史补关联",
-            )
-
-            list_response = app.handle_request("GET", "/api/etc/batches?status=submitted&month=2026-01&plate=ADA")
-            detail_response = app.handle_request("GET", f"/api/etc/batches/{batch.id}")
-
-        self.assertEqual(list_response.status_code, 200)
-        list_payload = json.loads(list_response.body)
-        self.assertEqual(list_payload["counts"]["submitted"], 1)
-        self.assertEqual(list_payload["counts"]["current"], 1)
-        self.assertEqual(list_payload["items"][0]["id"], batch.id)
-        self.assertEqual(list_payload["items"][0]["etc_batch_id"], "ETC-HIST-2026-01")
-        self.assertEqual(list_payload["items"][0]["invoice_count"], 2)
-        self.assertEqual(list_payload["selectedBatch"]["summary"]["amount_delta"], "1.00")
-        self.assertEqual(list_payload["plateSummary"][0]["plate_number"], "云ADA0381")
-        self.assertEqual([item["invoice_number"] for item in list_payload["invoiceItems"]], ["ETC001", "ETC002"])
-
-        self.assertEqual(detail_response.status_code, 200)
-        detail_payload = json.loads(detail_response.body)
-        self.assertEqual(detail_payload["batch"]["source_type"], "historical_repair")
-        self.assertEqual(detail_payload["summary"]["linked_oa_row_id"], "oa-exp-1994")
-        self.assertEqual(detail_payload["plateSummary"][1]["plate_number"], "云A361SY")
-        self.assertEqual(detail_payload["invoiceItems"][0]["has_pdf"], True)
-
-    def test_etc_batch_list_only_checks_attachment_status_for_selected_detail(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            for batch_index in range(4):
-                invoice_numbers = [f"ETC{batch_index}{invoice_index}" for invoice_index in range(2)]
-                app._etc_service.import_zips([UploadedEtcZipFile(f"batch-{batch_index}.zip", etc_zip(invoice_numbers))])
-
-            for batch_index in (2, 3):
-                invoice_numbers = [f"ETC{batch_index}{invoice_index}" for invoice_index in range(2)]
-                submitted_batch = app._etc_service.create_historical_submitted_batch(
-                    case_id=f"etc-historical-{batch_index}",
-                    external_batch_id=f"ETC-HIST-{batch_index}",
-                    invoice_numbers=invoice_numbers,
-                    linked_oa_row_id=f"oa-exp-{batch_index}",
-                    oa_amount=Decimal("26.14"),
-                    note="历史补关联",
-                )
-                import_batch = next(
-                    batch
-                    for batch in app._etc_service.list_import_batches()
-                    if batch.source_names == [f"batch-{batch_index}.zip"]
-                )
-                import_batch.submission_batch_id = submitted_batch.id
-
-            attachment_exists_calls = 0
-
-            def count_attachment_exists(_path: object) -> bool:
-                nonlocal attachment_exists_calls
-                attachment_exists_calls += 1
-                return True
-
-            app._etc_service._stored_invoice_file_exists = count_attachment_exists
-
-            unsubmitted_response = app.handle_request("GET", "/api/etc/batches?status=unsubmitted&page=1&page_size=20")
-            unsubmitted_attachment_checks = attachment_exists_calls
-            attachment_exists_calls = 0
-            submitted_response = app.handle_request("GET", "/api/etc/batches?status=submitted&page=1&page_size=20")
-            submitted_attachment_checks = attachment_exists_calls
-
-        self.assertEqual(unsubmitted_response.status_code, 200)
-        self.assertEqual(submitted_response.status_code, 200)
-        self.assertEqual(json.loads(unsubmitted_response.body)["pagination"]["total"], 2)
-        self.assertEqual(json.loads(submitted_response.body)["pagination"]["total"], 2)
-        self.assertEqual(unsubmitted_attachment_checks, 4)
-        self.assertEqual(submitted_attachment_checks, 4)
 
     def test_preview_rejects_non_zip_upload(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -5316,21 +4495,6 @@ class EtcApiTests(unittest.TestCase):
 
         self.assertIn(response.status_code, {400, 410})
         self.assertEqual(json.loads(query_response.body)["total"], 0)
-
-    def test_api_returns_clear_errors_for_invalid_input(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            empty_draft = app.handle_request("POST", "/api/etc/batches/draft", json.dumps({"invoiceIds": []}))
-            missing_batch = app.handle_request("POST", "/api/etc/batches/missing/confirm-submitted")
-            bad_revoke = app.handle_request("POST", "/api/etc/invoices/revoke-submitted", json.dumps({"invoiceIds": []}))
-
-        self.assertEqual(empty_draft.status_code, 400)
-        self.assertEqual(json.loads(empty_draft.body)["error"], "invalid_etc_draft_request")
-        self.assertEqual(missing_batch.status_code, 404)
-        self.assertEqual(json.loads(missing_batch.body)["error"], "etc_batch_not_found")
-        self.assertEqual(bad_revoke.status_code, 400)
-        self.assertEqual(json.loads(bad_revoke.body)["error"], "invalid_etc_invoice_request")
 
     def test_historical_etc_repair_reconcile_is_idempotent_from_seed_bundle(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -5845,26 +5009,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual([relation["case_id"] for relation in relations], ["CASE-IDEMPOTENT-ETC"])
         self.assertEqual(len(batches), 1)
         self.assertEqual(batches[0].etc_batch_id, "ETC-IDEMPOTENT-2026-02")
-
-    def test_etc_draft_returns_clear_error_when_oa_token_is_missing(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            task_id, preview_response, _preview_payload = self._preview_task_zip(app, ["ETC001"], nested=False)
-            session_id = json.loads(preview_response.body)["sessionId"]
-            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
-            job = json.loads(confirm_response.body)["job"]
-            self._wait_for_job(app, job["job_id"])
-            draft_response = app.handle_request(
-                "POST",
-                "/api/etc/batches/draft",
-                json.dumps({"invoiceIds": ["etc_invoice_0001"]}),
-            )
-
-        self.assertEqual(draft_response.status_code, 400)
-        payload = json.loads(draft_response.body)
-        self.assertEqual(payload["error"], "invalid_etc_draft_request")
-        self.assertIn("OA 登录 token 缺失", payload["message"])
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.state_store_protocol import ApplicationStateStoreProtocol
 
 
 RESET_BANK_TRANSACTIONS_ACTION = "reset_bank_transactions"
@@ -67,7 +67,7 @@ class SettingsDataResetService:
     def __init__(
         self,
         *,
-        state_store: ApplicationStateStore,
+        state_store: ApplicationStateStoreProtocol,
         import_service: Any,
         file_import_service: Any,
         matching_service: Any,

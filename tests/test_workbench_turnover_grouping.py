@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService

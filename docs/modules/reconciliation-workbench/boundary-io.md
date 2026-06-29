@@ -86,3 +86,13 @@
 - 对 legacy workbench API 的任何修改都必须同时写清是否仍有调用方。
 - 删除旧路径前必须证明 route、frontend、worker、tests、生产脚本都不再依赖。
 - legacy exception action 不得再丢弃 `_apply_exception_payload` 计算出的 affected scopes；删除旧异常入口前必须保留 target envelope 回归。
+
+## Canonical facts ownership
+
+- Owned facts: `app.workbench_row_overrides`、`app.workbench_exception_cases`、`app.workbench_exception_case_events`、`app.matching_runs`、`app.matching_results`、`app.workbench_idempotency_records`。
+- Shared facts: relation facts 由 `workbench-relations` owner 管理；Workbench 只能通过 relation command/read boundary 写读关系。
+- Allowed writes: workbench route owner、workbench command/facade services、matching worker、idempotency service。
+- Allowed reads: workbench query/facade ports、active generation/read model boundary。
+- Downstream outputs: workbench active generation、workbench_relation、search/cost/tax dirty scopes 或 owner producer 输出。
+- Forbidden paths: legacy workbench handler 不得直接写 relation facts、read model 或 dirty/outbox；building/failed projection 不得被当作页面事实。
+- Old code deletion: legacy workbench API、legacy exception action 和同步 builder production fallback 必须删除或迁移到 route/service owner；保留 compat wrapper 不算 closure。

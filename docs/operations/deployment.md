@@ -103,7 +103,6 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 | `worker-tax-offset` | `tax_offset.read_model.refresh` | `--enable-tax-offset-read-model-refresh --event-type tax_offset.read_model.refresh` |
 | `worker-import` | `import.process.requested` | `--enable-import-job-processing --event-type import.process.requested` |
 | `worker-workbench-matching` | `job.workbench_matching_dirty_scopes` | `--enable-workbench-matching` |
-| `worker-file-migration` | `file_object.gridfs_migration` | 可选迁移 worker；只有 legacy GridFS 与对象存储 secret 已配置时才启用 |
 
 不要部署 `fin-ops-worker@oa-rabbitmq.service` 这类没有匹配 handler 的实例。OA worker 的实例名应指向 `oa.sync`，例如 `fin-ops-worker@oa-sync-rabbitmq.service`，并配置 `--enable-oa-sync --event-type oa.sync`。
 
@@ -135,7 +134,6 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 - `deploy/oa/env/fin-ops.worker.cost-statistics.env.example`
 - `deploy/oa/env/fin-ops.worker.tax-offset.env.example`
 - `deploy/oa/env/fin-ops.worker.import.env.example`
-- `deploy/oa/env/fin-ops.worker.file-migration.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
 生产 secret 只能放在 `/etc/fin-ops/*.env` 这类 root-only `EnvironmentFile` 中。`RABBITMQ_URL`、`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、Redis、MinIO/S3、OA role sync 密码、OA payment status MySQL 密码都不能写入 systemd inline `Environment=` 或仓库文件。migrator DSN 应单独放在 `/etc/fin-ops/fin-ops.postgres-migrator.env`，仅在执行 schema migration 时手动加载，不要加入 API/worker unit。
@@ -230,7 +228,7 @@ RabbitMQ 是 outbox envelope transport，不是业务事实源。生产切换必
 4. 观察 outbox unpublished backlog、publish failed backlog、dispatcher lag、RabbitMQ per-queue depth、DLQ count。同步 SLO 场景下
    dispatcher idle poll 默认应为 `RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5`；如果仍是 5 秒，单个新事件可能在
    投递前就消耗完整页面同步预算。
-5. 按 worker 族逐个切到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`：workbench、search/pending、cost/tax、oa-sync、file-migration、import-job。RabbitMQ consumer 仍会按 heartbeat 间隔低频 drain PostgreSQL durable queue，RabbitMQ 只作为唤醒层。
+5. 按 worker 族逐个切到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`：workbench、search/pending、cost/tax、oa-sync、import-job。RabbitMQ consumer 仍会按 heartbeat 间隔低频 drain PostgreSQL durable queue，RabbitMQ 只作为唤醒层。
 6. 每切一组都要触发受控事件验证 PostgreSQL publish/ack 与 RabbitMQ queue/DLQ，再扩 worker 数量和 prefetch。
 
 回滚路径是停止 dispatcher 和 RabbitMQ consumer worker，恢复 worker env 为 `FIN_OPS_QUEUE_BACKEND=postgres`，再启动 PostgreSQL polling worker。详细 runbook 见 `docs/operations/runtime-read-model-hardening.md`。

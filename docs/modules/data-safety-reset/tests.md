@@ -14,7 +14,7 @@
 | OA rebuild | `reset_oa_and_rebuild` 路径、OA adapter、workbench rebuild | OA 重建要受保留月份和配置表单限制，不能破坏纯银行+发票关系 |
 | App Health/App Status | `tests/test_app_health_api.py`、App Status overview | running/failed/partial reset job 必须进入全局状态平面 |
 | 设置页 UI | `SettingsPage`、`SettingsDataResetDialogs`、Workbench 内设置入口 | 影响确认、密码弹窗、progress reentry、错误反馈、权限隐藏 |
-| 备份/导出 | `tests/test_export_app_mongo.py`、operations docs | 当前自动化覆盖导出只读和不可覆盖；真实 PostgreSQL/PITR/对象存储恢复仍需 staging |
+| 备份/恢复 | operations docs | App Mongo export 工具已删除；真实 PostgreSQL/PITR/对象存储恢复仍需 staging |
 
 ## 场景覆盖清单
 
@@ -28,7 +28,6 @@
 | 后台 reset job 可创建、查询、恢复 active progress，不保存密码 | `tests/test_settings_data_reset_service.py` | 已覆盖 |
 | 并发 reset job 返回 `409 settings_data_reset_job_running` 且不泄露密码 | `tests/test_settings_data_reset_service.py` | 2026-06-11 新增 |
 | failed/partial/interrupted background job 进入 App Health attention | `tests/test_app_health_api.py`、`tests/test_background_job_service.py` | 已覆盖 |
-| legacy app Mongo export manifest、NDJSON counts、只读 store、不可覆盖目录 | `tests/test_export_app_mongo.py` | 已覆盖 |
 | runtime state policy 对 active/attention/background jobs 的镜像写入约束 | `tests/test_runtime_state_policy.py` | 已覆盖 |
 | Settings/Workbench UI 的 impact confirmation、OA password、progress reentry、权限隐藏、多页面 fresh contract | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 已覆盖；Browser e2e 覆盖真实 Chromium 下设置页影响确认、OA 密码复核、job polling、完成后 reload 与全局反馈，并在 reset 完成后进入银行明细验证 fresh empty、进入待找发票验证 fresh rows。 |
 
@@ -37,7 +36,7 @@
 | 类别 | 是否适用 | 当前测试入口 | 当前结论 | 缺口等级 | 维护要求 |
 | --- | --- | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_settings_data_reset_service.py` | 覆盖 action、protected targets、bank/invoice/OA relation 保留删除规则、unsupported action | 无 P0 | 新增 reset action 或删除规则时必须先补 service 规则测试 |
-| 2. Service-layer tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_background_job_service.py`、`tests/test_export_app_mongo.py` | 覆盖 state store 清理、文件删除调用、job 进度、payload sanitize、只读导出 | P1 | PostgreSQL PITR/对象存储备份恢复未本地自动化 |
+| 2. Service-layer tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_background_job_service.py` | 覆盖 state store 清理、文件删除调用、job 进度、payload sanitize | P1 | PostgreSQL PITR/对象存储备份恢复未本地自动化 |
 | 3. API contract tests | 适用 | `tests/test_settings_data_reset_service.py` | 覆盖 admin-only、密码失败、同步 reset、job create/query/active、并发 409、protected_targets、敏感字段不泄露 | 无 P0 | 修改 route/error/status/job shape 时同步补契约断言 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_app_health_api.py`、`tests/test_background_job_service.py`、`tests/test_runtime_state_policy.py` | 覆盖 lifecycle fan-out、cost statistics clear、job attention/active、runtime state policy | P1 | 真 Redis cache、真实 Postgres dirty/outbox/worker drain 需要 staging/nightly smoke |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 覆盖确认、密码弹窗、cancel、错误、progress reentry、权限隐藏；Browser e2e 覆盖真实页面 job polling/reload 和 reset 后跨页读取银行明细/待找发票 fresh contract | P1 | 真实浏览器视觉、长任务 progress、网络断开恢复需 smoke |
@@ -71,7 +70,6 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_settings_data_reset_service \
   tests.test_app_health_api \
   tests.test_background_job_service \
-  tests.test_export_app_mongo \
   tests.test_runtime_state_policy \
   tests.test_platform_runtime_boundary_guards \
   -v

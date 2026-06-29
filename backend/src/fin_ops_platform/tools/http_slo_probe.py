@@ -182,7 +182,6 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("turnover_ledger_grouped", "/api/turnover-ledger?view=grouped&page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("turnover_ledger_tag_selection", "/api/turnover-ledger/tag-selection", expected_statuses=(200, 202)),
     HttpProbe("etc_invoices", "/api/etc/invoices?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("etc_batches", "/api/etc/batches?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("etc_business_batches", "/api/etc/business-batches?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("etc_reconciliation_tasks", "/api/etc/reconciliation-tasks?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("import_facts_batches", "/api/import-facts/batches?page=1&page_size=50", expected_statuses=(200, 202)),

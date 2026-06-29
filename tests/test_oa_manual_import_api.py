@@ -7,7 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.app.server import Application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 from tests.test_oa_manual_import_service import (

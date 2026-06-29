@@ -51,7 +51,6 @@ from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
 from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
 from fin_ops_platform.app.routes_etc_import import EtcImportApiRoutes
 from fin_ops_platform.app.routes_etc_invoices import EtcInvoiceApiRoutes
-from fin_ops_platform.app.routes_etc_legacy_batches import EtcLegacyBatchApiRoutes
 from fin_ops_platform.app.routes_etc_reconciliation import EtcReconciliationTaskApiRoutes
 from fin_ops_platform.app.routes_legacy_workbench_actions import LegacyWorkbenchActionRoutes
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
@@ -163,9 +162,6 @@ from fin_ops_platform.services.etc_service import (
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
 from fin_ops_platform.services.etc_business_batch_delete_service import EtcBusinessBatchDeleteService
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
-from fin_ops_platform.services.etc_legacy_batch_delete_service import EtcLegacyBatchDeleteService
-from fin_ops_platform.services.etc_legacy_batch_lifecycle_service import EtcLegacyBatchLifecycleService
-from fin_ops_platform.services.etc_legacy_batch_read_facade import EtcLegacyBatchReadFacade
 from fin_ops_platform.services.etc_reconciliation_import_cleanup_service import EtcReconciliationImportCleanupService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_reconciliation_task_payload_facade import EtcReconciliationTaskPayloadFacade
@@ -249,6 +245,7 @@ from fin_ops_platform.services.oa_pending_payment_command_service import OaPendi
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
 from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
 from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
+from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.output_invoice_collection_lifecycle_service import (
     InMemoryOutputInvoiceCollectionLifecycleRepository,
     OutputInvoiceCollectionLifecycleService,
@@ -265,7 +262,6 @@ from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
 from fin_ops_platform.services.matching import MatchingEngineService
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
 from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NO_OA_BANK_BATCH_RELATION_MODE,
@@ -360,7 +356,7 @@ from fin_ops_platform.services.settings_data_reset_service import (
     SettingsDataResetPairSnapshotPort,
     SettingsDataResetService,
 )
-from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap, RuntimeRepositoryContext
+from fin_ops_platform.services.runtime_bootstrap import RuntimeRepositoryContext
 from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
 from fin_ops_platform.services.tax_certified_import_application_service import TaxCertifiedImportApplicationService
@@ -388,8 +384,6 @@ from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_ro
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankdetailWritePort,
-    TurnoverLedgerBankRowTagsLegacyFallbackAdapterSet,
-    TurnoverLedgerBankRowTagsLegacyFallbackFacade,
     TurnoverLedgerBankRowTagsRequestBoundaryFacade,
     TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder,
     TurnoverLedgerDirtyOutboxWriter,
@@ -409,22 +403,14 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalWithdrawRelationAdapterSet,
     TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder,
     TurnoverLedgerTagSelectionRequestBoundaryFacade,
-    TurnoverLedgerClosureLegacyFallbackFacade,
-    TurnoverLedgerConfirmLegacyFallbackAdapterSet,
-    TurnoverLedgerConfirmLegacyFallbackFacade,
     TurnoverLedgerConfirmRequestBoundaryFacade,
     TurnoverLedgerConfirmPrimaryWriteFacadeBuilder,
     TurnoverLedgerRelationMutationInvalidationLegacyAdapter,
-    TurnoverLedgerRelationExtraLegacyFallbackAdapterSet,
-    TurnoverLedgerRelationExtraLegacyFallbackFacade,
     TurnoverLedgerRelationWritePort,
-    TurnoverLedgerTagSelectionLegacyFallbackFacade,
-    TurnoverLedgerTagSelectionLegacyFallbackAdapterSet,
     TurnoverLedgerTagSelectionSettingsAdapter,
     TurnoverLedgerWritePreconditionError,
     TurnoverLedgerWithdrawRequestBoundaryFacade,
     TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder,
-    TurnoverLedgerWithdrawLegacyFallbackFacade,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
@@ -670,6 +656,11 @@ class StatePersistenceError(RuntimeError):
     """Raised when critical workbench state cannot be durably persisted."""
 
 
+class _LocalTurnoverLedgerRefreshQueue:
+    def enqueue_read_model_refresh(self, **kwargs: object) -> dict[str, object]:
+        return dict(kwargs)
+
+
 def _build_ascii_download_name(filename: str, *, fallback_stem: str = "download", fallback_suffix: str = ".bin") -> str:
     safe = "".join(character if ord(character) < 128 else "_" for character in filename)
     safe = safe.replace('"', "").replace("\\", "_").strip()
@@ -714,7 +705,6 @@ class Application:
         self._bootstrap_mode = self._normalize_bootstrap_mode(bootstrap_mode)
         self._api_performance_recorder = ApiPerformanceRecorder()
         self._state_store = build_state_store(data_dir)
-        self._legacy_bootstrap = LegacySnapshotBootstrap(self._state_store)
         self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)
         self._data_reset_jobs: dict[str, DataResetJob] = {}
         self._data_reset_jobs_lock = Lock()
@@ -768,12 +758,7 @@ class Application:
         return raw_value
 
     def _runtime_bootstrap_state(self) -> dict[str, object]:
-        if self._bootstrap_mode == "legacy":
-            return self._load_persisted_state("legacy_application_startup")
         return {}
-
-    def _load_persisted_state(self, reason: str) -> dict[str, object]:
-        return self._legacy_bootstrap.load_full_snapshot(reason=reason)
 
     def _requires_sql_read_model_runtime(self) -> bool:
         if getattr(self, "_bootstrap_mode", None) not in {"production", "lightweight"}:
@@ -876,14 +861,6 @@ class Application:
             return loaded
         return {}
 
-    def _build_legacy_direct_oa_mongo_adapter(self) -> MongoOAAdapter | None:
-        if self._bootstrap_mode != "legacy":
-            return None
-        mongo_oa_settings = load_mongo_oa_settings(self._state_store.data_dir if self._state_store is not None else None)
-        if mongo_oa_settings is None:
-            return None
-        return MongoOAAdapter(settings=mongo_oa_settings, attachment_invoice_cache=self._state_store)
-
     @staticmethod
     def _build_turnover_ledger_extra_service(snapshot: object) -> object:
         try:
@@ -891,6 +868,54 @@ class Application:
         except ModuleNotFoundError:
             return InMemoryTurnoverLedgerExtraService.from_snapshot(snapshot if isinstance(snapshot, dict) else None)
         return TurnoverLedgerExtraService.from_snapshot(snapshot if isinstance(snapshot, dict) else None)
+
+    def initialize_tool_runtime_state(self, persisted_state: dict[str, object]) -> None:
+        self._initialize_runtime_services(persisted_state)
+
+    def tool_runtime_state_snapshot(self) -> dict[str, object]:
+        state_store = self._state_store
+        state: dict[str, object] = {}
+        for key, loader_name in (
+            ("imports", "load_imports_snapshot"),
+            ("file_imports", "load_file_imports_snapshot"),
+            ("workbench_pair_relations", "load_workbench_pair_relations"),
+            ("etc_reconciliation_state", "load_etc_reconciliation_state"),
+        ):
+            loader = getattr(state_store, loader_name, None)
+            if not callable(loader):
+                continue
+            loaded = loader()
+            if isinstance(loaded, dict):
+                state[key] = loaded
+        return state
+
+    def tool_runtime_ports(self) -> SimpleNamespace:
+        state_store = self._state_store
+        etc_service = self._etc_service
+        etc_reconciliation_task_service = self._etc_reconciliation_task_service
+        save_etc_state = getattr(state_store, "save_etc_state", None)
+        return SimpleNamespace(
+            get_settings_payload=self._app_settings_service.get_settings_payload,
+            replace_auto_tag_rules_from_file_source=self._bank_details_application_service().replace_auto_tag_rules_from_file_source,
+            import_service=self._import_service,
+            etc_service=etc_service,
+            etc_reconciliation_task_service=etc_reconciliation_task_service,
+            workbench_relation_command_service=self._workbench_relation_command_service(),
+            workbench_relation_reader=self._workbench_relation_command_service(),
+            object_identity_repository=(
+                self._import_fact_repository
+                if callable(getattr(getattr(self, "_import_fact_repository", None), "find_invoice_by_identity", None))
+                else self._import_service
+            ),
+            persist_workbench_pair_relations=lambda case_ids: self._persist_workbench_pair_relations(changed_case_ids=case_ids),
+            invalidate_workbench_scopes=self._invalidate_workbench_read_model_scopes,
+            save_invoice_etc_metadata=(
+                state_store.save_invoice_etc_metadata
+                if callable(getattr(state_store, "save_invoice_etc_metadata", None))
+                else None
+            ),
+            persist_etc_state=(lambda: save_etc_state(etc_service.snapshot())) if callable(save_etc_state) else None,
+        )
 
     def _initialize_runtime_services(self, persisted_state: dict[str, object]) -> None:
         import_fact_repository = getattr(self._state_store, "import_fact_repository", None)
@@ -1014,13 +1039,11 @@ class Application:
         self._tax_offset_read_model_service = TaxOffsetReadModelService.from_snapshot(
             persisted_state.get("tax_offset_read_models"),
         )
-        source_oa_adapter = self._build_legacy_direct_oa_mongo_adapter()
-        self._source_oa_adapter = source_oa_adapter
         oa_projection_repository = getattr(self._state_store, "oa_projection_repository", None)
         oa_adapter = (
             PostgresOAProjectionAdapter(oa_projection_repository)
             if oa_projection_repository is not None
-            else source_oa_adapter
+            else None
         )
         self._audit_service = AuditTrailService()
         self._reconciliation_service = ManualReconciliationService(
@@ -1035,7 +1058,6 @@ class Application:
         self._integration_service = IntegrationHubService(
             self._import_service,
             self._audit_service,
-            adapter=source_oa_adapter,
         )
         self._project_costing_service = ProjectCostingService(
             self._import_service,
@@ -1045,16 +1067,10 @@ class Application:
             self._audit_service,
         )
         self._oa_role_sync_service = OARoleSyncService.from_environment()
-        oa_import_options_provider = (
-            source_oa_adapter.list_oa_import_filter_options
-            if isinstance(source_oa_adapter, MongoOAAdapter)
-            else None
-        )
         self._app_settings_service = AppSettingsService(
             self._state_store,
             self._project_costing_service,
             oa_role_sync_service=self._oa_role_sync_service,
-            oa_import_options_provider=oa_import_options_provider,
             bank_transaction_category_service=self._bank_transaction_category_service,
             bank_transaction_auto_category_service=self._bank_transaction_auto_category_service,
             audit_service=self._audit_service,
@@ -1071,8 +1087,6 @@ class Application:
                 persist=bool(kwargs.get("persist")),
             ),
         )
-        if source_oa_adapter is not None:
-            source_oa_adapter.set_import_settings_provider(self._app_settings_service.get_oa_import_settings)
         self._oa_identity_service = OAIdentityService()
         self._access_control_service = AccessControlService.from_environment(
             dynamic_allowed_usernames_provider=self._app_settings_service.get_allowed_usernames,
@@ -1350,8 +1364,6 @@ class Application:
             reconciliation_service=self._reconciliation_service,
             ledger_service=self._ledger_service,
         )
-        if isinstance(source_oa_adapter, MongoOAAdapter):
-            source_oa_adapter.set_attachment_invoice_cache_updated_callback(self._handle_oa_attachment_invoice_cache_updated)
         self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
             ledger_service=self._turnover_ledger_service,
             relation_service=self._turnover_relation_service,
@@ -2065,8 +2077,6 @@ class Application:
             return self._route_api_etc_business_batch_v2(method, route_path, body, headers)
         if route_path == "/api/etc/invoices" or route_path == "/api/etc/invoices/revoke-submitted":
             return self._etc_invoice_routes().route(method, route_path, query, body)
-        if route_path == "/api/etc/batches" or route_path.startswith("/api/etc/batches/"):
-            return self._etc_legacy_batch_routes().route(method, route_path, query, body, headers)
         if method == "GET" and route_path == "/api/session/me":
             return self._handle_api_session_me(headers)
         if method == "GET" and route_path == "/api/workbench/ignored":
@@ -2321,7 +2331,7 @@ class Application:
             "bootstrap": {
                 "mode": self._bootstrap_mode,
                 "legacy_snapshot_disabled": self._bootstrap_mode != "legacy",
-                "legacy_snapshot": self._legacy_bootstrap.summary(),
+                "legacy_snapshot": {"allowlist_count": 0, "allowlist": []},
                 "repositories": self._runtime_repositories.summary(),
             },
             "entrypoints": [
@@ -2405,10 +2415,6 @@ class Application:
                 "/api/etc/reconciliation-tasks/{task_id}/credit-card-statement",
                 "/api/etc/reconciliation-tasks/{task_id}/supplement-evidences",
                 "/api/etc/reconciliation-tasks/{task_id}/refresh-matches",
-                "/api/etc/batches/{batch_id}",
-                "/api/etc/batches/draft",
-                "/api/etc/batches/{batch_id}/confirm-submitted",
-                "/api/etc/batches/{batch_id}/mark-not-submitted",
                 "/api/no-oa-bank-batches",
                 "/api/no-oa-bank-batches/tag-selection",
                 "/api/no-oa-bank-batches/submit",
@@ -3112,14 +3118,14 @@ class Application:
             idempotency_store=idempotency_store,
         )
 
-    def _turnover_ledger_relation_extra_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerRelationExtraLegacyFallbackFacade:
+    def _turnover_ledger_relation_extra_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         override = getattr(self, "_turnover_ledger_relation_extra_write_facade_override", None)
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
         if state_store is None or queue_repository is None:
-            return self._turnover_ledger_relation_extra_legacy_fallback_facade()
+            return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder(
             state_store=state_store,
@@ -3137,24 +3143,16 @@ class Application:
         ).build()
         if facade is not None:
             return facade
-        return self._turnover_ledger_relation_extra_legacy_fallback_facade()
+        return None
 
-    def _turnover_ledger_relation_extra_legacy_fallback_facade(self) -> TurnoverLedgerRelationExtraLegacyFallbackFacade:
-        return TurnoverLedgerRelationExtraLegacyFallbackAdapterSet(
-            routes=self._turnover_ledger_api_routes,
-            persist_extra_best_effort=self._persist_turnover_ledger_extras_best_effort,
-            clear_read_model=self._turnover_ledger_read_model_refresh_producer().clear_best_effort,
-            enqueue_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
-        ).facade()
-
-    def _turnover_ledger_bank_row_tags_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerBankRowTagsLegacyFallbackFacade | None:
+    def _turnover_ledger_bank_row_tags_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         override = getattr(self, "_turnover_ledger_bank_row_tags_write_facade_override", None)
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
         if state_store is None or queue_repository is None:
-            return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
+            return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder(
             state_store=state_store,
@@ -3175,27 +3173,16 @@ class Application:
         ).build()
         if facade is not None:
             return facade
-        return self._turnover_ledger_bank_row_tags_legacy_fallback_facade()
+        return None
 
-    def _turnover_ledger_bank_row_tags_legacy_fallback_facade(self) -> TurnoverLedgerBankRowTagsLegacyFallbackFacade:
-        state_store = getattr(self, "_state_store", None)
-        invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
-        return TurnoverLedgerBankRowTagsLegacyFallbackAdapterSet(
-            state_store=state_store,
-            category_service=self._bank_transaction_category_service,
-            relation_rebuild=self._turnover_relation_service.rebuild_from_bank_rows,
-            bank_rows_provider=self._turnover_bank_transaction_rows,
-            after_mutation=invalidation_adapter.after_relation_mutation,
-        ).facade()
-
-    def _turnover_ledger_confirm_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerConfirmLegacyFallbackFacade:
+    def _turnover_ledger_confirm_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         override = getattr(self, "_turnover_ledger_confirm_write_facade_override", None)
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
         if state_store is None or queue_repository is None:
-            return self._turnover_ledger_confirm_legacy_fallback_facade()
+            return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerConfirmPrimaryWriteFacadeBuilder(
             state_store=state_store,
@@ -3215,16 +3202,7 @@ class Application:
         ).build()
         if facade is not None:
             return facade
-        return self._turnover_ledger_confirm_legacy_fallback_facade()
-
-    def _turnover_ledger_confirm_legacy_fallback_facade(self) -> TurnoverLedgerConfirmLegacyFallbackFacade:
-        invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
-        return TurnoverLedgerConfirmLegacyFallbackAdapterSet(
-            relation_service=self._turnover_relation_service,
-            bank_rows_provider=self._turnover_bank_transaction_rows,
-            routes=self._turnover_ledger_api_routes,
-            after_mutation=invalidation_adapter.after_relation_mutation,
-        ).facade()
+        return None
 
     def _turnover_ledger_confirm_request_boundary_facade(self) -> TurnoverLedgerConfirmRequestBoundaryFacade:
         return TurnoverLedgerConfirmRequestBoundaryFacade(
@@ -3232,11 +3210,11 @@ class Application:
             affected_months_resolver=self._bank_transaction_category_affected_months,
         )
 
-    def _turnover_ledger_closure_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerClosureLegacyFallbackFacade:
+    def _turnover_ledger_closure_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         state_store = getattr(self, "_state_store", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
         if state_store is None or queue_repository is None:
-            return self._turnover_ledger_closure_legacy_fallback_facade()
+            return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerConfirmPrimaryWriteFacadeBuilder(
             state_store=state_store,
@@ -3262,19 +3240,7 @@ class Application:
         ).build()
         if facade is not None:
             return facade
-        return self._turnover_ledger_closure_legacy_fallback_facade()
-
-    def _turnover_ledger_closure_legacy_fallback_facade(self) -> TurnoverLedgerClosureLegacyFallbackFacade:
-        invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
-        return TurnoverLedgerClosureLegacyFallbackFacade(
-            relation_rebuild=lambda: self._turnover_relation_service.rebuild_from_bank_rows(
-                self._turnover_bank_transaction_rows()
-            ),
-            routes=self._turnover_ledger_api_routes,
-            after_mutation=invalidation_adapter.after_relation_mutation,
-            relation_command_service_factory=self._turnover_workbench_relation_command_service,
-            relation_facade=self._workbench_relation_read_facade(),
-        )
+        return None
 
     def _turnover_ledger_closure_request_boundary_facade(self) -> TurnoverLedgerConfirmRequestBoundaryFacade:
         return TurnoverLedgerConfirmRequestBoundaryFacade(
@@ -3282,14 +3248,14 @@ class Application:
             affected_months_resolver=self._bank_transaction_category_affected_months,
         )
 
-    def _turnover_ledger_withdraw_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerWithdrawLegacyFallbackFacade:
+    def _turnover_ledger_withdraw_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         override = getattr(self, "_turnover_ledger_withdraw_write_facade_override", None)
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
         if state_store is None or queue_repository is None:
-            return self._turnover_ledger_withdraw_legacy_fallback_facade()
+            return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder(
             state_store=state_store,
@@ -3315,22 +3281,13 @@ class Application:
         ).build()
         if facade is not None:
             return facade
-        return self._turnover_ledger_withdraw_legacy_fallback_facade()
+        return None
 
     def _turnover_ledger_withdraw_request_boundary_facade(self) -> TurnoverLedgerWithdrawRequestBoundaryFacade:
         return TurnoverLedgerWithdrawRequestBoundaryFacade(
             facade=self._turnover_ledger_withdraw_write_facade(),
             relation_detail_provider=self._turnover_ledger_api_routes.get_relation,
             affected_months_resolver=self._bank_transaction_category_affected_months,
-        )
-
-    def _turnover_ledger_withdraw_legacy_fallback_facade(self) -> TurnoverLedgerWithdrawLegacyFallbackFacade:
-        invalidation_adapter = self._turnover_ledger_relation_mutation_invalidation_adapter()
-        return TurnoverLedgerWithdrawLegacyFallbackFacade(
-            routes=self._turnover_ledger_api_routes,
-            after_mutation=invalidation_adapter.after_relation_mutation,
-            relation_command_service_factory=self._turnover_workbench_relation_command_service,
-            relation_facade=self._workbench_relation_read_facade(),
         )
 
     def _postgres_turnover_ledger_persistence_repository(
@@ -3373,6 +3330,14 @@ class Application:
             relation_service_rebinder=self._bind_local_turnover_relation_runtime,
             extra_service_rebinder=self._bind_local_turnover_ledger_extra_runtime,
         )
+
+    def _turnover_ledger_write_queue_repository(self, state_store: object | None) -> object | None:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        if queue_repository is not None:
+            return queue_repository
+        if str(getattr(state_store, "storage_backend", "") or "").strip() == "postgres":
+            return None
+        return _LocalTurnoverLedgerRefreshQueue()
 
     def _bind_local_bank_transaction_category_runtime(
         self,
@@ -3453,14 +3418,14 @@ class Application:
             snapshot,
         )
 
-    def _turnover_ledger_tag_selection_write_facade(self) -> TurnoverLedgerWriteFacade | TurnoverLedgerTagSelectionLegacyFallbackFacade:
+    def _turnover_ledger_tag_selection_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         override = getattr(self, "_turnover_ledger_tag_selection_write_facade_override", None)
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
         if state_store is None or queue_repository is None:
-            return self._turnover_ledger_tag_selection_legacy_fallback_facade()
+            return None
         facade = TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder(
             state_store=state_store,
             queue_repository=queue_repository,
@@ -3472,15 +3437,8 @@ class Application:
             local_idempotency_store_provider=self._turnover_ledger_tag_selection_local_idempotency_store,
         ).build()
         if facade is None:
-            return self._turnover_ledger_tag_selection_legacy_fallback_facade()
+            return None
         return facade
-
-    def _turnover_ledger_tag_selection_legacy_fallback_facade(self) -> TurnoverLedgerTagSelectionLegacyFallbackFacade:
-        return TurnoverLedgerTagSelectionLegacyFallbackAdapterSet(
-            app_settings_service=self._app_settings_service,
-            clear_read_model=self._turnover_ledger_read_model_refresh_producer().clear_best_effort,
-            enqueue_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
-        ).facade()
 
     def _refresh_local_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
         self._turnover_ledger_local_runtime_support().refresh_app_settings_snapshot(snapshot)
@@ -4411,25 +4369,6 @@ class Application:
     def _search_read_model_refresh_producer(self) -> SearchReadModelRefreshProducer:
         return SearchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
 
-    def _etc_legacy_batch_routes(self) -> EtcLegacyBatchApiRoutes:
-        routes = getattr(self, "_etc_legacy_batch_api_routes", None)
-        if isinstance(routes, EtcLegacyBatchApiRoutes):
-            return routes
-        routes = EtcLegacyBatchApiRoutes(
-            json_response=self._json_response,
-            load_json_body=self._load_json_body,
-            reconciliation_error_response=self._reconciliation_error_response,
-            read_facade=self._etc_legacy_batch_read_facade(),
-            delete_service=self._etc_legacy_batch_delete_service(),
-            lifecycle_service=self._etc_legacy_batch_lifecycle_service(),
-            build_oa_client=self._build_etc_oa_client,
-            legacy_business_delete=self._handle_legacy_etc_batch_business_delete,
-            refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
-            persist_state=self._persist_state,
-        )
-        self._etc_legacy_batch_api_routes = routes
-        return routes
-
     def _etc_invoice_routes(self) -> EtcInvoiceApiRoutes:
         routes = getattr(self, "_etc_invoice_api_routes", None)
         if isinstance(routes, EtcInvoiceApiRoutes):
@@ -4520,23 +4459,6 @@ class Application:
         self._etc_reconciliation_import_cleanup = service
         return service
 
-    def _etc_legacy_batch_delete_service(self) -> EtcLegacyBatchDeleteService:
-        service = getattr(self, "_etc_legacy_batch_delete", None)
-        if isinstance(service, EtcLegacyBatchDeleteService):
-            return service
-        service = EtcLegacyBatchDeleteService(
-            etc_service=self._etc_service,
-            import_service=self._import_service,
-            reconciliation_task_service=self._etc_reconciliation_task_service,
-            cleanup_service=self._etc_reconciliation_import_cleanup_service(),
-            existing_etc_invoices_by_ids=self._existing_etc_invoices_by_ids,
-            etc_invoice_changed_months=self._etc_invoice_changed_months,
-            link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
-            etc_import_batch_by_id=self._etc_import_batch_by_id,
-        )
-        self._etc_legacy_batch_delete = service
-        return service
-
     def _etc_business_batch_delete_service(self) -> EtcBusinessBatchDeleteService:
         service = getattr(self, "_etc_business_batch_delete", None)
         if isinstance(service, EtcBusinessBatchDeleteService):
@@ -4554,32 +4476,6 @@ class Application:
         )
         self._etc_business_batch_delete = service
         return service
-
-    def _etc_legacy_batch_lifecycle_service(self) -> EtcLegacyBatchLifecycleService:
-        service = getattr(self, "_etc_legacy_batch_lifecycle", None)
-        if isinstance(service, EtcLegacyBatchLifecycleService):
-            return service
-        service = EtcLegacyBatchLifecycleService(
-            etc_service=self._etc_service,
-            reconciliation_task_service=self._etc_reconciliation_task_service,
-            link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
-        )
-        self._etc_legacy_batch_lifecycle = service
-        return service
-
-    def _etc_legacy_batch_read_facade(self) -> EtcLegacyBatchReadFacade:
-        facade = getattr(self, "_etc_legacy_batch_read", None)
-        if isinstance(facade, EtcLegacyBatchReadFacade):
-            return facade
-        facade = EtcLegacyBatchReadFacade(
-            etc_service=self._etc_service,
-            reconciliation_task_service=self._etc_reconciliation_task_service,
-            existing_etc_invoices_by_ids=self._existing_etc_invoices_by_ids,
-            serialize_value=self._serialize_value,
-            serialize_etc_invoice=self._serialize_etc_invoice,
-        )
-        self._etc_legacy_batch_read = facade
-        return facade
 
     def _etc_reconciliation_task_payload_facade(self) -> EtcReconciliationTaskPayloadFacade:
         facade = getattr(self, "_etc_reconciliation_task_payload_read", None)
@@ -5441,20 +5337,6 @@ class Application:
             and self._etc_service._stored_invoice_file_exists(xml_path)
         )
         return payload
-
-    def _handle_legacy_etc_batch_business_delete(self, batch_id: str) -> Response | None:
-        if str(batch_id or "").strip().startswith("etc_business_batch_"):
-            return self._delete_etc_business_batch_via_route_owner(
-                batch_id,
-                json.dumps({"reason": "legacy_etc_batch_delete"}),
-            )
-        linked_business_batch = self._etc_service.find_business_batch_by_linked_batch_id(batch_id)
-        if linked_business_batch is not None:
-            return self._delete_etc_business_batch_via_route_owner(
-                str(getattr(linked_business_batch, "business_batch_id")),
-                json.dumps({"reason": "legacy_etc_batch_delete"}),
-            )
-        return None
 
     def _delete_etc_business_batch_via_route_owner(self, business_batch_id: str, body: str | bytes | None) -> Response:
         result = self._etc_business_routes().delete_batch(business_batch_id, body)
@@ -6830,29 +6712,17 @@ class Application:
         if isinstance(projection, PaymentAdmittedOAProjectionAdapter):
             return projection
         projection = PaymentAdmittedOAProjectionAdapter(
-            source_adapter=self._oa_pending_payment_source_adapter(),
+            source_adapter=self._oa_pending_payment_source_projection(),
             payment_status_repository=self._oa_payment_status_repository(),
         )
         self._oa_pending_payment_projection_instance = projection
         return projection
 
-    def _oa_pending_payment_source_adapter(self) -> object | None:
-        source_adapter = getattr(self, "_source_oa_adapter", None)
-        if source_adapter is not None:
-            return source_adapter
-        cached = getattr(self, "_oa_pending_payment_source_adapter_instance", None)
-        if cached is not None:
-            return cached
-        mongo_oa_settings = load_mongo_oa_settings(self._state_store.data_dir if self._state_store is not None else None)
-        if mongo_oa_settings is None:
-            return None
-        adapter = MongoOAAdapter(settings=mongo_oa_settings, attachment_invoice_cache=self._state_store)
-        app_settings_service = getattr(self, "_app_settings_service", None)
-        get_oa_import_settings = getattr(app_settings_service, "get_oa_import_settings", None)
-        if callable(get_oa_import_settings):
-            adapter.set_import_settings_provider(get_oa_import_settings)
-        self._oa_pending_payment_source_adapter_instance = adapter
-        return adapter
+    def _oa_pending_payment_source_projection(self) -> object | None:
+        override = getattr(self, "_oa_pending_payment_source_projection_override", None)
+        if override is not None:
+            return override
+        return self._postgres_oa_projection_repository() or getattr(self._workbench_query_service, "_oa_adapter", None)
 
     def _oa_pending_payment_read_model_service(self) -> OaPendingPaymentReadModelService | None:
         if not self._requires_sql_read_model_runtime():
@@ -9596,7 +9466,6 @@ class Application:
     def _turnover_ledger_bank_row_tags_request_boundary_facade(self) -> TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         return TurnoverLedgerBankRowTagsRequestBoundaryFacade(
             facade_provider=self._turnover_ledger_bank_row_tags_write_facade,
-            legacy_fallback_provider=self._turnover_ledger_bank_row_tags_legacy_fallback_facade,
             target_validator=self._ensure_turnover_bank_row_tag_targets,
             affected_months_resolver=self._bank_transaction_category_affected_months,
         )
@@ -12882,7 +12751,7 @@ class Application:
         return hashlib.sha256(encoded).hexdigest()
 
     def _current_oa_attachment_invoice_parser_version(self) -> str:
-        return MongoOAAdapter._attachment_invoice_cache_parser_version()
+        return attachment_invoice_cache_parser_version()
 
     def _current_oa_projection_sync_version(self) -> str:
         return OA_PROJECTION_SYNC_VERSION
@@ -13024,7 +12893,10 @@ class Application:
         if builder is None:
             builder = WorkbenchOaPayloadBuilder(
                 use_retained_all_payload=lambda month: month == "all"
-                and isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter),
+                and self._parse_oa_retention_date(
+                    self._app_settings_service.get_oa_retention_cutoff_date()
+                )
+                is not None,
                 build_retained_all_oa_row_payload=self._build_retained_all_oa_row_payload,
                 get_workbench_payload=lambda month: self._workbench_api_routes.get_workbench(month),
                 serialize_value=self._serialize_value,
@@ -13087,31 +12959,7 @@ class Application:
             available_months = []
         if available_months:
             return sorted(month for month in available_months if month >= cutoff_month)
-
-        oa_status = self._workbench_query_service.oa_status_payload()
-        if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter) and str(oa_status.get("code", "")).strip() != "ready":
-            return self._fallback_retained_oa_months_for_all_scope(cutoff_date)
         return []
-
-    def _fallback_retained_oa_months_for_all_scope(self, cutoff_date: datetime) -> list[str]:
-        cutoff_month = cutoff_date.strftime("%Y-%m")
-        end_month = self._fallback_retained_oa_end_month()
-        if not SEARCH_MONTH_RE.match(cutoff_month) or not SEARCH_MONTH_RE.match(end_month):
-            return [cutoff_month] if SEARCH_MONTH_RE.match(cutoff_month) else []
-        months: list[str] = []
-        current = datetime.strptime(f"{cutoff_month}-01", "%Y-%m-%d")
-        end = datetime.strptime(f"{end_month}-01", "%Y-%m-%d")
-        while current <= end:
-            months.append(current.strftime("%Y-%m"))
-            if current.month == 12:
-                current = current.replace(year=current.year + 1, month=1)
-            else:
-                current = current.replace(month=current.month + 1)
-        return months
-
-    @staticmethod
-    def _fallback_retained_oa_end_month() -> str:
-        return datetime.now().strftime("%Y-%m")
 
     def _supplemental_retained_oa_row_ids(self, cutoff_date: datetime) -> list[str]:
         return self._workbench_supplemental_retained_oa_row_selector().select(cutoff_date)
@@ -13307,7 +13155,7 @@ class Application:
         helper = getattr(self, "_workbench_cache_read_payload_helper_instance", None)
         if helper is None:
             helper = WorkbenchCacheReadPayloadHelper(
-                is_mongo_oa_adapter=lambda: isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter),
+                is_mongo_oa_adapter=self._workbench_cache_uses_strict_oa_source_gates,
                 cached_payload_needs_oa_invoice_offset_rebuild=self._cached_payload_needs_oa_invoice_offset_rebuild,
                 workbench_candidate_snapshot_hash=self._workbench_candidate_snapshot_hash,
                 current_oa_attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version,
@@ -13317,6 +13165,10 @@ class Application:
             )
             self._workbench_cache_read_payload_helper_instance = helper
         return helper
+
+    def _workbench_cache_uses_strict_oa_source_gates(self) -> bool:
+        adapter = getattr(getattr(self, "_workbench_query_service", None), "_oa_adapter", None)
+        return str(getattr(adapter, "name", "")).strip() == "mongo_oa"
 
     def _cached_payload_needs_oa_invoice_offset_rebuild(self, payload: dict[str, object]) -> bool:
         return self._workbench_oa_invoice_offset_rebuild_helper().cached_payload_needs_rebuild(payload)
@@ -14199,10 +14051,11 @@ class Application:
 
     def _derived_lifecycle_oa_adapter_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         adapter = self._workbench_query_service._oa_adapter
-        if isinstance(adapter, MongoOAAdapter):
+        invalidate_records_cache = getattr(adapter, "invalidate_records_cache", None)
+        if callable(invalidate_records_cache):
             scope_keys = self._domain_plan_scope_keys(domain_plan)
             months = self._months_from_lifecycle_scope_keys(scope_keys)
-            adapter.invalidate_records_cache(None if "all" in scope_keys else months)
+            invalidate_records_cache(None if "all" in scope_keys else months)
             invalidated = months or (["all"] if "all" in scope_keys else [])
         else:
             invalidated = []

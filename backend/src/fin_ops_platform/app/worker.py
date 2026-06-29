@@ -32,7 +32,6 @@ from fin_ops_platform.services.postgres_connection import (
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
-from fin_ops_platform.services.file_object_migration import GridFSObjectMigrationService
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_usage_collection_read_model_refresh import (
@@ -45,8 +44,9 @@ from fin_ops_platform.services.invoice_lifecycle_read_model_refresh import (
     InvoiceLifecycleReadModelRefreshService,
 )
 from fin_ops_platform.services.invoice_lifecycle_sql_projection import InvoiceLifecycleSqlProjectionBuilder
-from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
+from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
+from fin_ops_platform.services.mongo_oa_adapter import load_mongo_oa_settings
+from fin_ops_platform.services.oa_sync_source_adapter import build_oa_sync_source_adapter
 from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
     NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE,
     NoOaBankBatchReadModelPersistencePort,
@@ -63,7 +63,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION, PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
-from fin_ops_platform.services.postgres_state_store import LegacyGridFSFileReader, PostgresStateStore
+from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -89,7 +89,7 @@ from fin_ops_platform.services.search_pending_read_model_refresh import SearchPe
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
-from fin_ops_platform.services.state_store import default_data_dir
+from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
 from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
 from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
@@ -137,7 +137,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--statement-timeout-seconds", type=int, default=None)
     parser.add_argument("--max-iterations", type=int, default=None, help="Testing/smoke limit. Omit to run continuously.")
     parser.add_argument("--max-events-per-iteration", type=int, default=1, help="Maximum events to drain before an idle sleep.")
-    parser.add_argument("--enable-file-object-migration", action="store_true", help="Register GridFS to object storage migration handler.")
     parser.add_argument("--enable-workbench-read-model-refresh", action="store_true", help="Register workbench SQL read model refresh handler.")
     parser.add_argument("--enable-workbench-relation-read-model-refresh", action="store_true", help="Register workbench relation distribution read model refresh handler.")
     parser.add_argument("--enable-cost-statistics-read-model-refresh", action="store_true", help="Register cost statistics SQL read model refresh handler.")
@@ -218,9 +217,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     def _read_model_handler(handler: Any) -> Any:
         return readiness_reporter.wrap_handler(handler) if readiness_reporter is not None else handler
 
-    oa_payment_source_adapter: MongoOAAdapter | None = None
+    oa_payment_source_adapter: Any | None = None
 
-    def _oa_payment_source_adapter() -> MongoOAAdapter | None:
+    def _oa_payment_source_adapter() -> Any | None:
         nonlocal oa_payment_source_adapter
         if oa_payment_source_adapter is not None:
             return oa_payment_source_adapter
@@ -230,7 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if oa_settings is None:
             return None
         ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
-        adapter = _build_oa_sync_source_adapter(
+        adapter = build_oa_sync_source_adapter(
             settings=oa_settings,
             attachment_invoice_cache=ops_tax_etc_repository,
         )
@@ -240,28 +239,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return adapter
 
     handlers = {}
-    if args.enable_file_object_migration:
-        object_storage_settings = ObjectStorageSettings.from_env()
-        object_storage_repository = S3ObjectStorageRepository(object_storage_settings)
-        legacy_file_reader = LegacyGridFSFileReader.from_data_dir(default_data_dir())
-        if legacy_file_reader is None:
-            raise RuntimeError("GridFS migration worker requires legacy Mongo/GridFS configuration.")
-        migration_service = GridFSObjectMigrationService(
-            connection=connection,
-            object_storage_repository=object_storage_repository,
-            legacy_file_reader=legacy_file_reader,
-            storage_backend=object_storage_settings.backend,
-            bucket_name=object_storage_settings.bucket,
-        )
-        handlers["file_object.gridfs_migration"] = migration_service.handle_runtime_event
-        if "file_object.gridfs_migration" not in config.event_types:
-            config.event_types.append("file_object.gridfs_migration")
     if args.enable_oa_sync:
         oa_settings = load_mongo_oa_settings(default_data_dir())
         if oa_settings is None:
             raise RuntimeError("OA sync worker requires FIN_OPS_OA_MONGO_* configuration or oa_mongo_config.json.")
         ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
-        source_adapter = _build_oa_sync_source_adapter(
+        source_adapter = build_oa_sync_source_adapter(
             settings=oa_settings,
             attachment_invoice_cache=ops_tax_etc_repository,
         )
@@ -620,7 +603,7 @@ def _no_oa_workbench_matching_source_versions(app_settings_service: AppSettingsS
         "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
         "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(app_settings_service),
     }
-    parser_version = MongoOAAdapter._attachment_invoice_cache_parser_version()
+    parser_version = attachment_invoice_cache_parser_version()
     if parser_version:
         payload["oa_attachment_invoice_parser_version"] = parser_version
     if OA_PROJECTION_SYNC_VERSION:
@@ -692,14 +675,6 @@ def _registration_check_payload(registration: RuntimeWorkerRegistration | None) 
 
 def _argparse_attr_name(flag: str) -> str:
     return flag.lstrip("-").replace("-", "_")
-
-
-def _build_oa_sync_source_adapter(
-    *,
-    settings: Any,
-    attachment_invoice_cache: Any,
-) -> MongoOAAdapter:
-    return MongoOAAdapter(settings=settings, attachment_invoice_cache=attachment_invoice_cache)
 
 
 def _load_oa_runtime_settings(connection: PostgresConnection) -> dict[str, Any]:

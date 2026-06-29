@@ -9,8 +9,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+from fin_ops_platform.tools.runtime_application import bank_auto_tag_rules_runtime
 
 
 DEFAULT_ACTOR_ID = "system:bank-auto-tag-rule-restore"
@@ -62,8 +62,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.source.exists() or not args.source.is_file():
         raise SystemExit(f"source file not found: {args.source}")
 
-    app = build_application(data_dir=args.data_dir) if args.data_dir is not None else build_application()
-    settings_before = app._app_settings_service.get_settings_payload()
+    runtime = bank_auto_tag_rules_runtime(args.data_dir)
+    settings_before = runtime.get_settings_payload()
     dry_run = build_restore_plan(args.source, previous_settings=settings_before)
 
     backup_path: Path | None = None
@@ -76,11 +76,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             actor_id=str(args.actor_id),
             source=args.source,
         )
-        app._bank_details_application_service().replace_auto_tag_rules_from_file_source(
+        runtime.replace_auto_tag_rules_from_file_source(
             args.source,
             actor_id=str(args.actor_id),
         )
-        settings_after = app._app_settings_service.get_settings_payload()
+        settings_after = runtime.get_settings_payload()
         applied = True
 
     summary = build_restore_summary(

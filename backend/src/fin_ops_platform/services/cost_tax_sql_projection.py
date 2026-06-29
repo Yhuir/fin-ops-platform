@@ -16,7 +16,7 @@ from fin_ops_platform.services.cost_statistics_relation_rules import (
     is_cost_eligible_open_group,
 )
 from fin_ops_platform.services.live_workbench_service import format_decimal
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
@@ -205,7 +205,7 @@ class CostStatisticsSqlProjectionBuilder:
             "workbench_scope_key": month,
             "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
             "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(self._connection),
-            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         }
         if month != "all":
@@ -536,7 +536,7 @@ class TaxOffsetSqlProjectionBuilder:
             "tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
             "invoice_fact_source_version": self._table_source_version("app.invoices", "status <> 'deleted'"),
             "tax_certified_import_source_version": self._table_source_version("app.tax_certified_import_records", "status <> 'deleted'"),
-            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         }
 

@@ -36,6 +36,9 @@ describe("tax API mappers", () => {
       fileCount: 2,
       months: ["2026-03", "2026-04"],
       persistedRecordCount: 18,
+      readModelScopeKeys: [],
+      freshnessTargets: [],
+      operationBarrierTargets: [],
     });
   });
 

@@ -79,3 +79,12 @@
 ## 当前缺口和删除条件
 
 - 红冲 fan-out 和撤回恢复必须在删除旧路径前覆盖。
+
+## Canonical facts ownership
+
+- Owned facts: `app.output_invoice_collection_status_overrides`、`app.output_invoice_collection_reminders`、`app.output_invoice_collection_red_relations`、`app.output_invoice_receipt_settings`、`app.output_invoice_receipt_number_counters`、`app.output_invoice_receipts`、`app.output_invoice_receipt_events`。
+- Allowed writes: output invoice collection lifecycle services、receipt services、reminder/red relation services。
+- Allowed reads: output collection application/query services、receipt query ports。
+- Downstream outputs: output_invoice_collection、invoice_lifecycle、workbench_relation dirty scopes 或 owner producer 输出。
+- Forbidden paths: route overlay 不得伪造 fresh 或直接写生命周期表；read model payload 不得反向成为收款事实。
+- Old code deletion: 旧 route overlay、snapshot 收款状态 fallback 和直接 SQL 写 lifecycle facts 路径必须删除；migration/audit/rollback 工具保留不算 closure。

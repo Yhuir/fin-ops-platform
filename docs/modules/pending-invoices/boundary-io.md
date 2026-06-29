@@ -77,3 +77,13 @@
 
 - 修改规则或 scope policy 时必须同步 manifest/scope tests。
 - 删除旧路径前必须覆盖 expense/income、规则保存、关联、导出和 fan-out。
+
+## Canonical facts ownership
+
+- Owned facts: `app.pending_invoice_manual_invoice_commands`。
+- Shared facts: `app.invoices` 由 canonical invoice pool owner 管理；关系事实由 `workbench-relations` owner 管理。
+- Allowed writes: pending invoice manual invoice command service、pending invoice application boundary。
+- Allowed reads: pending invoice application/query services、manual command repository/read ports。
+- Downstream outputs: pending_invoice、invoice_lifecycle、search、workbench_relation dirty scopes 或 owner producer 输出。
+- Forbidden paths: pending invoice 页面或 service 不得直接创建第二发票池、直接写 relation facts 或绕过 command 状态机。
+- Old code deletion: manual invoice command snapshot fallback、direct invoice/relation write fallback 和 bare all refresh 旧路径必须删除；migration/audit/rollback 工具保留不算 closure。

@@ -1,185 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 import hashlib
-from io import BytesIO
 import json
-import os
 from pathlib import Path
 import pickle
 import re
 from threading import RLock
-from typing import Any, Callable, TypeVar
-from urllib.parse import quote_plus
+from typing import Any
 
-from bson.binary import Binary
-from gridfs import GridFSBucket
-from pymongo import MongoClient
-from pymongo.errors import PyMongoError
+from fin_ops_platform.services.runtime_paths import default_data_dir as _default_data_dir
 
 
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
-DEFAULT_APP_MONGO_DATABASE = "fin_ops_platform_app"
-LEGACY_APP_MONGO_COLLECTION = "application_state"
-STATE_COLLECTIONS = {
-    "imports": "imports_state",
-    "file_imports": "file_import_sessions_state",
-    "matching": "matching_state",
-}
-FILE_METADATA_COLLECTION = "import_file_metadata"
-META_COLLECTION = "app_state_meta"
-IMPORTS_META_COLLECTION = "imports_meta"
-IMPORT_BATCHES_COLLECTION = "import_batches"
-INVOICES_COLLECTION = "invoices"
-BANK_TRANSACTIONS_COLLECTION = "bank_transactions"
-BANK_TRANSACTION_CATEGORIES_META_COLLECTION = "bank_transaction_categories_meta"
-BANK_TRANSACTION_CATEGORIES_COLLECTION = "bank_transaction_categories"
-FILE_IMPORTS_META_COLLECTION = "file_imports_meta"
-FILE_IMPORT_SESSIONS_COLLECTION = "file_import_sessions"
-FILE_IMPORT_FILES_COLLECTION = "file_import_files"
-MATCHING_META_COLLECTION = "matching_meta"
-MATCHING_RUNS_COLLECTION = "matching_runs"
-MATCHING_RESULTS_COLLECTION = "matching_results"
-WORKBENCH_OVERRIDES_META_COLLECTION = "workbench_overrides_meta"
-WORKBENCH_ROW_OVERRIDES_COLLECTION = "workbench_row_overrides"
-WORKBENCH_EXCEPTION_CASES_META_COLLECTION = "workbench_exception_cases_meta"
-WORKBENCH_EXCEPTION_CASES_COLLECTION = "workbench_exception_cases"
-WORKBENCH_PAIR_RELATIONS_META_COLLECTION = "workbench_pair_relations_meta"
-WORKBENCH_PAIR_RELATIONS_COLLECTION = "workbench_pair_relations"
-WORKBENCH_READ_MODELS_META_COLLECTION = "workbench_read_models_meta"
-WORKBENCH_READ_MODELS_COLLECTION = "workbench_read_models"
-WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION = "workbench_candidate_matches_meta"
-WORKBENCH_CANDIDATE_MATCHES_COLLECTION = "workbench_candidate_matches"
-WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION = "workbench_matching_dirty_scopes_meta"
-WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION = "workbench_matching_dirty_scopes"
-NO_OA_BANK_BATCHES_META_COLLECTION = "no_oa_bank_batches_meta"
-NO_OA_BANK_BATCHES_COLLECTION = "no_oa_bank_batches"
-NO_OA_BANK_BATCH_AUDIT_LOG_COLLECTION = "no_oa_bank_batch_audit_log"
-TURNOVER_RELATIONS_META_COLLECTION = "turnover_relations_meta"
-TURNOVER_RELATIONS_COLLECTION = "turnover_relations"
-TURNOVER_RELATION_AUDIT_LOG_COLLECTION = "turnover_relation_audit_log"
-TURNOVER_LEDGER_EXTRAS_META_COLLECTION = "turnover_ledger_extras_meta"
-TURNOVER_LEDGER_EXTRAS_COLLECTION = "turnover_ledger_extras"
-COST_STATISTICS_READ_MODELS_META_COLLECTION = "cost_statistics_read_models_meta"
-COST_STATISTICS_READ_MODELS_COLLECTION = "cost_statistics_read_models"
-TAX_OFFSET_READ_MODELS_META_COLLECTION = "tax_offset_read_models_meta"
-TAX_OFFSET_READ_MODELS_COLLECTION = "tax_offset_read_models"
-OA_ATTACHMENT_INVOICE_CACHE_COLLECTION = "oa_attachment_invoice_cache"
-OA_SYNC_STATE_COLLECTION = "oa_sync_state"
-MANUAL_OA_IMPORTS_COLLECTION = "manual_oa_imports"
-APP_SETTINGS_COLLECTION = "app_settings"
-PENDING_INVOICE_COMMANDS_COLLECTION = "pending_invoice_manual_invoice_commands"
-TAX_CERTIFIED_IMPORTS_META_COLLECTION = "tax_certified_imports_meta"
-TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
-TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION = "tax_certified_import_batches"
-TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION = "tax_certified_import_records"
-ETC_STATE_COLLECTION = "etc_state"
-ETC_RECONCILIATION_STATE_COLLECTION = "etc_reconciliation_state"
-HISTORICAL_ETC_REPAIR_BUNDLES_COLLECTION = "historical_etc_repair_bundles"
-HISTORICAL_ETC_REPAIR_PARSED_SEEDS_COLLECTION = "historical_etc_repair_parsed_seeds"
-HISTORICAL_ETC_REPAIR_STATES_COLLECTION = "historical_etc_repair_states"
-BACKGROUND_JOBS_COLLECTION = "background_jobs"
-APP_HEALTH_ALERTS_COLLECTION = "app_health_alerts"
-STATE_DOCUMENT_ID = "current_state"
-META_DOCUMENT_ID = "_meta"
-APP_SETTINGS_DOCUMENT_ID = "settings"
-GRIDFS_BUCKET_NAME = "import_file_blobs"
 GRIDFS_REF_PREFIX = "gridfs://"
-HISTORICAL_ETC_REPAIR_GRIDFS_ID_PREFIX = "historical_etc_repair:"
-MONGO_ONLY_STORAGE_MODE = "mongo_only"
-T = TypeVar("T")
-
-
-@dataclass(slots=True)
-class MongoStateSettings:
-    host: str
-    database: str = DEFAULT_APP_MONGO_DATABASE
-    port: int = 27017
-    username: str | None = None
-    password: str | None = None
-    auth_source: str = "admin"
-    request_timeout_ms: int = 5000
-
-    @property
-    def mongo_uri(self) -> str:
-        credentials = ""
-        if self.username:
-            password = quote_plus(self.password or "")
-            credentials = f"{quote_plus(self.username)}:{password}@"
-        return (
-            f"mongodb://{credentials}{self.host}:{self.port}/{self.database}"
-            f"?authSource={quote_plus(self.auth_source)}"
-        )
-
-
-def default_data_dir() -> Path:
-    configured = os.getenv("FIN_OPS_DATA_DIR")
-    if configured:
-        return Path(configured).expanduser()
-    return Path(__file__).resolve().parents[4] / ".runtime" / "fin_ops_platform"
-
-
-def load_mongo_state_settings(data_dir: Path | None = None) -> MongoStateSettings | None:
-    file_payload: dict[str, Any] = {}
-    oa_payload: dict[str, Any] = {}
-    explicit_enable = False
-
-    if data_dir is not None:
-        app_config_path = data_dir / "app_mongo_config.json"
-        if app_config_path.exists():
-            loaded = json.loads(app_config_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                file_payload = loaded
-                explicit_enable = True
-
-        oa_config_path = data_dir / "oa_mongo_config.json"
-        if oa_config_path.exists():
-            loaded = json.loads(oa_config_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                oa_payload = loaded
-
-    def pick(env_name: str, file_key: str, oa_key: str | None = None, default: Any = None) -> Any:
-        env_value = os.getenv(env_name)
-        if env_value not in (None, ""):
-            return env_value
-        if file_key in file_payload and file_payload.get(file_key) not in (None, ""):
-            return file_payload[file_key]
-        if oa_key is not None and oa_payload.get(oa_key) not in (None, ""):
-            return oa_payload.get(oa_key)
-        return default
-
-    env_explicit = any(
-        os.getenv(name) not in (None, "")
-        for name in (
-            "FIN_OPS_APP_MONGO_HOST",
-            "FIN_OPS_APP_MONGO_DATABASE",
-            "FIN_OPS_APP_MONGO_USERNAME",
-            "FIN_OPS_APP_MONGO_PASSWORD",
-        )
-    )
-    host = pick("FIN_OPS_APP_MONGO_HOST", "host", "host" if explicit_enable or env_explicit else None)
-    if not (explicit_enable or env_explicit):
-        return None
-    if not host:
-        return None
-
-    return MongoStateSettings(
-        host=str(host),
-        port=int(pick("FIN_OPS_APP_MONGO_PORT", "port", "port", 27017)),
-        database=str(pick("FIN_OPS_APP_MONGO_DATABASE", "database", None, DEFAULT_APP_MONGO_DATABASE)),
-        username=pick("FIN_OPS_APP_MONGO_USERNAME", "username", "username"),
-        password=pick("FIN_OPS_APP_MONGO_PASSWORD", "password", "password"),
-        auth_source=str(pick("FIN_OPS_APP_MONGO_AUTH_SOURCE", "auth_source", "auth_source", "admin")),
-        request_timeout_ms=int(pick("FIN_OPS_APP_MONGO_TIMEOUT_MS", "request_timeout_ms", "request_timeout_ms", 5000)),
-    )
 
 
 class ApplicationStateStore:
     def __init__(self, data_dir: Path | None = None, *, read_only: bool = False) -> None:
-        root = data_dir or default_data_dir()
+        root = data_dir or _default_data_dir()
         self._data_dir = root
         self._legacy_state_path = root / "state.pkl"
         self._import_file_root = root / "import_files"
@@ -203,96 +44,9 @@ class ApplicationStateStore:
         self._local_pickle_lock = RLock()
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
-        self._mongo_settings = load_mongo_state_settings(root)
-        self._storage_mode = (
-            os.getenv("FIN_OPS_STORAGE_MODE")
-            or (MONGO_ONLY_STORAGE_MODE if self._mongo_settings is not None else "auto")
-        ).strip().lower()
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE and self._mongo_settings is None:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        self._mongo_client: MongoClient | None = None
-        self._mongo_database: Any | None = None
-        self._legacy_mongo_collection: Any | None = None
-        self._mongo_state_collections: dict[str, Any] = {}
-        self._mongo_metadata_collection: Any | None = None
-        self._mongo_meta_collection: Any | None = None
-        self._mongo_detailed_collections: dict[str, Any] = {}
-        self._mongo_file_bucket: GridFSBucket | None = None
+        self._storage_mode = "local_pickle"
         self._read_only = read_only
-        if self._mongo_settings is not None:
-            self._mongo_client = MongoClient(
-                self._mongo_settings.mongo_uri,
-                serverSelectionTimeoutMS=self._mongo_settings.request_timeout_ms,
-                connectTimeoutMS=self._mongo_settings.request_timeout_ms,
-                socketTimeoutMS=self._mongo_settings.request_timeout_ms,
-            )
-            self._mongo_database = self._mongo_client[self._mongo_settings.database]
-            self._legacy_mongo_collection = self._mongo_database[LEGACY_APP_MONGO_COLLECTION]
-            self._mongo_state_collections = {
-                key: self._mongo_database[collection_name]
-                for key, collection_name in STATE_COLLECTIONS.items()
-            }
-            self._mongo_metadata_collection = self._mongo_database[FILE_METADATA_COLLECTION]
-            self._mongo_meta_collection = self._mongo_database[META_COLLECTION]
-            self._mongo_detailed_collections = {
-                "imports_meta": self._mongo_database[IMPORTS_META_COLLECTION],
-                "import_batches": self._mongo_database[IMPORT_BATCHES_COLLECTION],
-                "invoices": self._mongo_database[INVOICES_COLLECTION],
-                "bank_transactions": self._mongo_database[BANK_TRANSACTIONS_COLLECTION],
-                "bank_transaction_categories_meta": self._mongo_database[BANK_TRANSACTION_CATEGORIES_META_COLLECTION],
-                "bank_transaction_categories": self._mongo_database[BANK_TRANSACTION_CATEGORIES_COLLECTION],
-                "file_imports_meta": self._mongo_database[FILE_IMPORTS_META_COLLECTION],
-                "file_import_sessions": self._mongo_database[FILE_IMPORT_SESSIONS_COLLECTION],
-                "file_import_files": self._mongo_database[FILE_IMPORT_FILES_COLLECTION],
-                "matching_meta": self._mongo_database[MATCHING_META_COLLECTION],
-                "matching_runs": self._mongo_database[MATCHING_RUNS_COLLECTION],
-                "matching_results": self._mongo_database[MATCHING_RESULTS_COLLECTION],
-                "workbench_overrides_meta": self._mongo_database[WORKBENCH_OVERRIDES_META_COLLECTION],
-                "workbench_row_overrides": self._mongo_database[WORKBENCH_ROW_OVERRIDES_COLLECTION],
-                "workbench_exception_cases_meta": self._mongo_database[WORKBENCH_EXCEPTION_CASES_META_COLLECTION],
-                "workbench_exception_cases": self._mongo_database[WORKBENCH_EXCEPTION_CASES_COLLECTION],
-                "workbench_pair_relations_meta": self._mongo_database[WORKBENCH_PAIR_RELATIONS_META_COLLECTION],
-                "workbench_pair_relations": self._mongo_database[WORKBENCH_PAIR_RELATIONS_COLLECTION],
-                "workbench_read_models_meta": self._mongo_database[WORKBENCH_READ_MODELS_META_COLLECTION],
-                "workbench_read_models": self._mongo_database[WORKBENCH_READ_MODELS_COLLECTION],
-                "workbench_candidate_matches_meta": self._mongo_database[WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION],
-                "workbench_candidate_matches": self._mongo_database[WORKBENCH_CANDIDATE_MATCHES_COLLECTION],
-                "workbench_matching_dirty_scopes_meta": self._mongo_database[WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION],
-                "workbench_matching_dirty_scopes": self._mongo_database[WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION],
-                "no_oa_bank_batches_meta": self._mongo_database[NO_OA_BANK_BATCHES_META_COLLECTION],
-                "no_oa_bank_batches": self._mongo_database[NO_OA_BANK_BATCHES_COLLECTION],
-                "no_oa_bank_batch_audit_log": self._mongo_database[NO_OA_BANK_BATCH_AUDIT_LOG_COLLECTION],
-                "turnover_relations_meta": self._mongo_database[TURNOVER_RELATIONS_META_COLLECTION],
-                "turnover_relations": self._mongo_database[TURNOVER_RELATIONS_COLLECTION],
-                "turnover_relation_audit_log": self._mongo_database[TURNOVER_RELATION_AUDIT_LOG_COLLECTION],
-                "turnover_ledger_extras_meta": self._mongo_database[TURNOVER_LEDGER_EXTRAS_META_COLLECTION],
-                "turnover_ledger_extras": self._mongo_database[TURNOVER_LEDGER_EXTRAS_COLLECTION],
-                "cost_statistics_read_models_meta": self._mongo_database[COST_STATISTICS_READ_MODELS_META_COLLECTION],
-                "cost_statistics_read_models": self._mongo_database[COST_STATISTICS_READ_MODELS_COLLECTION],
-                "tax_offset_read_models_meta": self._mongo_database[TAX_OFFSET_READ_MODELS_META_COLLECTION],
-                "tax_offset_read_models": self._mongo_database[TAX_OFFSET_READ_MODELS_COLLECTION],
-                "oa_attachment_invoice_cache": self._mongo_database[OA_ATTACHMENT_INVOICE_CACHE_COLLECTION],
-                "oa_sync_state": self._mongo_database[OA_SYNC_STATE_COLLECTION],
-                "manual_oa_imports": self._mongo_database[MANUAL_OA_IMPORTS_COLLECTION],
-                "app_settings": self._mongo_database[APP_SETTINGS_COLLECTION],
-                "pending_invoice_commands": self._mongo_database[PENDING_INVOICE_COMMANDS_COLLECTION],
-                "tax_certified_imports_meta": self._mongo_database[TAX_CERTIFIED_IMPORTS_META_COLLECTION],
-                "tax_certified_import_sessions": self._mongo_database[TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION],
-                "tax_certified_import_batches": self._mongo_database[TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION],
-                "tax_certified_import_records": self._mongo_database[TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION],
-                "etc_state": self._mongo_database[ETC_STATE_COLLECTION],
-                "etc_reconciliation_state": self._mongo_database[ETC_RECONCILIATION_STATE_COLLECTION],
-                "historical_etc_repair_bundles": self._mongo_database[HISTORICAL_ETC_REPAIR_BUNDLES_COLLECTION],
-                "historical_etc_repair_parsed_seeds": self._mongo_database[HISTORICAL_ETC_REPAIR_PARSED_SEEDS_COLLECTION],
-                "historical_etc_repair_states": self._mongo_database[HISTORICAL_ETC_REPAIR_STATES_COLLECTION],
-                "background_jobs": self._mongo_database[BACKGROUND_JOBS_COLLECTION],
-                "app_health_alerts": self._mongo_database[APP_HEALTH_ALERTS_COLLECTION],
-            }
-            self._mongo_file_bucket = GridFSBucket(self._mongo_database, bucket_name=GRIDFS_BUCKET_NAME)
-            if not self._read_only:
-                self._ensure_mongo_metadata()
-        else:
-            self._import_file_root.mkdir(parents=True, exist_ok=True)
+        self._import_file_root.mkdir(parents=True, exist_ok=True)
 
     @property
     def data_dir(self) -> Path:
@@ -300,7 +54,7 @@ class ApplicationStateStore:
 
     @property
     def storage_backend(self) -> str:
-        return "mongo" if self._mongo_database is not None else "local_pickle"
+        return "local_pickle"
 
     @property
     def storage_mode(self) -> str:
@@ -308,20 +62,7 @@ class ApplicationStateStore:
 
     @property
     def mongo_database_name(self) -> str | None:
-        return self._mongo_settings.database if self._mongo_settings is not None else None
-
-    @staticmethod
-    def _run_mongo_operation(operation: Callable[[], T]) -> T:
-        last_error: Exception | None = None
-        for attempt in range(2):
-            try:
-                return operation()
-            except (OSError, PyMongoError, TimeoutError) as exc:
-                last_error = exc
-                if attempt == 0:
-                    continue
-        assert last_error is not None
-        raise last_error
+        return None
 
     def load_app_settings(self) -> dict[str, Any]:
         default_payload = {
@@ -341,40 +82,6 @@ class ApplicationStateStore:
             "pending_output_invoice_tag_groups": {},
             "input_invoice_usage_payment_status_rules": {},
         }
-        if self._mongo_database is not None:
-            document = self._mongo_detailed_collections["app_settings"].find_one({"_id": APP_SETTINGS_DOCUMENT_ID})
-            payload = self._load_binary_payload(document)
-            if isinstance(payload, dict):
-                normalized_payload = {
-                    "completed_project_ids": list(payload.get("completed_project_ids") or []),
-                    "manual_projects": list(payload.get("manual_projects") or []),
-                    "synced_projects": list(payload.get("synced_projects") or []),
-                    "bank_account_mappings": list(payload.get("bank_account_mappings") or []),
-                    "allowed_usernames": list(payload.get("allowed_usernames") or []),
-                    "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
-                    "admin_usernames": list(payload.get("admin_usernames") or []),
-                    "workbench_column_layouts": dict(payload.get("workbench_column_layouts") or {}),
-                    "oa_retention": dict(payload.get("oa_retention") or {}),
-                    "oa_import": dict(payload.get("oa_import") or {}),
-                    "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
-                    "bank_transaction_tags": dict(payload.get("bank_transaction_tags") or {}),
-                    "pending_invoice_tag_groups": dict(payload.get("pending_invoice_tag_groups") or {}),
-                    "pending_output_invoice_tag_groups": dict(payload.get("pending_output_invoice_tag_groups") or {}),
-                    "input_invoice_usage_payment_status_rules": dict(
-                        payload.get("input_invoice_usage_payment_status_rules") or {}
-                    ),
-                }
-                if "no_oa_bank_batch_tag_selection" in payload:
-                    normalized_payload["no_oa_bank_batch_tag_selection"] = dict(
-                        payload.get("no_oa_bank_batch_tag_selection") or {}
-                    )
-                if "turnover_ledger_tag_selection" in payload:
-                    normalized_payload["turnover_ledger_tag_selection"] = dict(
-                        payload.get("turnover_ledger_tag_selection") or {}
-                    )
-                return normalized_payload
-            return default_payload
-
         if not self._app_settings_path.exists():
             return default_payload
         try:
@@ -440,41 +147,6 @@ class ApplicationStateStore:
             normalized_payload["turnover_ledger_tag_selection"] = dict(
                 payload.get("turnover_ledger_tag_selection") or {}
             )
-        if self._mongo_database is not None:
-            set_payload = {
-                "completed_project_ids": normalized_payload["completed_project_ids"],
-                "manual_projects": normalized_payload["manual_projects"],
-                "synced_projects": normalized_payload["synced_projects"],
-                "bank_account_mappings": normalized_payload["bank_account_mappings"],
-                "allowed_usernames": normalized_payload["allowed_usernames"],
-                "readonly_export_usernames": normalized_payload["readonly_export_usernames"],
-                "admin_usernames": normalized_payload["admin_usernames"],
-                "workbench_column_layouts": normalized_payload["workbench_column_layouts"],
-                "oa_retention": normalized_payload["oa_retention"],
-                "oa_import": normalized_payload["oa_import"],
-                "oa_invoice_offset": normalized_payload["oa_invoice_offset"],
-                "bank_transaction_tags": normalized_payload["bank_transaction_tags"],
-                "pending_invoice_tag_groups": normalized_payload["pending_invoice_tag_groups"],
-                "pending_output_invoice_tag_groups": normalized_payload["pending_output_invoice_tag_groups"],
-                "input_invoice_usage_payment_status_rules": normalized_payload[
-                    "input_invoice_usage_payment_status_rules"
-                ],
-                "payload": Binary(pickle.dumps(normalized_payload)),
-                "updated_at": datetime.now(UTC),
-            }
-            if "no_oa_bank_batch_tag_selection" in normalized_payload:
-                set_payload["no_oa_bank_batch_tag_selection"] = normalized_payload["no_oa_bank_batch_tag_selection"]
-            if "turnover_ledger_tag_selection" in normalized_payload:
-                set_payload["turnover_ledger_tag_selection"] = normalized_payload["turnover_ledger_tag_selection"]
-            self._mongo_detailed_collections["app_settings"].update_one(
-                {"_id": APP_SETTINGS_DOCUMENT_ID},
-                {"$set": set_payload},
-                upsert=True,
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._app_settings_path.write_text(
             json.dumps(normalized_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -484,13 +156,6 @@ class ApplicationStateStore:
         normalized_cache_key = str(cache_key).strip()
         if not normalized_cache_key:
             return None
-        if self._mongo_database is not None:
-            document = self._run_mongo_operation(
-                lambda: self._mongo_detailed_collections["oa_attachment_invoice_cache"].find_one({"_id": normalized_cache_key})
-            )
-            payload = self._load_binary_payload(document)
-            return dict(payload) if isinstance(payload, dict) else None
-
         if not self._oa_attachment_invoice_cache_path.exists():
             return None
         try:
@@ -506,23 +171,6 @@ class ApplicationStateStore:
             return
         normalized_payload = dict(payload if isinstance(payload, dict) else {})
         normalized_payload["cache_key"] = normalized_cache_key
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._mongo_detailed_collections["oa_attachment_invoice_cache"].update_one(
-                    {"_id": normalized_cache_key},
-                    {
-                        "$set": {
-                            "payload": Binary(pickle.dumps(normalized_payload)),
-                            "updated_at": datetime.now(UTC),
-                        }
-                    },
-                    upsert=True,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         try:
             loaded = json.loads(self._oa_attachment_invoice_cache_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
@@ -535,13 +183,6 @@ class ApplicationStateStore:
         )
 
     def load_oa_sync_state(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            document = self._run_mongo_operation(
-                lambda: self._mongo_detailed_collections["oa_sync_state"].find_one({"_id": STATE_DOCUMENT_ID})
-            )
-            payload = self._load_binary_payload(document)
-            return dict(payload) if isinstance(payload, dict) else {}
-
         if not self._oa_sync_state_path.exists():
             return {}
         try:
@@ -553,34 +194,10 @@ class ApplicationStateStore:
 
     def save_oa_sync_state(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = dict(snapshot if isinstance(snapshot, dict) else {})
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._mongo_detailed_collections["oa_sync_state"].update_one(
-                    {"_id": STATE_DOCUMENT_ID},
-                    {
-                        "$set": {
-                            "payload": Binary(pickle.dumps(normalized_snapshot)),
-                            "updated_at": datetime.now(UTC),
-                        }
-                    },
-                    upsert=True,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         with self._oa_sync_state_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
     def load_manual_oa_imports(self) -> dict[str, object]:
-        if self._mongo_database is not None:
-            document = self._run_mongo_operation(
-                lambda: self._mongo_detailed_collections["manual_oa_imports"].find_one({"_id": STATE_DOCUMENT_ID})
-            )
-            payload = self._load_binary_payload(document)
-            return self._normalize_manual_oa_imports(payload)
-
         if not self._manual_oa_imports_path.exists():
             return self._normalize_manual_oa_imports({})
         try:
@@ -591,23 +208,6 @@ class ApplicationStateStore:
 
     def save_manual_oa_imports(self, payload: dict[str, object]) -> None:
         normalized_payload = self._normalize_manual_oa_imports(payload)
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._mongo_detailed_collections["manual_oa_imports"].update_one(
-                    {"_id": STATE_DOCUMENT_ID},
-                    {
-                        "$set": {
-                            "payload": Binary(pickle.dumps(normalized_payload)),
-                            "updated_at": datetime.now(UTC),
-                        }
-                    },
-                    upsert=True,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._manual_oa_imports_path.write_text(
             json.dumps(normalized_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -685,22 +285,6 @@ class ApplicationStateStore:
         return removed
 
     def load_tax_certified_imports(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            meta_document = self._mongo_detailed_collections["tax_certified_imports_meta"].find_one({"_id": STATE_DOCUMENT_ID})
-            meta_payload = self._load_binary_payload(meta_document)
-            sessions = self._load_entities_by_id(self._mongo_detailed_collections["tax_certified_import_sessions"])
-            batches = self._load_entities_by_id(self._mongo_detailed_collections["tax_certified_import_batches"])
-            records = self._load_entities_by_id(self._mongo_detailed_collections["tax_certified_import_records"])
-            if not meta_payload and not sessions and not batches and not records:
-                return {}
-            payload = meta_payload if isinstance(meta_payload, dict) else {}
-            payload["sessions"] = sessions
-            payload["batches"] = batches
-            payload["records"] = records
-            return payload
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._tax_certified_imports_path.exists():
             return {}
         with self._tax_certified_imports_path.open("rb") as handle:
@@ -709,18 +293,10 @@ class ApplicationStateStore:
 
     def save_tax_certified_imports(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._save_tax_certified_imports_detailed(normalized_snapshot, datetime.now(UTC))
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         with self._tax_certified_imports_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
     def save_tax_offset_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         normalized_plan = plan if isinstance(plan, dict) else {}
         current_payload = self._load_tax_offset_plans()
         plans = dict(current_payload.get("plans") if isinstance(current_payload.get("plans"), dict) else {})
@@ -748,13 +324,6 @@ class ApplicationStateStore:
         return loaded if isinstance(loaded, dict) else {}
 
     def load_etc_state(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            document = self._mongo_detailed_collections["etc_state"].find_one({"_id": STATE_DOCUMENT_ID})
-            payload = self._load_binary_payload(document)
-            return payload if isinstance(payload, dict) else {}
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._etc_state_path.exists():
             return {}
         with self._etc_state_path.open("rb") as handle:
@@ -763,33 +332,11 @@ class ApplicationStateStore:
 
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._mongo_detailed_collections["etc_state"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        "payload": Binary(pickle.dumps(normalized_snapshot)),
-                        "updated_at": datetime.now(UTC),
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._etc_state_path.parent.mkdir(parents=True, exist_ok=True)
         with self._etc_state_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
     def load_etc_reconciliation_state(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            document = self._mongo_detailed_collections["etc_reconciliation_state"].find_one({"_id": STATE_DOCUMENT_ID})
-            payload = self._load_binary_payload(document)
-            return payload if isinstance(payload, dict) else {}
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._etc_reconciliation_state_path.exists():
             return {}
         with self._etc_reconciliation_state_path.open("rb") as handle:
@@ -798,21 +345,6 @@ class ApplicationStateStore:
 
     def save_etc_reconciliation_state(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._mongo_detailed_collections["etc_reconciliation_state"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        "payload": Binary(pickle.dumps(normalized_snapshot)),
-                        "updated_at": datetime.now(UTC),
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._etc_reconciliation_state_path.parent.mkdir(parents=True, exist_ok=True)
         with self._etc_reconciliation_state_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
@@ -820,27 +352,6 @@ class ApplicationStateStore:
     def store_etc_reconciliation_file(self, *, task_id: str, file_id: str, file_name: str, content: bytes) -> str:
         sanitized_name = self._sanitize_name(file_name)
         content_bytes = bytes(content or b"")
-        if self._mongo_file_bucket is not None:
-            gridfs_id = f"etc_reconciliation:{task_id}:{file_id}"
-            try:
-                self._mongo_file_bucket.delete(gridfs_id)
-            except Exception:
-                pass
-            self._mongo_file_bucket.upload_from_stream_with_id(
-                gridfs_id,
-                sanitized_name,
-                BytesIO(content_bytes),
-                metadata={
-                    "task_id": task_id,
-                    "file_id": file_id,
-                    "file_name": file_name,
-                    "stored_at": datetime.now(UTC),
-                    "purpose": "etc_reconciliation_source",
-                },
-            )
-            return self._build_gridfs_ref(gridfs_id, sanitized_name)
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo GridFS is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         task_dir = self._etc_reconciliation_file_root / task_id
         task_dir.mkdir(parents=True, exist_ok=True)
         target_path = task_dir / f"{file_id}_{sanitized_name}"
@@ -849,38 +360,13 @@ class ApplicationStateStore:
 
     def read_etc_reconciliation_file(self, stored_file_path: str) -> bytes:
         if self._is_gridfs_ref(stored_file_path):
-            if self._mongo_file_bucket is None:
-                raise RuntimeError("Mongo GridFS is not configured for stored ETC reconciliation file access.")
-            stream = self._mongo_file_bucket.open_download_stream(self._parse_gridfs_ref(stored_file_path))
-            return stream.read()
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Local ETC reconciliation file access is disabled in FIN_OPS_STORAGE_MODE=mongo_only.")
+            raise RuntimeError("Legacy GridFS ETC reconciliation file access is disabled.")
         return Path(stored_file_path).read_bytes()
 
     def store_etc_invoice_file(self, *, invoice_number: str, file_name: str, content: bytes) -> str:
         sanitized_name = self._sanitize_name(file_name)
         content_bytes = bytes(content or b"")
         normalized_invoice_number = self._sanitize_name(invoice_number)
-        if self._mongo_file_bucket is not None:
-            gridfs_id = f"etc_invoice:{normalized_invoice_number}:{sanitized_name}"
-            try:
-                self._mongo_file_bucket.delete(gridfs_id)
-            except Exception:
-                pass
-            self._mongo_file_bucket.upload_from_stream_with_id(
-                gridfs_id,
-                sanitized_name,
-                BytesIO(content_bytes),
-                metadata={
-                    "invoice_number": invoice_number,
-                    "file_name": file_name,
-                    "stored_at": datetime.now(UTC),
-                    "purpose": "etc_invoice_attachment",
-                },
-            )
-            return self._build_gridfs_ref(gridfs_id, sanitized_name)
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo GridFS is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         invoice_dir = self._etc_invoice_file_root / normalized_invoice_number
         invoice_dir.mkdir(parents=True, exist_ok=True)
         target_path = invoice_dir / sanitized_name
@@ -889,38 +375,20 @@ class ApplicationStateStore:
 
     def read_etc_invoice_file(self, stored_file_path: str) -> bytes:
         if self._is_gridfs_ref(stored_file_path):
-            if self._mongo_file_bucket is None:
-                raise RuntimeError("Mongo GridFS is not configured for stored ETC invoice file access.")
-            stream = self._mongo_file_bucket.open_download_stream(self._parse_gridfs_ref(stored_file_path))
-            return stream.read()
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Local ETC invoice file access is disabled in FIN_OPS_STORAGE_MODE=mongo_only.")
+            raise RuntimeError("Legacy GridFS ETC invoice file access is disabled.")
         return Path(stored_file_path).read_bytes()
 
     def etc_invoice_file_exists(self, stored_file_path: str) -> bool:
         if self._is_gridfs_ref(stored_file_path):
-            if self._mongo_file_bucket is None:
-                return False
-            try:
-                self._mongo_file_bucket.open_download_stream(self._parse_gridfs_ref(stored_file_path)).close()
-            except Exception:
-                return False
-            return True
+            return False
         return Path(stored_file_path).exists()
 
     def delete_etc_invoice_file(self, stored_file_path: str) -> None:
         if self._is_gridfs_ref(stored_file_path):
-            if self._mongo_file_bucket is None:
-                return
-            try:
-                self._mongo_file_bucket.delete(self._parse_gridfs_ref(stored_file_path))
-            except Exception:
-                pass
             return
-        if self._storage_mode != MONGO_ONLY_STORAGE_MODE:
-            path = Path(stored_file_path)
-            if path.exists():
-                path.unlink()
+        path = Path(stored_file_path)
+        if path.exists():
+            path.unlink()
 
     def save_historical_etc_repair_bundle(
         self,
@@ -950,42 +418,6 @@ class ApplicationStateStore:
             }
         )
 
-        if self._mongo_database is not None:
-            if self._mongo_file_bucket is None:
-                raise RuntimeError("Mongo GridFS is not configured for historical ETC repair bundles.")
-            gridfs_id = self._historical_etc_gridfs_id(resolved_bundle_id)
-            try:
-                self._mongo_file_bucket.delete(gridfs_id)
-            except Exception:
-                pass
-            sanitized_name = self._sanitize_name(resolved_file_name)
-            self._mongo_file_bucket.upload_from_stream_with_id(
-                gridfs_id,
-                sanitized_name,
-                BytesIO(content_bytes),
-                metadata={
-                    **normalized_metadata,
-                    "stored_at": updated_at,
-                    "purpose": "historical_etc_repair_seed",
-                },
-            )
-            document = {
-                "_id": resolved_bundle_id,
-                **normalized_metadata,
-                "gridfs_id": gridfs_id,
-                "stored_file_path": self._build_gridfs_ref(gridfs_id, sanitized_name),
-            }
-            self._run_mongo_operation(
-                lambda: self._mongo_detailed_collections["historical_etc_repair_bundles"].replace_one(
-                    {"_id": resolved_bundle_id},
-                    document,
-                    upsert=True,
-                )
-            )
-            return document
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo GridFS is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._historical_etc_repair_root.mkdir(parents=True, exist_ok=True)
         target_path = self._historical_etc_repair_root / f"{resolved_bundle_id}_{self._sanitize_name(resolved_file_name)}"
         target_path.write_bytes(content_bytes)
@@ -1003,17 +435,6 @@ class ApplicationStateStore:
         return document
 
     def load_historical_etc_repair_bundle_metadata(self) -> dict[str, dict[str, Any]]:
-        if self._mongo_database is not None:
-            documents = self._run_mongo_operation(
-                lambda: list(self._mongo_detailed_collections["historical_etc_repair_bundles"].find({}))
-            )
-            return {
-                str(document.get("_id")): dict(document)
-                for document in documents
-                if str(document.get("_id") or "").strip()
-            }
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._historical_etc_repair_bundles_path.exists():
             return {}
         try:
@@ -1037,10 +458,8 @@ class ApplicationStateStore:
         if not stored_file_path:
             return None
         if self._is_gridfs_ref(stored_file_path):
-            content = self.read_import_file(stored_file_path)
+            raise RuntimeError("Legacy GridFS historical ETC repair bundle access is disabled.")
         else:
-            if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-                raise RuntimeError("Local historical ETC repair bundles are disabled in FIN_OPS_STORAGE_MODE=mongo_only.")
             content = Path(stored_file_path).read_bytes()
         expected_sha256 = str(metadata.get("sha256") or "").strip()
         actual_sha256 = hashlib.sha256(content).hexdigest()
@@ -1070,18 +489,6 @@ class ApplicationStateStore:
             "bundle_id": resolved_bundle_id,
             "updated_at": parsed_seed.get("updated_at") or updated_at,
         }
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._mongo_detailed_collections["historical_etc_repair_parsed_seeds"].replace_one(
-                    {"_id": resolved_bundle_id},
-                    {"_id": resolved_bundle_id, **document},
-                    upsert=True,
-                )
-            )
-            return document
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._historical_etc_repair_root.mkdir(parents=True, exist_ok=True)
         seeds = self.load_historical_etc_repair_parsed_seeds()
         seeds[resolved_bundle_id] = document
@@ -1092,21 +499,6 @@ class ApplicationStateStore:
         return document
 
     def load_historical_etc_repair_parsed_seeds(self) -> dict[str, dict[str, Any]]:
-        if self._mongo_database is not None:
-            documents = self._run_mongo_operation(
-                lambda: list(self._mongo_detailed_collections["historical_etc_repair_parsed_seeds"].find({}))
-            )
-            return {
-                str(document.get("_id")): {
-                    key: value
-                    for key, value in dict(document).items()
-                    if key != "_id"
-                }
-                for document in documents
-                if str(document.get("_id") or "").strip()
-            }
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._historical_etc_repair_parsed_seeds_path.exists():
             return {}
         try:
@@ -1127,21 +519,6 @@ class ApplicationStateStore:
         return dict(seed) if isinstance(seed, dict) else None
 
     def load_historical_etc_repair_states(self) -> dict[str, dict[str, Any]]:
-        if self._mongo_database is not None:
-            documents = self._run_mongo_operation(
-                lambda: list(self._mongo_detailed_collections["historical_etc_repair_states"].find({}))
-            )
-            return {
-                str(document.get("_id")): {
-                    key: value
-                    for key, value in dict(document).items()
-                    if key != "_id"
-                }
-                for document in documents
-                if str(document.get("_id") or "").strip()
-            }
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._historical_etc_repair_states_path.exists():
             return {}
         try:
@@ -1160,54 +537,13 @@ class ApplicationStateStore:
             for bundle_id, state in (states if isinstance(states, dict) else {}).items()
             if str(bundle_id).strip() and isinstance(state, dict)
         }
-        if self._mongo_database is not None:
-            collection = self._mongo_detailed_collections["historical_etc_repair_states"]
-            self._run_mongo_operation(lambda: collection.delete_many({}))
-            updated_at = datetime.now(UTC)
-            for bundle_id, state in normalized_states.items():
-                self._run_mongo_operation(
-                    lambda bundle_id=bundle_id, state=state: collection.replace_one(
-                        {"_id": bundle_id},
-                        {"_id": bundle_id, **state, "updated_at": state.get("updated_at") or updated_at.isoformat()},
-                        upsert=True,
-                    )
-                )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._historical_etc_repair_root.mkdir(parents=True, exist_ok=True)
         self._historical_etc_repair_states_path.write_text(
             json.dumps(normalized_states, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
 
-    @staticmethod
-    def _historical_etc_gridfs_id(bundle_id: str) -> str:
-        return f"{HISTORICAL_ETC_REPAIR_GRIDFS_ID_PREFIX}{bundle_id}"
-
     def load_background_jobs(self) -> dict[str, dict[str, Any]]:
-        if self._mongo_database is not None:
-            jobs: dict[str, dict[str, Any]] = {}
-            documents = self._run_mongo_operation(
-                lambda: list(self._mongo_detailed_collections["background_jobs"].find({}))
-            )
-            for document in documents:
-                payload = self._load_binary_payload(document)
-                if not isinstance(payload, dict):
-                    payload = {
-                        key: value
-                        for key, value in document.items()
-                        if key not in {"_id", "payload", "updated_at"}
-                    }
-                job_id = str(payload.get("job_id") or document.get("_id") or "").strip()
-                if job_id:
-                    payload["job_id"] = job_id
-                    jobs[job_id] = dict(payload)
-            return jobs
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._background_jobs_path.exists():
             return {}
         try:
@@ -1229,43 +565,10 @@ class ApplicationStateStore:
             for job_id, payload in (snapshot if isinstance(snapshot, dict) else {}).items()
             if isinstance(payload, dict)
         }
-        if self._mongo_database is not None:
-            collection = self._mongo_detailed_collections["background_jobs"]
-            self._run_mongo_operation(lambda: collection.delete_many({}))
-            updated_at = datetime.now(UTC)
-            for job_id, payload in normalized_snapshot.items():
-                normalized_payload = dict(payload)
-                normalized_payload["job_id"] = job_id
-                self._run_mongo_operation(
-                    lambda job_id=job_id, normalized_payload=normalized_payload: collection.replace_one(
-                        {"_id": job_id},
-                        {
-                            "_id": job_id,
-                            "job_id": job_id,
-                            "owner_user_id": normalized_payload.get("owner_user_id"),
-                            "visibility": normalized_payload.get("visibility"),
-                            "status": normalized_payload.get("status"),
-                            "type": normalized_payload.get("type"),
-                            "idempotency_key": normalized_payload.get("idempotency_key"),
-                            "payload": Binary(pickle.dumps(normalized_payload)),
-                            "updated_at": updated_at,
-                        },
-                        upsert=True,
-                    )
-                )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         with self._background_jobs_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
     def load_app_health_alerts(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_app_health_alerts_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._app_health_alerts_path.exists():
             return {}
         try:
@@ -1277,34 +580,10 @@ class ApplicationStateStore:
 
     def save_app_health_alerts(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            collection = self._mongo_detailed_collections["app_health_alerts"]
-            updated_at = datetime.now(UTC)
-            self._run_mongo_operation(
-                lambda: collection.replace_one(
-                    {"_id": STATE_DOCUMENT_ID},
-                    {
-                        "_id": STATE_DOCUMENT_ID,
-                        "schema": "app_health_alerts",
-                        "payload": Binary(pickle.dumps(normalized_snapshot)),
-                        "updated_at": updated_at,
-                    },
-                    upsert=True,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         with self._app_health_alerts_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
     def load_workbench_pair_relations(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_workbench_pair_relations_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("workbench_pair_relations")
         return snapshot if isinstance(snapshot, dict) else {}
@@ -1316,18 +595,6 @@ class ApplicationStateStore:
         changed_case_ids: list[str] | None = None,
     ) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_workbench_pair_relations_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                    changed_case_ids=changed_case_ids,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         if changed_case_ids is None:
             current_payload["workbench_pair_relations"] = normalized_snapshot
@@ -1351,29 +618,17 @@ class ApplicationStateStore:
         self._save_local_pickle(current_payload)
 
     def load_oa_pending_payment_bank_relations(self) -> dict[str, Any]:
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE and self._mongo_database is None:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        current_payload = self.load() if self._mongo_database is not None else self._load_local_pickle()
+        current_payload = self._load_local_pickle()
         snapshot = current_payload.get("oa_pending_payment_bank_relations")
         return snapshot if isinstance(snapshot, dict) else {}
 
     def save_oa_pending_payment_bank_relations(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE and self._mongo_database is None:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-        current_payload = self.load() if self._mongo_database is not None else self._load_local_pickle()
+        current_payload = self._load_local_pickle()
         current_payload["oa_pending_payment_bank_relations"] = normalized_snapshot
-        if self._mongo_database is not None:
-            self.save(current_payload)
-            return
         self._save_local_pickle(current_payload)
 
     def load_no_oa_bank_batches(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._run_mongo_operation(self._load_no_oa_bank_batches_detailed_payload)
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._no_oa_bank_batches_path.exists():
             return {}
         with self._no_oa_bank_batches_path.open("rb") as handle:
@@ -1382,23 +637,10 @@ class ApplicationStateStore:
 
     def save_no_oa_bank_batches(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_no_oa_bank_batches_detailed(normalized_snapshot, datetime.now(UTC))
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         with self._no_oa_bank_batches_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
     def load_workbench_read_models(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_workbench_read_models_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("workbench_read_models")
         return snapshot if isinstance(snapshot, dict) else {}
@@ -1410,18 +652,6 @@ class ApplicationStateStore:
         changed_scope_keys: list[str] | None = None,
     ) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_workbench_read_models_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                    changed_scope_keys=changed_scope_keys,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["workbench_read_models"] = normalized_snapshot
         self._save_local_pickle(current_payload)
@@ -1449,11 +679,6 @@ class ApplicationStateStore:
         )
 
     def load_workbench_candidate_matches(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_workbench_candidate_matches_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("workbench_candidate_matches")
         return snapshot if isinstance(snapshot, dict) else {}
@@ -1465,89 +690,34 @@ class ApplicationStateStore:
         changed_scope_months: list[str] | None = None,
     ) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_workbench_candidate_matches_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                    changed_scope_months=changed_scope_months,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["workbench_candidate_matches"] = normalized_snapshot
         self._save_local_pickle(current_payload)
 
     def save_workbench_matching_dirty_scopes(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_workbench_matching_dirty_scopes_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["workbench_matching_dirty_scopes"] = normalized_snapshot
         self._save_local_pickle(current_payload)
 
     def load_bank_transaction_categories(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_bank_transaction_categories_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("bank_transaction_categories")
         return snapshot if isinstance(snapshot, dict) else {}
 
     def save_bank_transaction_categories(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_bank_transaction_categories_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["bank_transaction_categories"] = normalized_snapshot
         self._save_local_pickle(current_payload)
 
     def load_turnover_relations(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_turnover_relations_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("turnover_relations")
         return snapshot if isinstance(snapshot, dict) else {}
 
     def save_turnover_relations(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_turnover_relations_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["turnover_relations"] = normalized_snapshot
         self._save_local_pickle(current_payload)
@@ -1567,38 +737,17 @@ class ApplicationStateStore:
         self.save_turnover_relations(current_snapshot)
 
     def load_turnover_ledger_extras(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_turnover_ledger_extras_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("turnover_ledger_extras")
         return snapshot if isinstance(snapshot, dict) else {}
 
     def save_turnover_ledger_extras(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_turnover_ledger_extras_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["turnover_ledger_extras"] = normalized_snapshot
         self._save_local_pickle(current_payload)
 
     def load_cost_statistics_read_models(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_cost_statistics_read_models_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("cost_statistics_read_models")
         return snapshot if isinstance(snapshot, dict) else {}
@@ -1610,28 +759,11 @@ class ApplicationStateStore:
         changed_scope_keys: list[str] | None = None,
     ) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_cost_statistics_read_models_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                    changed_scope_keys=changed_scope_keys,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["cost_statistics_read_models"] = normalized_snapshot
         self._save_local_pickle(current_payload)
 
     def load_tax_offset_read_models(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            return self._load_tax_offset_read_models_detailed_payload()
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("tax_offset_read_models")
         return snapshot if isinstance(snapshot, dict) else {}
@@ -1643,98 +775,14 @@ class ApplicationStateStore:
         changed_scope_keys: list[str] | None = None,
     ) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        if self._mongo_database is not None:
-            self._run_mongo_operation(
-                lambda: self._save_tax_offset_read_models_detailed(
-                    normalized_snapshot,
-                    datetime.now(UTC),
-                    changed_scope_keys=changed_scope_keys,
-                )
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
         current_payload["tax_offset_read_models"] = normalized_snapshot
         self._save_local_pickle(current_payload)
 
     def load(self) -> dict[str, Any]:
-        if self._mongo_database is not None:
-            detailed_payload = self._load_detailed_mongo_payload()
-            if detailed_payload:
-                return detailed_payload
-
-            split_payload = self._load_split_mongo_payload()
-            if split_payload:
-                if self._migrate_legacy_file_refs_to_gridfs(split_payload):
-                    self.save(split_payload)
-                else:
-                    self.save(split_payload)
-                return split_payload
-
-            legacy_payload = self._load_legacy_mongo_payload()
-            if legacy_payload:
-                if self._migrate_legacy_file_refs_to_gridfs(legacy_payload):
-                    self.save(legacy_payload)
-                else:
-                    self.save(legacy_payload)
-                return legacy_payload
-            return {}
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         return self._load_local_pickle()
 
     def save(self, payload: dict[str, Any]) -> None:
-        if self._mongo_database is not None:
-            updated_at = datetime.now(UTC)
-            self._save_imports_detailed(payload.get("imports", {}), updated_at)
-            if "bank_transaction_categories" in payload:
-                self._save_bank_transaction_categories_detailed(
-                    payload.get("bank_transaction_categories", {}),
-                    updated_at,
-                )
-            self._save_file_imports_detailed(payload.get("file_imports", {}), updated_at)
-            self._save_matching_detailed(payload.get("matching", {}), updated_at)
-            self._save_workbench_overrides_detailed(payload.get("workbench_overrides", {}), updated_at)
-            if "workbench_exception_cases" in payload:
-                self._save_workbench_exception_cases_detailed(payload.get("workbench_exception_cases", {}), updated_at)
-            if "workbench_pair_relations" in payload:
-                self._save_workbench_pair_relations_detailed(payload.get("workbench_pair_relations", {}), updated_at)
-            if "workbench_read_models" in payload:
-                self._save_workbench_read_models_detailed(payload.get("workbench_read_models", {}), updated_at)
-            if "workbench_candidate_matches" in payload:
-                self._save_workbench_candidate_matches_detailed(payload.get("workbench_candidate_matches", {}), updated_at)
-            if "workbench_matching_dirty_scopes" in payload:
-                self._save_workbench_matching_dirty_scopes_detailed(
-                    payload.get("workbench_matching_dirty_scopes", {}),
-                    updated_at,
-                )
-            if "no_oa_bank_batches" in payload:
-                self._save_no_oa_bank_batches_detailed(payload.get("no_oa_bank_batches", {}), updated_at)
-            if "turnover_relations" in payload:
-                self._save_turnover_relations_detailed(payload.get("turnover_relations", {}), updated_at)
-            if "turnover_ledger_extras" in payload:
-                self._save_turnover_ledger_extras_detailed(payload.get("turnover_ledger_extras", {}), updated_at)
-            if "cost_statistics_read_models" in payload:
-                self._save_cost_statistics_read_models_detailed(
-                    payload.get("cost_statistics_read_models", {}),
-                    updated_at,
-                )
-            if "tax_offset_read_models" in payload:
-                self._save_tax_offset_read_models_detailed(payload.get("tax_offset_read_models", {}), updated_at)
-            if "pending_invoice_commands" in payload:
-                self._save_pending_invoice_commands_detailed(payload.get("pending_invoice_commands", {}), updated_at)
-            if "app_health_alerts" in payload:
-                self.save_app_health_alerts(payload.get("app_health_alerts", {}))
-            self._save_file_import_metadata(payload.get("file_imports", {}), updated_at)
-            if self._has_non_empty_state(payload):
-                self._clear_legacy_snapshot_collections()
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._save_local_pickle(payload)
 
     def save_workbench_overrides(
@@ -1743,61 +791,16 @@ class ApplicationStateStore:
         *,
         changed_row_ids: list[str] | None = None,
     ) -> None:
-        if self._mongo_database is not None:
-            updated_at = datetime.now(UTC)
-            if changed_row_ids is None:
-                self._run_mongo_operation(
-                    lambda: self._save_workbench_overrides_detailed(workbench_overrides_snapshot, updated_at)
-                )
-            else:
-                self._run_mongo_operation(
-                    lambda: self._save_workbench_overrides_detailed_incremental(
-                        workbench_overrides_snapshot,
-                        updated_at,
-                        changed_row_ids,
-                    )
-                )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-
         current_payload = self._load_local_pickle()
         current_payload["workbench_overrides"] = workbench_overrides_snapshot
         self._save_local_pickle(current_payload)
 
     def save_workbench_exception_cases(self, snapshot: dict[str, Any]) -> None:
-        if self._mongo_database is not None:
-            updated_at = datetime.now(UTC)
-            self._run_mongo_operation(
-                lambda: self._save_workbench_exception_cases_detailed(snapshot, updated_at)
-            )
-            return
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
-
         current_payload = self._load_local_pickle()
         current_payload["workbench_exception_cases"] = snapshot
         self._save_local_pickle(current_payload)
 
     def store_import_file(self, *, session_id: str, file_id: str, file_name: str, content: bytes) -> str:
-        if self._mongo_file_bucket is not None:
-            sanitized_name = self._sanitize_name(file_name)
-            self._mongo_file_bucket.upload_from_stream_with_id(
-                file_id,
-                sanitized_name,
-                BytesIO(content),
-                metadata={
-                    "session_id": session_id,
-                    "file_id": file_id,
-                    "file_name": file_name,
-                    "stored_at": datetime.now(UTC),
-                },
-            )
-            return self._build_gridfs_ref(file_id, sanitized_name)
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo GridFS is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         session_dir = self._import_file_root / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         target_path = session_dir / f"{file_id}_{self._sanitize_name(file_name)}"
@@ -1806,13 +809,7 @@ class ApplicationStateStore:
 
     def read_import_file(self, stored_file_path: str) -> bytes:
         if self._is_gridfs_ref(stored_file_path):
-            if self._mongo_file_bucket is None:
-                raise RuntimeError("Mongo GridFS is not configured for stored import file access.")
-            file_id = self._parse_gridfs_ref(stored_file_path)
-            stream = self._mongo_file_bucket.open_download_stream(file_id)
-            return stream.read()
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Local import file access is disabled in FIN_OPS_STORAGE_MODE=mongo_only.")
+            raise RuntimeError("Legacy GridFS import file references are not supported by ApplicationStateStore.")
         return Path(stored_file_path).read_bytes()
 
     def delete_import_files(self, stored_file_paths: list[str]) -> int:
@@ -1824,15 +821,6 @@ class ApplicationStateStore:
                 continue
             seen_paths.add(normalized_path)
             if self._is_gridfs_ref(normalized_path):
-                if self._mongo_file_bucket is None:
-                    continue
-                try:
-                    self._mongo_file_bucket.delete(self._parse_gridfs_ref(normalized_path))
-                    deleted_count += 1
-                except Exception:
-                    continue
-                continue
-            if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
                 continue
             target_path = Path(normalized_path)
             if target_path.exists():
@@ -1841,14 +829,6 @@ class ApplicationStateStore:
         return deleted_count
 
     def clear_oa_attachment_invoice_cache(self) -> int:
-        if self._mongo_database is not None:
-            result = self._run_mongo_operation(
-                lambda: self._mongo_detailed_collections["oa_attachment_invoice_cache"].delete_many({})
-            )
-            return int(result.deleted_count)
-
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         if not self._oa_attachment_invoice_cache_path.exists():
             return 0
         try:
@@ -1860,22 +840,11 @@ class ApplicationStateStore:
         return entry_count
 
     def import_session_exists(self, session_id: str) -> bool:
-        if self._mongo_database is not None:
-            return self._mongo_detailed_collections["file_import_sessions"].find_one({"_id": session_id}) is not None
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            return False
         file_imports = self._load_local_pickle().get("file_imports", {})
         sessions = file_imports.get("sessions", {}) if isinstance(file_imports, dict) else {}
         return session_id in sessions
 
     def import_file_exists(self, file_id: str) -> bool:
-        if self._mongo_database is not None:
-            if self._mongo_detailed_collections["file_import_files"].find_one({"_id": file_id}) is not None:
-                return True
-            files_collection = self._mongo_database[f"{GRIDFS_BUCKET_NAME}.files"]
-            return files_collection.find_one({"_id": file_id}) is not None
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            return False
         file_imports = self._load_local_pickle().get("file_imports", {})
         sessions = file_imports.get("sessions", {}) if isinstance(file_imports, dict) else {}
         for session in sessions.values():
@@ -1885,1613 +854,28 @@ class ApplicationStateStore:
         return False
 
     def import_batch_exists(self, batch_id: str) -> bool:
-        if self._mongo_database is not None:
-            return self._mongo_detailed_collections["import_batches"].find_one({"_id": batch_id}) is not None
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            return False
         imports = self._load_local_pickle().get("imports", {})
         batches = imports.get("batches", {}) if isinstance(imports, dict) else {}
         return batch_id in batches
 
     def invoice_exists(self, invoice_id: str) -> bool:
-        if self._mongo_database is not None:
-            return self._mongo_detailed_collections["invoices"].find_one({"_id": invoice_id}) is not None
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            return False
         imports = self._load_local_pickle().get("imports", {})
         invoices = imports.get("invoices", []) if isinstance(imports, dict) else []
         return any(isinstance(invoice, dict) and invoice.get("id") == invoice_id for invoice in invoices)
 
     def transaction_exists(self, transaction_id: str) -> bool:
-        if self._mongo_database is not None:
-            return self._mongo_detailed_collections["bank_transactions"].find_one({"_id": transaction_id}) is not None
-        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
-            return False
         imports = self._load_local_pickle().get("imports", {})
         transactions = imports.get("transactions", []) if isinstance(imports, dict) else []
         return any(isinstance(transaction, dict) and transaction.get("id") == transaction_id for transaction in transactions)
 
-    def _ensure_mongo_metadata(self) -> None:
-        if self._mongo_meta_collection is None:
-            return
-        self._mongo_meta_collection.update_one(
-            {"_id": META_DOCUMENT_ID},
-            {
-                "$setOnInsert": {
-                    "schema_version": 2,
-                    "storage_backend": "detailed_mongo_collections",
-                    "state_collections": dict(STATE_COLLECTIONS),
-                    "detailed_collections": {
-                        "imports_meta": IMPORTS_META_COLLECTION,
-                        "import_batches": IMPORT_BATCHES_COLLECTION,
-                        "invoices": INVOICES_COLLECTION,
-                        "bank_transactions": BANK_TRANSACTIONS_COLLECTION,
-                        "bank_transaction_categories_meta": BANK_TRANSACTION_CATEGORIES_META_COLLECTION,
-                        "bank_transaction_categories": BANK_TRANSACTION_CATEGORIES_COLLECTION,
-                        "file_imports_meta": FILE_IMPORTS_META_COLLECTION,
-                        "file_import_sessions": FILE_IMPORT_SESSIONS_COLLECTION,
-                        "file_import_files": FILE_IMPORT_FILES_COLLECTION,
-                        "matching_meta": MATCHING_META_COLLECTION,
-                        "matching_runs": MATCHING_RUNS_COLLECTION,
-                        "matching_results": MATCHING_RESULTS_COLLECTION,
-                        "workbench_overrides_meta": WORKBENCH_OVERRIDES_META_COLLECTION,
-                        "workbench_row_overrides": WORKBENCH_ROW_OVERRIDES_COLLECTION,
-                        "workbench_pair_relations_meta": WORKBENCH_PAIR_RELATIONS_META_COLLECTION,
-                        "workbench_pair_relations": WORKBENCH_PAIR_RELATIONS_COLLECTION,
-                        "workbench_read_models_meta": WORKBENCH_READ_MODELS_META_COLLECTION,
-                        "workbench_read_models": WORKBENCH_READ_MODELS_COLLECTION,
-                        "workbench_candidate_matches_meta": WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION,
-                        "workbench_candidate_matches": WORKBENCH_CANDIDATE_MATCHES_COLLECTION,
-                        "workbench_matching_dirty_scopes_meta": WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION,
-                        "workbench_matching_dirty_scopes": WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION,
-                        "no_oa_bank_batches_meta": NO_OA_BANK_BATCHES_META_COLLECTION,
-                        "no_oa_bank_batches": NO_OA_BANK_BATCHES_COLLECTION,
-                        "no_oa_bank_batch_audit_log": NO_OA_BANK_BATCH_AUDIT_LOG_COLLECTION,
-                        "turnover_relations_meta": TURNOVER_RELATIONS_META_COLLECTION,
-                        "turnover_relations": TURNOVER_RELATIONS_COLLECTION,
-                        "turnover_relation_audit_log": TURNOVER_RELATION_AUDIT_LOG_COLLECTION,
-                        "turnover_ledger_extras_meta": TURNOVER_LEDGER_EXTRAS_META_COLLECTION,
-                        "turnover_ledger_extras": TURNOVER_LEDGER_EXTRAS_COLLECTION,
-                        "cost_statistics_read_models_meta": COST_STATISTICS_READ_MODELS_META_COLLECTION,
-                        "cost_statistics_read_models": COST_STATISTICS_READ_MODELS_COLLECTION,
-                        "tax_offset_read_models_meta": TAX_OFFSET_READ_MODELS_META_COLLECTION,
-                        "tax_offset_read_models": TAX_OFFSET_READ_MODELS_COLLECTION,
-                        "oa_attachment_invoice_cache": OA_ATTACHMENT_INVOICE_CACHE_COLLECTION,
-                        "oa_sync_state": OA_SYNC_STATE_COLLECTION,
-                        "tax_certified_imports_meta": TAX_CERTIFIED_IMPORTS_META_COLLECTION,
-                        "tax_certified_import_sessions": TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION,
-                        "tax_certified_import_batches": TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION,
-                        "tax_certified_import_records": TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION,
-                        "etc_state": ETC_STATE_COLLECTION,
-                        "historical_etc_repair_bundles": HISTORICAL_ETC_REPAIR_BUNDLES_COLLECTION,
-                        "historical_etc_repair_parsed_seeds": HISTORICAL_ETC_REPAIR_PARSED_SEEDS_COLLECTION,
-                        "historical_etc_repair_states": HISTORICAL_ETC_REPAIR_STATES_COLLECTION,
-                        "background_jobs": BACKGROUND_JOBS_COLLECTION,
-                        "app_health_alerts": APP_HEALTH_ALERTS_COLLECTION,
-                    },
-                    "file_metadata_collection": FILE_METADATA_COLLECTION,
-                    "gridfs_bucket": GRIDFS_BUCKET_NAME,
-                    "created_at": datetime.now(UTC),
-                }
-            },
-            upsert=True,
-        )
-
-    def _load_detailed_mongo_payload(self) -> dict[str, Any]:
-        if not self._mongo_detailed_collections:
-            return {}
-
-        imports_payload = self._load_imports_detailed_payload()
-        bank_transaction_categories_payload = self._load_bank_transaction_categories_detailed_payload()
-        file_imports_payload = self._load_file_imports_detailed_payload()
-        matching_payload = self._load_matching_detailed_payload()
-        workbench_overrides_payload = self._load_workbench_overrides_detailed_payload()
-        workbench_exception_cases_payload = self._load_workbench_exception_cases_detailed_payload()
-        workbench_pair_relations_payload = self._load_workbench_pair_relations_detailed_payload()
-        workbench_read_models_payload = self._load_workbench_read_models_detailed_payload()
-        workbench_candidate_matches_payload = self._load_workbench_candidate_matches_detailed_payload()
-        workbench_matching_dirty_scopes_payload = self._load_workbench_matching_dirty_scopes_detailed_payload()
-        no_oa_bank_batches_payload = self._load_no_oa_bank_batches_detailed_payload()
-        turnover_relations_payload = self._load_turnover_relations_detailed_payload()
-        turnover_ledger_extras_payload = self._load_turnover_ledger_extras_detailed_payload()
-        cost_statistics_read_models_payload = self._load_cost_statistics_read_models_detailed_payload()
-        tax_offset_read_models_payload = self._load_tax_offset_read_models_detailed_payload()
-        pending_invoice_commands_payload = self._load_pending_invoice_commands_detailed_payload()
-        app_health_alerts_payload = self._load_app_health_alerts_detailed_payload()
-        found_any = any(
-            bool(section)
-            for section in (
-                imports_payload,
-                bank_transaction_categories_payload,
-                file_imports_payload,
-                matching_payload,
-                workbench_overrides_payload,
-                workbench_exception_cases_payload,
-                workbench_pair_relations_payload,
-                workbench_read_models_payload,
-                workbench_candidate_matches_payload,
-                workbench_matching_dirty_scopes_payload,
-                no_oa_bank_batches_payload,
-                turnover_relations_payload,
-                turnover_ledger_extras_payload,
-                cost_statistics_read_models_payload,
-                tax_offset_read_models_payload,
-                pending_invoice_commands_payload,
-                app_health_alerts_payload,
-            )
-        )
-        if not found_any:
-            return {}
-        payload = {
-            "imports": imports_payload or {},
-            "file_imports": file_imports_payload or {},
-            "matching": matching_payload or {},
-        }
-        if bank_transaction_categories_payload:
-            payload["bank_transaction_categories"] = bank_transaction_categories_payload
-        if workbench_overrides_payload:
-            payload["workbench_overrides"] = workbench_overrides_payload
-        if workbench_exception_cases_payload:
-            payload["workbench_exception_cases"] = workbench_exception_cases_payload
-        if workbench_pair_relations_payload:
-            payload["workbench_pair_relations"] = workbench_pair_relations_payload
-        if workbench_read_models_payload:
-            payload["workbench_read_models"] = workbench_read_models_payload
-        if workbench_candidate_matches_payload:
-            payload["workbench_candidate_matches"] = workbench_candidate_matches_payload
-        if workbench_matching_dirty_scopes_payload:
-            payload["workbench_matching_dirty_scopes"] = workbench_matching_dirty_scopes_payload
-        if no_oa_bank_batches_payload:
-            payload["no_oa_bank_batches"] = no_oa_bank_batches_payload
-        if turnover_relations_payload:
-            payload["turnover_relations"] = turnover_relations_payload
-        if turnover_ledger_extras_payload:
-            payload["turnover_ledger_extras"] = turnover_ledger_extras_payload
-        if cost_statistics_read_models_payload:
-            payload["cost_statistics_read_models"] = cost_statistics_read_models_payload
-        if tax_offset_read_models_payload:
-            payload["tax_offset_read_models"] = tax_offset_read_models_payload
-        if pending_invoice_commands_payload:
-            payload["pending_invoice_commands"] = pending_invoice_commands_payload
-        if app_health_alerts_payload:
-            payload["app_health_alerts"] = app_health_alerts_payload
-        if self._migrate_legacy_file_refs_to_gridfs(payload):
-            self.save(payload)
-        return payload
-
-    def _load_split_mongo_payload(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {}
-        found_any = False
-        for key, collection in self._mongo_state_collections.items():
-            document = collection.find_one({"_id": STATE_DOCUMENT_ID})
-            loaded = self._load_binary_payload(document)
-            if isinstance(loaded, dict):
-                payload[key] = loaded if isinstance(loaded, dict) else {}
-                found_any = True
-            else:
-                payload[key] = {}
-        return payload if found_any else {}
-
-    def _load_legacy_mongo_payload(self) -> dict[str, Any]:
-        if self._legacy_mongo_collection is None:
-            return {}
-        document = self._legacy_mongo_collection.find_one({"_id": STATE_DOCUMENT_ID})
-        loaded = self._load_binary_payload(document)
-        if isinstance(loaded, dict):
-            return loaded if isinstance(loaded, dict) else {}
-        return {}
-
-    def _load_imports_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["imports_meta"].find_one({"_id": STATE_DOCUMENT_ID})
-        meta_payload = self._load_binary_payload(meta_document)
-        batches = self._load_entities_by_id(self._mongo_detailed_collections["import_batches"])
-        invoices = self._load_entities_list(self._mongo_detailed_collections["invoices"])
-        transactions = self._load_entities_list(self._mongo_detailed_collections["bank_transactions"])
-        found_any = bool(meta_payload or batches or invoices or transactions)
-        if not found_any:
-            return {}
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["batches"] = batches
-        payload["invoices"] = invoices
-        payload["transactions"] = transactions
-        return payload
-
-    def _load_file_imports_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["file_imports_meta"].find_one({"_id": STATE_DOCUMENT_ID})
-        meta_payload = self._load_binary_payload(meta_document)
-        raw_sessions = self._load_entities_by_id(self._mongo_detailed_collections["file_import_sessions"])
-        raw_file_documents = sorted(
-            self._mongo_detailed_collections["file_import_files"].find({}),
-            key=lambda item: str(item.get("_id", "")),
-        )
-        raw_files: list[tuple[str, Any]] = []
-        for document in raw_file_documents:
-            loaded = self._load_binary_payload(document)
-            if loaded is None:
-                continue
-            self._backfill_file_import_preview_item(loaded)
-            session_id = str(document.get("session_id", ""))
-            raw_files.append((session_id, loaded))
-        found_any = bool(meta_payload or raw_sessions or raw_files)
-        if not found_any:
-            return {}
-
-        files_by_session: dict[str, list[Any]] = {}
-        for session_id, file_item in raw_files:
-            if not session_id:
-                continue
-            files_by_session.setdefault(str(session_id), []).append(file_item)
-
-        sessions: dict[str, Any] = {}
-        for session_id, session in raw_sessions.items():
-            files = sorted(
-                files_by_session.get(str(session_id), []),
-                key=lambda item: str(self._get_container_value(item, "id") or ""),
-            )
-            self._set_container_value(session, "files", files)
-            self._set_container_value(session, "file_count", len(files))
-            sessions[str(session_id)] = session
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["sessions"] = sessions
-        return payload
-
-    def _load_matching_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["matching_meta"].find_one({"_id": STATE_DOCUMENT_ID})
-        meta_payload = self._load_binary_payload(meta_document)
-        raw_runs = self._load_entities_by_id(self._mongo_detailed_collections["matching_runs"])
-        raw_results = self._load_entities_list(self._mongo_detailed_collections["matching_results"])
-        found_any = bool(meta_payload or raw_runs or raw_results)
-        if not found_any:
-            return {}
-
-        results_by_run: dict[str, list[Any]] = {}
-        result_map: dict[str, Any] = {}
-        for result in raw_results:
-            result_id = self._get_container_value(result, "id")
-            run_id = self._get_container_value(result, "run_id")
-            if result_id:
-                result_map[str(result_id)] = result
-            if run_id:
-                results_by_run.setdefault(str(run_id), []).append(result)
-
-        runs: dict[str, Any] = {}
-        for run_id, run in raw_runs.items():
-            run_results = sorted(
-                results_by_run.get(str(run_id), []),
-                key=lambda item: str(self._get_container_value(item, "id") or ""),
-            )
-            self._set_container_value(run, "results", run_results)
-            runs[str(run_id)] = run
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["runs"] = runs
-        payload["results"] = result_map
-        return payload
-
-    def _save_file_import_metadata(self, file_import_snapshot: Any, updated_at: datetime) -> None:
-        if self._mongo_metadata_collection is None:
-            return
-        metadata_payload = self._extract_file_import_metadata(file_import_snapshot)
-        self._mongo_metadata_collection.update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    "file_count": len(metadata_payload["files"]),
-                    "payload": Binary(pickle.dumps(metadata_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_imports_detailed(self, imports_snapshot: Any, updated_at: datetime) -> None:
-        snapshot = imports_snapshot if isinstance(imports_snapshot, dict) else {}
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"batches", "invoices", "transactions"}
-        }
-        batches = snapshot.get("batches", {})
-        invoices = snapshot.get("invoices", [])
-        transactions = snapshot.get("transactions", [])
-
-        self._mongo_detailed_collections["imports_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "batch_count": len(batches) if isinstance(batches, dict) else 0,
-                    "invoice_count": len(invoices) if isinstance(invoices, list) else 0,
-                    "transaction_count": len(transactions) if isinstance(transactions, list) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-        batch_documents = []
-        if isinstance(batches, dict):
-            for batch_id, preview in batches.items():
-                preview_payload = self._serialize_value(preview)
-                batch_payload = self._get_container_value(preview, "batch")
-                serialized_batch = self._serialize_value(batch_payload) if batch_payload is not None else {}
-                batch_documents.append(
-                    {
-                        "_id": str(batch_id),
-                        "batch_type": serialized_batch.get("batch_type"),
-                        "source_name": serialized_batch.get("source_name"),
-                        "imported_by": serialized_batch.get("imported_by"),
-                        "row_count": serialized_batch.get("row_count"),
-                        "success_count": serialized_batch.get("success_count"),
-                        "error_count": serialized_batch.get("error_count"),
-                        "status": serialized_batch.get("status"),
-                        "imported_at": serialized_batch.get("imported_at"),
-                        "payload": Binary(pickle.dumps(preview)),
-                        "updated_at": updated_at,
-                        "summary": preview_payload,
-                    }
-                )
-        self._replace_collection_documents(self._mongo_detailed_collections["import_batches"], batch_documents)
-
-        invoice_documents = []
-        if isinstance(invoices, list):
-            for invoice in invoices:
-                serialized_invoice = self._serialize_value(invoice)
-                invoice_documents.append(
-                    {
-                        "_id": str(self._get_container_value(invoice, "id")),
-                        "invoice_type": serialized_invoice.get("invoice_type"),
-                        "invoice_no": serialized_invoice.get("invoice_no"),
-                        "invoice_code": serialized_invoice.get("invoice_code"),
-                        "digital_invoice_no": serialized_invoice.get("digital_invoice_no"),
-                        "invoice_date": serialized_invoice.get("invoice_date"),
-                        "amount": serialized_invoice.get("amount"),
-                        "signed_amount": serialized_invoice.get("signed_amount"),
-                        "counterparty": serialized_invoice.get("counterparty"),
-                        "source_batch_id": serialized_invoice.get("source_batch_id"),
-                        "status": serialized_invoice.get("status"),
-                        "payload": Binary(pickle.dumps(invoice)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(self._mongo_detailed_collections["invoices"], invoice_documents)
-
-        transaction_documents = []
-        if isinstance(transactions, list):
-            for transaction in transactions:
-                serialized_transaction = self._serialize_value(transaction)
-                transaction_documents.append(
-                    {
-                        "_id": str(self._get_container_value(transaction, "id")),
-                        "account_no": serialized_transaction.get("account_no"),
-                        "txn_direction": serialized_transaction.get("txn_direction"),
-                        "counterparty_name_raw": serialized_transaction.get("counterparty_name_raw"),
-                        "amount": serialized_transaction.get("amount"),
-                        "signed_amount": serialized_transaction.get("signed_amount"),
-                        "txn_date": serialized_transaction.get("txn_date"),
-                        "trade_time": serialized_transaction.get("trade_time"),
-                        "source_batch_id": serialized_transaction.get("source_batch_id"),
-                        "status": serialized_transaction.get("status"),
-                        "payload": Binary(pickle.dumps(transaction)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(self._mongo_detailed_collections["bank_transactions"], transaction_documents)
-
-    def _save_file_imports_detailed(self, file_import_snapshot: Any, updated_at: datetime) -> None:
-        snapshot = file_import_snapshot if isinstance(file_import_snapshot, dict) else {}
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"sessions"}
-        }
-        raw_sessions = snapshot.get("sessions", {})
-        self._mongo_detailed_collections["file_imports_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "session_count": len(raw_sessions) if isinstance(raw_sessions, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-        session_documents = []
-        file_documents = []
-        if isinstance(raw_sessions, dict):
-            for session_id, session in raw_sessions.items():
-                serialized_session = self._serialize_value(session)
-                session_documents.append(
-                    {
-                        "_id": str(session_id),
-                        "imported_by": serialized_session.get("imported_by"),
-                        "status": serialized_session.get("status"),
-                        "file_count": serialized_session.get("file_count"),
-                        "created_at": serialized_session.get("created_at"),
-                        "payload": Binary(pickle.dumps(session)),
-                        "updated_at": updated_at,
-                    }
-                )
-                files = self._get_container_value(session, "files")
-                if not isinstance(files, list):
-                    continue
-                for file_item in files:
-                    serialized_file = self._serialize_value(file_item)
-                    file_documents.append(
-                        {
-                            "_id": str(self._get_container_value(file_item, "id")),
-                            "session_id": str(session_id),
-                            "file_name": serialized_file.get("file_name"),
-                            "status": serialized_file.get("status"),
-                            "template_code": serialized_file.get("template_code"),
-                            "batch_type": serialized_file.get("batch_type"),
-                            "stored_file_path": serialized_file.get("stored_file_path"),
-                            "preview_batch_id": serialized_file.get("preview_batch_id"),
-                            "batch_id": serialized_file.get("batch_id"),
-                            "payload": Binary(pickle.dumps(file_item)),
-                            "updated_at": updated_at,
-                        }
-                    )
-
-        self._replace_collection_documents(self._mongo_detailed_collections["file_import_sessions"], session_documents)
-        self._replace_collection_documents(self._mongo_detailed_collections["file_import_files"], file_documents)
-
-    def _save_matching_detailed(self, matching_snapshot: Any, updated_at: datetime) -> None:
-        snapshot = matching_snapshot if isinstance(matching_snapshot, dict) else {}
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"runs", "results"}
-        }
-        raw_runs = snapshot.get("runs", {})
-        raw_results = snapshot.get("results", {})
-        self._mongo_detailed_collections["matching_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "run_count": len(raw_runs) if isinstance(raw_runs, dict) else 0,
-                    "result_count": len(raw_results) if isinstance(raw_results, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-        run_documents = []
-        if isinstance(raw_runs, dict):
-            for run_id, run in raw_runs.items():
-                serialized_run = self._serialize_value(run)
-                run_documents.append(
-                    {
-                        "_id": str(run_id),
-                        "triggered_by": serialized_run.get("triggered_by"),
-                        "invoice_count": serialized_run.get("invoice_count"),
-                        "transaction_count": serialized_run.get("transaction_count"),
-                        "executed_at": serialized_run.get("executed_at"),
-                        "result_count": len(serialized_run.get("results", []) or []),
-                        "payload": Binary(pickle.dumps(run)),
-                        "updated_at": updated_at,
-                    }
-                )
-
-        result_documents = []
-        if isinstance(raw_results, dict):
-            for result_id, result in raw_results.items():
-                serialized_result = self._serialize_value(result)
-                result_documents.append(
-                    {
-                        "_id": str(result_id),
-                        "run_id": serialized_result.get("run_id"),
-                        "result_type": serialized_result.get("result_type"),
-                        "confidence": serialized_result.get("confidence"),
-                        "rule_code": serialized_result.get("rule_code"),
-                        "amount": serialized_result.get("amount"),
-                        "difference_amount": serialized_result.get("difference_amount"),
-                        "counterparty_name": serialized_result.get("counterparty_name"),
-                        "invoice_ids": serialized_result.get("invoice_ids"),
-                        "transaction_ids": serialized_result.get("transaction_ids"),
-                        "payload": Binary(pickle.dumps(result)),
-                        "updated_at": updated_at,
-                    }
-                )
-
-        self._replace_collection_documents(self._mongo_detailed_collections["matching_runs"], run_documents)
-        self._replace_collection_documents(self._mongo_detailed_collections["matching_results"], result_documents)
-
-    def _load_workbench_overrides_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["workbench_overrides_meta"].find_one({"_id": STATE_DOCUMENT_ID})
-        meta_payload = self._load_binary_payload(meta_document)
-        row_overrides = self._load_entities_by_id(self._mongo_detailed_collections["workbench_row_overrides"])
-        if not meta_payload and not row_overrides:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["row_overrides"] = row_overrides
-        return payload
-
-    def _load_workbench_exception_cases_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["workbench_exception_cases_meta"].find_one({"_id": STATE_DOCUMENT_ID})
-        meta_payload = self._load_binary_payload(meta_document)
-        cases = self._load_entities_by_id(self._mongo_detailed_collections["workbench_exception_cases"])
-        if not meta_payload and not cases:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["cases"] = cases
-        row_case_index = payload.get("row_case_index")
-        payload["row_case_index"] = dict(row_case_index) if isinstance(row_case_index, dict) else {}
-        return payload
-
-    def _load_workbench_pair_relations_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["workbench_pair_relations_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        pair_relations = self._load_entities_by_id(self._mongo_detailed_collections["workbench_pair_relations"])
-        if not meta_payload and not pair_relations:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["pair_relations"] = pair_relations
-        return payload
-
-    def _load_workbench_read_models_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["workbench_read_models_meta"].find_one({"_id": STATE_DOCUMENT_ID})
-        meta_payload = self._load_binary_payload(meta_document)
-        read_models = self._load_entities_by_id(self._mongo_detailed_collections["workbench_read_models"])
-        if not meta_payload and not read_models:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["read_models"] = read_models
-        return payload
-
-    def _load_workbench_candidate_matches_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["workbench_candidate_matches_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        candidates = self._load_entities_by_id(self._mongo_detailed_collections["workbench_candidate_matches"])
-        if not meta_payload and not candidates:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["candidates"] = candidates
-        return payload
-
-    def _load_bank_transaction_categories_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["bank_transaction_categories_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        categories = self._load_entities_by_id(self._mongo_detailed_collections["bank_transaction_categories"])
-        if not meta_payload and not categories:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["categories"] = categories
-        return payload
-
-    def _load_workbench_matching_dirty_scopes_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["workbench_matching_dirty_scopes_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        dirty_scopes = self._load_entities_by_id(self._mongo_detailed_collections["workbench_matching_dirty_scopes"])
-        if not meta_payload and not dirty_scopes:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["dirty_scopes"] = dirty_scopes
-        return payload
-
-    def _load_no_oa_bank_batches_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["no_oa_bank_batches_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        batches = self._load_entities_by_id(self._mongo_detailed_collections["no_oa_bank_batches"])
-        audit_log = self._load_entities_list(self._mongo_detailed_collections["no_oa_bank_batch_audit_log"])
-        if not meta_payload and not batches and not audit_log:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["batches"] = batches
-        payload["audit_log"] = audit_log
-        return payload
-
-    def _load_turnover_relations_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["turnover_relations_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        relations = self._load_entities_list(self._mongo_detailed_collections["turnover_relations"])
-        audit_log = self._load_entities_list(self._mongo_detailed_collections["turnover_relation_audit_log"])
-        if not meta_payload and not relations and not audit_log:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["relations"] = relations
-        payload["audit_log"] = audit_log
-        return payload
-
-    def _load_turnover_ledger_extras_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["turnover_ledger_extras_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        extras = self._load_entities_list(self._mongo_detailed_collections["turnover_ledger_extras"])
-        if not meta_payload and not extras:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["extras"] = extras
-        return payload
-
-    def _load_cost_statistics_read_models_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["cost_statistics_read_models_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        read_models = self._load_entities_by_id(self._mongo_detailed_collections["cost_statistics_read_models"])
-        if not meta_payload and not read_models:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["read_models"] = read_models
-        return payload
-
-    def _load_tax_offset_read_models_detailed_payload(self) -> dict[str, Any]:
-        meta_document = self._mongo_detailed_collections["tax_offset_read_models_meta"].find_one(
-            {"_id": STATE_DOCUMENT_ID}
-        )
-        meta_payload = self._load_binary_payload(meta_document)
-        read_models = self._load_entities_by_id(self._mongo_detailed_collections["tax_offset_read_models"])
-        if not meta_payload and not read_models:
-            return {}
-
-        payload = meta_payload if isinstance(meta_payload, dict) else {}
-        payload["read_models"] = read_models
-        return payload
-
-    def _load_pending_invoice_commands_detailed_payload(self) -> dict[str, Any]:
-        commands = self._load_entities_by_id(self._mongo_detailed_collections["pending_invoice_commands"])
-        return commands if isinstance(commands, dict) else {}
-
     def load_pending_invoice_commands(self) -> dict[str, Any]:
-        return self._load_pending_invoice_commands_detailed_payload()
-
-    def save_pending_invoice_commands(self, snapshot: dict[str, Any]) -> None:
-        self._save_pending_invoice_commands_detailed(snapshot, datetime.now(UTC))
-
-    def _load_app_health_alerts_detailed_payload(self) -> dict[str, Any]:
-        document = self._mongo_detailed_collections["app_health_alerts"].find_one({"_id": STATE_DOCUMENT_ID})
-        payload = self._load_binary_payload(document)
+        payload = self._load_local_pickle().get("pending_invoice_commands", {})
         return payload if isinstance(payload, dict) else {}
 
-    def _save_workbench_overrides_detailed(self, workbench_overrides_snapshot: Any, updated_at: datetime) -> None:
-        snapshot = workbench_overrides_snapshot if isinstance(workbench_overrides_snapshot, dict) else {}
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"row_overrides"}
-        }
-        row_overrides = snapshot.get("row_overrides", {})
-        self._mongo_detailed_collections["workbench_overrides_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "row_override_count": len(row_overrides) if isinstance(row_overrides, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-        override_documents = []
-        if isinstance(row_overrides, dict):
-            for row_id, override in row_overrides.items():
-                override_documents.append(
-                    {
-                        "_id": str(row_id),
-                        "payload": Binary(pickle.dumps(override)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(self._mongo_detailed_collections["workbench_row_overrides"], override_documents)
-
-    def _save_workbench_overrides_detailed_incremental(
-        self,
-        workbench_overrides_snapshot: Any,
-        updated_at: datetime,
-        changed_row_ids: list[str],
-    ) -> None:
-        snapshot = workbench_overrides_snapshot if isinstance(workbench_overrides_snapshot, dict) else {}
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"row_overrides"}
-        }
-        row_overrides = snapshot.get("row_overrides", {})
-        self._mongo_detailed_collections["workbench_overrides_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "row_override_count": len(row_overrides) if isinstance(row_overrides, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-        collection = self._mongo_detailed_collections["workbench_row_overrides"]
-        if not isinstance(row_overrides, dict):
-            row_overrides = {}
-        for row_id in {str(value) for value in changed_row_ids}:
-            override = row_overrides.get(row_id)
-            if isinstance(override, dict):
-                collection.replace_one(
-                    {"_id": row_id},
-                    {
-                        "_id": row_id,
-                        "payload": Binary(pickle.dumps(override)),
-                        "updated_at": updated_at,
-                    },
-                    upsert=True,
-                )
-            else:
-                collection.delete_many({"_id": row_id})
-
-    def _save_workbench_exception_cases_detailed(self, snapshot: Any, updated_at: datetime) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        meta_payload = {
-            key: value
-            for key, value in normalized_snapshot.items()
-            if key not in {"cases"}
-        }
-        cases = normalized_snapshot.get("cases", {})
-        case_documents = []
-        if isinstance(cases, dict):
-            for case_id, case_payload in cases.items():
-                serialized_case = self._serialize_value(case_payload)
-                case_documents.append(
-                    {
-                        "_id": str(case_id),
-                        "status": serialized_case.get("status"),
-                        "exception_code": serialized_case.get("exception_code"),
-                        "category": serialized_case.get("category"),
-                        "row_ids": serialized_case.get("row_ids"),
-                        "scope_months": serialized_case.get("scope_months"),
-                        "payload": Binary(pickle.dumps(case_payload)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(self._mongo_detailed_collections["workbench_exception_cases"], case_documents)
-        self._mongo_detailed_collections["workbench_exception_cases_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "exception_case_count": len(cases) if isinstance(cases, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_workbench_pair_relations_detailed(
-        self,
-        snapshot: dict[str, Any],
-        updated_at: datetime,
-        *,
-        changed_case_ids: list[str] | None = None,
-    ) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"pair_relations"}
-        }
-        serialized_meta_payload = self._serialize_value(meta_payload)
-        pair_relations = snapshot.get("pair_relations", {})
-        collection = self._mongo_detailed_collections["workbench_pair_relations"]
-        if changed_case_ids is not None:
-            normalized_case_ids = {str(case_id) for case_id in changed_case_ids if str(case_id)}
-            for case_id in normalized_case_ids:
-                relation = pair_relations.get(case_id) if isinstance(pair_relations, dict) else None
-                if isinstance(relation, dict):
-                    serialized_relation = self._serialize_value(relation)
-                    collection.replace_one(
-                        {"_id": case_id},
-                        {
-                            "_id": case_id,
-                            "case_id": serialized_relation.get("case_id"),
-                            "row_ids": serialized_relation.get("row_ids"),
-                            "row_types": serialized_relation.get("row_types"),
-                            "status": serialized_relation.get("status"),
-                            "relation_mode": serialized_relation.get("relation_mode"),
-                            "month_scope": serialized_relation.get("month_scope"),
-                            "note": serialized_relation.get("note"),
-                            "amount_check": serialized_relation.get("amount_check"),
-                            "created_by": serialized_relation.get("created_by"),
-                            "created_at": serialized_relation.get("created_at"),
-                            "updated_at": serialized_relation.get("updated_at"),
-                            "payload": Binary(pickle.dumps(relation)),
-                        },
-                        upsert=True,
-                    )
-                else:
-                    collection.delete_many({"_id": case_id})
-            self._mongo_detailed_collections["workbench_pair_relations_meta"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        **serialized_meta_payload,
-                        "pair_relation_count": collection.count_documents({}),
-                        "payload": Binary(pickle.dumps(meta_payload)),
-                        "updated_at": updated_at,
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        relation_documents = []
-        if isinstance(pair_relations, dict):
-            for case_id, relation in pair_relations.items():
-                serialized_relation = self._serialize_value(relation)
-                relation_documents.append(
-                    {
-                        "_id": str(case_id),
-                        "case_id": serialized_relation.get("case_id"),
-                        "row_ids": serialized_relation.get("row_ids"),
-                        "row_types": serialized_relation.get("row_types"),
-                        "status": serialized_relation.get("status"),
-                        "relation_mode": serialized_relation.get("relation_mode"),
-                        "month_scope": serialized_relation.get("month_scope"),
-                        "note": serialized_relation.get("note"),
-                        "amount_check": serialized_relation.get("amount_check"),
-                        "created_by": serialized_relation.get("created_by"),
-                        "created_at": serialized_relation.get("created_at"),
-                        "updated_at": serialized_relation.get("updated_at"),
-                        "payload": Binary(pickle.dumps(relation)),
-                    }
-                )
-        self._replace_collection_documents(collection, relation_documents)
-        self._mongo_detailed_collections["workbench_pair_relations_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **serialized_meta_payload,
-                    "pair_relation_count": len(pair_relations) if isinstance(pair_relations, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_workbench_read_models_detailed(
-        self,
-        snapshot: dict[str, Any],
-        updated_at: datetime,
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"read_models"}
-        }
-        read_models = snapshot.get("read_models", {})
-        collection = self._mongo_detailed_collections["workbench_read_models"]
-        if changed_scope_keys is not None:
-            normalized_scope_keys = {str(scope_key) for scope_key in changed_scope_keys if str(scope_key)}
-            for scope_key in normalized_scope_keys:
-                read_model = read_models.get(scope_key) if isinstance(read_models, dict) else None
-                if isinstance(read_model, dict):
-                    serialized_read_model = self._serialize_value(read_model)
-                    collection.replace_one(
-                        {"_id": scope_key},
-                        {
-                            "_id": str(scope_key),
-                            "scope_key": serialized_read_model.get("scope_key"),
-                            "scope_type": serialized_read_model.get("scope_type"),
-                            "generated_at": serialized_read_model.get("generated_at"),
-                            "payload": Binary(pickle.dumps(read_model)),
-                            "updated_at": updated_at,
-                        },
-                        upsert=True,
-                    )
-                else:
-                    collection.delete_many({"_id": scope_key})
-            self._mongo_detailed_collections["workbench_read_models_meta"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        **meta_payload,
-                        "read_model_count": collection.count_documents({}),
-                        "payload": Binary(pickle.dumps(meta_payload)),
-                        "updated_at": updated_at,
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        read_model_documents = []
-        if isinstance(read_models, dict):
-            for scope_key, read_model in read_models.items():
-                serialized_read_model = self._serialize_value(read_model)
-                read_model_documents.append(
-                    {
-                        "_id": str(scope_key),
-                        "scope_key": serialized_read_model.get("scope_key"),
-                        "scope_type": serialized_read_model.get("scope_type"),
-                        "generated_at": serialized_read_model.get("generated_at"),
-                        "payload": Binary(pickle.dumps(read_model)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(collection, read_model_documents)
-        self._mongo_detailed_collections["workbench_read_models_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "read_model_count": len(read_models) if isinstance(read_models, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_workbench_candidate_matches_detailed(
-        self,
-        snapshot: dict[str, Any],
-        updated_at: datetime,
-        *,
-        changed_scope_months: list[str] | None = None,
-    ) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"candidates"}
-        }
-        candidates = snapshot.get("candidates", {})
-        normalized_scope_months = {
-            str(scope_month).strip()
-            for scope_month in list(changed_scope_months or [])
-            if str(scope_month).strip()
-        }
-        collection = self._mongo_detailed_collections["workbench_candidate_matches"]
-        if changed_scope_months is not None:
-            if normalized_scope_months:
-                collection.delete_many({"scope_month": {"$in": sorted(normalized_scope_months)}})
-            candidate_documents = []
-            if isinstance(candidates, dict):
-                for candidate_key, candidate in candidates.items():
-                    serialized_candidate = self._serialize_value(candidate)
-                    if str(serialized_candidate.get("scope_month") or "").strip() not in normalized_scope_months:
-                        continue
-                    candidate_documents.append(
-                        {
-                            "_id": str(candidate_key),
-                            "candidate_id": serialized_candidate.get("candidate_id"),
-                            "candidate_key": serialized_candidate.get("candidate_key"),
-                            "scope_month": serialized_candidate.get("scope_month"),
-                            "candidate_type": serialized_candidate.get("candidate_type"),
-                            "status": serialized_candidate.get("status"),
-                            "confidence": serialized_candidate.get("confidence"),
-                            "rule_code": serialized_candidate.get("rule_code"),
-                            "row_ids": serialized_candidate.get("row_ids"),
-                            "generated_at": serialized_candidate.get("generated_at"),
-                            "payload": Binary(pickle.dumps(candidate)),
-                            "updated_at": updated_at,
-                        }
-                    )
-            for document in candidate_documents:
-                collection.replace_one({"_id": document["_id"]}, document, upsert=True)
-            self._mongo_detailed_collections["workbench_candidate_matches_meta"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        **meta_payload,
-                        "candidate_count": collection.count_documents({}),
-                        "payload": Binary(pickle.dumps(meta_payload)),
-                        "updated_at": updated_at,
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        candidate_documents = []
-        if isinstance(candidates, dict):
-            for candidate_key, candidate in candidates.items():
-                serialized_candidate = self._serialize_value(candidate)
-                candidate_documents.append(
-                    {
-                        "_id": str(candidate_key),
-                        "candidate_id": serialized_candidate.get("candidate_id"),
-                        "candidate_key": serialized_candidate.get("candidate_key"),
-                        "scope_month": serialized_candidate.get("scope_month"),
-                        "candidate_type": serialized_candidate.get("candidate_type"),
-                        "status": serialized_candidate.get("status"),
-                        "confidence": serialized_candidate.get("confidence"),
-                        "rule_code": serialized_candidate.get("rule_code"),
-                        "row_ids": serialized_candidate.get("row_ids"),
-                        "generated_at": serialized_candidate.get("generated_at"),
-                        "payload": Binary(pickle.dumps(candidate)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(collection, candidate_documents)
-        self._mongo_detailed_collections["workbench_candidate_matches_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "candidate_count": len(candidates) if isinstance(candidates, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-                upsert=True,
-            )
-
-    def _save_bank_transaction_categories_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"categories"}
-        }
-        categories = snapshot.get("categories", {})
-        category_documents = []
-        if isinstance(categories, dict):
-            for transaction_id, record in categories.items():
-                serialized_record = self._serialize_value(record)
-                category_documents.append(
-                    {
-                        "_id": str(transaction_id),
-                        "transaction_id": serialized_record.get("transaction_id"),
-                        "category_code": serialized_record.get("category_code"),
-                        "category_label": serialized_record.get("category_label"),
-                        "category_path": serialized_record.get("category_path"),
-                        "version": serialized_record.get("version"),
-                        "updated_by": serialized_record.get("updated_by"),
-                        "updated_at": serialized_record.get("updated_at"),
-                        "payload": Binary(pickle.dumps(record)),
-                    }
-                )
-        self._replace_collection_documents(
-            self._mongo_detailed_collections["bank_transaction_categories"],
-            category_documents,
-        )
-        self._mongo_detailed_collections["bank_transaction_categories_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "category_count": len(categories) if isinstance(categories, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_workbench_matching_dirty_scopes_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"dirty_scopes"}
-        }
-        dirty_scopes = snapshot.get("dirty_scopes", {})
-        dirty_scope_documents = []
-        if isinstance(dirty_scopes, dict):
-            for scope_month, entry in dirty_scopes.items():
-                if not isinstance(entry, dict):
-                    continue
-                serialized_entry = self._serialize_value(entry)
-                dirty_scope_documents.append(
-                    {
-                        "_id": str(scope_month),
-                        "scope_month": serialized_entry.get("scope_month"),
-                        "reasons": serialized_entry.get("reasons"),
-                        "attempt_count": serialized_entry.get("attempt_count"),
-                        "last_error": serialized_entry.get("last_error"),
-                        "updated_at": updated_at,
-                        "payload": Binary(pickle.dumps(entry)),
-                    }
-                )
-        self._replace_collection_documents(
-            self._mongo_detailed_collections["workbench_matching_dirty_scopes"],
-            dirty_scope_documents,
-        )
-        self._mongo_detailed_collections["workbench_matching_dirty_scopes_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "dirty_scope_count": len(dirty_scopes) if isinstance(dirty_scopes, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_no_oa_bank_batches_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        meta_payload = {
-            key: value
-            for key, value in normalized_snapshot.items()
-            if key not in {"batches", "audit_log"}
-        }
-        batches = normalized_snapshot.get("batches", {})
-        batch_documents = []
-        if isinstance(batches, dict):
-            for batch_id, batch in batches.items():
-                serialized_batch = self._serialize_value(batch)
-                batch_documents.append(
-                    {
-                        "_id": str(batch_id),
-                        "batch_id": serialized_batch.get("batch_id"),
-                        "batch_key": serialized_batch.get("batch_key"),
-                        "batch_type": serialized_batch.get("batch_type"),
-                        "scope_month": serialized_batch.get("scope_month"),
-                        "account_key": serialized_batch.get("account_key"),
-                        "status": serialized_batch.get("status"),
-                        "row_ids": serialized_batch.get("row_ids"),
-                        "relation_case_id": serialized_batch.get("relation_case_id"),
-                        "version": serialized_batch.get("version"),
-                        "payload": Binary(pickle.dumps(batch)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(self._mongo_detailed_collections["no_oa_bank_batches"], batch_documents)
-
-        audit_log = normalized_snapshot.get("audit_log", [])
-        audit_documents = []
-        if isinstance(audit_log, list):
-            for index, entry in enumerate(audit_log):
-                if not isinstance(entry, dict):
-                    continue
-                audit_documents.append(
-                    {
-                        "_id": f"{index:012d}",
-                        "batch_id": str(entry.get("batch_id") or ""),
-                        "operation": str(entry.get("operation") or ""),
-                        "actor": str(entry.get("actor") or ""),
-                        "created_at": str(entry.get("created_at") or ""),
-                        "payload": Binary(pickle.dumps(entry)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(
-            self._mongo_detailed_collections["no_oa_bank_batch_audit_log"],
-            audit_documents,
-        )
-
-        self._mongo_detailed_collections["no_oa_bank_batches_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "batch_count": len(batches) if isinstance(batches, dict) else 0,
-                    "audit_log_count": len(audit_documents),
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_turnover_relations_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        meta_payload = {
-            key: value
-            for key, value in normalized_snapshot.items()
-            if key not in {"relations", "audit_log"}
-        }
-        relations = normalized_snapshot.get("relations", [])
-        audit_log = normalized_snapshot.get("audit_log", [])
-        relation_documents = []
-        if isinstance(relations, list):
-            for index, relation in enumerate(relations):
-                serialized_relation = self._serialize_value(relation)
-                relation_id = str(serialized_relation.get("relation_id") or f"relation-{index}")
-                relation_documents.append(
-                    {
-                        "_id": relation_id,
-                        "relation_id": relation_id,
-                        "status": serialized_relation.get("status"),
-                        "category_family": serialized_relation.get("category_family"),
-                        "business_type": serialized_relation.get("business_type"),
-                        "bank_row_ids": serialized_relation.get("bank_row_ids"),
-                        "sync_to_workbench": serialized_relation.get("sync_to_workbench"),
-                        "updated_at": updated_at,
-                        "payload": Binary(pickle.dumps(relation)),
-                    }
-                )
-        audit_documents = []
-        if isinstance(audit_log, list):
-            for index, entry in enumerate(audit_log):
-                serialized_entry = self._serialize_value(entry)
-                audit_id = str(serialized_entry.get("audit_id") or f"{index:08d}-{serialized_entry.get('relation_id', 'unknown')}-{serialized_entry.get('action', 'event')}")
-                audit_documents.append(
-                    {
-                        "_id": audit_id,
-                        "relation_id": serialized_entry.get("relation_id"),
-                        "action": serialized_entry.get("action"),
-                        "actor": serialized_entry.get("actor"),
-                        "created_at": serialized_entry.get("created_at"),
-                        "updated_at": updated_at,
-                        "payload": Binary(pickle.dumps(entry)),
-                    }
-                )
-        self._replace_collection_documents(self._mongo_detailed_collections["turnover_relations"], relation_documents)
-        self._replace_collection_documents(
-            self._mongo_detailed_collections["turnover_relation_audit_log"],
-            audit_documents,
-        )
-        self._mongo_detailed_collections["turnover_relations_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "relation_count": len(relations) if isinstance(relations, list) else 0,
-                    "audit_log_count": len(audit_log) if isinstance(audit_log, list) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_turnover_ledger_extras_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        meta_payload = {
-            key: value
-            for key, value in normalized_snapshot.items()
-            if key not in {"extras"}
-        }
-        extras = normalized_snapshot.get("extras", [])
-        extra_documents = []
-        if isinstance(extras, list):
-            for index, extra in enumerate(extras):
-                serialized_extra = self._serialize_value(extra)
-                relation_id = str(serialized_extra.get("relation_id") or f"turnover-ledger-extra-{index}")
-                extra_documents.append(
-                    {
-                        "_id": relation_id,
-                        "relation_id": relation_id,
-                        "interest_rate_type": serialized_extra.get("interest_rate_type"),
-                        "interest_rate_value": serialized_extra.get("interest_rate_value"),
-                        "interest_paid_amount": serialized_extra.get("interest_paid_amount"),
-                        "interest_paid_date": serialized_extra.get("interest_paid_date"),
-                        "updated_by": serialized_extra.get("updated_by"),
-                        "updated_at": updated_at,
-                        "payload": Binary(pickle.dumps(extra)),
-                    }
-                )
-        self._replace_collection_documents(
-            self._mongo_detailed_collections["turnover_ledger_extras"],
-            extra_documents,
-        )
-        self._mongo_detailed_collections["turnover_ledger_extras_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "extra_count": len(extras) if isinstance(extras, list) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_cost_statistics_read_models_detailed(
-        self,
-        snapshot: dict[str, Any],
-        updated_at: datetime,
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"read_models"}
-        }
-        read_models = snapshot.get("read_models", {})
-        collection = self._mongo_detailed_collections["cost_statistics_read_models"]
-        if changed_scope_keys is not None:
-            normalized_scope_keys = {str(scope_key) for scope_key in changed_scope_keys if str(scope_key)}
-            for scope_key in normalized_scope_keys:
-                read_model = read_models.get(scope_key) if isinstance(read_models, dict) else None
-                if isinstance(read_model, dict):
-                    serialized_read_model = self._serialize_value(read_model)
-                    collection.replace_one(
-                        {"_id": scope_key},
-                        {
-                            "_id": str(scope_key),
-                            "scope_key": serialized_read_model.get("scope_key"),
-                            "scope_type": serialized_read_model.get("scope_type"),
-                            "schema_version": serialized_read_model.get("schema_version"),
-                            "month": serialized_read_model.get("month"),
-                            "project_scope": serialized_read_model.get("project_scope"),
-                            "generated_at": serialized_read_model.get("generated_at"),
-                            "cache_status": serialized_read_model.get("cache_status"),
-                            "entry_count": serialized_read_model.get("entry_count"),
-                            "source_scope_keys": serialized_read_model.get("source_scope_keys"),
-                            "payload": Binary(pickle.dumps(read_model)),
-                            "updated_at": updated_at,
-                        },
-                        upsert=True,
-                    )
-                else:
-                    collection.delete_many({"_id": scope_key})
-            self._mongo_detailed_collections["cost_statistics_read_models_meta"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        **meta_payload,
-                        "read_model_count": collection.count_documents({}),
-                        "payload": Binary(pickle.dumps(meta_payload)),
-                        "updated_at": updated_at,
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        read_model_documents = []
-        if isinstance(read_models, dict):
-            for scope_key, read_model in read_models.items():
-                serialized_read_model = self._serialize_value(read_model)
-                read_model_documents.append(
-                    {
-                        "_id": str(scope_key),
-                        "scope_key": serialized_read_model.get("scope_key"),
-                        "scope_type": serialized_read_model.get("scope_type"),
-                        "schema_version": serialized_read_model.get("schema_version"),
-                        "month": serialized_read_model.get("month"),
-                        "project_scope": serialized_read_model.get("project_scope"),
-                        "generated_at": serialized_read_model.get("generated_at"),
-                        "cache_status": serialized_read_model.get("cache_status"),
-                        "entry_count": serialized_read_model.get("entry_count"),
-                        "source_scope_keys": serialized_read_model.get("source_scope_keys"),
-                        "payload": Binary(pickle.dumps(read_model)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(collection, read_model_documents)
-        self._mongo_detailed_collections["cost_statistics_read_models_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "read_model_count": len(read_models) if isinstance(read_models, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_tax_offset_read_models_detailed(
-        self,
-        snapshot: dict[str, Any],
-        updated_at: datetime,
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"read_models"}
-        }
-        read_models = snapshot.get("read_models", {})
-        collection = self._mongo_detailed_collections["tax_offset_read_models"]
-        if changed_scope_keys is not None:
-            normalized_scope_keys = {str(scope_key) for scope_key in changed_scope_keys if str(scope_key)}
-            for scope_key in normalized_scope_keys:
-                read_model = read_models.get(scope_key) if isinstance(read_models, dict) else None
-                if isinstance(read_model, dict):
-                    serialized_read_model = self._serialize_value(read_model)
-                    collection.replace_one(
-                        {"_id": scope_key},
-                        {
-                            "_id": str(scope_key),
-                            "scope_key": serialized_read_model.get("scope_key"),
-                            "scope_type": serialized_read_model.get("scope_type"),
-                            "schema_version": serialized_read_model.get("schema_version"),
-                            "month": serialized_read_model.get("month"),
-                            "generated_at": serialized_read_model.get("generated_at"),
-                            "cache_status": serialized_read_model.get("cache_status"),
-                            "output_count": serialized_read_model.get("output_count"),
-                            "input_plan_count": serialized_read_model.get("input_plan_count"),
-                            "certified_count": serialized_read_model.get("certified_count"),
-                            "source_scope_keys": serialized_read_model.get("source_scope_keys"),
-                            "payload": Binary(pickle.dumps(read_model)),
-                            "updated_at": updated_at,
-                        },
-                        upsert=True,
-                    )
-                else:
-                    collection.delete_many({"_id": scope_key})
-            self._mongo_detailed_collections["tax_offset_read_models_meta"].update_one(
-                {"_id": STATE_DOCUMENT_ID},
-                {
-                    "$set": {
-                        **meta_payload,
-                        "read_model_count": collection.count_documents({}),
-                        "payload": Binary(pickle.dumps(meta_payload)),
-                        "updated_at": updated_at,
-                    }
-                },
-                upsert=True,
-            )
-            return
-
-        read_model_documents = []
-        if isinstance(read_models, dict):
-            for scope_key, read_model in read_models.items():
-                serialized_read_model = self._serialize_value(read_model)
-                read_model_documents.append(
-                    {
-                        "_id": str(scope_key),
-                        "scope_key": serialized_read_model.get("scope_key"),
-                        "scope_type": serialized_read_model.get("scope_type"),
-                        "schema_version": serialized_read_model.get("schema_version"),
-                        "month": serialized_read_model.get("month"),
-                        "generated_at": serialized_read_model.get("generated_at"),
-                        "cache_status": serialized_read_model.get("cache_status"),
-                        "output_count": serialized_read_model.get("output_count"),
-                        "input_plan_count": serialized_read_model.get("input_plan_count"),
-                        "certified_count": serialized_read_model.get("certified_count"),
-                        "source_scope_keys": serialized_read_model.get("source_scope_keys"),
-                        "payload": Binary(pickle.dumps(read_model)),
-                        "updated_at": updated_at,
-                    }
-                )
-        self._replace_collection_documents(collection, read_model_documents)
-        self._mongo_detailed_collections["tax_offset_read_models_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "read_model_count": len(read_models) if isinstance(read_models, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-    def _save_pending_invoice_commands_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
-        command_documents: list[dict[str, Any]] = []
-        if isinstance(snapshot, dict):
-            for request_id, command in snapshot.items():
-                if not isinstance(command, dict):
-                    continue
-                serialized_command = self._serialize_value(command)
-                command_documents.append(
-                    {
-                        **serialized_command,
-                        "_id": str(serialized_command.get("request_id") or request_id),
-                        "request_id": str(serialized_command.get("request_id") or request_id),
-                        "request_key": serialized_command.get("request_key"),
-                        "status": serialized_command.get("status"),
-                        "updated_at": updated_at,
-                        "payload": Binary(pickle.dumps(command)),
-                    }
-                )
-        self._replace_collection_documents(
-            self._mongo_detailed_collections["pending_invoice_commands"],
-            command_documents,
-        )
-
-    def _save_tax_certified_imports_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
-        meta_payload = {
-            key: value
-            for key, value in snapshot.items()
-            if key not in {"sessions", "batches", "records"}
-        }
-        sessions = snapshot.get("sessions", {})
-        batches = snapshot.get("batches", {})
-        records = snapshot.get("records", {})
-
-        self._mongo_detailed_collections["tax_certified_imports_meta"].update_one(
-            {"_id": STATE_DOCUMENT_ID},
-            {
-                "$set": {
-                    **meta_payload,
-                    "session_count": len(sessions) if isinstance(sessions, dict) else 0,
-                    "batch_count": len(batches) if isinstance(batches, dict) else 0,
-                    "record_count": len(records) if isinstance(records, dict) else 0,
-                    "payload": Binary(pickle.dumps(meta_payload)),
-                    "updated_at": updated_at,
-                }
-            },
-            upsert=True,
-        )
-
-        session_documents = []
-        if isinstance(sessions, dict):
-            for session_id, session in sessions.items():
-                serialized_session = self._serialize_value(session)
-                session_documents.append(
-                    {
-                        "_id": str(session_id),
-                        "imported_by": serialized_session.get("imported_by"),
-                        "status": serialized_session.get("status"),
-                        "file_count": serialized_session.get("file_count"),
-                        "created_at": serialized_session.get("created_at"),
-                        "payload": Binary(pickle.dumps(session)),
-                        "updated_at": updated_at,
-                    }
-                )
-
-        batch_documents = []
-        if isinstance(batches, dict):
-            for batch_id, batch in batches.items():
-                serialized_batch = self._serialize_value(batch)
-                batch_documents.append(
-                    {
-                        "_id": str(batch_id),
-                        "session_id": serialized_batch.get("session_id"),
-                        "imported_by": serialized_batch.get("imported_by"),
-                        "file_count": serialized_batch.get("file_count"),
-                        "months": serialized_batch.get("months"),
-                        "persisted_record_count": serialized_batch.get("persisted_record_count"),
-                        "created_at": serialized_batch.get("created_at"),
-                        "payload": Binary(pickle.dumps(batch)),
-                        "updated_at": updated_at,
-                    }
-                )
-
-        record_documents = []
-        if isinstance(records, dict):
-            for record_id, record in records.items():
-                serialized_record = self._serialize_value(record)
-                record_documents.append(
-                    {
-                        "_id": str(record_id),
-                        "month": serialized_record.get("month"),
-                        "invoice_no": serialized_record.get("invoice_no"),
-                        "digital_invoice_no": serialized_record.get("digital_invoice_no"),
-                        "invoice_code": serialized_record.get("invoice_code"),
-                        "seller_tax_no": serialized_record.get("seller_tax_no"),
-                        "seller_name": serialized_record.get("seller_name"),
-                        "issue_date": serialized_record.get("issue_date"),
-                        "tax_amount": serialized_record.get("tax_amount"),
-                        "selection_status": serialized_record.get("selection_status"),
-                        "invoice_status": serialized_record.get("invoice_status"),
-                        "source_file_name": serialized_record.get("source_file_name"),
-                        "source_row_number": serialized_record.get("source_row_number"),
-                        "payload": Binary(pickle.dumps(record)),
-                        "updated_at": updated_at,
-                    }
-                )
-
-        self._replace_collection_documents(self._mongo_detailed_collections["tax_certified_import_sessions"], session_documents)
-        self._replace_collection_documents(self._mongo_detailed_collections["tax_certified_import_batches"], batch_documents)
-        self._replace_collection_documents(self._mongo_detailed_collections["tax_certified_import_records"], record_documents)
+    def save_pending_invoice_commands(self, snapshot: dict[str, Any]) -> None:
+        current_payload = self._load_local_pickle()
+        current_payload["pending_invoice_commands"] = snapshot if isinstance(snapshot, dict) else {}
+        self._save_local_pickle(current_payload)
 
     def _extract_file_import_metadata(self, file_import_snapshot: Any) -> dict[str, Any]:
         sessions_by_id = {}
@@ -3533,42 +917,6 @@ class ApplicationStateStore:
             "files": files,
         }
 
-    def _replace_collection_documents(self, collection: Any, documents: list[dict[str, Any]]) -> None:
-        collection.delete_many({})
-        for document in documents:
-            collection.replace_one({"_id": document["_id"]}, document, upsert=True)
-
-    def _load_entities_by_id(self, collection: Any) -> dict[str, Any]:
-        payload: dict[str, Any] = {}
-        documents = sorted(collection.find({}), key=lambda item: str(item.get("_id", "")))
-        for document in documents:
-            loaded = self._load_binary_payload(document)
-            if loaded is None:
-                continue
-            payload[str(document["_id"])] = loaded
-        return payload
-
-    def _load_entities_list(self, collection: Any) -> list[Any]:
-        payload: list[Any] = []
-        documents = sorted(collection.find({}), key=lambda item: str(item.get("_id", "")))
-        for document in documents:
-            loaded = self._load_binary_payload(document)
-            if loaded is None:
-                continue
-            payload.append(loaded)
-        return payload
-
-    @staticmethod
-    def _load_binary_payload(document: dict[str, Any] | None) -> Any | None:
-        if not isinstance(document, dict):
-            return None
-        raw_payload = document.get("payload")
-        if isinstance(raw_payload, dict):
-            return raw_payload
-        if isinstance(raw_payload, (Binary, bytes, bytearray)):
-            return pickle.loads(bytes(raw_payload))  # noqa: S301 - trusted app state
-        return None
-
     @classmethod
     def _normalize_manual_oa_imports(cls, payload: object) -> dict[str, object]:
         raw_payload = payload if isinstance(payload, dict) else {}
@@ -3604,12 +952,6 @@ class ApplicationStateStore:
             result.append(text)
             seen.add(text)
         return result
-
-    def _clear_legacy_snapshot_collections(self) -> None:
-        if self._legacy_mongo_collection is not None:
-            self._legacy_mongo_collection.delete_many({})
-        for collection in self._mongo_state_collections.values():
-            collection.delete_many({})
 
     @staticmethod
     def _has_non_empty_state(payload: dict[str, Any]) -> bool:
@@ -3651,43 +993,6 @@ class ApplicationStateStore:
                 pickle.dump(payload, handle)
             temp_path.replace(self._legacy_state_path)
 
-    def _migrate_legacy_file_refs_to_gridfs(self, payload: dict[str, Any]) -> bool:
-        if self._mongo_file_bucket is None:
-            return False
-        file_import_snapshot = payload.get("file_imports")
-        if not isinstance(file_import_snapshot, dict):
-            return False
-
-        migrated_any = False
-        raw_sessions = file_import_snapshot.get("sessions", {})
-        if not isinstance(raw_sessions, dict):
-            return False
-        for session_id, session_payload in raw_sessions.items():
-            files = self._get_container_value(session_payload, "files")
-            if not isinstance(files, list):
-                continue
-            for file_payload in files:
-                stored_file_path = self._get_container_value(file_payload, "stored_file_path")
-                file_id = self._get_container_value(file_payload, "id")
-                file_name = self._get_container_value(file_payload, "file_name")
-                if not stored_file_path or not file_id or not file_name:
-                    continue
-                if self._is_gridfs_ref(str(stored_file_path)):
-                    continue
-                source_path = Path(str(stored_file_path))
-                if not source_path.exists():
-                    raise RuntimeError(f"Legacy import file is missing and cannot be migrated: {source_path}")
-                migrated_ref = self.store_import_file(
-                    session_id=str(session_id),
-                    file_id=str(file_id),
-                    file_name=str(file_name),
-                    content=source_path.read_bytes(),
-                )
-                self._set_container_value(file_payload, "stored_file_path", migrated_ref)
-                source_path.unlink(missing_ok=True)
-                migrated_any = True
-        return migrated_any
-
     @staticmethod
     def _get_container_value(container: Any, key: str) -> Any:
         if isinstance(container, dict):
@@ -3702,20 +1007,8 @@ class ApplicationStateStore:
         setattr(container, key, value)
 
     @staticmethod
-    def _build_gridfs_ref(file_id: str, file_name: str) -> str:
-        return f"{GRIDFS_REF_PREFIX}{file_id}/{file_name}"
-
-    @staticmethod
     def _is_gridfs_ref(value: str) -> bool:
         return value.startswith(GRIDFS_REF_PREFIX)
-
-    @staticmethod
-    def _parse_gridfs_ref(value: str) -> str:
-        raw = value[len(GRIDFS_REF_PREFIX) :]
-        file_id, _, _ = raw.partition("/")
-        if not file_id:
-            raise ValueError("Invalid GridFS stored file reference.")
-        return file_id
 
     @staticmethod
     def _sanitize_name(file_name: str) -> str:

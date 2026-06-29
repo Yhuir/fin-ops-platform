@@ -16,7 +16,7 @@ from fin_ops_platform.services.turnover_ledger_source_versions import build_turn
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_by_row_id_from_distribution_payload
 from fin_ops_platform.services.workbench_relation_read_facade import FRESH_WORKBENCH_RELATION_STATUS, WorkbenchRelationReadFacade
-from fin_ops_platform.services.state_store import default_data_dir
+from fin_ops_platform.services.runtime_paths import default_data_dir
 
 
 CENT = Decimal("0.01")

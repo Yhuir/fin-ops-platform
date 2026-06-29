@@ -13,8 +13,15 @@ from fin_ops_platform.services.historical_etc_business_batch_migration_service i
 )
 from fin_ops_platform.tools.link_existing_etc_batches import (
     _active_relation_by_case_id,
-    _build_full_snapshot_application,
     _link_etc_invoices_to_existing_invoices,
+)
+from fin_ops_platform.tools.runtime_application import (
+    build_tool_runtime_application,
+    etc_service,
+    etc_state_persister,
+    invalidate_workbench_scopes,
+    persist_workbench_pair_relations,
+    workbench_relation_command_service,
 )
 
 
@@ -29,16 +36,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     specs = _load_specs(args.spec_file)
-    app = _build_full_snapshot_application(args.data_dir)
+    app = build_tool_runtime_application(args.data_dir)
     if args.execute:
         service = HistoricalEtcBusinessBatchMigrationService(
-            etc_service=app._etc_service,
-            relation_command_service=app._workbench_relation_command_service(),
+            etc_service=etc_service(app),
+            relation_command_service=workbench_relation_command_service(app),
             link_etc_invoices_to_existing_invoices=lambda invoices: _link_etc_invoices_to_existing_invoices(app, invoices),
             refresh_after_etc_invoice_link=lambda months, reason: _refresh_after_historical_migration(app, months, reason),
-            persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(changed_case_ids=case_ids),
-            invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
-            persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
+            persist_pair_relations=lambda case_ids: persist_workbench_pair_relations(app, case_ids),
+            invalidate_workbench_scopes=lambda scope_keys: invalidate_workbench_scopes(app, scope_keys),
+            persist_etc_state=etc_state_persister(app),
         )
         results = [service.migrate(spec).to_payload() for spec in specs]
         status = "ok" if all(result.get("status") == "ok" for result in results) else "attention"
@@ -90,13 +97,13 @@ def _dry_run_spec(app: Any, spec: HistoricalEtcBusinessBatchMigrationSpec) -> di
     submission_batch = None
     submission_error = None
     try:
-        submission_batch = app._etc_service.get_batch(spec.submission_batch_id)
+        submission_batch = etc_service(app).get_batch(spec.submission_batch_id)
     except Exception as exc:  # pragma: no cover - concrete store errors differ by repository.
         submission_error = str(exc)
 
     existing_business_batch_found = False
     try:
-        app._etc_service.get_business_batch(spec.business_batch_id)
+        etc_service(app).get_business_batch(spec.business_batch_id)
         existing_business_batch_found = True
     except Exception:
         existing_business_batch_found = False
@@ -106,7 +113,7 @@ def _dry_run_spec(app: Any, spec: HistoricalEtcBusinessBatchMigrationSpec) -> di
     external_batch_matches = False
     if submission_batch is not None:
         external_batch_matches = str(getattr(submission_batch, "etc_batch_id", "") or "").strip() == spec.external_batch_id
-        invoices = app._etc_service.list_invoices_by_ids([str(invoice_id) for invoice_id in list(getattr(submission_batch, "invoice_ids", []) or [])])
+        invoices = etc_service(app).list_invoices_by_ids([str(invoice_id) for invoice_id in list(getattr(submission_batch, "invoice_ids", []) or [])])
         invoice_count = len(invoices)
         invoice_total = sum((Decimal(str(getattr(invoice, "total_amount", "0.00"))) for invoice in invoices), Decimal("0.00")).quantize(
             Decimal("0.01")

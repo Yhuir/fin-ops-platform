@@ -7,9 +7,9 @@
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
 | Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` | unsubmitted/submitted tab、业务批次筛选计数、workflow/detail/error/loading/delete dialog、首屏 business-batches 暂时失败刷新恢复、OA 草稿暂时失败重试、人工确认暂时失败重试、未提交和已提交 business batch delete/reset 暂时失败重试、source file delete 暂时失败重试、ticket-root source upload 暂时失败重试、OA 草稿和人工确认、source file 上传、严格浏览器错误捕获、成功后无可见错误残留 |
-| Frontend API mapper | `web/src/features/etc/api.ts` | `/api/etc/business-batches*` envelope、legacy `/api/etc/batches*` fallback、multipart upload、HTML/proxy error、stale preview error、本地化错误 |
+| Frontend API mapper | `web/src/features/etc/api.ts` | `/api/etc/business-batches*` envelope、canonical invoice list `importBatchId` 查询、multipart upload、HTML/proxy error、stale preview error、本地化错误 |
 | Workbench UI | `web/src/components/workbench/CandidateGroupGrid.tsx` | `etc_invoice_summary` 折叠/展开、open/paired 区显示、撤回/删除后 summary 释放和已存在 canonical invoice 可见性 |
-| HTTP routes | `server.py` `/api/etc*` | business batch、reconciliation task、legacy batch、import preview/confirm、source files、manual status、delete/reset 的状态码和结构化错误 |
+| HTTP routes | `server.py` `/api/etc*` | business batch、reconciliation task、invoice list、import preview/confirm、source files、manual status、delete/reset 的状态码和结构化错误 |
 | Business service | `EtcService`、`EtcBatchInvoiceLinkService` | 业务批次幂等、状态流转、ETC metadata/附件占用释放、已存在 canonical invoice 关联、ETC batch invoice link 幂等写入、历史 batch 迁移、删除 audit |
 | Application service | `EtcBusinessBatchApplicationService` | OA 草稿、manual OA status、source file、绑定 task 恢复、Workbench invalidation |
 | Reconciliation service | `EtcReconciliationTaskService` | task ready/importing/imported/closed/deleted、source files、version、tombstone、重启 hydrate |

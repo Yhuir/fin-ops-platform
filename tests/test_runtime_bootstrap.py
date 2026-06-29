@@ -8,8 +8,11 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.app import server as server_module
+from fin_ops_platform.services import file_object_migration as file_object_migration_module
+from fin_ops_platform.services import postgres_state_store as postgres_state_store_module
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
-from fin_ops_platform.services.runtime_bootstrap import LEGACY_SNAPSHOT_ALLOWLIST, LegacySnapshotBootstrap
+from fin_ops_platform.services import runtime_bootstrap as runtime_bootstrap_module
+from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
 class LoadTrackingStore:
@@ -118,25 +121,16 @@ class RuntimeBootstrapTests(unittest.TestCase):
 
     def test_application_init_does_not_call_legacy_full_snapshot_adapter_in_production(self) -> None:
         store = LoadTrackingStore()
-        with patch("fin_ops_platform.app.server.build_state_store", return_value=store), patch.object(
-            server_module.LegacySnapshotBootstrap,
-            "load_full_snapshot",
-            side_effect=AssertionError("production bootstrap must not load full snapshot"),
-        ):
+        self.assertFalse(hasattr(server_module, "LegacySnapshotBootstrap"))
+        with patch("fin_ops_platform.app.server.build_state_store", return_value=store):
             app = build_application(data_dir=Path("/tmp/ignored"))
 
         self.assertEqual(app.readiness_summary()["bootstrap"]["mode"], "production")
 
     def test_production_bootstrap_does_not_construct_direct_oa_mongo_adapter(self) -> None:
         store = LoadTrackingStore()
-        with patch("fin_ops_platform.app.server.build_state_store", return_value=store), patch(
-            "fin_ops_platform.app.server.load_mongo_oa_settings",
-            return_value=object(),
-        ), patch.object(
-            server_module.MongoOAAdapter,
-            "__init__",
-            side_effect=AssertionError("production API bootstrap must not construct direct OA Mongo adapter"),
-        ):
+        self.assertFalse(hasattr(server_module, "MongoOAAdapter"))
+        with patch("fin_ops_platform.app.server.build_state_store", return_value=store):
             app = build_application(data_dir=Path("/tmp/ignored"))
 
         self.assertEqual(app.readiness_summary()["bootstrap"]["mode"], "production")
@@ -152,46 +146,18 @@ class RuntimeBootstrapTests(unittest.TestCase):
 
         self.assertEqual(app.readiness_summary()["bootstrap"]["mode"], "production")
 
-    def test_postgres_state_store_does_not_auto_configure_legacy_gridfs_reader(self) -> None:
+    def test_postgres_state_store_does_not_expose_legacy_gridfs_reader(self) -> None:
         connection = ImportFactBootstrapConnection()
-        with patch(
-            "fin_ops_platform.services.postgres_state_store.LegacyGridFSFileReader.from_data_dir",
-            side_effect=AssertionError("production PostgreSQL store must not auto-configure legacy GridFS fallback"),
-        ):
-            store = PostgresStateStore(data_dir=Path("/tmp/fin-ops-bootstrap-test"), connection=connection)
+        self.assertFalse(hasattr(postgres_state_store_module, "LegacyGridFSFileReader"))
+        self.assertFalse(hasattr(file_object_migration_module, "LegacyGridFSFileReader"))
+        store = PostgresStateStore(data_dir=Path("/tmp/fin-ops-bootstrap-test"), connection=connection)
 
-        self.assertIsNone(getattr(store, "_legacy_file_reader"))
+        self.assertFalse(hasattr(store, "_legacy_file_reader"))
 
-    def test_postgres_state_store_can_enable_legacy_gridfs_reader_for_explicit_cutover_window(self) -> None:
-        connection = ImportFactBootstrapConnection()
-        legacy_reader = object()
-        with patch.dict(os.environ, {"FIN_OPS_ENABLE_LEGACY_GRIDFS_READS": "1"}), patch(
-            "fin_ops_platform.services.postgres_state_store.LegacyGridFSFileReader.from_data_dir",
-            return_value=legacy_reader,
-        ) as from_data_dir:
-            store = PostgresStateStore(data_dir=Path("/tmp/fin-ops-bootstrap-test"), connection=connection)
-
-        from_data_dir.assert_called_once()
-        self.assertIs(getattr(store, "_legacy_file_reader"), legacy_reader)
-
-    def test_legacy_bootstrap_loads_snapshot_only_for_explicit_test_migration_shadow_reason(self) -> None:
-        store = LoadTrackingStore()
-        bootstrap = LegacySnapshotBootstrap(store)
-
-        snapshot = bootstrap.load_full_snapshot(reason="unit_test")
-
-        self.assertEqual(snapshot, {})
-        self.assertEqual(store.bootstrap_load_calls, 1)
-        self.assertEqual(store.load_calls, 0)
-
-    def test_legacy_bootstrap_rejects_production_full_snapshot_reason(self) -> None:
-        bootstrap = LegacySnapshotBootstrap(LoadTrackingStore())
-
-        with self.assertRaises(RuntimeError):
-            bootstrap.load_full_snapshot(reason="application_startup")
-
-    def test_legacy_snapshot_allowlist_is_empty_for_production_modules(self) -> None:
-        self.assertEqual(LEGACY_SNAPSHOT_ALLOWLIST, ())
+    def test_runtime_bootstrap_does_not_expose_legacy_full_snapshot_adapter(self) -> None:
+        self.assertFalse(hasattr(runtime_bootstrap_module, "LegacySnapshotBootstrap"))
+        self.assertFalse(hasattr(runtime_bootstrap_module, "LEGACY_SNAPSHOT_ALLOWLIST"))
+        self.assertFalse(hasattr(runtime_bootstrap_module, "LEGACY_FULL_SNAPSHOT_REASON_PREFIXES"))
 
     def test_application_server_does_not_call_state_store_load_directly(self) -> None:
         server_path = Path("backend/src/fin_ops_platform/app/server.py")
@@ -206,6 +172,10 @@ class RuntimeBootstrapTests(unittest.TestCase):
     def test_application_server_production_path_does_not_call_load_persisted_state(self) -> None:
         source = Path("backend/src/fin_ops_platform/app/server.py").read_text(encoding="utf-8")
 
+        self.assertNotIn("LegacySnapshotBootstrap", source)
+        self.assertNotIn("_legacy_bootstrap", source)
+        self.assertNotIn("load_full_snapshot", source)
+        self.assertNotIn("def _load_persisted_state", source)
         self.assertNotIn("_initialize_runtime_services(self._load_persisted_state", source)
 
     def test_production_postgres_workbench_requires_sql_read_model_without_sync_builder(self) -> None:
@@ -334,16 +304,15 @@ class RuntimeBootstrapTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_postgres_bootstrap_snapshot_excludes_import_fact_snapshots(self) -> None:
-        connection = ImportFactBootstrapConnection()
-        store = PostgresStateStore(data_dir=Path("/tmp/fin-ops-bootstrap-test"), connection=connection)
+    def test_postgres_state_store_does_not_expose_bootstrap_snapshot_loader(self) -> None:
+        store = PostgresStateStore(data_dir=Path("/tmp/fin-ops-bootstrap-test"), connection=ImportFactBootstrapConnection())
 
-        snapshot = store.load_bootstrap_snapshot()
+        self.assertFalse(hasattr(store, "load_bootstrap_snapshot"))
 
-        self.assertEqual(snapshot.get("imports"), {})
-        self.assertEqual(snapshot.get("file_imports"), {})
-        self.assertTrue(all("from app.invoices" not in sql for sql in connection.fetch_all_sql))
-        self.assertTrue(all("from app.bank_transactions" not in sql for sql in connection.fetch_all_sql))
+    def test_application_state_store_does_not_expose_bootstrap_snapshot_loader(self) -> None:
+        store = ApplicationStateStore(data_dir=Path("/tmp/fin-ops-bootstrap-test"), read_only=True)
+
+        self.assertFalse(hasattr(store, "load_bootstrap_snapshot"))
 
     def test_server_downstream_bank_tag_consumers_use_runtime_tag_reader_boundary(self) -> None:
         source = Path("backend/src/fin_ops_platform/app/server.py").read_text(encoding="utf-8")

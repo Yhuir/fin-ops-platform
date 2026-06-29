@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.pending_invoice_read_model_service import pending_invoice_source_versions
 from fin_ops_platform.services.pending_invoice_service import PENDING_INVOICE_EXPORT_ROW_LIMIT

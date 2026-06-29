@@ -21,8 +21,8 @@ from fin_ops_platform.app.server import (
     SYSTEM_AUTO_PAIR_RELATION_MODES,
     WORKBENCH_READ_MODEL_SCHEMA_VERSION,
     _build_handler_factory,
-    build_application,
 )
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.bank_details_export_service import BANK_DETAIL_EXPORT_ROW_LIMIT
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
@@ -328,7 +328,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             with (data_dir / "state.pkl").open("wb") as handle:
                 pickle.dump({"workbench_candidate_matches": {"candidates": {candidate_key: candidate}}}, handle)
 
-            app = Application(data_dir=data_dir, bootstrap_mode="legacy")
+            app = build_application(data_dir=data_dir, bootstrap_mode="legacy")
 
         self.assertEqual(
             app._workbench_candidate_match_service.list_candidates_by_month("2026-05"),
@@ -341,7 +341,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             with (data_dir / "state.pkl").open("wb") as handle:
                 pickle.dump({"imports": {}, "file_imports": {}, "matching": {}}, handle)
 
-            app = Application(data_dir=data_dir)
+            app = build_application(data_dir=data_dir)
 
         self.assertEqual(
             app._workbench_candidate_match_service.snapshot(),
@@ -2977,7 +2977,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(adapter.month_calls, ["2026-01"])
         self.assertEqual(adapter.row_id_calls, [["oa-pay-2046"]])
 
-    def test_get_api_workbench_all_falls_back_to_cutoff_month_range_when_month_listing_errors(self) -> None:
+    def test_get_api_workbench_all_does_not_fabricate_cutoff_month_range_when_month_listing_errors(self) -> None:
         app = build_application()
         app._app_settings_service.update_settings(
             completed_project_ids=[],
@@ -3029,18 +3029,15 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         app._workbench_query_service._oa_adapter = adapter
 
-        with (
-            patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False),
-            patch.object(Application, "_fallback_retained_oa_end_month", return_value="2026-02", create=True),
-        ):
+        with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
             response = app.handle_request("GET", "/api/workbench?month=all")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
-        self.assertEqual(payload["oa_status"]["code"], "ready")
+        self.assertEqual(payload["oa_status"]["code"], "error")
         oa_ids = [row["id"] for row in flatten_groups(all_groups(payload), "oa")]
-        self.assertEqual(set(oa_ids), {"oa-pay-2047", "oa-pay-2048"})
-        self.assertEqual(adapter.month_calls, ["2026-01", "2026-02"])
+        self.assertEqual(oa_ids, [])
+        self.assertEqual(adapter.month_calls, [])
 
     def test_get_api_workbench_all_does_not_schedule_attachment_invoice_ocr(self) -> None:
         app = build_application()

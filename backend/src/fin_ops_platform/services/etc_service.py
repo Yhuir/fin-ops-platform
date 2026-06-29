@@ -1525,10 +1525,12 @@ class EtcService:
         month: str | None = None,
         plate: str | None = None,
         keyword: str | None = None,
+        import_batch_id: str | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[EtcInvoice], int, dict[str, int]]:
         resolved_status = _coerce_invoice_status(status) if status else None
+        normalized_import_batch_id = str(import_batch_id or "").strip()
         all_invoices = list(self._invoices.values())
         status_counts = {
             EtcInvoiceStatus.UNSUBMITTED.value: sum(1 for invoice in all_invoices if invoice.status == EtcInvoiceStatus.UNSUBMITTED),
@@ -1541,6 +1543,10 @@ class EtcService:
             and (not month or (invoice.issue_date or "").startswith(month))
             and (not plate or plate.lower() in (invoice.plate_number or "").lower())
             and (not keyword or self._invoice_matches_keyword(invoice, keyword))
+            and (
+                not normalized_import_batch_id
+                or str(getattr(invoice, "import_batch_id", "") or "").strip() == normalized_import_batch_id
+            )
         ]
         filtered.sort(key=lambda item: (item.issue_date or "", item.invoice_number), reverse=True)
         total = len(filtered)

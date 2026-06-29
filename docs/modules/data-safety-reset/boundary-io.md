@@ -67,7 +67,6 @@
 ## 测试与验证
 
 - `tests/test_settings_data_reset_service.py`
-- `tests/test_export_app_mongo.py`
 - `web/e2e/settings-data-reset-flow.spec.ts`
 
 ## 当前缺口和删除条件

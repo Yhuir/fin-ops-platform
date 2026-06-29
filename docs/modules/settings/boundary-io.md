@@ -78,3 +78,13 @@
 
 - 拆分 route owner 后同步本文件和 README。
 - 重置行为变更必须先读 data-safety-reset boundary。
+
+## Canonical facts ownership
+
+- Owned facts: `app.app_settings` 中的业务设置 facts。
+- Shared facts: `app.oa_applicant_credentials` 由 `oa-integration` credential owner 管理。
+- Allowed writes: settings service、明确 settings application boundary。
+- Allowed reads: settings APIs、owner read ports。
+- Downstream outputs: 按 setting family 产生 affected read model dirty scopes、domain events 或 explicit not-applicable。
+- Forbidden paths: `state:*` JSON、`state:full_state` 或旧 snapshot 不得作为 production 业务事实 fallback；其它模块不得直接写 settings store。
+- Old code deletion: legacy settings snapshot、state JSON fallback 和 route-inline settings writes 必须删除；migration/audit/rollback 工具保留不算 closure。

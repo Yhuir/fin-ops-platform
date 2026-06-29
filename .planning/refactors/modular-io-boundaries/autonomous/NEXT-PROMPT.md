@@ -20,4 +20,5 @@ Only resume this read-model closure controller if new evidence contradicts the f
 - a worker/readiness/outbox regression;
 - a user request for stricter browser/page UX evidence.
 
+Do not implement Go, Go Fiber or Go Worker.
 Use one macro-wave prompt, not a backlog of small prompts.

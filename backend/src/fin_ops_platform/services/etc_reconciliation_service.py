@@ -31,7 +31,7 @@ from fin_ops_platform.services.etc_reconciliation_models import (
     UploadedSourceFileMetadata,
     coerce_datetime,
 )
-from fin_ops_platform.services.state_store import default_data_dir
+from fin_ops_platform.services.runtime_paths import default_data_dir
 
 
 SCHEMA_VERSION = 1

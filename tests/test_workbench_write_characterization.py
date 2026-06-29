@@ -5,7 +5,8 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.app.server import Application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,
     WorkbenchMatchingDirtyScopeWorkerConfig,

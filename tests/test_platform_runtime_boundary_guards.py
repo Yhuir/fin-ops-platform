@@ -11,10 +11,10 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app import server as server_module
+from fin_ops_platform.services.cutover_preflight import redact_secret_text
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import EtcImportItem, EtcImportResult
 from fin_ops_platform.services.runtime_worker_handlers import _link_etc_import_result_to_existing_invoices
-from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -186,7 +186,6 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
             "backend/src/fin_ops_platform/app/worker.py",
             "backend/src/fin_ops_platform/services/runtime_worker_handlers.py",
             "backend/src/fin_ops_platform/services/postgres_state_store.py",
-            "backend/src/fin_ops_platform/services/shadow_read_psql_store.py",
             "backend/src/fin_ops_platform/services/state_store.py",
         }
 
@@ -236,7 +235,6 @@ def _bare_application(*, backend: str = "postgres", bootstrap_mode: str = "produ
     app = object.__new__(server_module.Application)
     app._bootstrap_mode = bootstrap_mode
     app._state_store = Store(backend=backend)
-    app._legacy_bootstrap = LegacySnapshotBootstrap(None)
     app._runtime_repositories = RuntimeRepositorySummary()
     app._seed_payload = {}
     return app
@@ -268,6 +266,800 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertEqual(summary["status"], "not_ready")
         self.assertIn("legacy_bootstrap_in_production", summary["production_runtime_guard"]["problems"])
         self.assertIn("postgres_full_state_snapshot_enabled", summary["production_runtime_guard"]["problems"])
+
+    def test_legacy_etc_batch_backend_api_is_removed(self) -> None:
+        app = _bare_application(backend="postgres")
+
+        with patch.dict(os.environ, {"FIN_OPS_PRODUCTION_RUNTIME_GUARD": "1"}, clear=True):
+            summary = app.readiness_summary(check_dependencies=False)
+
+        entrypoints = "\n".join(summary["entrypoints"])
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        removed_paths = [
+            APP_ROOT / "routes_etc_legacy_batches.py",
+            SERVICES_ROOT / "etc_legacy_batch_delete_service.py",
+            SERVICES_ROOT / "etc_legacy_batch_lifecycle_service.py",
+            SERVICES_ROOT / "etc_legacy_batch_read_facade.py",
+        ]
+        forbidden_markers = (
+            "EtcLegacyBatch",
+            "_etc_legacy_batch",
+            "_legacy_etc_batch_api_enabled",
+            "FIN_OPS_ENABLE_LEGACY_ETC_BATCH_API",
+        )
+        violations = [f"{_relative(path)} still exists" for path in removed_paths if path.exists()]
+        violations.extend(marker for marker in forbidden_markers if marker in server_source)
+        if "/api/etc/batches" in entrypoints:
+            violations.append("readiness entrypoints still expose legacy ETC batch API")
+
+        self.assertEqual(violations, [])
+
+    def test_shadow_and_dual_state_store_modules_are_removed(self) -> None:
+        removed_paths = [
+            SERVICES_ROOT / "shadow_state_store.py",
+            SERVICES_ROOT / "dual_state_store.py",
+            REPO_ROOT / "tests" / "test_shadow_state_store.py",
+            REPO_ROOT / "tests" / "test_dual_state_store.py",
+        ]
+        violations = [f"{_relative(path)} still exists" for path in removed_paths if path.exists()]
+
+        self.assertEqual(violations, [])
+
+    def test_legacy_import_fact_consistency_tool_is_removed(self) -> None:
+        path = TOOLS_ROOT / "check_import_fact_consistency.py"
+
+        self.assertFalse(path.exists(), f"{_relative(path)} still exists")
+
+    def test_legacy_postgres_migration_reconcile_tool_is_removed(self) -> None:
+        removed_paths = [
+            TOOLS_ROOT / "reconcile_postgres_migration.py",
+            REPO_ROOT / "tests" / "test_reconcile_postgres_migration.py",
+        ]
+        violations = [f"{_relative(path)} still exists" for path in removed_paths if path.exists()]
+
+        self.assertEqual(violations, [])
+
+    def test_legacy_mongo_staging_migration_cli_tools_are_removed(self) -> None:
+        removed_paths = [
+            TOOLS_ROOT / "import_postgres_staging.py",
+            TOOLS_ROOT / "transform_staging_to_postgres.py",
+            REPO_ROOT / "tests" / "test_import_postgres_staging.py",
+        ]
+        violations = [f"{_relative(path)} still exists" for path in removed_paths if path.exists()]
+
+        self.assertEqual(violations, [])
+
+    def test_legacy_postgres_transform_tool_is_removed(self) -> None:
+        removed_paths = [
+            TOOLS_ROOT / "postgres_transform.py",
+            REPO_ROOT / "tests" / "test_postgres_transform.py",
+        ]
+        violations = [f"{_relative(path)} still exists" for path in removed_paths if path.exists()]
+
+        self.assertEqual(violations, [])
+
+    def test_legacy_mongo_export_manifest_helpers_are_removed(self) -> None:
+        removed_paths = [
+            TOOLS_ROOT / "export_manifest.py",
+            REPO_ROOT / "tests" / "test_mongo_export_manifest.py",
+        ]
+        violations = [f"{_relative(path)} still exists" for path in removed_paths if path.exists()]
+
+        self.assertEqual(violations, [])
+
+    def test_legacy_mongo_exporter_definition_package_is_removed(self) -> None:
+        exporters_root = TOOLS_ROOT / "exporters"
+        forbidden_markers = {
+            "ExportDefinition",
+            "CORE_EXPORTS",
+            "WORKBENCH_EXPORTS",
+            "OPS_TAX_ETC_EXPORTS",
+            "READ_MODEL_EXPORTS",
+            "gridfs_files_manifest",
+            "stage 03",
+            "stage 04",
+        }
+        violations: list[str] = []
+
+        if exporters_root.exists():
+            violations.extend(f"{_relative(path)} still exists" for path in sorted(exporters_root.rglob("*")) if path.is_file())
+
+        for path in _python_files(TOOLS_ROOT):
+            rel_path = _relative(path)
+            source = path.read_text(encoding="utf-8")
+            if "fin_ops_platform.tools.exporters" in source:
+                violations.append(f"{rel_path} imports legacy exporters package")
+            for marker in forbidden_markers:
+                if marker in source:
+                    violations.append(f"{rel_path} references legacy exporter marker {marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_deploy_runtime_templates_do_not_enable_postgres_full_state_snapshot(self) -> None:
+        deploy_files = [
+            *sorted((REPO_ROOT / "deploy" / "oa" / "env").glob("*.env.example")),
+            REPO_ROOT / "deploy" / "oa" / "fin_ops.env.example",
+            REPO_ROOT / "deploy" / "oa" / "bin" / "finops-deploy-control.sh",
+        ]
+        violations = [
+            _relative(path)
+            for path in deploy_files
+            if "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT" in path.read_text(encoding="utf-8")
+        ]
+        deploy_script = (REPO_ROOT / "scripts" / "deploy_oa.py").read_text(encoding="utf-8")
+
+        self.assertEqual(violations, [])
+        self.assertIn("check-release", deploy_script)
+
+    def test_deploy_runtime_templates_keep_app_storage_backend_postgres(self) -> None:
+        deploy_files = [
+            *sorted((REPO_ROOT / "deploy" / "oa" / "env").glob("*.env.example")),
+            REPO_ROOT / "deploy" / "oa" / "fin_ops.env.example",
+        ]
+        violations: list[str] = []
+        for path in deploy_files:
+            source = path.read_text(encoding="utf-8")
+            for line in source.splitlines():
+                stripped = line.strip()
+                if not stripped.startswith("FIN_OPS_APP_STORAGE_BACKEND="):
+                    continue
+                if stripped != "FIN_OPS_APP_STORAGE_BACKEND=postgres":
+                    violations.append(f"{_relative(path)} uses {stripped}")
+        common_source = (REPO_ROOT / "deploy" / "oa" / "env" / "fin-ops.common.env.example").read_text(encoding="utf-8")
+
+        self.assertEqual(violations, [])
+        self.assertIn("FIN_OPS_APP_STORAGE_BACKEND=postgres", common_source)
+
+    def test_canonical_fact_legacy_source_paths_stay_in_removal_baseline(self) -> None:
+        production_paths = {
+            "backend/src/fin_ops_platform/app/server.py": APP_ROOT / "server.py",
+            "backend/src/fin_ops_platform/app/worker.py": APP_ROOT / "worker.py",
+            "backend/src/fin_ops_platform/services/runtime_worker_handlers.py": SERVICES_ROOT / "runtime_worker_handlers.py",
+            "backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py": SERVICES_ROOT / "turnover_ledger_write_adapters.py",
+            "backend/src/fin_ops_platform/services/file_object_migration.py": SERVICES_ROOT / "file_object_migration.py",
+        }
+        expected_legacy_refs = {
+            "backend/src/fin_ops_platform/app/server.py": {
+                "load_full_snapshot": 0,
+                "MongoOAAdapter": 0,
+                "WorkbenchPairRelationService": 3,
+                "pair_relation_service": 30,
+            },
+            "backend/src/fin_ops_platform/app/worker.py": {
+                "GridFSObjectMigrationService": 0,
+                "LegacyGridFSFileReader": 0,
+                "MongoOAAdapter": 0,
+                "WorkbenchPairRelationService": 2,
+                "pair_relation_service": 6,
+            },
+            "backend/src/fin_ops_platform/services/runtime_worker_handlers.py": {
+                "WorkbenchPairRelationService": 4,
+                "pair_relation_service": 9,
+            },
+            "backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py": {
+                "pair_relation_service": 7,
+            },
+            "backend/src/fin_ops_platform/services/file_object_migration.py": {
+                "GridFSObjectMigrationService": 0,
+                "LegacyGridFSFileReader": 0,
+            },
+        }
+        forbidden_uninventoried_tokens = (
+            "ApplicationStateStore",
+            "_load_local_pickle",
+            "_save_local_pickle",
+            "load_bootstrap_snapshot",
+            "state:full_state",
+            "state:imports",
+            "state:file_imports",
+            "state:workbench",
+            "TurnoverLedgerBankRowTagsLegacyFallback",
+            "TurnoverLedgerClosureLegacyFallback",
+            "TurnoverLedgerConfirmLegacyFallback",
+            "TurnoverLedgerRelationExtraLegacyFallback",
+            "TurnoverLedgerTagSelectionLegacyFallback",
+            "TurnoverLedgerWithdrawLegacyFallback",
+        )
+        tracked_tokens = sorted({token for counts in expected_legacy_refs.values() for token in counts})
+        violations: list[str] = []
+
+        for rel_path, path in sorted(production_paths.items()):
+            source = path.read_text(encoding="utf-8")
+            for token in forbidden_uninventoried_tokens:
+                if token in source:
+                    violations.append(f"{rel_path} contains uninventoried canonical fact legacy token {token}")
+            expected_counts = expected_legacy_refs.get(rel_path, {})
+            for token in tracked_tokens:
+                actual = source.count(token)
+                expected = expected_counts.get(token, 0)
+                if actual != expected:
+                    violations.append(f"{rel_path} has {actual} {token} reference(s), expected removal baseline {expected}")
+
+        self.assertEqual(violations, [])
+
+    def test_production_services_do_not_type_bind_to_local_application_state_store(self) -> None:
+        allowed_paths = {
+            "backend/src/fin_ops_platform/services/state_store_factory.py",
+        }
+        violations: list[str] = []
+
+        for path in _python_files(SERVICES_ROOT):
+            rel_path = _relative(path)
+            if rel_path in allowed_paths or rel_path.endswith("/state_store.py"):
+                continue
+            source = path.read_text(encoding="utf-8")
+            if "from fin_ops_platform.services.state_store import ApplicationStateStore" in source:
+                violations.append(f"{rel_path} imports local ApplicationStateStore")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_does_not_open_app_mongo_snapshot_source(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        init_source = _function_source(ast.parse(class_source), class_source, "__init__")
+        violations = [
+            token
+            for token in (
+                "load_mongo_state_settings(",
+                "MongoClient(",
+                "GridFSBucket(",
+                "FIN_OPS_STORAGE_MODE",
+                "MONGO_ONLY_STORAGE_MODE",
+                "_mongo_client",
+                "_mongo_database",
+                "_legacy_mongo_collection",
+                "_mongo_state_collections",
+                "_mongo_metadata_collection",
+                "_mongo_meta_collection",
+                "_mongo_detailed_collections",
+                "_run_mongo_operation",
+                "_replace_collection_documents",
+                "_load_entities_by_id",
+                "_load_entities_list",
+                "_load_binary_payload",
+                "_clear_legacy_snapshot_collections",
+            )
+            if token in class_source
+        ]
+        for forbidden_import in (
+            "from gridfs import GridFSBucket",
+            "from pymongo import MongoClient",
+            "from pymongo.errors import PyMongoError",
+            "from bson.binary import Binary",
+        ):
+            if forbidden_import in source:
+                violations.append(forbidden_import)
+
+        self.assertEqual(violations, [])
+
+    def test_local_state_store_does_not_expose_legacy_mongo_settings_loader(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+
+        self.assertNotIn("MongoStateSettings", source)
+        self.assertNotIn("load_mongo_state_settings", source)
+
+    def test_production_runtime_paths_do_not_import_local_state_store(self) -> None:
+        production_roots = (APP_ROOT, SERVICES_ROOT, TOOLS_ROOT)
+        violations: list[str] = []
+
+        for root in production_roots:
+            for path in _python_files(root):
+                if path == SERVICES_ROOT / "state_store.py":
+                    continue
+                source = path.read_text(encoding="utf-8")
+                if "from fin_ops_platform.services.state_store import" in source:
+                    violations.append(_relative(path))
+
+        self.assertEqual(violations, [])
+
+    def test_canonical_fact_tools_use_runtime_application_state_io_boundary(self) -> None:
+        violations: list[str] = []
+
+        for path in _python_files(TOOLS_ROOT):
+            source = path.read_text(encoding="utf-8")
+            if "build_full_snapshot_application" in source:
+                violations.append(f"{_relative(path)} uses legacy full snapshot tool runtime builder name")
+            for forbidden in (
+                '._state_store',
+                'getattr(app, "_state_store"',
+                "_initialize_runtime_services",
+                "app._",
+            ):
+                if forbidden in source:
+                    violations.append(f"{_relative(path)} directly accesses {forbidden}")
+            if path != TOOLS_ROOT / "runtime_application.py" and "build_application(" in source:
+                violations.append(f"{_relative(path)} directly accesses build_application(")
+
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        tool_ports_source = _function_source(_parse(server_path), server_source, "tool_runtime_ports")
+        if "state_store=" in tool_ports_source:
+            violations.append("Application.tool_runtime_ports exposes the full state_store")
+        if "def tool_runtime_state_snapshot" not in server_source:
+            violations.append("Application missing dedicated tool runtime state snapshot port")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_etc_file_paths_do_not_use_mongo_gridfs(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = (
+            "store_etc_reconciliation_file",
+            "read_etc_reconciliation_file",
+            "store_etc_invoice_file",
+            "read_etc_invoice_file",
+            "etc_invoice_file_exists",
+            "delete_etc_invoice_file",
+        )
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_file_bucket", "MONGO_ONLY_STORAGE_MODE", "_build_gridfs_ref"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_settings_and_oa_cache_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = (
+            "load_app_settings",
+            "save_app_settings",
+            "load_oa_attachment_invoice_cache_entry",
+            "save_oa_attachment_invoice_cache_entry",
+            "load_oa_sync_state",
+            "save_oa_sync_state",
+            "load_manual_oa_imports",
+            "save_manual_oa_imports",
+            "load_oa_sync_state",
+            "save_oa_sync_state",
+            "save_historical_etc_repair_bundle",
+            "load_historical_etc_repair_bundle_metadata",
+            "save_historical_etc_repair_parsed_seed",
+            "load_historical_etc_repair_parsed_seeds",
+            "load_historical_etc_repair_states",
+            "save_historical_etc_repair_states",
+        )
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_etc_states_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = (
+            "load_etc_state",
+            "save_etc_state",
+            "load_etc_reconciliation_state",
+            "save_etc_reconciliation_state",
+        )
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+        for forbidden in (
+            "BANK_TRANSACTION_CATEGORIES_META_COLLECTION",
+            "BANK_TRANSACTION_CATEGORIES_COLLECTION",
+            "_load_bank_transaction_categories_detailed_payload",
+            "_save_bank_transaction_categories_detailed",
+        ):
+            if forbidden in source:
+                violations.append(f"state_store.py contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_historical_etc_repair_does_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = (
+            "save_historical_etc_repair_bundle",
+            "load_historical_etc_repair_bundle_metadata",
+            "read_historical_etc_repair_bundle",
+            "save_historical_etc_repair_parsed_seed",
+            "load_historical_etc_repair_parsed_seeds",
+            "load_historical_etc_repair_states",
+            "save_historical_etc_repair_states",
+        )
+        violations: list[str] = []
+
+        if "HISTORICAL_ETC_REPAIR_GRIDFS_ID_PREFIX" in class_source:
+            violations.append("ApplicationStateStore contains HISTORICAL_ETC_REPAIR_GRIDFS_ID_PREFIX")
+        if "_historical_etc_gridfs_id" in class_source:
+            violations.append("ApplicationStateStore contains _historical_etc_gridfs_id")
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in (
+                "_mongo_database",
+                "_mongo_detailed_collections",
+                "_mongo_file_bucket",
+                "_build_gridfs_ref",
+                "MONGO_ONLY_STORAGE_MODE",
+            ):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_jobs_and_health_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = (
+            "load_background_jobs",
+            "save_background_jobs",
+            "load_app_health_alerts",
+            "save_app_health_alerts",
+            "load_manual_oa_imports",
+            "save_manual_oa_imports",
+        )
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_no_oa_bank_batches_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = ("load_no_oa_bank_batches", "save_no_oa_bank_batches")
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_oa_pending_payment_bank_relations_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = ("load_oa_pending_payment_bank_relations", "save_oa_pending_payment_bank_relations")
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "MONGO_ONLY_STORAGE_MODE", "self.load()", "self.save("):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_tax_imports_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = ("load_tax_certified_imports", "save_tax_certified_imports", "save_tax_offset_plan")
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_workbench_pair_relations_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = ("load_workbench_pair_relations", "save_workbench_pair_relations")
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_workbench_overrides_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = ("save_workbench_overrides", "save_workbench_exception_cases")
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_bank_transaction_categories_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = ("load_bank_transaction_categories", "save_bank_transaction_categories")
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+        for forbidden in (
+            "BANK_TRANSACTION_CATEGORIES_META_COLLECTION",
+            "BANK_TRANSACTION_CATEGORIES_COLLECTION",
+            "_load_bank_transaction_categories_detailed_payload",
+            "_save_bank_transaction_categories_detailed",
+        ):
+            if forbidden in source:
+                violations.append(f"state_store.py contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_turnover_facts_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = (
+            "load_turnover_relations",
+            "save_turnover_relations",
+            "load_turnover_ledger_extras",
+            "save_turnover_ledger_extras",
+            "load_tax_certified_imports",
+            "save_tax_certified_imports",
+            "load_pending_invoice_commands",
+            "save_pending_invoice_commands",
+        )
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+        for forbidden in (
+            "TURNOVER_RELATIONS_META_COLLECTION",
+            "TURNOVER_RELATIONS_COLLECTION",
+            "TURNOVER_RELATION_AUDIT_LOG_COLLECTION",
+            "TURNOVER_LEDGER_EXTRAS_META_COLLECTION",
+            "TURNOVER_LEDGER_EXTRAS_COLLECTION",
+            "_load_turnover_relations_detailed_payload",
+            "_load_turnover_ledger_extras_detailed_payload",
+            "_save_turnover_relations_detailed",
+            "_save_turnover_ledger_extras_detailed",
+        ):
+            if forbidden in source:
+                violations.append(f"state_store.py contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_cost_and_tax_read_models_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = (
+            "load_cost_statistics_read_models",
+            "save_cost_statistics_read_models",
+            "load_tax_offset_read_models",
+            "save_tax_offset_read_models",
+            "load_background_jobs",
+            "save_background_jobs",
+            "load_app_health_alerts",
+            "save_app_health_alerts",
+        )
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+        for forbidden in (
+            "COST_STATISTICS_READ_MODELS_META_COLLECTION",
+            "COST_STATISTICS_READ_MODELS_COLLECTION",
+            "TAX_OFFSET_READ_MODELS_META_COLLECTION",
+            "TAX_OFFSET_READ_MODELS_COLLECTION",
+            "_load_cost_statistics_read_models_detailed_payload",
+            "_load_tax_offset_read_models_detailed_payload",
+            "_save_cost_statistics_read_models_detailed",
+            "_save_tax_offset_read_models_detailed",
+        ):
+            if forbidden in source:
+                violations.append(f"state_store.py contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_workbench_read_models_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        method_names = (
+            "load_workbench_read_models",
+            "save_workbench_read_models",
+            "load_workbench_candidate_matches",
+            "save_workbench_candidate_matches",
+            "save_workbench_matching_dirty_scopes",
+        )
+        violations: list[str] = []
+
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+        for forbidden in (
+            "WORKBENCH_READ_MODELS_META_COLLECTION",
+            "WORKBENCH_READ_MODELS_COLLECTION",
+            "WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION",
+            "WORKBENCH_CANDIDATE_MATCHES_COLLECTION",
+            "WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION",
+            "WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION",
+            "_load_workbench_read_models_detailed_payload",
+            "_load_workbench_candidate_matches_detailed_payload",
+            "_load_workbench_matching_dirty_scopes_detailed_payload",
+            "_save_workbench_read_models_detailed",
+            "_save_workbench_candidate_matches_detailed",
+            "_save_workbench_matching_dirty_scopes_detailed",
+        ):
+            if forbidden in source:
+                violations.append(f"state_store.py contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_application_state_store_import_matching_snapshots_do_not_use_app_mongo(self) -> None:
+        path = SERVICES_ROOT / "state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
+        class_tree = ast.parse(class_source)
+        violations: list[str] = []
+
+        for method_name in (
+            "load",
+            "save",
+            "store_import_file",
+            "read_import_file",
+            "delete_import_files",
+            "clear_oa_attachment_invoice_cache",
+            "import_session_exists",
+            "import_file_exists",
+            "import_batch_exists",
+            "invoice_exists",
+            "transaction_exists",
+        ):
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in (
+                "_mongo_database",
+                "_mongo_detailed_collections",
+                "_mongo_file_bucket",
+                "_build_gridfs_ref",
+                "_parse_gridfs_ref",
+                "MONGO_ONLY_STORAGE_MODE",
+            ):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+        for forbidden in (
+            "GRIDFS_BUCKET_NAME",
+            "MONGO_ONLY_STORAGE_MODE",
+            "LEGACY_APP_MONGO_COLLECTION",
+            "STATE_COLLECTIONS",
+            "FILE_METADATA_COLLECTION",
+            "IMPORTS_META_COLLECTION",
+            "IMPORT_BATCHES_COLLECTION",
+            "INVOICES_COLLECTION",
+            "BANK_TRANSACTIONS_COLLECTION",
+            "FILE_IMPORTS_META_COLLECTION",
+            "FILE_IMPORT_SESSIONS_COLLECTION",
+            "FILE_IMPORT_FILES_COLLECTION",
+            "MATCHING_META_COLLECTION",
+            "MATCHING_RUNS_COLLECTION",
+            "MATCHING_RESULTS_COLLECTION",
+            "_load_detailed_mongo_payload",
+            "_load_split_mongo_payload",
+            "_load_legacy_mongo_payload",
+            "_load_imports_detailed_payload",
+            "_load_file_imports_detailed_payload",
+            "_load_matching_detailed_payload",
+            "_save_imports_detailed",
+            "_save_file_imports_detailed",
+            "_save_matching_detailed",
+            "_save_file_import_metadata",
+            "_migrate_legacy_file_refs_to_gridfs",
+            "_build_gridfs_ref",
+            "_parse_gridfs_ref",
+        ):
+            if re.search(rf"\b{re.escape(forbidden)}\b", source):
+                violations.append(f"state_store.py contains {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_postgres_canonical_fact_methods_do_not_use_runtime_settings_snapshots(self) -> None:
+        path = SERVICES_ROOT / "postgres_state_store.py"
+        source = path.read_text(encoding="utf-8")
+        class_source = _class_source(_parse(path), source, "PostgresStateStore")
+        class_tree = ast.parse(class_source)
+        violations: list[str] = []
+
+        for forbidden in (
+            "STATE_KEY_PREFIX",
+            "def _load_snapshot(",
+            "def _save_snapshot(",
+            "def _load_snapshot_or_empty(",
+            "def _load_snapshot_or_table_map(",
+        ):
+            if forbidden in source:
+                violations.append(f"postgres_state_store.py retains runtime settings snapshot API {forbidden}")
+
+        method_names = (
+            "load_workbench_pair_relations",
+            "save_workbench_pair_relations",
+            "load_no_oa_bank_batches",
+            "save_no_oa_bank_batches",
+            "load_bank_transaction_categories",
+            "save_bank_transaction_categories",
+            "load_turnover_relations",
+            "save_turnover_relations",
+            "load_turnover_ledger_extras",
+            "save_turnover_ledger_extras",
+            "load_tax_certified_imports",
+            "save_tax_certified_imports",
+            "load_pending_invoice_commands",
+            "save_pending_invoice_commands",
+            "load_workbench_overrides",
+            "save_workbench_overrides",
+            "load_workbench_exception_cases",
+            "save_workbench_exception_cases",
+            "load_cost_statistics_read_models",
+            "save_cost_statistics_read_models",
+            "load_tax_offset_read_models",
+            "save_tax_offset_read_models",
+            "load_etc_state",
+            "save_etc_state",
+            "load_etc_reconciliation_state",
+            "save_etc_reconciliation_state",
+        )
+        for method_name in method_names:
+            method_source = _function_source(class_tree, class_source, method_name)
+            for forbidden in ("_load_snapshot(", "_save_snapshot("):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} contains {forbidden}")
+
+        self.assertEqual(violations, [])
 
     def test_services_do_not_import_http_auth_boundary_or_parse_cookie_token_headers(self) -> None:
         violations: list[str] = []
@@ -389,11 +1181,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "module": "fin_ops_platform.app.routes_etc_invoices",
                 "class": "EtcInvoiceApiRoutes",
                 "server_markers": ("def _etc_invoice_routes", "_etc_invoice_routes()."),
-            },
-            "routes_etc_legacy_batches.py": {
-                "module": "fin_ops_platform.app.routes_etc_legacy_batches",
-                "class": "EtcLegacyBatchApiRoutes",
-                "server_markers": ("def _etc_legacy_batch_routes", "_etc_legacy_batch_routes()."),
             },
             "routes_etc_reconciliation.py": {
                 "module": "fin_ops_platform.app.routes_etc_reconciliation",
@@ -2506,237 +3293,23 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_etc_legacy_batch_routes_delegate_to_compat_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        route_path = APP_ROOT / "routes_etc_legacy_batches.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-
-        handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
-        route_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_routes")
-        route_owner_names = [
-            node.name
-            for node in ast.walk(route_tree)
-            if isinstance(node, ast.ClassDef)
-        ]
-        route_owner_init = _function_source(route_tree, route_source, "__init__")
-        route_owner_route = _function_source(route_tree, route_source, "route")
-        route_owner_route_batch = _function_source(route_tree, route_source, "_route_batch")
-
-        violations: list[str] = []
-        if "EtcLegacyBatchApiRoutes" not in server_source:
-            violations.append("server.py does not import/use EtcLegacyBatchApiRoutes")
-        if "_etc_legacy_batch_routes().route(" not in handle_request:
-            violations.append("handle_request no longer delegates legacy ETC batch routes to route owner")
-        if "EtcLegacyBatchApiRoutes(" not in route_factory:
-            violations.append("_etc_legacy_batch_routes does not construct the route owner")
-        for required_port in (
-            "json_response=self._json_response",
-            "load_json_body=self._load_json_body",
-            "reconciliation_error_response=self._reconciliation_error_response",
-            "read_facade=self._etc_legacy_batch_read_facade()",
-            "delete_service=self._etc_legacy_batch_delete_service()",
-            "lifecycle_service=self._etc_legacy_batch_lifecycle_service()",
-            "build_oa_client=self._build_etc_oa_client",
-            "legacy_business_delete=self._handle_legacy_etc_batch_business_delete",
-            "refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link",
-            "persist_state=self._persist_state",
-        ):
-            if required_port not in route_factory:
-                violations.append(f"ETC legacy batch route owner lacks explicit port {required_port}")
-        if "Application" in route_owner_init:
-            violations.append("ETC legacy batch route owner accepts the whole Application")
-        if "EtcLegacyBatchApiRoutes" not in route_owner_names:
-            violations.append("routes_etc_legacy_batches.py does not define EtcLegacyBatchApiRoutes")
-        for required_route in (
-            'route_path == "/api/etc/batches"',
-            'route_path == "/api/etc/batches/draft"',
-            'route_path.startswith("/api/etc/batches/")',
-        ):
-            if required_route not in route_owner_route:
-                violations.append(f"ETC legacy batch route owner missing dispatch branch {required_route}")
-        for required_subroute in (
-            'parts[1] == "draft"',
-            'parts[1] == "confirm-submitted"',
-            'parts[1] == "mark-not-submitted"',
-        ):
-            if required_subroute not in route_owner_route_batch:
-                violations.append(f"ETC legacy batch route owner missing subroute branch {required_subroute}")
-        direct_dispatch_markers = (
-            "_handle_api_etc_batches(",
-            "_handle_api_etc_batch_detail(",
-            "_handle_api_etc_batch_delete(",
-            "_handle_api_etc_batch_draft(",
-            "_handle_api_etc_batch_draft_for_batch(",
-            "_handle_api_etc_batch_confirm_submitted(",
-            "_handle_api_etc_batch_mark_not_submitted(",
+    def test_web_etc_api_does_not_call_legacy_batch_mutations_or_list(self) -> None:
+        api_source = (REPO_ROOT / "web" / "src" / "features" / "etc" / "api.ts").read_text(encoding="utf-8")
+        forbidden_markers = (
+            "export async function fetchEtcBatches",
+            "export async function createEtcOaDraft",
+            "export async function createEtcOaDraftForBatch",
+            "export async function confirmEtcBatchSubmitted",
+            "export async function markEtcBatchNotSubmitted",
+            "export async function deleteEtcBatch",
+            "export async function fetchEtcBatchDetail",
+            '"/api/etc/batches/draft"',
+            '`/api/etc/batches?${params.toString()}`',
+            '`/api/etc/batches/${encodeURIComponent(batchId)}`',
+            '`/api/etc/batches/${encodeURIComponent(batchId)}/confirm-submitted`',
+            '`/api/etc/batches/${encodeURIComponent(batchId)}/mark-not-submitted`',
         )
-        for marker in direct_dispatch_markers:
-            if marker in handle_request:
-                violations.append(f"server.py reintroduced direct legacy ETC batch route dispatch {marker}")
-            if marker in server_source:
-                violations.append(f"server.py reintroduced legacy ETC batch callback {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_etc_legacy_batch_delete_side_effects_use_service_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        service_path = SERVICES_ROOT / "etc_legacy_batch_delete_service.py"
-        service_source = service_path.read_text(encoding="utf-8")
-        service_tree = _parse(service_path)
-        route_path = APP_ROOT / "routes_etc_legacy_batches.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-
-        delete_handler = _function_source(route_tree, route_source, "_delete_response")
-        service_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_delete_service")
-        service_imports = _imported_modules(service_tree)
-
-        violations: list[str] = []
-        if "EtcLegacyBatchDeleteService(" not in service_factory:
-            violations.append("server.py does not construct EtcLegacyBatchDeleteService")
-        if "cleanup_service=self._etc_reconciliation_import_cleanup_service()" not in service_factory:
-            violations.append("legacy batch delete service lacks explicit cleanup service dependency")
-        if "delete_non_business_batch(batch_id)" not in delete_handler:
-            violations.append("legacy batch delete handler does not delegate non-business side effects")
-        for forbidden_marker in (
-            "delete_etc_import_batch_sources",
-            "delete_unsubmitted_submission_batch",
-            "clear_task_import_after_batch_delete",
-            "remove_etc_invoices_by_import_batch_id",
-            "record_oa_draft_deleted",
-        ):
-            if forbidden_marker in delete_handler:
-                violations.append(f"legacy batch delete handler still performs {forbidden_marker}")
-        forbidden_imports = {
-            "fin_ops_platform.app.server",
-            "fin_ops_platform.app.auth",
-            "http.cookies",
-        }
-        leaked_imports = sorted(forbidden_imports.intersection(service_imports))
-        if leaked_imports:
-            violations.append(f"legacy batch delete service imports forbidden modules: {leaked_imports}")
-        if "Response" in service_source or "_json_response" in service_source:
-            violations.append("legacy batch delete service constructs HTTP response details")
-
-        self.assertEqual(violations, [])
-
-    def test_etc_legacy_batch_lifecycle_side_effects_use_service_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        service_path = SERVICES_ROOT / "etc_legacy_batch_lifecycle_service.py"
-        service_source = service_path.read_text(encoding="utf-8")
-        service_tree = _parse(service_path)
-        route_path = APP_ROOT / "routes_etc_legacy_batches.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-
-        draft_helper = _function_source(route_tree, route_source, "_create_draft_from_invoice_ids")
-        confirm_handler = _function_source(route_tree, route_source, "_confirm_submitted_response")
-        reopen_handler = _function_source(route_tree, route_source, "_mark_not_submitted_response")
-        service_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_lifecycle_service")
-        service_imports = _imported_modules(service_tree)
-
-        violations: list[str] = []
-        if "EtcLegacyBatchLifecycleService(" not in service_factory:
-            violations.append("server.py does not construct EtcLegacyBatchLifecycleService")
-        if "create_draft_from_invoice_ids(" not in draft_helper:
-            violations.append("legacy batch draft helper does not delegate lifecycle side effects")
-        if "confirm_submitted(batch_id)" not in confirm_handler:
-            violations.append("legacy batch confirm handler does not delegate lifecycle side effects")
-        if "mark_not_submitted(batch_id)" not in reopen_handler:
-            violations.append("legacy batch reopen handler does not delegate lifecycle side effects")
-        forbidden_handler_markers = (
-            "create_oa_draft(",
-            "record_oa_draft_created(",
-            "record_oa_submitted_confirmed(",
-            "self._etc_service.confirm_submitted(",
-            "self._etc_service.mark_not_submitted(",
-        )
-        for marker in forbidden_handler_markers:
-            if marker in draft_helper or marker in confirm_handler or marker in reopen_handler:
-                violations.append(f"legacy batch lifecycle handler still performs {marker}")
-        for removed_handler in (
-            "_create_etc_batch_draft_from_invoice_ids(",
-            "_handle_api_etc_batch_confirm_submitted(",
-            "_handle_api_etc_batch_mark_not_submitted(",
-        ):
-            if removed_handler in server_source:
-                violations.append(f"server.py reintroduced legacy batch lifecycle callback {removed_handler}")
-        forbidden_imports = {
-            "fin_ops_platform.app.server",
-            "fin_ops_platform.app.auth",
-            "http.cookies",
-        }
-        leaked_imports = sorted(forbidden_imports.intersection(service_imports))
-        if leaked_imports:
-            violations.append(f"legacy batch lifecycle service imports forbidden modules: {leaked_imports}")
-        if "Response" in service_source or "_json_response" in service_source:
-            violations.append("legacy batch lifecycle service constructs HTTP response details")
-
-        self.assertEqual(violations, [])
-
-    def test_etc_legacy_batch_read_payload_uses_facade_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        facade_path = SERVICES_ROOT / "etc_legacy_batch_read_facade.py"
-        facade_source = facade_path.read_text(encoding="utf-8")
-        facade_tree = _parse(facade_path)
-        route_path = APP_ROOT / "routes_etc_legacy_batches.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-
-        list_handler = _function_source(route_tree, route_source, "_list_batches_response")
-        detail_handler = _function_source(route_tree, route_source, "_detail_response")
-        draft_for_batch = _function_source(route_tree, route_source, "_create_draft_for_batch_response")
-        facade_factory = _function_source(server_tree, server_source, "_etc_legacy_batch_read_facade")
-        facade_imports = _imported_modules(facade_tree)
-
-        violations: list[str] = []
-        if "EtcLegacyBatchReadFacade(" not in facade_factory:
-            violations.append("server.py does not construct EtcLegacyBatchReadFacade")
-        if "list_payload(" not in list_handler:
-            violations.append("legacy batch list handler does not delegate payload composition to facade")
-        if "detail_payload(batch_id)" not in detail_handler:
-            violations.append("legacy batch detail handler does not delegate payload composition to facade")
-        if "detail_payload(batch_id)" not in draft_for_batch:
-            violations.append("legacy batch draft-for-batch does not reuse read facade detail payload")
-        forbidden_app_helpers = (
-            "def _etc_batch_counts",
-            "def _etc_batch_list_items",
-            "def _etc_batch_detail_payload",
-            "def _etc_business_batch_summary_payload",
-            "def _etc_submission_batch_summary_payload",
-            "def _etc_import_batch_summary_payload",
-            "def _etc_batch_summary_matches_filters",
-            "def _etc_batch_detail_filtered_for_query",
-        )
-        for marker in forbidden_app_helpers:
-            if marker in server_source:
-                violations.append(f"server.py still owns legacy batch read helper {marker}")
-        for removed_handler in (
-            "_handle_api_etc_batches(",
-            "_handle_api_etc_batch_detail(",
-            "_handle_api_etc_batch_draft_for_batch(",
-        ):
-            if removed_handler in server_source:
-                violations.append(f"server.py reintroduced legacy batch read callback {removed_handler}")
-        forbidden_imports = {
-            "fin_ops_platform.app.server",
-            "fin_ops_platform.app.auth",
-            "http.cookies",
-        }
-        leaked_imports = sorted(forbidden_imports.intersection(facade_imports))
-        if leaked_imports:
-            violations.append(f"legacy batch read facade imports forbidden modules: {leaked_imports}")
-        if "Response" in facade_source or "_json_response" in facade_source:
-            violations.append("legacy batch read facade constructs HTTP response details")
+        violations = [marker for marker in forbidden_markers if marker in api_source]
 
         self.assertEqual(violations, [])
 
@@ -5791,7 +6364,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in (
             "WorkbenchOaPayloadBuilder(",
             "use_retained_all_payload=lambda month: month == \"all\"",
-            "isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter)",
+            "self._app_settings_service.get_oa_retention_cutoff_date()",
             "build_retained_all_oa_row_payload=self._build_retained_all_oa_row_payload",
             "get_workbench_payload=lambda month: self._workbench_api_routes.get_workbench(month)",
             "serialize_value=self._serialize_value",
@@ -6624,7 +7197,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"WorkbenchCacheReadPayloadHelper missing marker: {marker}")
         for marker in (
             "WorkbenchCacheReadPayloadHelper(",
-            "is_mongo_oa_adapter=lambda: isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter)",
+            "is_mongo_oa_adapter=self._workbench_cache_uses_strict_oa_source_gates",
             "cached_payload_needs_oa_invoice_offset_rebuild=self._cached_payload_needs_oa_invoice_offset_rebuild",
             "workbench_candidate_snapshot_hash=self._workbench_candidate_snapshot_hash",
             "current_oa_attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version",
@@ -6883,6 +7456,106 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 ):
                     if forbidden in method_source:
                         violations.append(f"{rel_path}:{method_name} keeps direct pair write fallback {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_canonical_workbench_pair_relation_direct_write_fallbacks_do_not_return(self) -> None:
+        allowed_paths = {
+            "backend/src/fin_ops_platform/services/workbench_pair_relation_service.py",
+            "backend/src/fin_ops_platform/services/workbench_relation_command_service.py",
+        }
+        forbidden_methods = {
+            "create_active_relation",
+            "cancel_relation",
+            "record_history",
+            "replace_with_confirmed_relation",
+        }
+        violations: list[str] = []
+
+        for path in _python_files(APP_ROOT, SERVICES_ROOT):
+            rel_path = _relative(path)
+            if rel_path in allowed_paths:
+                continue
+            tree = _parse(path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                    continue
+                if node.func.attr not in forbidden_methods:
+                    continue
+                owner = _attribute_chain(node.func.value)
+                if owner.endswith("pair_relation_service") or owner.endswith("._pair_relation_service"):
+                    violations.append(f"{rel_path}:{node.lineno} calls direct pair relation write {owner}.{node.func.attr}")
+
+        self.assertEqual(violations, [])
+
+    def test_canonical_gridfs_legacy_worker_path_is_removed(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        postgres_state_store_source = (SERVICES_ROOT / "postgres_state_store.py").read_text(encoding="utf-8")
+        worker_path = APP_ROOT / "worker.py"
+        worker_source = worker_path.read_text(encoding="utf-8")
+        registry_source = (SERVICES_ROOT / "runtime_worker_registry.py").read_text(encoding="utf-8")
+        file_migration_source = (SERVICES_ROOT / "file_object_migration.py").read_text(encoding="utf-8")
+        deploy_env_dir = REPO_ROOT / "deploy" / "oa" / "env"
+        violations: list[str] = []
+
+        for forbidden in (
+            "LegacyGridFSFileReader",
+            "GridFSObjectMigrationService",
+            "file_object.gridfs_migration",
+            "FIN_OPS_ENABLE_LEGACY_GRIDFS_READS",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py references legacy GridFS source path {forbidden}")
+        for forbidden in (
+            "from fin_ops_platform.services.state_store import",
+            "FIN_OPS_ENABLE_LEGACY_GRIDFS_READS",
+            "_legacy_file_reader",
+            "legacy_file_reader:",
+            "legacy_file_reader=",
+        ):
+            if forbidden in postgres_state_store_source:
+                violations.append(f"postgres_state_store.py keeps legacy GridFS read fallback {forbidden}")
+        production_sources = {
+            "worker.py": worker_source,
+            "runtime_worker_registry.py": registry_source,
+            "file_object_migration.py": file_migration_source,
+            "fin-ops.rabbitmq-dispatcher.env.example": (deploy_env_dir / "fin-ops.rabbitmq-dispatcher.env.example").read_text(encoding="utf-8"),
+            "fin-ops.secrets.env.example": (deploy_env_dir / "fin-ops.secrets.env.example").read_text(encoding="utf-8"),
+        }
+        for name, source in production_sources.items():
+            for forbidden in (
+                "file_object.gridfs_migration",
+                "--enable-file-object-migration",
+                "LegacyGridFSFileReader",
+                "GridFSObjectMigrationService",
+                '"legacy_gridfs"',
+                "fin-ops.worker.file-migration",
+                "FIN_OPS_APP_MONGO_",
+            ):
+                if forbidden in source:
+                    violations.append(f"{name} keeps removed GridFS migration path {forbidden}")
+        for removed_file in (
+            "fin-ops.worker.file-migration.env.example",
+            "fin-ops.worker.file-migration-rabbitmq.env.example",
+        ):
+            if (deploy_env_dir / removed_file).exists():
+                violations.append(f"{removed_file} still exists")
+        for removed_tool in ("verify_file_object_migration.py", "rollback_file_object_migration.py"):
+            if (TOOLS_ROOT / removed_tool).exists():
+                violations.append(f"{removed_tool} still exists")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_candidate_snapshot_repair_tool_is_removed(self) -> None:
+        tool_path = TOOLS_ROOT / "repair_workbench_candidate_snapshot.py"
+        violations: list[str] = []
+
+        if tool_path.exists():
+            violations.append("repair_workbench_candidate_snapshot.py still exists")
+        for path in _python_files(APP_ROOT, SERVICES_ROOT):
+            source = path.read_text(encoding="utf-8")
+            if "repair_workbench_candidate_snapshot" in source:
+                violations.append(f"{_relative(path)} imports or references repair_workbench_candidate_snapshot")
 
         self.assertEqual(violations, [])
 
@@ -7245,16 +7918,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_oa_mongo_adapter_direct_use_is_allowlisted(self) -> None:
         allowed_paths = {
-            "backend/src/fin_ops_platform/app/oa_attachment_audit.py",
-            "backend/src/fin_ops_platform/app/server.py",
-            "backend/src/fin_ops_platform/app/worker.py",
-            "backend/src/fin_ops_platform/services/oa_manual_import_service.py",
-            "backend/src/fin_ops_platform/services/search_pending_sql_projection.py",
-            "backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py",
-            "backend/src/fin_ops_platform/services/workbench_sql_projection.py",
-        }
-        known_violations = {
-            "backend/src/fin_ops_platform/services/cost_tax_sql_projection.py",
+            "backend/src/fin_ops_platform/services/oa_sync_source_adapter.py",
         }
         violations: list[str] = []
         for path in _python_files(APP_ROOT, SERVICES_ROOT):
@@ -7264,8 +7928,173 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 tree,
                 module="fin_ops_platform.services.mongo_oa_adapter",
                 name="MongoOAAdapter",
-            ) and rel_path not in allowed_paths | known_violations:
+            ) and rel_path not in allowed_paths:
                 violations.append(rel_path)
+
+        self.assertEqual(violations, [])
+
+    def test_worker_oa_mongo_adapter_is_confined_to_sync_source_boundary(self) -> None:
+        worker_path = APP_ROOT / "worker.py"
+        worker_source = worker_path.read_text(encoding="utf-8")
+        boundary_path = SERVICES_ROOT / "oa_sync_source_adapter.py"
+        boundary_source = boundary_path.read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if "MongoOAAdapter._attachment_invoice_cache_parser_version" in worker_source:
+            violations.append("worker still reads parser version through MongoOAAdapter")
+        if "MongoOAAdapter" in worker_source:
+            violations.append("worker still directly imports or constructs MongoOAAdapter")
+        if worker_source.count("build_oa_sync_source_adapter(") != 2:
+            violations.append("worker does not delegate both OA sync source adapter paths to the boundary")
+        if "MongoOAAdapter(" not in boundary_source:
+            violations.append("OA sync source boundary no longer owns the direct adapter construction")
+
+        self.assertEqual(violations, [])
+
+    def test_server_direct_oa_mongo_adapter_legacy_bootstrap_builder_is_removed(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        builder = _function_source(server_tree, server_source, "_build_legacy_direct_oa_mongo_adapter")
+        initializer = _function_source(server_tree, server_source, "_initialize_runtime_services")
+        pending_source = _function_source(server_tree, server_source, "_oa_pending_payment_source_adapter")
+        violations: list[str] = []
+
+        if builder:
+            violations.append("_build_legacy_direct_oa_mongo_adapter still exists")
+        if "_build_legacy_direct_oa_mongo_adapter()" in initializer:
+            violations.append("_initialize_runtime_services still calls legacy OA Mongo adapter builder")
+        if "_source_oa_adapter" in server_source:
+            violations.append("server.py still keeps legacy _source_oa_adapter state")
+        if "source_oa_adapter" in initializer:
+            violations.append("_initialize_runtime_services still keeps legacy source_oa_adapter")
+        if pending_source:
+            violations.append("_oa_pending_payment_source_adapter still exists")
+        if "_build_legacy_direct_oa_mongo_adapter()" in pending_source:
+            violations.append("_oa_pending_payment_source_adapter reuses legacy bootstrap Mongo adapter")
+        if "_source_oa_adapter" in pending_source:
+            violations.append("_oa_pending_payment_source_adapter still reads legacy source adapter")
+        if "load_mongo_oa_settings" in server_source:
+            violations.append("server.py still loads direct OA Mongo settings")
+
+        self.assertEqual(violations, [])
+
+    def test_app_mongo_export_tool_is_removed(self) -> None:
+        tool_path = TOOLS_ROOT / "export_app_mongo.py"
+        violations: list[str] = []
+
+        if tool_path.exists():
+            violations.append("export_app_mongo.py still exists")
+        for path in _python_files(APP_ROOT, SERVICES_ROOT):
+            source = path.read_text(encoding="utf-8")
+            if "export_app_mongo" in source:
+                violations.append(f"{_relative(path)} imports or references export_app_mongo")
+
+        self.assertEqual(violations, [])
+
+    def test_app_mongo_shadow_preflight_tools_are_removed(self) -> None:
+        removed_tool_names = (
+            "run_shadow_read_rehearsal",
+            "run_runtime_state_policy_preflight",
+            "run_controlled_mirror_write_rehearsal",
+        )
+        removed_service_names = (
+            "shadow_read_psql_store",
+        )
+        violations: list[str] = []
+
+        for module_name in removed_tool_names:
+            if (TOOLS_ROOT / f"{module_name}.py").exists():
+                violations.append(f"{module_name}.py still exists")
+        for module_name in removed_service_names:
+            if (SERVICES_ROOT / f"{module_name}.py").exists():
+                violations.append(f"{module_name}.py still exists")
+        for path in _python_files(APP_ROOT, SERVICES_ROOT):
+            source = path.read_text(encoding="utf-8")
+            for module_name in removed_tool_names:
+                if module_name in source:
+                    violations.append(f"{_relative(path)} imports or references {module_name}")
+            for module_name in removed_service_names:
+                if module_name in source:
+                    violations.append(f"{_relative(path)} imports or references {module_name}")
+
+        self.assertEqual(violations, [])
+
+    def test_cutover_preflight_checker_is_removed(self) -> None:
+        service_source = (SERVICES_ROOT / "cutover_preflight.py").read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if (TOOLS_ROOT / "verify_cutover_preflight.py").exists():
+            violations.append("verify_cutover_preflight.py still exists")
+        for forbidden in ("CutoverPreflightChecker", "CutoverPreflightConfig", "build_checker_from_env"):
+            if forbidden in service_source:
+                violations.append(f"cutover_preflight.py still exposes {forbidden}")
+        if redact_secret_text("failed postgresql://user:secret@db.example.com/fin_ops") != (
+            "failed postgresql://user:***@db.example.com/fin_ops"
+        ):
+            violations.append("cutover_preflight.py no longer redacts URI passwords")
+
+        self.assertEqual(violations, [])
+
+    def test_runtime_convergence_closure_tool_is_removed(self) -> None:
+        violations: list[str] = []
+
+        if (TOOLS_ROOT / "run_runtime_convergence_closure.py").exists():
+            violations.append("run_runtime_convergence_closure.py still exists")
+        if (REPO_ROOT / "tests/test_runtime_convergence_closure.py").exists():
+            violations.append("test_runtime_convergence_closure.py still exists")
+
+        self.assertEqual(violations, [])
+
+    def test_oa_attachment_audit_tool_is_removed(self) -> None:
+        violations: list[str] = []
+
+        removed_paths = [
+            APP_ROOT / "oa_attachment_audit.py",
+            TOOLS_ROOT / "oa_attachment_audit.py",
+            SERVICES_ROOT / "oa_attachment_audit.py",
+            REPO_ROOT / "tests" / "test_oa_attachment_audit.py",
+        ]
+        violations.extend(f"{_relative(path)} still exists" for path in removed_paths if path.exists())
+        for path in (APP_ROOT / "server.py", APP_ROOT / "worker.py"):
+            source = path.read_text(encoding="utf-8")
+            if "oa_attachment_audit" in source:
+                violations.append(f"{_relative(path)} imports or references oa_attachment_audit")
+        for path in _python_files(SERVICES_ROOT):
+            source = path.read_text(encoding="utf-8")
+            if "oa_attachment_audit" in source:
+                violations.append(f"{_relative(path)} imports or references oa_attachment_audit")
+
+        self.assertEqual(violations, [])
+
+    def test_legacy_read_model_reconcile_tools_are_removed(self) -> None:
+        removed_tool_names = {
+            "reconcile_workbench_read_model",
+            "reconcile_cost_statistics_read_model",
+            "reconcile_tax_offset_read_model",
+        }
+        forbidden_private_oracles = {
+            "_build_raw_workbench_payload",
+            "_apply_candidate_matches_to_payload",
+            "_cost_statistics_service.get_explorer",
+            "_tax_api_routes.get_tax_offset",
+        }
+        violations: list[str] = []
+
+        for module_name in sorted(removed_tool_names):
+            path = TOOLS_ROOT / f"{module_name}.py"
+            if path.exists():
+                violations.append(f"{module_name}.py still exists")
+
+        for path in _python_files(TOOLS_ROOT):
+            rel_path = _relative(path)
+            source = path.read_text(encoding="utf-8")
+            for module_name in removed_tool_names:
+                if module_name in source:
+                    violations.append(f"{rel_path} references removed {module_name}")
+            for private_oracle in forbidden_private_oracles:
+                if private_oracle in source:
+                    violations.append(f"{rel_path} uses legacy read model oracle {private_oracle}")
 
         self.assertEqual(violations, [])
 
@@ -7484,7 +8313,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_raw_postgres_sql_in_services_is_classified_by_platform_boundary(self) -> None:
         allowed_exact_paths = {
             "backend/src/fin_ops_platform/services/bank_account_balance_projection.py",
-            "backend/src/fin_ops_platform/services/cutover_preflight.py",
             "backend/src/fin_ops_platform/services/file_object_migration.py",
             "backend/src/fin_ops_platform/services/import_job_queue.py",
             "backend/src/fin_ops_platform/services/oa_payment_status_service.py",

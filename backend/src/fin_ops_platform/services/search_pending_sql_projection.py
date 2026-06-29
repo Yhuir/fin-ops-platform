@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.pending_invoice_rules import (
     pending_invoice_effective_category_payload,
     pending_invoice_group_for_category,
@@ -500,7 +500,7 @@ class SearchPendingSqlProjectionBuilder:
             "search_index_schema_version": "2026-05-search-index-v1",
             "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
             "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(self._connection),
-            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         }
 
@@ -567,7 +567,7 @@ class SearchPendingSqlProjectionBuilder:
             "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
             "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,
             "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,
-            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
             "bank_detail_source_versions": dict(self._pending_invoice_bank_tag_source_versions),
             "workbench_relation_source_versions": dict(self._pending_invoice_relation_source_versions),

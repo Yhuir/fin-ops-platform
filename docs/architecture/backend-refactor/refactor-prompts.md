@@ -666,7 +666,7 @@ Pre-Flight:
 - backend/src/fin_ops_platform/app/worker.py
 - backend/src/fin_ops_platform/app/rabbitmq_dispatcher.py
 - backend/src/fin_ops_platform/app/rabbitmq_topology.py
-- backend/src/fin_ops_platform/app/oa_attachment_audit.py
+- backend/src/fin_ops_platform/tools/oa_attachment_audit.py
 - backend/src/fin_ops_platform/app/*_backfill.py
 - backend/src/fin_ops_platform/domain/*.py
 - backend/src/fin_ops_platform/postgres/*.py
@@ -682,7 +682,7 @@ Pre-Flight:
 - backend/src/fin_ops_platform/services/state_store_protocol.py
 - backend/src/fin_ops_platform/services/shadow_state_store.py
 - backend/src/fin_ops_platform/services/dual_state_store.py
-- backend/src/fin_ops_platform/services/shadow_read_rehearsal.py
+- backend/src/fin_ops_platform/services/shadow_read_rehearsal.py（已在 canonical facts wave 5 删除，不得恢复为旧 shadow-read 链路）
 - backend/src/fin_ops_platform/services/state_store_diff.py
 - backend/src/fin_ops_platform/services/cutover_preflight.py
 - backend/src/fin_ops_platform/services/runtime_queue.py
@@ -813,7 +813,7 @@ Required Audit Output:
    - `state_store_protocol.py`
    - `shadow_state_store.py`
    - `dual_state_store.py`
-   - `shadow_read_rehearsal.py`
+   - `shadow_read_rehearsal.py`（已在 canonical facts wave 5 删除，不得恢复为旧 shadow-read 链路）
    - `state_store_diff.py`
    - `cutover_preflight.py`
    - `app/server.py`

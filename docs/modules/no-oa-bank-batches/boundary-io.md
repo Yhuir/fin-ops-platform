@@ -80,3 +80,13 @@
 
 - repair/migration service 保留时必须写明生产使用条件。
 - 撤回后恢复到撤回前状态必须通过业务操作验证。
+
+## Canonical facts ownership
+
+- Owned facts: `app.no_oa_bank_batches`、`app.no_oa_bank_batch_events`。
+- Shared facts: relation facts 由 `workbench-relations` owner 管理；银行分类 facts 由 `bank-details` owner 管理。
+- Allowed writes: `NoOaBankBatchApplicationService`、明确 UoW、受控 repair/migration service。
+- Allowed reads: no-OA application/query ports、no-OA read model boundary。
+- Downstream outputs: no_oa_bank_batch、workbench_relation、turnover_ledger、search dirty scopes 或 owner producer 输出。
+- Forbidden paths: shared state-store broad snapshot、legacy repair/consolidation 不得直接写关系或批次事实。
+- Old code deletion: 生产主链路中的 direct batch/relation mutation fallback 必须删除；repair/migration 工具保留不算 closure。

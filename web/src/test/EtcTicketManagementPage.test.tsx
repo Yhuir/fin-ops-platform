@@ -63,6 +63,14 @@ function businessBatchFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function mockFetchEtcInvoices(items: unknown[] = []) {
+  return vi.spyOn(etcApi, "fetchEtcInvoices").mockResolvedValue({
+    counts: { unsubmitted: items.length, submitted: 0 },
+    items,
+    pagination: { page: 1, pageSize: 500, total: items.length },
+  } as never);
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -1226,51 +1234,24 @@ describe("ETC ticket management page", () => {
       ...importedTask,
       version: 9,
     } as never);
-    vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
-      id: "import-session-delete-001",
-      etcBatchId: "ETC-2026-IMPORTED-DELETE",
-      externalBatchId: "ETC-2026-IMPORTED-DELETE",
-      status: "unsubmitted",
-      sourceType: "etc_zip",
-      invoiceCount: 1,
-      totalAmount: "30.00",
-      taxAmount: "1.80",
-      issueStartDate: "2026-03-03",
-      issueEndDate: "2026-03-03",
-      passageStartDate: "2026-03-03",
-      passageEndDate: "2026-03-03",
-      plateCount: 1,
-      plateSummary: [{ plateNumber: "云ADA0381", invoiceCount: 1, totalAmount: "30.00" }],
-      linkedOaRowId: "",
-      linkedOaCaseId: "",
-      linkedOaApplicant: "",
-      linkedOaApplyDate: "",
-      linkedOaAmount: "0.00",
-      amountDelta: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      supplementAmount: "0.00",
-      displayCountText: "ETC票 1 + 补充凭证 0",
-      note: "",
-      invoiceItems: [
-        {
-          id: "etc-inv-imported-delete-001",
-          invoiceNumber: "ETC-IMPORTED-DELETE-001",
-          issueDate: "2026-03-03",
-          passageStartDate: "2026-03-03",
-          passageEndDate: "2026-03-03",
-          plateNumber: "云ADA0381",
-          sellerName: "云南高速通行费",
-          buyerName: "云南溯源科技",
-          amountWithoutTax: "28.20",
-          taxAmount: "1.80",
-          totalAmount: "30.00",
-          status: "unsubmitted",
-          hasPdf: true,
-          hasXml: true,
-        },
-      ],
-    } as never);
+    mockFetchEtcInvoices([
+      {
+        id: "etc-inv-imported-delete-001",
+        invoiceNumber: "ETC-IMPORTED-DELETE-001",
+        issueDate: "2026-03-03",
+        passageStartDate: "2026-03-03",
+        passageEndDate: "2026-03-03",
+        plateNumber: "云ADA0381",
+        sellerName: "云南高速通行费",
+        buyerName: "云南溯源科技",
+        amountWithoutTax: "28.20",
+        taxAmount: "1.80",
+        totalAmount: "30.00",
+        status: "unsubmitted",
+        hasPdf: true,
+        hasXml: true,
+      },
+    ]);
     const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
 
     renderAppAt("/etc-tickets");
@@ -1579,7 +1560,6 @@ describe("ETC ticket management page", () => {
       invoiceItems: [],
     } as never);
     const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue(submittedBatch as never);
-    const legacyMarkNotSubmitted = vi.spyOn(etcApi, "markEtcBatchNotSubmitted");
 
     renderAppAt("/etc-tickets");
 
@@ -1606,7 +1586,6 @@ describe("ETC ticket management page", () => {
         reason: "用户确认 OA 草稿已提交。",
       });
     });
-    expect(legacyMarkNotSubmitted).not.toHaveBeenCalled();
     await waitFor(() => expect(fetchReconciliationTasks).toHaveBeenCalledTimes(2));
     await waitFor(() => {
       expect(fetchBusinessBatches).toHaveBeenCalledWith(expect.objectContaining({ status: "submitted" }));
@@ -1725,7 +1704,6 @@ describe("ETC ticket management page", () => {
       invoiceItems: [],
     } as never);
     const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue(notSubmittedBatch as never);
-    const legacyMarkNotSubmitted = vi.spyOn(etcApi, "markEtcBatchNotSubmitted");
 
     renderAppAt("/etc-tickets");
 
@@ -1740,7 +1718,6 @@ describe("ETC ticket management page", () => {
         reason: "用户确认 OA 草稿未提交。",
       });
     });
-    expect(legacyMarkNotSubmitted).not.toHaveBeenCalled();
     expect(within(oaStatusPanel).queryByLabelText("人工处理原因")).not.toBeInTheDocument();
     expect(within(page).getByRole("radio", { name: "未提交 1" })).toBeInTheDocument();
     expect(within(page).getByRole("radio", { name: "已提交 0" })).toBeInTheDocument();
@@ -3359,51 +3336,24 @@ describe("ETC ticket management page", () => {
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
       items: [importedTask],
     } as never);
-    vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
-      id: "etc-batch-imported-001",
-      etcBatchId: "ETC-2026-IMPORTED",
-      externalBatchId: "ETC-2026-IMPORTED",
-      status: "unsubmitted",
-      sourceType: "etc_zip",
-      invoiceCount: 1,
-      totalAmount: "30.00",
-      taxAmount: "1.80",
-      issueStartDate: "2026-03-03",
-      issueEndDate: "2026-03-03",
-      passageStartDate: "2026-03-03",
-      passageEndDate: "2026-03-03",
-      plateCount: 1,
-      plateSummary: [{ plateNumber: "云ADA0381", invoiceCount: 1, totalAmount: "30.00" }],
-      linkedOaRowId: "",
-      linkedOaCaseId: "",
-      linkedOaApplicant: "",
-      linkedOaApplyDate: "",
-      linkedOaAmount: "0.00",
-      amountDelta: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      supplementAmount: "0.00",
-      displayCountText: "ETC票 1 + 补充凭证 0",
-      note: "",
-      invoiceItems: [
-        {
-          id: "etc-inv-imported-001",
-          invoiceNumber: "ETC-IMPORTED-001",
-          issueDate: "2026-03-03",
-          passageStartDate: "2026-03-03",
-          passageEndDate: "2026-03-03",
-          plateNumber: "云ADA0381",
-          sellerName: "云南高速通行费",
-          buyerName: "云南溯源科技",
-          amountWithoutTax: "28.20",
-          taxAmount: "1.80",
-          totalAmount: "30.00",
-          status: "unsubmitted",
-          hasPdf: true,
-          hasXml: true,
-        },
-      ],
-    } as never);
+    mockFetchEtcInvoices([
+      {
+        id: "etc-inv-imported-001",
+        invoiceNumber: "ETC-IMPORTED-001",
+        issueDate: "2026-03-03",
+        passageStartDate: "2026-03-03",
+        passageEndDate: "2026-03-03",
+        plateNumber: "云ADA0381",
+        sellerName: "云南高速通行费",
+        buyerName: "云南溯源科技",
+        amountWithoutTax: "28.20",
+        taxAmount: "1.80",
+        totalAmount: "30.00",
+        status: "unsubmitted",
+        hasPdf: true,
+        hasXml: true,
+      },
+    ]);
     vi.spyOn(etcApi, "deleteEtcReconciliationTaskImportedInvoices").mockResolvedValue({
       ...importedTask,
       status: "ready_for_import",
@@ -3426,7 +3376,12 @@ describe("ETC ticket management page", () => {
     expect(removeButton).toBeEnabled();
     expect(within(importedInvoiceSection).getByRole("table", { name: "已导入ETC发票明细" })).toBeInTheDocument();
     expect(within(importedInvoiceSection).getByText("ETC-IMPORTED-001")).toBeInTheDocument();
-    expect(etcApi.fetchEtcBatchDetail).toHaveBeenCalledWith("import-session-001", expect.any(AbortSignal));
+    expect(etcApi.fetchEtcInvoices).toHaveBeenCalledWith({
+      importBatchId: "import-session-001",
+      page: 1,
+      pageSize: 500,
+      signal: expect.any(AbortSignal),
+    });
 
     await user.click(removeButton);
     const dialog = await screen.findByRole("dialog", { name: "移除发票" });
@@ -3495,34 +3450,24 @@ describe("ETC ticket management page", () => {
       ...importedTask,
       version: 9,
     } as never);
-    vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
-      id: "etc-batch-remove-fail-001",
-      etcBatchId: "ETC-REMOVE-FAIL",
-      externalBatchId: "ETC-REMOVE-FAIL",
-      status: "unsubmitted",
-      sourceType: "etc_zip",
-      invoiceCount: 1,
-      totalAmount: "30.00",
-      taxAmount: "1.80",
-      issueStartDate: "2026-03-03",
-      issueEndDate: "2026-03-03",
-      passageStartDate: "2026-03-03",
-      passageEndDate: "2026-03-03",
-      plateCount: 1,
-      plateSummary: [{ plateNumber: "云ADA0381", invoiceCount: 1, totalAmount: "30.00" }],
-      linkedOaRowId: "",
-      linkedOaCaseId: "",
-      linkedOaApplicant: "",
-      linkedOaApplyDate: "",
-      linkedOaAmount: "0.00",
-      amountDelta: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      supplementAmount: "0.00",
-      displayCountText: "ETC票 1 + 补充凭证 0",
-      note: "",
-      invoiceItems: [],
-    } as never);
+    mockFetchEtcInvoices([
+      {
+        id: "etc-inv-remove-fail-001",
+        invoiceNumber: "ETC-REMOVE-FAIL-001",
+        issueDate: "2026-03-03",
+        passageStartDate: "2026-03-03",
+        passageEndDate: "2026-03-03",
+        plateNumber: "云ADA0381",
+        sellerName: "云南高速通行费",
+        buyerName: "云南溯源科技",
+        amountWithoutTax: "28.20",
+        taxAmount: "1.80",
+        totalAmount: "30.00",
+        status: "unsubmitted",
+        hasPdf: true,
+        hasXml: true,
+      },
+    ]);
     const removeInvoices = vi
       .spyOn(etcApi, "deleteEtcReconciliationTaskImportedInvoices")
       .mockRejectedValue(new Error("移除发票失败，请刷新后重试。") as never);
@@ -3587,51 +3532,24 @@ describe("ETC ticket management page", () => {
         },
       ],
     } as never);
-    vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
-      id: "etc_import_batch_0004",
-      etcBatchId: "etc_import_batch_0004",
-      externalBatchId: "etc_import_batch_0004",
-      status: "unsubmitted",
-      sourceType: "etc_import",
-      invoiceCount: 36,
-      totalAmount: "1673.30",
-      taxAmount: "48.74",
-      issueStartDate: "2026-03-28",
-      issueEndDate: "2026-04-27",
-      passageStartDate: "2026-03-28",
-      passageEndDate: "2026-04-27",
-      plateCount: 1,
-      plateSummary: [{ plateNumber: "云ADA0381", invoiceCount: 36, totalAmount: "1673.30" }],
-      linkedOaRowId: "",
-      linkedOaCaseId: "",
-      linkedOaApplicant: "",
-      linkedOaApplyDate: "",
-      linkedOaAmount: "0.00",
-      amountDelta: "0.00",
-      etcInvoiceCount: 37,
-      supplementCount: 0,
-      supplementAmount: "0.00",
-      displayCountText: "ETC票 37 + 补充凭证 0",
-      note: "",
-      invoiceItems: [
-        {
-          id: "etc-inv-imported-submit-001",
-          invoiceNumber: "ETC-IMPORTED-SUBMIT-001",
-          issueDate: "2026-04-27",
-          passageStartDate: "2026-04-27",
-          passageEndDate: "2026-04-27",
-          plateNumber: "云ADA0381",
-          sellerName: "云南高速通行费",
-          buyerName: "云南溯源科技",
-          amountWithoutTax: "1624.56",
-          taxAmount: "48.74",
-          totalAmount: "1673.30",
-          status: "unsubmitted",
-          hasPdf: true,
-          hasXml: true,
-        },
-      ],
-    } as never);
+    mockFetchEtcInvoices([
+      {
+        id: "etc-inv-imported-submit-001",
+        invoiceNumber: "ETC-IMPORTED-SUBMIT-001",
+        issueDate: "2026-04-27",
+        passageStartDate: "2026-04-27",
+        passageEndDate: "2026-04-27",
+        plateNumber: "云ADA0381",
+        sellerName: "云南高速通行费",
+        buyerName: "云南溯源科技",
+        amountWithoutTax: "1624.56",
+        taxAmount: "48.74",
+        totalAmount: "1673.30",
+        status: "unsubmitted",
+        hasPdf: true,
+        hasXml: true,
+      },
+    ]);
     const businessBatch = {
       businessBatchId: "etc_business_batch_imported_submit_001",
       taskId: "etc-recon-imported-submit-001",
@@ -3754,34 +3672,7 @@ describe("ETC ticket management page", () => {
       .mockResolvedValueOnce({ items: [importedTask] } as never)
       .mockResolvedValue({ items: [] } as never);
     vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(importedTask as never);
-    vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
-      id: "import-session-delete-001",
-      etcBatchId: "import-session-delete-001",
-      externalBatchId: "import-session-delete-001",
-      status: "unsubmitted",
-      sourceType: "etc_zip",
-      invoiceCount: 1,
-      totalAmount: "30.00",
-      taxAmount: "1.80",
-      issueStartDate: "2026-03-03",
-      issueEndDate: "2026-03-03",
-      passageStartDate: "2026-03-03",
-      passageEndDate: "2026-03-03",
-      plateCount: 1,
-      plateSummary: [],
-      linkedOaRowId: "",
-      linkedOaCaseId: "",
-      linkedOaApplicant: "",
-      linkedOaApplyDate: "",
-      linkedOaAmount: "0.00",
-      amountDelta: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      supplementAmount: "0.00",
-      displayCountText: "ETC票 1 + 补充凭证 0",
-      note: "",
-      invoiceItems: [],
-    } as never);
+    mockFetchEtcInvoices([]);
     vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined);
 
     renderAppAt("/etc-tickets");
@@ -4119,7 +4010,6 @@ describe("ETC ticket management page", () => {
   test("submitted business batches use local reset deletion instead of the legacy internal revoke action", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
-    const legacyMarkNotSubmitted = vi.spyOn(etcApi, "markEtcBatchNotSubmitted");
     const deleteBusinessBatch = vi.spyOn(etcApi, "deleteEtcBusinessBatch");
     renderAppAt("/etc-tickets");
 
@@ -4149,7 +4039,6 @@ describe("ETC ticket management page", () => {
     await waitFor(() => {
       expect(within(page).queryByTestId("etc-batch-row-etc-batch-submitted-01")).not.toBeInTheDocument();
     });
-    expect(legacyMarkNotSubmitted).not.toHaveBeenCalled();
   });
 
   test("renders batch invoice details with a native table instead of DataGrid", async () => {

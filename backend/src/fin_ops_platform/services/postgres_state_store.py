@@ -6,8 +6,8 @@ from decimal import Decimal
 from enum import Enum
 import hashlib
 import json
-import os
 from pathlib import Path
+import re
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -39,17 +39,14 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
 )
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
-from fin_ops_platform.services.state_store import ApplicationStateStore, GRIDFS_BUCKET_NAME, GRIDFS_REF_PREFIX, load_mongo_state_settings
 from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
 from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
 from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 
 APP_SETTINGS_KEY = "app_settings"
-STATE_KEY_PREFIX = "state:"
-LEGACY_GRIDFS_READS_ENV = "FIN_OPS_ENABLE_LEGACY_GRIDFS_READS"
-
-
+GRIDFS_REF_PREFIX = "gridfs://"
+FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 def _default_app_settings_payload() -> dict[str, Any]:
     return {
         "completed_project_ids": [],
@@ -76,44 +73,45 @@ def _jsonb(value: Any) -> Any:
     return Jsonb(value)
 
 
-class LegacyGridFSFileReader:
-    def __init__(self, *, mongo_uri: str, database: str) -> None:
-        self._mongo_uri = mongo_uri
-        self._database = database
-        self._client: Any | None = None
+def _dedupe_text_values(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        result.append(item)
+        seen.add(item)
+    return result
 
-    @classmethod
-    def from_data_dir(cls, data_dir: Path) -> LegacyGridFSFileReader | None:
-        settings = load_mongo_state_settings(data_dir)
-        if settings is None:
-            return None
-        return cls(mongo_uri=settings.mongo_uri, database=settings.database)
 
-    def read(self, stored_file_path: str) -> bytes:
-        bucket_name, object_id = self._parse_gridfs_uri(stored_file_path)
-        bucket = self._bucket(bucket_name)
-        stream = bucket.open_download_stream(object_id)
-        return bytes(stream.read())
+def _normalize_manual_oa_imports(payload: object) -> dict[str, object]:
+    raw_payload = payload if isinstance(payload, dict) else {}
+    raw_entries = raw_payload.get("entries")
+    entries: dict[str, object] = {}
+    if isinstance(raw_entries, dict):
+        for row_id, entry in raw_entries.items():
+            normalized_row_id = str(row_id or "").strip()
+            if not normalized_row_id:
+                continue
+            entry_payload = dict(entry) if isinstance(entry, dict) else {}
+            entry_payload["row_id"] = normalized_row_id
+            entries[normalized_row_id] = entry_payload
+    for row_id in _dedupe_text_values(raw_payload.get("row_ids") if isinstance(raw_payload, dict) else []):
+        entries.setdefault(row_id, {"row_id": row_id, "source": "manual_oa_import"})
+    audit_log = raw_payload.get("audit_log")
+    return {
+        "row_ids": sorted(entries),
+        "entries": entries,
+        "audit_log": list(audit_log) if isinstance(audit_log, list) else [],
+    }
 
-    def _bucket(self, bucket_name: str) -> Any:
-        if self._client is None:
-            from gridfs import GridFSBucket
-            from pymongo import MongoClient
 
-            self._client = MongoClient(self._mongo_uri)
-            self._gridfs_bucket_class = GridFSBucket
-        database = self._client[self._database]
-        return self._gridfs_bucket_class(database, bucket_name=bucket_name)
-
-    @staticmethod
-    def _parse_gridfs_uri(stored_file_path: str) -> tuple[str, str]:
-        raw = str(stored_file_path or "")[len(GRIDFS_REF_PREFIX) :]
-        first, separator, rest = raw.partition("/")
-        if not first:
-            raise ValueError("Invalid GridFS stored file reference.")
-        if separator and first == GRIDFS_BUCKET_NAME and rest:
-            return first, rest
-        return GRIDFS_BUCKET_NAME, first
+def _sanitize_name(file_name: str) -> str:
+    cleaned = FILENAME_SAFE_RE.sub("_", file_name).strip("._")
+    return cleaned or "uploaded_file"
 
 
 class PostgresStateStore:
@@ -123,7 +121,6 @@ class PostgresStateStore:
         data_dir: Path,
         connection: Any,
         sql_read_connection: Any | None = None,
-        legacy_file_reader: Any | None = None,
         object_storage_repository: ObjectStorageRepository | None = None,
     ) -> None:
         self._data_dir = Path(data_dir)
@@ -132,13 +129,6 @@ class PostgresStateStore:
         self._object_storage_repository = object_storage_repository
         self._object_storage_backend = str(getattr(object_storage_repository, "backend", "minio")) if object_storage_repository is not None else None
         self._object_storage_bucket = str(getattr(object_storage_repository, "bucket", "")) if object_storage_repository is not None else None
-        self._legacy_file_reader = legacy_file_reader
-        if (
-            self._legacy_file_reader is None
-            and self._object_storage_repository is None
-            and self._legacy_gridfs_reads_enabled()
-        ):
-            self._legacy_file_reader = LegacyGridFSFileReader.from_data_dir(self._data_dir)
         self._core_repository = PostgresCoreRepository(connection)
         self._oa_projection_repository = PostgresOAProjectionRepository(connection)
         self._ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
@@ -179,10 +169,6 @@ class PostgresStateStore:
     @property
     def mongo_database_name(self) -> str | None:
         return None
-
-    @staticmethod
-    def _legacy_gridfs_reads_enabled() -> bool:
-        return (os.environ.get(LEGACY_GRIDFS_READS_ENV) or "").strip().lower() in {"1", "true", "yes", "on"}
 
     def health_summary(self) -> dict[str, object]:
         summary: dict[str, object]
@@ -268,11 +254,10 @@ class PostgresStateStore:
         snapshot = self._ops_tax_etc_repository.load_pending_invoice_commands()
         if snapshot:
             return snapshot
-        return self._load_snapshot_or_empty("pending_invoice_commands")
+        return {}
 
     def save_pending_invoice_commands(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_pending_invoice_commands(snapshot)
-        self._save_snapshot("pending_invoice_commands", snapshot)
 
     def load_oa_attachment_invoice_cache_entry(self, cache_key: str) -> dict[str, object] | None:
         return self._ops_tax_etc_repository.load_oa_attachment_invoice_cache_entry(cache_key)
@@ -284,24 +269,18 @@ class PostgresStateStore:
         return self._ops_tax_etc_repository.clear_oa_attachment_invoice_cache()
 
     def load_oa_sync_state(self) -> dict[str, Any]:
-        snapshot = self._load_snapshot("oa_sync_state")
-        if snapshot:
-            return snapshot
         return self._ops_tax_etc_repository.load_oa_sync_state()
 
     def save_oa_sync_state(self, snapshot: dict[str, Any]) -> None:
-        self._save_snapshot("oa_sync_state", snapshot)
+        self._ops_tax_etc_repository.save_oa_sync_state(snapshot)
 
     def load_manual_oa_imports(self) -> dict[str, object]:
-        snapshot = self._load_snapshot("manual_oa_imports")
-        if snapshot:
-            return ApplicationStateStore._normalize_manual_oa_imports(snapshot)  # noqa: SLF001
         payload = self._ops_tax_etc_repository.load_manual_oa_imports()
-        return ApplicationStateStore._normalize_manual_oa_imports(payload)  # noqa: SLF001
+        return _normalize_manual_oa_imports(payload)
 
     def save_manual_oa_imports(self, payload: dict[str, object]) -> None:
-        normalized = ApplicationStateStore._normalize_manual_oa_imports(payload)  # noqa: SLF001
-        self._save_snapshot("manual_oa_imports", normalized)
+        normalized = _normalize_manual_oa_imports(payload)
+        self._ops_tax_etc_repository.save_manual_oa_imports(normalized)
 
     def add_manual_oa_imports(
         self,
@@ -310,11 +289,11 @@ class PostgresStateStore:
         actor_id: str | None = None,
         audit: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        payload = ApplicationStateStore._normalize_manual_oa_imports(self.load_manual_oa_imports())  # noqa: SLF001
+        payload = _normalize_manual_oa_imports(self.load_manual_oa_imports())
         entries = dict(payload.get("entries") if isinstance(payload.get("entries"), dict) else {})
         imported: list[str] = []
         already_imported: list[str] = []
-        for row_id in ApplicationStateStore._dedupe_text_values(row_ids):  # noqa: SLF001
+        for row_id in _dedupe_text_values(row_ids):
             if row_id in entries:
                 already_imported.append(row_id)
                 continue
@@ -336,7 +315,7 @@ class PostgresStateStore:
         normalized_row_id = str(row_id or "").strip()
         if not normalized_row_id:
             return False
-        payload = ApplicationStateStore._normalize_manual_oa_imports(self.load_manual_oa_imports())  # noqa: SLF001
+        payload = _normalize_manual_oa_imports(self.load_manual_oa_imports())
         entries = dict(payload.get("entries") if isinstance(payload.get("entries"), dict) else {})
         removed = entries.pop(normalized_row_id, None) is not None
         if not removed:
@@ -353,51 +332,25 @@ class PostgresStateStore:
         snapshot = self._ops_tax_etc_repository.load_tax_certified_imports()
         if snapshot:
             return snapshot
-        return self._load_snapshot_or_empty("tax_certified_imports")
+        return {}
 
     def save_tax_certified_imports(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_tax_certified_imports(snapshot)
-        self._save_snapshot("tax_certified_imports", snapshot)
 
     def save_tax_offset_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
         return self._ops_tax_etc_repository.save_tax_offset_plan(plan)
 
     def load_etc_state(self) -> dict[str, Any]:
-        snapshot = self._ops_tax_etc_repository.load_etc_state()
-        if snapshot:
-            fallback = self._load_snapshot("etc_state") or {}
-            if fallback:
-                for key in (
-                    "invoice_counter",
-                    "batch_counter",
-                    "import_batch_counter",
-                    "business_batch_counter",
-                    "batch_day_counters",
-                    "invoice_numbers",
-                ):
-                    if key in fallback:
-                        snapshot[key] = fallback[key]
-            return snapshot
-        return self._load_snapshot_or_empty("etc_state")
+        return self._ops_tax_etc_repository.load_etc_state()
 
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_etc_state(snapshot)
-        self._save_snapshot("etc_state", snapshot)
 
     def load_etc_reconciliation_state(self) -> dict[str, Any]:
-        snapshot = self._ops_tax_etc_repository.load_etc_reconciliation_state()
-        if snapshot:
-            fallback = self._load_snapshot("etc_reconciliation_state") or {}
-            if fallback:
-                for key in ("schema_version", "task_counter", "file_counter", "audit_counter"):
-                    if key in fallback:
-                        snapshot[key] = fallback[key]
-            return snapshot
-        return self._load_snapshot_or_empty("etc_reconciliation_state")
+        return self._ops_tax_etc_repository.load_etc_reconciliation_state()
 
     def save_etc_reconciliation_state(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_etc_reconciliation_state(snapshot)
-        self._save_snapshot("etc_reconciliation_state", snapshot)
 
     def store_etc_reconciliation_file(self, *, task_id: str, file_id: str, file_name: str, content: bytes) -> str:
         if self._object_storage_repository is not None:
@@ -410,8 +363,8 @@ class PostgresStateStore:
         return self._read_file(stored_file_path)
 
     def store_etc_invoice_file(self, *, invoice_number: str, file_name: str, content: bytes) -> str:
-        normalized_invoice_number = ApplicationStateStore._sanitize_name(invoice_number)  # noqa: SLF001
-        file_id = f"etc_invoice:{normalized_invoice_number}:{ApplicationStateStore._sanitize_name(file_name)}"  # noqa: SLF001
+        normalized_invoice_number = _sanitize_name(invoice_number)
+        file_id = f"etc_invoice:{normalized_invoice_number}:{_sanitize_name(file_name)}"
         if self._object_storage_repository is not None:
             return self._store_object_file(namespace="etc_invoice", file_id=file_id, file_name=file_name, content=content)
         stored_file_path = self._store_local_file("etc_invoice", file_id, file_name, content)
@@ -429,9 +382,7 @@ class PostgresStateStore:
                 return False
             return True
         if self._is_gridfs_ref(stored_file_path):
-            if self._object_storage_repository is not None:
-                return False
-            return self._legacy_file_reader is not None
+            return False
         return Path(stored_file_path).exists()
 
     def delete_etc_invoice_file(self, stored_file_path: str) -> None:
@@ -480,17 +431,10 @@ class PostgresStateStore:
             "sha256": hashlib.sha256(content).hexdigest(),
         }
         self._ops_tax_etc_repository.save_historical_etc_repair_bundle_metadata(payload, file_object_id=file_object_id)
-        bundles = self.load_historical_etc_repair_bundle_metadata()
-        bundles[normalized_bundle_id] = payload
-        self._save_snapshot("historical_etc_repair_bundles", bundles)
         return payload
 
     def load_historical_etc_repair_bundle_metadata(self) -> dict[str, dict[str, Any]]:
-        rows = self._ops_tax_etc_repository.load_historical_etc_repair_bundle_metadata()
-        if rows:
-            return rows
-        payload = self._load_snapshot("historical_etc_repair_bundles")
-        return {str(key): dict(value) for key, value in payload.items() if isinstance(value, dict)} if isinstance(payload, dict) else {}
+        return self._ops_tax_etc_repository.load_historical_etc_repair_bundle_metadata()
 
     def read_historical_etc_repair_bundle(self, bundle_id: str) -> dict[str, Any] | None:
         bundle = self.load_historical_etc_repair_bundle_metadata().get(str(bundle_id or "").strip())
@@ -523,86 +467,60 @@ class PostgresStateStore:
             bundle_id=bundle_id,
             parsed_seed=parsed_seed,
         )
-        seeds = self.load_historical_etc_repair_parsed_seeds()
-        seeds[str(bundle_id)] = seed
-        self._save_snapshot("historical_etc_repair_parsed_seeds", seeds)
         return seed
 
     def load_historical_etc_repair_parsed_seeds(self) -> dict[str, dict[str, Any]]:
-        rows = self._ops_tax_etc_repository.load_historical_etc_repair_parsed_seeds()
-        if rows:
-            return rows
-        payload = self._load_snapshot("historical_etc_repair_parsed_seeds")
-        return {str(key): dict(value) for key, value in payload.items() if isinstance(value, dict)} if isinstance(payload, dict) else {}
+        return self._ops_tax_etc_repository.load_historical_etc_repair_parsed_seeds()
 
     def load_historical_etc_repair_parsed_seed(self, bundle_id: str) -> dict[str, Any] | None:
         seed = self.load_historical_etc_repair_parsed_seeds().get(str(bundle_id or "").strip())
         return dict(seed) if isinstance(seed, dict) else None
 
     def load_historical_etc_repair_states(self) -> dict[str, dict[str, Any]]:
-        rows = self._ops_tax_etc_repository.load_historical_etc_repair_states()
-        if rows:
-            return rows
-        payload = self._load_snapshot("historical_etc_repair_states")
-        return {str(key): dict(value) for key, value in payload.items() if isinstance(value, dict)} if isinstance(payload, dict) else {}
+        return self._ops_tax_etc_repository.load_historical_etc_repair_states()
 
     def save_historical_etc_repair_states(self, states: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_historical_etc_repair_states(states)
-        self._save_snapshot("historical_etc_repair_states", states)
 
     def load_background_jobs(self) -> dict[str, Any]:
-        snapshot = self._load_snapshot("background_jobs")
-        if snapshot:
-            return snapshot
         return self._ops_tax_etc_repository.load_background_jobs()
 
     def save_background_jobs(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_background_jobs(snapshot)
-        self._save_snapshot("background_jobs", snapshot)
 
     def load_app_health_alerts(self) -> dict[str, Any]:
-        snapshot = self._load_snapshot("app_health_alerts")
-        if snapshot:
-            return snapshot
         return self._ops_tax_etc_repository.load_app_health_alerts()
 
     def save_app_health_alerts(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_app_health_alerts(snapshot)
-        self._save_snapshot("app_health_alerts", snapshot)
 
     def load_workbench_pair_relations(self) -> dict[str, Any]:
         snapshot = self._workbench_relation_repository.load_workbench_pair_relations()
-        fallback = self._load_snapshot("workbench_pair_relations")
-        if snapshot or fallback:
+        if snapshot:
             pair_relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
             pair_history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else None
             return normalize_workbench_pair_relations(
                 pair_relations if pair_relations else None,
                 pair_history if pair_history else None,
-                snapshot=fallback,
             )
         return {}
 
     def save_workbench_pair_relations(self, snapshot: dict[str, Any], *, changed_case_ids: set[str] | None = None) -> None:
         self._workbench_relation_repository.save_workbench_pair_relations(snapshot, changed_case_ids=changed_case_ids)
-        self._save_snapshot("workbench_pair_relations", snapshot)
 
     def load_no_oa_bank_batches(self) -> dict[str, Any]:
         snapshot = self._workbench_repository.load_no_oa_bank_batches()
-        fallback = self._load_snapshot("no_oa_bank_batches")
-        if snapshot or fallback:
+        if snapshot:
             batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
             audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else None
             return normalize_no_oa_bank_batches(
                 batches if batches else None,
                 audit_log if audit_log else None,
-                snapshot=fallback,
             )
         return {}
 
     def save_no_oa_bank_batches(self, snapshot: dict[str, Any]) -> None:
         self._workbench_repository.save_no_oa_bank_batches(snapshot)
-        self._save_snapshot("no_oa_bank_batches", snapshot)
 
     def save_no_oa_bank_batches_scope(self, snapshot: dict[str, Any], *, scope_key: str) -> None:
         self._workbench_repository.save_no_oa_bank_batches_scope(snapshot, scope_key=scope_key)
@@ -615,7 +533,6 @@ class PostgresStateStore:
 
     def save_workbench_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
         self._read_model_repository.save_workbench_read_models(snapshot, changed_scope_keys=changed_scope_keys)
-        self._save_snapshot("workbench_read_models", snapshot)
 
     def save_no_oa_bank_batch_mutation(
         self,
@@ -651,50 +568,37 @@ class PostgresStateStore:
 
     def save_workbench_candidate_matches(self, snapshot: dict[str, Any], *, changed_scope_months: set[str] | None = None) -> None:
         self._read_model_repository.save_workbench_candidate_matches(snapshot, changed_scope_months=changed_scope_months)
-        self._save_snapshot("workbench_candidate_matches", snapshot)
 
     def save_workbench_matching_dirty_scopes(self, snapshot: dict[str, Any]) -> None:
-        self._save_snapshot("workbench_matching_dirty_scopes", snapshot)
+        return None
 
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         snapshot = self._workbench_repository.load_bank_transaction_categories()
-        fallback = self._load_snapshot("bank_transaction_categories")
         if snapshot:
             categories = snapshot.get("categories") if isinstance(snapshot, dict) else None
             audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else None
             return normalize_bank_transaction_categories(
                 categories if isinstance(categories, dict) else {},
                 audit_log if isinstance(audit_log, list) else [],
-                snapshot={
-                    key: value
-                    for key, value in (fallback.items() if isinstance(fallback, dict) else [])
-                    if key not in {"categories", "audit_log"}
-                },
             )
-        if fallback:
-            return normalize_bank_transaction_categories(None, None, snapshot=fallback)
         return {}
 
     def save_bank_transaction_categories(self, snapshot: dict[str, Any]) -> None:
         self._workbench_repository.save_bank_transaction_categories(snapshot)
-        self._save_snapshot("bank_transaction_categories", snapshot)
 
     def load_turnover_relations(self) -> dict[str, Any]:
         snapshot = self._workbench_repository.load_turnover_relations()
-        fallback = self._load_snapshot("turnover_relations")
-        if snapshot or fallback:
+        if snapshot:
             relations = snapshot.get("relations") if isinstance(snapshot, dict) else None
             audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else None
             return normalize_turnover_relations(
                 relations if relations else None,
                 audit_log if audit_log else None,
-                snapshot=fallback,
             )
         return {}
 
     def save_turnover_relations(self, snapshot: dict[str, Any]) -> None:
         self._workbench_repository.save_turnover_relations(snapshot)
-        self._save_snapshot("turnover_relations", snapshot)
 
     def load_turnover_relation_audit_log(self) -> list[Any]:
         snapshot = self.load_turnover_relations()
@@ -712,14 +616,10 @@ class PostgresStateStore:
         snapshot = self._workbench_repository.load_turnover_ledger_extras()
         if snapshot:
             return snapshot
-        fallback = self._load_snapshot("turnover_ledger_extras")
-        if fallback:
-            return fallback
         return {"version": 1, "extras": []}
 
     def save_turnover_ledger_extras(self, snapshot: dict[str, Any]) -> None:
         self._workbench_repository.save_turnover_ledger_extras(snapshot)
-        self._save_snapshot("turnover_ledger_extras", snapshot)
 
     def load_cost_statistics_read_models(self) -> dict[str, Any]:
         snapshot = self._read_model_repository.load_cost_statistics_read_models()
@@ -729,7 +629,6 @@ class PostgresStateStore:
 
     def save_cost_statistics_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
         self._read_model_repository.save_cost_statistics_read_models(snapshot, changed_scope_keys=changed_scope_keys)
-        self._save_snapshot("cost_statistics_read_models", snapshot)
 
     def load_tax_offset_read_models(self) -> dict[str, Any]:
         snapshot = self._tax_offset_read_model_repository.load_tax_offset_read_models()
@@ -742,7 +641,6 @@ class PostgresStateStore:
             snapshot,
             changed_scope_keys=changed_scope_keys,
         )
-        self._save_snapshot("tax_offset_read_models", snapshot)
 
     @property
     def import_fact_repository(self) -> PostgresCoreRepository:
@@ -844,9 +742,6 @@ class PostgresStateStore:
     def load(self) -> dict[str, Any]:
         return self._load_snapshot_payload(include_import_facts=True)
 
-    def load_bootstrap_snapshot(self) -> dict[str, Any]:
-        return self._load_snapshot_payload(include_import_facts=False)
-
     def load_imports_snapshot(self) -> dict[str, Any]:
         return self._load_imports()
 
@@ -862,12 +757,12 @@ class PostgresStateStore:
             "file_imports": self._load_file_imports() if include_import_facts else {},
             "matching": self._load_matching(),
             "bank_transaction_categories": self.load_bank_transaction_categories(),
-            "workbench_overrides": self._load_snapshot_or_empty("workbench_overrides"),
+            "workbench_overrides": self.load_workbench_overrides(),
             "workbench_exception_cases": self.load_workbench_exception_cases(),
             "workbench_pair_relations": self.load_workbench_pair_relations(),
             "workbench_read_models": self.load_workbench_read_models(),
             "workbench_candidate_matches": self.load_workbench_candidate_matches(),
-            "workbench_matching_dirty_scopes": self._load_snapshot_or_empty("workbench_matching_dirty_scopes"),
+            "workbench_matching_dirty_scopes": {},
             "no_oa_bank_batches": self.load_no_oa_bank_batches(),
             "turnover_relations": self.load_turnover_relations(),
             "turnover_ledger_extras": self.load_turnover_ledger_extras(),
@@ -876,13 +771,6 @@ class PostgresStateStore:
             "app_health_alerts": self.load_app_health_alerts(),
             "pending_invoice_commands": self.load_pending_invoice_commands(),
         }
-        saved_whole = self._load_snapshot("full_state") if include_import_facts and self._legacy_full_state_snapshot_enabled() else {}
-        if saved_whole:
-            for key, value in saved_whole.items():
-                if not include_import_facts and key in {"imports", "file_imports"}:
-                    continue
-                if key not in snapshot or snapshot.get(key) in ({}, [], None):
-                    snapshot[key] = value
         return snapshot
 
     def save(self, payload: dict[str, Any]) -> None:
@@ -895,8 +783,6 @@ class PostgresStateStore:
             self._core_repository.save_file_imports(normalized.get("file_imports") or {})
         if "bank_transaction_categories" in normalized:
             self.save_bank_transaction_categories(normalized.get("bank_transaction_categories") or {})
-        if "matching" in normalized:
-            self._save_snapshot("matching", normalized.get("matching") or {})
         if "workbench_overrides" in normalized:
             self.save_workbench_overrides(normalized.get("workbench_overrides") or {})
         if "workbench_exception_cases" in normalized:
@@ -923,37 +809,23 @@ class PostgresStateStore:
             self.save_app_health_alerts(normalized.get("app_health_alerts") or {})
         if "pending_invoice_commands" in normalized:
             self.save_pending_invoice_commands(normalized.get("pending_invoice_commands") or {})
-        if self._legacy_full_state_snapshot_enabled():
-            self._save_snapshot("full_state", normalized)
-
-    @staticmethod
-    def _legacy_full_state_snapshot_enabled() -> bool:
-        return os.getenv("FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-
     def save_workbench_overrides(self, workbench_overrides_snapshot: dict[str, Any], *, changed_row_ids: set[str] | None = None) -> None:
         self._workbench_repository.save_workbench_overrides(workbench_overrides_snapshot, changed_row_ids=changed_row_ids)
-        self._save_snapshot("workbench_overrides", workbench_overrides_snapshot)
 
     def load_workbench_overrides(self) -> dict[str, Any]:
         snapshot = self._workbench_repository.load_workbench_overrides()
         if snapshot:
             return snapshot
-        return self._load_snapshot("workbench_overrides") or {}
+        return {}
 
     def load_workbench_exception_cases(self) -> dict[str, Any]:
         snapshot = self._workbench_repository.load_workbench_exception_cases()
         if snapshot:
             return snapshot
-        return self._load_snapshot("workbench_exception_cases") or {}
+        return {}
 
     def save_workbench_exception_cases(self, snapshot: dict[str, Any]) -> None:
         self._workbench_repository.save_workbench_exception_cases(snapshot)
-        self._save_snapshot("workbench_exception_cases", snapshot)
 
     def store_import_file(self, *, session_id: str, file_id: str, file_name: str, content: bytes) -> str:
         if self._object_storage_repository is not None:
@@ -1074,40 +946,19 @@ class PostgresStateStore:
     def _save_settings(self, settings_key: str, payload: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_settings(settings_key, payload)
 
-    def _load_snapshot(self, key: str) -> dict[str, Any]:
-        return self._load_settings(f"{STATE_KEY_PREFIX}{key}")
-
-    def _save_snapshot(self, key: str, payload: dict[str, Any]) -> None:
-        self._save_settings(f"{STATE_KEY_PREFIX}{key}", payload)
-
-    def _load_snapshot_or_empty(self, key: str) -> dict[str, Any]:
-        return self._load_snapshot(key) or {}
-
-    def _load_snapshot_or_table_map(self, key: str, sql: str, payload_key: str) -> dict[str, Any]:
-        rows = self._connection.fetch_all(sql)
-        values = {str(row.get("key")): self._row_payload(row, "payload", "extra_payload", "raw_payload") for row in rows}
-        if values:
-            return {payload_key: values}
-        return self._load_snapshot(key) or {}
-
     def _load_imports(self) -> dict[str, Any]:
         snapshot = self._core_repository.load_imports()
         if snapshot:
             return snapshot
-        saved = self._load_snapshot("imports")
-        return saved if saved else {}
+        return {}
 
     def _load_file_imports(self) -> dict[str, Any]:
         snapshot = self._core_repository.load_file_imports()
         if snapshot:
             return snapshot
-        saved = self._load_snapshot("file_imports")
-        return saved if saved else {}
+        return {}
 
     def _load_matching(self) -> dict[str, Any]:
-        saved = self._load_snapshot("matching")
-        if saved:
-            return saved
         runs = self._load_keyed_rows("select run_id as key, raw_payload from app.matching_runs order by executed_at, run_id")
         results = self._load_keyed_rows("select coalesce(legacy_mongo_id, id::text) as key, raw_payload from app.matching_results order by created_at, key")
         if not runs and not results:
@@ -1177,9 +1028,9 @@ class PostgresStateStore:
         content_bytes = bytes(content or b"")
         sha256 = hashlib.sha256(content_bytes).hexdigest()
         temporary_object_key = (
-            f"tmp/{ApplicationStateStore._sanitize_name(namespace)}/"
-            f"{ApplicationStateStore._sanitize_name(file_id)}/{sha256}/"
-            f"{ApplicationStateStore._sanitize_name(file_name)}"
+            f"tmp/{_sanitize_name(namespace)}/"
+            f"{_sanitize_name(file_id)}/{sha256}/"
+            f"{_sanitize_name(file_name)}"
         )
         pending_uri = f"{self._object_storage_backend}://{self._object_storage_bucket}/{temporary_object_key}"
         row = self._upsert_file_object(
@@ -1385,8 +1236,8 @@ class PostgresStateStore:
         )
 
     def _store_local_file(self, namespace: str, file_id: str, file_name: str, content: bytes) -> str:
-        safe_name = ApplicationStateStore._sanitize_name(file_name)  # noqa: SLF001
-        target_dir = self._file_root / ApplicationStateStore._sanitize_name(namespace) / ApplicationStateStore._sanitize_name(file_id)  # noqa: SLF001
+        safe_name = _sanitize_name(file_name)
+        target_dir = self._file_root / _sanitize_name(namespace) / _sanitize_name(file_id)
         target_dir.mkdir(parents=True, exist_ok=True)
         target_path = target_dir / safe_name
         target_path.write_bytes(content)
@@ -1396,11 +1247,7 @@ class PostgresStateStore:
         if self._is_object_storage_ref(stored_file_path):
             return self._read_object_file(stored_file_path)
         if self._is_gridfs_ref(stored_file_path):
-            if self._object_storage_repository is not None:
-                raise RuntimeError("Legacy GridFS fallback is disabled when object storage is enabled.")
-            if self._legacy_file_reader is None:
-                raise RuntimeError("Legacy GridFS file access is not configured for PostgreSQL state store.")
-            return bytes(self._legacy_file_reader.read(stored_file_path))
+            raise RuntimeError("Legacy GridFS file access is disabled for PostgreSQL state store.")
         path = Path(str(stored_file_path or ""))
         if not path.exists():
             raise FileNotFoundError(stored_file_path)

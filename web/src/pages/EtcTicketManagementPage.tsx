@@ -25,14 +25,12 @@ import {
   createEtcBusinessBatch,
   createEtcBusinessBatchOaDraft,
   deleteEtcBusinessBatch,
-  deleteEtcBatch,
   deleteEtcReconciliationTask,
   deleteEtcReconciliationTaskImportedInvoices,
   deleteEtcReconciliationSourceFile,
   fetchEtcBusinessBatchDetail,
   fetchEtcBusinessBatches,
-  fetchEtcBatchDetail,
-  fetchEtcBatches,
+  fetchEtcInvoices,
   fetchEtcReconciliationTask,
   manualEtcBusinessBatchOaStatus,
   fetchEtcReconciliationTasks,
@@ -587,8 +585,7 @@ type ReconciliationSelectionSummary = {
 };
 
 type BatchDeletePlan =
-  | { kind: "businessBatch"; batchId: string; expectedVersion?: number }
-  | { kind: "legacyBatch"; batchId: string };
+  | { kind: "businessBatch"; batchId: string; expectedVersion?: number };
 
 type DeleteTarget =
   | { kind: "batch"; item: EtcBatchSummary; plan: BatchDeletePlan }
@@ -630,6 +627,56 @@ function businessBatchToBatchDetail(batch: EtcBusinessBatchDetail): EtcBatchDeta
   return {
     ...businessBatchToBatchSummary(batch),
     invoiceItems: batch.invoiceItems,
+  };
+}
+
+function taskImportInvoicesToBatchDetail(task: EtcReconciliationTask, invoiceItems: EtcInvoice[]): EtcBatchDetail {
+  const issueDates = invoiceItems.map((invoice) => invoice.issueDate).filter(Boolean).sort();
+  const passageDates = invoiceItems
+    .flatMap((invoice) => [invoice.passageStartDate, invoice.passageEndDate])
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  const totalAmount = invoiceItems.length > 0 ? sumInvoiceTotalAmount(invoiceItems) : task.importedInvoiceAmount;
+  const plateCounts = new Map<string, { invoiceCount: number; totalAmount: number }>();
+  invoiceItems.forEach((invoice) => {
+    const plateNumber = invoice.plateNumber || "未识别车牌";
+    const current = plateCounts.get(plateNumber) ?? { invoiceCount: 0, totalAmount: 0 };
+    current.invoiceCount += 1;
+    const amount = Number(invoice.totalAmount);
+    current.totalAmount += Number.isFinite(amount) ? amount : 0;
+    plateCounts.set(plateNumber, current);
+  });
+  return {
+    id: task.importBatchId,
+    etcBatchId: task.etcBatchId || task.importBatchId,
+    externalBatchId: task.etcBatchId || task.importBatchId,
+    status: "unsubmitted",
+    sourceType: "etc_import_batch",
+    invoiceCount: task.importedInvoiceCount || invoiceItems.length,
+    totalAmount,
+    taxAmount: "0.00",
+    issueStartDate: issueDates[0] ?? null,
+    issueEndDate: issueDates[issueDates.length - 1] ?? null,
+    passageStartDate: passageDates[0] ?? null,
+    passageEndDate: passageDates[passageDates.length - 1] ?? null,
+    plateCount: plateCounts.size,
+    plateSummary: Array.from(plateCounts.entries()).map(([plateNumber, item]) => ({
+      plateNumber,
+      invoiceCount: item.invoiceCount,
+      totalAmount: item.totalAmount.toFixed(2),
+    })),
+    linkedOaRowId: task.oaDraftBatchId,
+    linkedOaCaseId: task.oaDraftBatchId,
+    linkedOaApplicant: "",
+    linkedOaApplyDate: "",
+    linkedOaAmount: task.oaTotalAmount,
+    amountDelta: "0.00",
+    etcInvoiceCount: task.etcInvoiceCount || invoiceItems.length,
+    supplementCount: task.supplementCount,
+    supplementAmount: task.supplementAmount,
+    displayCountText: `ETC票 ${task.etcInvoiceCount || invoiceItems.length} + 补充凭证 ${task.supplementCount}`,
+    note: task.title,
+    invoiceItems,
   };
 }
 
@@ -979,10 +1026,17 @@ export default function EtcTicketManagementPage() {
     setTaskImportDetailLoading(true);
     const detailLoader = selectedTaskBusinessBatch
       ? fetchEtcBusinessBatchDetail(selectedTaskImportBatchId, controller.signal).then(businessBatchToBatchDetail)
-      : fetchEtcBatchDetail(selectedTaskImportBatchId, controller.signal);
+      : selectedTask
+        ? fetchEtcInvoices({
+          importBatchId: selectedTaskImportBatchId,
+          page: 1,
+          pageSize: 500,
+          signal: controller.signal,
+        }).then((payload) => taskImportInvoicesToBatchDetail(selectedTask, payload.items))
+        : Promise.resolve(null);
     void detailLoader
       .then((detail) => {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && detail) {
           setTaskImportBatchDetail(detail);
         }
       })
@@ -997,7 +1051,7 @@ export default function EtcTicketManagementPage() {
         }
       });
     return () => controller.abort();
-  }, [selectedTaskBusinessBatch, selectedTaskImportBatchId]);
+  }, [selectedTask, selectedTaskBusinessBatch, selectedTaskImportBatchId]);
 
   useEffect(() => {
     if (batches.length === 0 && selectedBatchId) {
@@ -1140,7 +1194,7 @@ export default function EtcTicketManagementPage() {
         ...(businessBatch ? { expectedVersion: businessBatch.version } : {}),
       };
     }
-    return { kind: "legacyBatch", batchId: batch.id };
+    return { kind: "businessBatch", batchId: batch.id };
   };
   const canDeleteBatch = (batch: EtcBatchSummary) => {
     const businessBatch = businessBatchForBatchSummary(batch);
@@ -1150,7 +1204,7 @@ export default function EtcTicketManagementPage() {
     if (isBusinessBatchSource(batch)) {
       return true;
     }
-    return true;
+    return false;
   };
   const deleteBusinessBatchDisabledReason = (batch: EtcBusinessBatchSummary) =>
     businessBatchDeleteBlockReason(batch) || "当前批次暂不可删除";
@@ -1825,13 +1879,7 @@ export default function EtcTicketManagementPage() {
         mergeReconciliationTask(task);
       } else {
         const { plan } = deleteTarget;
-        const batchId = plan.batchId;
-        if (plan.kind === "businessBatch") {
-          await deleteBusinessBatchByPlan(plan);
-        } else {
-          await deleteEtcBatch(batchId);
-          removeDeletedBatchFromState(batchId);
-        }
+        await deleteBusinessBatchByPlan(plan);
         await loadBatches();
       }
       setDeleteTarget(null);

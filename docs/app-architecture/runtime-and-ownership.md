@@ -2,6 +2,8 @@
 
 本文维护当前 app 的运行时序、read model/worker 边界和模块 owner。它回答“请求如何到达事实源”“写入如何触发派生数据刷新”“哪个模块负责维护某类事实”。
 
+PostgreSQL 业务唯一真相的全局 owner matrix 见 `../architecture/module-boundaries/canonical-facts.md`。本文描述运行链路；具体 canonical fact family 的写入口、读入口和禁止路径以 canonical facts 合同和对应业务模块 `boundary-io.md` 为准。
+
 ## 总体调用链
 
 ```mermaid
@@ -50,6 +52,8 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 6. API 返回写入结果、受影响月份/对象、版本、job 或 refresh 状态。
 
 写模型、权限认证、冲突校验不做“分发 read model”；它们保留明确 command/service 边界。
+
+任何写入 PostgreSQL canonical facts 的路径，都必须先落到 `../architecture/module-boundaries/canonical-facts.md` 登记的 owner 模块。非 owner 模块只能通过 owner service、facade、UoW 或明确 adapter 发起写入；不能把 `read_model.*`、Redis、RabbitMQ 或前端事件反向当作业务事实。
 
 ### 写操作后的页面闭环
 

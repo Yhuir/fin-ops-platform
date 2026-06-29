@@ -80,3 +80,12 @@
 ## 当前缺口和删除条件
 
 - OA reverse 变更必须覆盖权限、凭证、审计和 read model recovery。
+
+## Canonical facts ownership
+
+- Owned facts: `app.input_invoice_usage_oa_reverse_batches`。
+- Allowed writes: input invoice usage OA reverse service、明确 application/UoW boundary。
+- Allowed reads: input invoice usage application/query services、OA reverse query ports。
+- Downstream outputs: input_invoice_usage、invoice_lifecycle、workbench_relation dirty scopes 或 owner producer 输出。
+- Forbidden paths: OA reverse 工具不得绕过 owner 状态机；read model rows 不得反向成为 reverse batch 事实。
+- Old code deletion: 旧 OA reverse direct-write path 和 snapshot fallback 必须删除；migration/audit/rollback 工具保留不算 closure。

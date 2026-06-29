@@ -6,18 +6,20 @@
 
 - app 业务事实、设置、后台任务、健康告警和主要读模型进入 PostgreSQL。
 - 原始上传文件和附件对象进入 MinIO/S3，PostgreSQL `app.file_objects` 保存 verified object pointer。
-- app Mongo 旧路径保留为迁移观察期回滚、shadow-read、导出和审计工具。
+- app Mongo 旧路径只允许保留为明确登记的迁移观察期回滚、审计或运维工具；旧 shadow-read rehearsal 和 export 工具已删除，不再作为允许路径。
 - OA 原始数据只由独立 worker 或迁移/shadow/audit 工具通过 Mongo adapter 只读读取，不写 OA Mongo。
+
+PostgreSQL 中的业务唯一真相、owner matrix、允许写入口和跨模块读写规则以 `module-boundaries/canonical-facts.md` 为准。本文只说明持久化和 read model 运行原则；具体业务事实仍由各 owner 模块管理，不由 read model 模块接管。
 
 生产 API/worker 主路径不得读取：
 
-- `ApplicationStateStore.load()` / `PostgresStateStore.load_bootstrap_snapshot()` full snapshot。
+- `ApplicationStateStore.load_bootstrap_snapshot()` local legacy full snapshot。
 - `app.app_settings` 中的 `state:*` JSON 作为业务事实 fallback。
 - App Mongo snapshot 或 local pickle snapshot。
 - GridFS 文件内容 fallback。
 - OA Mongo direct adapter fallback。
 
-这些旧路径只允许出现在 `backend/src/fin_ops_platform/tools/`、shadow-read rehearsal、migration/backfill worker、audit/export 和短期 rollback 工具中；进入 API production bootstrap 时必须通过 SQL repository、durable queue、Redis helper、object storage 和轻量配置注入。
+这些旧路径只允许出现在仍被登记的 migration/backfill worker、audit 和短期 rollback 工具中；进入 API production bootstrap 时必须通过 SQL repository、durable queue、Redis helper、object storage 和轻量配置注入。
 
 相关代码：
 
@@ -71,11 +73,11 @@
 - `/api/bank-details/transactions`：优先使用 `list_bank_transactions_page()` 在 SQL 中分页和过滤，不先加载全量流水。
 - `/api/import-facts/invoices`、`/api/import-facts/batches`、`/api/import-facts/files`：按 SQL repository 分页读取发票、批次状态和导入文件。
 
-production bootstrap 不再调用 `PostgresStateStore.load_bootstrap_snapshot()` 或 `ApplicationStateStore.load()`。这些 full/compat snapshot 入口只保留给 migration、shadow、test 和显式 `FIN_OPS_BOOTSTRAP_MODE=legacy` 场景。新迁移模块必须通过 SQL repository/read model 注入，不能读取 `state:imports`、`state:file_imports` 或 `state:full_state` 来构造发票、银行流水、导入文件全量内存索引。
+production bootstrap 不再调用 full/compat snapshot。`PostgresStateStore` 和 `ApplicationStateStore` 都不暴露 `load_bootstrap_snapshot()`；`LegacySnapshotBootstrap` 只接受显式注入的 test/migration/shadow loader，不能从 state store 恢复 generic `load()`。新迁移模块必须通过 SQL repository/read model 注入，不能读取 `state:imports`、`state:file_imports` 或 `state:full_state` 来构造发票、银行流水、导入文件全量内存索引。
 
-`PostgresStateStore.save()` 不再默认写 `state:full_state`。如果 migration/shadow/test 需要旧 whole snapshot round-trip，必须在对应工具进程显式启用 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1`，并且该开关不能作为 production API/worker fallback。已迁移 read model loader 在 SQL 表为空时返回空结果或 refreshing 状态，不再读取 `state:workbench_*`、`state:cost_statistics_read_models` 或 `state:tax_offset_read_models`。
+`PostgresStateStore.save()` 不写 `state:full_state`，`FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT` 不再恢复旧 whole snapshot round-trip。已迁移 read model loader 在 SQL 表为空时返回空结果或 refreshing 状态，不再读取 `state:workbench_*`、`state:cost_statistics_read_models` 或 `state:tax_offset_read_models`。
 
-PostgreSQL store 默认不会自动从 data dir 探测 legacy GridFS reader；GridFS reader 只能由 `file_object.gridfs_migration` worker 或手动校验/回滚工具显式注入。production API 读取文件时只接受 `migration_status='verified'` 的对象存储记录。
+PostgreSQL store 不再读取 legacy GridFS reference；production API 读取文件时只接受 `migration_status='verified'` 的对象存储记录。旧 GridFS 校验/回滚工具和 `file_object.gridfs_migration` worker path 均已删除，不能作为 source-of-truth 路径回归。
 
 导入事实写入 `app.invoices` / `app.bank_transactions` / `app.import_batches` 后，必须同时 upsert `job.read_model_dirty_scopes` 并写入 `job.outbox_events`，通知 `workbench`、`cost`、`tax`、`search` 后续投影或 read model 收敛。
 
@@ -98,15 +100,7 @@ PostgreSQL store 默认不会自动从 data dir 探测 legacy GridFS reader；Gr
 - `all` scope 只能从一致的 active month shards 聚合；任一 parent shard 不一致时，新 all generation 进入 failed，旧 active all 继续服务读请求。
 - `read_model.workbench_generation_consistency` 是生产健康检查和运维排障的事实入口。
 
-对账工具：
-
-```bash
-FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
-PYTHONPATH=backend/src \
-python3 -m fin_ops_platform.tools.reconcile_workbench_read_model --scope-key 2026-05
-```
-
-该工具只用于迁移校验，会在工具进程内调用旧 builder 生成 row id 集合，并与 `read_model.workbench_rows` 对比；不要把旧 builder 重新放回 API 请求路径。
+旧 `reconcile_workbench_read_model` 工具已删除。工作台 read model 一致性不再把旧 `_build_raw_workbench_payload()` 当 oracle；验证应通过 worker refresh、`read_model.workbench_generation_consistency`、模块回归测试和生产只读证据完成。
 
 ## 工作台关系分发 read model 边界
 
@@ -132,13 +126,7 @@ OA、银行流水、进项发票、销项发票之间的两两/三栏关系上�
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-cost-statistics-read-model-refresh` claim durable queue 后，从发票、银行流水、关系事实和现有工作台读模型口径构建 explorer payload，并写回 `read_model.cost_statistics_read_models`。
 - 发票、银行流水、pair relation、row override、exception case 等影响成本口径的写路径必须标记 `cost_statistics` dirty scope，并失效 `cost_statistics:explorer:{project_scope}:{month}` 与 `cost_statistics:month:{project_scope}:{month}` Redis key。
 
-对账工具：
-
-```bash
-FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
-PYTHONPATH=backend/src \
-python3 -m fin_ops_platform.tools.reconcile_cost_statistics_read_model --month 2026-05 --project-scope active
-```
+旧 `reconcile_cost_statistics_read_model` 工具已删除。成本统计 read model 不再通过 `Application._cost_statistics_service.get_explorer(...)` legacy 对照链路验证；验证应走 cost-statistics 模块测试、worker refresh/fresh gate 和生产只读 SLO evidence。
 
 ## 税金抵扣 SQL read model 边界
 
@@ -150,13 +138,7 @@ python3 -m fin_ops_platform.tools.reconcile_cost_statistics_read_model --month 2
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-tax-offset-read-model-refresh` claim durable queue 后，按既有 `TaxOffsetService` 口径从发票、认证抵扣状态、关系事实构建月度 payload，并写回 `read_model.tax_offset_read_models`。
 - 发票导入、认证抵扣导入、关系变更和影响税金口径的设置写入必须标记 `tax_offset` dirty scope，并失效 `tax_offset:month:{month}` Redis key。
 
-对账工具：
-
-```bash
-FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
-PYTHONPATH=backend/src \
-python3 -m fin_ops_platform.tools.reconcile_tax_offset_read_model --month 2026-05
-```
+旧 `reconcile_tax_offset_read_model` 工具已删除。税金抵扣 read model 不再通过 `Application._tax_api_routes.get_tax_offset(...)` legacy 对照链路验证；验证应走 tax-offset 模块测试、worker refresh/fresh gate 和生产只读 SLO evidence。
 
 ## 搜索和待找发票 SQL read model 边界
 

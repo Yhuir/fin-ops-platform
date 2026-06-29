@@ -80,3 +80,12 @@
 
 - 发票模板变更必须覆盖进项/销项/待找/search 的 downstream fresh 状态。
 - 删除旧同步导入路径前，必须证明确认响应/job result 仍能给出所有下游 read model 的 operation barrier targets。
+
+## Canonical facts ownership
+
+- Owned facts: `app.invoices` 的导入正式化事实，以及对应 `app.import_batches`、`app.import_batch_rows`、`app.import_files`、`app.file_objects` 中的发票导入事实。
+- Allowed writes: invoice import preview/confirm/job、`ImportNormalizationService`、受控 OA/ETC 现有发票 link/promotion adapter。
+- Allowed reads: invoice import facts repository、发票查询/context ports、owner API。
+- Downstream outputs: invoice lifecycle、pending invoice、input/output invoice usage、search、workbench、workbench_relation、tax、cost read model dirty scopes 或 owner producer 输出。
+- Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或 OA/ETC cache 直接构造第二发票池。
+- Old code deletion: 旧同步导入、直接状态写入或 snapshot 发票池 fallback 必须删除；migration/audit/rollback 工具保留不算 closure。

@@ -4,10 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from fin_ops_platform.services.file_object_migration import GridFSObjectMigrationService
 from fin_ops_platform.services.object_storage import InMemoryObjectStorageRepository, ObjectStorageWriteError
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
-from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 def unwrap_jsonb(value):
@@ -55,20 +53,6 @@ class FileObjectConnection:
             return None
         return None
 
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        normalized = " ".join(sql.lower().split())
-        if "from app.file_objects" in normalized and "legacy_gridfs_id" in normalized:
-            statuses = {"legacy", "failed", "pending_upload"}
-            rows = [
-                dict(row)
-                for row in self.file_objects.values()
-                if row.get("legacy_gridfs_id")
-                and row.get("storage_uri", "").startswith("gridfs://")
-                and row.get("migration_status") in statuses
-            ]
-            return rows[: int(params[0])]
-        return []
-
     def execute(self, sql: str, params: tuple = ()) -> int:
         self.executed.append((sql, params))
         normalized = " ".join(sql.lower().split())
@@ -114,16 +98,6 @@ class FileObjectConnection:
 class FailingObjectStorageRepository(InMemoryObjectStorageRepository):
     def put_object(self, object_key, body, *, content_type=None):  # type: ignore[override]
         raise RuntimeError("object storage unavailable")
-
-
-class LegacyReader:
-    def __init__(self, payloads: dict[str, bytes]) -> None:
-        self.payloads = payloads
-        self.reads: list[str] = []
-
-    def read(self, stored_file_path: str) -> bytes:
-        self.reads.append(stored_file_path)
-        return self.payloads[stored_file_path]
 
 
 class FileObjectStorageTests(unittest.TestCase):
@@ -180,101 +154,6 @@ class FileObjectStorageTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "verified"):
                 store.read_import_file(stored_uri)
-
-    def test_gridfs_migration_is_idempotent_and_verifies_checksum(self) -> None:
-        connection = FileObjectConnection()
-        connection.file_objects["legacy-row"] = {
-            "id": "legacy-row",
-            "legacy_mongo_id": "file-legacy",
-            "legacy_gridfs_id": "gridfs-id-1",
-            "storage_backend": "gridfs_legacy",
-            "storage_uri": "gridfs://import_file_blobs/gridfs-id-1",
-            "filename": "legacy.xlsx",
-            "sha256": "dceda2dd1ec30247f7dc9a1239285488631c9594a320e5ec4c5a554cd7e42d26",
-            "size_bytes": 12,
-            "migration_status": "legacy",
-        }
-        object_store = InMemoryObjectStorageRepository(bucket="fin-ops-files", backend="minio")
-        reader = LegacyReader({"gridfs://import_file_blobs/gridfs-id-1": b"legacy-bytes"})
-        service = GridFSObjectMigrationService(connection=connection, object_storage_repository=object_store, legacy_file_reader=reader)
-
-        first = service.migrate_batch(limit=10)
-        second = service.migrate_batch(limit=10)
-
-        self.assertEqual(first["migrated"], 1)
-        self.assertEqual(second["migrated"], 0)
-        self.assertEqual(reader.reads, ["gridfs://import_file_blobs/gridfs-id-1"])
-        self.assertEqual(connection.file_objects["legacy-row"]["migration_status"], "verified")
-        self.assertEqual(
-            connection.file_objects["legacy-row"]["sha256"],
-            "dceda2dd1ec30247f7dc9a1239285488631c9594a320e5ec4c5a554cd7e42d26",
-        )
-        self.assertEqual(connection.file_objects["legacy-row"]["size_bytes"], 12)
-        self.assertEqual(object_store.get_object(connection.file_objects["legacy-row"]["object_key"]), b"legacy-bytes")
-
-    def test_gridfs_migration_backfills_missing_checksum_metadata(self) -> None:
-        connection = FileObjectConnection()
-        connection.file_objects["legacy-row"] = {
-            "id": "legacy-row",
-            "legacy_mongo_id": "file-legacy",
-            "legacy_gridfs_id": "gridfs-id-1",
-            "storage_backend": "gridfs_legacy",
-            "storage_uri": "gridfs://import_file_blobs/gridfs-id-1",
-            "filename": "legacy.xlsx",
-            "sha256": None,
-            "size_bytes": None,
-            "migration_status": "legacy",
-        }
-        service = GridFSObjectMigrationService(
-            connection=connection,
-            object_storage_repository=InMemoryObjectStorageRepository(bucket="fin-ops-files", backend="minio"),
-            legacy_file_reader=LegacyReader({"gridfs://import_file_blobs/gridfs-id-1": b"legacy-bytes"}),
-        )
-
-        result = service.migrate_batch(limit=10)
-
-        self.assertEqual(result["migrated"], 1)
-        self.assertEqual(
-            connection.file_objects["legacy-row"]["sha256"],
-            "dceda2dd1ec30247f7dc9a1239285488631c9594a320e5ec4c5a554cd7e42d26",
-        )
-        self.assertEqual(connection.file_objects["legacy-row"]["size_bytes"], 12)
-
-    def test_gridfs_migration_handler_processes_runtime_worker_event(self) -> None:
-        connection = FileObjectConnection()
-        connection.file_objects["legacy-row"] = {
-            "id": "legacy-row",
-            "legacy_mongo_id": "file-legacy",
-            "legacy_gridfs_id": "gridfs-id-1",
-            "storage_backend": "gridfs_legacy",
-            "storage_uri": "gridfs://import_file_blobs/gridfs-id-1",
-            "filename": "legacy.xlsx",
-            "sha256": "dceda2dd1ec30247f7dc9a1239285488631c9594a320e5ec4c5a554cd7e42d26",
-            "size_bytes": 12,
-            "migration_status": "legacy",
-        }
-        service = GridFSObjectMigrationService(
-            connection=connection,
-            object_storage_repository=InMemoryObjectStorageRepository(bucket="fin-ops-files", backend="minio"),
-            legacy_file_reader=LegacyReader({"gridfs://import_file_blobs/gridfs-id-1": b"legacy-bytes"}),
-        )
-        event = RuntimeQueueEvent(
-            event_id="event-1",
-            tenant_id="default",
-            event_type="file_object.gridfs_migration",
-            aggregate_type=None,
-            aggregate_id=None,
-            scope_type=None,
-            scope_key=None,
-            dedupe_key=None,
-            payload={"limit": 10},
-            attempts=1,
-            status="processing",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertEqual(result["migrated"], 1)
 
 
 if __name__ == "__main__":

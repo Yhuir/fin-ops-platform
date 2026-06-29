@@ -238,7 +238,6 @@ PF-P190 后推荐下一步：
 | `app/routes_tax.py` | <1KB | Tax / Cost / ETC | Platform routing | Tax route facade |
 | `app/rabbitmq_dispatcher.py` | 5KB | Platform / Queue Transport | All modules via outbox | RabbitMQ publisher/dispatcher 入口 |
 | `app/rabbitmq_topology.py` | 1KB | Platform / Queue Transport | All modules via outbox | RabbitMQ topology helper |
-| `app/oa_attachment_audit.py` | 2KB | Platform / Ops | Invoices、OA attachment cache | OA 附件审计脚本 |
 | `app/bank_account_balance_backfill.py` | 4KB | Platform / Ops Backfill | Bankdetail | 账户余额回填，必须绑定 Bankdetail 验证 |
 | `app/bank_detail_backfill.py` | 4KB | Platform / Ops Backfill | Bankdetail | 银行流水 read model 回填，必须绑定 Bankdetail 验证 |
 | `postgres/__init__.py` | <1KB | Platform / DB Migration Runtime | All schema modules | 包边界 |
@@ -697,7 +696,7 @@ HTTP handler
 - 外部依赖 port/adapter 清单。
 - Redis/RabbitMQ 直接依赖点审计，并输出“允许的 platform adapter 调用”和“禁止的业务层直接调用”清单。
 - 生产路径禁止 legacy snapshot/local state/pickle 的代码事实审计。
-- `state_store.py`、`postgres_state_store.py`、`runtime_bootstrap.py` 和 shadow/dual/diff state store 相关文件的 production request/worker path 审计，明确 legacy snapshot/local state/pickle 是否仍可能进入生产路径。
+- `state_store.py`、`postgres_state_store.py`、`runtime_bootstrap.py` 和 state diff 相关文件的 production request/worker path 审计，明确 legacy snapshot/local state/pickle 是否仍可能进入生产路径；shadow/dual state store 模块已删除。
 - `app/auth.py` 到 handler/usecase 的 auth context 传导链审计，明确统一身份上下文接口和测试门禁。
 - Ops tools、backfill scripts、observability/audit/performance metrics 的平台边界审计。
 - runtime queue / outbox / dirty scope 调用链。

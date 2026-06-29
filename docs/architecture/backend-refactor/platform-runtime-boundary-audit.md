@@ -16,15 +16,15 @@ PF-P002 的结论是：当前 Python 后端已经具备若干生产级平台边�
 - Durable outbox、dirty scope、source_version 已集中在 `services/runtime_queue.py`。
 - RabbitMQ envelope 已限定 JSON contract，并禁止大 payload、snapshot、business fact 直接进入消息体。
 - Redis 真实客户端导入集中在 `services/runtime_redis.py`。
-- production bootstrap 默认不加载 full snapshot；full snapshot 只能通过 `LegacySnapshotBootstrap` 的 legacy/migration/shadow/test reason 进入。
+- production bootstrap 不加载 full snapshot；`LegacySnapshotBootstrap` 旧入口已在 canonical facts wave 5 删除。
 - OA session token 解析、OA identity 查询、access decision 已形成 `app/auth.py` + `OAIdentityService` + `AccessControlService` 的主链路。
 
 需要修正的核心风险：
 
 - `app/server.py` 仍是巨型组合根、路由器、handler、调度器和部分 usecase 的混合体，Platform 边界容易被业务代码绕过。
 - `PostgresConnection.transaction()` 可用，但 facts、audit、dirty scope、outbox 的同事务规则不是全局强制，部分业务动作仍通过 handler 后置调度刷新。
-- `FIN_OPS_APP_STORAGE_BACKEND` 缺失时会回落到 `ApplicationStateStore`，生产必须明确锁定 `postgres`。
-- `state_store.py`、ETC service 本地 `.pkl` fallback、Mongo pickle 兼容路径仍存在，必须被限定在 legacy、migration、shadow、test 或本地排障路径。
+- `state_store_factory.build_state_store()` 只接受 `FIN_OPS_APP_STORAGE_BACKEND=postgres`；缺失、`local_pickle`、`mongo`、`auto` 均直接失败。
+- `state_store.py` local pickle implementation 仍存在，但当前只作为 test/local tooling I/O；不得重新接入 production request/worker 主路径。
 - Auth context 已能计算权限，但未形成统一注入到 usecase 的稳定接口，多个 handler 仍重复解析 session 或只传 actor 字符串。
 - Ops tools、backfill scripts 可以直接触发 runtime queue 和 PostgreSQL 连接，必须作为 Platform / Ops 工具而不是业务模块接口使用。
 
@@ -47,10 +47,7 @@ PF-P002 的结论是：当前 Python 后端已经具备若干生产级平台边�
 | `backend/src/fin_ops_platform/services/state_store.py` | Platform / Legacy State | Migration / Shadow / Test | legacy local pickle / Mongo state store，不允许进入 production request 主路径。 |
 | `backend/src/fin_ops_platform/services/postgres_state_store.py` | Platform / PostgreSQL State Store | All modules | PostgreSQL runtime state facade。 |
 | `backend/src/fin_ops_platform/services/state_store_factory.py` | Platform / Storage Runtime | App Shell / Ops | storage backend 选择入口，生产必须锁定 `postgres`。 |
-| `backend/src/fin_ops_platform/services/shadow_state_store.py` | Platform / Shadow Runtime | Migration / Test | shadow read compare，仅允许迁移验证或显式 rehearsal。 |
-| `backend/src/fin_ops_platform/services/dual_state_store.py` | Platform / Dual Write Runtime | Migration / Test | dual write rehearsal，仅允许 preflight/cutover rehearsal。 |
 | `backend/src/fin_ops_platform/services/state_store_diff.py` | Platform / State Diff | Migration / Test | primary/shadow diff 工具，不是业务路径。 |
-| `backend/src/fin_ops_platform/services/shadow_read_rehearsal.py` | Platform / Shadow Read Runtime | Migration / Test | read-only rehearsal，不允许被 handler 热路径调用。 |
 | `backend/src/fin_ops_platform/services/app_settings_service.py` | Platform / Settings | Auth / Workbench settings | 设置事实源，影响 Access Control、OA import settings、tag rules。 |
 | `backend/src/fin_ops_platform/services/access_control_service.py` | Platform / AuthZ | Auth / Settings | 权限判定事实源。 |
 | `backend/src/fin_ops_platform/services/settings_data_reset_service.py` | Platform / Ops Reset | Workbench / OA / Imports | 高风险运维动作，必须保持 admin gate 和 audit。 |
@@ -188,20 +185,21 @@ worker 主路径应通过 PostgreSQL runtime queue、PostgreSQL projection repos
 
 ### shadow / dual / diff 边界
 
-- `shadow_state_store.py`、`shadow_read_rehearsal.py`、`state_store_diff.py` 只允许 migration/shadow/test/rehearsal。
-- `dual_state_store.py` 只允许 preflight/cutover rehearsal，`state_store_factory.py` 要求 `FIN_OPS_CUTOVER_PREFLIGHT_ONLY=1` 才能 build dual store。
-- `state_store_factory.py` 支持 `shadow` 和 `dual`，但这些模式必须被 Ops gate 控制，不能由 production API 服务随意启用。
+- `shadow_state_store.py` 和 `dual_state_store.py` 已删除；`state_store_diff.py` 只保留为 migration/test diff utility，不是业务路径。
+- 旧 `services/shadow_read_rehearsal.py` 和 `tools/run_shadow_read_rehearsal.py` 已在 canonical facts wave 5 删除；不得作为新的 shadow-read 链路恢复。
+- 旧 `state_store_factory.py` 的 `shadow` / `dual` backend 构造入口已在 canonical facts wave 5 删除，不得恢复为 local pickle / PostgreSQL mirror 旁路。
+- `shadow_state_store.py` / `dual_state_store.py` 不得作为独立 legacy test/tooling 对象恢复。
 
 ### 已确认风险
 
-- `state_store_factory.build_state_store()` 在 `FIN_OPS_APP_STORAGE_BACKEND` 缺失或为 local/mongo/auto 时会返回 `ApplicationStateStore`。生产环境必须显式设置 `FIN_OPS_APP_STORAGE_BACKEND=postgres`，并在 readiness/部署脚本中验证。
-- `state_store.py` 仍包含 local pickle 和 Mongo Binary pickle 兼容路径。
-- `EtcService` 和 `EtcReconciliationTaskService` 在没有 state_store 时会 fallback 到本地 `.pkl` 文件。只要生产通过 `Application(data_dir=default_data_dir())` 且 state_store_factory 返回 PostgreSQL store，这条 fallback 不应触发；但缺失 env 会让风险回到 production request path。
-- `PostgresStateStore.save()` 默认不写 `state:full_state`，但 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1` 会恢复 whole snapshot 写入。生产必须禁止该环境变量。
+- `state_store_factory.build_state_store()` 已改为只接受 `FIN_OPS_APP_STORAGE_BACKEND=postgres`；缺失或为 local/mongo/auto 时直接失败，不再把 `ApplicationStateStore` 接入 app runtime。
+- `state_store.py` 仍包含 local pickle implementation，但 App Mongo / GridFS runtime branch 已删除。
+- `EtcService` 和 `EtcReconciliationTaskService` 在没有 state_store 时仍有本地 `.pkl` fallback；生产必须保持 `Application(data_dir=default_data_dir())` 通过 PostgreSQL state store 装配。
+- `PostgresStateStore.save()` 不再写 `state:full_state`；`FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1` 仅作为 production readiness 禁止项保留，不能恢复 whole snapshot 写入。
 
 ### 结论
 
-legacy snapshot/local state/pickle 目前没有被证实进入 PostgreSQL production request/worker 主路径，但存在配置风险。后续平台 prompt 应增加机械 guard：
+legacy snapshot/local state/pickle 目前没有被证实进入 PostgreSQL production request/worker 主路径；factory 配置回退风险已移除。剩余风险是绕过 factory 的 no-state-store/local tooling 构造。后续平台 prompt 应保留机械 guard：
 
 - 启动时如果检测到 release runtime 且 `FIN_OPS_APP_STORAGE_BACKEND != postgres`，readiness 必须 `not_ready`。
 - release runtime 下禁止 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1`。
@@ -271,8 +269,8 @@ sequenceDiagram
 
 - `app/bank_account_balance_backfill.py` 和 `app/bank_detail_backfill.py` 直接创建 `PostgresConnection` 和 `RuntimeQueueRepository`，用于标记 read model refresh。
 - `tools/runtime_queue_ops.py` 用于 inspect/replay/pause outbox，是 Platform / Ops 工具。
-- `tools/run_runtime_convergence_closure.py` 会跑 migration、runtime queue、Redis、object migration、OA sync 等 closure 检查，是高权限收敛工具。
-- `tools/run_shadow_read_rehearsal.py`、`tools/run_runtime_state_policy_preflight.py`、`tools/run_controlled_mirror_write_rehearsal.py` 属于 migration rehearsal，不属于业务模块。
+- 旧 `tools/run_runtime_convergence_closure.py` 高权限收敛工具已删除；运行时收口改用分项 gate。
+- 旧 `tools/run_shadow_read_rehearsal.py`、`tools/run_runtime_state_policy_preflight.py`、`tools/run_controlled_mirror_write_rehearsal.py` 已删除，后续不得恢复为 App Mongo/local pickle 旁路读取入口。
 
 ### Ops 规则
 
@@ -425,12 +423,12 @@ sequenceDiagram
 | Access / Settings | `tests/test_app_settings_service.py`、`tests/test_settings_data_reset_service.py`、`tests/test_oa_role_sync_service.py` | settings、dynamic providers、role sync、data reset audit。 |
 | PostgreSQL Runtime | `tests/test_postgres_connection.py`、`tests/test_postgres_repositories_core.py`、`tests/test_postgres_repositories_boundaries.py`、`tests/test_postgres_migrations.py` | connection、repository transaction、migration schema、runtime grants。 |
 | State Store / Snapshot | `tests/test_state_store.py`、`tests/test_postgres_state_store.py`、`tests/test_state_store_factory_preflight.py`、`tests/test_runtime_bootstrap.py` | local/postgres state store、bootstrap guard、storage backend selection。 |
-| Shadow / Dual / Diff | `tests/test_shadow_state_store.py`、`tests/test_dual_state_store.py`、`tests/test_state_store_diff.py`、`tests/test_shadow_read_rehearsal.py`、`tests/test_runtime_state_policy.py` | shadow/dual safety、diff、rehearsal gates、policy classification。 |
+| State Diff | `tests/test_state_store_diff.py`、`tests/test_runtime_state_policy.py` | diff、policy classification；旧 shadow/dual state-store tests 已随旧模块删除。 |
 | Runtime Queue / Worker | `tests/test_runtime_queue.py`、`tests/test_runtime_worker.py`、`tests/test_runtime_infrastructure_postgres_integration.py`、`tests/test_runtime_queue_ops.py` | outbox、dirty scope、source_version、claim/ack/fail/retry、ops replay。 |
 | Redis / RabbitMQ | `tests/test_runtime_redis.py`、`tests/test_rabbitmq_runtime.py`、`tests/test_rabbitmq_integration.py`、`tests/test_rabbitmq_staging_preflight.py` | Redis helper、RabbitMQ envelope、publisher/consumer/topology、staging preflight。 |
 | OA Projection | `tests/test_oa_projection_sql_runtime.py`、`tests/test_worker_oa_sync.py`、`tests/test_mongo_oa_adapter.py` | OA Mongo source、PostgreSQL projection、downstream dirty scopes。 |
 | Observability / Ops | `tests/test_app_health_service.py`、`tests/test_app_health_api.py`、`tests/test_app_health_alert_service.py`、`tests/test_api_performance_metrics.py`、`tests/test_operations_dashboard_service.py`、`tests/test_runtime_monitoring.py` | app health、SSE、alerts、performance metrics、operations dashboard、runtime monitoring。 |
-| Release / Deploy Guard | `tests/test_deploy_oa_script.py`、`tests/test_deploy_oa_nginx_config.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_runtime_convergence_closure.py` | deploy scripts、proxy/SSE rules、runtime examples、closure checks。 |
+| Release / Deploy Guard | `tests/test_deploy_oa_script.py`、`tests/test_deploy_oa_nginx_config.py`、`tests/test_deploy_runtime_examples.py` | deploy scripts、proxy/SSE rules、runtime examples。 |
 
 PF-P002 本轮只改文档，没有运行以上 Python tests。后续如果执行平台边界代码收口，至少应运行对应 gate 的最小子集。
 

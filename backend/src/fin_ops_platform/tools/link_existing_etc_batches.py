@@ -7,13 +7,23 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.existing_etc_batch_link_service import (
     ExistingEtcBatchLinkService,
     ExistingEtcBatchLinkSpec,
 )
-from fin_ops_platform.services.state_store import default_data_dir
+from fin_ops_platform.tools.runtime_application import (
+    build_tool_runtime_application,
+    etc_state_persister,
+    etc_service,
+    import_service,
+    invalidate_workbench_scopes,
+    invoice_etc_metadata_persister,
+    object_identity_repository,
+    persist_workbench_pair_relations,
+    workbench_relation_command_service,
+    workbench_relation_reader,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,25 +37,23 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     specs = _load_specs(args.spec_file)
-    app = _build_full_snapshot_application(args.data_dir)
+    app = build_tool_runtime_application(args.data_dir)
     if args.execute:
         link_service = EtcExistingInvoiceLinkService(
-            import_service=app._import_service,
-            etc_service=app._etc_service,
-            persist_linked_invoices=_invoice_etc_metadata_persister(app),
+            import_service=import_service(app),
+            etc_service=etc_service(app),
+            persist_linked_invoices=invoice_etc_metadata_persister(app),
         )
         service = ExistingEtcBatchLinkService(
-            etc_service=app._etc_service,
-            import_service=app._import_service,
-            relation_command_service=app._workbench_relation_command_service(),
+            etc_service=etc_service(app),
+            import_service=import_service(app),
+            relation_command_service=workbench_relation_command_service(app),
             link_import_result_to_existing_invoices=link_service.link_import_result_to_existing_invoices,
             link_etc_invoices_to_existing_invoices=link_service.link_etc_invoices_to_existing_invoices,
             refresh_after_etc_invoice_link=lambda _months, _reason: None,
-            persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
-                changed_case_ids=case_ids,
-            ),
-            invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
-            persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
+            persist_pair_relations=lambda case_ids: persist_workbench_pair_relations(app, case_ids),
+            invalidate_workbench_scopes=lambda scope_keys: invalidate_workbench_scopes(app, scope_keys),
+            persist_etc_state=etc_state_persister(app),
         )
         results = [service.link_existing_invoices(spec).to_payload() for spec in specs]
         status = "ok" if all(result.get("status") == "ok" for result in results) else "attention"
@@ -100,7 +108,7 @@ def _dry_run_spec(app: Any, spec: ExistingEtcBatchLinkSpec) -> dict[str, object]
         }
     canonical_by_number = _canonical_invoices_by_number(identity_repository, list(spec.invoice_numbers))
     canonical_numbers = set(canonical_by_number)
-    etc_numbers = {invoice.invoice_number for invoice in app._etc_service.list_invoices_by_numbers(list(spec.invoice_numbers))}
+    etc_numbers = {invoice.invoice_number for invoice in etc_service(app).list_invoices_by_numbers(list(spec.invoice_numbers))}
     found_numbers = sorted(set(canonical_numbers).union(etc_numbers))
     missing_numbers = [invoice_number for invoice_number in spec.invoice_numbers if invoice_number not in found_numbers]
     invoice_total = _invoice_total(app, canonical_by_number, found_numbers)
@@ -130,31 +138,20 @@ def _active_relation_by_case_id(app: Any, case_id: str) -> dict[str, object] | N
 
 
 def _workbench_relation_reader(app: Any) -> Any | None:
-    command_service_factory = getattr(app, "_workbench_relation_command_service", None)
-    if callable(command_service_factory):
-        return command_service_factory()
-    if command_service_factory is not None:
-        return command_service_factory
-    return getattr(app, "_workbench_pair_relation_service", None)
+    return workbench_relation_reader(app)
 
 
 def _link_etc_invoices_to_existing_invoices(app: Any, invoice_ids: list[str]) -> dict[str, object]:
     link_service = EtcExistingInvoiceLinkService(
-        import_service=app._import_service,
-        etc_service=app._etc_service,
-        persist_linked_invoices=_invoice_etc_metadata_persister(app),
+        import_service=import_service(app),
+        etc_service=etc_service(app),
+        persist_linked_invoices=invoice_etc_metadata_persister(app),
     )
     return link_service.link_etc_invoices_to_existing_invoices(invoice_ids)
 
 
 def _object_identity_repository(app: Any) -> Any | None:
-    repository = getattr(app, "_import_fact_repository", None)
-    finder = getattr(repository, "find_invoice_by_identity", None)
-    if callable(finder):
-        return repository
-    repository = getattr(app, "_import_service", None)
-    finder = getattr(repository, "find_invoice_by_identity", None)
-    return repository if callable(finder) else None
+    return object_identity_repository(app)
 
 
 def _canonical_invoices_by_number(identity_repository: Any, invoice_numbers: list[str]) -> dict[str, Any]:
@@ -180,46 +177,14 @@ def _invoice_total(app: Any, canonical_by_number: dict[str, Any], invoice_number
         amount = getattr(invoice, "total_with_tax", None) or getattr(invoice, "amount", None) or Decimal("0.00")
         total += Decimal(str(amount))
     missing_canonical_numbers = sorted(numbers - counted)
-    for invoice in app._etc_service.list_invoices_by_numbers(missing_canonical_numbers):
+    for invoice in etc_service(app).list_invoices_by_numbers(missing_canonical_numbers):
         total += Decimal(str(invoice.total_amount))
     return total.quantize(Decimal("0.01"))
-
-
-def _invoice_etc_metadata_persister(app: Any) -> Any | None:
-    state_store = getattr(app, "_state_store", None)
-    save_invoice_etc_metadata = getattr(state_store, "save_invoice_etc_metadata", None)
-    return save_invoice_etc_metadata if callable(save_invoice_etc_metadata) else None
 
 
 def _optional_text(value: object) -> str | None:
     normalized = str(value or "").strip()
     return normalized or None
-
-
-def _build_full_snapshot_application(data_dir: Path | None) -> Any:
-    root = data_dir or default_data_dir()
-    app = build_application(data_dir=root, bootstrap_mode="lightweight")
-    state_store = getattr(app, "_state_store", None)
-    if state_store is not None:
-        app._initialize_runtime_services(_load_tool_runtime_state(state_store))
-    return app
-
-
-def _load_tool_runtime_state(state_store: Any) -> dict[str, object]:
-    state: dict[str, object] = {}
-    for key, loader_name in (
-        ("imports", "load_imports_snapshot"),
-        ("file_imports", "load_file_imports_snapshot"),
-        ("workbench_pair_relations", "load_workbench_pair_relations"),
-        ("etc_reconciliation_state", "load_etc_reconciliation_state"),
-    ):
-        loader = getattr(state_store, loader_name, None)
-        if not callable(loader):
-            continue
-        loaded = loader()
-        if isinstance(loaded, dict):
-            state[key] = loaded
-    return state
 
 
 if __name__ == "__main__":

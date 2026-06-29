@@ -5,7 +5,7 @@ import json
 from collections.abc import Sequence
 
 from fin_ops_platform.app.server import build_application, run_http_server
-from fin_ops_platform.services.state_store import default_data_dir
+from fin_ops_platform.services.runtime_paths import default_data_dir
 
 
 def build_parser() -> argparse.ArgumentParser:

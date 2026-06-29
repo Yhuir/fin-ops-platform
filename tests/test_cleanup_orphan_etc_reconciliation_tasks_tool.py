@@ -63,6 +63,10 @@ class CleanupOrphanEtcReconciliationTasksToolTests(unittest.TestCase):
             ),
             _etc_service=_EtcService(["etc_business_batch_0001"]),
         )
+        app.tool_runtime_ports = lambda: SimpleNamespace(
+            etc_reconciliation_task_service=app._etc_reconciliation_task_service,
+            etc_service=app._etc_service,
+        )
 
         result = _plan_task_cleanup(app, "ETC-RECON-000001")
 
@@ -76,6 +80,10 @@ class CleanupOrphanEtcReconciliationTasksToolTests(unittest.TestCase):
         app = SimpleNamespace(
             _etc_reconciliation_task_service=reconciliation_service,
             _etc_service=_EtcService(),
+        )
+        app.tool_runtime_ports = lambda: SimpleNamespace(
+            etc_reconciliation_task_service=app._etc_reconciliation_task_service,
+            etc_service=app._etc_service,
         )
 
         first = _execute_task_cleanup(app, "ETC-RECON-000001", reason="cleanup_test")

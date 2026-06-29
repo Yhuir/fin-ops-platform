@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from fin_ops_platform.services.etc_reconciliation_models import EtcReconciliationTaskStatus
-from fin_ops_platform.tools.link_existing_etc_batches import _build_full_snapshot_application
+from fin_ops_platform.tools.runtime_application import (
+    build_tool_runtime_application,
+    etc_reconciliation_task_service,
+    etc_service,
+)
 
 
 ACTOR = "system_orphan_etc_task_cleanup"
@@ -24,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    app = _build_full_snapshot_application(args.data_dir)
+    app = build_tool_runtime_application(args.data_dir)
     task_ids = _normalized_task_ids(args.task_id)
     if args.execute:
         results = [_execute_task_cleanup(app, task_id, reason=str(args.reason or "")) for task_id in task_ids]
@@ -84,7 +88,7 @@ def _execute_task_cleanup(app: Any, task_id: str, *, reason: str) -> dict[str, o
     plan = _plan_task_cleanup(app, task_id)
     if plan.get("status") != "ready":
         return plan
-    service = app._etc_reconciliation_task_service
+    service = etc_reconciliation_task_service(app)
     task = service.get_task(task_id)
     result = service.delete_task(
         task_id=task_id,
@@ -103,7 +107,7 @@ def _execute_task_cleanup(app: Any, task_id: str, *, reason: str) -> dict[str, o
 
 
 def _raw_task_payload(app: Any, task_id: str) -> dict[str, Any] | None:
-    service = app._etc_reconciliation_task_service
+    service = etc_reconciliation_task_service(app)
     snapshot = service.snapshot()
     tasks = snapshot.get("tasks") if isinstance(snapshot, dict) else None
     if not isinstance(tasks, dict):
@@ -135,7 +139,7 @@ def _task_version(task_payload: dict[str, Any]) -> int:
 
 
 def _active_business_batch_ids(app: Any, task_id: str) -> list[str]:
-    service = app._etc_service
+    service = etc_service(app)
     batches = service.list_business_batches(task_id=task_id)
     return [
         str(getattr(batch, "business_batch_id", "") or "").strip()

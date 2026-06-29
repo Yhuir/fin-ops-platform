@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_file_service import parse_ccb_rows, parse_cmbc_rows, parse_icbc_rows, parse_pingan_rows
 from fin_ops_platform.services.imports import ImportNormalizationService

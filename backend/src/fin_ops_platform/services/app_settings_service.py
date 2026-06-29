@@ -28,7 +28,7 @@ from fin_ops_platform.services.pending_invoice_rules import (
     normalize_pending_invoice_direction,
 )
 from fin_ops_platform.services.project_costing import ProjectCostingService
-from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.state_store_protocol import ApplicationStateStoreProtocol
 
 DEFAULT_OA_RETENTION_CUTOFF_DATE = "2026-01-01"
 DEFAULT_OA_INVOICE_OFFSET_APPLICANTS = ["周洁莹"]
@@ -87,7 +87,7 @@ class BankAutoTagRulesPersistenceError(RuntimeError):
 class AppSettingsService:
     def __init__(
         self,
-        state_store: ApplicationStateStore | None,
+        state_store: ApplicationStateStoreProtocol | None,
         project_costing_service: ProjectCostingService,
         oa_role_sync_service: OARoleSyncService | None = None,
         oa_import_options_provider: Callable[[], dict[str, Any]] | None = None,

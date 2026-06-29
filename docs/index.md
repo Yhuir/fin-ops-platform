@@ -77,10 +77,11 @@
 
 1. `architecture/module-boundaries/README.md`
 2. `architecture/module-boundaries/inventory.md`
-3. `architecture/module-boundaries/read-model-contracts.md`
-4. `architecture/module-boundaries/maintenance.md`
-5. `modules/README.md`
-6. 按目标模块继续读取 `modules/<module>/README.md` 和必要的状态机、测试、实施记录。
+3. 涉及 PostgreSQL 业务唯一真相时读取 `architecture/module-boundaries/canonical-facts.md`
+4. 涉及 read model 时读取 `architecture/module-boundaries/read-model-contracts.md`
+5. `architecture/module-boundaries/maintenance.md`
+6. `modules/README.md`
+7. 按目标模块继续读取 `modules/<module>/README.md` 和必要的状态机、测试、实施记录。
 
 ### 当前 App 架构维护
 
@@ -118,7 +119,8 @@
 
 1. `operations/postgresql-runtime.md`
 2. `operations/runtime-worker-governance.md`
-3. `references/postgresql-migration-history.md`
+3. `architecture/module-boundaries/canonical-facts.md`
+4. `references/postgresql-migration-history.md`
 
 ## 当前技术债
 

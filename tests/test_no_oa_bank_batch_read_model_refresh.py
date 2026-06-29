@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
     NoOaBankBatchReadModelPersistencePort,

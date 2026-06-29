@@ -388,6 +388,7 @@ const rowsPayload = {
   ],
   pagination: { page: 1, pageSize: 20, total: 51 },
   summary: { rowCount: 51, viewCounts: { completed: 51, in_progress: 23 } },
+  read_model_status: "fresh",
   filterConfig: [
     {
       field: "oa_applicant",

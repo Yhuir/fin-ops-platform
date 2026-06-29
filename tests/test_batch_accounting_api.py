@@ -4,7 +4,8 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import Application, StatePersistenceError, build_application
+from fin_ops_platform.app.server import Application, StatePersistenceError
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import (

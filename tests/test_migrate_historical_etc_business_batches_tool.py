@@ -9,6 +9,7 @@ from fin_ops_platform.services.historical_etc_business_batch_migration_service i
 )
 from fin_ops_platform.tools.migrate_historical_etc_business_batches import _dry_run_spec, _refresh_after_historical_migration
 from fin_ops_platform.tools import link_existing_etc_batches
+from fin_ops_platform.tools import runtime_application
 
 
 class _EtcService:
@@ -41,7 +42,7 @@ class _RelationService:
 
 
 class MigrateHistoricalEtcBusinessBatchesToolTests(unittest.TestCase):
-    def test_shared_application_builder_uses_default_data_dir_when_none_is_provided(self) -> None:
+    def test_tool_runtime_application_builder_uses_default_data_dir_when_none_is_provided(self) -> None:
         calls: list[tuple[object, object]] = []
         default_dir = object()
         partial_state = {
@@ -50,40 +51,23 @@ class MigrateHistoricalEtcBusinessBatchesToolTests(unittest.TestCase):
             "workbench_pair_relations": {"pair_relations": {}},
             "etc_reconciliation_state": {"tasks": {}},
         }
-
-        class StateStore:
-            def load(self) -> dict[str, object]:
-                raise AssertionError("full state load should not be used by ETC migration tools")
-
-            def load_imports_snapshot(self) -> dict[str, object]:
-                return partial_state["imports"]
-
-            def load_file_imports_snapshot(self) -> dict[str, object]:
-                return partial_state["file_imports"]
-
-            def load_workbench_pair_relations(self) -> dict[str, object]:
-                return partial_state["workbench_pair_relations"]
-
-            def load_etc_reconciliation_state(self) -> dict[str, object]:
-                return partial_state["etc_reconciliation_state"]
-
         app = SimpleNamespace(
-            _state_store=StateStore(),
-            _initialize_runtime_services=lambda state: calls.append(("initialize", state)),
+            initialize_tool_runtime_state=lambda state: calls.append(("initialize", state)),
+            tool_runtime_state_snapshot=lambda: partial_state,
         )
 
-        original_build_application = link_existing_etc_batches.build_application
-        original_default_data_dir = link_existing_etc_batches.default_data_dir
+        original_build_application = runtime_application.build_application
+        original_default_data_dir = runtime_application.default_data_dir
         try:
-            link_existing_etc_batches.default_data_dir = lambda: default_dir
-            link_existing_etc_batches.build_application = lambda *, data_dir=None, bootstrap_mode=None: calls.append(
+            runtime_application.default_data_dir = lambda: default_dir
+            runtime_application.build_application = lambda *, data_dir=None, bootstrap_mode=None: calls.append(
                 (data_dir, bootstrap_mode)
             ) or app
 
-            result = link_existing_etc_batches._build_full_snapshot_application(None)
+            result = runtime_application.build_tool_runtime_application(None)
         finally:
-            link_existing_etc_batches.build_application = original_build_application
-            link_existing_etc_batches.default_data_dir = original_default_data_dir
+            runtime_application.build_application = original_build_application
+            runtime_application.default_data_dir = original_default_data_dir
 
         self.assertIs(result, app)
         self.assertEqual(calls, [(default_dir, "lightweight"), ("initialize", partial_state)])
@@ -94,21 +78,25 @@ class MigrateHistoricalEtcBusinessBatchesToolTests(unittest.TestCase):
             etc_batch_id="ETC-OA-20260215-154900",
             invoice_ids=["etc-inv-1", "etc-inv-2"],
         )
-        app = SimpleNamespace(
-            _etc_service=_EtcService(
+        etc_service = _EtcService(
                 submission_batch=submission_batch,
                 invoices=[
                     SimpleNamespace(id="etc-inv-1", total_amount=Decimal("23.50")),
                     SimpleNamespace(id="etc-inv-2", total_amount=Decimal("21.52")),
                 ],
-            ),
-            _workbench_pair_relation_service=_RelationService(
+            )
+        relation_service = _RelationService(
                 {
                     "case_id": "CASE-HIST-MIGRATION",
                     "row_ids": ["oa-hist", "txn-hist"],
                     "amount_check": {"external_etc_batch_id": "ETC-OA-20260215-154900"},
                 }
-            ),
+            )
+        app = SimpleNamespace(
+            tool_runtime_ports=lambda: SimpleNamespace(
+                etc_service=etc_service,
+                workbench_relation_reader=relation_service,
+            )
         )
 
         payload = _dry_run_spec(

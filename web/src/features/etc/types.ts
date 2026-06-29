@@ -102,6 +102,7 @@ export type EtcBatchQuery = {
   month?: string;
   plate?: string;
   keyword?: string;
+  importBatchId?: string;
   page?: number;
   pageSize?: number;
   signal?: AbortSignal;

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.state_store import ApplicationStateStore
 

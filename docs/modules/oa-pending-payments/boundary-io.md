@@ -78,3 +78,12 @@
 
 - 确认付款/撤回类变更必须通过业务 API 验证，不直接改数据库。
 - 删除旧 projection 路径前必须验证 nonfresh、银行关联和确认付款恢复。
+
+## Canonical facts ownership
+
+- Owned facts: `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims`、`app.oa_pending_payment_bank_relation_events`。
+- Allowed writes: OA pending payment relation service、明确 application/UoW boundary。
+- Allowed reads: OA pending payment read/query ports、relation claim read ports。
+- Downstream outputs: oa_pending_payment、bank_detail、turnover_ledger、workbench_relation dirty scopes 或 owner producer 输出。
+- Forbidden paths: 其它模块不得直接 claim 银行流水关系；workbench relation migration 不得保留为 normal write path。
+- Old code deletion: legacy workbench-pair based OA pending relation fallback、direct bank claim write 和 snapshot relation inference 必须删除；migration/audit/rollback 工具保留不算 closure。

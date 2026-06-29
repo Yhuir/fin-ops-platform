@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import unittest
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.app_status_domain_registry import (
     APP_STATUS_DOMAIN_REGISTRY,
     domain_routes,

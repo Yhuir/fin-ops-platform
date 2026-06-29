@@ -6,7 +6,8 @@ import unittest
 from http import HTTPStatus
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.app.server import Application
+from tests.app_test_support import build_local_state_application as build_application
 
 
 def _flatten_groups(groups: list[dict[str, object]], record_type: str) -> list[dict[str, object]]:

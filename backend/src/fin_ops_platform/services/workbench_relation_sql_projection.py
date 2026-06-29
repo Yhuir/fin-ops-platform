@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 import re
 from typing import Any
 
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy, ObjectIdentity
 from fin_ops_platform.services.postgres_repositories.common import int_value, month_start, text, text_list
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL, OA_PROJECTION_SYNC_VERSION
@@ -338,7 +338,7 @@ class WorkbenchRelationSqlProjectionBuilder:
             "invoices_updated_at": text(payload.get("invoices_updated_at")),
             "oa_projection_updated_at": text(payload.get("oa_projection_updated_at")),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
-            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
         }
 
 

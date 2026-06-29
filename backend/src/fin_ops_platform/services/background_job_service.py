@@ -8,7 +8,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from fin_ops_platform.services.app_status_job_registry import APP_STATUS_BACKGROUND_JOB_REGISTRY
-from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.state_store_protocol import ApplicationStateStoreProtocol
 
 
 BACKGROUND_JOB_STATUSES = {
@@ -89,7 +89,7 @@ class BackgroundJobAccessError(PermissionError):
 class BackgroundJobService:
     def __init__(
         self,
-        state_store: ApplicationStateStore | None = None,
+        state_store: ApplicationStateStoreProtocol | None = None,
         *,
         max_workers: int = 2,
         recent_success_seconds: int = 8,

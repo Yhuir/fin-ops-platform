@@ -53,7 +53,7 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - `POST /api/etc/business-batches` 可省略 `taskId`，成功响应必须返回已绑定 `taskId` 的 business batch；随后 `GET /api/etc/business-batches?status=active` 能看到该批次，且 `/api/etc/reconciliation-tasks` 中的 task-only 记录不得额外混入 ETC 左侧批次列表。
 - `POST /api/etc/business-batches`、`POST /api/etc/business-batches/{id}/etc-import/preview`、`POST /api/etc/business-batches/{id}/etc-import/confirm`、`POST /api/etc/business-batches/{id}/manual-oa-status` 和 `DELETE /api/etc/business-batches/{id}` 的代理路径都命中后端。
 - Nginx `/api/` 与 `/fin-ops-api/` 下的 GET、POST、DELETE 都不返回 HTML 502、官网 HTML 或 React shell。
-- 旧 `/api/etc/batches` 在过渡期仍可读取，且不会创建第二个用户可见业务批次。
+- 旧 `/api/etc/batches` 已删除；任何探针、脚本或前端回滚都不得依赖该兼容入口。
 - 生产日志可按 `requestId`、`businessBatchId`、`taskId`、`externalEtcBatchId` 和 `oaRowId` 检索。
 
 可用 curl 检查响应类型：
@@ -139,7 +139,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.cleanup_orphan_etc_reco
 1. 关闭 `business-batches` 写开关，阻止新增业务批次、补充导入、创建 OA 草稿和人工兜底。
 2. 确认 ETC 页面没有自动检测入口，后端没有 ETC OA 检测后台任务、检测 adapter 或 refresh API。
 3. 回滚前端到旧 ETC 页面或隐藏新入口。
-4. 回滚后端版本或配置到旧 `/api/etc/batches*` 兼容路径。
+4. 回滚后端版本时仍保持 `/api/etc/business-batches*` 主链路；不要恢复旧 `/api/etc/batches*` 兼容路径。
 5. 如迁移已写入错误数据，先恢复迁移前备份；无法立即恢复时保留 `migration_conflict` 状态并由管理员人工修复。
 6. 确认 Nginx `/api/` 与 `/fin-ops-api/` 仍返回 JSON，而不是 HTML 502。
 

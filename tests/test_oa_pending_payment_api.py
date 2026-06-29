@@ -10,7 +10,8 @@ import unittest
 from urllib.parse import quote
 
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
-from fin_ops_platform.app.server import Application, Response, build_application
+from fin_ops_platform.app.server import Application, Response
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -437,7 +438,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
             app._import_service = ImportNormalizationService(existing_transactions=[target_bank])
             app._oa_payment_status_repository_instance = payment_repository
-            app._oa_pending_payment_source_adapter_instance = StaticOAProjection([target_oa])
+            app._oa_pending_payment_source_projection_override = StaticOAProjection([target_oa])
             app._postgres_oa_projection_repository = lambda: StaticOAProjection([])  # type: ignore[method-assign]
             app._workbench_relation_command_service = lambda **_kwargs: relation_command  # type: ignore[method-assign]
             app._invoice_lifecycle_policy = lambda: InvoiceLifecyclePolicy()  # type: ignore[method-assign]
@@ -500,7 +501,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             payment_repository = FakePaymentStatusRepository(flow_id="flow-persist")
             app._import_service = ImportNormalizationService(existing_transactions=[target_bank])
             app._oa_payment_status_repository_instance = payment_repository
-            app._oa_pending_payment_source_adapter_instance = StaticOAProjection([target_oa])
+            app._oa_pending_payment_source_projection_override = StaticOAProjection([target_oa])
             app._postgres_oa_projection_repository = lambda: StaticOAProjection([])  # type: ignore[method-assign]
             app._enqueue_workbench_read_model_refresh = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
             app._enqueue_oa_pending_payment_read_model_refresh = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
@@ -519,7 +520,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             )
             reloaded._import_service = ImportNormalizationService(existing_transactions=[target_bank])
             reloaded._oa_payment_status_repository_instance = reloaded_payment_repository
-            reloaded._oa_pending_payment_source_adapter_instance = StaticOAProjection([target_oa])
+            reloaded._oa_pending_payment_source_projection_override = StaticOAProjection([target_oa])
             reloaded._postgres_oa_projection_repository = lambda: StaticOAProjection([])  # type: ignore[method-assign]
             reloaded._enqueue_workbench_read_model_refresh = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
             reloaded._enqueue_oa_pending_payment_read_model_refresh = lambda *_args, **_kwargs: True  # type: ignore[method-assign]

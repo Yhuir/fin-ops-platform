@@ -28,7 +28,30 @@ run_clean_app_check() {
   local verify_data_dir
   verify_data_dir="$(mktemp -d)"
   trap 'rm -rf "$verify_data_dir"' RETURN
-  FIN_OPS_DATA_DIR="$verify_data_dir" PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+  if [[ -z "${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL:-}}" ]]; then
+    FIN_OPS_DATA_DIR="$verify_data_dir" PYTHONPATH=backend/src python3 - <<'PY'
+from __future__ import annotations
+
+from pathlib import Path
+import os
+
+from fin_ops_platform.app.server import build_application
+
+try:
+    build_application(data_dir=Path(os.environ["FIN_OPS_DATA_DIR"]))
+except ValueError as exc:
+    message = str(exc)
+    if "requires FIN_OPS_APP_STORAGE_BACKEND=postgres" not in message:
+        raise
+else:
+    raise AssertionError("Application unexpectedly started without PostgreSQL storage backend.")
+PY
+  else
+    FIN_OPS_APP_STORAGE_BACKEND="${FIN_OPS_APP_STORAGE_BACKEND:-postgres}" \
+      FIN_OPS_DATA_DIR="$verify_data_dir" \
+      PYTHONPATH=backend/src \
+      python3 -m fin_ops_platform.app.main --check
+  fi
   trap - RETURN
   rm -rf "$verify_data_dir"
 }

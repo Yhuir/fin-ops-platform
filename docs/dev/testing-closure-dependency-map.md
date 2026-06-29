@@ -609,7 +609,7 @@
 | Business service | `SettingsDataResetService` | bank/invoice/OA action 删除范围、protected target、state store save、import file delete、OA relation 保留/删除 |
 | Background job | `BackgroundJobService` type `settings_data_reset` | active/running/failed/partial/succeeded 状态、result_summary sanitize、App Health attention |
 | Derived lifecycle | `settings_reset_completed`、historical ETC repair、Workbench matching rebuild | reset 后旧 read model/cache 不得伪装 fresh；失败必须 partial/failed |
-| Backup/export | `tests/test_export_app_mongo.py`、operations runbooks | 本地只覆盖 legacy export 只读/manifest；真实 PostgreSQL PITR、对象存储和 runtime config 需 staging |
+| Backup/recovery | operations runbooks | 旧 App Mongo export 工具已删除；真实 PostgreSQL PITR、对象存储和 runtime config 需 staging |
 | App Status/App Health | `app_health` API、App Status registries、runtime monitoring | reset job、dirty scope、worker readiness 和 dependency failure 必须被全局状态面暴露 |
 
 当前 Browser e2e：
@@ -628,7 +628,7 @@
 
 - `tests/test_settings_data_reset_service.py` 保护 reset action、protected targets、密码校验、job contract、并发 409、OA rebuild 和 lifecycle fan-out。
 - `tests/test_app_health_api.py`、`tests/test_background_job_service.py` 保护 failed/partial/interrupted/running job 的 App Health attention 和 job policy。
-- `tests/test_export_app_mongo.py` 保护 legacy app Mongo export 只读、manifest/NDJSON counts 和不可覆盖 completed export。
+- 旧 App Mongo export 工具已删除；备份/恢复以 PostgreSQL PITR、对象存储和 operations runbooks 为准。
 - `tests/test_runtime_state_policy.py` 保护 active/attention background jobs 的 runtime mirror policy。
 - `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` 保护 impact confirmation、OA password、progress reentry、错误和权限隐藏。
 

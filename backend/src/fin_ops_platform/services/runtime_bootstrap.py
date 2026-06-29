@@ -9,60 +9,6 @@ from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeR
 
 
 @dataclass(frozen=True)
-class LegacySnapshotDependency:
-    snapshot_key: str
-    owner: str
-    module: str
-    exit_condition: str
-
-
-LEGACY_SNAPSHOT_ALLOWLIST: tuple[LegacySnapshotDependency, ...] = (
-)
-
-LEGACY_FULL_SNAPSHOT_REASON_PREFIXES = (
-    "legacy_",
-    "migration_",
-    "shadow_",
-    "test",
-    "unit_test",
-)
-
-
-class LegacySnapshotBootstrap:
-    def __init__(self, state_store: Any | None, allowlist: tuple[LegacySnapshotDependency, ...] = LEGACY_SNAPSHOT_ALLOWLIST) -> None:
-        self._state_store = state_store
-        self.allowlist = allowlist
-
-    def load_full_snapshot(self, *, reason: str) -> dict[str, object]:
-        normalized_reason = str(reason or "").strip()
-        if not normalized_reason.startswith(LEGACY_FULL_SNAPSHOT_REASON_PREFIXES):
-            raise RuntimeError(
-                "Full snapshot bootstrap is restricted to explicit legacy, migration, shadow, or test scenarios."
-            )
-        if self._state_store is None:
-            return {}
-        bootstrap_loader = getattr(self._state_store, "load_bootstrap_snapshot", None)
-        payload = bootstrap_loader() if callable(bootstrap_loader) else self._state_store.load()
-        if not isinstance(payload, dict):
-            raise RuntimeError(f"Legacy full snapshot load for {reason} returned {type(payload).__name__}, expected dict.")
-        return payload
-
-    def summary(self) -> dict[str, object]:
-        return {
-            "allowlist_count": len(self.allowlist),
-            "allowlist": [
-                {
-                    "snapshot_key": entry.snapshot_key,
-                    "owner": entry.owner,
-                    "module": entry.module,
-                    "exit_condition": entry.exit_condition,
-                }
-                for entry in self.allowlist
-            ],
-        }
-
-
-@dataclass(frozen=True)
 class RuntimeRepositoryContext:
     state_store: Any | None
     queue_repository: RuntimeQueueRepository | None

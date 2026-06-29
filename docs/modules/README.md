@@ -6,6 +6,7 @@
 模块文档是日常维护入口，不替代长期事实源：
 
 - 模块边界、I/O、文件范围索引和 read model 合同以 `docs/architecture/module-boundaries/` 为准。
+- PostgreSQL 业务唯一真相和 canonical fact owner matrix 以 `docs/architecture/module-boundaries/canonical-facts.md` 和 `canonical-facts/` 为准。
 - 业务口径仍以 `docs/product-specs/` 为准。
 - 页面、运行链、read model、worker 和跨页面影响仍以 `docs/app-architecture/` 为准。
 - API、测试和本地开发仍以 `docs/dev/` 为准。
@@ -15,12 +16,13 @@
 
 1. 修改前识别目标页面或功能域。
 2. 读取 `docs/architecture/module-boundaries/README.md` 和 `docs/architecture/module-boundaries/inventory.md`。
-3. 读取目标模块 `README.md`。
-4. 如涉及状态、权限、API、read model、worker、部署或测试，继续读取该模块下的 `state-machine.md`、`tests.md`、`implementation-notes.md`。
-5. 如涉及 read model，继续读取 `docs/architecture/module-boundaries/read-model-contracts.md`。
-6. 若改动跨多个页面或资源域，读取每个受影响模块。
-7. 修改后做 docs impact assessment；模块事实、边界、I/O、文件范围、状态、测试、风险或验证方式变化时，更新对应模块文档和 `docs/architecture/module-boundaries/`。
-8. 不保存原始 Codex prompt；只在 `implementation-notes.md` 记录提炼后的目标、决策、验收和风险。
+3. 如涉及 PostgreSQL 业务事实写入、读取、迁移、修复或 owner 判定，读取 `docs/architecture/module-boundaries/canonical-facts.md` 和 `canonical-facts/README.md`。
+4. 读取目标模块 `README.md`。
+5. 如涉及状态、权限、API、read model、worker、部署或测试，继续读取该模块下的 `state-machine.md`、`tests.md`、`implementation-notes.md`。
+6. 如涉及 read model，继续读取 `docs/architecture/module-boundaries/read-model-contracts.md`。
+7. 若改动跨多个页面或资源域，读取每个受影响模块。
+8. 修改后做 docs impact assessment；模块事实、边界、I/O、文件范围、状态、测试、风险或验证方式变化时，更新对应模块文档和 `docs/architecture/module-boundaries/`。
+9. 不保存原始 Codex prompt；只在 `implementation-notes.md` 记录提炼后的目标、决策、验收和风险。
 
 ## 模块清单
 
@@ -28,6 +30,7 @@
 | --- | --- | --- | --- | --- |
 | `reconciliation-workbench` | 关联台 | 页面模块 | `/` | `reconciliation-workbench/README.md` |
 | `workbench-relations` | 关联台关系事实源 | 资源模块 | `N/A` | `workbench-relations/README.md` |
+| `canonical-facts` | PostgreSQL 业务唯一真相 | 资源治理模块 | `N/A` | `canonical-facts/README.md` |
 | `tax-offset` | 税金抵扣 | 页面模块 | `/tax-offset` | `tax-offset/README.md` |
 | `cost-statistics` | 成本统计 | 页面模块 | `/cost-statistics` | `cost-statistics/README.md` |
 | `bank-details` | 银行明细 | 页面模块 | `/bank-details` | `bank-details/README.md` |

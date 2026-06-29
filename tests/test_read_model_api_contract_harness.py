@@ -8,7 +8,8 @@ import unittest
 from pathlib import Path
 from typing import Iterator
 
-from fin_ops_platform.app.server import Response, build_application
+from fin_ops_platform.app.server import Response
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.tools.http_slo_probe import DEFAULT_API_PROBES
 
 

@@ -38,7 +38,7 @@
 - 数据重置任务异常结束。
 - 工作台 read model 长时间无法刷新。
 - API 返回 `read_model_unavailable`，表示 production PostgreSQL runtime 缺少对应 SQL read repository 或 repository 初始化失败；这不是允许回落旧 snapshot 的场景，应该检查 PostgreSQL 连接、migration 版本和 worker 配置。
-- `state:full_state` 在 PostgreSQL `app.app_settings` 中持续更新。生产 API/worker 不应设置 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1`；若出现该 key 写入，应排查是否误用了 migration/shadow/test 配置。
+- `state:full_state` 不应再由 PostgreSQL `PostgresStateStore.save()` 写入。生产 API/worker 不应设置 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1`；若出现该 key 写入，应排查旧工具或未迁移路径。
 
 ## Workbench 索引卫生
 
@@ -227,6 +227,7 @@ Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS
 - `/health/ready` 和 `/metrics` 的 read model refresh / enqueue-to-fresh / RabbitMQ publish confirm percentile 使用每个 event type 最近 512 条样本，不扫全历史 `done` outbox。
 - `read_model_refresh_current_windows` 仍基于每个 event type 最近 512 条 bounded 样本，但按 `created_at` 过滤固定窗口；它用于当前 SLO 判定，历史滞留事件仍由 all-time bounded 指标和 slow events 保留。
 - `/health/ready.runtime_infrastructure.read_model_refresh_slow_events` 和 `read_model_refresh_current_slow_events` 用于定位慢 scope；Prometheus 只导出聚合分位数，避免 event/scope 高基数 label。
+- read model refresh 指标查询必须使用 bounded partial indexes；`outbox_events_read_model_refresh_metric_attention_idx` 覆盖 completed duration rows 与 failed/dead-lettered rows，避免 full health/dashboard 在大 outbox 表上因 `done OR failed` 样本条件退化为历史扫描。
 - outbox pending 和 RabbitMQ queue 同时增长，优先看 worker/consumer。
 - RabbitMQ queue 增长但 outbox 不增长，优先看 broker consumer、prefetch、DLQ 和 ack/nack。
 
@@ -678,23 +679,6 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.validate_workbench_gene
 - summary 物化和 groups summary 命中后仍慢，瓶颈落在对象构造、JSON 序列化、请求调度或连接并发。
 - 水平扩 Python 的机器成本、内存占用或部署复杂度明显高于拆只读 sidecar。
 
-## 收口验证报告
+## 收口验证
 
-运行时 SQL/read-model 收敛的最终验收报告由以下命令生成：
-
-```bash
-PYTHONPATH=backend/src \
-python3 -m fin_ops_platform.tools.run_runtime_convergence_closure \
-  --json \
-  --require-real-infra \
-  --run-unit-tests \
-  --output /tmp/finops-runtime-convergence-closure-require-real-infra.json
-```
-
-报告语义：
-
-- `pass`：该项已在当前环境验证通过。
-- `skip`：缺少真实环境或配置；只能用于本地开发报告，不能作为生产验收。
-- `fail`：验证失败或强制真实环境下缺少依赖；必须修复后重跑。
-
-生产 cutover 或最终下线旧 snapshot/Mongo/GridFS fallback 前，`--require-real-infra` 报告必须整体为 `pass`。该报告需要覆盖真实 PostgreSQL migration/queue integration、Redis TTL cache、MinIO/S3 checksum smoke、GridFS backfill/verify/orphan cleanup worker、OA Mongo source 只读探测与 `oa.sync` worker、worker `--check` 和 read model 查询性能探测。
+旧 `run_runtime_convergence_closure` 高权限收敛工具已删除，不能再作为生产验收入口。运行时验证改用当前分项 gate：`scripts/verify.sh runtime-check`、RabbitMQ staging preflight、deploy examples tests、worker `--check`、read model/API 性能探测和对应模块测试。

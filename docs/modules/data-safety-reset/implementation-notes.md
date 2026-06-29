@@ -8,7 +8,7 @@
 - `protected_targets` 是可执行契约，不只是文档说明；新增或改变目标必须补 service/API 回归。
 - data reset 必须先通过管理员 session 和当前 OA 密码校验；密码不得进入 job payload、result、error、App Health 或前端持久 state。
 - 并发 data reset job 必须互斥。同一 owner 有 active job 时，新的 job create 返回 `409 settings_data_reset_job_running` 并返回当前 job，前端用于恢复进度。
-- 本地自动化覆盖 reset 规则、API/job contract、UI 交互、App Health attention 和 legacy app Mongo export。真实 PostgreSQL PITR、对象存储恢复、Redis/RabbitMQ/systemd worker drain 和大生产库收敛归入 `documented-risk`，由 staging/nightly/smoke 补。
+- 本地自动化覆盖 reset 规则、API/job contract、UI 交互和 App Health attention。旧 App Mongo export 工具已删除；真实 PostgreSQL PITR、对象存储恢复、Redis/RabbitMQ/systemd worker drain 和大生产库收敛归入 `documented-risk`，由 staging/nightly/smoke 补。
 
 ## 历史记录
 
@@ -24,7 +24,7 @@
 ## 2026-06-11 - 首轮 data-safety-reset 测试闭环
 
 - 目标：审计数据重置、备份/导出、protected targets、state store 清理、read model dirty/worker/App Health、OA 密码校验和前端交互测试闭环。
-- 影响范围：`SettingsDataResetService`、`server.py` data reset routes、`BackgroundJobService`、Settings/Workbench UI、App Health/App Status、legacy app Mongo export、read model/worker runtime 状态。
+- 影响范围：`SettingsDataResetService`、`server.py` data reset routes、`BackgroundJobService`、Settings/Workbench UI、App Health/App Status、read model/worker runtime 状态。
 - 关键决策：补并发 job API 回归，防止 active reset 期间重复创建危险后台任务；真实基础设施和备份恢复风险记录为 documented-risk。
 - 文档影响：补齐 `README.md`、`tests.md`、`state-machine.md`，并更新全局依赖地图和测试闭环状态。
 - 测试覆盖：新增 `test_reset_job_api_rejects_concurrent_job_without_echoing_password`，覆盖 API contract、background job 并发互斥、旧功能回归和敏感字段不泄露。

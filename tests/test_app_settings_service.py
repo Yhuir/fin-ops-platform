@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.app_settings_service import (
     AppSettingsValidationError,
     BankAutoTagRulesValidationError,

@@ -40,6 +40,7 @@ class EtcInvoiceApiRoutes:
                 month=query.get("month", [None])[0],
                 plate=query.get("plate", [None])[0],
                 keyword=query.get("keyword", [None])[0],
+                import_batch_id=query.get("importBatchId", query.get("import_batch_id", [None]))[0],
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
@@ -54,6 +55,7 @@ class EtcInvoiceApiRoutes:
         month: str | None,
         plate: str | None,
         keyword: str | None,
+        import_batch_id: str | None,
         page: str | None,
         page_size: str | None,
     ) -> Any:
@@ -65,6 +67,7 @@ class EtcInvoiceApiRoutes:
                 month=month or None,
                 plate=plate or None,
                 keyword=keyword or None,
+                import_batch_id=import_batch_id or None,
                 page=resolved_page,
                 page_size=resolved_page_size,
             )

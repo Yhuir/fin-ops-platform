@@ -17,7 +17,7 @@
 | 盘点和目标设计 | 明确 app Mongo collection、GridFS、OA Mongo 只读边界、PostgreSQL schema、read model/job/audit schema。 |
 | staging 导出导入 | 通过规范化 export、staging import、正式表 transform 和 reconcile 校验数量、金额、状态分布。 |
 | repository 覆盖 | 将核心 app state、workbench、导入、税金、ETC、银行、往来、background jobs 等 repository 接入 PostgreSQL。 |
-| shadow-read / dual-write | 通过 shadow-read、runtime policy 和 controlled mirror-write 验证差异，修复 P0/P1 blocker。 |
+| shadow-read / dual-write | 历史迁移期曾通过 shadow-read、runtime policy 和 controlled mirror-write 验证差异，修复 P0/P1 blocker；这些旧 rehearsal 工具已在 canonical facts wave 5 删除。 |
 | runtime credential | 准备 PostgreSQL runtime credential 和 service drop-in，完成 no-traffic PostgreSQL mode check。 |
 | controlled read switch | same-run gates 通过后切 production service 到 PostgreSQL primary。 |
 | main redeploy | main release 重新部署，`/health` 确认 backend=postgres，HTTP smoke 返回期望状态。 |
@@ -40,4 +40,3 @@
 - 需要修复生产差异时，使用补偿脚本、事务 writer、outbox 重投递和审计记录。
 - 需要新增 read model/worker 时，更新 registry、manifest/systemd、tests、docs。
 - 需要查迁移前字段或 collection 证据时，优先读当前代码和 PostgreSQL repository；本文只保留历史摘要。
-

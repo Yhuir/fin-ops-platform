@@ -21,6 +21,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_app_health_alerts
 
 
+OA_SYNC_STATE_KEY = "oa_sync_state"
+
+
 def _oa_attachment_cache_source_rows(cache_key: str, payload: dict[str, Any]) -> list[dict[str, str | None]]:
     rows: dict[tuple[str, str], dict[str, str | None]] = {}
 
@@ -402,7 +405,31 @@ class PostgresOpsTaxEtcRepository:
             order by sync_key
             """
         )
-        return {str(row.get("sync_key")): row_payload(row, "payload", "raw_payload") for row in rows}
+        payloads = {str(row.get("sync_key")): row_payload(row, "payload", "raw_payload") for row in rows}
+        state_payload = payloads.get(OA_SYNC_STATE_KEY)
+        return dict(state_payload) if isinstance(state_payload, dict) else payloads
+
+    def save_oa_sync_state(self, snapshot: dict[str, Any]) -> None:
+        normalized = serialize_value(snapshot)
+        if not isinstance(normalized, dict):
+            normalized = {}
+        self._connection.execute(
+            """
+            insert into app.oa_sync_watermarks(sync_key, status, payload, raw_payload)
+            values (%s, 'active', %s, %s)
+            on conflict (sync_key) do update set
+                status = excluded.status,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                version = app.oa_sync_watermarks.version + 1,
+                updated_at = now()
+            """,
+            (
+                OA_SYNC_STATE_KEY,
+                jsonb(normalized),
+                jsonb({"normalized_payload": normalized}),
+            ),
+        )
 
     def load_manual_oa_imports(self) -> dict[str, object]:
         rows = self._connection.fetch_all(
@@ -431,6 +458,52 @@ class PostgresOpsTaxEtcRepository:
             row_ids.append(row_id)
             entries[row_id] = entry
         return payload
+
+    def save_manual_oa_imports(self, payload: dict[str, object]) -> None:
+        raw_entries = payload.get("entries") if isinstance(payload, dict) else None
+        entries = {
+            str(row_id).strip(): dict(entry) if isinstance(entry, dict) else {"row_id": str(row_id).strip()}
+            for row_id, entry in iter_mapping(raw_entries)
+            if str(row_id).strip()
+        }
+
+        def write(connection: Any) -> None:
+            active_row_ids = sorted(entries)
+            if active_row_ids:
+                connection.execute(
+                    "update app.manual_oa_imports set status = 'inactive' where row_id <> all(%s)",
+                    (active_row_ids,),
+                )
+            else:
+                connection.execute("update app.manual_oa_imports set status = 'inactive'")
+            for row_id, entry in entries.items():
+                normalized = {**entry, "row_id": row_id}
+                audit_payload = normalized.get("audit") if isinstance(normalized.get("audit"), dict) else {}
+                connection.execute(
+                    """
+                    insert into app.manual_oa_imports(
+                        row_id, source, actor_id, imported_at, status, audit_payload, raw_payload
+                    )
+                    values (%s, %s, %s, coalesce(%s::timestamptz, now()), 'active', %s, %s)
+                    on conflict (row_id) do update set
+                        source = excluded.source,
+                        actor_id = excluded.actor_id,
+                        imported_at = excluded.imported_at,
+                        status = 'active',
+                        audit_payload = excluded.audit_payload,
+                        raw_payload = excluded.raw_payload
+                    """,
+                    (
+                        row_id,
+                        text(normalized.get("source") or "manual_oa_import"),
+                        text(normalized.get("actor_id")),
+                        text(normalized.get("imported_at")),
+                        jsonb(audit_payload),
+                        jsonb({"normalized_payload": normalized}),
+                    ),
+                )
+
+        run_in_transaction(self._connection, write)
 
     def load_tax_certified_imports(self) -> dict[str, Any]:
         sessions = load_keyed_rows(

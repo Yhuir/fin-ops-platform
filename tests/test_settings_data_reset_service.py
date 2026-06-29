@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import Event
 from unittest.mock import call, patch
 
-from fin_ops_platform.app.server import build_application
+from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
@@ -96,6 +96,25 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
             else:
                 os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
+
+    def _install_test_mongo_oa_adapter(self, app) -> MongoOAAdapter:
+        adapter = MongoOAAdapter(
+            settings=MongoOASettings(host="127.0.0.1", database="form_data_db", cache_ttl_seconds=0),
+            attachment_invoice_cache=app._state_store,
+        )
+        adapter.set_import_settings_provider(app._app_settings_service.get_oa_import_settings)
+        app._workbench_query_service._oa_adapter = adapter
+        return adapter
+
+    def _preserve_test_mongo_oa_adapter_after_reload(self, app) -> None:
+        original_reload_runtime_services = app._reload_runtime_services
+
+        def reload_runtime_services_with_test_adapter() -> None:
+            original_reload_runtime_services()
+            self._install_test_mongo_oa_adapter(app)
+
+        app._reload_runtime_services = reload_runtime_services_with_test_adapter
+        self._install_test_mongo_oa_adapter(app)
 
     def test_reset_bank_transactions_keeps_invoices_and_protects_form_data_db(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -873,6 +892,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                     "statuses": ["completed"],
                 },
             )
+            self._preserve_test_mongo_oa_adapter_after_reload(app)
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="1",
                 username="YNSYLP005",
@@ -1021,6 +1041,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                     "statuses": ["completed"],
                 },
             )
+            self._preserve_test_mongo_oa_adapter_after_reload(app)
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="1",
                 username="YNSYLP005",

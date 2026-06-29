@@ -9,6 +9,7 @@
 - 新增、删除或移动模块文件。
 - 新增、删除或改变 API endpoint、API 响应 shape、前端页面入口。
 - 改变 service、repository、gateway、facade、adapter 的职责或依赖方向。
+- 新增、删除或改变 PostgreSQL canonical fact 表、owner、写入口、读入口、旧生产 source-of-truth 删除状态或跨模块读写路径。
 - 改变 read model scope、dirty scope、outbox event、projection strategy、freshness gate 或 worker。
 - 改变业务状态机、非法状态、权限、审计、部署、生产验证或回滚方式。
 - 删除旧链路、引入新链路，或改变旧链路的兼容条件。
@@ -21,8 +22,9 @@
 
 - 目标模块是什么？受影响模块还有哪些？
 - 是否改变模块职责、输入、输出、持久化、worker、read model 或 API？
+- 是否改变 PostgreSQL canonical facts 的 owner、写入口、读入口、禁止路径、旧生产 source-of-truth 删除状态或 downstream 输出？
 - 是否需要更新 `docs/modules/<module>/README.md`、`state-machine.md`、`tests.md`、`implementation-notes.md` 或新增 `boundary-io.md`？
-- 是否需要更新 `inventory.md` 或 `read-model-contracts.md`？
+- 是否需要更新 `inventory.md`、`canonical-facts.md` 或 `read-model-contracts.md`？
 - 是否需要更新 `docs/app-architecture/`、`docs/dev/` 或 `docs/operations/`？
 - 是否有旧代码需要删除或标记删除条件，避免旧链路污染新链路？
 
@@ -53,6 +55,7 @@
 
 - read model 全量重构或跨页面刷新链路变更。
 - 后端服务边界拆分、旧链路删除、跨模块 API 调整。
+- PostgreSQL canonical facts owner 收口、跨模块写入收口、旧事实源 fallback 删除。
 - 需要生产 rollout、可控写操作样本、性能验证或回滚方案的任务。
 - 需要先全量定位再大规模修改的任务。
 
@@ -66,6 +69,21 @@
 - 删除后是否有测试覆盖旧行为不再需要，或新链路已经覆盖。
 
 如果旧代码污染新链路，优先迁移调用点到新边界，再删除旧路径。删除条件和验证方式应写入模块 `implementation-notes.md` 或 `boundary-io.md`。
+
+## Canonical Facts 维护规则
+
+修改 PostgreSQL 业务唯一真相时必须同时检查：
+
+- `docs/architecture/module-boundaries/canonical-facts.md` 的 owner matrix。
+- 事实 owner 模块 `docs/modules/<owner>/boundary-io.md`。
+- 允许写入口、允许读入口、跨模块 adapter/UoW 和 direct SQL 禁止路径。
+- 写后 dirty scope、domain event、operation barrier target、audit 和 rollback manifest。
+- 是否引入或删除 legacy full snapshot、local pickle、`state:*` JSON、Mongo app snapshot、GridFS fallback 或 direct owner bypass。
+- 对应 owner 模块的 service/API/read model/regression tests。
+
+旧生产 source-of-truth 路径默认必须删除。migration、audit、rollback 工具如果暂时保留，必须隔离在生产 API/worker 主链路之外，并且不算 canonical facts closure。
+
+不能只把表登记到 shared repository，却不声明业务 owner 和 I/O 边界。
 
 ## Read Model 维护规则
 

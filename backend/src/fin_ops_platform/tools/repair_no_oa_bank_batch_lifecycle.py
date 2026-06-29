@@ -16,7 +16,7 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresSettings,
 )
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
-from fin_ops_platform.services.state_store import default_data_dir
+from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report
 
 

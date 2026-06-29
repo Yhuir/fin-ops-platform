@@ -10,16 +10,18 @@
 
 1. `README.md`：确认本文档体系、事实源边界和强制流程。
 2. `inventory.md`：定位目标模块、入口文档和文件范围来源。
-3. 目标模块的 `docs/modules/<module>/README.md`。
-4. 目标模块的 `state-machine.md`、`tests.md`、`implementation-notes.md`，按影响范围读取。
-5. 涉及 read model/worker 时读取 `read-model-contracts.md`、`docs/app-architecture/runtime-and-ownership.md`、`docs/operations/runtime-worker-governance.md`。
-6. 涉及接口、本地验证或生产运维时读取 `docs/dev/` 与 `docs/operations/` 中的对应文档。
+3. 涉及 PostgreSQL 业务事实写入、读取、迁移、修复或跨模块 owner 判定时读取 `canonical-facts.md`。
+4. 目标模块的 `docs/modules/<module>/README.md`。
+5. 目标模块的 `state-machine.md`、`tests.md`、`implementation-notes.md`，按影响范围读取。
+6. 涉及 read model/worker 时读取 `read-model-contracts.md`、`docs/app-architecture/runtime-and-ownership.md`、`docs/operations/runtime-worker-governance.md`。
+7. 涉及接口、本地验证或生产运维时读取 `docs/dev/` 与 `docs/operations/` 中的对应文档。
 
 ## 事实源分工
 
 | 事实 | 长期事实源 |
 | --- | --- |
 | 模块边界、I/O、文件范围索引 | 本目录 + `docs/modules/<module>/README.md` |
+| PostgreSQL 业务唯一真相、canonical fact owner 和写入 I/O | `canonical-facts.md` + `docs/modules/canonical-facts/` + 拥有事实的业务模块 `boundary-io.md` |
 | 页面、运行链、页面间影响 | `docs/app-architecture/` |
 | 产品和业务口径 | `docs/product-specs/` |
 | API、测试、本地开发 | `docs/dev/`、`backend/README.md`、`web/README.md` |
@@ -71,6 +73,7 @@ GSD 输出可以保留在 `.planning/`，但 `.planning/` 不是长期事实源�
 
 - 定位目标模块和所有受影响模块。
 - 阅读本目录、模块 README、相关状态机/测试文档。
+- 如果涉及 PostgreSQL canonical facts，核对 `canonical-facts.md` 和事实 owner 模块的 `boundary-io.md`。
 - 如果涉及 read model/worker，核对 `read-model-contracts.md`、manifest、registry 和运维文档。
 - 明确当前变更是否改变边界、I/O、文件范围、状态机、测试矩阵或生产验证。
 
@@ -78,6 +81,7 @@ GSD 输出可以保留在 `.planning/`，但 `.planning/` 不是长期事实源�
 
 - 更新受影响模块文档。
 - 如果新增或移除模块，更新 `inventory.md` 和 `docs/modules/README.md`。
+- 如果新增、移除或改变 canonical fact family、owner、允许写入口、跨模块读写路径或旧生产 source-of-truth 删除状态，更新 `canonical-facts.md` 和对应 owner 模块 `boundary-io.md`。
 - 如果新增、移除或改变 read model，更新 `read-model-contracts.md`、manifest/registry、测试和运维文档。
 - 如果改变模块边界或 I/O，更新对应模块 README 和 `boundary-io.md`。
 - 运行相关文档、测试或验证命令，并在最终说明中写清未覆盖风险。
