@@ -23,7 +23,7 @@
 
 - `workbench_relation` 投影改为：每个 scope 保存该 scope 内 relation group 涉及的所有成员 row 索引，而不仅是当前月份原生对象。
 - PostgreSQL 迁移 `0077_workbench_relation_rows_scope_unique.sql` 删除旧 `(tenant_id, row_id)` 覆盖约束，新增 `(tenant_id, scope_key, row_id)` scope 内唯一约束。
-- 生产 deploy 发现 `0077` 已有早期 checksum；已登记 accepted drift，并新增 `0078_workbench_relation_rows_scope_unique_repair.sql` 作为幂等 forward repair。
+- 生产 deploy 发现 `0077` 和 `0078` 均已有早期 checksum；已登记 accepted drift，并新增 `0079_workbench_relation_rows_scope_unique_hardening.sql` 作为幂等 forward hardening，重新断言 `(tenant_id, scope_key, row_id)` 目标唯一性。
 - read model upsert 改为 `on conflict (tenant_id, scope_key, row_id)`，避免不同 scope 互相覆盖。
 - 文档同步更新 `workbench_relation` 边界、read model 合同和运维回填顺序。
 

@@ -54,5 +54,13 @@
     "current_checksum_sha256": "32ce9d2e90eb3179c64066d1b3434969500b8b5a8fbbff0a336f4660741e142b",
     "accepted_at": "2026-06-29",
     "reason": "Production fin_ops applied an earlier 0077 during release activation before this repository baseline was finalized. Migration 0078 carries the idempotent forward repair; do not edit 0077 again."
+  },
+  {
+    "version": "0078",
+    "name": "workbench_relation_rows_scope_unique_repair",
+    "applied_checksum_sha256": "949f565c0ae5b90fb80becf68f80128320c0bfa7b37f4f0b4edb81cc20245fd7",
+    "current_checksum_sha256": "e5bb5e522cad39445c5b1a105bf0dee7708b27ada750a377bb92b33f37f84ac1",
+    "accepted_at": "2026-06-29",
+    "reason": "Production fin_ops applied an earlier 0078 repair migration before this repository baseline was finalized. Migration 0079 reasserts the idempotent target schema; do not edit 0078 again."
   }
 ]

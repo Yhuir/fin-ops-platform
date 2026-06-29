@@ -92,6 +92,7 @@ EXPECTED_MIGRATIONS = [
     "0076_outbox_read_model_refresh_metric_attention.sql",
     "0077_workbench_relation_rows_scope_unique.sql",
     "0078_workbench_relation_rows_scope_unique_repair.sql",
+    "0079_workbench_relation_rows_scope_unique_hardening.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -234,7 +235,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 79)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 80)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -259,6 +260,8 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("unique (tenant_id, scope_key, row_id)", sql)
         self.assertIn("workbench_relation_rows_tenant_scope_row_idx", sql)
         self.assertIn("workbench_relation_rows_tenant_row_idx", sql)
+        self.assertIn("partition by tenant_id, scope_key, row_id", sql)
+        self.assertIn("scope unique index missing after 0079 hardening", sql)
 
     def test_workbench_unused_write_indexes_are_dropped(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
@@ -884,6 +887,12 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         sql = re.sub(
             r"\binsert\s+into\s+read_model\.workbench_generations\s*\(.*?on\s+conflict\s*\(generation_id\)\s+do\s+nothing;",
             "insert into allowed_workbench_generation_backfill",
+            sql,
+            flags=re.S,
+        )
+        sql = re.sub(
+            r"\bdelete\s+from\s+read_model\.workbench_relation_rows\s+target\s+using\s*\(\s*select\s+id,\s+row_number\(\)\s+over\s*\(\s*partition\s+by\s+tenant_id,\s+scope_key,\s+row_id\s+order\s+by\s+generated_at\s+desc,\s+updated_at\s+desc,\s+created_at\s+desc,\s+id\s+desc\s*\)\s+as\s+row_rank\s+from\s+read_model\.workbench_relation_rows\s*\)\s+ranked\s+where\s+target\.id\s+=\s+ranked\.id\s+and\s+ranked\.row_rank\s+>\s+1;",
+            "allowed_workbench_relation_rows_dedupe",
             sql,
             flags=re.S,
         )
