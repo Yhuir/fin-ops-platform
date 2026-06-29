@@ -445,6 +445,40 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in invoice_row["linked_oa"]], ["oa-yang"])
         self.assertEqual([row["id"] for row in invoice_row["linked_bank_transactions"]], ["bank-nanjing"])
 
+    def test_cross_month_member_index_schema_change_invalidates_old_scope(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = CrossMonthRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+        source_versions = builder._source_versions()
+        self.assertEqual(
+            source_versions["workbench_relation_schema_version"],
+            "2026-06-cross-month-relation-member-index-v1",
+        )
+        repository.existing_scope_summary = {
+            "scope_key": "2026-04",
+            "row_count": 2,
+            "group_count": 1,
+            "source_versions": {
+                **source_versions,
+                "workbench_relation_schema_version": "2026-06-oa-pending-bank-claim-exclusion-v1",
+            },
+            "cache_status": "fresh",
+        }
+
+        result = builder.rebuild_workbench_relation_read_model_scope("2026-04")
+
+        self.assertNotIn("skip_reason", result)
+        saved = repository.saved[0]
+        self.assertEqual(
+            saved["source_versions"]["workbench_relation_schema_version"],
+            "2026-06-cross-month-relation-member-index-v1",
+        )
+        rows_by_id = {row["row_id"]: row for row in saved["rows"]}
+        self.assertIn("input-invoice-nanjing", rows_by_id)
+
     def test_rebuild_distributes_open_reconciliation_decision_as_candidate_relation(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
         connection = CandidateDecisionRelationProjectionConnection()

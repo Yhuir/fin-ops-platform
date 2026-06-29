@@ -41,6 +41,7 @@
 | Scope key | manifest/scope policy | 必须符合注册 scope policy |
 | Query freshness request | API/read facade | 必须返回 fresh/stale/refreshing 或等价状态 |
 | Write response target envelope | 页面写 API/service | 会影响 read model 的成功写入必须返回或透出 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets` 和 `operation_barrier_targets`；缺少/未知前端 read model status 必须保持非 fresh |
+| Projection source versions | Worker/projection/upstream read model | 必须包含 own projection schema version 和依赖 source_versions；行为变更必须 bump version |
 
 ## 输出 I/O
 
@@ -49,6 +50,7 @@
 | Dirty scope/outbox event | PostgreSQL durable queue | `job.outbox_events` 与 `job.read_model_dirty_scopes` 是事实源 |
 | Fresh payload | 页面 API/Redis | Redis 只能缓存 fresh gate 后 payload |
 | Readiness/status | app status/operation barrier | 页面不能伪装 fresh |
+| Source-version proof | Scope rows / API fresh gate | `source_versions_unchanged` 只能在 own schema version 与依赖版本都匹配时跳过重建 |
 
 ## 持久化与投影
 
@@ -90,6 +92,7 @@
 
 - 新增 read model 必须同时更新 manifest、scope policy、registry、tests、docs。
 - 删除旧 read path 前必须证明所有页面 API 和 worker 均通过新 freshness/status 边界。
+- Projection 行为、索引、跨 scope 分发或上游依赖合同变化时必须 bump projection schema version；禁止只改 SQL/service 逻辑却复用旧 `source_versions`。
 - `workbench_relation` 的 `rows` 索引是 scope 内唯一，不是 row 全局唯一；跨月 relation 必须在每个受影响 scope 写入所有成员 row 索引，禁止恢复旧的 `(tenant_id, row_id)` 覆盖模型。
 - legacy compat path 删除不是当前 PSCIP-L4 blocker；它必须继续保持生产 fail-closed、不能绕过 fresh gate，也不能新增未登记 dirty/outbox/readiness 写入。
 - Search 高行数 refresh latency 仍需在后续生产 evidence sweep 中观察；单次高延迟不是当前 stale-as-fresh 或 readiness blocker。

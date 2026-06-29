@@ -14,6 +14,15 @@
 
 查询端必须经过 freshness/status/enqueue 边界；页面不能读取旧 read model 却返回 fresh。Redis 只能缓存 fresh gate 之后的 payload；RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
 
+## Freshness / Version 合同
+
+- 每个 read model scope 的 `source_versions` 必须覆盖自己的 projection schema version，以及构建该 payload 依赖的 canonical facts / upstream read model versions。
+- 任何会改变 rows、groups、索引键、跨 scope 成员分发、状态字段、金额口径或 freshness 语义的 projection 行为变更，都必须 bump 自己的 projection schema version；不能只依赖事实表 `updated_at`。
+- Worker 的 `source_versions_unchanged` 跳过优化只有在 own schema version 和全部依赖版本都匹配时才允许触发；缺失 schema/dependency version 时必须 fail closed 为 stale/refreshing 或执行重建。
+- 下游 read model 消费 upstream read model 时，必须把 upstream source_versions 写入自身 scope source_versions。upstream schema/version 变化后，下游 scope 必须能被 freshness gate 识别并重新投影。
+- `all` scope 不允许用一个伪全局版本掩盖月份 shard 差异；合法方式是 fan-out command、月份 shard convergence 或 manifest 明确登记的 parent aggregate。
+- 页面和导出只能读取 freshness gate 之后的 payload；不得用 live fallback、旧 snapshot、Redis 或前端拼接把 stale read model 伪装成 fresh。
+
 ## 当前验收状态
 
 - 状态：PSCIP-L4 closed。
@@ -47,6 +56,7 @@
 
 - 新增 read model 时，必须先定义 manifest entry：scope、event type、worker、projection strategy、`all` 语义、query owner、repository owner、permission boundary 和测试入口。
 - 修改 projection strategy 或 `all` 语义时，必须同步更新 scope policy、dirty scope 写入路径、worker registry、freshness/status 查询、API contract tests、worker/read model tests 和本文档。
+- 修改 projection 行为或 upstream dependency 合同时，必须 bump 对应 projection schema version，并新增回归测试证明旧 source_versions 不会触发 `source_versions_unchanged` 跳过。
 - 删除旧 read model 代码前，必须证明没有页面、API、worker、测试或生产脚本继续读取旧路径。
 - `workbench` 的 active generation 原子发布模型是明确例外，不允许机械迁移成普通 gateway 模型。
 - 所有非事务 refresh 请求必须通过 `ReadModelRefreshGateway` / scope policy registry normalize、validate、dedupe 后进入 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。

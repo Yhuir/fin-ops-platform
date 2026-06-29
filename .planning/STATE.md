@@ -23,7 +23,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 Phase: 1 of 18 (完善外部往来款管理页面)
 Plan: 0 of 0 in current phase
 Status: Ready to discuss/plan page-specific phases using Phase 0 as required baseline
-Last activity: 2026-06-22 - Completed quick task 260622-oal: OA 待付款表格 OA 区域五列压缩
+Last activity: 2026-06-29 - Completed quick task 260629-guf: fix read model freshness version contract and deploy
 
 Progress: [█░░░░░░░░░] 6%
 
@@ -84,6 +84,7 @@ None yet.
 | 260622-bta | 银行流水模板别名识别 | 2026-06-22 | — | [260622-bta-bank-import-template-aliases](./quick/260622-bta-bank-import-template-aliases/) |
 | 260622-oaw | OA 待付款自动匹配和自动写回 | 2026-06-22 | — | [260622-oaw-oa-pending-auto-writeback](./quick/260622-oaw-oa-pending-auto-writeback/) |
 | 260622-oal | OA 待付款表格 OA 区域五列压缩 | 2026-06-22 | — | [260622-oal-oa-pending-layout](./quick/260622-oal-oa-pending-layout/) |
+| 260629-guf | fix read model freshness version contract and deploy | 2026-06-29 | — | [260629-guf-fix-read-model-freshness-version-contrac](./quick/260629-guf-fix-read-model-freshness-version-contrac/) |
 
 ## Deferred Items
 

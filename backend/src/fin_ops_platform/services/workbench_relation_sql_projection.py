@@ -13,7 +13,7 @@ from fin_ops_platform.services.workbench_relation_read_model_repository import W
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-oa-pending-bank-claim-exclusion-v1"
+WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-cross-month-relation-member-index-v1"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
