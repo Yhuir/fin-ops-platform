@@ -11,6 +11,7 @@
 | BRB-E2E-005 | 历史 no-OA submitted rebaseline | `tests/test_no_oa_bank_batch_tag_selection_api.py`、`web/e2e/bank-flow-rule-batches-flow.spec.ts` | 已覆盖 dry-run、apply、撤回旧 relation、旧 batch withdrawn、apply 幂等；浏览器 E2E 覆盖 dry-run 清单、apply 携带 manifest/reason、operation barrier 后刷新。 |
 | BRB-E2E-006 | 权限、陈旧和失败状态 fail closed | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/bank-flow-rule-batches-flow.spec.ts` | 已覆盖 read-export 无保存/提交/撤回、首屏失败恢复、stale read model 保持可见行。 |
 | BRB-E2E-007 | 银行标签变更后规则 grid 同步 | `web/e2e/bank-flow-rule-batches-flow.spec.ts` | 已覆盖银行明细自动标签规则保存后，流水规则抽屉左侧标签同步更新，旧标签不再出现。 |
+| BRB-E2E-008 | 已提交批次批量重置回未提交候选 | `tests/test_no_oa_bank_batch_tag_selection_api.py`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/e2e/bank-flow-rule-batches-flow.spec.ts` | 已覆盖提交后调用 `POST /api/bank-flow-rule-batches/reset-submitted`、等待 `bank_flow_rule_batch` operation barrier、页面回到未提交并重新展示候选；后端覆盖 relation 取消和 row 释放。 |
 
 ## 旧测试迁移说明
 

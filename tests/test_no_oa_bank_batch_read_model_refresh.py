@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from tests.app_test_support import build_local_state_application as build_application
+from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
     NoOaBankBatchReadModelPersistencePort,
@@ -617,6 +618,138 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
         )
         self.assertIn("bank_detail_source_versions", result["source_versions"])
         self.assertIn("workbench_relation_source_versions", result["source_versions"])
+
+    def test_bank_flow_rule_refresh_rebuilds_even_when_no_oa_source_versions_are_unchanged(self) -> None:
+        class ReadRepository:
+            def __init__(self) -> None:
+                self.source_versions: dict[str, object] = {}
+                self.summary_calls: list[dict[str, object]] = []
+
+            def no_oa_bank_batch_source_versions_summary(
+                self,
+                filters: dict[str, object] | None = None,
+            ) -> dict[str, object]:
+                self.summary_calls.append(dict(filters or {}))
+                return {
+                    "read_model_status": "fresh",
+                    "row_count": 0,
+                    "source_versions": dict(self.source_versions),
+                }
+
+        class StateStore:
+            def __init__(self, repository: ReadRepository) -> None:
+                self.no_oa_bank_batch_sql_read_repository = repository
+                self.saved_scopes: list[tuple[str, dict[str, object]]] = []
+
+            def save_no_oa_bank_batches_scope(self, snapshot: dict[str, object], *, scope_key: str) -> None:
+                self.saved_scopes.append((scope_key, dict(snapshot)))
+
+            def save_no_oa_bank_batches(self, snapshot: dict[str, object]) -> None:
+                self.saved_scopes.append(("all", dict(snapshot)))
+
+        class QueueRepository:
+            def __init__(self) -> None:
+                self.completions: list[dict[str, object]] = []
+
+            def read_model_refresh_is_current(self, **_kwargs) -> bool:
+                return True
+
+            def complete_read_model_refresh(self, **kwargs) -> None:
+                self.completions.append(dict(kwargs))
+
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-flow-worker-reset.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-03",
+                    "trade_time": "2026-05-03 10:20:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "8.80",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_id = app._import_service.list_transactions()[0].id
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "fee"}],
+            actor="tester",
+        )
+        repository = ReadRepository()
+        state_store = StateStore(repository)
+        queue_repository = QueueRepository()
+        service = NoOaBankBatchReadModelRefreshService(
+            import_service=app._import_service,
+            effective_category_provider=app._bank_transaction_effective_category_provider,
+            no_oa_bank_batch_service=app._no_oa_bank_batch_service,
+            app_settings_service=app._app_settings_service,
+            bank_transaction_category_service=app._bank_transaction_category_service,
+            pair_relation_service=app._workbench_pair_relation_service,
+            workbench_read_model_service=app._workbench_read_model_service,
+            state_store=state_store,
+            queue_repository=queue_repository,
+            workbench_matching_source_versions_provider=app._workbench_matching_source_versions,
+            relation_facade=app._workbench_relation_read_facade(),
+        )
+        bank_rows = service._application_service.no_oa_bank_transaction_rows(
+            month="2026-05",
+            include_categories=False,
+        )
+        service._application_service.effective_categories_for_rows(bank_rows)
+        service._application_service.load_relation_source_versions_for_bank_rows(bank_rows)
+        repository.source_versions = service._application_service.no_oa_bank_batch_source_versions()
+
+        result = service.handle_runtime_event(
+            RuntimeQueueEvent(
+                event_id="evt-bank-flow-rebuild",
+                tenant_id="default",
+                event_type="no_oa_bank_batch.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="2026-05",
+                scope_type="no_oa_bank_batch",
+                scope_key="2026-05",
+                dedupe_key="no_oa_bank_batch.read_model.refresh:no_oa_bank_batch:2026-05",
+                payload={
+                    "scope_type": "no_oa_bank_batch",
+                    "scope_key": "2026-05",
+                    "source_version": 9,
+                    "metadata": {"action_name": "bank_flow_rule_batch_reset_submitted"},
+                    "action_name": "bank_flow_rule_batch_reset_submitted",
+                },
+                attempts=1,
+                status="processing",
+                source_version=9,
+            )
+        )
+
+        self.assertEqual(result["scope_key"], "2026-05")
+        self.assertNotIn("skipped", result)
+        self.assertEqual(repository.summary_calls, [])
+        self.assertEqual(len(state_store.saved_scopes), 1)
+        snapshot = state_store.saved_scopes[0][1]
+        batches = snapshot.get("batches")
+        self.assertIsInstance(batches, dict)
+        self.assertEqual(
+            [batch["batch_type"] for batch in batches.values()],
+            ["fee"],
+        )
+        self.assertEqual(
+            queue_repository.completions,
+            [
+                {
+                    "tenant_id": "default",
+                    "scope_type": "no_oa_bank_batch",
+                    "scope_key": "2026-05",
+                    "source_version": 9,
+                }
+            ],
+        )
 
     def test_month_scope_refresh_reads_only_month_and_preserves_other_month_batches(self) -> None:
         class ImportService:

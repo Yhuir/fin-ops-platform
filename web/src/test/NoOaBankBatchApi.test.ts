@@ -7,6 +7,7 @@ import {
   applyNoOaBankBatchRebaseline,
   dryRunNoOaBankBatchRebaseline,
   saveNoOaBankBatchTagSelection,
+  resetSubmittedNoOaBankBatches,
   submitNoOaBankBatch,
   submitNoOaBankBatches,
   submitNoOaBankBatchSelection,
@@ -200,6 +201,37 @@ describe("no OA bank batch API", () => {
       dryRun: false,
       applied: true,
       batches: [{ batchId: "legacy-no-oa-001", status: "withdrawn", version: 4 }],
+    });
+  });
+
+  test("resets all submitted flow rule batches through the reset endpoint", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      affected_months: ["2026-01"],
+      operation_barrier_targets: [{ read_model_key: "bank_flow_rule_batch", scope_key: "2026-01" }],
+      results: [
+        { batch_id: "flow-batch-001", status: "withdrawn" },
+        { batch_id: "flow-batch-002", status: "withdrawn" },
+      ],
+      workbench_rebuild_queued: true,
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await resetSubmittedNoOaBankBatches({ reason: "全部重新过规则" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/bank-flow-rule-batches/reset-submitted",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ reason: "全部重新过规则" }),
+      }),
+    );
+    expect(result).toMatchObject({
+      affectedMonths: ["2026-01"],
+      operationBarrierTargets: [{ readModelKey: "bank_flow_rule_batch", scopeKey: "2026-01" }],
+      results: [
+        { batch_id: "flow-batch-001", status: "withdrawn" },
+        { batch_id: "flow-batch-002", status: "withdrawn" },
+      ],
     });
   });
 

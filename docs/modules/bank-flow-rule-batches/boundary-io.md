@@ -37,6 +37,7 @@
 | 标签闭环规则 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | 本模块拥有规则版本和 `requirements_by_tag_code`。未知、停用、重复 tag code fail fast。新增/未配置标签默认 `requires_oa=true, requires_invoice=true`。 |
 | 页面查询 | `BankFlowRuleBatchPage.tsx` | 查询候选/已提交/已撤回批次，必须携带 read model freshness/status。 |
 | 批量提交 | `POST /api/bank-flow-rule-batches/submit-selection` | `transaction_ids` 必填、非空、去重。提交前重查银行流水身份、月份、账户、标签、active relation 占用和当前规则版本。 |
+| 已提交重置 | `POST /api/bank-flow-rule-batches/reset-submitted` | 批量撤回当前所有 submitted 批次，必须走 withdraw + relation command，不直接 SQL 改表；旧批次保留 withdrawn/audit history，释放的银行 rows 在 read model rebuild 后重新成为候选。 |
 | Rebaseline dry-run/apply | 管理 API 或运维工具 | 只处理 legacy submitted no-OA relation/batch。apply 必须提交 dry-run manifest 并校验 batch/version 一致；缺失或漂移时拒绝。重复 apply 同一 manifest 幂等返回。 |
 | 权限/session | API session / permissions | 读取、保存规则、提交批次、rebaseline 分别校验权限；缺权限 fail fast。 |
 

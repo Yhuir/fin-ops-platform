@@ -7,11 +7,11 @@
 | 类别 | 是否适用 | 计划覆盖 |
 | --- | --- | --- |
 | 1. Business core unit tests | 适用 | 已覆盖 checkbox requirement metadata、paired/open 判定、`requires_oa`+`requires_invoice` 缺任一项 fail closed、折叠阈值、rebaseline 状态转换；未知/停用/重复标签仍需扩展。 |
-| 2. Service-layer tests | 适用 | 已覆盖批次提交 relation command payload、rebaseline dry-run/apply manifest 校验和幂等；独立规则审计和 partial failure rollback 仍需扩展。 |
-| 3. API contract tests | 适用 | 已覆盖 `GET/PUT /api/bank-flow-rule-batches/tag-rules`、`POST /submit-selection`、`POST /rebaseline-no-oa/dry-run`、`POST /rebaseline-no-oa/apply`、缺 manifest 和 stale manifest 错误；权限错误 shape 仍主要靠浏览器 role matrix。 |
+| 2. Service-layer tests | 适用 | 已覆盖批次提交 relation command payload、reset submitted 批量撤回、rebaseline dry-run/apply manifest 校验和幂等；独立规则审计和 partial failure rollback 仍需扩展。 |
+| 3. API contract tests | 适用 | 已覆盖 `GET/PUT /api/bank-flow-rule-batches/tag-rules`、`POST /submit-selection`、`POST /reset-submitted`、`POST /rebaseline-no-oa/dry-run`、`POST /rebaseline-no-oa/apply`、缺 manifest 和 stale manifest 错误；权限错误 shape 仍主要靠浏览器 role matrix。 |
 | 4. Read model, cache, and background job tests | 适用 | 当前覆盖过渡期 `no_oa_bank_batch` stale/refreshing fail-closed、`bank_flow_rule_batch` operation barrier alias 和 no-OA worker/manifest guard；独立 `bank_flow_rule_batch` 投影表、source version、schema version、worker refresh 待 read model 拆分时补。 |
 | 5. Frontend component and interaction tests | 适用 | xlsx/grid 抽屉、左侧只读、OA/发票 checkbox、保存失败、标签变化后 grid 同步、选择清空、批量提交 loading/error/empty/stale 状态。 |
-| 6. End-to-end business-flow integration tests | 适用 | 已覆盖 bank tag rules -> submit bank rows -> workbench open/paired、银行明细标签变更 -> 流水规则抽屉同步、`requires_invoice` open -> 选择补票候选发票 -> 确认后 paired、legacy no-OA rebaseline dry-run -> apply manifest -> barrier 刷新。 |
+| 6. End-to-end business-flow integration tests | 适用 | 已覆盖 bank tag rules -> submit bank rows -> reset submitted -> 未提交候选恢复、bank tag rules -> submit bank rows -> workbench open/paired、银行明细标签变更 -> 流水规则抽屉同步、`requires_invoice` open -> 选择补票候选发票 -> 确认后 paired、legacy no-OA rebaseline dry-run -> apply manifest -> barrier 刷新。 |
 | 7. Existing feature regression tests | 适用 | no-OA legacy paths、Workbench paired/open、bank-details tag rules、pending invoices rules、turnover ledger、search、operation barrier、permissions/audit。 |
 
 ## 计划后端测试入口

@@ -156,7 +156,12 @@ class NoOaBankBatchApplicationService:
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
 
-    def list_batches_payload(self, query: dict[str, list[str]]) -> dict[str, object]:
+    def list_batches_payload(
+        self,
+        query: dict[str, list[str]],
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> dict[str, object]:
         pagination = self._pagination_from_query(query)
         filters = {
             "month": query.get("month", [""])[0],
@@ -170,13 +175,28 @@ class NoOaBankBatchApplicationService:
             "account_key": filters["account_key"],
         }
         refresh_scope_keys = self._refresh_scope_keys_for_filters(filters)
+        refresh_metadata = self._read_model_refresh_metadata_for_relation_mode(relation_mode)
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE and self._no_oa_bank_batch_read_model_repository is None:
+            self.refresh_batches(
+                apply_relation_repairs=False,
+                scope_key=refresh_scope_keys[0] if len(refresh_scope_keys) == 1 else "all",
+                relation_mode=relation_mode,
+            )
         list_read_model_batches = getattr(self._no_oa_bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
         if callable(list_read_model_batches):
             summary_read_model_batches = list_read_model_batches(summary_filters)
             read_model_batches = list_read_model_batches(filters)
             if summary_read_model_batches is None or read_model_batches is None:
-                refresh_reason = "api_no_oa_read_model_missing"
-                refresh_enqueued = self.enqueue_background_refresh(refresh_scope_keys, reason=refresh_reason)
+                refresh_reason = self._read_model_refresh_reason_for_relation_mode(
+                    relation_mode,
+                    fallback_reason="api_no_oa_read_model_missing",
+                    bank_flow_reason="api_bank_flow_rule_batch_read_model_missing",
+                )
+                refresh_enqueued = self.enqueue_background_refresh(
+                    refresh_scope_keys,
+                    reason=refresh_reason,
+                    metadata=refresh_metadata,
+                )
                 return {
                     "summary": self.summary([]),
                     "batches": [],
@@ -192,8 +212,16 @@ class NoOaBankBatchApplicationService:
                 summary_public_batches = self._public_batches(summary_read_model_batches)
                 read_model_public_batches = self._public_batches(read_model_batches)
                 if stale_reasons:
-                    refresh_reason = "api_no_oa_source_versions_stale"
-                    refresh_enqueued = self.enqueue_background_refresh(refresh_scope_keys, reason=refresh_reason)
+                    refresh_reason = self._read_model_refresh_reason_for_relation_mode(
+                        relation_mode,
+                        fallback_reason="api_no_oa_source_versions_stale",
+                        bank_flow_reason="api_bank_flow_rule_batch_source_versions_stale",
+                    )
+                    refresh_enqueued = self.enqueue_background_refresh(
+                        refresh_scope_keys,
+                        reason=refresh_reason,
+                        metadata=refresh_metadata,
+                    )
                     return {
                         "summary": self.summary(summary_public_batches),
                         "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
@@ -220,8 +248,16 @@ class NoOaBankBatchApplicationService:
                 **self._pagination_payload(read_public_batches, pagination),
                 "read_model_status": "fresh",
             }
-        refresh_reason = "api_no_oa_read_model_unavailable"
-        refresh_enqueued = self.enqueue_background_refresh(refresh_scope_keys, reason=refresh_reason)
+        refresh_reason = self._read_model_refresh_reason_for_relation_mode(
+            relation_mode,
+            fallback_reason="api_no_oa_read_model_unavailable",
+            bank_flow_reason="api_bank_flow_rule_batch_read_model_unavailable",
+        )
+        refresh_enqueued = self.enqueue_background_refresh(
+            refresh_scope_keys,
+            reason=refresh_reason,
+            metadata=refresh_metadata,
+        )
         return {
             "summary": self.summary([]),
             "batches": [],
@@ -288,7 +324,7 @@ class NoOaBankBatchApplicationService:
         previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
         previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
         try:
-            self.refresh_batches()
+            self.refresh_batches(relation_mode=relation_mode)
             before_batch = self._no_oa_bank_batch_service.get_batch(batch_id)
             already_submitted = str(before_batch.get("status") or "") == "submitted"
             batch = self._no_oa_bank_batch_service.submit_batch(
@@ -406,6 +442,79 @@ class NoOaBankBatchApplicationService:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
             raise
         return result
+
+    def reset_submitted_bank_flow_rule_batches(
+        self,
+        *,
+        actor: str,
+        reason: str | None,
+    ) -> dict[str, object]:
+        previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
+        previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
+        candidates = self._submitted_no_oa_rebaseline_candidates()
+        withdrawn_batches: list[dict[str, object]] = []
+        changed_case_ids: list[str] = []
+        affected_months: set[str] = set()
+        resolved_reason = str(reason or "").strip() or "流水规则批量处理：重置全部已提交批次为未提交"
+        try:
+            for candidate in candidates:
+                batch_id = str(candidate.get("batch_id") or "").strip()
+                if not batch_id:
+                    continue
+                before_batch = self._no_oa_bank_batch_service.get_batch(batch_id)
+                already_withdrawn = str(before_batch.get("status") or "") == "withdrawn"
+                withdrawn = self._no_oa_bank_batch_service.withdraw_batch(
+                    batch_id,
+                    actor=actor,
+                    expected_version=int(before_batch.get("version") or 1),
+                    reason=resolved_reason,
+                )
+                if not already_withdrawn:
+                    self._cancel_relation_for_batch(
+                        withdrawn,
+                        actor=actor,
+                        reason=resolved_reason,
+                        history_operation_type="bank_flow_rule_batch_reset_submitted_withdraw",
+                        idempotency_operation="bank_flow_rule_batch_reset_submitted",
+                    )
+                withdrawn_batches.append(withdrawn)
+                relation_case_id = str(withdrawn.get("relation_case_id") or withdrawn.get("batch_id") or "").strip()
+                if relation_case_id:
+                    changed_case_ids.append(relation_case_id)
+                affected_months.update(self.affected_months(withdrawn))
+            if withdrawn_batches:
+                self.refresh_batches(
+                    relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                    scope_key="all",
+                )
+            workbench_rebuild_queued = self.after_mutation(
+                sorted(affected_months),
+                changed_case_ids=changed_case_ids,
+                persist=True,
+                action_name="bank_flow_rule_batch_reset_submitted",
+            )
+        except Exception:
+            self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
+            raise
+        return {
+            "summary": {
+                "reset_count": len(withdrawn_batches),
+                "batch_count": len(withdrawn_batches),
+                "row_count": sum(int(batch.get("row_count") or 0) for batch in withdrawn_batches),
+                "affected_months": sorted(affected_months),
+            },
+            "affected_months": sorted(affected_months),
+            **write_target_envelope(
+                read_model_key=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                scope_keys=sorted(affected_months),
+                fallback_scope_key="all",
+            ),
+            "workbench_rebuild_queued": workbench_rebuild_queued,
+            "results": [
+                {"batch_id": batch.get("batch_id"), "status": "withdrawn"}
+                for batch in withdrawn_batches
+            ],
+        }
 
     def rebaseline_submitted_no_oa_batches_dry_run(self) -> dict[str, object]:
         candidates = self._submitted_no_oa_rebaseline_candidates()
@@ -554,6 +663,23 @@ class NoOaBankBatchApplicationService:
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             return BANK_FLOW_RULE_BATCH_RELATION_MODE
         return "no_oa_bank_batch"
+
+    @staticmethod
+    def _read_model_refresh_metadata_for_relation_mode(relation_mode: str) -> dict[str, object] | None:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return {"action_name": "bank_flow_rule_batch_read_model_refresh"}
+        return None
+
+    @staticmethod
+    def _read_model_refresh_reason_for_relation_mode(
+        relation_mode: str,
+        *,
+        fallback_reason: str,
+        bank_flow_reason: str,
+    ) -> str:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return bank_flow_reason
+        return fallback_reason
 
     def _confirm_relation_for_batch(
         self,
@@ -755,6 +881,7 @@ class NoOaBankBatchApplicationService:
         *,
         apply_relation_repairs: bool = True,
         scope_key: str = "all",
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
         refresh_scope_key = str(scope_key or "all").strip() or "all"
         bank_rows = self.no_oa_bank_transaction_rows(month=refresh_scope_key, include_categories=False)
@@ -764,6 +891,7 @@ class NoOaBankBatchApplicationService:
             categories_by_transaction_id=categories_by_transaction_id,
             apply_relation_repairs=apply_relation_repairs,
             scope_key=refresh_scope_key,
+            relation_mode=relation_mode,
         )
 
     def unchanged_read_model_scope_result(
@@ -852,6 +980,7 @@ class NoOaBankBatchApplicationService:
         source_versions: dict[str, object] | None = None,
         apply_relation_repairs: bool,
         scope_key: str,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
         refresh_scope_key = str(scope_key or "all").strip() or "all"
         source_version_payload = dict(source_versions) if isinstance(source_versions, dict) else self.no_oa_bank_batch_source_versions()
@@ -863,7 +992,7 @@ class NoOaBankBatchApplicationService:
             if active_relations is not None
             else self._workbench_relation_active_relations_for_bank_rows(bank_rows),
             source_version_payload,
-            eligible_batch_types=self.selected_tag_codes(),
+            eligible_batch_types=self._eligible_tag_codes_for_relation_mode(relation_mode),
             apply_relation_repairs=apply_relation_repairs,
             refresh_scope_key=refresh_scope_key,
         )
@@ -1354,13 +1483,21 @@ class NoOaBankBatchApplicationService:
             )
         return bool(normalized_months)
 
-    def enqueue_background_refresh(self, scope_keys: list[str], *, reason: str) -> bool:
+    def enqueue_background_refresh(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> bool:
         if self._read_model_refresh_producer is not None:
+            if metadata:
+                return bool(self._read_model_refresh_producer.enqueue(scope_keys, reason=reason, metadata=metadata))
             return bool(self._read_model_refresh_producer.enqueue(scope_keys, reason=reason))
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
             return False
-        return bool(refresh_gateway.enqueue_many("no_oa_bank_batch", scope_keys, reason=reason))
+        return bool(refresh_gateway.enqueue_many("no_oa_bank_batch", scope_keys, reason=reason, metadata=metadata))
 
     def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
         if self._state_store is None:
@@ -1402,10 +1539,18 @@ class NoOaBankBatchApplicationService:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         relation = self.pair_relation_snapshot_by_case_id(relation_case_id)
         affected_months = self.affected_months(batch)
-        action_name = {
-            "submitted": "no_oa_bank_batch_submit",
-            "withdrawn": "no_oa_bank_batch_withdraw",
-        }.get(str(status or "").strip())
+        action_name_by_status = (
+            {
+                "submitted": "bank_flow_rule_batch_submit",
+                "withdrawn": "bank_flow_rule_batch_withdraw",
+            }
+            if read_model_key == BANK_FLOW_RULE_BATCH_RELATION_MODE
+            else {
+                "submitted": "no_oa_bank_batch_submit",
+                "withdrawn": "no_oa_bank_batch_withdraw",
+            }
+        )
+        action_name = action_name_by_status.get(str(status or "").strip())
         workbench_rebuild_queued = self.after_mutation(
             affected_months,
             changed_case_ids=[relation_case_id] if relation_case_id else [],

@@ -910,6 +910,46 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_enqueue_background_refresh_forwards_metadata_to_durable_queue_boundary(self) -> None:
+        class QueueRepository:
+            def __init__(self) -> None:
+                self.enqueued: list[dict[str, object]] = []
+
+            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+                self.enqueued.append(dict(kwargs))
+
+        queue = QueueRepository()
+        service = NoOaBankBatchApplicationService(
+            import_service=SimpleNamespace(),
+            effective_category_provider=SimpleNamespace(),
+            no_oa_bank_batch_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(),
+            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(SimpleNamespace()),
+            workbench_read_model_service=SimpleNamespace(),
+            state_store=None,
+            queue_repository=queue,
+        )
+
+        enqueued = service.enqueue_background_refresh(
+            ["2026-05"],
+            reason="unit_test",
+            metadata={"action_name": "bank_flow_rule_batch_read_model_refresh"},
+        )
+
+        self.assertTrue(enqueued)
+        self.assertEqual(
+            queue.enqueued,
+            [
+                {
+                    "scope_type": "no_oa_bank_batch",
+                    "scope_key": "2026-05",
+                    "reason": "unit_test",
+                    "metadata": {"action_name": "bank_flow_rule_batch_read_model_refresh"},
+                }
+            ],
+        )
+
     def test_enqueue_background_refresh_uses_injected_refresh_producer(self) -> None:
         class RefreshProducer:
             def __init__(self) -> None:

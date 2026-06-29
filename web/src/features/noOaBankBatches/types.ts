@@ -153,6 +153,11 @@ export type WithdrawNoOaBankBatchRequest = {
   signal?: AbortSignal;
 };
 
+export type ResetSubmittedNoOaBankBatchesRequest = {
+  reason?: string;
+  signal?: AbortSignal;
+};
+
 export type SubmitNoOaBankBatchesRequest = {
   batches: Array<{
     batchId: string;

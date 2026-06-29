@@ -258,6 +258,26 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 关联台按 metadata 判断 open/paired；`source_row_count > 3` 时默认折叠。
 - 成功响应返回 `batch_id`、`case_id`、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。
 
+`POST /api/bank-flow-rule-batches/reset-submitted`
+
+受控撤回当前所有已提交流水规则批次，让相关银行流水回到可重新按当前规则进入未提交候选的状态。该接口用于整理迁移期数据库状态，不能用手写 SQL 替代。
+
+请求示例：
+
+```json
+{
+  "reason": "全部重新过流水规则"
+}
+```
+
+处理规则：
+
+- 只处理当前 `submitted` 批次；没有 submitted 时返回空结果且保持幂等。
+- 每个批次必须通过既有 withdraw 边界撤回，并通过 `WorkbenchRelationCommandService.cancel_relation(...)` 取消 active relation。
+- 不直接修改银行流水、银行标签或 `app.workbench_pair_relations` 表。
+- 成功后返回 `summary.reset_count`、`summary.row_count`、`affected_months`、`results`、`freshness_targets` 和 `operation_barrier_targets`，其中 barrier target 使用 `read_model_key=bank_flow_rule_batch`。
+- 撤回后的旧批次进入 withdrawn/audit history；后续 read model rebuild 会按当前银行标签和规则重新生成未提交候选，不自动重新提交。
+
 `POST /api/bank-flow-rule-batches/rebaseline-no-oa/dry-run`
 
 生成历史 submitted no-OA 批次撤回计划，不改变事实。

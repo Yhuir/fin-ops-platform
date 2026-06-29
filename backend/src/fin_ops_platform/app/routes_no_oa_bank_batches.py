@@ -41,7 +41,9 @@ class NoOaBankBatchApiRoutes:
         headers: dict[str, str] | None,
     ) -> Any | None:
         if method == "GET" and route_path == "/api/bank-flow-rule-batches":
-            return self._json_response_for(*self.list_batches(query))
+            return self._json_response_for(
+                *self.list_batches(query, relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE)
+            )
         if method == "GET" and route_path == "/api/bank-flow-rule-batches/tag-rules":
             return self._json_response_for(*self.bank_flow_tag_rules())
         if method == "PUT" and route_path == "/api/bank-flow-rule-batches/tag-rules":
@@ -59,6 +61,12 @@ class NoOaBankBatchApiRoutes:
                     session=session,
                     relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
                 ),
+            )
+        if method == "POST" and route_path == "/api/bank-flow-rule-batches/reset-submitted":
+            return self._json_write(
+                body,
+                headers,
+                lambda payload, session: self.reset_submitted_bank_flow_batches(payload, session=session),
             )
         if method == "POST" and route_path == "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run":
             return self._json_write(body, headers, lambda payload, session: self.rebaseline_no_oa_dry_run(payload, session=session))
@@ -124,9 +132,17 @@ class NoOaBankBatchApiRoutes:
             )
         return None
 
-    def list_batches(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
+    def list_batches(
+        self,
+        query: dict[str, list[str]],
+        *,
+        relation_mode: str = "no_oa_bank_batch",
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
-            return HTTPStatus.OK, self._application_service.list_batches_payload(query)
+            return HTTPStatus.OK, self._application_service.list_batches_payload(
+                query,
+                relation_mode=relation_mode,
+            )
         except ValueError as exc:
             return self._value_error_response(exc)
 
@@ -201,6 +217,23 @@ class NoOaBankBatchApiRoutes:
                 actor=self._actor(payload, session),
                 reason=str(payload.get("reason") or payload.get("note") or "").strip() or None,
                 manifest=payload.get("manifest") or payload.get("dry_run_manifest"),
+            )
+        except NoOaBankBatchPersistenceError as exc:
+            return self._persistence_error_response(exc)
+        except ValueError as exc:
+            return self._value_error_response(exc)
+        return HTTPStatus.OK, result
+
+    def reset_submitted_bank_flow_batches(
+        self,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            result = self._application_service.reset_submitted_bank_flow_rule_batches(
+                actor=self._actor(payload, session),
+                reason=str(payload.get("reason") or payload.get("note") or "").strip() or None,
             )
         except NoOaBankBatchPersistenceError as exc:
             return self._persistence_error_response(exc)

@@ -72,3 +72,22 @@
 - 真实生产历史数据的全量 rebaseline 仍需先 dry-run 导出清单并人工确认后执行 apply。
 - 独立 `bank_flow_rule_batch` 投影表/worker 尚未拆出，当前 readiness 仍复用 no-OA worker。
 - “补齐 OA/发票后从 open 进入 paired”的完整跨页浏览器动作仍需后续接入真实补票/补 OA 流程测试。
+
+## 2026-06-29 已提交批次重置 slice
+
+目标：
+
+- 将流水规则批量处理页当前所有 `submitted` 批次恢复为可重新按规则处理的未提交候选。
+- 整理迁移期数据库状态，但不手工 SQL 修改批次表或 relation 表。
+
+关键决策：
+
+- 新增 `POST /api/bank-flow-rule-batches/reset-submitted`，由页面“重置全部已提交”触发。
+- 后端复用既有 `withdraw_batch`、`WorkbenchRelationCommandService.cancel_relation(...)`、`persist_mutation(...)` 和 operation barrier；旧批次进入 withdrawn/audit history。
+- read model 后续 rebuild 后，释放的银行 rows 按当前银行标签和 OA/发票规则重新进入未提交候选；不会自动重新提交。
+
+验证：
+
+- `tests/test_no_oa_bank_batch_tag_selection_api.py` 覆盖提交后 reset、relation 取消、row 回到未提交候选。
+- `web/src/test/NoOaBankBatchPage.test.tsx` 覆盖页面按钮、API payload、operation event。
+- `web/e2e/bank-flow-rule-batches-flow.spec.ts` 覆盖浏览器提交后 reset 并回到未提交。

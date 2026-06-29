@@ -112,6 +112,27 @@
 - 银行 rows 回到候选或按新规则进入 open/paired 候选链路。
 - 重复 apply 幂等。
 
+## BRB-E2E-008 已提交批次批量重置回未提交候选
+
+前置：
+
+- 流水规则批量处理页存在 `submitted` 批次。
+- 对应 active relation 由 `relation_mode=bank_flow_rule_batch` 创建。
+
+步骤：
+
+1. 在页面提交一组银行流水。
+2. 点击“重置全部已提交”。
+3. 等待 operation barrier。
+4. 查看未提交列表。
+
+验收：
+
+- API 调用 `POST /api/bank-flow-rule-batches/reset-submitted`。
+- 后端通过 withdraw + relation command 取消 active relation，不手工 SQL 修改 relation 表。
+- 页面提示重置成功，并切回未提交。
+- 银行 rows 重新按当前规则进入未提交候选；不会自动重新提交。
+
 ## BRB-E2E-006 权限、陈旧和失败状态 fail closed
 
 前置：

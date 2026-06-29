@@ -16,7 +16,7 @@ class FakeNoOaApplicationService:
         self.calls: list[tuple[str, object]] = []
         self.submit_failures: dict[str, Exception] = {}
 
-    def list_batches_payload(self, query):
+    def list_batches_payload(self, query, *, relation_mode="no_oa_bank_batch"):
         self.calls.append(("list", query))
         return {"summary": {}, "batches": [], "read_model_status": "fresh"}
 
@@ -30,7 +30,16 @@ class FakeNoOaApplicationService:
             raise AppSettingsValidationError("no_oa_bank_batch_tag_selection_version_conflict", "version conflict")
         return {"version": 2, "selected_tag_codes": list(payload.get("selected_tag_codes") or [])}
 
-    def submit_batch(self, batch_id, *, actor, expected_version, note, persist=True):
+    def submit_batch(
+        self,
+        batch_id,
+        *,
+        actor,
+        expected_version,
+        note,
+        relation_mode="no_oa_bank_batch",
+        persist=True,
+    ):
         self.calls.append(
             (
                 "submit_batch",
@@ -67,6 +76,22 @@ class FakeNoOaApplicationService:
         return {
             "batch": {"batch_id": batch_id, "version": 3},
             "affected_months": ["2026-05"],
+        }
+
+    def reset_submitted_bank_flow_rule_batches(self, *, actor, reason):
+        self.calls.append(
+            (
+                "reset_submitted_bank_flow_rule_batches",
+                {
+                    "actor": actor,
+                    "reason": reason,
+                },
+            )
+        )
+        return {
+            "summary": {"reset_count": 2, "batch_count": 2, "row_count": 4, "affected_months": ["2026-05"]},
+            "affected_months": ["2026-05"],
+            "results": [{"batch_id": "batch-001", "status": "withdrawn"}],
         }
 
     def after_mutation(self, affected_months, *, changed_case_ids, persist=True):
@@ -202,7 +227,7 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
 
     def test_list_batches_invalid_paging_returns_structured_400(self) -> None:
         class InvalidPagingService(FakeNoOaApplicationService):
-            def list_batches_payload(self, query):  # type: ignore[no-untyped-def]
+            def list_batches_payload(self, query, *, relation_mode="no_oa_bank_batch"):  # type: ignore[no-untyped-def]
                 self.calls.append(("list", query))
                 raise NoOaBankBatchRelationMutationError("invalid_paging", "page_size must be <= 200.")
 
@@ -215,6 +240,30 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_paging")
         self.assertEqual(payload["message"], "page_size must be <= 200.")
         self.assertEqual(service.calls, [("list", {"page": ["1"], "page_size": ["201"]})])
+
+    def test_bank_flow_reset_submitted_route_maps_actor_and_reason(self) -> None:
+        service = FakeNoOaApplicationService()
+        routes = NoOaBankBatchApiRoutes(application_service=service)
+
+        status, payload = routes.reset_submitted_bank_flow_batches(
+            {"reason": "  全部重新过规则  "},
+            session=fake_session("finance-user"),
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload["summary"]["reset_count"], 2)
+        self.assertEqual(
+            service.calls,
+            [
+                (
+                    "reset_submitted_bank_flow_rule_batches",
+                    {
+                        "actor": "finance-user",
+                        "reason": "全部重新过规则",
+                    },
+                )
+            ],
+        )
 
     def test_tag_selection_version_conflict_returns_409_and_error_code(self) -> None:
         service = FakeNoOaApplicationService()

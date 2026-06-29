@@ -34,6 +34,8 @@
 - 提交时必须冻结每条银行流水的标签 snapshot、规则版本和规则值；银行明细后续改标签只影响新候选，不重写已提交批次。
 - 已被 active relation 占用的 row 不得再次提交。
 - 提交成功写 `relation_mode=bank_flow_rule_batch`，不是 `no_oa_bank_batch`。
+- `POST /api/bank-flow-rule-batches/reset-submitted` 可批量撤回所有当前 submitted 批次；它通过既有 withdraw + relation command 取消 active relation，旧批次进 withdrawn history，银行 rows 在下一次 read model rebuild 后按当前规则重新出现在 candidate/未提交。
+- 禁止用手写 SQL 直接把 submitted 改成 draft；必须保留撤回审计、relation history 和 dirty scope。
 
 ## 关联台展示状态
 
@@ -76,6 +78,7 @@
 | `saving_rules` | 保存规则中，禁用重复提交。 |
 | `selection_dirty` | 用户已选择银行流水；切换月份、标签、账户、分页或 bucket 必须清空选择。 |
 | `submitting` | 批量提交中，等待 operation barrier。 |
+| `resetting_submitted` | 正在批量撤回已提交流水规则批次，等待 operation barrier 后刷新未提交候选。 |
 | `rebaseline_preview` | 展示 dry-run manifest，尚未改变事实。 |
 | `rebaseline_applying` | 正在撤回旧 no-OA submitted facts，禁止关闭或重复 apply。 |
 

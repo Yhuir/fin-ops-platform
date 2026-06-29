@@ -18,6 +18,7 @@ import type {
   SubmitNoOaBankBatchRequest,
   SubmitNoOaBankBatchSelectionRequest,
   WithdrawNoOaBankBatchRequest,
+  ResetSubmittedNoOaBankBatchesRequest,
   ApplyNoOaBankBatchRebaselineRequest,
   NoOaBankBatchRebaselineManifest,
 } from "./types";
@@ -752,6 +753,22 @@ export async function withdrawNoOaBankBatch({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expected_version: expectedVersion, reason }),
+      signal,
+    },
+  );
+  return mapMutationResult(payload);
+}
+
+export async function resetSubmittedNoOaBankBatches({
+  reason,
+  signal,
+}: ResetSubmittedNoOaBankBatchesRequest = {}): Promise<NoOaBankBatchMutationResult> {
+  const payload = await requestJson<ApiNoOaBankBatchMutationResult>(
+    "/api/bank-flow-rule-batches/reset-submitted",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason ?? "" }),
       signal,
     },
   );

@@ -6,6 +6,10 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
     NoOaPairRelationSnapshotPort,
 )
+from fin_ops_platform.services.no_oa_bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    NO_OA_BANK_BATCH_RELATION_MODE,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -82,6 +86,7 @@ class NoOaBankBatchReadModelRefreshService:
                 "source_version": event.source_version or event.payload.get("source_version"),
             }
 
+        relation_mode = self._relation_mode_for_event(event)
         bank_rows = self._application_service.no_oa_bank_transaction_rows(
             month=scope_key,
             include_categories=False,
@@ -89,16 +94,17 @@ class NoOaBankBatchReadModelRefreshService:
         categories = self._application_service.effective_categories_for_rows(bank_rows)
         self._application_service.load_relation_source_versions_for_bank_rows(bank_rows)
         source_versions = self._application_service.no_oa_bank_batch_source_versions()
-        unchanged = self._application_service.unchanged_read_model_scope_result(
-            scope_key=scope_key,
-            source_versions=source_versions,
-        )
-        if unchanged is not None:
-            self._complete_dirty_scope(event, scope_key=scope_key)
-            return {
-                **unchanged,
-                "bank_row_count": len(bank_rows),
-            }
+        if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            unchanged = self._application_service.unchanged_read_model_scope_result(
+                scope_key=scope_key,
+                source_versions=source_versions,
+            )
+            if unchanged is not None:
+                self._complete_dirty_scope(event, scope_key=scope_key)
+                return {
+                    **unchanged,
+                    "bank_row_count": len(bank_rows),
+                }
 
         active_relations = self._application_service.active_relations_for_bank_rows(bank_rows)
         bank_rows, _categories = self._application_service.refresh_batches_from_prepared_rows(
@@ -108,6 +114,7 @@ class NoOaBankBatchReadModelRefreshService:
             source_versions=source_versions,
             apply_relation_repairs=False,
             scope_key=scope_key,
+            relation_mode=relation_mode,
         )
         snapshot = self._no_oa_bank_batch_service.public_snapshot()
         self._read_model_persistence.save_public_snapshot(snapshot, scope_key=scope_key)
@@ -128,6 +135,15 @@ class NoOaBankBatchReadModelRefreshService:
                 scope_key=scope_key,
                 source_version=event.source_version or event.payload.get("source_version"),
             )
+
+    @staticmethod
+    def _relation_mode_for_event(event: RuntimeQueueEvent) -> str:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        action_name = str(metadata.get("action_name") or payload.get("action_name") or "").strip()
+        if action_name.startswith("bank_flow_rule_batch"):
+            return BANK_FLOW_RULE_BATCH_RELATION_MODE
+        return NO_OA_BANK_BATCH_RELATION_MODE
 
     def _event_source_version_is_current(self, event: RuntimeQueueEvent, *, scope_key: str) -> bool:
         is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)

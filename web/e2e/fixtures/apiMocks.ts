@@ -4969,6 +4969,14 @@ function noOaBankBatchMutationPayload(status: NoOaBrowserBatchStatus) {
   };
 }
 
+function noOaBankBatchResetSubmittedPayload() {
+  return {
+    ...noOaBankBatchMutationPayload("withdrawn"),
+    batch: null,
+    results: [{ batch_id: "no-oa-batch-e2e-001", status: "withdrawn" }],
+  };
+}
+
 function noOaRebaselineManifest(applied = false) {
   return {
     dry_run: !applied,
@@ -8622,6 +8630,12 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         readModelStatus,
         options.noOaBankBatchScenario ?? "single",
       ));
+    }
+
+    if (path === "/api/bank-flow-rule-batches/reset-submitted") {
+      const payload = noOaBankBatchResetSubmittedPayload();
+      noOaBankBatchStatus = "draft";
+      return json(route, payload);
     }
 
     const noOaBankBatchDetailMatch = path.match(/^\/api\/bank-flow-rule-batches\/([^/]+)$/);

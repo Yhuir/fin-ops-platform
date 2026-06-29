@@ -21,6 +21,7 @@ import {
   fetchNoOaBankBatches,
   applyNoOaBankBatchRebaseline,
   dryRunNoOaBankBatchRebaseline,
+  resetSubmittedNoOaBankBatches,
   saveNoOaBankBatchTagSelection,
   submitNoOaBankBatch,
   submitNoOaBankBatchSelection,
@@ -901,6 +902,40 @@ export default function NoOaBankBatchPage() {
     }
   };
 
+  const handleResetSubmitted = async () => {
+    if (!canMutateData || mutating) {
+      return;
+    }
+    const result = await runOperation({
+      loadingMessage: "正在重置已提交流水规则批次...",
+      action: async ({ setMessage }) => {
+        setMutating(true);
+        try {
+          const resetResult = await resetSubmittedNoOaBankBatches({
+            reason: "流水规则批量处理：全部已提交批次重新过规则",
+          });
+          setMessage("正在等待流水规则批次读模型同步...");
+          await waitForOperationFreshness(
+            mutationBarrierTargets(resetResult, month),
+          );
+          setMessage("正在刷新流水规则批次...");
+          await reloadBatchesAfterMutation();
+          return resetResult;
+        } finally {
+          setMutating(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "重置已提交批次失败",
+    });
+    if (result.status === "success") {
+      setBucket("unsubmitted");
+      setBatchPage(1);
+      handleMutationComplete(`已重置 ${result.value.results.length} 个已提交批次`, result.value);
+    } else {
+      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "重置已提交批次失败" });
+    }
+  };
+
   const handleRebaselineDryRun = async () => {
     if (!canMutateData || mutating) {
       return;
@@ -1152,6 +1187,16 @@ export default function NoOaBankBatchPage() {
             onClick={handleSubmitSelected}
           >
             提交批次
+          </button>
+        ) : null}
+        {canMutateData && payload.summary.submittedCount > 0 ? (
+          <button
+            className="no-oa-bank-batches-button"
+            disabled={mutating}
+            type="button"
+            onClick={handleResetSubmitted}
+          >
+            重置全部已提交
           </button>
         ) : null}
           {selectedTransactionIds.size > 0 ? (

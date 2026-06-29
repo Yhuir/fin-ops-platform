@@ -322,6 +322,42 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test("resets submitted flow rule batches back to unsubmitted", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/bank-flow-rule-batches");
+    await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
+    const draftTable = page.getByRole("table", { name: "建设银行8106流水" });
+    await expect(draftTable).toBeVisible();
+    await draftTable.getByLabel("选择流水 no-oa-bank-e2e-001").check();
+    await page.getByRole("button", { name: "提交批次" }).click();
+    await expect(page.getByText("选中流水已提交")).toBeVisible();
+    await expect(page.getByRole("button", { name: "已提交 1" })).toBeVisible();
+
+    const resetRequest = page.waitForRequest((request) =>
+      request.url().endsWith("/api/bank-flow-rule-batches/reset-submitted")
+      && request.method() === "POST",
+    );
+    const resetResponse = page.waitForResponse((response) =>
+      response.url().endsWith("/api/bank-flow-rule-batches/reset-submitted")
+      && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "重置全部已提交" }).click();
+    const resetBody = JSON.parse((await resetRequest).postData() ?? "{}") as { reason?: string };
+    expect(resetBody.reason).toBe("流水规则批量处理：全部已提交批次重新过规则");
+    expect((await resetResponse).status()).toBe(200);
+
+    await expect(page.getByText("已重置 1 个已提交批次")).toBeVisible();
+    await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("table", { name: "建设银行8106流水" })).toBeVisible();
+    expect(api.count("POST /api/bank-flow-rule-batches/reset-submitted")).toBe(1);
+    await expectNoUnexpectedSuccessUiErrors(page);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("submits a selected bank row, waits for freshness, and withdraws the submitted flow rule batch", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
