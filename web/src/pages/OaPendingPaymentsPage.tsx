@@ -1,4 +1,4 @@
-import { PanelRightOpen, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
@@ -47,6 +47,8 @@ const initialQuery: OaPendingPaymentQuery = {
   sortDirection: "",
   viewMode: "completed",
 };
+
+const BANK_CANDIDATE_PAGE_SIZE = 100;
 
 function filterOptionsByField(fields: Array<OaPendingPaymentFieldConfig & { options?: OaPendingPaymentFilterOption[] }>) {
   return fields.reduce<Record<string, OaPendingPaymentFilterOption[]>>((accumulator, field) => {
@@ -638,7 +640,9 @@ function OaBankLinkDrawer({
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(total / BANK_CANDIDATE_PAGE_SIZE));
 
   const loadCandidates = useCallback((signal?: AbortSignal) => {
     if (!open) {
@@ -649,8 +653,8 @@ function OaBankLinkDrawer({
       relationStatus,
       keyword,
       oaRowIds: selectedOaRowIds,
-      page: 1,
-      pageSize: 100,
+      page,
+      pageSize: BANK_CANDIDATE_PAGE_SIZE,
       signal,
     })
       .then((payload) => {
@@ -670,7 +674,7 @@ function OaBankLinkDrawer({
           setLoading(false);
         }
       });
-  }, [keyword, onError, open, relationStatus, selectedOaRowIds]);
+  }, [keyword, onError, open, page, relationStatus, selectedOaRowIds]);
 
   useEffect(() => {
     if (!open) {
@@ -692,6 +696,14 @@ function OaBankLinkDrawer({
       }
       return next;
     });
+  };
+
+  const searchCandidates = () => {
+    if (page === 1) {
+      loadCandidates();
+    } else {
+      setPage(1);
+    }
   };
 
   const submit = () => {
@@ -734,7 +746,10 @@ function OaBankLinkDrawer({
             <button
               className={relationStatus === status ? "oa-pending-payments-bank-drawer__filter oa-pending-payments-bank-drawer__filter--active" : "oa-pending-payments-bank-drawer__filter"}
               key={status}
-              onClick={() => setRelationStatus(status)}
+              onClick={() => {
+                setRelationStatus(status);
+                setPage(1);
+              }}
               type="button"
             >
               {bankCandidateFilterLabel(status)}
@@ -746,14 +761,17 @@ function OaBankLinkDrawer({
           <input
             placeholder="对方户名 / 摘要 / 金额"
             value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
+            onChange={(event) => {
+              setKeyword(event.target.value);
+              setPage(1);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
-                loadCandidates();
+                searchCandidates();
               }
             }}
           />
-          <button onClick={() => loadCandidates()} type="button">查询</button>
+          <button onClick={searchCandidates} type="button">查询</button>
         </label>
         <div className="oa-pending-payments-bank-drawer__meta">
           {loading ? "加载中" : `显示 ${rows.length} / ${total} 条`}
@@ -780,6 +798,27 @@ function OaBankLinkDrawer({
               <span className="oa-pending-payments-bank-drawer__amount">{row.amount}</span>
             </label>
           ))}
+        </div>
+        <div className="oa-pending-payments-bank-drawer__pagination">
+          <span>第 {page} / {pageCount} 页</span>
+          <div className="oa-pending-payments-bank-drawer__pagination-actions">
+            <button
+              aria-label="上一页"
+              disabled={loading || page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              type="button"
+            >
+              <ChevronLeft aria-hidden="true" size={18} />
+            </button>
+            <button
+              aria-label="下一页"
+              disabled={loading || page >= pageCount}
+              onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+              type="button"
+            >
+              <ChevronRight aria-hidden="true" size={18} />
+            </button>
+          </div>
         </div>
         <div className="oa-pending-payments-bank-drawer__footer">
           <button onClick={onClose} type="button">取消</button>

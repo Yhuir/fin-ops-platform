@@ -3,6 +3,18 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-30 - 右侧抽屉候选流水增加分页入口
+
+- 目标：候选接口返回 `100 / 743` 这类超过首屏的结果时，用户可以继续浏览后续支出流水。
+- 关键决策：复用既有 `bank-transaction-candidates` 的 `page/page_size/total` 合同，只在 `OaBankLinkDrawer` 内增加页码状态和上一页/下一页按钮；筛选和搜索变更回到第 1 页，翻页保留已选 `oa_row_ids` 与 relation status。
+- 测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，锁定候选抽屉页码显示、下一页请求参数、切换分类重置页码。
+
+## 2026-06-30 - 右侧抽屉候选流水改为全量支出流水池
+
+- 目标：进行中 OA 右侧“关联支出流水”抽屉不再因 OA 月份或 OA 月份解析失败显示空候选；用户可以在全部支出流水中按全部、未配对、已配对、已关联进行中 OA 分类筛选。
+- 关键决策：`oa_row_ids` 仍由前端传给候选接口和提交接口，但候选读取不再用它推导月份 scope；候选服务直接读取 `month=all` 的支出流水，再用 Workbench active relation 与 OA pending payment bank claim 计算 relation status。只有 `unmatched` 流水可提交关联。
+- 测试覆盖：更新 `tests/test_oa_pending_payment_command_service.py`，锁定已选 OA 返回全部月份候选、OA 缺月份仍返回候选、四个 relation status tab 分类；更新 `tests/test_oa_pending_payment_api.py`，锁定应用组装后的 in-progress OA source 与全量候选行为；继续跑 `web/src/test/OaPendingPaymentsPage.test.tsx` 保护前端请求携带 `oa_row_ids`。
+
 ## 2026-06-25 - route-owner local server.py audit
 
 - 目标：在 `/api/oa-pending-payments*` route callback collapse 后，审计 OA 待付款剩余 `Application` 表面是否还有本地 implementation gap。

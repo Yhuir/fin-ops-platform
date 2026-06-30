@@ -252,6 +252,57 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         audit = app._audit_service.as_dicts()[-1]
         self.assertEqual(audit["metadata"]["rule_payload_changes"], [{"code": "fee"}])
 
+    def test_put_retries_transient_stale_settings_read_after_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            app = build_application(data_dir=data_dir)
+            current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+            active = [
+                {**rule, "direction": "expense"}
+                if rule["code"] == "fee"
+                else rule
+                for rule in current["active_rules"]
+            ]
+            original_load = app._state_store.load_app_settings
+            original_save = app._state_store.save_app_settings
+            stale_read = {"remaining": 0, "snapshot": None}
+
+            def save_app_settings(snapshot: dict[str, object]) -> None:
+                stale_read["snapshot"] = original_load()
+                original_save(snapshot)
+                stale_read["remaining"] = 1
+
+            def load_app_settings() -> dict[str, object]:
+                if int(stale_read["remaining"]):
+                    stale_read["remaining"] = 0
+                    return dict(stale_read["snapshot"] or {})
+                return original_load()
+
+            app._state_store.save_app_settings = save_app_settings
+            app._state_store.load_app_settings = load_app_settings
+
+            with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+                response = self._update_auto_tag_rules_response(
+                    app,
+                    json.dumps(
+                        {
+                            "expected_version": current["version"],
+                            "active_rules": active,
+                            "archived_rules": current["archived_rules"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    {},
+                )
+
+            payload = json.loads(response.body)
+            reloaded = build_application(data_dir=data_dir)._app_settings_service.get_bank_auto_tag_rules_payload()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["version"], current["version"] + 1)
+        reloaded_fee = next(rule for rule in reloaded["active_rules"] if rule["code"] == "fee")
+        self.assertEqual(reloaded_fee["direction"], "expense")
+
     def test_reapply_endpoint_enqueues_bank_detail_refresh_without_changing_rules(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()

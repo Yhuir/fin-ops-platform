@@ -3516,7 +3516,7 @@ textarea {
   display: grid;
   width: min(560px, 100vw);
   height: 100%;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
   border-left: 1px solid var(--fp-border);
   background: var(--fp-surface);
   box-shadow: var(--fp-shadow-lg);
@@ -3702,6 +3702,55 @@ textarea {
   font-variant-numeric: tabular-nums;
   font-weight: 900;
   text-align: right;
+}
+
+.oa-pending-payments-bank-drawer__pagination {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+  border-top: 1px solid var(--fp-border);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+  padding: var(--fp-space-2) var(--fp-space-4);
+}
+
+.oa-pending-payments-bank-drawer__pagination-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fp-space-1);
+}
+
+.oa-pending-payments-bank-drawer__pagination-actions button {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
+}
+
+.oa-pending-payments-bank-drawer__pagination-actions button:hover:not(:disabled),
+.oa-pending-payments-bank-drawer__pagination-actions button:focus-visible {
+  border-color: var(--fp-accent);
+  background: var(--fp-accent-soft);
+  color: var(--fp-accent);
+  outline: none;
+}
+
+.oa-pending-payments-bank-drawer__pagination-actions button:disabled {
+  color: var(--fp-text-disabled);
+  cursor: default;
+}
+
+.oa-pending-payments-bank-drawer__pagination-actions button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .oa-pending-payments-bank-drawer__footer {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from time import sleep
 from typing import Any, Callable
 
 from fin_ops_platform.domain.models import ProjectMaster
@@ -808,29 +809,33 @@ class AppSettingsService:
         )
         if self._state_store is None:
             return normalized_snapshot
+        verified_keys = (
+            "bank_transaction_tags",
+            "pending_invoice_tag_groups",
+            "no_oa_bank_batch_tag_selection",
+            "turnover_ledger_tag_selection",
+        )
         try:
             self._state_store.save_app_settings(normalized_snapshot)
-            persisted_snapshot = self._normalize_settings(
-                self._state_store.load_app_settings(),
-                validate_pending_invoice_tag_groups=False,
-            )
+            for retry_delay in (0.0, 0.05, 0.15):
+                if retry_delay:
+                    sleep(retry_delay)
+                persisted_snapshot = self._normalize_settings(
+                    self._state_store.load_app_settings(),
+                    validate_pending_invoice_tag_groups=False,
+                )
+                if all(persisted_snapshot[key] == normalized_snapshot[key] for key in verified_keys):
+                    return normalized_snapshot
         except Exception as exc:
             raise BankAutoTagRulesPersistenceError(
                 "bank_auto_tag_rules_persistence_failed",
                 "自动标签规则保存失败：无法写入持久化设置源，请稍后重试。",
             ) from exc
 
-        if (
-            persisted_snapshot["bank_transaction_tags"] != normalized_snapshot["bank_transaction_tags"]
-            or persisted_snapshot["pending_invoice_tag_groups"] != normalized_snapshot["pending_invoice_tag_groups"]
-            or persisted_snapshot["no_oa_bank_batch_tag_selection"] != normalized_snapshot["no_oa_bank_batch_tag_selection"]
-            or persisted_snapshot["turnover_ledger_tag_selection"] != normalized_snapshot["turnover_ledger_tag_selection"]
-        ):
-            raise BankAutoTagRulesPersistenceError(
-                "bank_auto_tag_rules_persistence_failed",
-                "自动标签规则保存失败：持久化设置源未返回刚写入的规则版本，请稍后重试。",
-            )
-        return normalized_snapshot
+        raise BankAutoTagRulesPersistenceError(
+            "bank_auto_tag_rules_persistence_failed",
+            "自动标签规则保存失败：持久化设置源未返回刚写入的规则版本，请稍后重试。",
+        )
 
     def _restore_manual_projects(self) -> None:
         projects = [

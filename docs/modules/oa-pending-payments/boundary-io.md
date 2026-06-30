@@ -1,6 +1,6 @@
 # OA待付款核对模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-06-30
 
 ## 模块化状态
 
@@ -29,6 +29,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面查询/过滤 | `OaPendingPaymentsPage.tsx`、`features/oaPendingPayments/api.ts` | 进入 read model service/fresh gate |
+| 关联支出流水候选查询 | `GET /api/oa-pending-payments/bank-transaction-candidates` | `oa_row_ids` 只作为后续提交关联的目标 OA 上下文；候选读取全部支出流水，不按 OA 月份收敛 |
 | 确认付款/银行关联 | command service | 写操作必须审计并触发 read model scopes |
 | OA projection sync | OA sync/projection services | 输入必须带 source version |
 | Refresh scope | `oa_pending_payment` manifest | month or `all`；`all` 是 fan-out command |
@@ -38,6 +39,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | OA 待付款 rows/details | 前端页面 | fresh/status 可见 |
+| 支出流水候选 rows | 前端右侧抽屉 | 输出分页后的全部支出流水候选，并由后端标注 `unmatched` / `matched` / `linked_in_progress` 分类；只有 `unmatched` 可被提交关联 |
 | 关系 promotion/确认付款结果 | relation/downstream/frontend | 可审计、可恢复；返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`，目标覆盖 `oa_pending_payment` 与受影响 `workbench_relation` scope |
 | Dirty scope | runtime queue | `oa_pending_payment.read_model.refresh` |
 

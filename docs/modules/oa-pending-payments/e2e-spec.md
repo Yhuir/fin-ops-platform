@@ -20,7 +20,7 @@
 | `OA-PENDING-E2E-004` | candidate relation 负面语义 | candidate OA/流水/发票证据可以显示，但付款状态仍为 `支付少了`，不能触发自动写回 mutation。 |
 | `OA-PENDING-E2E-005` | Workbench confirm -> OA pending linked fan-out | 关联台确认 OA+银行流水+进项发票后，返回 OA 待付款重新请求 rows；目标行从 `支付少了` 变为 `已支付`，候选标记消失，显示 `关联台已确认`、支出流水、发票号和金额。 |
 | `OA-PENDING-E2E-006` | in-progress OA 自动匹配并写回 | 页面进入后自动调用匹配/写回接口； eligible 进行中 OA 与未配对支出流水匹配成功后必须刷新为 `已写回`；页面不得显示人工写回按钮；失败时保留 `未写回` 且显示错误，不允许半写。 |
-| `OA-PENDING-E2E-007` | in-progress OA 人工关联支出流水并自动写回 | 从已选 OA 打开抽屉时，候选请求必须携带 `oa_row_ids` 并按 OA 月份收敛候选流水；已配对/已关联进行中 OA 行禁选；提交创建 OA 待付款独立 pending relation 和 bank claim，不写 Workbench active relation，并在后端校验通过时自动写回 OA MySQL pay status；成功后等待 `oa_pending_payment` operation barrier fresh 再刷新 rows。 |
+| `OA-PENDING-E2E-007` | in-progress OA 人工关联支出流水并自动写回 | 从已选 OA 打开抽屉时，候选请求必须携带 `oa_row_ids`，候选池返回全部支出流水并支持全部、未配对、已配对、已关联进行中 OA 分类筛选和分页浏览；已配对/已关联进行中 OA 行禁选；提交创建 OA 待付款独立 pending relation 和 bank claim，不写 Workbench active relation，并在后端校验通过时自动写回 OA MySQL pay status；成功后等待 `oa_pending_payment` operation barrier fresh 再刷新 rows。 |
 | `OA-PENDING-E2E-008` | read model/detail 非 fresh | rows/detail refreshing/stale 时显示诊断或详情暂不可用；不能把空 rows 当真实空态。 |
 
 ## Read Model / Worker 合同

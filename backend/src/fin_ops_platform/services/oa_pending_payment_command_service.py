@@ -240,11 +240,9 @@ class OaPendingPaymentCommandService:
         page = _parse_positive_int((query.get("page") or [1])[0], "page")
         page_size = _parse_positive_int((query.get("page_size") or query.get("pageSize") or [100])[0], "page_size", maximum=200)
         oa_row_ids = _payload_list(query, "oa_row_ids", "oaRowIds")
-        month_scopes = self._candidate_month_scopes_for_oa_row_ids(oa_row_ids)
-        candidate_transactions = [] if oa_row_ids and not month_scopes else self._candidate_transactions(month_scopes)
         transactions = [
             transaction
-            for transaction in candidate_transactions
+            for transaction in self._import_service.list_transactions(month="all")
             if _bank_direction(transaction) == "outflow"
         ]
         transaction_ids = [transaction.id for transaction in transactions]
@@ -267,34 +265,9 @@ class OaPendingPaymentCommandService:
                 "relationStatus": status_filter,
                 "keyword": keyword,
                 "oaRowIds": oa_row_ids,
-                "monthScopes": month_scopes,
+                "monthScopes": [],
             },
         }
-
-    def _candidate_month_scopes_for_oa_row_ids(self, oa_row_ids: list[str]) -> list[str]:
-        if not oa_row_ids:
-            return []
-        scopes: list[str] = []
-        for record in self._oa_records(oa_row_ids):
-            month = clean_string(getattr(record, "month", "") or "")
-            if len(month) >= 7 and month[4] == "-":
-                scope = month[:7]
-                if scope not in scopes:
-                    scopes.append(scope)
-        return scopes
-
-    def _candidate_transactions(self, month_scopes: list[str]) -> list[BankTransaction]:
-        if not month_scopes:
-            return list(self._import_service.list_transactions(month="all"))
-        transactions: list[BankTransaction] = []
-        seen: set[str] = set()
-        for month_scope in month_scopes:
-            for transaction in self._import_service.list_transactions(month=month_scope):
-                if transaction.id in seen:
-                    continue
-                seen.add(transaction.id)
-                transactions.append(transaction)
-        return transactions
 
     def _oa_record(self, oa_row_id: str) -> OAApplicationRecord:
         loader = getattr(self._oa_projection, "list_application_records_by_row_ids", None)

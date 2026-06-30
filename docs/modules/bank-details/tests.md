@@ -2,6 +2,28 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-30 - auto-tag rule persistence readback retry test note
+
+`bank-details:auto-tag-rule-persistence-readback-retry` 已完成：
+
+- Business core unit tests：不适用；本轮不改标签规则匹配、分类、金额或状态转移规则。
+- Service-layer tests：适用；`tests/test_bank_auto_tag_rules_api.py` 新增 transient stale readback 回归，覆盖 `AppSettingsService` 保存后校验遇到一次旧 settings 快照时会重试并返回成功。
+- API contract tests：适用；同一 PUT 回归覆盖 `/api/bank-details/auto-tag-rules` 在短暂回读滞后时仍返回 200、新版本和持久化后的规则字段；既有 no-persist 回归继续覆盖真实持久化失败返回 503。
+- Read model/cache/background job tests：间接适用；本轮不改 read model scope/worker，但成功保存后仍沿用既有自动标签规则变更 refresh enqueue 回归，失败路径仍不触发生命周期/审计。
+- Frontend component and interaction tests：不适用；本轮不改前端组件、抽屉交互或请求序列化。
+- End-to-end business-flow integration tests：生产验证适用；本地未新增 Playwright，因为缺陷在后端 settings 保存校验分支，发布后需做受控页面保存/重载/刷新验证。
+- Existing feature regression tests：适用；复跑自动标签 API 回归，确保 direction-only 保存、持久化失败保护、权限、validation 和 refresh 行为不回退。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api.BankAutoTagRulesApiTests.test_put_retries_transient_stale_settings_read_after_write tests.test_bank_auto_tag_rules_api.BankAutoTagRulesApiTests.test_put_rejects_false_success_when_settings_store_does_not_persist_rules -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_transaction_category_service tests.test_bank_auto_tag_rules_api -v
+git diff --check
+```
+
+未测风险：本地验证不连接真实 PostgreSQL/RabbitMQ/Redis，不执行真实 worker drain；生产页面写入验证需发布后再闭环。
+
 ## 2026-06-30 - auto-tag rule direction-only save test note
 
 `bank-details:auto-tag-rule-direction-only-save` 已完成：

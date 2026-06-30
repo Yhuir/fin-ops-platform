@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-30 - auto-tag rule persistence readback retry
+
+- 目标：修复修改银行明细自动标签规则时，保存已写入但首次回读仍返回旧 settings 导致页面弹出“持久化设置源未返回刚写入的规则版本”的问题。
+- 影响范围：`AppSettingsService` 自动标签规则保存后持久化校验、银行明细自动标签 PUT 回归测试；不改变前端请求协议、规则规范化、审计结构、read model scope、worker 或下游模块 I/O。
+- 关键决策：保留“持久化源没有真正写入时必须失败”的保护，只对保存后的短暂 stale readback 做有限重试，避免把瞬时回读滞后暴露成用户保存失败。
+- 文档影响：更新本实施记录和测试矩阵；模块边界、read model 合同和 worker 治理不变。
+- 测试覆盖：新增 API 回归模拟保存成功但第一次 `load_app_settings()` 返回旧版本；保留既有 no-persist 回归证明真实持久化失败仍返回 503 且不触发生命周期/审计。
+- 验证命令：见 `docs/modules/bank-details/tests.md` 同日记录。
+- 未测风险：本地未连接真实 PostgreSQL/生产拓扑，发布后仍需页面保存、重载和刷新闭环验证。
+- 后续事项：发布后在生产页面执行一次受控规则保存并确认抽屉重开显示新版本。
+
 ## 2026-06-30 - auto-tag rule direction-only save closure
 
 - 目标：修复银行明细自动标签规则中“水电费”等规则仅修改流水类型后提示保存成功但实际仍为“不限”的问题。

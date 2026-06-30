@@ -597,7 +597,60 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in payload["rows"]], ["bank-linked"])
         self.assertEqual(payload["rows"][0]["relationStatusLabel"], "已关联进行中OA")
 
-    def test_bank_transaction_candidates_uses_selected_oa_month_scope(self) -> None:
+    def test_bank_transaction_candidates_filters_by_relation_status_tabs(self) -> None:
+        relation_command = FakeRelationCommandService(
+            [
+                {
+                    "case_id": "case-matched",
+                    "row_ids": ["oa-completed", "bank-matched"],
+                    "row_types": ["oa", "bank"],
+                    "relation_mode": "manual_confirmed",
+                    "amount_check": {"matched": True},
+                }
+            ]
+        )
+        pending_relation_service = FakePendingRelationService(
+            [
+                {
+                    "case_id": "case-progress",
+                    "relation_id": "case-progress",
+                    "row_ids": ["oa-progress", "bank-linked"],
+                    "row_types": ["oa", "bank"],
+                    "oa_row_ids": ["oa-progress"],
+                    "bank_transaction_ids": ["bank-linked"],
+                    "relation_mode": "oa_pending_payment_in_progress",
+                    "amount_check": {"matched": True},
+                    "month_scope": "2026-06",
+                    "special_metadata": {
+                        "origin": "oa_pending_payment_in_progress",
+                        "source": "oa_pending_payment_bank_relations",
+                    },
+                }
+            ]
+        )
+        service = _service(
+            oa_records=[_oa("oa-progress", "100.00", workflow_status="in_progress")],
+            transactions=[
+                _bank("bank-free", "80.00", trade_time="2026-06-19 10:00:00"),
+                _bank("bank-matched", "90.00", trade_time="2026-06-18 10:00:00"),
+                _bank("bank-linked", "100.00", trade_time="2026-06-17 10:00:00"),
+            ],
+            relation_command=relation_command,
+            pending_relation_service=pending_relation_service,
+            payment_repository=FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439012"),
+        )
+
+        all_payload = service.bank_transaction_candidates({"relation_status": ["all"]})
+        unmatched_payload = service.bank_transaction_candidates({"relation_status": ["unmatched"]})
+        matched_payload = service.bank_transaction_candidates({"relation_status": ["matched"]})
+        linked_payload = service.bank_transaction_candidates({"relation_status": ["linked_in_progress"]})
+
+        self.assertEqual([row["id"] for row in all_payload["rows"]], ["bank-free", "bank-matched", "bank-linked"])
+        self.assertEqual([row["id"] for row in unmatched_payload["rows"]], ["bank-free"])
+        self.assertEqual([row["id"] for row in matched_payload["rows"]], ["bank-matched"])
+        self.assertEqual([row["id"] for row in linked_payload["rows"]], ["bank-linked"])
+
+    def test_bank_transaction_candidates_with_selected_oa_returns_all_months(self) -> None:
         service = _service(
             oa_records=[_oa("oa-june", "2152.80", workflow_status="in_progress", month="2026-06")],
             transactions=[
@@ -613,11 +666,11 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
             "keyword": ["2152"],
         })
 
-        self.assertEqual([row["id"] for row in payload["rows"]], ["bank-june"])
+        self.assertEqual([row["id"] for row in payload["rows"]], ["bank-june", "bank-may"])
         self.assertEqual(payload["filters"]["oaRowIds"], ["oa-june"])
-        self.assertEqual(payload["filters"]["monthScopes"], ["2026-06"])
+        self.assertEqual(payload["filters"]["monthScopes"], [])
 
-    def test_bank_transaction_candidates_with_selected_oa_does_not_fallback_all_when_month_missing(self) -> None:
+    def test_bank_transaction_candidates_with_selected_oa_missing_month_still_returns_all(self) -> None:
         service = _service(
             oa_records=[_oa("oa-no-month", "2152.80", workflow_status="in_progress", month="")],
             transactions=[_bank("bank-history", "2152.80", txn_date="2026-05-18")],
@@ -630,7 +683,7 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
             "keyword": ["2152"],
         })
 
-        self.assertEqual(payload["rows"], [])
+        self.assertEqual([row["id"] for row in payload["rows"]], ["bank-history"])
         self.assertEqual(payload["filters"]["oaRowIds"], ["oa-no-month"])
         self.assertEqual(payload["filters"]["monthScopes"], [])
 

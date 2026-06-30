@@ -463,6 +463,7 @@ function installOaPendingPaymentsFetch(overrides?: {
   rulesCanSave?: boolean;
   autoReconcilePayload?: Record<string, unknown>;
   autoReconcileResponses?: Array<{ status: number; payload: Record<string, unknown> }>;
+  bankCandidatesPayload?: (url: URL) => Record<string, unknown>;
 }) {
   const autoReconcileResponses = [...(overrides?.autoReconcileResponses ?? [])];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -534,7 +535,7 @@ function installOaPendingPaymentsFetch(overrides?: {
       });
     }
     if (url.pathname === "/api/oa-pending-payments/bank-transaction-candidates") {
-      return new Response(JSON.stringify({
+      return new Response(JSON.stringify(overrides?.bankCandidatesPayload?.(url) ?? {
         rows: [
           {
             id: "bank-drawer-001",
@@ -1167,6 +1168,58 @@ describe("OA pending payments page", () => {
     expect(await within(page).findByText("已关联支出流水并写回 OA，等待核对表刷新。")).toBeInTheDocument();
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
+    });
+  });
+
+  test("paginates bank candidate drawer and keeps filter context", async () => {
+    const fetchMock = installOaPendingPaymentsFetch({
+      bankCandidatesPayload: (url) => {
+        const page = Number(url.searchParams.get("page") ?? "1");
+        return {
+          rows: [
+            {
+              id: `bank-page-${page}`,
+              counterpartyName: page === 1 ? "第一页供应商" : "第二页供应商",
+              tradeTime: "2026-06-14 09:41:55",
+              amount: "37681.73",
+              bankAccount: "工商银行 6386",
+              directionLabel: "支出",
+              summary: "分页支出流水",
+              relationStatus: "unmatched",
+              relationStatusLabel: "未配对",
+            },
+          ],
+          pagination: { page, pageSize: 100, total: 743 },
+        };
+      },
+    });
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
+    await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
+    await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
+
+    const drawer = await screen.findByLabelText("关联支出流水抽屉");
+    expect(await within(drawer).findByText("第 1 / 8 页")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "下一页" }));
+    await within(drawer).findByText("第二页供应商");
+    await waitFor(() => {
+      const lastRequest = bankCandidateRequests(fetchMock).at(-1);
+      expect(lastRequest?.searchParams.get("page")).toBe("2");
+      expect(lastRequest?.searchParams.getAll("oa_row_ids")).toEqual(["oa-candidate"]);
+      expect(lastRequest?.searchParams.get("relation_status")).toBe("all");
+    });
+
+    await user.click(within(drawer).getByRole("button", { name: "已配对" }));
+    await waitFor(() => {
+      const lastRequest = bankCandidateRequests(fetchMock).at(-1);
+      expect(lastRequest?.searchParams.get("page")).toBe("1");
+      expect(lastRequest?.searchParams.get("relation_status")).toBe("matched");
     });
   });
 

@@ -526,9 +526,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
-        self.assertEqual([row["id"] for row in payload["rows"]], ["bank-candidate-may"])
+        self.assertEqual([row["id"] for row in payload["rows"]], ["bank-candidate-june", "bank-candidate-may"])
         self.assertEqual(payload["filters"]["oaRowIds"], ["oa-pay-candidate-source"])
-        self.assertEqual(payload["filters"]["monthScopes"], ["2026-05"])
+        self.assertEqual(payload["filters"]["monthScopes"], [])
 
     def test_auto_reconcile_persists_relation_and_reload_is_noop(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
