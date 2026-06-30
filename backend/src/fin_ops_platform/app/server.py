@@ -9217,7 +9217,7 @@ class Application:
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             read_model_refresh_producer=self._no_oa_bank_batch_read_model_refresh_producer(),
             relation_facade=self._workbench_relation_read_facade(),
-            relation_command_service=self._workbench_relation_command_service(),
+            relation_command_service=self._workbench_relation_command_service(repository=self._state_store),
         )
 
     def _no_oa_bank_batch_routes(self) -> NoOaBankBatchApiRoutes:

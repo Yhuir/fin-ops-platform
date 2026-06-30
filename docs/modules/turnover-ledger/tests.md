@@ -62,6 +62,24 @@
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
+## 2026-06-30 - 外部往来免发票 relation metadata 回归
+
+- Business core unit tests：不新增；本轮不改变外部往来金额、方向、分组或零差额业务规则。
+- Service-layer tests：适用并已更新；`tests/test_turnover_ledger_uow_contract.py::TurnoverLedgerUoWContractTests::test_turnover_workbench_pair_port_delegates_manual_closure_to_relation_command_service` 保护新闭环写入 `requires_oa=true`、`requires_invoice=false` metadata；`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_update_relation_metadata_for_case_id_can_upgrade_relation_mode` 保护旧 relation 只能通过 command service 升级 relation mode 并记录历史。
+- API contract tests：间接适用；`tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_tag_rule_update_upgrades_legacy_turnover_relation_from_persistent_repository` 通过规则保存 API 覆盖旧 `turnover:* manual_confirmed` 持久化关系同步，不新增 turnover-ledger HTTP contract 字段。
+- Read model/cache/background job tests：适用并已更新；`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_pairs_turnover_manual_closure_when_no_invoice_required` 覆盖 active generation 构建阶段按 relation metadata 把 OA+银行、无需发票的外部往来闭环放入 paired；同步通过 relation command save 和 `after_mutation(... persist=True)` 触发 downstream dirty/freshness，未新增 worker 类型。
+- Frontend component and interaction tests：不适用；本轮未改前端组件或交互。
+- End-to-end business-flow integration tests：适用并已更新；`tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_two_pane_turnover_manual_closure_with_no_invoice_requirement_is_paired` 覆盖 Workbench 分区，`tests/test_turnover_workbench_integration.py::TurnoverWorkbenchIntegrationTests::test_manual_closure_accepts_three_bank_rows_and_keeps_workbench_case_open_until_invoice_exists` 覆盖 closure API 返回新 metadata 且 bank-only 因缺 OA 仍 open。
+- Existing feature regression tests：适用；复跑 no-OA/bank-flow、Workbench grouping、turnover integration 和 relation command suites，保护普通 `manual_confirmed` 两栏 relation 不被放宽、bank-flow requirement 同步不回退、durable repository load 仍为生产事实源。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src:. pytest tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_candidate_grouping.py tests/test_workbench_turnover_grouping.py tests/test_no_oa_bank_batch_application_service.py tests/test_workbench_relation_command_service.py tests/test_workbench_relation_command_repository_adapter.py tests/test_turnover_workbench_integration.py tests/test_turnover_ledger_uow_contract.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_pairs_turnover_manual_closure_when_no_invoice_required tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_keeps_turnover_manual_closure_bank_only_case_open_until_three_way_complete -q
+```
+
+未测风险：本地测试未执行真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 和真实浏览器；发布后需对生产现存 `turnover:*` 关系执行一次规则同步并检查目标 group 是否进入 paired。
+
 ## 2026-06-25 - route-owner local closure audit test note
 
 `server-py:turnover-ledger-route-owner-local-closure-audit` 已完成为 analysis-only：

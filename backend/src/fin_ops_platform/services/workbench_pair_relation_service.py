@@ -298,6 +298,7 @@ class WorkbenchPairRelationService:
         self,
         case_id: str,
         *,
+        relation_mode: str | None = None,
         amount_check: dict[str, Any] | None = None,
         special_metadata: dict[str, Any] | None = None,
         display_tags: list[str] | None = None,
@@ -327,6 +328,9 @@ class WorkbenchPairRelationService:
         normalized_relation = self._normalize_relation(
             {
                 **deepcopy(active_relation),
+                "relation_mode": str(
+                    relation_mode or active_relation.get("relation_mode") or "manual_confirmed"
+                ).strip(),
                 "amount_check": deepcopy(amount_check) if isinstance(amount_check, dict) else deepcopy(active_relation.get("amount_check") or {}),
                 "special_metadata": merged_metadata,
                 "display_tags": merged_display_tags,

@@ -1,5 +1,60 @@
 # 流水规则批量处理实施记录
 
+## 2026-06-30 外部往来旧关系 requirement 同步修复
+
+目标：
+
+- 修复外部往来款借入/归还借款保存为不需要发票后，旧 `turnover:* manual_confirmed` active relation 仍停留在关联台未配对区的问题。
+
+关键决策：
+
+- 规则 UI 是 requirement owner，但 Workbench 分区事实源仍必须是 relation metadata。不能让 Workbench 在查询时读取当前 settings，因为已存在 relation 的 paired/open 判定必须可审计、可回放、可跨进程一致。
+- 保存规则后，`NoOaBankBatchApplicationService.update_tag_selection(...)` 除同步 `bank_flow_rule_batch` relation 外，还会扫描 active `turnover:*` relation。若银行流水分类 code 直接命中规则，或属于外部往来/借入/借出/业务往来分类族且存在 `external_turnover` requirement，则通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(..., relation_mode=turnover_manual_closure)` 升级旧 relation 并写入 `requires_oa` / `requires_invoice`。
+- 旧逻辑删除/隔离：普通 `manual_confirmed` 两栏 relation 不放宽；无匹配外部往来规则的 relation 不改；同步不直接写 relation 表，不依赖进程内 snapshot。
+
+测试覆盖：
+
+- `tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_tag_rule_update_upgrades_legacy_turnover_relation_from_persistent_repository`
+- `tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_update_relation_metadata_for_case_id_can_upgrade_relation_mode`
+- `tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_two_pane_turnover_manual_closure_with_no_invoice_requirement_is_paired`
+
+验证命令：
+
+- `PYTHONPATH=backend/src:. pytest tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_candidate_grouping.py tests/test_workbench_turnover_grouping.py tests/test_no_oa_bank_batch_application_service.py tests/test_workbench_relation_command_service.py tests/test_workbench_relation_command_repository_adapter.py tests/test_turnover_workbench_integration.py tests/test_turnover_ledger_uow_contract.py -q`
+
+未测风险：
+
+- 生产需发布后执行一次同步，确认现存 `turnover:*` 旧关系被升级并触发 `workbench_relation` / `workbench` 刷新。
+
+## 2026-06-30 规则保存同步已提交 relation requirement 修复
+
+目标：
+
+- 修复保存“外部往来款”等流水标签的 `OA` / `发票` requirement 后，已提交 `bank_flow_rule_batch` relation 仍按旧 requirement 留在关联台未配对区的问题。
+
+关键决策：
+
+- 根因不是 Workbench 分组缺展示逻辑，而是规则保存只更新 settings family 和 read model refresh，没有同步已存在 active relation 的 `special_metadata.requires_oa` / `requires_invoice` / `flow_rule_version`。Workbench 按架构只能读取 relation fact，不应在分组阶段回读当前设置，否则 settings 与关系事实会变成双事实源。
+- 修复边界放在 `NoOaBankBatchApplicationService.update_tag_selection(...)`：保存规则后由流水规则模块 owner 遍历 active `relation_mode=bank_flow_rule_batch` relation，并通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(...)` 回写 requirement metadata。
+- 生产验证发现新进程构造的内存 `WorkbenchPairRelationService` 不一定包含历史 relation；因此 no-OA/bank-flow application service 注入的 relation command 必须通过 state store / PostgreSQL durable repository load active relations，再回写同一 repository。`WorkbenchRelationCommandRepositoryAdapter` 在传入 repository 时以 repository 为 load 事实源，内存只作为未注入 repository 的兼容路径。
+- 删除旧污染路径：不再在存在 `NoOaBankBatchTagSelectionApplicationService` 时提前 return；委托保存后必须继续执行 bank-flow relation requirement sync。旧 no-OA relation 不参与同步，避免 legacy 链路被新规则污染。
+- 同步只更新已有 relation metadata 和版本，不让 Workbench 直接读取 settings；变更后触发 no-OA 过渡底座的 mutation persistence、derived lifecycle 和 `bank_flow_rule_batch_tag_rules_changed` refresh。
+
+测试覆盖：
+
+- `tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_bank_flow_rule_tag_rule_update_resyncs_submitted_relation_requirements` 覆盖 PUT 规则后已提交 relation metadata 从 `requires_invoice=true` 同步为 `false`，并更新 `flow_rule_version`。
+- `tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_bank_flow_rule_tag_rule_update_resyncs_relation_from_persistent_repository` 覆盖进程内 relation snapshot 为空时，规则保存仍从持久化 relation repository 同步已提交 relation。
+- `tests/test_workbench_relation_command_repository_adapter.py::WorkbenchRelationCommandRepositoryAdapterTests::test_load_prefers_repository_when_repository_is_configured` 锁定 adapter load 事实源。
+- `tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_bank_flow_rule_batch_requires_only_oa_before_paired` 覆盖只要求 OA、不要求发票时，缺 OA 留 open，补齐 OA 后进入 paired。
+
+验证命令：
+
+- `pytest tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_bank_flow_rule_batch_requires_only_oa_before_paired tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_bank_flow_rule_tag_rule_update_resyncs_submitted_relation_requirements -q`
+
+未测风险：
+
+- 本地测试使用稳定 `fee` 标签构造同步场景；生产同一同步逻辑按 `flow_rule_tag_code` 泛化到 `external_turnover` 等标签。发布后需要对生产当前 settings 执行一次同步或重新保存规则，使此前已保存但未同步的 relation metadata 收敛。
+
 ## 2026-06-30 submitted 列表 read model mode 修复
 
 目标：

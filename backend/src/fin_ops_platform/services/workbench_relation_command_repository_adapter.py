@@ -19,6 +19,10 @@ class WorkbenchRelationCommandRepositoryAdapter:
         self._after_apply = after_apply
 
     def load_workbench_pair_relations(self) -> dict[str, Any]:
+        loader = getattr(self._repository, "load_workbench_pair_relations", None)
+        if callable(loader):
+            snapshot = loader()
+            return deepcopy(snapshot) if isinstance(snapshot, dict) else {}
         return self._pair_relation_service.snapshot()
 
     def save_workbench_pair_relations(

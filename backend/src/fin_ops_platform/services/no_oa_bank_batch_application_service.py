@@ -8,6 +8,10 @@ import re
 from typing import Any, Callable
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    EXTERNAL_TURNOVER_CATEGORY_CODE,
+    EXTERNAL_TURNOVER_ROLE,
+)
 from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_LABELS,
     BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
@@ -30,10 +34,13 @@ from fin_ops_platform.services.read_model_write_targets import write_target_enve
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
 
 SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+TURNOVER_RULE_REQUIREMENT_SOURCE = "no_oa_bank_batch_tag_selection"
+TURNOVER_RULE_CATEGORY_ROOTS = frozenset({"借入", "借出", "业务往来"})
 
 
 class NoOaBankBatchPersistenceError(RuntimeError):
@@ -277,10 +284,325 @@ class NoOaBankBatchApplicationService:
 
     def update_tag_selection(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         if self._tag_selection_service is not None:
-            return self._tag_selection_service.update_tag_selection(payload, actor_id=actor_id)
-        result = self._app_settings_service.update_no_oa_bank_batch_tag_selection(payload, actor_id=actor_id)
-        self.enqueue_background_refresh(["all"], reason="no_oa_bank_batch_tag_selection_changed")
-        self.after_mutation(["all"], changed_case_ids=[], persist=False)
+            result = self._tag_selection_service.update_tag_selection(payload, actor_id=actor_id)
+        else:
+            result = self._app_settings_service.update_no_oa_bank_batch_tag_selection(payload, actor_id=actor_id)
+            self.enqueue_background_refresh(["all"], reason="no_oa_bank_batch_tag_selection_changed")
+            self.after_mutation(["all"], changed_case_ids=[], persist=False)
+        self._sync_bank_flow_rule_relation_requirements(result, actor_id=actor_id)
+        self._sync_turnover_rule_relation_requirements(result, actor_id=actor_id)
+        return result
+
+    def _sync_bank_flow_rule_relation_requirements(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+    ) -> dict[str, object]:
+        relation_command_service = self._relation_command_service
+        if relation_command_service is None:
+            return {"changed_case_ids": [], "affected_months": []}
+        list_active_relations = getattr(relation_command_service, "list_active_relations", None)
+        if not callable(list_active_relations):
+            return {"changed_case_ids": [], "affected_months": []}
+        requirements_by_tag_code = self._bank_flow_rule_requirements_by_tag_code(payload)
+        if not requirements_by_tag_code:
+            return {"changed_case_ids": [], "affected_months": []}
+        rule_version = int(BankTransactionCategoryService._normalize_version(payload.get("version", 1)) or 1)
+        changed_case_ids: list[str] = []
+        affected_months: set[str] = set()
+        for relation in list(list_active_relations() or []):
+            if not isinstance(relation, dict):
+                continue
+            metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
+            relation_mode = str(relation.get("relation_mode") or metadata.get("relation_mode") or "").strip()
+            if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
+                continue
+            tag_code = str(metadata.get("flow_rule_tag_code") or "").strip()
+            if not tag_code:
+                continue
+            requirement = requirements_by_tag_code.get(tag_code)
+            if not isinstance(requirement, dict):
+                continue
+            next_metadata = {
+                "requires_oa": bool(requirement.get("requires_oa")),
+                "requires_invoice": bool(requirement.get("requires_invoice")),
+                "flow_rule_version": rule_version,
+            }
+            if self._bank_flow_rule_relation_requirements_current(metadata, next_metadata):
+                continue
+            case_id = str(relation.get("case_id") or "").strip()
+            if not case_id:
+                continue
+            try:
+                result = relation_command_service.update_relation_metadata_for_case_id(
+                    case_id=case_id,
+                    actor_id=str(actor_id or ""),
+                    special_metadata=next_metadata,
+                    history_operation_type="bank_flow_rule_batch_tag_rule_requirement_sync",
+                )
+            except WorkbenchRelationCommandError as exc:
+                raise self._relation_command_error(exc) from exc
+            changed_case_ids.extend(
+                str(changed_case_id).strip()
+                for changed_case_id in list(result.get("changed_case_ids") or [])
+                if str(changed_case_id).strip()
+            )
+            affected_months.update(
+                str(month).strip()
+                for month in list(result.get("affected_months") or [])
+                if SEARCH_MONTH_RE.match(str(month).strip())
+            )
+        normalized_changed_case_ids = self._dedupe_ordered(changed_case_ids)
+        normalized_months = sorted(affected_months)
+        if normalized_changed_case_ids:
+            self.after_mutation(
+                normalized_months,
+                changed_case_ids=normalized_changed_case_ids,
+                persist=True,
+                action_name="bank_flow_rule_batch_tag_rules_changed",
+            )
+            self.enqueue_background_refresh(
+                normalized_months or ["all"],
+                reason="bank_flow_rule_batch_tag_rules_changed",
+                metadata=self._read_model_refresh_metadata_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE),
+            )
+        return {"changed_case_ids": normalized_changed_case_ids, "affected_months": normalized_months}
+
+    def _sync_turnover_rule_relation_requirements(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+    ) -> dict[str, object]:
+        relation_command_service = self._relation_command_service
+        if relation_command_service is None:
+            return {"changed_case_ids": [], "affected_months": []}
+        list_active_relations = getattr(relation_command_service, "list_active_relations", None)
+        if not callable(list_active_relations):
+            return {"changed_case_ids": [], "affected_months": []}
+        requirements_by_tag_code = self._bank_flow_rule_requirements_by_tag_code(payload)
+        if not requirements_by_tag_code:
+            return {"changed_case_ids": [], "affected_months": []}
+        rule_version = int(BankTransactionCategoryService._normalize_version(payload.get("version", 1)) or 1)
+        changed_case_ids: list[str] = []
+        affected_months: set[str] = set()
+        for relation in list(list_active_relations() or []):
+            if not isinstance(relation, dict):
+                continue
+            case_id = str(relation.get("case_id") or "").strip()
+            if not case_id.startswith("turnover:"):
+                continue
+            metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
+            relation_mode = str(relation.get("relation_mode") or metadata.get("relation_mode") or "").strip()
+            if relation_mode not in {"manual_confirmed", TURNOVER_MANUAL_CLOSURE_RELATION_MODE}:
+                continue
+            bank_row_ids = self._turnover_relation_bank_row_ids(relation)
+            if not bank_row_ids:
+                continue
+            requirement = self._turnover_relation_requirement_from_bank_rows(
+                bank_row_ids,
+                requirements_by_tag_code=requirements_by_tag_code,
+            )
+            if requirement is None:
+                continue
+            next_metadata = {
+                "source": str(metadata.get("source") or "turnover_ledger"),
+                "turnover_relation_id": str(metadata.get("turnover_relation_id") or case_id.removeprefix("turnover:")),
+                "requires_oa": bool(requirement.get("requires_oa")),
+                "requires_invoice": bool(requirement.get("requires_invoice")),
+                "paired_requirement_tag_codes": list(requirement.get("tag_codes") or []),
+                "paired_requirement_source": TURNOVER_RULE_REQUIREMENT_SOURCE,
+                "paired_requirement_version": rule_version,
+            }
+            if self._turnover_relation_requirements_current(
+                relation=relation,
+                metadata=metadata,
+                next_metadata=next_metadata,
+            ):
+                continue
+            try:
+                result = relation_command_service.update_relation_metadata_for_case_id(
+                    case_id=case_id,
+                    relation_mode=TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+                    actor_id=str(actor_id or ""),
+                    special_metadata=next_metadata,
+                    history_operation_type="turnover_rule_tag_requirement_sync",
+                )
+            except WorkbenchRelationCommandError as exc:
+                raise self._relation_command_error(exc) from exc
+            changed_case_ids.extend(
+                str(changed_case_id).strip()
+                for changed_case_id in list(result.get("changed_case_ids") or [])
+                if str(changed_case_id).strip()
+            )
+            affected_months.update(
+                str(month).strip()
+                for month in list(result.get("affected_months") or [])
+                if SEARCH_MONTH_RE.match(str(month).strip())
+            )
+        normalized_changed_case_ids = self._dedupe_ordered(changed_case_ids)
+        normalized_months = sorted(affected_months)
+        if normalized_changed_case_ids:
+            self.after_mutation(
+                normalized_months,
+                changed_case_ids=normalized_changed_case_ids,
+                persist=True,
+                action_name="turnover_rule_tag_rules_changed",
+            )
+        return {"changed_case_ids": normalized_changed_case_ids, "affected_months": normalized_months}
+
+    @staticmethod
+    def _turnover_relation_bank_row_ids(relation: dict[str, Any]) -> list[str]:
+        row_ids = [
+            str(row_id).strip()
+            for row_id in list(relation.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        row_types = [str(row_type or "").strip() for row_type in list(relation.get("row_types") or [])]
+        if not row_ids:
+            return []
+        if len(row_types) == len(row_ids):
+            return [
+                row_id
+                for row_id, row_type in zip(row_ids, row_types)
+                if row_type == "bank"
+            ]
+        return [
+            row_id
+            for row_id in row_ids
+            if row_id.startswith("txn_") or row_id.startswith("bank")
+        ]
+
+    def _turnover_relation_requirement_from_bank_rows(
+        self,
+        bank_row_ids: list[str],
+        *,
+        requirements_by_tag_code: dict[str, dict[str, bool]],
+    ) -> dict[str, object] | None:
+        categories_by_row_id = self._bank_transaction_category_service.bulk_get(bank_row_ids)
+        tag_codes: list[str] = []
+        requires_oa = False
+        requires_invoice = False
+        for row_id in bank_row_ids:
+            category = categories_by_row_id.get(row_id)
+            if not isinstance(category, dict):
+                continue
+            tag_code = self._turnover_requirement_tag_code_for_category(category, requirements_by_tag_code)
+            if not tag_code:
+                continue
+            requirement = requirements_by_tag_code.get(tag_code)
+            if not isinstance(requirement, dict):
+                continue
+            tag_codes.append(tag_code)
+            requires_oa = requires_oa or bool(requirement.get("requires_oa"))
+            requires_invoice = requires_invoice or bool(requirement.get("requires_invoice"))
+        normalized_tag_codes = self._dedupe_ordered(tag_codes)
+        if not normalized_tag_codes:
+            return None
+        return {
+            "tag_codes": normalized_tag_codes,
+            "requires_oa": requires_oa,
+            "requires_invoice": requires_invoice,
+        }
+
+    def _turnover_requirement_tag_code_for_category(
+        self,
+        category: dict[str, Any],
+        requirements_by_tag_code: dict[str, dict[str, bool]],
+    ) -> str:
+        category_code = str(category.get("category_code") or "").strip()
+        if category_code and category_code in requirements_by_tag_code:
+            return category_code
+        if EXTERNAL_TURNOVER_CATEGORY_CODE not in requirements_by_tag_code:
+            return ""
+        semantics = self._bank_transaction_category_service.category_semantics_for_code(category_code)
+        if str(semantics.get("turnover_role") or "").strip() == EXTERNAL_TURNOVER_ROLE:
+            return EXTERNAL_TURNOVER_CATEGORY_CODE
+        category_path = category.get("category_path")
+        if not isinstance(category_path, list):
+            category_path = semantics.get("category_path")
+        category_root = str(category_path[0] if isinstance(category_path, list) and category_path else "").strip()
+        if category_root in TURNOVER_RULE_CATEGORY_ROOTS:
+            return EXTERNAL_TURNOVER_CATEGORY_CODE
+        return ""
+
+    @staticmethod
+    def _turnover_relation_requirements_current(
+        *,
+        relation: dict[str, Any],
+        metadata: dict[str, Any],
+        next_metadata: dict[str, object],
+    ) -> bool:
+        if str(relation.get("relation_mode") or "").strip() != TURNOVER_MANUAL_CLOSURE_RELATION_MODE:
+            return False
+        if bool(metadata.get("requires_oa")) != bool(next_metadata.get("requires_oa")):
+            return False
+        if bool(metadata.get("requires_invoice")) != bool(next_metadata.get("requires_invoice")):
+            return False
+        current_version = int(
+            BankTransactionCategoryService._normalize_version(metadata.get("paired_requirement_version", 1)) or 1
+        )
+        next_version = int(next_metadata.get("paired_requirement_version") or 1)
+        if current_version != next_version:
+            return False
+        if str(metadata.get("paired_requirement_source") or "").strip() != str(
+            next_metadata.get("paired_requirement_source") or ""
+        ).strip():
+            return False
+        return [
+            str(tag_code).strip()
+            for tag_code in list(metadata.get("paired_requirement_tag_codes") or [])
+            if str(tag_code).strip()
+        ] == list(next_metadata.get("paired_requirement_tag_codes") or [])
+
+    @staticmethod
+    def _bank_flow_rule_requirements_by_tag_code(payload: dict[str, Any]) -> dict[str, dict[str, bool]]:
+        requirements: dict[str, dict[str, bool]] = {}
+        for item in list(payload.get("rules") or []):
+            if not isinstance(item, dict):
+                continue
+            tag_code = str(item.get("tag_code") or item.get("code") or "").strip()
+            if not tag_code:
+                continue
+            requirements[tag_code] = {
+                "requires_oa": bool(item.get("requires_oa")),
+                "requires_invoice": bool(item.get("requires_invoice")),
+            }
+        raw_requirements = payload.get("requirements_by_tag_code")
+        if isinstance(raw_requirements, dict):
+            for raw_code, item in raw_requirements.items():
+                tag_code = str(raw_code or "").strip()
+                if not tag_code or not isinstance(item, dict):
+                    continue
+                requirements[tag_code] = {
+                    "requires_oa": bool(item.get("requires_oa")),
+                    "requires_invoice": bool(item.get("requires_invoice")),
+                }
+        return requirements
+
+    @staticmethod
+    def _bank_flow_rule_relation_requirements_current(
+        metadata: dict[str, Any],
+        next_metadata: dict[str, object],
+    ) -> bool:
+        return (
+            bool(metadata.get("requires_oa")) == bool(next_metadata.get("requires_oa"))
+            and bool(metadata.get("requires_invoice")) == bool(next_metadata.get("requires_invoice"))
+            and int(BankTransactionCategoryService._normalize_version(metadata.get("flow_rule_version", 1)) or 1)
+            == int(next_metadata.get("flow_rule_version") or 1)
+        )
+
+    @staticmethod
+    def _dedupe_ordered(values: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            normalized = str(value or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
         return result
 
     def detail_payload(self, batch_id: str) -> dict[str, object]:

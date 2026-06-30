@@ -16,8 +16,7 @@ from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedge
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
-
-TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 class TurnoverLedgerWritePreconditionError(ValueError):
@@ -1439,6 +1438,10 @@ class TurnoverLedgerWorkbenchPairPort:
             "turnover_relation_id": relation_id,
             "turnover_closure_mode": turnover_closure_mode,
             "turnover_closure_bank_row_ids": list(normalized_row_ids),
+            "requires_oa": True,
+            "requires_invoice": False,
+            "paired_requirement_source": "turnover_ledger_manual_closure",
+            "paired_requirement_version": 1,
         }
         evidence = {
             "source": "turnover_ledger",

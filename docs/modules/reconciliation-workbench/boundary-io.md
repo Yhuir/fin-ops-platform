@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-06-30
 
 ## 模块化状态
 
@@ -32,7 +32,8 @@
 | 页面过滤、月份、分页、候选分组操作 | `web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/*` | 前端状态只进入 workbench API，不直接拼持久化查询 |
 | 查询请求 | `backend/src/fin_ops_platform/app/routes_workbench.py`、历史 `server.py` 入口 | 必须返回 read model freshness/status |
 | 写操作 | workbench action/relation services | 写后污染受影响 workbench/workbench_relation/downstream scopes |
-| 流水规则批量处理 relation metadata | `workbench_relation` / bank-flow-rule-batch submit | `special_metadata.requires_oa`、`requires_invoice` 决定 `relation_mode=bank_flow_rule_batch` 是否具备进入 paired 区的 row type；`source_row_count>3` 时默认折叠 |
+| 流水规则批量处理 relation metadata | `workbench_relation` / bank-flow-rule-batch submit and tag-rule sync | `special_metadata.requires_oa`、`requires_invoice` 决定 `relation_mode=bank_flow_rule_batch` 是否具备进入 paired 区的 row type；`source_row_count>3` 时默认折叠。Workbench 不读取当前标签设置作为 fallback；规则 owner 必须在保存设置后同步 active relation metadata。 |
+| 外部往来闭环 relation metadata | `workbench_relation` / turnover manual closure and tag-rule sync | `relation_mode=turnover_manual_closure` 且 metadata 显式声明 `requires_oa` / `requires_invoice` 时，按 required row type 判定 open/paired；metadata 缺失的旧关系 fail closed。旧 `turnover:* manual_confirmed` 必须由规则 owner 通过 relation command 升级，Workbench 不回读当前标签设置。 |
 | no-OA relation metadata | `workbench_relation` / no-OA submit | legacy `special_metadata.paired_requires_oa`、`paired_requires_invoice` 决定 no-OA relation 是否具备进入 paired 区的 row type |
 | 写后 target envelope | `WorkbenchWriteFacade` | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；`read_model_key=workbench_relation` |
 | 外部 OA 手工导入影响 | settings/OA manual import API | 不属于 `WorkbenchWriteFacade`，但必须返回并等待 `workbench`/`workbench_relation` 等受影响 read model targets |
@@ -43,7 +44,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 关联台页面 payload | 前端 workbench components | 来自 active generation read model |
-| paired/open 分区 | 前端 workbench components | 已确认 `bank_flow_rule_batch` 或 legacy no-OA relation 若缺少勾选要求的 OA 或发票 row，必须留在 open 区；补齐后才进入 paired 区 |
+| paired/open 分区 | 前端 workbench components | 已确认 `bank_flow_rule_batch`、`turnover_manual_closure` 或 legacy no-OA relation 若缺少 metadata 声明要求的 OA 或发票 row，必须留在 open 区；补齐 required row type 后才进入 paired 区 |
 | 折叠批次展示 | `CandidateGroupGrid` | `collapsed_summary` 默认只展示摘要 row 和“展开 N 条/张明细”按钮；不得再渲染“当前显示 1 条摘要 / 实际 N 条流水”等绝对定位计数文案，避免与流水标签和日期重叠。 |
 | 配对/撤回结果 | 调用方和页面刷新 | 返回业务结果并触发 dirty scope |
 | Operation barrier targets | 前端页面 | 写成功后等待 `workbench_relation` targets，再刷新 workbench/相关页面 |

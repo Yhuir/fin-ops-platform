@@ -72,6 +72,35 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in paired_group["bank_rows"]], ["bk-flow-fee-both-required"])
         self.assertEqual([row["id"] for row in paired_group["invoice_rows"]], ["iv-flow-fee-both-required"])
 
+    def test_bank_flow_rule_batch_requires_only_oa_before_paired(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        batch_id = "bank_flow_rule_batch_turnover_loan"
+        bank_row = bank_flow_rule_row(
+            "bk-flow-loan-repayment",
+            batch_id=batch_id,
+            debit_amount="150000.00",
+            requires_oa=True,
+            requires_invoice=False,
+        )
+        oa = bank_flow_rule_oa_row("oa-flow-loan-repayment", batch_id=batch_id)
+
+        missing_oa = service.group_payload("2026-05", oa_rows=[], bank_rows=[bank_row], invoice_rows=[])
+        self.assertEqual(missing_oa["summary"]["paired_count"], 0)
+        self.assertEqual(missing_oa["summary"]["open_count"], 1)
+        self.assertIn(
+            "bk-flow-loan-repayment",
+            [row["id"] for row in flatten_groups(missing_oa["open"]["groups"], "bank")],
+        )
+
+        complete = service.group_payload("2026-05", oa_rows=[oa], bank_rows=[bank_row], invoice_rows=[])
+        self.assertEqual(complete["summary"]["paired_count"], 1)
+        self.assertEqual(complete["summary"]["open_count"], 0)
+        paired_group = complete["paired"]["groups"][0]
+        self.assertEqual(paired_group["relation_mode"], "bank_flow_rule_batch")
+        self.assertEqual([row["id"] for row in paired_group["oa_rows"]], ["oa-flow-loan-repayment"])
+        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], ["bk-flow-loan-repayment"])
+        self.assertEqual(paired_group["invoice_rows"], [])
+
     def test_no_oa_bank_batch_group_collapses_to_summary_and_preserves_bank_rows(self) -> None:
         service = WorkbenchCandidateGroupingService()
         batch_id = "no_oa_batch_fee_001"

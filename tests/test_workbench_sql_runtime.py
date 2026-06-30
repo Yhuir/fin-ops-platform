@@ -7641,6 +7641,54 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertTrue(all(row["invoice_relation"]["label"] == "收支闭环" for row in open_groups[0]["bank_rows"]))
         self.assertTrue(all(row["status"] == "open" for row in open_groups[0]["bank_rows"]))
 
+    def test_sql_projection_pairs_turnover_manual_closure_when_no_invoice_required(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "oa-turnover-1": {
+                "id": "oa-turnover-1",
+                "type": "oa",
+                "source_kind": "oa",
+                "amount": "150000.00",
+                "applicant": "刘际涛",
+                "counterparty_name": "杨丽萍",
+                "payment_date": "2026-05-22",
+            },
+            "bank-turnover-1": {
+                "id": "bank-turnover-1",
+                "type": "bank",
+                "source_kind": "bank",
+                "debit_amount": "150000.00",
+                "counterparty_name": "杨丽萍",
+                "trade_time": "2026-05-22 14:40:07",
+                "summary": "还5月9-11日借入款",
+            },
+        }
+        relation = {
+            "case_id": "turnover:turnover_rel_no_invoice",
+            "relation_mode": "turnover_manual_closure",
+            "row_ids": ["oa-turnover-1", "bank-turnover-1"],
+            "row_types": ["oa", "bank"],
+            "special_metadata": {
+                "requires_oa": True,
+                "requires_invoice": False,
+                "paired_requirement_tag_codes": ["external_turnover"],
+                "paired_requirement_source": "no_oa_bank_batch_tag_selection",
+            },
+        }
+
+        payload = builder._group_payload("2026-05", rows_by_id, [relation])
+
+        self.assertEqual(payload["open"]["groups"], [])
+        paired_groups = payload["paired"]["groups"]
+        self.assertEqual(len(paired_groups), 1)
+        self.assertEqual(paired_groups[0]["group_id"], "case:turnover:turnover_rel_no_invoice")
+        self.assertEqual(paired_groups[0]["relation_mode"], "turnover_manual_closure")
+        self.assertEqual([row["id"] for row in paired_groups[0]["oa_rows"]], ["oa-turnover-1"])
+        self.assertEqual([row["id"] for row in paired_groups[0]["bank_rows"]], ["bank-turnover-1"])
+
     def test_sql_projection_active_no_oa_relation_uses_grouping_contract(self) -> None:
         recorder = CandidateSnapshotRecorder()
         builder = WorkbenchSqlProjectionBuilder(

@@ -416,6 +416,56 @@ class WorkbenchTurnoverGroupingTests(unittest.TestCase):
         self.assertEqual(_group_bank_ids(matching_open_groups[0]), ["bank-turnover-1"])
         self.assertEqual(matching_open_groups[0]["bank_rows"][0]["status"], "open")
 
+    def test_two_pane_turnover_manual_closure_with_no_invoice_requirement_is_paired(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        requirement_metadata = {
+            "requires_oa": True,
+            "requires_invoice": False,
+            "paired_requirement_source": "no_oa_bank_batch_tag_selection",
+            "paired_requirement_tag_codes": ["external_turnover"],
+        }
+
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                {
+                    "id": "oa-turnover-no-invoice",
+                    "type": "oa",
+                    "case_id": "turnover:rel-no-invoice",
+                    "payment_date": "2026-03-05",
+                    "counterparty_name": "贾小花",
+                    "amount": "200000.00",
+                    "oa_bank_relation": {"code": "turnover_manual_closure", "label": "外部往来款闭环", "tone": "success"},
+                    "relation_mode": "turnover_manual_closure",
+                    "special_metadata": requirement_metadata,
+                }
+            ],
+            bank_rows=[
+                {
+                    **_bank_row(
+                        "bank-turnover-no-invoice",
+                        credit_amount="200000.00",
+                        case_id="turnover:rel-no-invoice",
+                        relation_code="turnover_manual_closure",
+                    ),
+                    "relation_mode": "turnover_manual_closure",
+                    "special_metadata": requirement_metadata,
+                }
+            ],
+            invoice_rows=[],
+            turnover_relations=[],
+        )
+
+        self.assertEqual(payload["open"]["groups"], [])
+        matching_paired_groups = [
+            group
+            for group in payload["paired"]["groups"]
+            if group["group_id"] == "case:turnover:rel-no-invoice"
+        ]
+        self.assertEqual(len(matching_paired_groups), 1)
+        self.assertEqual(matching_paired_groups[0]["group_type"], "manual_confirmed")
+        self.assertEqual(matching_paired_groups[0]["relation_mode"], "turnover_manual_closure")
+
     def test_three_pane_turnover_manual_closure_rows_render_as_paired_case(self) -> None:
         service = WorkbenchCandidateGroupingService()
 

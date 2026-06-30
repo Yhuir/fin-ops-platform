@@ -807,6 +807,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(call["special_metadata"]["source"], "turnover_ledger")
         self.assertEqual(call["special_metadata"]["turnover_relation_id"], "turnover_rel_closure")
         self.assertEqual(call["special_metadata"]["turnover_closure_mode"], "manual_zero_difference_group")
+        self.assertTrue(call["special_metadata"]["requires_oa"])
+        self.assertFalse(call["special_metadata"]["requires_invoice"])
+        self.assertEqual(call["special_metadata"]["paired_requirement_source"], "turnover_ledger_manual_closure")
         self.assertEqual(call["history_operation_type"], "turnover_manual_closure_confirm")
 
     def test_turnover_manual_closure_merges_existing_oa_bank_relations(self) -> None:

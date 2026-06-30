@@ -371,6 +371,7 @@ class WorkbenchRelationCommandService:
         self,
         *,
         case_id: str,
+        relation_mode: str | None = None,
         amount_check: dict[str, Any] | None = None,
         special_metadata: dict[str, Any] | None = None,
         display_tags: list[str] | None = None,
@@ -381,10 +382,16 @@ class WorkbenchRelationCommandService:
         history_operation_type: str = "update_pair_relation_metadata",
     ) -> dict[str, Any]:
         resolved_case_id = str(case_id or "").strip()
+        normalized_relation_mode = (
+            self._validated_relation_mode(relation_mode)
+            if str(relation_mode or "").strip()
+            else None
+        )
         fingerprint = self._request_fingerprint(
             "update_relation_metadata_for_case_id",
             {
                 "case_id": resolved_case_id,
+                "relation_mode": normalized_relation_mode,
                 "amount_check": amount_check,
                 "special_metadata": special_metadata,
                 "display_tags": display_tags,
@@ -411,6 +418,7 @@ class WorkbenchRelationCommandService:
         )
         relation, history = pair_service.update_relation_metadata_for_case_id(
             resolved_case_id,
+            relation_mode=normalized_relation_mode,
             amount_check=amount_check,
             special_metadata=special_metadata,
             display_tags=display_tags,

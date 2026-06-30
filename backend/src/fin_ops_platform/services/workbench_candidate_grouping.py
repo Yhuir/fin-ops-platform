@@ -23,6 +23,7 @@ from fin_ops_platform.services.workbench_invoice_direction import (
     invoice_counterparty_field_from_row,
     invoice_flow_direction_from_row,
 )
+from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
 ZERO = Decimal("0.00")
@@ -32,7 +33,6 @@ MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
 OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
 OA_BANK_SETTLEMENT_PAIRED_CODES = {"personal_advance_repayment_settlement"}
 NO_OA_BANK_BATCH_PAIRED_CODES = {NO_OA_BANK_BATCH_RELATION_MODE, BANK_FLOW_RULE_BATCH_RELATION_MODE}
-TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
 AUTO_PAIRED_CODES = {
     *SINGLE_BANK_AUTO_PAIRED_CODES,
     *MULTI_BANK_AUTO_PAIRED_CODES,
@@ -1311,6 +1311,8 @@ class WorkbenchCandidateGroupingService:
             return True
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
         if self._is_turnover_manual_closure_group(group):
+            if self._group_has_explicit_paired_requirements(group):
+                return self._no_oa_group_has_required_row_types(group)
             return row_type_count >= 3 and self._is_confirmed_active_relation_group(group)
         relation_codes = {self._relation_code(row) for row in rows}
         if relation_codes and relation_codes.issubset(NO_OA_BANK_BATCH_PAIRED_CODES):
@@ -1364,6 +1366,24 @@ class WorkbenchCandidateGroupingService:
     def _no_oa_paired_requirement(row: dict[str, Any], key: str) -> bool:
         metadata = row.get("special_metadata")
         return isinstance(metadata, dict) and bool(metadata.get(key))
+
+    @staticmethod
+    def _group_has_explicit_paired_requirements(group: CandidateGroup) -> bool:
+        for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]:
+            metadata = row.get("special_metadata")
+            if not isinstance(metadata, dict):
+                continue
+            if any(
+                key in metadata
+                for key in (
+                    "paired_requires_oa",
+                    "paired_requires_invoice",
+                    "requires_oa",
+                    "requires_invoice",
+                )
+            ):
+                return True
+        return False
 
     def _is_turnover_manual_closure_group(self, group: CandidateGroup) -> bool:
         rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]

@@ -4,6 +4,9 @@ from copy import deepcopy
 from typing import Any
 
 
+TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
+
+
 VALID_WORKBENCH_RELATION_MODES = frozenset(
     {
         "manual_confirmed",
@@ -14,7 +17,7 @@ VALID_WORKBENCH_RELATION_MODES = frozenset(
         "pending_invoice_manual_invoice",
         "no_oa_bank_batch",
         "bank_flow_rule_batch",
-        "turnover_manual_closure",
+        TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
         "batch_accounting",
         "etc_business_batch",
         "etc_historical_repair",

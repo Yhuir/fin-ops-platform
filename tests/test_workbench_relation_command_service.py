@@ -544,6 +544,53 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(history["before_relations"][0]["case_id"], "case-existing-etc")
         self.assertEqual(history["after_relations"][0]["amount_check"]["invoice_total"], "100.00")
 
+    def test_update_relation_metadata_for_case_id_can_upgrade_relation_mode(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "turnover:rel-1": {
+                        "case_id": "turnover:rel-1",
+                        "row_ids": ["oa-1", "bank-1"],
+                        "row_types": ["oa", "bank"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "all",
+                        "created_by": "finance-user",
+                        "created_at": "2026-05-01T10:00:00+00:00",
+                        "updated_at": "2026-05-01T10:00:00+00:00",
+                    }
+                }
+            }
+        )
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            relation_facade=FakeRelationFacade(),
+        )
+
+        result = service.update_relation_metadata_for_case_id(
+            case_id="turnover:rel-1",
+            relation_mode="turnover_manual_closure",
+            actor_id="system_turnover_rule_sync",
+            special_metadata={
+                "requires_oa": True,
+                "requires_invoice": False,
+                "paired_requirement_tag_codes": ["external_turnover"],
+            },
+            history_operation_type="turnover_rule_tag_requirement_sync",
+        )
+
+        self.assertEqual(result["status"], "updated")
+        self.assertEqual(result["relation"]["relation_mode"], "turnover_manual_closure")
+        self.assertTrue(result["relation"]["special_metadata"]["requires_oa"])
+        self.assertFalse(result["relation"]["special_metadata"]["requires_invoice"])
+        saved_snapshot = repository.save_calls[0]["snapshot"]
+        saved_relation = saved_snapshot["pair_relations"]["turnover:rel-1"]
+        self.assertEqual(saved_relation["relation_mode"], "turnover_manual_closure")
+        history = saved_snapshot["pair_relation_history"][0]
+        self.assertEqual(history["operation_type"], "turnover_rule_tag_requirement_sync")
+        self.assertEqual(history["before_relations"][0]["relation_mode"], "manual_confirmed")
+        self.assertEqual(history["after_relations"][0]["relation_mode"], "turnover_manual_closure")
+
     def test_confirm_relation_allows_oa_invoice_offset_auto_match_mode(self) -> None:
         repository = FakeRelationRepository()
         service = WorkbenchRelationCommandService(

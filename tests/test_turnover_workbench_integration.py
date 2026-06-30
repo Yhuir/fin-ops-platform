@@ -699,6 +699,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             payload["workbench_pair_relation"]["special_metadata"]["turnover_closure_mode"],
             "manual_zero_difference_group",
         )
+        self.assertTrue(payload["workbench_pair_relation"]["special_metadata"]["requires_oa"])
+        self.assertFalse(payload["workbench_pair_relation"]["special_metadata"]["requires_invoice"])
         self.assertEqual(set(payload["turnover_relation"]["bank_row_ids"]), set(transaction_ids))
         matching_open_groups = [
             group
@@ -770,6 +772,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             active_closure["special_metadata"]["turnover_closure_bank_row_ids"],
             transaction_ids,
         )
+        self.assertTrue(active_closure["special_metadata"]["requires_oa"])
+        self.assertFalse(active_closure["special_metadata"]["requires_invoice"])
         self.assertIsNone(case_oa_1_after_confirm)
         self.assertIsNone(case_oa_2_after_confirm)
 

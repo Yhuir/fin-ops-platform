@@ -1,6 +1,6 @@
 # 外部往来款管理模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-06-30
 
 ## 模块化状态
 
@@ -30,6 +30,7 @@
 | --- | --- | --- |
 | 页面查询/筛选 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | 进入 query service/read facade |
 | 确认/撤回写操作 | write facade/UoW | 已知 affected months 的写路径触发 turnover/workbench/workbench_relation/cost/search affected month scopes；未知月份例外才允许 `all` fan-out |
+| Workbench relation requirement | `TurnoverLedgerWorkbenchPairPort` | 创建 `turnover_manual_closure` 时必须写入 `requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`；这些字段是关联台分区的唯一输入，不能由关联台查询当前设置兜底 |
 | Refresh scope | `turnover_ledger` manifest | month or `all`；`all` 是 fan-out command，不是普通写操作默认 scope |
 
 ## 输出 I/O
@@ -38,6 +39,7 @@
 | --- | --- | --- |
 | 外部往来款 rows/summary | 前端页面 | query gateway 后 fresh/status |
 | 写操作结果 | API/frontend operation barrier | 可审计、幂等或有版本保护；返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
+| Workbench active relation | `workbench-relations` | 只通过 `WorkbenchRelationCommandService` 写入/撤回；`turnover_manual_closure` relation metadata 明确声明 OA/发票 requirement。metadata 缺失的旧关系必须 fail closed，等待规则保存同步链路升级 |
 | Dirty scope | runtime queue | `turnover_ledger.read_model.refresh` |
 | 导出 | 用户下载 | 复用查询权限和筛选 |
 

@@ -11,12 +11,37 @@ from fin_ops_platform.services.workbench_relation_command_repository_adapter imp
 class CaptureRepository:
     def __init__(self) -> None:
         self.saved: list[dict[str, object]] = []
+        self.snapshot: dict[str, object] = {}
+
+    def load_workbench_pair_relations(self) -> dict[str, object]:
+        return self.snapshot
 
     def save_workbench_pair_relations(self, snapshot: dict[str, object], *, changed_case_ids: list[str]) -> None:
         self.saved.append({"snapshot": snapshot, "changed_case_ids": list(changed_case_ids)})
 
 
 class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
+    def test_load_prefers_repository_when_repository_is_configured(self) -> None:
+        pair_service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {
+                    "MEMORY": {"case_id": "MEMORY", "row_ids": ["bank-memory"], "row_types": ["bank"], "status": "active"},
+                },
+            }
+        )
+        repository = CaptureRepository()
+        repository.snapshot = {
+            "pair_relations": {
+                "DURABLE": {"case_id": "DURABLE", "row_ids": ["bank-db"], "row_types": ["bank"], "status": "active"},
+            },
+        }
+        adapter = WorkbenchRelationCommandRepositoryAdapter(
+            pair_relation_service=pair_service,
+            repository=repository,
+        )
+
+        self.assertEqual(sorted(adapter.load_workbench_pair_relations()["pair_relations"]), ["DURABLE"])
+
     def test_save_forwards_to_repository_and_applies_changed_case_delta(self) -> None:
         after_apply_calls: list[str] = []
         pair_service = WorkbenchPairRelationService.from_snapshot(

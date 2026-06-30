@@ -1,5 +1,14 @@
 # 外部往来款管理 实施记录
 
+## 2026-06-30 - 外部往来闭环免发票 requirement 同步修复
+
+- 目标：修复用户已在流水规则标签管理中把外部往来款借入/归还借款设置为不需要发票后，历史 `turnover:*` 关系仍停留在关联台未配对区的问题。
+- 根因：生产里的目标关系是旧 `relation_mode=manual_confirmed` 且 `special_metadata={}` 的 `turnover:*` active relation。Workbench 按普通两栏手工关系 fail closed，不会读取当前规则设置临时推断“无需发票”。这是 relation fact 合同缺失，不是前端展示缺陷。
+- 关键决策：新闭环写入端 `TurnoverLedgerWorkbenchPairPort` 必须在 `turnover_manual_closure` relation metadata 中写入 `requires_oa=true`、`requires_invoice=false`、`paired_requirement_source` 和版本。规则保存后由 `NoOaBankBatchApplicationService.update_tag_selection(...)` 通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(...)` 同步旧 `turnover:* manual_confirmed` active relation，升级为 `turnover_manual_closure` 并补齐 requirement metadata。Workbench 分区只读 relation metadata；metadata 缺失的旧关系仍 fail closed。
+- 旧逻辑删除/隔离：不放宽普通 `manual_confirmed` 两栏关系，不允许 Workbench 查询当前 settings 兜底，不直接修改 relation 表。旧 `turnover:* manual_confirmed` 只在规则保存同步链路中迁移；没有匹配外部往来规则的 relation 不被改动。
+- 测试覆盖：`tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_two_pane_turnover_manual_closure_with_no_invoice_requirement_is_paired`、`tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_tag_rule_update_upgrades_legacy_turnover_relation_from_persistent_repository`、`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_update_relation_metadata_for_case_id_can_upgrade_relation_mode`、`tests/test_turnover_ledger_uow_contract.py::TurnoverLedgerUoWContractTests::test_turnover_workbench_pair_port_delegates_manual_closure_to_relation_command_service`、`tests/test_turnover_workbench_integration.py::TurnoverWorkbenchIntegrationTests::test_manual_closure_accepts_three_bank_rows_and_keeps_workbench_case_open_until_invoice_exists`。
+- 验证命令：`PYTHONPATH=backend/src:. pytest tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_candidate_grouping.py tests/test_workbench_turnover_grouping.py tests/test_no_oa_bank_batch_application_service.py tests/test_workbench_relation_command_service.py tests/test_workbench_relation_command_repository_adapter.py tests/test_turnover_workbench_integration.py tests/test_turnover_ledger_uow_contract.py -q`。
+
 ## 2026-06-25 - route-owner local closure audit
 
 - 目标：执行 `server-py:turnover-ledger-route-owner-local-closure-audit`，确认所有 `/api/turnover-ledger*` route callbacks 已从 `server.py` 迁出。
@@ -127,7 +136,7 @@
 
 - 外部往来款管理 Spec-first E2E 本地闭环状态为 `spec-first-covered`：`TURNOVER-E2E-001..009` 已映射到 Browser、组件、API、后端和 integration 覆盖；`TURNOVER-E2E-010` 真实基础设施 worker drain 明确保留为 staging/runtime risk。
 - 后续只有发现明确 P0/P1 缺口、真实 bug 或业务规则变化时，再按 `e2e-spec.md` 和 `tests.md` 中七类矩阵补测试。
-- 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。外部往来闭环 relation 在关联台保留同一个 `turnover_manual_closure` active case/evidence；纯银行或 OA+银行但缺发票的闭环留在 open/candidate，只有 OA + 银行 + 发票三栏完整后才进入 paired。若闭环确认前已有 OA-bank relation，可合并为同一个包含 `oa` + `bank` rows 的 active case。
+- 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。外部往来闭环 relation 在关联台保留同一个 `turnover_manual_closure` active case/evidence；新写入关系必须声明 `requires_oa=true`、`requires_invoice=false`，因此纯银行闭环留在 open/candidate，合并或补齐 OA 后可在无需发票时进入 paired。metadata 缺失的旧闭环关系 fail closed，仍按三栏完整后 paired，或由规则保存同步链路补齐 metadata 后按新规则分区。若闭环确认前已有 OA-bank relation，可合并为同一个包含 `oa` + `bank` rows 的 active case。
 - PostgreSQL SQL runtime 下外部往来闭环的银行流水事实源必须是 `bank_detail` SQL read model，并保留 Workbench 使用的 legacy/source row id；不能再从 legacy import snapshot 推导可闭环流水。
 - 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回原闭环关系再重新选择。
 - 外部往来页撤回只允许 row types 子集为 `{oa, bank}` 的 `turnover_manual_closure`；若已在关联台补齐发票或其他业务 row type，必须去关联台撤回完整关系。

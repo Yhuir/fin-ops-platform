@@ -1,6 +1,6 @@
 # 关联台关系事实源模块边界与 I/O
 
-日期：2026-06-29
+日期：2026-06-30
 
 ## 模块化状态
 
@@ -28,9 +28,10 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 关系写命令 | workbench、batch accounting、pending invoice、no-OA、turnover、ETC 修复工具 | 必须包含关系对象、方向、操作上下文和审计身份 |
+| 关系写命令 | workbench、batch accounting、pending invoice、no-OA、turnover、ETC 修复工具 | 必须包含关系对象、方向、操作上下文和审计身份。跨进程或生产修复场景必须让 command repository 的 load/save 接入 durable repository，不能只读进程内 `WorkbenchPairRelationService` snapshot。 |
 | no-OA relation metadata | `NoOaBankBatchApplicationService` | legacy `special_metadata` 可包含 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code`、`paired_requirement_version`；关系事实源负责原样保存和投影，不拥有标签规则解释 |
-| 流水规则批量处理 relation metadata | `BankFlowRuleBatchApplicationService` | `relation_mode=bank_flow_rule_batch`；`special_metadata` 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；关系事实源只保存和分发，不解释银行标签规则 |
+| 流水规则批量处理 relation metadata | `BankFlowRuleBatchApplicationService` submit / tag-rule sync | `relation_mode=bank_flow_rule_batch`；`special_metadata` 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；标签规则保存后也必须通过 command service 更新这些 requirement 字段。关系事实源只保存和分发，不解释银行标签规则 |
+| 外部往来闭环 relation metadata | `TurnoverLedgerWorkbenchPairPort` / 流水规则 tag-rule sync | `relation_mode=turnover_manual_closure`；`special_metadata` 至少包含 `source=turnover_ledger`、`turnover_relation_id`、`requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`。历史 `turnover:* manual_confirmed` 关系只能通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(..., relation_mode=turnover_manual_closure)` 受控升级并记录 before/after history |
 | 关系读请求 | 下游 read facade/service | 只暴露 read facade 或 repository port |
 | Refresh scope | `workbench_relation` manifest | month scope；`all` 只允许 fan-out command |
 
@@ -84,7 +85,7 @@
 ## Canonical facts ownership
 
 - Owned facts: `app.workbench_pair_relations`、`app.workbench_pair_relation_history`。
-- Allowed writes: `WorkbenchRelationCommandService`、relation UoW、明确 migration/repair adapter。
+- Allowed writes: `WorkbenchRelationCommandService`、relation UoW、明确 migration/repair adapter。`update_relation_metadata_for_case_id` 可更新 metadata/display tags/amount_check，并可在 command service 白名单校验后升级 relation mode；调用方不得绕过 command service 直接改 relation mode。
 - Allowed reads: `WorkbenchRelationReadFacade`、relation repository/read ports。
 - Downstream outputs: workbench_relation、workbench、bank_flow_rule_batch、pending invoice、input/output invoice usage、OA pending、tax、cost、search dirty scopes 或 owner producer 输出。
 - Forbidden paths: 调用方不得直接改关系表、不得自行拼 confirmed relation 状态、不得通过 legacy fallback 绕过 command service。

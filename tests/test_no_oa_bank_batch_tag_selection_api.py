@@ -1,9 +1,13 @@
 import json
+from pathlib import Path
+import shutil
+import tempfile
 import unittest
 from types import SimpleNamespace
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 def _json(response):
@@ -367,6 +371,204 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             payload["operation_barrier_targets"],
             [{"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}],
         )
+
+    def test_bank_flow_rule_tag_rule_update_resyncs_submitted_relation_requirements(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="fees-bank-flow-resync.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-03",
+                    "trade_time": "2026-05-03 10:20:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "8.80",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_id = app._import_service.list_transactions()[0].id
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "fee"}],
+            actor="tester",
+        )
+        submit_response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/submit-selection",
+            body=json.dumps({"transaction_ids": [row_id], "note": "提交流水规则"}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(submit_response.status_code, 200)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+        self.assertIsNotNone(relation)
+        self.assertEqual(relation["relation_mode"], "bank_flow_rule_batch")
+        self.assertTrue(relation["special_metadata"]["requires_oa"])
+        self.assertTrue(relation["special_metadata"]["requires_invoice"])
+
+        current_rules = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
+        next_rules = [
+            {
+                **rule,
+                "requires_oa": True,
+                "requires_invoice": False,
+            }
+            if rule["tag_code"] == "fee"
+            else rule
+            for rule in current_rules["rules"]
+        ]
+        save_response = app.handle_request(
+            "PUT",
+            "/api/bank-flow-rule-batches/tag-rules",
+            body=json.dumps({"expected_version": current_rules["version"], "rules": next_rules}),
+            headers={"Content-Type": "application/json"},
+        )
+        saved_rules = _json(save_response)
+
+        self.assertEqual(save_response.status_code, 200)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+        self.assertIsNotNone(relation)
+        metadata = relation["special_metadata"]
+        self.assertEqual(metadata["flow_rule_tag_code"], "fee")
+        self.assertTrue(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
+        self.assertEqual(metadata["flow_rule_version"], saved_rules["version"])
+
+    def test_bank_flow_rule_tag_rule_update_resyncs_relation_from_persistent_repository(self) -> None:
+        data_dir = Path(tempfile.mkdtemp(prefix="finops-test-bank-flow-rules-"))
+        self.addCleanup(shutil.rmtree, data_dir, ignore_errors=True)
+        app = build_application(data_dir=data_dir)
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="fees-bank-flow-persistent-resync.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-03",
+                    "trade_time": "2026-05-03 10:20:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "8.80",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_id = app._import_service.list_transactions()[0].id
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": row_id, "category_code": "fee"}],
+            actor="tester",
+        )
+        submit_response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/submit-selection",
+            body=json.dumps({"transaction_ids": [row_id], "note": "提交流水规则"}),
+            headers={"Content-Type": "application/json"},
+        )
+        batch_id = _json(submit_response)["batch"]["batch_id"]
+        app._workbench_pair_relation_service = WorkbenchPairRelationService()
+
+        current_rules = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
+        next_rules = [
+            {**rule, "requires_oa": True, "requires_invoice": False}
+            if rule["tag_code"] == "fee"
+            else rule
+            for rule in current_rules["rules"]
+        ]
+        save_response = app.handle_request(
+            "PUT",
+            "/api/bank-flow-rule-batches/tag-rules",
+            body=json.dumps({"expected_version": current_rules["version"], "rules": next_rules}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(save_response.status_code, 200)
+
+        relation_snapshot = app._state_store.load_workbench_pair_relations()["pair_relations"][batch_id]
+        metadata = relation_snapshot["special_metadata"]
+        self.assertEqual(relation_snapshot["relation_mode"], "bank_flow_rule_batch")
+        self.assertTrue(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
+
+    def test_tag_rule_update_upgrades_legacy_turnover_relation_from_persistent_repository(self) -> None:
+        data_dir = Path(tempfile.mkdtemp(prefix="finops-test-turnover-rules-"))
+        self.addCleanup(shutil.rmtree, data_dir, ignore_errors=True)
+        app = build_application(data_dir=data_dir)
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="turnover-bank-rule-sync.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-10",
+                    "trade_time": "2026-05-10 10:20:00",
+                    "counterparty_name": "杨丽萍",
+                    "debit_amount": "",
+                    "credit_amount": "50000.00",
+                    "summary": "暂借款",
+                },
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-22",
+                    "trade_time": "2026-05-22 14:40:00",
+                    "counterparty_name": "杨丽萍",
+                    "debit_amount": "50000.00",
+                    "credit_amount": "",
+                    "summary": "还借款",
+                },
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_ids = [transaction.id for transaction in app._import_service.list_transactions()]
+        app._bank_transaction_category_service.apply_updates(
+            [
+                {"transaction_id": row_ids[0], "category_code": "borrow_in_company_pending_repayment"},
+                {"transaction_id": row_ids[1], "category_code": "borrow_in_company_repaid"},
+            ],
+            actor="tester",
+        )
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="turnover:turnover_rel_legacy",
+            row_ids=[*row_ids, "oa-pay-turnover"],
+            row_types=["bank", "bank", "oa"],
+            relation_mode="manual_confirmed",
+            created_by="legacy-script",
+            month_scope="all",
+            note="旧往来款闭环关系",
+        )
+        app._state_store.save_workbench_pair_relations(app._workbench_pair_relation_service.snapshot())
+        app._workbench_pair_relation_service = WorkbenchPairRelationService()
+
+        current_rules = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
+        next_rules = [
+            {**rule, "requires_oa": True, "requires_invoice": False}
+            if rule["tag_code"] == "external_turnover"
+            else rule
+            for rule in current_rules["rules"]
+        ]
+        save_response = app.handle_request(
+            "PUT",
+            "/api/bank-flow-rule-batches/tag-rules",
+            body=json.dumps({"expected_version": current_rules["version"], "rules": next_rules}),
+            headers={"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(save_response.status_code, 200)
+        relation_snapshot = app._state_store.load_workbench_pair_relations()["pair_relations"]["turnover:turnover_rel_legacy"]
+        metadata = relation_snapshot["special_metadata"]
+        self.assertEqual(relation_snapshot["relation_mode"], "turnover_manual_closure")
+        self.assertTrue(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
+        self.assertEqual(metadata["paired_requirement_tag_codes"], ["external_turnover"])
+        self.assertEqual(metadata["paired_requirement_source"], "no_oa_bank_batch_tag_selection")
 
     def test_bank_flow_rule_reset_submitted_withdraws_all_submitted_batches(self) -> None:
         app = build_application()

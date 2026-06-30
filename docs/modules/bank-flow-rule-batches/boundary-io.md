@@ -1,6 +1,6 @@
 # 流水规则批量处理模块边界与 I/O
 
-日期：2026-06-29
+日期：2026-06-30
 
 ## 模块化状态
 
@@ -46,6 +46,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 标签规则 payload | 前端抽屉 | 返回 `active_tags`、`rules`、`requirements_by_tag_code`、`version`、`bank_auto_tag_rules_version`、`permissions`。不返回可编辑左侧标签字段。 |
+| 标签规则保存副作用 | `workbench-relations` / read models | 保存 `requires_oa` / `requires_invoice` 后，必须同步所有 active `relation_mode=bank_flow_rule_batch` 关系的 `special_metadata.requires_oa`、`requires_invoice`、`flow_rule_version`；同时同步匹配外部往来规则的 active `turnover:*` 关系，把旧 `manual_confirmed` 升级为 `turnover_manual_closure` 并写入 `requires_oa`、`requires_invoice`、`paired_requirement_tag_codes`、`paired_requirement_source`、`paired_requirement_version`。同步只能通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(...)`，且 relation command 的 load/save 必须接入 durable relation repository；不能依赖进程内 snapshot，不能让 Workbench 查询当前 settings 兜底，也不能直接改 relation 表。 |
 | 批次列表 payload | 页面 | 返回 summary、rows、status bucket、read model status、stale reasons、scope keys 和分页信息。非 fresh 不能展示为真实空态。 |
 | Relation command | `workbench-relations` | 使用 `relation_mode=bank_flow_rule_batch`，metadata 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`。 |
 | 关联台展示 | `reconciliation-workbench` | 银行流水数 `>3` 时默认折叠；是否进入 paired 由 required row type 是否已满足决定。 |
@@ -65,6 +66,7 @@
 - 过渡期使用 `app_settings.no_oa_bank_batch_tag_selection.requirements_by_tag_code`，通过 `/api/bank-flow-rule-batches/tag-rules` 暴露为 `rules`。
 - 新 API 拒绝 `selected_tag_codes` / `selectedTagCodes`；legacy no-OA API 仍可读取旧字段用于历史兼容。
 - 未配置 active tag 默认 `requires_oa=true`、`requires_invoice=true`。
+- 规则设置不是关联台运行时事实源。已提交批次是否进入 paired/open 只读取 relation metadata；规则保存后若 requirement 变化，规则 owner 必须重写 active bank-flow relation metadata 并触发 `bank_flow_rule_batch` / `workbench_relation` / `workbench` 相关刷新。
 
 目标拆分仍可新增独立表 `app.bank_flow_rule_tag_requirements`，前提是保留版本、审计和乐观锁，并提供旧 settings family 的一次性迁移。
 

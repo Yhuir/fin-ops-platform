@@ -79,7 +79,8 @@ same group flow rows selected
   -> Turnover manual confirmed relation
   -> Workbench active pair relation
   -> merge selected banks plus any selected banks' existing OA-bank active relations into one turnover_manual_closure case
-  -> Workbench open relation until invoice/full business relation is completed in Workbench
+  -> Workbench evaluates turnover_manual_closure relation metadata requires_oa/requires_invoice
+  -> bank-only stays open when requires_oa=true; OA + bank can become paired when requires_invoice=false
   -> turnover/workbench/workbench_relation dirty-outbox refresh
   -> API 返回 operation freshness targets
   -> frontend waits affected turnover_ledger month scopes + affected workbench_relation scopes as hard operation visibility targets
@@ -99,6 +100,7 @@ same group flow rows selected
 - `idempotency_key` 相同 payload 重放返回第一次结果；不同 payload 返回 409。
 - 已确认后不能追加流水；漏选时必须先撤回原闭环关系，再重新选择完整流水确认。
 - 两笔流水保留 `evidence.closure_mode=manual_zero_difference_pair`；三笔及以上使用 `manual_zero_difference_group`。
+- 写入 Workbench active relation 时必须携带 `special_metadata.requires_oa=true`、`requires_invoice=false`、`paired_requirement_source` 和版本。关联台只读取 relation metadata 判断 required row type 是否满足；metadata 缺失的旧关系 fail closed，不得在关联台查询当前规则设置兜底。
 
 ### 撤回
 
