@@ -780,7 +780,7 @@ class BankBatchApplicationService:
     ) -> dict[str, object]:
         previous_batch_snapshot = self._bank_batch_service.snapshot()
         previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
-        candidates = self._submitted_no_oa_rebaseline_candidates()
+        candidates = self._submitted_batches_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE)
         withdrawn_batches: list[dict[str, object]] = []
         changed_case_ids: list[str] = []
         affected_months: set[str] = set()
@@ -910,9 +910,17 @@ class BankBatchApplicationService:
         }
 
     def _submitted_no_oa_rebaseline_candidates(self) -> list[dict[str, object]]:
+        return self._submitted_batches_for_relation_mode(NO_OA_BANK_BATCH_RELATION_MODE)
+
+    def _submitted_batches_for_relation_mode(self, relation_mode: str) -> list[dict[str, object]]:
         return [
             batch
-            for batch in self._bank_batch_service.list_batches({"bucket": "submitted"})
+            for batch in self._bank_batch_service.list_batches(
+                {
+                    "bucket": "submitted",
+                    "relation_mode": self._read_model_key_for_relation_mode(relation_mode),
+                }
+            )
             if str(batch.get("status") or "").strip() == "submitted"
         ]
 

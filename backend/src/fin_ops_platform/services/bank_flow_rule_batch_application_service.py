@@ -9,6 +9,42 @@ from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RE
 class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
     """Application boundary for 流水规则批量处理."""
 
+    def _refresh_bank_flow_rule_batch_runtime_snapshot(self) -> None:
+        self.refresh_batches(
+            apply_relation_repairs=False,
+            scope_key="all",
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+    def detail_payload(self, batch_id: str) -> dict[str, object]:
+        self._refresh_bank_flow_rule_batch_runtime_snapshot()
+        return super().detail_payload(batch_id)
+
+    def withdraw_batch(
+        self,
+        batch_id: str,
+        *,
+        actor: str,
+        expected_version: int | None,
+        reason: str | None,
+    ) -> dict[str, object]:
+        self._refresh_bank_flow_rule_batch_runtime_snapshot()
+        return super().withdraw_batch(
+            batch_id,
+            actor=actor,
+            expected_version=expected_version,
+            reason=reason,
+        )
+
+    def reset_submitted_bank_flow_rule_batches(
+        self,
+        *,
+        actor: str,
+        reason: str | None,
+    ) -> dict[str, object]:
+        self._refresh_bank_flow_rule_batch_runtime_snapshot()
+        return super().reset_submitted_bank_flow_rule_batches(actor=actor, reason=reason)
+
     def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
         if self._state_store is None:
             return

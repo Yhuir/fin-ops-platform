@@ -237,3 +237,18 @@
 - `tests/test_no_oa_bank_batch_tag_selection_api.py` 覆盖提交后 reset、relation 取消、row 回到未提交候选。
 - `web/src/test/BankFlowRuleBatchPage.test.tsx` 覆盖页面按钮、API payload、operation event。
 - `web/e2e/bank-flow-rule-batches-flow.spec.ts` 覆盖浏览器提交后 reset 并回到未提交。
+
+## 2026-06-30 已提交批次运行时同步修复
+
+目标：
+
+- 修复生产中列表显示 `bank_flow_rule_batch` submitted 批次，但详情/撤回返回“流水规则批次不存在”的问题。
+
+关键决策：
+
+- 列表以 SQL read model 为入口，详情/撤回仍必须操作 canonical batch service。对于由 worker 从 active relation 回灌出来的 submitted 批次，API 进程启动期快照可能晚于 worker 写入；因此 bank-flow 详情、撤回和 reset 入口先刷新 `relation_mode=bank_flow_rule_batch` runtime snapshot，再读取/修改批次。
+- reset submitted 候选显式限定 `relation_mode=bank_flow_rule_batch`，禁止 legacy no-OA submitted 批次混入新页面重置链路。
+
+验证：
+
+- `tests/test_bank_flow_rule_batch_application_service.py` 覆盖 detail/withdraw 前刷新 runtime snapshot，以及 submitted 候选 relation mode 边界。

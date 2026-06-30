@@ -7,7 +7,7 @@
 | 类别 | 是否适用 | 计划覆盖 |
 | --- | --- | --- |
 | 1. Business core unit tests | 适用 | 已覆盖 checkbox requirement metadata、paired/open 判定、`requires_invoice`、`requires_oa`+`requires_invoice`、以及只要求 `requires_oa` 时补齐 OA 即可 paired 的 fail-closed/complete 组合、折叠阈值、`bank_flow_rule_batch` active relation / submitted batch fact 回灌 submitted 批次且不污染 legacy no-OA 列表、rebaseline 状态转换；未知/停用/重复标签仍需扩展。 |
-| 2. Service-layer tests | 适用 | 已覆盖批次提交 relation command payload、规则保存后从 durable relation repository 同步 active `bank_flow_rule_batch` relation requirement metadata、规则保存后同步旧 `turnover:* manual_confirmed` relation 为 `turnover_manual_closure`、adapter repository-load 守卫、reset submitted 批量撤回、应用层列表把 `relation_mode` 传入 read repository、submitted/withdrawn 批次保留按 refresh mode 隔离、rebaseline dry-run/apply manifest 校验和幂等；独立规则审计和 partial failure rollback 仍需扩展。 |
+| 2. Service-layer tests | 适用 | 已覆盖批次提交 relation command payload、规则保存后从 durable relation repository 同步 active `bank_flow_rule_batch` relation requirement metadata、规则保存后同步旧 `turnover:* manual_confirmed` relation 为 `turnover_manual_closure`、adapter repository-load 守卫、detail/withdraw 前刷新 bank-flow runtime snapshot、reset submitted 候选 relation mode 边界、reset submitted 批量撤回、应用层列表把 `relation_mode` 传入 read repository、submitted/withdrawn 批次保留按 refresh mode 隔离、rebaseline dry-run/apply manifest 校验和幂等；独立规则审计和 partial failure rollback 仍需扩展。 |
 | 3. API contract tests | 适用 | 已覆盖 `GET/PUT /api/bank-flow-rule-batches/tag-rules`，包括 PUT 后已提交 relation 的 `requires_oa/requires_invoice/flow_rule_version` 同步、PUT 后旧外部往来 relation 的 `requires_oa/requires_invoice/paired_requirement_*` 同步和 relation mode 升级、`GET /api/bank-flow-rule-batches` 路由 relation mode、`POST /submit-selection` 提交后进入 bank-flow submitted 且不进入 legacy no-OA submitted、`POST /reset-submitted`、`POST /rebaseline-no-oa/dry-run`、`POST /rebaseline-no-oa/apply`、缺 manifest 和 stale manifest 错误；权限错误 shape 仍主要靠浏览器 role matrix。 |
 | 4. Read model, cache, and background job tests | 适用 | 已覆盖 `bank_flow_rule_batch` 独立 operation barrier readiness、禁止回退 no-OA readiness、独立 refresh producer scope、manifest/registry/scope policy/worker event/RabbitMQ dispatch 合同、bank-flow repository port、bank-flow refresh persistence IO、relation-mode read model 分区索引，以及 Workbench SQL active generation 按外部往来 relation metadata 分区；独立物理投影表、专属 source version/schema version 仍待物理表拆分时补。 |
 | 5. Frontend component and interaction tests | 适用 | xlsx/grid 抽屉、左侧只读、OA/发票 checkbox、保存失败、标签变化后 grid 同步、选择清空、批量提交 loading/error/empty/stale 状态、关联台 bank-flow 折叠行不显示旧计数文案且保留“展开 N 条明细”。 |
@@ -26,7 +26,7 @@
 - 当前实现：`tests/test_workbench_candidate_grouping.py`
 - 当前实现：`tests/test_workbench_relation_command_service.py`
 - 后续拆分：`tests/test_bank_flow_rule_batch_requirement_service.py`
-- 后续拆分：`tests/test_bank_flow_rule_batch_application_service.py`
+- 当前实现：`tests/test_bank_flow_rule_batch_application_service.py`
 - 后续拆分：`tests/test_bank_flow_rule_batch_api.py`
 - 后续拆分：`tests/test_bank_flow_rule_batch_read_model_refresh.py`
 - `tests/test_bank_flow_rule_batch_rebaseline_service.py`
