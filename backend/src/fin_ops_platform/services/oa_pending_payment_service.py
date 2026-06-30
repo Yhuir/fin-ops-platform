@@ -119,6 +119,9 @@ class OaPendingPaymentQueryService:
         self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy()
         self._require_fresh_relations = require_fresh_relations
 
+    def in_progress_oa_projection(self) -> Any | None:
+        return self._in_progress_oa_projection
+
     def list_rows(
         self,
         *,

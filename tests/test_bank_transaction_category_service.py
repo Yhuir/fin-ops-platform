@@ -681,6 +681,38 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertEqual(updated_fee["rules"]["none_of"], ["退手续费"])
         self.assertEqual(updated_fee["rules"]["regex_any"], ["短信\\s*服务费"])
 
+    def test_auto_tag_rules_update_marks_direction_and_scope_only_change_as_changed(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(None)
+        current = service.auto_tag_rules_payload(service.tag_dictionary_payload())
+        next_active = [
+            (
+                {
+                    **rule,
+                    "direction": "expense",
+                    "account_scope": {"type": "bank", "values": ["建行"]},
+                }
+                if rule["code"] == "fee"
+                else rule
+            )
+            for rule in current["active_rules"]
+        ]
+
+        result = BankTransactionCategoryService.normalize_auto_tag_rules_update(
+            {
+                "expected_version": current["version"],
+                "active_rules": next_active,
+                "archived_rules": current["archived_rules"],
+            },
+            previous_tag_dictionary=service.tag_dictionary_payload(),
+        )
+
+        updated = BankTransactionCategoryService.auto_tag_rules_payload(result["tag_dictionary"])
+        updated_fee = next(rule for rule in updated["active_rules"] if rule["code"] == "fee")
+        self.assertTrue(result["changes"]["changed"])
+        self.assertIn("fee", [change["code"] for change in result["changes"]["rule_payload_changes"]])
+        self.assertEqual(updated_fee["direction"], "expense")
+        self.assertEqual(updated_fee["account_scope"], {"type": "bank", "values": ["建行"]})
+
     def test_auto_tag_rules_update_allows_duplicate_archived_labels(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(None)
         previous = service.tag_dictionary_payload()

@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-30 - auto-tag rule direction-only save closure
+
+- 目标：修复银行明细自动标签规则中“水电费”等规则仅修改流水类型后提示保存成功但实际仍为“不限”的问题。
+- 影响范围：银行明细自动标签规则 owner、settings 持久化 no-op 判定、审计 metadata、bank detail refresh enqueue；不改变前端表单协议、API 路由 owner、read model schema、worker scope 或下游模块 I/O。
+- 关键决策：根因不是前端漏传字段，而是 `BankTransactionCategoryService._auto_tag_rule_changes(...)` 使用旧的字段白名单判断变更，未覆盖 `direction` 和 `account_scope`。修复改为比较规范化后的规则 payload 指纹，并只排除明确的展示字段，避免未来新增持久化规则字段再次被漏判为 no-op。
+- 文档影响：更新本实施记录和测试矩阵；模块边界/I/O 文档不变，因为自动标签写入口和 refresh 输出合同未改变。
+- 测试覆盖：新增 business core 单测覆盖 direction/account scope-only 变更；新增 API/service 回归覆盖 PUT 后版本递增、状态持久化、重载可见、refresh enqueue 和审计 metadata。
+- 验证命令：见 `docs/modules/bank-details/tests.md` 同日记录。
+- 未测风险：本地验证不执行真实 worker drain；生产验证需要发布后用真实环境重新执行一次受控保存/重载/刷新检查。
+- 后续事项：发布后执行生产验证，确认页面保存“水电费：支出”后重开抽屉仍为支出，且银行明细刷新完成。
+
 ## 2026-06-25 - route-owner local closure audit retry
 
 - 目标：执行 `server-py:bank-details-route-owner-local-closure-audit-retry`，复审禁用 PATCH categories 迁移后银行明细 route owner 是否仍有 app-owned callback 残留。

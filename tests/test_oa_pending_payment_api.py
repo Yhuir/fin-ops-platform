@@ -477,6 +477,59 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             )
         )
 
+    def test_bank_transaction_candidates_use_in_progress_projection_from_query_service(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            target_oa = self._oa(
+                "oa-pay-candidate-source",
+                "胡蓉",
+                "350.00",
+                workflow_status="in_progress",
+            )
+            may_bank = BankTransaction(
+                id="bank-candidate-may",
+                account_no="622200001234",
+                txn_direction=TransactionDirection.OUTFLOW,
+                counterparty_name_raw="候选供应商",
+                amount=Decimal("350.00"),
+                signed_amount=Decimal("-350.00"),
+                txn_date="2026-05-21",
+                trade_time="2026-05-21 10:00:00",
+            )
+            june_bank = BankTransaction(
+                id="bank-candidate-june",
+                account_no="622200001234",
+                txn_direction=TransactionDirection.OUTFLOW,
+                counterparty_name_raw="其它月份供应商",
+                amount=Decimal("350.00"),
+                signed_amount=Decimal("-350.00"),
+                txn_date="2026-06-21",
+                trade_time="2026-06-21 10:00:00",
+            )
+            payment_repository = FakePaymentStatusRepository(flow_id="flow-candidate-source")
+            app._import_service = ImportNormalizationService(existing_transactions=[may_bank, june_bank])
+            app._oa_payment_status_repository_instance = payment_repository
+            app._postgres_oa_projection_repository = lambda: StaticOAProjection([])  # type: ignore[method-assign]
+            app._oa_pending_payment_query_service = OaPendingPaymentQueryService(
+                import_service=app._import_service,
+                oa_projection=StaticOAProjection([]),
+                in_progress_oa_projection=StaticOAProjection([target_oa]),
+                payment_status_repository=payment_repository,
+            )
+            app._oa_pending_payment_command_service_instance = None
+            app._oa_pending_payment_api_routes = None
+
+            response = app.handle_request(
+                "GET",
+                "/api/oa-pending-payments/bank-transaction-candidates?relation_status=all&oa_row_ids=oa-pay-candidate-source",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual([row["id"] for row in payload["rows"]], ["bank-candidate-may"])
+        self.assertEqual(payload["filters"]["oaRowIds"], ["oa-pay-candidate-source"])
+        self.assertEqual(payload["filters"]["monthScopes"], ["2026-05"])
+
     def test_auto_reconcile_persists_relation_and_reload_is_noop(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)

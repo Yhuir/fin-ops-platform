@@ -2,6 +2,30 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-06-30 - auto-tag rule direction-only save test note
+
+`bank-details:auto-tag-rule-direction-only-save` 已完成：
+
+- Business core unit tests：适用；`tests/test_bank_transaction_category_service.py` 新增 direction/account scope-only 变更回归，覆盖自动标签规则 owner 对规范化规则 payload 的持久化变更判定。
+- Service-layer tests：适用；`tests/test_bank_auto_tag_rules_api.py` 新增 PUT 回归，覆盖 `AppSettingsService` 保存后重载仍可读、版本递增、审计 metadata 记录 `rule_payload_changes`。
+- API contract tests：适用；同一 PUT 回归覆盖 `/api/bank-details/auto-tag-rules` 在 direction-only 变更时返回 200、返回新版本和新方向字段。
+- Read model/cache/background job tests：适用；同一 PUT 回归断言 `bank_detail/all/bank_auto_tag_rules_changed` refresh enqueue，不执行真实 worker drain。
+- Frontend component and interaction tests：不改前端；复跑 `web/src/test/AutoTagRulesDrawer.test.tsx` 验证抽屉仍会把 direction 发送到 PUT payload。
+- End-to-end business-flow integration tests：生产验证适用；本地未新增 Playwright 全链路，因为缺陷根因在后端 no-op 判定，生产发布后需做受控页面保存/重载/刷新验证。
+- Existing feature regression tests：适用；复跑自动标签 API、分类 service 和抽屉相关前端测试，防止系统规则、reapply、file replacement、规则字段序列化回退。
+
+验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_transaction_category_service -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v
+cd web && npm test -- --run src/test/AutoTagRulesDrawer.test.tsx
+bash scripts/verify.sh docs
+git diff --check
+```
+
+未测风险：本地验证不连接真实 PostgreSQL/RabbitMQ/Redis，不执行生产 worker drain；生产页面写入验证需发布后再闭环。
+
 ## 2026-06-26 - bank detail tag read repository port test note
 
 `read-model:bank-detail-tag-read-port-for-downstream` 已完成：

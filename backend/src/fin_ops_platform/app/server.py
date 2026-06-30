@@ -6674,7 +6674,7 @@ class Application:
             return service
         service = OaPendingPaymentCommandService(
             import_service=self._import_service,
-            oa_projection=self._oa_pending_payment_projection(),
+            oa_projection=self._oa_pending_payment_command_oa_projection(),
             completed_oa_projection=self._postgres_oa_projection_repository() or getattr(self._workbench_query_service, "_oa_adapter", None),
             relation_command_service=self._workbench_relation_command_service(repository=getattr(self, "_state_store", None)),
             pending_relation_service=self._oa_pending_payment_relation_repository(),
@@ -6685,6 +6685,11 @@ class Application:
         )
         self._oa_pending_payment_command_service_instance = service
         return service
+
+    def _oa_pending_payment_command_oa_projection(self) -> object | None:
+        if getattr(self, "_oa_pending_payment_source_projection_override", None) is not None:
+            return self._oa_pending_payment_projection()
+        return self._oa_pending_payment_service().in_progress_oa_projection()
 
     def _oa_pending_payment_relation_repository(self) -> object | None:
         override = getattr(self, "_oa_pending_payment_relation_repository_override", None)

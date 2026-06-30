@@ -213,6 +213,45 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("no_oa_bank_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
+    def test_put_direction_only_change_persists_reloads_and_triggers_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            app = build_application(data_dir=data_dir)
+            queue = _ReadModelQueue()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+            current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+            active = [
+                {**rule, "direction": "expense"}
+                if rule["code"] == "fee"
+                else rule
+                for rule in current["active_rules"]
+            ]
+
+            with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+                response = self._update_auto_tag_rules_response(
+                    app,
+                    json.dumps(
+                        {
+                            "expected_version": current["version"],
+                            "active_rules": active,
+                            "archived_rules": current["archived_rules"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    {},
+                )
+
+            payload = json.loads(response.body)
+            reloaded = build_application(data_dir=data_dir)._app_settings_service.get_bank_auto_tag_rules_payload()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["version"], current["version"] + 1)
+        self.assertEqual(next(rule for rule in payload["active_rules"] if rule["code"] == "fee")["direction"], "expense")
+        self.assertEqual(next(rule for rule in reloaded["active_rules"] if rule["code"] == "fee")["direction"], "expense")
+        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        audit = app._audit_service.as_dicts()[-1]
+        self.assertEqual(audit["metadata"]["rule_payload_changes"], [{"code": "fee"}])
+
     def test_reapply_endpoint_enqueues_bank_detail_refresh_without_changing_rules(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()

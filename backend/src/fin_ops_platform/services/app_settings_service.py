@@ -1886,6 +1886,7 @@ class AppSettingsService:
                 "reenabled_codes": list(event.get("reenabled_codes") or []),
                 "priority_changes": list(event.get("priority_changes") or []),
                 "rule_changes": list(event.get("rule_changes") or []),
+                "rule_payload_changes": list(event.get("rule_payload_changes") or []),
                 "source": dict(event.get("source") or {}),
                 "reused_codes": list(event.get("reused_codes") or []),
                 "added_codes": list(event.get("added_codes") or []),

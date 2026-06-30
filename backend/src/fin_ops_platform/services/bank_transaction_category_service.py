@@ -1795,6 +1795,21 @@ class BankTransactionCategoryService:
     def _auto_tag_rule_changes(cls, previous: dict[str, Any], next_payload: dict[str, Any]) -> dict[str, Any]:
         previous_rules = cls.auto_tag_rules_payload(previous)
         next_rules = cls.auto_tag_rules_payload(next_payload)
+        ignored_fingerprint_keys = {
+            "priority_label",
+            "rule_summary",
+            "editable",
+            "archivable",
+            "sortable",
+        }
+
+        def rule_fingerprint(rule: dict[str, Any]) -> dict[str, Any]:
+            return {
+                key: deepcopy(value)
+                for key, value in rule.items()
+                if key not in ignored_fingerprint_keys
+            }
+
         previous_by_code = {
             rule["code"]: rule
             for rule in [*previous_rules["active_rules"], *previous_rules["archived_rules"]]
@@ -1861,7 +1876,12 @@ class BankTransactionCategoryService:
             for code in sorted(set(previous_by_code).intersection(next_by_code))
             if previous_by_code[code].get("rules") != next_by_code[code].get("rules")
         ]
-        changed = bool(added or renamed or archived or reenabled or priority_changes or rule_changes)
+        rule_payload_changes = [
+            {"code": code}
+            for code in sorted(set(previous_by_code).intersection(next_by_code))
+            if rule_fingerprint(previous_by_code[code]) != rule_fingerprint(next_by_code[code])
+        ]
+        changed = bool(added or archived or reenabled or rule_payload_changes)
         return {
             "changed": changed,
             "added_tags": added,
@@ -1870,6 +1890,7 @@ class BankTransactionCategoryService:
             "reenabled_codes": reenabled,
             "priority_changes": priority_changes,
             "rule_changes": rule_changes,
+            "rule_payload_changes": rule_payload_changes,
         }
 
     @classmethod
