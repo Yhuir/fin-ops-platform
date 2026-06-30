@@ -158,8 +158,10 @@ class NoOaBankBatchService:
         eligible_batch_types: set[str] | list[str] | tuple[str, ...] | None = None,
         apply_relation_repairs: bool = True,
         refresh_scope_key: str = "all",
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> list[dict[str, Any]]:
         normalized_refresh_scope_key = str(refresh_scope_key or "all").strip() or "all"
+        normalized_relation_mode = self._normalize_relation_mode(relation_mode)
         if self._is_month_scope_key(normalized_refresh_scope_key):
             return self._build_batches_for_month_scope(
                 refresh_scope_key=normalized_refresh_scope_key,
@@ -169,6 +171,7 @@ class NoOaBankBatchService:
                 source_versions=source_versions,
                 eligible_batch_types=eligible_batch_types,
                 apply_relation_repairs=apply_relation_repairs,
+                relation_mode=normalized_relation_mode,
             )
 
         rows = [dict(row) for row in list(bank_rows or []) if isinstance(row, dict)]
@@ -177,7 +180,7 @@ class NoOaBankBatchService:
         eligible_types = self._eligible_batch_types(eligible_batch_types)
         self._last_legacy_migration_result = self._empty_legacy_migration_result()
 
-        if apply_relation_repairs:
+        if apply_relation_repairs and normalized_relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
             self._migrate_legacy_active_relations(
                 rows=rows,
                 categories=categories,
@@ -202,6 +205,7 @@ class NoOaBankBatchService:
             active_relations,
             rows,
             categories,
+            relation_mode=normalized_relation_mode,
         )
         occupied_row_ids = self._active_relation_row_ids(effective_active_relations)
         relation_backed_submitted_batches = self._relation_backed_submitted_batches(
@@ -209,24 +213,28 @@ class NoOaBankBatchService:
             rows,
             categories,
             source_version_payload,
+            relation_mode=normalized_relation_mode,
         )
 
         generated: dict[str, dict[str, Any]] = {}
-        generated.update(self._build_single_side_batches(rows, categories, occupied_row_ids, source_version_payload, eligible_types))
-        generated.update(
-            self._build_internal_transfer_batches(
-                rows,
-                categories,
-                occupied_row_ids,
-                source_version_payload,
-                eligible_types,
-            )
+        single_side_batches = self._build_single_side_batches(rows, categories, occupied_row_ids, source_version_payload, eligible_types)
+        self._assign_relation_mode(single_side_batches, normalized_relation_mode)
+        generated.update(single_side_batches)
+        internal_transfer_batches = self._build_internal_transfer_batches(
+            rows,
+            categories,
+            occupied_row_ids,
+            source_version_payload,
+            eligible_types,
         )
+        self._assign_relation_mode(internal_transfer_batches, normalized_relation_mode)
+        generated.update(internal_transfer_batches)
 
         submitted_or_withdrawn = {
             batch_id: deepcopy(batch)
             for batch_id, batch in self._batches.items()
             if batch.get("status") in {"submitted", "withdrawn", "stale", "superseded"}
+            and self._batch_relation_mode(batch) == normalized_relation_mode
         }
         for batch_id, batch in submitted_or_withdrawn.items():
             if batch.get("status") == "superseded":
@@ -247,7 +255,11 @@ class NoOaBankBatchService:
         for batch_id, relation_backed_batch in relation_backed_submitted_batches.items():
             existing_batch = self._batches.get(batch_id)
             current_generated = generated.get(batch_id)
-            if isinstance(current_generated, dict) and str(current_generated.get("status") or "") == "submitted":
+            if (
+                isinstance(current_generated, dict)
+                and str(current_generated.get("status") or "") == "submitted"
+                and self._batch_relation_mode(current_generated) == normalized_relation_mode
+            ):
                 continue
             if (
                 not isinstance(existing_batch, dict)
@@ -288,6 +300,7 @@ class NoOaBankBatchService:
         source_versions: dict[str, Any] | None,
         eligible_batch_types: set[str] | list[str] | tuple[str, ...] | None,
         apply_relation_repairs: bool,
+        relation_mode: str,
     ) -> list[dict[str, Any]]:
         original_batches = deepcopy(self._batches)
         original_audit_log = deepcopy(self._audit_log)
@@ -310,6 +323,7 @@ class NoOaBankBatchService:
             eligible_batch_types=eligible_batch_types,
             apply_relation_repairs=apply_relation_repairs,
             refresh_scope_key="all",
+            relation_mode=relation_mode,
         )
         scoped_snapshot = scoped_service.snapshot()
         scoped_snapshot_batches = scoped_snapshot.get("batches") if isinstance(scoped_snapshot, dict) else {}
@@ -353,7 +367,9 @@ class NoOaBankBatchService:
         row_ids: list[str],
         actor: str,
         note: str | None = None,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> dict[str, Any]:
+        normalized_relation_mode = self._normalize_relation_mode(relation_mode)
         rows_by_id = {self._row_id(row): dict(row) for row in list(bank_rows or []) if self._row_id(row)}
         selected_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
         if not selected_row_ids:
@@ -406,6 +422,7 @@ class NoOaBankBatchService:
             source_versions=dict(source_versions or {}),
             evidence=evidence,
         )
+        draft["relation_mode"] = normalized_relation_mode
         self._batches[str(draft["batch_id"])] = self._normalize_batch(draft)
         return self.submit_batch(
             str(draft["batch_id"]),
@@ -422,6 +439,8 @@ class NoOaBankBatchService:
         original_active_relations: list[dict[str, Any]],
         rows: list[dict[str, Any]],
         categories: dict[str, dict[str, Any]],
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> list[dict[str, Any]]:
         migrated_case_ids = {
             str(case_id).strip()
@@ -437,7 +456,11 @@ class NoOaBankBatchService:
                 continue
             effective_by_case_id[case_id] = deepcopy(relation)
 
-        for relation in self._submitted_batch_relation_facts(rows, categories):
+        for relation in self._submitted_batch_relation_facts(
+            rows,
+            categories,
+            relation_mode=relation_mode,
+        ):
             case_id = str(relation.get("case_id") or "").strip()
             if case_id:
                 effective_by_case_id[case_id] = relation
@@ -447,10 +470,15 @@ class NoOaBankBatchService:
         self,
         rows: list[dict[str, Any]],
         categories: dict[str, dict[str, Any]],
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> list[dict[str, Any]]:
+        normalized_relation_mode = self._normalize_relation_mode(relation_mode)
         facts: list[dict[str, Any]] = []
         for batch in self._batches.values():
             if str(batch.get("status") or "") != "submitted":
+                continue
+            if self._batch_relation_mode(batch) != normalized_relation_mode:
                 continue
             if not self._submitted_batch_still_current(batch, rows, categories):
                 continue
@@ -467,7 +495,7 @@ class NoOaBankBatchService:
                     "case_id": relation_case_id,
                     "row_ids": row_ids,
                     "row_types": ["bank" for _ in row_ids],
-                    "relation_mode": NO_OA_BANK_BATCH_RELATION_MODE,
+                    "relation_mode": normalized_relation_mode,
                     "status": "active",
                     "month_scope": str(batch.get("scope_month") or "all"),
                     "created_by": str(batch.get("submitted_by") or batch.get("created_by") or ""),
@@ -496,6 +524,10 @@ class NoOaBankBatchService:
             value = str(resolved_filters.get(filter_key) or "").strip()
             if value:
                 batches = [batch for batch in batches if str(batch.get(field_name) or "") == value]
+        relation_mode = str(resolved_filters.get("relation_mode") or "").strip()
+        if relation_mode:
+            target_relation_mode = self._normalize_relation_mode(relation_mode)
+            batches = [batch for batch in batches if self._batch_relation_mode(batch) == target_relation_mode]
         bucket = str(resolved_filters.get("bucket") or "").strip()
         if bucket and bucket != "all":
             batches = [batch for batch in batches if str(batch.get("status_bucket") or "") == bucket]
@@ -567,7 +599,7 @@ class NoOaBankBatchService:
             return batch
         if batch.get("status") not in {"submitted", "stale"}:
             raise ValueError("only_submitted_no_oa_bank_batch_can_be_withdrawn")
-        if batch.get("status") == "stale" and not self._has_active_no_oa_relation(batch):
+        if batch.get("status") == "stale" and not self._has_active_relation_for_batch(batch):
             raise ValueError("stale_no_oa_bank_batch_has_no_active_relation_to_withdraw")
         self._check_expected_version(batch, expected_version)
 
@@ -1472,11 +1504,14 @@ class NoOaBankBatchService:
         rows: list[dict[str, Any]],
         categories: dict[str, dict[str, Any]],
         source_versions: dict[str, Any],
+        *,
+        relation_mode: str,
     ) -> dict[str, dict[str, Any]]:
+        normalized_relation_mode = self._normalize_relation_mode(relation_mode)
         rows_by_id = {self._row_id(row): row for row in list(rows or []) if self._row_id(row)}
         batches: dict[str, dict[str, Any]] = {}
         for relation in list(active_relations or []):
-            if not isinstance(relation, dict) or not self._is_no_oa_relation(relation):
+            if not isinstance(relation, dict) or not self._relation_matches_mode(relation, normalized_relation_mode):
                 continue
             case_id = str(relation.get("case_id") or "").strip()
             batch_id = self._relation_source_batch_id(relation) or case_id
@@ -1510,6 +1545,7 @@ class NoOaBankBatchService:
             batch = {
                 "batch_id": batch_id,
                 "batch_key": str(evidence.get("batch_key") or f"relation:{case_id}"),
+                "relation_mode": normalized_relation_mode,
                 "batch_type": batch_type,
                 "batch_label": batch_label,
                 "scope_month": scope_month,
@@ -1532,11 +1568,11 @@ class NoOaBankBatchService:
                 "source_versions": deepcopy(source_versions),
                 "evidence": {
                     **evidence,
-                    "source": "active_no_oa_relation",
+                    "source": f"active_{normalized_relation_mode}_relation",
                     "relation_backed_projection": True,
                     "relation_case_id": case_id,
                 },
-                "category_source": "active_no_oa_relation",
+                "category_source": f"active_{normalized_relation_mode}_relation",
                 "created_by": str(relation.get("created_by") or NO_OA_LEGACY_RELATION_MIGRATION_SOURCE),
                 "created_at": str(relation.get("created_at") or self._timestamp()),
                 "submitted_by": str(relation.get("created_by") or NO_OA_LEGACY_RELATION_MIGRATION_SOURCE),
@@ -2454,21 +2490,46 @@ class NoOaBankBatchService:
         )
 
     @staticmethod
-    def _is_no_oa_relation(relation: dict[str, Any]) -> bool:
-        if str(relation.get("relation_mode") or "").strip() == NO_OA_BANK_BATCH_RELATION_MODE:
-            return True
+    def _normalize_relation_mode(relation_mode: str | None) -> str:
+        return str(relation_mode or NO_OA_BANK_BATCH_RELATION_MODE).strip() or NO_OA_BANK_BATCH_RELATION_MODE
+
+    @classmethod
+    def _relation_mode_from_relation(cls, relation: dict[str, Any]) -> str:
+        direct_mode = str(relation.get("relation_mode") or "").strip()
+        if direct_mode:
+            return cls._normalize_relation_mode(direct_mode)
         special_metadata = relation.get("special_metadata")
-        return (
-            isinstance(special_metadata, dict)
-            and str(special_metadata.get("relation_mode") or special_metadata.get("source") or "").strip()
-            in {NO_OA_BANK_BATCH_RELATION_MODE, "no_oa_bank_batch"}
-        )
+        if isinstance(special_metadata, dict):
+            metadata_mode = str(special_metadata.get("relation_mode") or special_metadata.get("source") or "").strip()
+            if metadata_mode:
+                return cls._normalize_relation_mode(metadata_mode)
+        return NO_OA_BANK_BATCH_RELATION_MODE
+
+    @classmethod
+    def _relation_matches_mode(cls, relation: dict[str, Any], relation_mode: str) -> bool:
+        return cls._relation_mode_from_relation(relation) == cls._normalize_relation_mode(relation_mode)
+
+    @classmethod
+    def _is_no_oa_relation(cls, relation: dict[str, Any]) -> bool:
+        return cls._relation_matches_mode(relation, NO_OA_BANK_BATCH_RELATION_MODE)
+
+    @classmethod
+    def _batch_relation_mode(cls, batch: dict[str, Any]) -> str:
+        return cls._normalize_relation_mode(str(batch.get("relation_mode") or ""))
+
+    @classmethod
+    def _assign_relation_mode(cls, batches: dict[str, dict[str, Any]], relation_mode: str) -> None:
+        normalized_relation_mode = cls._normalize_relation_mode(relation_mode)
+        for batch in batches.values():
+            if isinstance(batch, dict):
+                batch["relation_mode"] = normalized_relation_mode
 
     @staticmethod
     def _normalize_batch(batch: dict[str, Any]) -> dict[str, Any]:
         normalized = deepcopy(batch)
         normalized["batch_id"] = str(normalized.get("batch_id") or "")
         normalized["batch_key"] = str(normalized.get("batch_key") or normalized["batch_id"])
+        normalized["relation_mode"] = NoOaBankBatchService._batch_relation_mode(normalized)
         normalized["batch_type"] = str(normalized.get("batch_type") or "")
         normalized["batch_label"] = str(normalized.get("batch_label") or NO_OA_BANK_BATCH_LABELS.get(normalized["batch_type"], ""))
         normalized["scope_month"] = str(normalized.get("scope_month") or "")
@@ -2531,7 +2592,7 @@ class NoOaBankBatchService:
 
     def _enrich_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         enriched = self._normalize_batch(batch)
-        has_active_relation = self._has_active_no_oa_relation(enriched)
+        has_active_relation = self._has_active_relation_for_batch(enriched)
         if enriched["status"] == "stale" and has_active_relation:
             enriched["status"] = "submitted"
             enriched["status_bucket"] = "submitted"
@@ -2542,19 +2603,17 @@ class NoOaBankBatchService:
         enriched["blocked_reason"] = self._blocked_reason(enriched)
         return deepcopy(enriched)
 
-    def _has_active_no_oa_relation(self, batch: dict[str, Any]) -> bool:
+    def _has_active_relation_for_batch(self, batch: dict[str, Any]) -> bool:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         relation = self._relation_read_port.active_relation_by_case_id(relation_case_id)
         if not isinstance(relation, dict):
             return False
-        if str(relation.get("relation_mode") or "").strip() == NO_OA_BANK_BATCH_RELATION_MODE:
-            return True
-        special_metadata = relation.get("special_metadata")
-        return (
-            isinstance(special_metadata, dict)
-            and str(special_metadata.get("relation_mode") or special_metadata.get("source") or "").strip()
-            in {NO_OA_BANK_BATCH_RELATION_MODE, "no_oa_bank_batch"}
-        )
+        return self._relation_matches_mode(relation, self._batch_relation_mode(batch))
+
+    def _has_active_no_oa_relation(self, batch: dict[str, Any]) -> bool:
+        relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
+        relation = self._relation_read_port.active_relation_by_case_id(relation_case_id)
+        return isinstance(relation, dict) and self._is_no_oa_relation(relation)
 
     @staticmethod
     def _status_bucket(status: str) -> str:

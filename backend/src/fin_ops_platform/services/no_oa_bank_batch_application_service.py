@@ -169,10 +169,12 @@ class NoOaBankBatchApplicationService:
             "status": query.get("status", [""])[0],
             "bucket": query.get("bucket", [""])[0],
             "account_key": query.get("account_key", [""])[0],
+            "relation_mode": self._read_model_key_for_relation_mode(relation_mode),
         }
         summary_filters = {
             "month": filters["month"],
             "account_key": filters["account_key"],
+            "relation_mode": filters["relation_mode"],
         }
         refresh_scope_keys = self._refresh_scope_keys_for_filters(filters)
         refresh_metadata = self._read_model_refresh_metadata_for_relation_mode(relation_mode)
@@ -357,7 +359,7 @@ class NoOaBankBatchApplicationService:
         previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
         previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
         try:
-            bank_rows, categories_by_transaction_id = self.refresh_batches()
+            bank_rows, categories_by_transaction_id = self.refresh_batches(relation_mode=relation_mode)
             self._validate_internal_transfer_selection(
                 bank_rows=bank_rows,
                 categories_by_transaction_id=categories_by_transaction_id,
@@ -372,6 +374,7 @@ class NoOaBankBatchApplicationService:
                 row_ids=row_ids,
                 actor=actor,
                 note=note,
+                relation_mode=relation_mode,
             )
             self._confirm_relation_for_batch(batch, actor=actor, note=note, relation_mode=relation_mode)
             result = self._mutation_result(
@@ -999,6 +1002,7 @@ class NoOaBankBatchApplicationService:
             eligible_batch_types=self._eligible_tag_codes_for_relation_mode(relation_mode),
             apply_relation_repairs=apply_relation_repairs,
             refresh_scope_key=refresh_scope_key,
+            relation_mode=relation_mode,
         )
         migration_result = self._no_oa_bank_batch_service.last_legacy_migration_result()
         if apply_relation_repairs and migration_result.get("changed"):

@@ -44,6 +44,7 @@
 | --- | --- | --- |
 | 关联台页面 payload | 前端 workbench components | 来自 active generation read model |
 | paired/open 分区 | 前端 workbench components | 已确认 `bank_flow_rule_batch` 或 legacy no-OA relation 若缺少勾选要求的 OA 或发票 row，必须留在 open 区；补齐后才进入 paired 区 |
+| 折叠批次展示 | `CandidateGroupGrid` | `collapsed_summary` 默认只展示摘要 row 和“展开 N 条/张明细”按钮；不得再渲染“当前显示 1 条摘要 / 实际 N 条流水”等绝对定位计数文案，避免与流水标签和日期重叠。 |
 | 配对/撤回结果 | 调用方和页面刷新 | 返回业务结果并触发 dirty scope |
 | Operation barrier targets | 前端页面 | 写成功后等待 `workbench_relation` targets，再刷新 workbench/相关页面 |
 | Dirty scope/outbox | runtime queue | 通过 gateway 或等价事务合同进入 durable queue |

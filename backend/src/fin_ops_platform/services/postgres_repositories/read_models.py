@@ -3818,6 +3818,9 @@ class PostgresSummaryReadModelRepository:
         if value := text(resolved_filters.get("account_key")):
             where.append("account_key = %s")
             params.append(value)
+        if value := text(resolved_filters.get("relation_mode")):
+            where.append("coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s")
+            params.append(value)
         rows = self._connection.fetch_all(
             f"""
             select batch_id, source_versions, payload, raw_payload
@@ -3850,6 +3853,9 @@ class PostgresSummaryReadModelRepository:
         if value := text(resolved_filters.get("month")):
             where.append("scope_month = %s::date")
             params.append(month_start(value))
+        if value := text(resolved_filters.get("relation_mode")):
+            where.append("coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s")
+            params.append(value)
         rows = self._connection.fetch_all(
             f"""
             select source_versions

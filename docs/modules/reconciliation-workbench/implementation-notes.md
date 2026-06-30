@@ -29,6 +29,15 @@
 
 ## 历史记录
 
+## 2026-06-30 - 折叠批次计数文案重叠修复
+
+- 目标：修复关联台折叠银行流水行中“当前显示 1 条摘要 / 实际 N 条流水”与日期、标签、摘要文字重叠的问题。
+- 影响范围：`CandidateGroupGrid` 折叠控制渲染和样式；不改变后端 relation payload、workbench 分区、展开明细或确认/撤回逻辑。
+- 关键决策：删除旧的绝对定位计数文案和 `.candidate-group-collapse-counts` 样式，只保留“展开 N 条/张明细”按钮作为入口；按钮文本已表达总明细数，额外文案属于重复信息且在表格行高内易重叠。
+- 测试覆盖：`web/src/test/CandidateGroupGrid.test.tsx::renders bank-flow summary rows without overlapping collapsed count copy` 覆盖 `bank_flow_rule_batch` 折叠行不再渲染旧计数文案；原 no-OA/ETC 折叠测试同步断言旧文案不存在。
+- 验证命令：`npm test -- --run src/test/CandidateGroupGrid.test.tsx`；`npm run build`。
+- 未测风险：未跑浏览器截图回归；当前风险由组件测试和 build 覆盖，真实大屏/缩放视觉仍建议发布后抽查。
+
 ## 2026-06-24 - Workbench compute 生产证据门延期
 
 - 目标：执行 `go-hot-path:workbench-compute-production-evidence-gate`，在不部署、不拷贝代码、不写生产数据、不输出 secret 的前提下，尝试收集 Workbench matching/grouping/check 的生产只读性能证据。

@@ -8,15 +8,20 @@ from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchRelationMutationError
+from fin_ops_platform.services.no_oa_bank_batch_application_service import (
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    NoOaBankBatchRelationMutationError,
+)
 
 
 class FakeNoOaApplicationService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
+        self.list_relation_modes: list[str] = []
         self.submit_failures: dict[str, Exception] = {}
 
     def list_batches_payload(self, query, *, relation_mode="no_oa_bank_batch"):
+        self.list_relation_modes.append(relation_mode)
         self.calls.append(("list", query))
         return {"summary": {}, "batches": [], "read_model_status": "fresh"}
 
@@ -149,6 +154,21 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
                 ("tag_selection", None),
             ],
         )
+        self.assertEqual(service.list_relation_modes, ["no_oa_bank_batch"])
+
+    def test_bank_flow_list_route_uses_bank_flow_relation_mode(self) -> None:
+        service = FakeNoOaApplicationService()
+        routes = NoOaBankBatchApiRoutes(
+            application_service=service,
+            json_response=lambda status, payload: {"status": status, "payload": payload},
+        )
+
+        response = routes.route("GET", "/api/bank-flow-rule-batches", {"bucket": ["submitted"]}, None, {})
+
+        self.assertEqual(response["status"], HTTPStatus.OK)
+        self.assertEqual(response["payload"]["read_model_status"], "fresh")
+        self.assertEqual(service.calls, [("list", {"bucket": ["submitted"]})])
+        self.assertEqual(service.list_relation_modes, [BANK_FLOW_RULE_BATCH_RELATION_MODE])
 
     def test_route_owner_handles_http_mapping_with_platform_ports(self) -> None:
         service = FakeNoOaApplicationService()

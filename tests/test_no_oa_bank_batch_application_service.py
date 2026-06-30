@@ -10,7 +10,10 @@ from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaPairRelationSnapshotPort,
 )
 from fin_ops_platform.services.no_oa_bank_batch_read_model_repository import NoOaBankBatchReadModelRepositoryPort
-from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
+from fin_ops_platform.services.no_oa_bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    NoOaBankBatchService,
+)
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
@@ -388,6 +391,61 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(batch["can_submit"], False)
         self.assertEqual(batch["can_withdraw"], True)
 
+    def test_bank_flow_list_uses_relation_mode_read_model_boundary(self) -> None:
+        class ReadRepository:
+            def __init__(self, service: NoOaBankBatchApplicationService) -> None:
+                self.service = service
+                self.calls: list[dict[str, object]] = []
+                self.rows = [
+                    {
+                        "batch_id": "legacy-no-oa-submitted",
+                        "relation_mode": "no_oa_bank_batch",
+                        "batch_type": "fee",
+                        "scope_month": "2026-03",
+                        "status": "submitted",
+                        "status_bucket": "submitted",
+                        "row_count": 1,
+                        "total_amount": "3.00",
+                        "source_versions": self.service.no_oa_bank_batch_source_versions(),
+                    },
+                    {
+                        "batch_id": "bank-flow-submitted",
+                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                        "batch_type": "fee",
+                        "scope_month": "2026-03",
+                        "status": "submitted",
+                        "status_bucket": "submitted",
+                        "row_count": 1,
+                        "total_amount": "5.00",
+                        "source_versions": self.service.no_oa_bank_batch_source_versions(),
+                    },
+                ]
+
+            def list_no_oa_bank_batch_rows(self, filters: dict[str, object]) -> list[dict[str, object]]:
+                self.calls.append(dict(filters))
+                relation_mode = str(filters.get("relation_mode") or "")
+                bucket = str(filters.get("bucket") or "")
+                rows = [deepcopy(row) for row in self.rows if str(row.get("relation_mode") or "") == relation_mode]
+                if bucket:
+                    rows = [row for row in rows if str(row.get("status_bucket") or "") == bucket]
+                return rows
+
+        service, _no_oa_service, _relation_command = self._application_service(
+            rows=[],
+            selected_tag_codes=["fee"],
+        )
+        repository = ReadRepository(service)
+        service._no_oa_bank_batch_read_model_repository = repository
+
+        payload = service.list_batches_payload(
+            {"bucket": ["submitted"]},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        self.assertEqual([batch["batch_id"] for batch in payload["batches"]], ["bank-flow-submitted"])
+        self.assertEqual(repository.calls[0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        self.assertEqual(repository.calls[1]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+
     def test_month_missing_read_model_refreshes_month_scope(self) -> None:
         class ReadRepository:
             def __init__(self) -> None:
@@ -425,10 +483,21 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             producer.calls,
             [{"scope_keys": ["2026-06"], "reason": "api_no_oa_read_model_missing", "metadata": None}],
         )
-        self.assertEqual(repository.calls[0], {"month": "2026-06", "account_key": ""})
+        self.assertEqual(repository.calls[0], {
+            "month": "2026-06",
+            "account_key": "",
+            "relation_mode": "no_oa_bank_batch",
+        })
         self.assertEqual(
             repository.calls[1],
-            {"month": "2026-06", "type": "", "status": "", "bucket": "unsubmitted", "account_key": ""},
+            {
+                "month": "2026-06",
+                "type": "",
+                "status": "",
+                "bucket": "unsubmitted",
+                "account_key": "",
+                "relation_mode": "no_oa_bank_batch",
+            },
         )
 
     def test_month_stale_read_model_refreshes_month_scope(self) -> None:

@@ -11,6 +11,7 @@ from tests.app_test_support import build_local_state_application as build_applic
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.no_oa_bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_BATCH_TYPE_ORDER
 
 
@@ -157,6 +158,14 @@ class NoOaBankBatchApiTests(unittest.TestCase):
     def _list_batches(self, app, query: str = ""):
         app._no_oa_bank_batch_application_service().refresh_batches()
         response = app.handle_request("GET", f"/api/no-oa-bank-batches{query}")
+        self.assertEqual(response.status_code, 200, response.body)
+        return json.loads(response.body)
+
+    def _list_bank_flow_batches(self, app, query: str = ""):
+        app._no_oa_bank_batch_application_service().refresh_batches(
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        response = app.handle_request("GET", f"/api/bank-flow-rule-batches{query}")
         self.assertEqual(response.status_code, 200, response.body)
         return json.loads(response.body)
 
@@ -492,6 +501,33 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             self.assertEqual(app._state_store.load_no_oa_bank_batches()["batches"][batch["batch_id"]]["status"], "submitted")
             pair_relations = app._state_store.load().get("workbench_pair_relations", {}).get("pair_relations", {})
             self.assertIn(payload["pair_relation"]["case_id"], pair_relations)
+
+    def test_bank_flow_submit_selection_appears_only_in_bank_flow_submitted_list(self) -> None:
+        app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
+        batch = self._list_bank_flow_batches(app, "?bucket=unsubmitted")["batches"][0]
+
+        response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/submit-selection",
+            body=json.dumps({"transaction_ids": batch["row_ids"], "note": "流水规则批量提交"}),
+        )
+        payload = json.loads(response.body)
+        app._workbench_relation_facade = FakeNoOaRelationFacade(app._workbench_pair_relation_service.list_active_relations())
+
+        submitted_payload = self._list_bank_flow_batches(app, "?bucket=submitted")
+        no_oa_submitted_payload = self._list_batches(app, "?bucket=submitted")
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["batch"]["status_bucket"], "submitted")
+        self.assertEqual(payload["batch"]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        self.assertEqual(payload["pair_relation"]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        self.assertEqual(
+            payload["operation_barrier_targets"],
+            [{"read_model_key": BANK_FLOW_RULE_BATCH_RELATION_MODE, "scope_key": "2026-03"}],
+        )
+        self.assertEqual([item["batch_id"] for item in submitted_payload["batches"]], [payload["batch"]["batch_id"]])
+        self.assertEqual(submitted_payload["batches"][0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        self.assertEqual(no_oa_submitted_payload["batches"], [])
 
     def test_submit_returns_error_and_rolls_back_when_no_oa_batch_persistence_fails(self) -> None:
         class FailingNoOaBatchStore:

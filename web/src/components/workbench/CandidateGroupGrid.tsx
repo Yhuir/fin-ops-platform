@@ -86,7 +86,6 @@ type CandidateGroupGridProps = {
 type CollapsedSummaryCopy = {
   detailLabel: string;
   countUnit: string;
-  totalLabel: (count: number) => string;
 };
 
 function resolveCollapsedSummaryCopy(
@@ -103,21 +102,18 @@ function resolveCollapsedSummaryCopy(
     return {
       detailLabel: "ETC发票明细",
       countUnit: "张",
-      totalLabel: (count) => `实际 ${count} 张发票`,
     };
   }
   if (group.relationMode === "bank_flow_rule_batch") {
     return {
       detailLabel: "流水规则批次明细",
       countUnit: "条",
-      totalLabel: (count) => `实际 ${count} 条流水`,
     };
   }
 
   return {
     detailLabel: "免OA批次明细",
     countUnit: "条",
-    totalLabel: (count) => `实际 ${count} 条流水`,
   };
 }
 
@@ -429,7 +425,6 @@ function CandidateGroupGrid({
           const collapseKey = `${group.id}:${paneId}`;
           const isExpanded = expandedCollapsedGroups.has(collapseKey);
           const isLoading = loadingCollapsedGroups.has(collapseKey);
-          const displayRowCount = group.displayRowCounts?.[paneId] ?? group.rows[paneId].length;
           const collapsedRowCount = group.rowCounts?.[paneId] ?? group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
           const collapseCopy = resolveCollapsedSummaryCopy(group, paneId, collapsedRows);
           return (
@@ -452,12 +447,6 @@ function CandidateGroupGrid({
                     ? "收起明细"
                     : `展开 ${collapsedRowCount} ${collapseCopy.countUnit}明细`}
               </button>
-              {!isExpanded ? (
-                <span className="candidate-group-collapse-counts">
-                  <span>当前显示 {displayRowCount} 条摘要</span>
-                  <span>{collapseCopy.totalLabel(collapsedRowCount)}</span>
-                </span>
-              ) : null}
             </Fragment>
           );
         };

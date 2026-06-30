@@ -257,6 +257,43 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
+  function createBankFlowCollapsedGroup(): WorkbenchCandidateGroup {
+    const summary = createNoOaBankRecord("bank-flow-summary-BATCH-202603-FEE", "流水规则手续费批次", "124.50", "15 条手续费");
+    return {
+      ...createNoOaCollapsedGroup(),
+      id: "bank-flow-rule-batch:BATCH-202603-FEE",
+      relationMode: "bank_flow_rule_batch",
+      reason: "流水规则手续费批次",
+      summaryRow: summary,
+      rows: {
+        oa: [],
+        bank: [summary],
+        invoice: [],
+      },
+      rowCounts: {
+        oa: 0,
+        bank: 15,
+        invoice: 0,
+        rows: 15,
+      },
+      displayRowCounts: {
+        oa: 0,
+        bank: 1,
+        invoice: 0,
+        rows: 1,
+      },
+      collapsedRows: {
+        bank: [
+          createNoOaBankRecord("bk-bank-flow-fee-001", "建设银行手续费", "8.30", "摘要：账户管理费"),
+          createNoOaBankRecord("bk-bank-flow-fee-002", "网银服务费", "7.20", "摘要：企业网银年费"),
+        ],
+      },
+      collapsedRowCounts: {
+        bank: 15,
+      },
+    };
+  }
+
   function createEtcInvoiceRecord(id: string, invoiceNo: string, amount: string): WorkbenchRecord {
     return {
       id,
@@ -918,8 +955,8 @@ describe("Workbench candidate grouping layout", () => {
     const expandButton = screen.getByRole("button", { name: "展开免OA批次明细，2 条" });
     expect(expandButton).toHaveTextContent("展开 2 条明细");
     expect(expandButton).toHaveClass("candidate-group-collapse-control");
-    expect(screen.getByText("当前显示 1 条摘要")).toBeInTheDocument();
-    expect(screen.getByText("实际 2 条流水")).toBeInTheDocument();
+    expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
+    expect(screen.queryByText("实际 2 条流水")).not.toBeInTheDocument();
     expect(bankCell).not.toContainElement(expandButton);
     expect(within(bankCell).getAllByRole("row")).toHaveLength(1);
 
@@ -930,6 +967,15 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("免OA手续费批次")).not.toBeInTheDocument();
     expect(within(bankCell).getAllByRole("row")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "收起免OA批次明细" })).toBeInTheDocument();
+  });
+
+  test("renders bank-flow summary rows without overlapping collapsed count copy", () => {
+    renderNoOaGrid(createBankFlowCollapsedGroup());
+
+    const expandButton = screen.getByRole("button", { name: "展开流水规则批次明细，15 条" });
+    expect(expandButton).toHaveTextContent("展开 15 条明细");
+    expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
+    expect(screen.queryByText("实际 15 条流水")).not.toBeInTheDocument();
   });
 
   test("renders ETC invoice summaries collapsed by default and expands in the invoice pane", () => {
@@ -959,8 +1005,8 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("ETC-002")).not.toBeInTheDocument();
     const expandButton = screen.getByRole("button", { name: "展开ETC发票明细，2 张" });
     expect(expandButton).toHaveTextContent("展开 2 张明细");
-    expect(screen.getByText("当前显示 1 条摘要")).toBeInTheDocument();
-    expect(screen.getByText("实际 2 张发票")).toBeInTheDocument();
+    expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
+    expect(screen.queryByText("实际 2 张发票")).not.toBeInTheDocument();
     expect(invoiceCell).not.toContainElement(expandButton);
     expect(within(invoiceCell).getAllByRole("row")).toHaveLength(1);
 

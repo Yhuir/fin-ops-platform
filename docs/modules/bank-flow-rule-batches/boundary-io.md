@@ -71,7 +71,10 @@
 当前 read model：
 
 - 过渡期复用 `no_oa_bank_batch` read model 和 refresh scope，页面/API 对外命名为 `bank-flow-rule-batches`，operation barrier 对外使用 `bank_flow_rule_batch` 并在 barrier 层映射到底层 no-OA readiness。
-- 新 relation 写入 `relation_mode=bank_flow_rule_batch`，关联台按 relation metadata 判定 open/paired。
+- 新 relation 写入 `relation_mode=bank_flow_rule_batch`，批次 payload/read model row 也必须携带 `relation_mode=bank_flow_rule_batch`。列表 API 查询 submitted/unsubmitted/withdrawn 时必须把 `relation_mode` 作为 read repository 输入过滤，旧 no-OA payload 缺失该字段时只按 `no_oa_bank_batch` 处理。
+- Read model refresh 从 active relation 或已提交批次 relation fact 回灌 submitted 批次时必须按调用方目标 relation mode 判定；`bank_flow_rule_batch` 刷新不能复用只识别 `no_oa_bank_batch` 的旧 relation 判定，也不能把 bank-flow 批次显示到 legacy no-OA 列表。
+- 过渡期服务内由 submitted batch 反推 relation fact 时，必须继承该 batch 的 `relation_mode`，并且只为当前 refresh `relation_mode` 生成 fact；禁止再把所有 submitted batch 硬编码为 `no_oa_bank_batch`。旧 no-OA legacy migration/repair 只允许处理 no-OA/明确 legacy relation，不得处理 `bank_flow_rule_batch`。
+- 关联台按 relation metadata 判定 open/paired。
 
 目标 read model：
 
