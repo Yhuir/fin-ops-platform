@@ -1521,7 +1521,7 @@ class AppSettingsService:
                 "path": list(system_definition.get("path") or []),
                 "source": str(system_rule.get("source") or system_definition.get("source") or "system"),
                 "status": str(system_rule.get("status") or system_definition.get("status") or "active"),
-                "direction": str(system_rule.get("direction") or system_definition.get("direction") or "any"),
+                "direction": str(system_definition.get("direction") or system_rule.get("direction") or "any"),
                 "output_primary_label": str(
                     system_definition.get("output_primary_label")
                     or system_rule.get("label")
@@ -1545,7 +1545,7 @@ class AppSettingsService:
                 "path": list(rule.get("path") or definitions_by_code.get(code, {}).get("path") or []),
                 "source": str(rule.get("source") or definitions_by_code.get(code, {}).get("source") or "custom"),
                 "status": str(rule.get("status") or "active"),
-                "direction": str(rule.get("direction") or definitions_by_code.get(code, {}).get("direction") or "any"),
+                "direction": str(definitions_by_code.get(code, {}).get("direction") or rule.get("direction") or "any"),
                 "output_primary_label": str(rule.get("output_primary_label") or rule.get("label") or code),
                 "output_sub_label": str(rule.get("output_sub_label") or ""),
             })

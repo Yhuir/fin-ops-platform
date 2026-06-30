@@ -552,6 +552,7 @@ describe("NoOaBankBatchPage", () => {
     const drawerRule = cssRule(styles, ".no-oa-bank-batches-drawer");
     const drawerGridWrapRule = cssRule(styles, ".no-oa-bank-batches-drawer__grid-wrap");
     const drawerGridRule = cssRule(styles, ".no-oa-bank-batches-drawer__grid");
+    const drawerDirectionColRule = cssRule(styles, ".no-oa-bank-batches-drawer__direction-col");
     const drawerGridCellRule = cssRule(styles, ".no-oa-bank-batches-drawer__grid th,\\n.no-oa-bank-batches-drawer__grid td");
     const drawerCheckColRule = cssRule(styles, ".no-oa-bank-batches-drawer__check-col");
     const drawerCloseRule = cssRule(styles, ".no-oa-bank-batches-drawer__close");
@@ -589,6 +590,7 @@ describe("NoOaBankBatchPage", () => {
     expect(drawerGridWrapRule).toContain("overflow: auto");
     expect(drawerGridRule).toContain("border-collapse: collapse");
     expect(drawerGridRule).toContain("min-width: 620px");
+    expect(drawerDirectionColRule).toContain("width: 76px");
     expect(drawerGridCellRule).toContain("white-space: nowrap");
     expect(drawerCheckColRule).toContain("width: 64px");
     expect(paginationButtonRule).toContain("width: 30px");
@@ -871,10 +873,10 @@ describe("NoOaBankBatchPage", () => {
       tagSelection: {
         ...tagSelectionPayload,
         active_tags: [
-          { code: "fee", label: "手续费", direction: "expense", output_primary_label: "费用", output_sub_label: "手续费", status: "active" },
-          { code: "repair_fee", label: "修理费", direction: "expense", output_primary_label: "费用", output_sub_label: "修理费", status: "active" },
+          { code: "fee", label: "手续费", direction: "支出", output_primary_label: "费用", output_sub_label: "手续费", status: "active" },
+          { code: "repair_fee", label: "修理费", direction: "outflow", output_primary_label: "费用", output_sub_label: "修理费", status: "active" },
           { code: "salary", label: "工资", direction: "expense", output_primary_label: "人工成本", output_sub_label: "工资", status: "active" },
-          { code: "project_income", label: "工程款收入", direction: "income", output_primary_label: "工程款收入", output_sub_label: "", status: "active" },
+          { code: "project_income", label: "工程款收入", direction: "收入", output_primary_label: "工程款收入", output_sub_label: "", status: "active" },
         ],
         rules: [
           { tag_code: "fee", requires_oa: false, requires_invoice: false },

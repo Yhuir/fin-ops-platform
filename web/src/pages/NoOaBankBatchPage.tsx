@@ -269,11 +269,23 @@ function tagSubLabel(tag: NoOaBankBatchTagDefinition | NoOaBankBatchSummaryCateg
   return "batchType" in tag ? cleanText(tag.categorySubLabel) : "";
 }
 
+function normalizeDrawerDirection(value: string) {
+  const normalized = cleanText(value).toLowerCase();
+  if (normalized === "income" || normalized === "inflow" || normalized === "credit" || value === "收入" || value === "收") {
+    return "income";
+  }
+  if (normalized === "expense" || normalized === "outflow" || normalized === "debit" || value === "支出" || value === "支") {
+    return "expense";
+  }
+  return "any";
+}
+
 function directionLabel(value: string) {
-  if (value === "income") {
+  const normalized = normalizeDrawerDirection(value);
+  if (normalized === "income") {
     return "收入";
   }
-  if (value === "expense") {
+  if (normalized === "expense") {
     return "支出";
   }
   return "全部";
@@ -298,7 +310,7 @@ function tagDrawerGroupColor(index: number) {
 
 function buildTagDrawerRows(tags: NoOaBankBatchTagDefinition[]): TagDrawerRow[] {
   const baseRows = tags.map((tag, index) => {
-    const directionKey = cleanText(tag.direction) || "any";
+    const directionKey = normalizeDrawerDirection(tag.direction);
     const primaryLabel = tagPrimaryLabel(tag) || tag.label || tag.code;
     return {
       tag,
@@ -1612,6 +1624,13 @@ export default function NoOaBankBatchPage() {
               ) : null}
               <div className="no-oa-bank-batches-drawer__grid-wrap">
                 <table className="no-oa-bank-batches-drawer__grid">
+                  <colgroup>
+                    <col className="no-oa-bank-batches-drawer__direction-col" />
+                    <col />
+                    <col />
+                    <col className="no-oa-bank-batches-drawer__check-col" />
+                    <col className="no-oa-bank-batches-drawer__check-col" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th scope="col">收支类型</th>
@@ -1625,6 +1644,7 @@ export default function NoOaBankBatchPage() {
                     {drawerRows.map(({
                       tag,
                       direction,
+                      directionKey,
                       directionRowSpan,
                       isDirectionStart,
                       primaryLabel,
@@ -1646,7 +1666,13 @@ export default function NoOaBankBatchPage() {
                           } as CSSProperties}
                         >
                           {isDirectionStart ? (
-                            <td className="no-oa-bank-batches-drawer__direction-cell" rowSpan={directionRowSpan}>
+                            <td
+                              className={cx(
+                                "no-oa-bank-batches-drawer__direction-cell",
+                                `no-oa-bank-batches-drawer__direction-cell--${directionKey}`,
+                              )}
+                              rowSpan={directionRowSpan}
+                            >
                               {direction}
                             </td>
                           ) : null}

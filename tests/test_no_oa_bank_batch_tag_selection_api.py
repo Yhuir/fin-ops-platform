@@ -67,6 +67,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
                     "label": "银行手续费规则",
                     "output_primary_label": "银行费用",
                     "output_sub_label": "手续费自动规则",
+                    "direction": "expense",
                 })
             else:
                 next_active_rules.append(rule)
@@ -87,6 +88,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(fee_tag["label"], saved_fee_rule["label"])
         self.assertEqual(fee_tag["output_primary_label"], saved_fee_rule["output_primary_label"])
         self.assertEqual(fee_tag["output_sub_label"], saved_fee_rule["output_sub_label"])
+        self.assertEqual(fee_tag["direction"], "expense")
 
     def test_tag_selection_starts_empty_and_controls_unsubmitted_candidates(self) -> None:
         app = build_application()

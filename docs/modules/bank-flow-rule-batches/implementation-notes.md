@@ -81,14 +81,17 @@
 - `收支类型` 按连续方向合并单元格，同一方向只显示一次。
 - `流水主标签` 按主标签合并单元格，同一主标签只显示一次。
 - 同一 `流水主标签` 下的不同子标签共享同一行组背景色；不同主标签使用不同背景色。
+- `收支类型` 第一列压缩为固定窄列，并用方向底色/左侧色带强化 `支出`、`收入`、`全部` 分隔。
 
 边界说明：
 
-- 只调整前端展示层 view model、table `rowSpan` 和样式。
+- 主要调整前端展示层 view model、table `rowSpan` 和样式。
+- 标签 direction 读取兼容 `expense/outflow/debit/支出/支` 与 `income/inflow/credit/收入/收`；后端组装 active tag 时同 code 优先采用最新银行标签定义中的 direction。
 - 不改变 `active_tags` 事实来源、`requirements_by_tag_code` 持久化、保存 payload、权限、read model、operation barrier 或 Workbench paired/open 判定。
 
 验证：
 
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_tag_selection_api.py -q`
 - `npm --prefix web test -- --run src/test/NoOaBankBatchPage.test.tsx`
 - `npm --prefix web run build`
 - `npm --prefix web run e2e -- e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium`

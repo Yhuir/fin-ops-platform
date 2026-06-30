@@ -22,3 +22,4 @@
 | `06-t0-meta-orchestrator-goal.md` | 当前推荐入口：只启动一个 T0 `/goal`。T0 自动创建 worker threads、监控、收回 handoff、审阅、更新状态机、继续分发，直到全局闭环或 hard stop。 |
 | `07-read-model-main-closure-controller.md` | 用户授权的 read model 专项 main 分支主控 prompt：高效率 wave 推进全部页面 read model 模块化边界、I/O、freshness、legacy 退役和生产证据闭环。 |
 | `08-canonical-facts-main-closure-controller.md` | 用户授权的统一事实源专项主控 prompt：高效率 wave 推进 PostgreSQL canonical facts owner、I/O、禁止路径、旧事实源隔离和业务模块边界闭环；与 07 并行时不得修改 read model runtime 共享文件。 |
+| `09-workbench-main-closure-controller.md` | 用户授权的 Workbench 专项主控 `/goal` prompt：高效率 wave 推进 `reconciliation-workbench` 与 `workbench-relations` 的模块化代码、边界、I/O、旧路径退役、本地验证和生产证据闭环。 |

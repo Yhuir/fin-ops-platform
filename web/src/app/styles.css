@@ -7159,6 +7159,10 @@ textarea {
   font-size: var(--fp-text-caption);
 }
 
+.no-oa-bank-batches-drawer__direction-col {
+  width: 76px;
+}
+
 .no-oa-bank-batches-drawer__grid th,
 .no-oa-bank-batches-drawer__grid td {
   border-right: 1px solid var(--fp-border);
@@ -7198,8 +7202,24 @@ textarea {
 }
 
 .no-oa-bank-batches-drawer__direction-cell {
+  border-bottom-width: 2px !important;
   background: color-mix(in srgb, var(--fp-surface-muted) 54%, var(--fp-surface));
   text-align: center !important;
+}
+
+.no-oa-bank-batches-drawer__direction-cell--expense {
+  background: color-mix(in srgb, #2563eb 12%, var(--fp-surface));
+  box-shadow: inset 4px 0 0 #2563eb;
+}
+
+.no-oa-bank-batches-drawer__direction-cell--income {
+  background: color-mix(in srgb, #059669 12%, var(--fp-surface));
+  box-shadow: inset 4px 0 0 #059669;
+}
+
+.no-oa-bank-batches-drawer__direction-cell--any {
+  background: color-mix(in srgb, var(--fp-text-secondary) 10%, var(--fp-surface));
+  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--fp-text-secondary) 72%, var(--fp-border));
 }
 
 .no-oa-bank-batches-dialog {
