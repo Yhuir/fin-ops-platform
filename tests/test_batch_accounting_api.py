@@ -524,10 +524,10 @@ class BatchAccountingApiTests(unittest.TestCase):
         class SqlReadModel:
             def __init__(self, payload: dict[str, object]) -> None:
                 self.payload = payload
-                self.calls: list[tuple[str, str]] = []
+                self.calls: list[str] = []
 
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str, oa_year: str) -> dict[str, object]:
-                self.calls.append((bank_year, oa_year))
+            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
+                self.calls.append(bank_year)
                 return self.payload
 
         app = build_application()
@@ -537,13 +537,16 @@ class BatchAccountingApiTests(unittest.TestCase):
         payload_patcher.start()
         self.addCleanup(payload_patcher.stop)
 
-        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&oa_year=2025&bucket=unsubmitted")
+        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&bucket=unsubmitted")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(sql_read_model.calls, [("2026", "2025")])
+        self.assertEqual(sql_read_model.calls, ["2026"])
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-        self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-2025", "oa-exp-ba-2025b"])
+        self.assertEqual(
+            [row["id"] for row in payload["oa_rows"]],
+            ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
+        )
 
     def test_unsubmitted_list_explicit_pagination_protects_first_screen_slo(self) -> None:
         app = build_application()
@@ -618,10 +621,10 @@ class BatchAccountingApiTests(unittest.TestCase):
 
         class SqlReadModel:
             def __init__(self) -> None:
-                self.calls: list[tuple[str, str]] = []
+                self.calls: list[str] = []
 
-            def load_batch_accounting_workbench_payload(self, *, bank_year: str, oa_year: str) -> dict[str, object]:
-                self.calls.append((bank_year, oa_year))
+            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
+                self.calls.append(bank_year)
                 return duplicate_payload
 
         app = build_application()
@@ -635,9 +638,12 @@ class BatchAccountingApiTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(sql_read_model.calls, [("2026", "2026")])
+        self.assertEqual(sql_read_model.calls, ["2026"])
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-        self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003"])
+        self.assertEqual(
+            [row["id"] for row in payload["oa_rows"]],
+            ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
+        )
 
     def test_unsubmitted_list_does_not_run_legacy_relation_repair(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -677,13 +683,16 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(payload["bank_rows"][0]["counterparty_name"], "批量账务集中处理")
         self.assertEqual(payload["bank_rows"][0]["direction"], "expense")
         self.assertEqual(payload["bank_rows"][0]["amount"], "1200.00")
-        self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003"])
+        self.assertEqual(
+            [row["id"] for row in payload["oa_rows"]],
+            ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
+        )
         self.assertEqual(payload["oa_rows"][0]["linked_invoice_row_ids"], ["oa-att-inv-oa-exp-ba-001-01"])
         self.assertEqual(payload["oa_rows"][2]["apply_time"], "2026-01-08")
         self.assertEqual(payload["summary"]["unsubmitted_count"], 1)
         self.assertEqual(payload["summary"]["submitted_count"], 0)
 
-    def test_unsubmitted_list_uses_independent_bank_and_oa_years(self) -> None:
+    def test_unsubmitted_list_ignores_legacy_oa_year_filter(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
 
         response = app.handle_request(
@@ -694,9 +703,12 @@ class BatchAccountingApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
-        self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-2025", "oa-exp-ba-2025b"])
+        self.assertEqual(
+            [row["id"] for row in payload["oa_rows"]],
+            ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
+        )
         self.assertEqual(payload["summary"]["bank_year"], "2026")
-        self.assertEqual(payload["summary"]["oa_year"], "2025")
+        self.assertNotIn("oa_year", payload["summary"])
 
     def test_unsubmitted_list_excludes_bank_rows_already_linked_elsewhere(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -949,7 +961,6 @@ class BatchAccountingApiTests(unittest.TestCase):
                 "invoice_row_ids": ["oa-att-inv-oa-exp-ba-001-01"],
                 "year": "2026",
                 "bank_year": "2026",
-                "oa_year": "2026",
                 "oa_years": ["2026"],
                 "created_by": "finance-user",
             },
@@ -1323,7 +1334,6 @@ class BatchAccountingApiTests(unittest.TestCase):
             json.dumps(
                 {
                     "bank_year": "2026",
-                    "oa_year": "2025",
                     "bank_row_id": "txn_imported_202601_batch_001",
                     "oa_row_ids": ["oa-exp-ba-2025", "oa-exp-ba-001"],
                     "actor": "finance-user",
@@ -1336,7 +1346,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["relation_id"])
         assert relation is not None
         self.assertEqual(relation["special_metadata"]["bank_year"], "2026")
-        self.assertEqual(relation["special_metadata"]["oa_year"], "2025")
+        self.assertNotIn("oa_year", relation["special_metadata"])
         self.assertEqual(relation["special_metadata"]["oa_years"], ["2025", "2026"])
         self.assertEqual(relation["special_metadata"]["year"], "2026")
         self.assertCountEqual(

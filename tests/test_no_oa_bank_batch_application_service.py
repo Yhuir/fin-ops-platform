@@ -421,7 +421,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                     },
                 ]
 
-            def list_no_oa_bank_batch_rows(self, filters: dict[str, object]) -> list[dict[str, object]]:
+            def list_bank_flow_rule_batch_rows(self, filters: dict[str, object]) -> list[dict[str, object]]:
                 self.calls.append(dict(filters))
                 relation_mode = str(filters.get("relation_mode") or "")
                 bucket = str(filters.get("bucket") or "")
@@ -1003,7 +1003,10 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         enqueued = service.enqueue_background_refresh(
             ["2026-05"],
             reason="unit_test",
-            metadata={"action_name": "bank_flow_rule_batch_read_model_refresh"},
+            metadata={
+                "action_name": "bank_flow_rule_batch_read_model_refresh",
+                "relation_mode": "bank_flow_rule_batch",
+            },
         )
 
         self.assertTrue(enqueued)
@@ -1011,10 +1014,13 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             queue.enqueued,
             [
                 {
-                    "scope_type": "no_oa_bank_batch",
+                    "scope_type": "bank_flow_rule_batch",
                     "scope_key": "2026-05",
                     "reason": "unit_test",
-                    "metadata": {"action_name": "bank_flow_rule_batch_read_model_refresh"},
+                    "metadata": {
+                        "action_name": "bank_flow_rule_batch_read_model_refresh",
+                        "relation_mode": "bank_flow_rule_batch",
+                    },
                 }
             ],
         )

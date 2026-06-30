@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-30 - bank_flow_rule_batch storage contract 补齐
+
+- 目标：修复 App Status registry 与 migration storage contract 不一致，确保 `bank_flow_rule_batch` 作为当前 App Status read model 之一可被迁移测试证明。
+- 影响范围：`tests/test_postgres_migrations.py` 的 `READ_MODEL_STORAGE_CONTRACTS`、bank-flow 模块实施记录；不改变 API、worker、scope policy、manifest、runtime registry 或生产物理 schema。
+- 关键决策：`bank_flow_rule_batch` 逻辑 read model 保持独立；共享物理存储期内 storage contract 显式声明为 `read_model.no_oa_bank_batch_rows`，行级隔离依赖 `payload.relation_mode=bank_flow_rule_batch` 与现有 relation-mode 过滤索引。此修复不新增 `read_model.bank_flow_rule_batch_rows`。
+- 文档影响：更新 read-models 与 bank-flow 模块实施记录。
+- 测试覆盖：`tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_app_status_read_model_storage_contracts_are_declared`；`tests/test_read_model_manifest.py` 继续保护 manifest/registry/scope/worker 合同。
+- 验证命令：见本轮交付说明。
+- 未测风险：独立物理表拆分仍未执行；当前生产级合同依赖 relation-mode 隔离。
+- 后续事项：独立物理表拆分必须作为单独迁移任务推进，并同步更新 migration、storage contract、read model 文档和生产迁移/回滚方案。
+
 ## 2026-06-28 - Read model PSCIP-L4 production closure persisted
 
 - 目标：把 07 main closure 的最终结论从 `.planning/` 证据沉淀到长期 module 文档，避免后续 agent 继续把 read model 模块化误判为 `partial`。
@@ -1185,8 +1196,8 @@
 - 只读证据：6 组均为 `classification=cross_oa`，`oa_attachment_invoice_duplicate_classification_counts={"cross_oa": 6}`；Workbench 自身 `cross_zone_identity_duplicate_group_count=0`、`open_visible_owner_duplicate_group_count=0`、`orphan_relation_group_count=0`，问题集中在 OA attachment invoice cache/source identity 层。
 - 明细模式：`053002200111:15312761` 出现在 `oa-exp-2005` 与 `oa-exp-69898450db8c0a3633bd748c`，申请人周洁莹、日期 2026-02-01、金额 800.00、项目云南溯源科技一致；`153012525093:00233178` 出现在 `oa-exp-2035` 与 `oa-exp-69a7aeaedb8c0a3633bd74a7`，申请人胡瑢、日期 2026-03-01、金额 248.00、项目一致；其余 4 个 identity 均出现在 `oa-exp-2062` 与 `oa-exp-69c0b43adb8c0a3633bd74c4` 的同一 item 行，申请人刘际涛、日期 2026-03-01、金额 3061.64、项目组合一致。
 - 代码判断：`audit_object_identity._classify_oa_attachment_invoice_duplicate_groups(...)` 只有在同一 canonical 发票 identity 映射到多个 `oa_application_id` / OA row/source 时才标为 `cross_oa`；同 OA 内的同一缓存、多实际附件或同实际附件 alias 会被分类为非 blocker。因此这 6 组不能简单视作缓存重复。
-- 关键决策：当前不删除 OA attachment invoice cache、不删除发票、不手工改 readiness；下一步先建立 OA source alias / migration identity 证据，确认短号 `oa-exp-20xx` 与长 hash `oa-exp-69...` 是否代表同一 OA 单迁移后的新旧 ID。只有证明确为 alias，才应在 source identity/alias 合并层修复；若不是 alias，则应进入人工业务去重流程。
-- 后续事项：新增只读 OA alias audit，比较两端 `oa_application_id`、`oa_source_id`、`row_id`、附件 hash、发票代码号码、金额、申请人、项目和 source row item；修复方案优先放在 OA source identity / attachment cache source mapping，而不是 downstream read model 或手工 SQL 清理。
+- 关键决策：当前不删除 OA attachment invoice cache、不删除发票、不手工改 readiness；短号 `oa-exp-20xx` 与长 hash `oa-exp-69...` 只有在 `app.oa_source_aliases.status='active'` 中被显式登记后才视为同一 canonical OA row。若不是 alias，则应进入人工业务去重流程。
+- 生产治理结果：2026-06-30 已在生产登记 3 条 `active` OA source alias，覆盖上述 6 组附件票 duplicate；固定入口 `workbench-audit-identity` 复核 `blocking_issue_count=0`、`oa_attachment_invoice_blocking_duplicate_group_count=0`。修复发生在 OA source identity 层，不通过 downstream read model 或手工 SQL 清理实现。
 
 ## 2026-06-20 - 当前 gzip release critical read model apply 复验
 

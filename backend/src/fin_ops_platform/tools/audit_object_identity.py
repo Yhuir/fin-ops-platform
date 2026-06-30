@@ -561,6 +561,7 @@ def _oa_attachment_invoice_identity_payloads(
 
 
 def _fetch_oa_attachment_invoice_context(connection: Any) -> dict[str, Any]:
+    active_aliases = _fetch_oa_source_aliases(connection)
     sources_scan = _fetch_rows_if_table_exists(
         connection,
         "app.oa_attachment_invoice_cache_sources",
@@ -608,12 +609,53 @@ def _fetch_oa_attachment_invoice_context(connection: Any) -> dict[str, Any]:
         cache_key = str(row.get("cache_source_attachment_key") or "").strip()
         if not cache_key:
             continue
+        row = dict(row)
+        row["canonical_oa_row_id"] = _canonical_oa_row_id(row, active_aliases)
         by_cache_key.setdefault(cache_key, []).append(dict(row))
     return {
         "source_table_status": sources_scan["status"],
         "attachment_table_status": attachment_scan["status"],
+        "alias_table_status": active_aliases["status"],
+        "active_alias_count": len(active_aliases["aliases"]),
         "by_cache_key": by_cache_key,
     }
+
+
+def _fetch_oa_source_aliases(connection: Any) -> dict[str, Any]:
+    scan = _fetch_rows_if_table_exists(
+        connection,
+        "app.oa_source_aliases",
+        """
+        select alias_row_id, canonical_row_id
+        from app.oa_source_aliases
+        where status = 'active'
+        order by alias_row_id
+        """,
+    )
+    aliases = {
+        str(row.get("alias_row_id") or "").strip(): str(row.get("canonical_row_id") or "").strip()
+        for row in scan["rows"]
+        if str(row.get("alias_row_id") or "").strip() and str(row.get("canonical_row_id") or "").strip()
+    }
+    return {"status": scan["status"], "aliases": aliases, "canonical_ids": set(aliases.values())}
+
+
+def _canonical_oa_row_id(row: dict[str, Any], active_aliases: dict[str, Any]) -> str:
+    aliases = active_aliases.get("aliases")
+    if not isinstance(aliases, dict):
+        aliases = {}
+    canonical_ids = active_aliases.get("canonical_ids")
+    if not isinstance(canonical_ids, set):
+        canonical_ids = set()
+    row_id = str(row.get("oa_row_id") or "").strip()
+    source_id = str(row.get("oa_source_id") or row.get("attachment_oa_source_id") or "").strip()
+    for value in (row_id, source_id):
+        canonical = str(aliases.get(value) or "").strip()
+        if canonical:
+            return canonical
+        if value in canonical_ids:
+            return value
+    return ""
 
 
 def _classify_oa_attachment_invoice_duplicate_groups(
@@ -638,7 +680,13 @@ def _classify_oa_attachment_invoice_duplicate_groups(
                 source_attachment_key = str(context.get("source_attachment_key") or "").strip()
                 if source_attachment_key:
                     actual_attachment_keys.add(source_attachment_key)
-                oa_id = str(context.get("oa_application_id") or context.get("oa_row_id") or context.get("oa_source_id") or "").strip()
+                oa_id = str(
+                    context.get("canonical_oa_row_id")
+                    or context.get("oa_application_id")
+                    or context.get("oa_row_id")
+                    or context.get("oa_source_id")
+                    or ""
+                ).strip()
                 if oa_id:
                     oa_by_id.setdefault(
                         oa_id,

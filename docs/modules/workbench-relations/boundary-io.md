@@ -28,7 +28,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 关系写命令 | workbench、batch accounting、pending invoice、no-OA、turnover、ETC 修复工具 | 必须包含关系对象、方向、操作上下文和审计身份。跨进程或生产修复场景必须让 command repository 的 load/save 接入 durable repository，不能只读进程内 `WorkbenchPairRelationService` snapshot。 |
+| 关系写命令 | workbench、workbench matching、batch accounting、pending invoice、no-OA、turnover、ETC 修复工具 | 必须包含关系对象、方向、操作上下文和审计身份。跨进程或生产修复场景必须让 command repository 的 load/save 接入 durable repository，不能只读进程内 `WorkbenchPairRelationService` snapshot。自动 paired decision 只有通过 command service 写成 active relation 后，才算业务已配对。 |
 | no-OA relation metadata | `NoOaBankBatchApplicationService` | legacy `special_metadata` 可包含 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code`、`paired_requirement_version`；关系事实源负责原样保存和投影，不拥有标签规则解释 |
 | 流水规则批量处理 relation metadata | `BankFlowRuleBatchApplicationService` submit / tag-rule sync | `relation_mode=bank_flow_rule_batch`；`special_metadata` 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；标签规则保存后也必须通过 command service 更新这些 requirement 字段。关系事实源只保存和分发，不解释银行标签规则 |
 | 外部往来闭环 relation metadata | `TurnoverLedgerWorkbenchPairPort` / 流水规则 tag-rule sync | `relation_mode=turnover_manual_closure`；`special_metadata` 至少包含 `source=turnover_ledger`、`turnover_relation_id`、`requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`。历史 `turnover:* manual_confirmed` 关系只能通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(..., relation_mode=turnover_manual_closure)` 受控升级并记录 before/after history |
@@ -40,8 +40,9 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 关系事实 | repository | 原子持久化关系状态和审计 |
-| 关系 read model | `workbench_relation` projection | scoped incremental distribution；`rows` 是 scope 内 row 索引，唯一键为 `(tenant_id, scope_key, row_id)` |
+| 关系 read model | `workbench_relation` projection | scoped incremental distribution；`rows` 是 scope 内 row 索引，唯一键为 `(tenant_id, scope_key, row_id)`；只向下游分发 active relation 的 linked/unlinked 业务口径，不分发 automatic decision candidate。 |
 | 下游 dirty scope | runtime queue/lifecycle | 按受影响页面 fan-out |
+| no-OA / 流水规则批量 read model dirty scope | `no_oa_bank_batch` runtime queue | `relation_mode=no_oa_bank_batch` 与 `relation_mode=bank_flow_rule_batch` 共用迁移期底座，但 dirty/outbox payload 必须携带 `relation_mode`，outbox dedupe key 必须按 relation mode 分桶；不能让同一月份 no-OA 与 bank-flow 刷新互相覆盖 metadata。 |
 
 ## 持久化与投影
 
@@ -88,5 +89,6 @@
 - Allowed writes: `WorkbenchRelationCommandService`、relation UoW、明确 migration/repair adapter。`update_relation_metadata_for_case_id` 可更新 metadata/display tags/amount_check，并可在 command service 白名单校验后升级 relation mode；调用方不得绕过 command service 直接改 relation mode。
 - Allowed reads: `WorkbenchRelationReadFacade`、relation repository/read ports。
 - Downstream outputs: workbench_relation、workbench、bank_flow_rule_batch、pending invoice、input/output invoice usage、OA pending、tax、cost、search dirty scopes 或 owner producer 输出。
+- `no_oa_bank_batch` 下游输出在过渡期同时覆盖 no-OA 与 bank-flow 批量处理：关系事实源只根据 relation payload 的 `relation_mode` 分发，不解释业务规则；worker handler 必须从 payload/metadata 读取目标 relation mode。
 - Forbidden paths: 调用方不得直接改关系表、不得自行拼 confirmed relation 状态、不得通过 legacy fallback 绕过 command service。
 - Old code deletion: direct pair relation write fallback、旧关系修复半写入和调用方内联关系状态机必须删除；离线 migration/audit/rollback 工具保留不算 closure。

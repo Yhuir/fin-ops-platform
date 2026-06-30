@@ -1,5 +1,42 @@
 # 流水规则批量处理实施记录
 
+## 2026-06-30 App Status storage contract 补齐
+
+目标：修复 `bank_flow_rule_batch` 已登记到 App Status read model registry，但 migration storage contract 未登记，导致完整 `tests/test_postgres_migrations.py` 失败的问题。
+
+关键决策：
+
+- 保留 `bank_flow_rule_batch` 作为独立 read model key、scope、worker event、operation barrier target 和 App Status readiness 目标；不回退到 `no_oa_bank_batch` registry。
+- 当前不新增 `read_model.bank_flow_rule_batch_rows` 物理表。按现有模块边界，过渡期继续使用 `read_model.no_oa_bank_batch_rows`，并由 `payload.relation_mode=bank_flow_rule_batch` 及 relation-mode filter/index 隔离。
+- `READ_MODEL_STORAGE_CONTRACTS["bank_flow_rule_batch"]` 显式指向 `read_model.no_oa_bank_batch_rows`，把共享物理存储从隐式 WIP 变成可验证合同。后续拆出独立表时必须同步更新 migration、storage contract、read model 文档和生产迁移/回滚方案。
+
+测试覆盖：
+
+- `tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_app_status_read_model_storage_contracts_are_declared`
+- `tests/test_read_model_manifest.py`
+
+## 2026-06-30 后端闭环与旧链路隔离
+
+目标：把 `bank_flow_rule_batch` 从 no-OA route/readiness/producer/worker alias 中拆出，形成独立逻辑 API、read model、worker 和 operation barrier target。
+
+关键决策：
+
+- 保留 no-OA legacy 业务域本身，不删除仍被 `/api/no-oa-bank-batches/*` 使用的历史代码；删除的是 bank-flow 新链路对 no-OA route/event/scope/producer 的依赖。
+- 新增 `routes_bank_flow_rule_batches.py`、`BankFlowRuleBatchApplicationService`、`BankFlowRuleBatchReadModelRefreshProducer`、`BankFlowRuleBatchReadModelRefreshService`、`BankFlowRuleBatchReadModelRepositoryPort`；`routes_no_oa_bank_batches.py` 不再处理 `/api/bank-flow-rule-batches/*`。
+- `READ_MODEL_MANIFEST`、App Status read model registry、scope policy、runtime worker registry、RabbitMQ dispatch event 和 deploy env 示例均登记 `bank_flow_rule_batch` / `bank-flow-rule-batch` / `bank_flow_rule_batch.read_model.refresh`。
+- Operation barrier 删除 `bank_flow_rule_batch -> no_oa_bank_batch` alias，bank-flow readiness/outbox/worker 缺失会真实返回 refreshing/blocked，不再被 no-OA fresh 状态掩盖。
+- 物理存储仍共享 `app.no_oa_bank_batches` 与 `read_model.no_oa_bank_batch_rows`，必须继续用 `relation_mode=bank_flow_rule_batch` 隔离；后续物理表拆分需要单独迁移计划和回滚方案。
+
+测试覆盖：
+
+- `tests/test_bank_flow_rule_batch_backend_boundary.py`
+- `tests/test_bank_flow_rule_batch_routes.py`
+- `tests/test_bank_flow_rule_batch_read_model_refresh_producer.py`
+- `tests/test_operation_freshness_barrier.py`
+- `tests/test_read_model_manifest.py`
+- `tests/test_runtime_worker_registry.py`
+- `tests/test_no_oa_bank_batch_routes.py`
+
 ## 2026-06-30 外部往来旧关系 requirement 同步修复
 
 目标：
@@ -134,15 +171,16 @@
 
 当前实现说明：
 
-- 后端复用 no-OA 批次 service/read model 的一部分作为过渡承载，但新 route、新 relation mode 和新规则合同已独立。
-- 旧 no-OA route 仍保留兼容；新页面和 E2E 使用 bank-flow-rule-batches route。
+- 后端 route、application service、read model key、refresh producer、worker event、operation barrier、repository port、mutation persistence port 和 refresh persistence port 已作为 `bank_flow_rule_batch` 独立边界接入。
+- 旧 no-OA route 仍保留兼容；新页面和 E2E 使用 bank-flow-rule-batches route，且 bank-flow route/service/refresh 不再 import 或继承 no-OA route/application/refresh 模块。
+- 共享批次计算逻辑已放入中性 `bank_batch_application_service.py` / `bank_batch_service.py`；no-OA legacy 和 bank-flow 分别从自己的模块边界调用。
 - rebaseline 浏览器入口只提供 dry-run 清单和 apply；不会在普通查询、提交或刷新时自动撤回历史批次。
-- 新功能 mutation 和前端等待使用 `read_model_key=bank_flow_rule_batch`；operation barrier 内部将该 key 映射到现有 no-OA readiness/outbox/worker，避免复制 worker。
+- 新功能 mutation 和前端等待使用 `read_model_key=bank_flow_rule_batch`；operation barrier 直接读取 `bank_flow_rule_batch` readiness/outbox/worker，不再映射到 no-OA。
 
 验证：
 
 - `PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_candidate_grouping.py tests/test_workbench_relation_command_service.py -q`
-- `npm --prefix web test -- --run CandidateGroupGrid.test.tsx NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts App.test.tsx`
+- `npm --prefix web test -- --run CandidateGroupGrid.test.tsx BankFlowRuleBatchPage.test.tsx BankFlowRuleBatchApi.test.ts App.test.tsx`
 - `npm --prefix web run e2e -- e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium`
 - `npm --prefix web run e2e -- e2e/permissions-role-matrix.spec.ts --project=chromium`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`
@@ -154,7 +192,7 @@
 剩余风险：
 
 - 真实生产历史数据的全量 rebaseline 仍需先 dry-run 导出清单并人工确认后执行 apply。
-- 独立 `bank_flow_rule_batch` 投影表/worker 尚未拆出，当前 readiness 仍复用 no-OA worker。
+- 独立 `bank_flow_rule_batch` 物理表尚未拆出；当前由 bank-flow 命名 IO adapter 使用历史批次存储，并通过 `relation_mode=bank_flow_rule_batch` 隔离。
 - “补齐 OA/发票后从 open 进入 paired”的完整跨页浏览器动作仍需后续接入真实补票/补 OA 流程测试。
 
 ## 2026-06-30 标签规则抽屉分组 UI slice
@@ -176,7 +214,7 @@
 验证：
 
 - `PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_tag_selection_api.py -q`
-- `npm --prefix web test -- --run src/test/NoOaBankBatchPage.test.tsx`
+- `npm --prefix web test -- --run src/test/BankFlowRuleBatchPage.test.tsx`
 - `npm --prefix web run build`
 - `npm --prefix web run e2e -- e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium`
 - `git diff --check`
@@ -197,5 +235,5 @@
 验证：
 
 - `tests/test_no_oa_bank_batch_tag_selection_api.py` 覆盖提交后 reset、relation 取消、row 回到未提交候选。
-- `web/src/test/NoOaBankBatchPage.test.tsx` 覆盖页面按钮、API payload、operation event。
+- `web/src/test/BankFlowRuleBatchPage.test.tsx` 覆盖页面按钮、API payload、operation event。
 - `web/e2e/bank-flow-rule-batches-flow.spec.ts` 覆盖浏览器提交后 reset 并回到未提交。

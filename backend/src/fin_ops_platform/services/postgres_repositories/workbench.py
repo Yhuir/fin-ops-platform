@@ -22,6 +22,14 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_turnover_relations,
 )
 
+NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"
+
+
+def _no_oa_batch_relation_mode(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return NO_OA_BANK_BATCH_RELATION_MODE
+    return text(payload.get("relation_mode")) or NO_OA_BANK_BATCH_RELATION_MODE
+
 
 class PostgresWorkbenchRepository:
     def __init__(self, connection: Any) -> None:
@@ -51,10 +59,21 @@ class PostgresWorkbenchRepository:
             [payload for row in event_rows if isinstance((payload := row_payload(row, "raw_payload")), dict)],
         )
 
-    def save_no_oa_bank_batches(self, snapshot: dict[str, Any]) -> None:
+    def save_no_oa_bank_batches(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> None:
+        normalized_relation_mode = text(relation_mode) or NO_OA_BANK_BATCH_RELATION_MODE
+
         def write(connection: Any) -> None:
             batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
-            batch_items = list(iter_mapping(batches))
+            batch_items = [
+                (batch_id, payload)
+                for batch_id, payload in list(iter_mapping(batches))
+                if _no_oa_batch_relation_mode(payload) == normalized_relation_mode
+            ]
             batch_ids = [
                 str(batch_id).strip()
                 for batch_id, _payload in batch_items
@@ -62,26 +81,59 @@ class PostgresWorkbenchRepository:
             ]
             if batch_ids:
                 connection.execute(
-                    "delete from read_model.no_oa_bank_batch_rows where not (batch_id = any(%s))",
-                    (batch_ids,),
+                    """
+                    delete from read_model.no_oa_bank_batch_rows
+                    where coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s
+                      and not (batch_id = any(%s))
+                    """,
+                    (normalized_relation_mode, batch_ids),
                 )
                 connection.execute(
                     """
                     delete from app.no_oa_bank_batch_events
                     where no_oa_bank_batch_id in (
-                        select id from app.no_oa_bank_batches where not (batch_id = any(%s))
+                        select id
+                        from app.no_oa_bank_batches
+                        where coalesce(nullif(raw_payload->'normalized_payload'->>'relation_mode', ''), 'no_oa_bank_batch') = %s
+                          and not (batch_id = any(%s))
                     )
                     """,
-                    (batch_ids,),
+                    (normalized_relation_mode, batch_ids),
                 )
                 connection.execute(
-                    "delete from app.no_oa_bank_batches where not (batch_id = any(%s))",
-                    (batch_ids,),
+                    """
+                    delete from app.no_oa_bank_batches
+                    where coalesce(nullif(raw_payload->'normalized_payload'->>'relation_mode', ''), 'no_oa_bank_batch') = %s
+                      and not (batch_id = any(%s))
+                    """,
+                    (normalized_relation_mode, batch_ids),
                 )
             else:
-                connection.execute("delete from read_model.no_oa_bank_batch_rows")
-                connection.execute("delete from app.no_oa_bank_batch_events")
-                connection.execute("delete from app.no_oa_bank_batches")
+                connection.execute(
+                    """
+                    delete from read_model.no_oa_bank_batch_rows
+                    where coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s
+                    """,
+                    (normalized_relation_mode,),
+                )
+                connection.execute(
+                    """
+                    delete from app.no_oa_bank_batch_events
+                    where no_oa_bank_batch_id in (
+                        select id
+                        from app.no_oa_bank_batches
+                        where coalesce(nullif(raw_payload->'normalized_payload'->>'relation_mode', ''), 'no_oa_bank_batch') = %s
+                    )
+                    """,
+                    (normalized_relation_mode,),
+                )
+                connection.execute(
+                    """
+                    delete from app.no_oa_bank_batches
+                    where coalesce(nullif(raw_payload->'normalized_payload'->>'relation_mode', ''), 'no_oa_bank_batch') = %s
+                    """,
+                    (normalized_relation_mode,),
+                )
             self._upsert_no_oa_bank_batch_items(connection, batch_items)
             self._replace_no_oa_bank_batch_events(
                 connection,
@@ -90,10 +142,17 @@ class PostgresWorkbenchRepository:
 
         run_in_transaction(self._connection, write)
 
-    def save_no_oa_bank_batches_scope(self, snapshot: dict[str, Any], *, scope_key: str) -> None:
+    def save_no_oa_bank_batches_scope(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        scope_key: str,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> None:
         normalized_scope_key = text(scope_key)
+        normalized_relation_mode = text(relation_mode) or NO_OA_BANK_BATCH_RELATION_MODE
         if not normalized_scope_key or normalized_scope_key == "all":
-            self.save_no_oa_bank_batches(snapshot)
+            self.save_no_oa_bank_batches(snapshot, relation_mode=normalized_relation_mode)
             return
         scope_month = month_start(normalized_scope_key)
         if not scope_month:
@@ -104,6 +163,7 @@ class PostgresWorkbenchRepository:
             (batch_id, payload)
             for batch_id, payload in list(iter_mapping(batches))
             if month_start(payload.get("scope_month") or payload.get("month")) == scope_month
+            and _no_oa_batch_relation_mode(payload) == normalized_relation_mode
         ]
         batch_ids = [
             str(batch_id).strip()
@@ -117,9 +177,10 @@ class PostgresWorkbenchRepository:
                     """
                     delete from read_model.no_oa_bank_batch_rows
                     where scope_month = %s::date
+                      and coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s
                       and not (batch_id = any(%s))
                     """,
-                    (scope_month, batch_ids),
+                    (scope_month, normalized_relation_mode, batch_ids),
                 )
                 connection.execute(
                     """
@@ -128,31 +189,50 @@ class PostgresWorkbenchRepository:
                         select id
                         from app.no_oa_bank_batches
                         where scope_month = %s::date
+                          and coalesce(nullif(raw_payload->'normalized_payload'->>'relation_mode', ''), 'no_oa_bank_batch') = %s
                           and not (batch_id = any(%s))
                     )
                     """,
-                    (scope_month, batch_ids),
+                    (scope_month, normalized_relation_mode, batch_ids),
                 )
                 connection.execute(
                     """
                     delete from app.no_oa_bank_batches
                     where scope_month = %s::date
+                      and coalesce(nullif(raw_payload->'normalized_payload'->>'relation_mode', ''), 'no_oa_bank_batch') = %s
                       and not (batch_id = any(%s))
                     """,
-                    (scope_month, batch_ids),
+                    (scope_month, normalized_relation_mode, batch_ids),
                 )
             else:
-                connection.execute("delete from read_model.no_oa_bank_batch_rows where scope_month = %s::date", (scope_month,))
+                connection.execute(
+                    """
+                    delete from read_model.no_oa_bank_batch_rows
+                    where scope_month = %s::date
+                      and coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s
+                    """,
+                    (scope_month, normalized_relation_mode),
+                )
                 connection.execute(
                     """
                     delete from app.no_oa_bank_batch_events
                     where no_oa_bank_batch_id in (
-                        select id from app.no_oa_bank_batches where scope_month = %s::date
+                        select id
+                        from app.no_oa_bank_batches
+                        where scope_month = %s::date
+                          and coalesce(nullif(raw_payload->'normalized_payload'->>'relation_mode', ''), 'no_oa_bank_batch') = %s
                     )
                     """,
-                    (scope_month,),
+                    (scope_month, normalized_relation_mode),
                 )
-                connection.execute("delete from app.no_oa_bank_batches where scope_month = %s::date", (scope_month,))
+                connection.execute(
+                    """
+                    delete from app.no_oa_bank_batches
+                    where scope_month = %s::date
+                      and coalesce(nullif(raw_payload->'normalized_payload'->>'relation_mode', ''), 'no_oa_bank_batch') = %s
+                    """,
+                    (scope_month, normalized_relation_mode),
+                )
             self._upsert_no_oa_bank_batch_items(connection, batch_items)
             scoped_batch_ids = set(batch_ids)
             audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else []

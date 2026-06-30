@@ -256,6 +256,18 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         read_model_scope_type="no_oa_bank_batch",
     ),
     RuntimeWorkerRegistration(
+        instance_name="bank-flow-rule-batch",
+        worker_kind="bank-flow-rule-batch-read-model",
+        handler_flags=("--enable-bank-flow-rule-batch-read-model-refresh",),
+        event_types=("bank_flow_rule_batch.read_model.refresh",),
+        required=True,
+        rabbitmq_eligible=True,
+        env_example="fin-ops.worker.bank-flow-rule-batch.env.example",
+        rabbitmq_env_example="fin-ops.worker.bank-flow-rule-batch-rabbitmq.env.example",
+        read_model_key="bank_flow_rule_batch",
+        read_model_scope_type="bank_flow_rule_batch",
+    ),
+    RuntimeWorkerRegistration(
         instance_name="bank-account-balance",
         worker_kind="bank-account-balance-read-model",
         handler_flags=("--enable-bank-account-balance-read-model-refresh",),

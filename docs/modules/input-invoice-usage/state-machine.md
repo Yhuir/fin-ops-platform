@@ -6,11 +6,11 @@
 ## 业务状态
 
 - 当前状态：页面本身是只读查询页，业务状态主要来自行 payload 中的 `paymentStatus`、OA 关联、银行流水关联和发票生命周期判断。
-- 状态事实源：`read_model.input_invoice_usage_rows.payload` 是页面读取事实；发票、OA、银行流水和 workbench 关系由 read model worker 构建时投影进入 payload。关系证据来自 `WorkbenchRelationReadFacade`，包括 linked 关系和关联台未配对区 candidate 候选。
+- 状态事实源：`read_model.input_invoice_usage_rows.payload` 是页面读取事实；发票、OA、银行流水和 workbench 关系由 read model worker 构建时投影进入 payload。关系证据来自 `WorkbenchRelationReadFacade`，只有 Workbench active relation 进入 linked 已关联口径；未正式化的自动匹配 decision 不作为本页 candidate relation。
 - OA 附件来源发票：当正式发票保留 `source_links[].source_type='oa_attachment_invoice'` 与 `source_workbench_row_id` 时，`source_workbench_row_id` 是查询统一 relation distribution 的等价 row key；页面不能只用正式发票 id 判定“无 OA/流水”。
 - 允许流转：支付状态规则、OA 反提、workbench 关系确认或撤销会通过 read model refresh 影响页面展示。
 - 禁止流转：页面列表查询不直接修改发票、OA 或银行流水事实；缺失或过期 read model 不能回退为 live scan 伪装 fresh。
-- 支付状态规则：`relationStatus='candidate'` 的 OA/银行/发票只作为候选展示，不参与已支付、完全关联或已确认关系判断；只有 `relationStatus='linked'` 的关系可参与支付状态计算。
+- 支付状态规则：只有 `relationStatus='linked'` 的关系可参与已支付、完全关联或已确认关系判断；无 active relation 或历史 `candidate` 兼容值都不得参与支付状态计算。
 
 ## 以发票反提 OA 本地状态机
 
@@ -72,7 +72,7 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 - permission disabled/hidden：列表读取无独立权限状态；OA 反提、支付规则保存等 mutation 能力按对应接口权限和前端按钮状态控制。
 - oa reverse pending tab：`待处理` 页签展示目标 OA 申请人、候选发票和 `创建 OA 草稿` 主动作；不展示 `创建本地批次`。
 - oa reverse staged tab：`暂存` 页签展示状态为 `oa_draft_created` 的批次摘要和两项处理动作：`我已在OA系统提交该草稿 / OA正在进行中`、`OA提交内容需修改 / 删除本次提交内容`。暂存列表不展示 OA 草稿链接。
-- oa reverse candidate relation：候选发票清单必须展示 OA 关联状态三态。可反提发票展示 `未关联oa` chip 并可勾选；已有 active/linked OA 关系的发票展示 `已关联oa` chip、禁用勾选；关联台未配对区 open/proposed OA 候选展示 `候选oa` chip、禁用勾选。`已关联oa` 和 `候选oa` 都不能进入创建草稿 payload。表头提供 drawer 内局部筛选：`全部`、`已经关联oa`、`候选oa`、`未关联oa`。
+- oa reverse relation display：候选发票清单只展示 OA 关联二态。可反提发票展示 `未关联oa` chip 并可勾选；已有 active/linked OA 关系的发票展示 `已关联oa` chip、禁用勾选；历史 `candidate` 兼容值归入 `未关联oa`，不再提供独立“候选 OA”筛选。表头提供 drawer 内局部筛选：`全部`、`已经关联oa`、`未关联oa`，并支持发票清单搜索。
 - oa reverse submitted tab：`已提交` 页签展示用户确认过的已提交历史，只显示申请人、时间、金额和发票摘要等业务字段。
 - oa reverse confirmation：OA 草稿创建成功后显示确认弹窗，用户可以选择 `我已在OA系统提交该草稿 / OA正在进行中`、`OA提交内容需修改 / 删除本次提交内容`，也可以点击右上角取消只关闭弹窗。取消、页面刷新、父组件重渲染或 preview reload 都不能清空当前草稿 batch；未决批次必须可在 `暂存` 页签恢复处理。
 
@@ -104,7 +104,7 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 | 2026-06-12 | 收口 OA reverse relation 写入口 | OA reverse batch 不作为 relation 事实源；evidence detected 后通过 `WorkbenchRelationCommandService` 写 `input_invoice_oa_reverse`，non-fresh 时 fail fast 且不保存 detected batch | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` |
 | 2026-06-12 | 接入 unified relation candidate 和单行详情 | 关联台未配对 candidate 通过 `WorkbenchRelationReadFacade` 进入页面展示；candidate 不参与支付状态；`+N` 详情优先读取 SQL read model 单行 payload，避免全量 live rebuild 卡在加载态 | `tests/test_workbench_relation_sql_projection.py`、`tests/test_workbench_relation_read_facade.py`、`tests/test_input_invoice_usage_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` |
 | 2026-06-17 | 补真实 Chromium OA reverse 子集草稿 smoke | Browser e2e 覆盖 rows 首屏、`以发票反提 OA` drawer、取消候选子集、子集 preview hash、创建 OA 草稿、`已提交 OA` 和 submitted history，防止页面维护破坏完整浏览器流 | `web/e2e/input-invoice-usage-flow.spec.ts`、`cd web && npm run e2e:smoke` |
-| 2026-06-17 | 固化 OA reverse 确认弹窗和 OA 关联状态 UI | 草稿创建后的确认弹窗必须等待用户二选一；已有 active OA 关系的发票展示 `已关联oa`，关联台未配对 OA 候选展示 `候选oa`，两者均不可勾选，并支持 OA 关联状态筛选 | `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py` |
+| 2026-06-30 | 简化 OA reverse OA 关联状态 UI | 草稿创建后的确认弹窗必须等待用户二选一；已有 active OA 关系的发票展示 `已关联oa`，无 active relation 或历史 candidate 兼容值展示 `未关联oa`；筛选只保留 `全部/已经关联oa/未关联oa`，候选发票清单支持搜索，提示放在抽屉标题右侧 | `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`web/e2e/input-invoice-relation-fanout.spec.ts` |
 | 2026-06-17 | 主列表通过 OA 附件 row id 查询 relation distribution | 正式发票由 OA 附件提升/合并后，列表 rows 使用正式发票 id 与 `source_workbench_row_id` 共同查询统一 relation facade，显示已有 OA/candidate 证据但不改变支付状态 | `tests/test_input_invoice_usage_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` |
 | 2026-06-18 | 补 Spec-first Browser relation fan-out smoke | 不改变状态机；新增真实 Chromium 覆盖 candidate OA/流水证据只展示不驱动支付状态、Workbench confirm 后 linked 证据驱动 `已支付`，并在 OA reverse drawer 中证明 candidate/linked 均不可勾选 | `web/e2e/input-invoice-relation-fanout.spec.ts` |
 | 2026-06-18 | 新增 OA reverse `暂存` bucket | `oa_draft_created` 作为用户可见暂存状态，关闭确认弹窗不清理 batch；暂存列表只展示两项处理动作，不展示 OA 草稿链接 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` |

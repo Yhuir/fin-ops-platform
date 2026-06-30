@@ -105,7 +105,7 @@ class BatchAccountingService:
         self,
         *,
         grouped_workbench_loader: Callable[[str], dict[str, Any]],
-        batch_workbench_loader: Callable[[str, str], dict[str, Any] | None] | None = None,
+        batch_workbench_loader: Callable[..., dict[str, Any] | None] | None = None,
         case_id_provider: Callable[[str], str] | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
@@ -192,7 +192,6 @@ class BatchAccountingService:
         *,
         year: str | None = None,
         bank_year: str | None = None,
-        oa_year: str | None = None,
         bucket: str,
         page: int | str | None = None,
         page_size: int | str | None = None,
@@ -203,7 +202,6 @@ class BatchAccountingService:
     ) -> dict[str, Any]:
         fallback_year = str(year or "").strip()
         resolved_bank_year = self._validate_year(bank_year or fallback_year)
-        resolved_oa_year = self._validate_year(oa_year or fallback_year)
         if bucket not in {"unsubmitted", "submitted"}:
             raise BatchAccountingError("invalid_batch_accounting_bucket", "bucket must be unsubmitted or submitted.")
         bank_pagination = self._pagination_from_values(
@@ -216,7 +214,7 @@ class BatchAccountingService:
             page_size=oa_page_size if oa_page_size is not None else page_size,
             requested=any(value is not None for value in (page, page_size, oa_page, oa_page_size)),
         )
-        context = self._build_context(bank_year=resolved_bank_year, oa_year=resolved_oa_year)
+        context = self._build_context(bank_year=resolved_bank_year)
         submitted_relations = self._submitted_relations(resolved_bank_year, context)
         if bucket == "submitted":
             bank_rows, relations_by_bank_row_id = self._submitted_payload(submitted_relations, context)
@@ -239,7 +237,6 @@ class BatchAccountingService:
                 "unsubmitted_count": len(context.eligible_bank_rows),
                 "submitted_count": len(submitted_relations),
                 "bank_year": resolved_bank_year,
-                "oa_year": resolved_oa_year,
             },
             "bank_rows": visible_bank_rows,
             "oa_rows": visible_oa_rows,
@@ -322,7 +319,6 @@ class BatchAccountingService:
         *,
         year: str | None = None,
         bank_year: str | None = None,
-        oa_year: str | None = None,
         bank_row_id: str,
         oa_row_ids: list[str],
         actor: str,
@@ -333,7 +329,6 @@ class BatchAccountingService:
             return self._submit_unlocked(
                 year=year,
                 bank_year=bank_year,
-                oa_year=oa_year,
                 bank_row_id=bank_row_id,
                 oa_row_ids=oa_row_ids,
                 actor=actor,
@@ -346,7 +341,6 @@ class BatchAccountingService:
         *,
         year: str | None = None,
         bank_year: str | None = None,
-        oa_year: str | None = None,
         bank_row_id: str,
         oa_row_ids: list[str],
         actor: str,
@@ -355,10 +349,9 @@ class BatchAccountingService:
     ) -> dict[str, Any]:
         fallback_year = str(year or "").strip()
         resolved_bank_year = self._validate_year(bank_year or fallback_year)
-        resolved_oa_year = self._validate_year(oa_year or fallback_year)
         normalized_bank_row_id = self._required_id(bank_row_id, "bank_row_id")
         normalized_oa_row_ids = self._normalize_ids(oa_row_ids)
-        context = self._build_context(bank_year=resolved_bank_year, oa_year=resolved_oa_year)
+        context = self._build_context(bank_year=resolved_bank_year)
         self._ensure_relation_read_model_fresh(context.relation_read_model_status)
         bank_row = context.rows_by_id.get(normalized_bank_row_id)
         if not isinstance(bank_row, dict) or not self._is_batch_bank_row(bank_row, resolved_bank_year, require_unlinked=False):
@@ -414,7 +407,6 @@ class BatchAccountingService:
             "invoice_row_ids": invoice_row_ids,
             "year": resolved_bank_year,
             "bank_year": resolved_bank_year,
-            "oa_year": resolved_oa_year,
             "oa_years": selected_oa_years,
             "created_by": actor,
         }
@@ -640,10 +632,10 @@ class BatchAccountingService:
             "message": "已撤回批量账务关联。",
         }
 
-    def _build_context(self, *, bank_year: str, oa_year: str) -> _WorkbenchContext:
+    def _build_context(self, *, bank_year: str) -> _WorkbenchContext:
         payload = None
         if self._batch_workbench_loader is not None:
-            payload = self._batch_workbench_loader(bank_year=bank_year, oa_year=oa_year)
+            payload = self._batch_workbench_loader(bank_year=bank_year)
         if not isinstance(payload, dict):
             payload = self._grouped_workbench_loader("all")
         groups = self._groups_from_payload(payload)
@@ -716,7 +708,7 @@ class BatchAccountingService:
         eligible_oa_rows = [
             row
             for row in open_oa_rows
-            if self._is_eligible_oa_row(row, oa_year, linked_row_ids=linked_row_ids)
+            if self._is_eligible_oa_row(row, linked_row_ids=linked_row_ids)
         ]
         return _WorkbenchContext(
             rows_by_id=rows_by_id,
@@ -796,18 +788,10 @@ class BatchAccountingService:
     def _is_eligible_oa_row(
         self,
         row: dict[str, Any],
-        year: str,
         *,
         linked_row_ids: set[str] | None = None,
     ) -> bool:
-        if not self._is_eligible_oa_row_for_submission(row, linked_row_ids=linked_row_ids):
-            return False
-        return self._row_year_matches(
-            row,
-            year,
-            keys=("apply_time", "application_time", "application_date", "date", "created_at"),
-            nested_date_keys=("申请日期", "单据日期", "日期"),
-        )
+        return self._is_eligible_oa_row_for_submission(row, linked_row_ids=linked_row_ids)
 
     def _is_eligible_oa_row_for_submission(
         self,

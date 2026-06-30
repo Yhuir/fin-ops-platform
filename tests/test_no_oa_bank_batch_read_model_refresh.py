@@ -4,7 +4,10 @@ import unittest
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
+from fin_ops_platform.services.no_oa_bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    NoOaBankBatchService,
+)
 from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import (
     NoOaBankBatchReadModelPersistencePort,
     NoOaBankBatchReadModelRefreshService,
@@ -30,23 +33,37 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.saved_snapshots: list[dict[str, object]] = []
 
-            def save_no_oa_bank_batches(self, snapshot: dict[str, object]) -> None:
-                self.saved_snapshots.append(dict(snapshot))
+            def save_no_oa_bank_batches(
+                self,
+                snapshot: dict[str, object],
+                *,
+                relation_mode: str = "no_oa_bank_batch",
+            ) -> None:
+                self.saved_snapshots.append({**dict(snapshot), "relation_mode": relation_mode})
 
         state_store = StateStore()
         port = NoOaBankBatchReadModelPersistencePort(state_store)
 
         port.save_public_snapshot({"batches": {"batch-1": {"status": "draft"}}})
 
-        self.assertEqual(state_store.saved_snapshots, [{"batches": {"batch-1": {"status": "draft"}}}])
+        self.assertEqual(
+            state_store.saved_snapshots,
+            [{"batches": {"batch-1": {"status": "draft"}}, "relation_mode": "no_oa_bank_batch"}],
+        )
 
     def test_persistence_port_uses_scoped_store_save_when_available(self) -> None:
         class StateStore:
             def __init__(self) -> None:
                 self.saved_scopes: list[tuple[str, dict[str, object]]] = []
 
-            def save_no_oa_bank_batches_scope(self, snapshot: dict[str, object], *, scope_key: str) -> None:
-                self.saved_scopes.append((scope_key, dict(snapshot)))
+            def save_no_oa_bank_batches_scope(
+                self,
+                snapshot: dict[str, object],
+                *,
+                scope_key: str,
+                relation_mode: str = "no_oa_bank_batch",
+            ) -> None:
+                self.saved_scopes.append((scope_key, relation_mode, dict(snapshot)))
 
             def save_no_oa_bank_batches(self, *_args: object, **_kwargs: object) -> None:
                 raise AssertionError("scoped no-OA refresh should not fall back to full snapshot save")
@@ -58,7 +75,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
 
         self.assertEqual(
             state_store.saved_scopes,
-            [("2026-03", {"batches": {"batch-1": {"status": "draft"}}})],
+            [("2026-03", "no_oa_bank_batch", {"batches": {"batch-1": {"status": "draft"}}})],
         )
 
     def test_refresh_persists_through_explicit_persistence_boundary(self) -> None:
@@ -70,8 +87,14 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.saved_snapshots: list[tuple[str, dict[str, object]]] = []
 
-            def save_public_snapshot(self, snapshot: dict[str, object], *, scope_key: str = "all") -> None:
-                self.saved_snapshots.append((scope_key, dict(snapshot)))
+            def save_public_snapshot(
+                self,
+                snapshot: dict[str, object],
+                *,
+                scope_key: str = "all",
+                relation_mode: str = "no_oa_bank_batch",
+            ) -> None:
+                self.saved_snapshots.append((scope_key, relation_mode, dict(snapshot)))
 
         app = build_application()
         persistence = Persistence()
@@ -108,6 +131,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
         self.assertEqual(result["scope_key"], "all")
         self.assertEqual(len(persistence.saved_snapshots), 1)
         self.assertEqual(persistence.saved_snapshots[0][0], "all")
+        self.assertEqual(persistence.saved_snapshots[0][1], "no_oa_bank_batch")
 
     def test_refresh_does_not_repair_workbench_relations_from_read_model_path(self) -> None:
         class ImportService:
@@ -140,7 +164,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.saved_no_oa_snapshots: list[dict[str, object]] = []
 
-            def save_no_oa_bank_batches(self, snapshot) -> None:
+            def save_no_oa_bank_batches(self, snapshot, **_kwargs) -> None:
                 self.saved_no_oa_snapshots.append(dict(snapshot))
 
             def save_workbench_pair_relations(self, *_args, **_kwargs) -> None:
@@ -381,7 +405,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                 return {}
 
         class StateStore:
-            def save_no_oa_bank_batches(self, _snapshot) -> None:
+            def save_no_oa_bank_batches(self, _snapshot, **_kwargs) -> None:
                 return None
 
         app = build_application()
@@ -639,13 +663,24 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
         class StateStore:
             def __init__(self, repository: ReadRepository) -> None:
                 self.no_oa_bank_batch_sql_read_repository = repository
-                self.saved_scopes: list[tuple[str, dict[str, object]]] = []
+                self.saved_scopes: list[tuple[str, str, dict[str, object]]] = []
 
-            def save_no_oa_bank_batches_scope(self, snapshot: dict[str, object], *, scope_key: str) -> None:
-                self.saved_scopes.append((scope_key, dict(snapshot)))
+            def save_no_oa_bank_batches_scope(
+                self,
+                snapshot: dict[str, object],
+                *,
+                scope_key: str,
+                relation_mode: str = "no_oa_bank_batch",
+            ) -> None:
+                self.saved_scopes.append((scope_key, relation_mode, dict(snapshot)))
 
-            def save_no_oa_bank_batches(self, snapshot: dict[str, object]) -> None:
-                self.saved_scopes.append(("all", dict(snapshot)))
+            def save_no_oa_bank_batches(
+                self,
+                snapshot: dict[str, object],
+                *,
+                relation_mode: str = "no_oa_bank_batch",
+            ) -> None:
+                self.saved_scopes.append(("all", relation_mode, dict(snapshot)))
 
         class QueueRepository:
             def __init__(self) -> None:
@@ -719,8 +754,8 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                     "scope_type": "no_oa_bank_batch",
                     "scope_key": "2026-05",
                     "source_version": 9,
-                    "metadata": {"action_name": "bank_flow_rule_batch_reset_submitted"},
-                    "action_name": "bank_flow_rule_batch_reset_submitted",
+                    "metadata": {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE},
+                    "action_name": "workbench_relation_changed",
                 },
                 attempts=1,
                 status="processing",
@@ -732,7 +767,8 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
         self.assertNotIn("skipped", result)
         self.assertEqual(repository.summary_calls, [])
         self.assertEqual(len(state_store.saved_scopes), 1)
-        snapshot = state_store.saved_scopes[0][1]
+        self.assertEqual(state_store.saved_scopes[0][1], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        snapshot = state_store.saved_scopes[0][2]
         batches = snapshot.get("batches")
         self.assertIsInstance(batches, dict)
         self.assertEqual(
@@ -788,7 +824,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.saved_no_oa_snapshots: list[dict[str, object]] = []
 
-            def save_no_oa_bank_batches(self, snapshot) -> None:
+            def save_no_oa_bank_batches(self, snapshot, **_kwargs) -> None:
                 self.saved_no_oa_snapshots.append(dict(snapshot))
 
         old_batch = {

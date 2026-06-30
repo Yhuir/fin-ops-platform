@@ -18,11 +18,11 @@
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
 | `IN-USAGE-E2E-001` | fresh rows/filter/table baseline | P0 | 页面加载 fresh rows，展示发票、支付状态、OA、支出流水；首屏 page size 有界，筛选/排序不从当前页伪造全局选项。 |
-| `IN-USAGE-E2E-002` | Workbench relation evidence fan-out | P0 | 关联台 candidate relation 只显示 OA/流水候选证据，支付状态保持待处理；Workbench confirm 后页面重新读取 rows，linked OA/流水证据驱动已支付状态。 |
-| `IN-USAGE-E2E-003` | OA reverse preview 三态 | P0 | 反提 OA 预览中 `unlinked` 发票可勾选；`linked` 显示 `已关联oa` 且不可勾选；`candidate` 显示 `候选oa` 且不可勾选，两者都不能进入创建草稿 payload。 |
+| `IN-USAGE-E2E-002` | Workbench relation evidence fan-out | P0 | 未正式化自动匹配不能驱动已支付；Workbench confirm 或自动正式化后页面重新读取 rows，linked OA/流水证据驱动已支付状态。 |
+| `IN-USAGE-E2E-003` | OA reverse preview 二态 | P0 | 反提 OA 预览中 `unlinked` 发票可勾选；`linked` 显示 `已关联oa` 且不可勾选；历史 `candidate` 兼容值归入 `未关联oa`，不展示独立候选 OA 筛选。 |
 | `IN-USAGE-E2E-004` | OA reverse draft -> staged -> submitted history | P0 | 用户可从当前候选子集重新 preview、创建 OA 草稿；关闭确认弹窗后批次进入 `暂存` 且不展示 OA 草稿链接；用户确认 `我已在OA系统提交该草稿 / OA正在进行中` 后，历史只展示业务字段，不暴露 batch/draft/preview/internal status；成功写入后必须等 `input_invoice_usage` operation barrier fresh 再读取 rows。 |
 | `IN-USAGE-E2E-005` | read model refreshing/stale/detail | P0 | rows 和 `/rows/{row_id}/relation-details` 在 missing/stale/source mismatch 时展示刷新/诊断，不触发全量 live rebuild 或假空态。 |
-| `IN-USAGE-E2E-006` | 多关系 `+N` 详情 | P1 | 同一 linked/candidate relation 下多 OA、流水或发票聚合为一行，`+N` 详情从单行 read model payload 展开。 |
+| `IN-USAGE-E2E-006` | 多关系 `+N` 详情 | P1 | 同一 linked relation 下多 OA、流水或发票聚合为一行，`+N` 详情从单行 read model payload 展开。 |
 | `IN-USAGE-E2E-007` | 权限矩阵 | P1 | `read_export_only` 看不到或不能触发写入口；API 403 不被 UI 当作成功；admin-only 凭据入口不泄漏给普通用户。 |
 | `IN-USAGE-E2E-008` | 导出/download | P1 | 浏览器 download event 成功，字段、筛选、权限、row-limit 和 refreshing 反馈与后端 contract 一致。 |
 | `IN-USAGE-E2E-009` | 下游 tax/cost/OA pending/search fan-out | P1 | relation、支付规则、OA reverse 或认证状态变化后，下游页面通过各自 read model 展示一致结果。 |

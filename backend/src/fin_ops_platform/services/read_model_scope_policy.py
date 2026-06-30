@@ -162,6 +162,7 @@ DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
     {
         "bank_account_balance": _all_only_scope_policy("bank_account_balance"),
         "bank_detail": _month_or_all_scope_policy("bank_detail"),
+        "bank_flow_rule_batch": _month_or_all_scope_policy("bank_flow_rule_batch"),
         "cost_statistics": _cost_statistics_scope_policy(),
         "input_invoice_usage": _month_or_all_scope_policy("input_invoice_usage"),
         "invoice_lifecycle": _month_or_all_scope_policy("invoice_lifecycle"),

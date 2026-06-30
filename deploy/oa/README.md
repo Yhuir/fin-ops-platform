@@ -298,7 +298,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.postgres apply
 ```
 
-RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、发票使用/收款、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。运行前置检查见 `docs/operations/postgresql-runtime.md`，worker/read model 运维口径见 `docs/operations/runtime-worker-governance.md`。
+RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、发票使用/收款、bank-flow/no-OA、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。运行前置检查见 `docs/operations/postgresql-runtime.md`，worker/read model 运维口径见 `docs/operations/runtime-worker-governance.md`。
 
 RabbitMQ 生产 env 拆分：
 
@@ -329,6 +329,7 @@ sudo systemctl enable --now fin-ops-worker@workbench-matching.service
 sudo systemctl enable --now fin-ops-worker@bank-detail.service
 sudo systemctl enable --now fin-ops-worker@bank-account-balance.service
 sudo systemctl enable --now fin-ops-worker@no-oa-bank-batch.service
+sudo systemctl enable --now fin-ops-worker@bank-flow-rule-batch.service
 sudo systemctl enable --now fin-ops-worker@turnover-ledger.service
 sudo systemctl enable --now fin-ops-worker@search-pending.service
 sudo systemctl enable --now fin-ops-worker@search.service

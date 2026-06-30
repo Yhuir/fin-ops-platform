@@ -93,6 +93,10 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             "pending-invoice": ("pending-invoice-read-model", ("pending_invoice.read_model.refresh",)),
             "cost-statistics": ("cost-statistics-read-model", ("cost_statistics.read_model.refresh",)),
             "tax-offset": ("tax-offset-read-model", ("tax_offset.read_model.refresh",)),
+            "bank-flow-rule-batch": (
+                "bank-flow-rule-batch-read-model",
+                ("bank_flow_rule_batch.read_model.refresh",),
+            ),
             "invoice-lifecycle-secondary": (
                 "invoice-lifecycle-secondary-read-model",
                 ("invoice_lifecycle.read_model.refresh",),
@@ -110,6 +114,7 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["pending_invoice"].worker_instance, "pending-invoice")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["cost_statistics"].worker_instance, "cost-statistics")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["tax_offset"].worker_instance, "tax-offset")
+        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["bank_flow_rule_batch"].worker_instance, "bank-flow-rule-batch")
 
     def test_import_claim_events_include_import_fact_changed_in_all_transports(self) -> None:
         registration = registration_by_instance_name()["import"]
@@ -169,6 +174,11 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         args = worker_app.build_parser().parse_args(["--enable-no-oa-bank-batch-read-model-refresh"])
 
         self.assertEqual(worker_app._infer_worker_kind(args), "no-oa-bank-batch-read-model")
+
+    def test_worker_kind_inference_uses_registry_for_bank_flow_rule_batch_worker(self) -> None:
+        args = worker_app.build_parser().parse_args(["--enable-bank-flow-rule-batch-read-model-refresh"])
+
+        self.assertEqual(worker_app._infer_worker_kind(args), "bank-flow-rule-batch-read-model")
 
     def test_worker_registration_check_outputs_registry_derived_configuration(self) -> None:
         stdout = io.StringIO()

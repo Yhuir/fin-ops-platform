@@ -299,7 +299,6 @@ export default function BatchAccountingPage() {
   const { runOperation } = useGlobalOperationOverlay();
   const { canMutateData } = useSessionPermissions();
   const [bankYear, setBankYear] = useState(currentYear);
-  const [oaYear, setOaYear] = useState(currentYear);
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
   const [payload, setPayload] = useState<BatchAccountingResponse>(EMPTY_PAYLOAD);
   const [selectedBankRowId, setSelectedBankRowId] = useState<string | null>(null);
@@ -377,7 +376,6 @@ export default function BatchAccountingPage() {
     && canMutateData
     && selectedOaRows.length > 0
     && isValidYear(bankYear)
-    && isValidYear(oaYear)
     && !mutating
     && (differenceCents === 0 || differenceNote.trim().length > 0);
   const canWithdraw = Boolean(selectedBankRow?.relationId) && canMutateData && !mutating;
@@ -411,12 +409,11 @@ export default function BatchAccountingPage() {
   }, []);
 
   const reloadDataAfterMutation = useCallback(async () => {
-    if (!isValidYear(bankYear) || !isValidYear(oaYear)) {
+    if (!isValidYear(bankYear)) {
       return null;
     }
     const nextPayload = await fetchBatchAccounting({
       bankYear,
-      oaYear,
       bucket,
       bankPage,
       bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
@@ -425,17 +422,16 @@ export default function BatchAccountingPage() {
     });
     applyBatchAccountingPayload(nextPayload);
     return nextPayload;
-  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage, oaYear]);
+  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage]);
 
   const loadData = useCallback((signal?: AbortSignal) => {
-    if (!isValidYear(bankYear) || !isValidYear(oaYear)) {
+    if (!isValidYear(bankYear)) {
       return;
     }
     setLoading(true);
     setError(null);
     fetchBatchAccounting({
       bankYear,
-      oaYear,
       bucket,
       bankPage,
       bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
@@ -452,7 +448,7 @@ export default function BatchAccountingPage() {
         setError(caught instanceof Error ? caught.message : "批量账务数据加载失败");
       })
       .finally(() => setLoading(false));
-  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage, oaYear]);
+  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -500,11 +496,6 @@ export default function BatchAccountingPage() {
     setSelectedBankRowId(null);
     setSelectedOaRowIds(new Set());
     setDifferenceNote("");
-  };
-
-  const handleOaYearChange = (nextYear: string) => {
-    setOaYear(nextYear);
-    setOaPage(1);
   };
 
   const handleSelectBankRow = (row: BatchAccountingBankRow) => {
@@ -558,7 +549,6 @@ export default function BatchAccountingPage() {
         try {
           const submitResult = await submitBatchAccounting({
             bankYear,
-            oaYear,
             bankRowId: selectedBankRow.id,
             oaRowIds: selectedOaRows.map((row) => row.id),
             expectedVersion: selectedBankRow.version,
@@ -773,17 +763,6 @@ export default function BatchAccountingPage() {
                   <small id="batch-accounting-difference-note-help">金额不一致时必须填写，提交后视为人工差额闭环。</small>
                 </div>
               ) : null}
-              <label className="batch-accounting-field batch-accounting-field--year" htmlFor="batch-accounting-oa-year">
-                <span>OA年份</span>
-                <input
-                  id="batch-accounting-oa-year"
-                  max={2100}
-                  min={2000}
-                  onChange={(event) => handleOaYearChange(event.target.value)}
-                  type="number"
-                  value={oaYear}
-                />
-              </label>
               <div className="batch-accounting-field batch-accounting-field--search">
                 <label htmlFor="batch-accounting-oa-search">搜索OA内容</label>
                 <div className="batch-accounting-search">

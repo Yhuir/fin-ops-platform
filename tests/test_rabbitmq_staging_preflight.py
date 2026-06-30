@@ -71,6 +71,7 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         self.assertIn("workbench.read_model.refresh", dispatcher_command)
         self.assertIn("bank_detail.read_model.refresh", dispatcher_command)
         self.assertIn("no_oa_bank_batch.read_model.refresh", dispatcher_command)
+        self.assertIn("bank_flow_rule_batch.read_model.refresh", dispatcher_command)
         self.assertIn("invoice_lifecycle.read_model.refresh", dispatcher_command)
         self.assertIn("input_invoice_usage.read_model.refresh", dispatcher_command)
         self.assertIn("output_invoice_collection.read_model.refresh", dispatcher_command)

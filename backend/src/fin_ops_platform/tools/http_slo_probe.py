@@ -176,7 +176,7 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("no_oa_bank_batches_tag_selection", "/api/no-oa-bank-batches/tag-selection", expected_statuses=(200, 202)),
     HttpProbe(
         "batch_accounting",
-        f"/api/batch-accounting?bank_year={_current_year()}&oa_year={_current_year()}&bucket=unsubmitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",
+        f"/api/batch-accounting?bank_year={_current_year()}&bucket=unsubmitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",
         expected_statuses=(200, 202),
     ),
     HttpProbe("turnover_ledger_grouped", "/api/turnover-ledger?view=grouped&page=1&page_size=50", expected_statuses=(200, 202)),

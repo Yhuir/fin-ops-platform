@@ -1,6 +1,6 @@
 # 流水规则批量处理状态机
 
-> 本文件定义当前过渡态和目标态。当前代码已提供 `/bank-flow-rule-batches` / `/api/bank-flow-rule-batches`，底层批次/read model 仍复用旧 no-OA 底座。
+> 本文件定义当前流水规则批量处理状态。当前代码已提供 `/bank-flow-rule-batches` / `/api/bank-flow-rule-batches`，并使用独立 `bank_flow_rule_batch` read model key、worker event、operation barrier target 和 repository port；底层物理批次存储仍共享现有 no-OA batch storage 并以 `relation_mode=bank_flow_rule_batch` 隔离。
 
 ## 标签规则状态
 
@@ -21,7 +21,7 @@
 
 | 状态 | 事实源 | 语义 | 允许流转 |
 | --- | --- | --- | --- |
-| `candidate` | 过渡期 `no_oa_bank_batch` read model；目标态 `bank_flow_rule_batch` read model | 当前筛选下可选择的未占用银行流水候选。 | 用户选择后进入 `selected_draft`。 |
+| `candidate` | `bank_flow_rule_batch` read model | 当前筛选下可选择的未占用银行流水候选。 | 用户选择后进入 `selected_draft`。 |
 | `selected_draft` | 页面本地状态 | 用户本次选择的银行流水，尚未写事实。 | 提交成功进入 `submitted`; 清空选择回到 `candidate`。 |
 | `submitted` | `app.bank_flow_rule_batches` + active relation | 已通过 command service 创建 relation。 | owner withdraw 或 rebaseline apply 后进入 `withdrawn`。 |
 | `withdrawn` | batch event + cancelled/withdrawn relation | 批次关系已撤回，银行流水释放，可重新按新规则进入候选。 | 不自动恢复为 submitted；重新提交创建新 request/case。 |
@@ -84,7 +84,7 @@
 
 ## Read Model / Worker 状态
 
-当前过渡期复用 `no_oa_bank_batch` read model；目标态 `bank_flow_rule_batch` read model 使用 scoped incremental projection：
+当前 `bank_flow_rule_batch` read model 使用 scoped incremental projection：
 
 - `fresh`：候选、submitted、withdrawn 与 source versions 一致。
 - `refreshing`：dirty scope pending/processing。

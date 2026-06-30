@@ -145,10 +145,52 @@ def test_no_oa_relation_change_keeps_no_oa_read_model_in_downstream_scope() -> N
     assert dirty_by_scope_type["cost_statistics"][-1] == "high"
     assert dirty_by_scope_type["search"][-1] == "high"
     assert dirty_by_scope_type["no_oa_bank_batch"][-1] == "high"
+    assert _json_payload(dirty_by_scope_type["no_oa_bank_batch"][4])["relation_mode"] == "no_oa_bank_batch"
+    no_oa_outbox_params = [
+        params
+        for sql, params in connection.execute_calls
+        if "insert into job.outbox_events" in " ".join(sql.lower().split())
+        and str(params[3]) == "no_oa_bank_batch"
+    ]
+    assert no_oa_outbox_params[-1][5] == (
+        "no_oa_bank_batch.read_model.refresh:no_oa_bank_batch:2026-05:no_oa_bank_batch"
+    )
+    assert _json_payload(no_oa_outbox_params[-1][8])["relation_mode"] == "no_oa_bank_batch"
     assert "input_invoice_usage" not in dirty_by_scope_type
     assert "output_invoice_collection" not in dirty_by_scope_type
     assert "tax_offset" not in dirty_by_scope_type
     assert "oa_pending_payment" not in dirty_by_scope_type
+
+
+def test_bank_flow_relation_change_enqueues_bank_flow_read_model_refresh() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relations(
+        _snapshot(relation_mode="bank_flow_rule_batch", row_types=["bank"]),
+        changed_case_ids={"CASE-1"},
+    )
+
+    dirty_by_scope_type = {
+        str(params[1]): params
+        for sql, params in connection.fetch_one_calls
+        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
+    }
+    bank_flow_outbox_params = [
+        params
+        for sql, params in connection.execute_calls
+        if "insert into job.outbox_events" in " ".join(sql.lower().split())
+        and str(params[3]) == "bank_flow_rule_batch"
+    ]
+
+    assert "no_oa_bank_batch" not in dirty_by_scope_type
+    assert dirty_by_scope_type["bank_flow_rule_batch"][-1] == "high"
+    assert _json_payload(dirty_by_scope_type["bank_flow_rule_batch"][4])["relation_mode"] == "bank_flow_rule_batch"
+    assert bank_flow_outbox_params[-1][5] == (
+        "bank_flow_rule_batch.read_model.refresh:bank_flow_rule_batch:2026-05:bank_flow_rule_batch"
+    )
+    assert _json_payload(bank_flow_outbox_params[-1][8])["relation_mode"] == "bank_flow_rule_batch"
+    assert dirty_by_scope_type["cost_statistics"][-1] == "high"
 
 
 def test_input_expense_relation_change_skips_output_and_income_downstream_scopes() -> None:

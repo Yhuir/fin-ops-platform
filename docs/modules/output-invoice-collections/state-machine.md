@@ -12,7 +12,7 @@
   - 正式收据：`preview -> issued -> voided -> reissued`。创建必须有 idempotency key；history 读取真实 receipt lifecycle facts。
 - 状态事实源：
   - 销项发票和银行/关系事实来自 import/workbench/read model 上游。
-  - OA、收入流水和关联销项发票项展示来自 `workbench_relation` 统一分发关系；`relationStatus="candidate"` 只能作为候选证据展示，不能计入已收款或 confirmed relation 判断。
+  - OA、收入流水和关联销项发票项展示来自 `workbench_relation` 统一分发关系；只有 `relationStatus="linked"` 能计入已收款或 confirmed relation 判断。未正式化自动匹配 decision 或历史 `relationStatus="candidate"` 兼容值按未关联处理，不作为第三种收款关系状态。
   - 收款状态规则来自 `InvoiceLifecyclePolicy` 和 `OutputInvoiceCollectionStatusRuleService`。
   - 手动状态、提醒、红蓝票关系、收据 facts 来自 output invoice collection lifecycle repository。
   - 页面列表事实来自 SQL read model `output_invoice_collection`，fresh 时叠加 lifecycle facts。

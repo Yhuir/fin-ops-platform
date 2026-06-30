@@ -365,7 +365,12 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
       });
     }
     if (url.pathname === "/api/output-invoice-collections/invoices/out-001/detail") {
-      return jsonResponse({ id: "out-001", invoiceNo: "0001", buyerName: "云南客户科技有限公司" });
+      return jsonResponse({
+        id: "out-001",
+        invoiceNo: "0001",
+        buyerName: "云南客户科技有限公司",
+        sourceLinks: { invoiceId: "out-001", relationCaseId: "case-hidden" },
+      });
     }
     if (url.pathname === "/api/output-invoice-collections/bank-transactions/bank-001/detail") {
       return jsonResponse({ id: "bank-001", counterpartyName: "云南客户科技有限公司", amount: "5000.00" });
@@ -373,9 +378,9 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
     if (url.pathname.startsWith("/api/output-invoice-collections/rows/") && url.pathname.endsWith("/relation-details")) {
       const kind = url.searchParams.get("kind") ?? "bank";
       const invoiceSummaries = [
-        { invoiceId: "out-primary", digitalInvoiceNo: "XSFP-MULTI-PRIMARY", totalWithTax: "300.00" },
-        { invoiceId: "out-related-a", invoiceNo: "XSFP-MULTI-A", totalWithTax: "100.00" },
-        { invoiceId: "out-related-b", invoiceNo: "XSFP-MULTI-B", totalWithTax: "200.00" },
+        { invoiceId: "out-primary", digitalInvoiceNo: "XSFP-MULTI-PRIMARY", buyerName: "多发票客户", totalWithTax: "300.00", relationCaseId: "case-hidden-primary" },
+        { invoiceId: "out-related-a", invoiceNo: "XSFP-MULTI-A", buyerName: "多发票客户", totalWithTax: "100.00", relationCaseId: "case-hidden-a" },
+        { invoiceId: "out-related-b", invoiceNo: "XSFP-MULTI-B", buyerName: "多发票客户", totalWithTax: "200.00", relationCaseId: "case-hidden-b" },
       ];
       return jsonResponse({
         rowId: url.pathname.split("/")[4],
@@ -562,6 +567,9 @@ describe("Output invoice collections page", () => {
     const tableActionIcon = cssRule(styles, ".output-invoice-collections-table-action--icon");
     const sortButton = cssRule(styles, ".output-invoice-collections-sort-button");
     const paginationButton = cssRule(styles, ".output-invoice-collections-pagination-actions button");
+    const detailDrawerHeader = cssRule(styles, ".output-invoice-collection-drawer .finance-drawer__header");
+    const detailDrawerTitle = cssRule(styles, ".output-invoice-collection-drawer .finance-drawer__title");
+    const detailDrawerBody = cssRule(styles, ".output-invoice-collection-drawer .finance-drawer__body");
     const drawerButton = cssRule(styles, ".output-invoice-collection-drawer__button");
     const drawerFields = cssRule(styles, ".output-invoice-collection-drawer__field input,\n.output-invoice-collection-drawer__field select,\n.output-invoice-collection-drawer__field textarea");
     const groupInvoice = cssRule(styles, ".output-invoice-collections-table-group-header--invoice");
@@ -590,6 +598,9 @@ describe("Output invoice collections page", () => {
     expect(tableActionIcon).toContain("padding: 0");
     expect(sortButton).toContain("var(--motion-fast)");
     expect(paginationButton).toContain("var(--motion-fast)");
+    expect(detailDrawerHeader).toContain("padding: 10px var(--fp-space-4)");
+    expect(detailDrawerTitle).toContain("font-size: var(--fp-text-subtitle)");
+    expect(detailDrawerBody).toContain("padding: var(--fp-space-3) var(--fp-space-4)");
     expect(drawerButton).toContain("var(--motion-fast)");
     expect(drawerFields).toContain("var(--motion-fast)");
     expect(groupInvoice).toContain("color-mix(in srgb, var(--fp-success-soft)");
@@ -816,6 +827,21 @@ describe("Output invoice collections page", () => {
     expect(within(page).getAllByRole("button", { name: "已出收据" }).length).toBeGreaterThan(0);
     expect(within(page).getAllByRole("button", { name: "待出收据" }).length).toBeGreaterThan(0);
 
+    await user.click(within(page).getByRole("button", { name: "查看发票 XSFP-2026-0001 详情" }));
+    expect(await screen.findByRole("heading", { name: "销项发票详情" })).toBeInTheDocument();
+    expect(screen.getByText("购买方名称")).toBeInTheDocument();
+    expect(screen.getAllByText("云南客户科技有限公司").length).toBeGreaterThan(0);
+    expect(screen.queryByText("out-001")).not.toBeInTheDocument();
+    expect(screen.queryByText("invoiceId")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "销项发票详情" })).not.toBeInTheDocument());
+
+    await user.click(within(page).getByRole("button", { name: "查看流水 云南客户科技有限公司 详情" }));
+    expect(await screen.findByRole("heading", { name: "流水详情" })).toBeInTheDocument();
+    expect(screen.getByText("对方户名")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "流水详情" })).not.toBeInTheDocument());
+
     await user.click(within(page).getByRole("button", { name: /展开.*销项发票货物或应税劳务名称/ }));
     expect(within(page).getByRole("button", { name: /收起.*销项发票货物或应税劳务名称/ })).toBeInTheDocument();
 
@@ -964,18 +990,28 @@ describe("Output invoice collections page", () => {
     expect(within(page).queryByText("多流水摘要甲")).not.toBeInTheDocument();
 
     await user.click(within(page).getByRole("button", { name: "查看关联OA 2 条" }));
-    expect(await screen.findByText("OA关联明细")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "OA详情" })).toBeInTheDocument();
+    expect(screen.getByText("申请 1")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看关联流水 2 条" }));
-    expect(await screen.findByText("流水关联明细")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "流水详情" })).toBeInTheDocument();
+    expect(screen.getByText("流水 1")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看关联发票 3 张" }));
-    expect(await screen.findByText("发票关联明细")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "销项发票详情" })).toBeInTheDocument();
+    expect(screen.getByText("发票 1")).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText(/XSFP-MULTI-PRIMARY/).length).toBeGreaterThanOrEqual(2));
     expect(screen.getByText(/XSFP-MULTI-A/)).toBeInTheDocument();
     expect(screen.getByText(/XSFP-MULTI-B/)).toBeInTheDocument();
+    expect(screen.getAllByText("购买方").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("多发票客户").length).toBeGreaterThan(0);
+    expect(screen.queryByText("invoiceId")).not.toBeInTheDocument();
+    expect(screen.queryByText("buyerName")).not.toBeInTheDocument();
+    expect(screen.queryByText("relationCaseId")).not.toBeInTheDocument();
+    expect(screen.queryByText("case-output-multi")).not.toBeInTheDocument();
+    expect(screen.queryByText(/"buyerName"/)).not.toBeInTheDocument();
 
     const relationRequests = fetchMock.mock.calls
       .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))

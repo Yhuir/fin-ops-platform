@@ -3075,6 +3075,77 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(june_payload["total"], 0)
         self.assertEqual(june_payload["items"], [])
 
+    def test_etc_business_batch_submitted_list_prefers_scope_month_when_available(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.import_zips([
+                UploadedEtcZipFile(
+                    "historical-cross-month.zip",
+                    zip_bytes({
+                        "xml/ETC-SCOPE-JAN.xml": etc_xml(
+                            "ETC-SCOPE-JAN",
+                            issue_date="2026-02-01",
+                            passage_start_date="2026-01-31",
+                            passage_end_date="2026-03-01",
+                            total_amount="11.00",
+                        ),
+                        "pdf/ETC-SCOPE-JAN.pdf": fake_pdf("ETC-SCOPE-JAN"),
+                        "xml/ETC-SCOPE-FEB.xml": etc_xml(
+                            "ETC-SCOPE-FEB",
+                            issue_date="2026-02-05",
+                            passage_start_date="2026-01-31",
+                            passage_end_date="2026-03-01",
+                            total_amount="22.00",
+                        ),
+                        "pdf/ETC-SCOPE-FEB.pdf": fake_pdf("ETC-SCOPE-FEB"),
+                        "xml/ETC-SCOPE-MAR.xml": etc_xml(
+                            "ETC-SCOPE-MAR",
+                            issue_date="2026-02-10",
+                            passage_start_date="2026-01-31",
+                            passage_end_date="2026-03-01",
+                            total_amount="33.00",
+                        ),
+                        "pdf/ETC-SCOPE-MAR.pdf": fake_pdf("ETC-SCOPE-MAR"),
+                    }),
+                )
+            ])
+            expected_by_month = {
+                "2026-01": ("ETC-OA-20260114-187293", "ETC-SCOPE-JAN", "11.00"),
+                "2026-02": ("ETC-OA-20260215-154900", "ETC-SCOPE-FEB", "22.00"),
+                "2026-03": ("ETC-OA-20260312-193545", "ETC-SCOPE-MAR", "33.00"),
+            }
+            for scope_month, (external_batch_id, invoice_number, amount) in expected_by_month.items():
+                submitted_batch = app._etc_service.create_historical_submitted_batch(
+                    case_id=f"CASE-{scope_month}",
+                    external_batch_id=external_batch_id,
+                    invoice_numbers=[invoice_number],
+                    linked_oa_row_id=f"oa-{scope_month}",
+                    oa_amount=Decimal(amount),
+                )
+                app._etc_service.create_historical_submitted_business_batch(
+                    business_batch_id=f"etc_business_batch_hist_{scope_month.replace('-', '')}",
+                    task_id=f"ETC-RECON-HIST-{scope_month}",
+                    submission_batch_id=submitted_batch.id,
+                    external_etc_batch_id=external_batch_id,
+                    reported_amount=Decimal(amount),
+                    relation_case_id=f"CASE-{scope_month}",
+                    linked_oa_row_id=f"oa-{scope_month}",
+                    scope_month=scope_month,
+                )
+
+            payloads = {
+                month: json.loads(
+                    app.handle_request("GET", f"/api/etc/business-batches?status=submitted&month={month}").body
+                )["data"]
+                for month in expected_by_month
+            }
+
+        for month, payload in payloads.items():
+            expected_external_batch_id = expected_by_month[month][0]
+            self.assertEqual(payload["counts"], {"active": 0, "submitted": 1})
+            self.assertEqual(payload["total"], 1)
+            self.assertEqual([item["externalEtcBatchId"] for item in payload["items"]], [expected_external_batch_id])
+
     def test_etc_business_manual_submitted_creates_open_workbench_summary_with_reported_amount(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

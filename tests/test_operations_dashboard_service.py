@@ -12,11 +12,11 @@ class FakeDashboardConnection:
     def __init__(
         self,
         *,
-        fail_oa_attachment_inventory: bool = False,
-        fail_oa_attachment_cache_inventory: bool = False,
+        fail_invoice_inventory: bool = False,
+        fail_import_events: bool = False,
     ) -> None:
-        self.fail_oa_attachment_inventory = fail_oa_attachment_inventory
-        self.fail_oa_attachment_cache_inventory = fail_oa_attachment_cache_inventory
+        self.fail_invoice_inventory = fail_invoice_inventory
+        self.fail_import_events = fail_import_events
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
@@ -27,26 +27,17 @@ class FakeDashboardConnection:
                 raise AssertionError("bank inventory must qualify bank_transactions.status when import_batches is joined")
             return {"total_count": 12, "latest_synced_at": datetime(2026, 5, 20, 10, 30, tzinfo=UTC)}
         if "from app.invoices" in normalized and "invoice_flags" in normalized:
+            if self.fail_invoice_inventory:
+                raise RuntimeError("invoice inventory missing")
             return {
                 "total_count": 20,
-                "standard_count": 11,
-                "manual_count": 2,
-                "etc_count": 4,
-                "app_oa_attachment_count": 3,
+                "manual_count": 14,
+                "oa_attachment_count": 6,
+                "oa_attachment_non_manual_count": 2,
                 "latest_synced_at": datetime(2026, 5, 21, 8, 0, tzinfo=UTC),
-                "standard_latest_synced_at": datetime(2026, 5, 21, 8, 0, tzinfo=UTC),
                 "manual_latest_synced_at": datetime(2026, 5, 18, 8, 0, tzinfo=UTC),
-                "etc_latest_synced_at": datetime(2026, 5, 17, 8, 0, tzinfo=UTC),
-                "app_oa_attachment_latest_synced_at": datetime(2026, 5, 16, 8, 0, tzinfo=UTC),
+                "oa_attachment_latest_synced_at": datetime(2026, 5, 22, 9, 0, tzinfo=UTC),
             }
-        if "from read_model.workbench_rows" in normalized and "oa_attachment_invoice" in normalized:
-            if self.fail_oa_attachment_inventory:
-                raise RuntimeError("read model missing")
-            return {"count": 3, "latest_synced_at": datetime(2026, 5, 22, 9, 0, tzinfo=UTC)}
-        if "from app.oa_attachment_invoice_cache" in normalized:
-            if self.fail_oa_attachment_inventory or self.fail_oa_attachment_cache_inventory:
-                raise RuntimeError("cache missing")
-            return {"count": 3, "latest_synced_at": datetime(2026, 5, 22, 9, 0, tzinfo=UTC)}
         if "from app.oa_applications" in normalized and "oa_records_count" in normalized:
             return {
                 "oa_records_count": 7,
@@ -58,6 +49,66 @@ class FakeDashboardConnection:
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
         self.calls.append((sql, params))
+        normalized = " ".join(sql.lower().split())
+        if self.fail_import_events and (
+            "from app.import_batches" in normalized
+            or "oa_attachment_source_links" in normalized
+            or "from app.oa_sync_runs" in normalized
+        ):
+            raise RuntimeError("import events missing")
+        if "from app.import_batches" in normalized and "batch_type in" in normalized:
+            return [
+                {
+                    "event_id": "bank-batch-2",
+                    "source_key": "bank_transactions",
+                    "label": "流水导入",
+                    "source_name": "bank-2.xlsx",
+                    "imported_by": "ops",
+                    "count": 8,
+                    "supplementary_count": None,
+                    "imported_at": datetime(2026, 5, 23, 10, 5, tzinfo=UTC),
+                    "status": "completed",
+                },
+                {
+                    "event_id": "invoice-batch-1",
+                    "source_key": "manual",
+                    "label": "手工导入",
+                    "source_name": "invoice-1.xlsx",
+                    "imported_by": "ops",
+                    "count": 6,
+                    "supplementary_count": None,
+                    "imported_at": datetime(2026, 5, 22, 10, 5, tzinfo=UTC),
+                    "status": "completed",
+                },
+            ]
+        if "oa_attachment_source_links" in normalized:
+            return [
+                {
+                    "event_id": "oa-attachment-2026-05-21t10:05:00+00:00",
+                    "source_key": "oa_attachment",
+                    "label": "OA 解析",
+                    "source_name": "OA 附件解析",
+                    "imported_by": "oa_sync",
+                    "count": 4,
+                    "supplementary_count": 1,
+                    "imported_at": datetime(2026, 5, 21, 10, 5, tzinfo=UTC),
+                    "status": "completed",
+                }
+            ]
+        if "from app.oa_sync_runs" in normalized and "sync_type = 'oa_projection'" in normalized:
+            return [
+                {
+                    "event_id": "oa-run-1",
+                    "source_key": "oa_records",
+                    "label": "OA 同步",
+                    "source_name": "oa_projection",
+                    "imported_by": "oa_sync",
+                    "count": 7,
+                    "supplementary_count": None,
+                    "imported_at": datetime(2026, 5, 20, 10, 5, tzinfo=UTC),
+                    "status": "succeeded",
+                }
+            ]
         raise AssertionError(f"Unexpected fetch_all SQL: {sql}")
 
 
@@ -125,9 +176,16 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertIn("generated_at", payload)
         self.assertEqual(payload["data_inventory"]["bank"]["total_count"], 12)
         self.assertEqual(payload["data_inventory"]["invoice"]["total_count"], 20)
-        self.assertEqual(payload["data_inventory"]["invoice"]["sources"][1]["key"], "oa_attachment")
-        self.assertEqual(payload["data_inventory"]["invoice"]["sources"][1]["count"], 3)
+        invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
+        self.assertEqual(set(invoice_sources), {"manual", "oa_attachment"})
+        self.assertEqual(invoice_sources["manual"]["count"], 14)
+        self.assertEqual(invoice_sources["oa_attachment"]["count"], 6)
+        self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 2)
         self.assertEqual(payload["data_inventory"]["oa"]["sources"][1]["count"], 30)
+        import_events = payload["data_inventory"]["import_events"]
+        self.assertEqual([row["source_key"] for row in import_events], ["bank_transactions", "manual", "oa_attachment", "oa_records"])
+        self.assertEqual(import_events[2]["count"], 4)
+        self.assertEqual(import_events[2]["supplementary_count"], 1)
         endpoints = {row["endpoint"]: row for row in payload["request_performance"]["endpoints"]}
         self.assertEqual(endpoints["GET /api/workbench/summary"]["duration_ms"]["p95"], 640.0)
         self.assertEqual(endpoints["GET /api/workbench/summary"]["database_duration_ms"]["p99"], 310.0)
@@ -136,9 +194,9 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(payload["runtime_performance"]["queues"][0]["status"], "unknown")
         self.assertIn("rabbitmq_metrics_unavailable", payload["freshness"]["warnings"])
 
-    def test_oa_attachment_inventory_unknown_uses_null_not_zero(self) -> None:
+    def test_invoice_inventory_unknown_uses_null_not_zero(self) -> None:
         service = OperationsDashboardService(
-            FakeDashboardConnection(fail_oa_attachment_inventory=True),
+            FakeDashboardConnection(fail_invoice_inventory=True),
             api_performance_recorder=ApiPerformanceRecorder(),
             runtime_repository=FakeRuntimeRepository(),
         )
@@ -147,10 +205,11 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
         invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
         self.assertIsNone(invoice_sources["oa_attachment"]["count"])
+        self.assertIsNone(invoice_sources["oa_attachment"]["supplementary_count"])
         self.assertEqual(invoice_sources["oa_attachment"]["status"], "unknown")
-        self.assertIn("invoice_oa_attachment_inventory_unknown", payload["freshness"]["warnings"])
+        self.assertIn("invoice_inventory_unknown", payload["freshness"]["warnings"])
 
-    def test_oa_attachment_inventory_uses_cache_before_workbench_rows(self) -> None:
+    def test_invoice_inventory_uses_canonical_source_links_not_oa_cache_or_workbench_rows(self) -> None:
         connection = FakeDashboardConnection()
         service = OperationsDashboardService(
             connection,
@@ -162,15 +221,15 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
         normalized_calls = [" ".join(sql.lower().split()) for sql, _params in connection.calls]
         invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
-        self.assertEqual(invoice_sources["oa_attachment"]["count"], 3)
-        self.assertTrue(any("from app.oa_attachment_invoice_cache" in sql for sql in normalized_calls))
-        self.assertTrue(any("count(distinct concat_ws" in sql for sql in normalized_calls))
-        self.assertTrue(any("document_kind, '') <> 'non_tax_receipt'" in sql for sql in normalized_calls))
-        self.assertTrue(any("position('发票' in invoice_kind) > 0" in sql for sql in normalized_calls))
+        self.assertEqual(invoice_sources["manual"]["count"], 14)
+        self.assertEqual(invoice_sources["oa_attachment"]["count"], 6)
+        self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 2)
+        self.assertTrue(any("jsonb_array_elements" in sql and "manual_invoice_import" in sql and "oa_attachment_invoice" in sql for sql in normalized_calls))
+        self.assertFalse(any("from app.oa_attachment_invoice_cache" in sql for sql in normalized_calls))
         self.assertFalse(any("from read_model.workbench_rows" in sql for sql in normalized_calls))
 
-    def test_oa_attachment_inventory_falls_back_to_workbench_rows_when_cache_missing(self) -> None:
-        connection = FakeDashboardConnection(fail_oa_attachment_cache_inventory=True)
+    def test_import_events_failure_warns_without_blocking_inventory(self) -> None:
+        connection = FakeDashboardConnection(fail_import_events=True)
         service = OperationsDashboardService(
             connection,
             api_performance_recorder=ApiPerformanceRecorder(),
@@ -179,10 +238,9 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
         payload = service.build_payload()
 
-        normalized_calls = [" ".join(sql.lower().split()) for sql, _params in connection.calls]
-        invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
-        self.assertEqual(invoice_sources["oa_attachment"]["count"], 3)
-        self.assertTrue(any("from read_model.workbench_rows" in sql for sql in normalized_calls))
+        self.assertEqual(payload["data_inventory"]["bank"]["total_count"], 12)
+        self.assertEqual(payload["data_inventory"]["import_events"], [])
+        self.assertIn("import_events_unknown", payload["freshness"]["warnings"])
 
     def test_runtime_repository_outputs_unknown_queue_rows_when_rabbitmq_metrics_unavailable(self) -> None:
         class EmptyConnection:

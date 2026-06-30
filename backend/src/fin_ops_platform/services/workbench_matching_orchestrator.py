@@ -220,6 +220,9 @@ class WorkbenchMatchingOrchestrator:
         summary["auto_completed_relation_count"] = int(summary.get("auto_completed_relation_count") or 0) + int(
             result.get("auto_completed_relation_count") or 0
         )
+        summary["auto_created_relation_count"] = int(summary.get("auto_created_relation_count") or 0) + int(
+            result.get("auto_created_relation_count") or 0
+        )
         self._invalidate_read_models(scope_month)
 
     def _accumulate_rule_summary(self, summary: dict[str, Any]) -> None:

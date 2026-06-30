@@ -685,6 +685,17 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py tests/test_etc_backend.py tests/test_etc_reconciliation_service.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_etc_reconciliation_task_routes_delegate_to_route_owner -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_reconciliation_service.EtcReconciliationServiceTests.test_source_upload_service_submits_ticket_root_manual_text -v`；ticket-root text targeted API 回归 4 条中 3 passed、1 条因本地真实样例缺失 skipped。
 - 未测风险：剩余 upload/text callbacks 已经很薄，但仍在 `Application`；下一步应折叠到 `EtcReconciliationTaskApiRoutes`。
 
+## 2026-06-30 - ETC business-batch 月份筛选和紧凑列表 UI 修复
+
+- 目标：修复已提交批次在 1/2/3 月份重复出现的问题，并把批次列表和详情从内部 ID 主导的卡片式展示收敛为更紧凑的业务摘要。
+- 影响范围：`EtcBusinessBatchApplicationService.list_batches_payload` 月份过滤、ETC business batch API mapper、`EtcTicketManagementPage` 批次标题/审批文案/详情摘要、`web/src/app/styles.css` ETC 页面密度、产品/API/测试文档。
+- 关键决策：`amount_breakdown.scope_month` 是历史迁移和运维补录批次的业务归属月份；一旦存在，月份筛选只按该归属月份匹配，避免同一跨月发票批次重复落入多个月份。缺少归属月份的普通导入批次继续按发票开票日期、通行开始日期和通行结束日期匹配。
+- 模块化结论：ETC 票据模块已有页面、feature API、application service 和 `EtcService` 边界，但模块化状态仍是 partial；本次修复没有新增 read model/worker，也没有改变 Workbench relation 写边界。
+- UI 决策：批次列表不再把外部批次号作为主展示；用归属月份或通行日期范围、数量、金额和状态组成紧凑行。审批相关操作使用中文业务词，内部 ID 仍保留在请求、test id 和 aria 之外的必要技术路径中。
+- 测试覆盖：新增 API 契约回归，覆盖三个发票日期跨月但归属月份分别为 1/2/3 月的已提交批次；前端 API mapper 覆盖 `amountBreakdown.scope_month -> scopeMonth`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_etc_business_batch_submitted_list_prefers_scope_month_when_available tests.test_etc_backend.EtcApiTests.test_etc_business_batch_submitted_list_counts_use_filtered_passage_month -v`；`cd web && npm test -- --run src/test/EtcApi.test.ts src/test/EtcTicketManagementPage.test.tsx`；`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx -t "can retry OA draft creation"`；`cd web && npm exec tsc -- --noEmit`；`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts --project=chromium`。
+- 未测风险：真实生产历史数据若缺失 `scope_month` 仍会按发票日期兜底，可能继续跨月显示；需要通过历史迁移/补录数据 dry-run 检查缺失归属月份的已提交批次。
+
 ## 2026-06-25 - ETC reconciliation upload/text route callback收敛
 
 - 目标：把已经变薄的 generic source upload 和 ticket-root text HTTP callback 从 `Application` 收敛到 `EtcReconciliationTaskApiRoutes`。

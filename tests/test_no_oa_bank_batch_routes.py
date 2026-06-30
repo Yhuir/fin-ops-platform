@@ -8,10 +8,7 @@ from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-from fin_ops_platform.services.no_oa_bank_batch_application_service import (
-    BANK_FLOW_RULE_BATCH_RELATION_MODE,
-    NoOaBankBatchRelationMutationError,
-)
+from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchRelationMutationError
 
 
 class FakeNoOaApplicationService:
@@ -156,7 +153,7 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
         )
         self.assertEqual(service.list_relation_modes, ["no_oa_bank_batch"])
 
-    def test_bank_flow_list_route_uses_bank_flow_relation_mode(self) -> None:
+    def test_no_oa_route_does_not_handle_bank_flow_rule_batches(self) -> None:
         service = FakeNoOaApplicationService()
         routes = NoOaBankBatchApiRoutes(
             application_service=service,
@@ -165,10 +162,9 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
 
         response = routes.route("GET", "/api/bank-flow-rule-batches", {"bucket": ["submitted"]}, None, {})
 
-        self.assertEqual(response["status"], HTTPStatus.OK)
-        self.assertEqual(response["payload"]["read_model_status"], "fresh")
-        self.assertEqual(service.calls, [("list", {"bucket": ["submitted"]})])
-        self.assertEqual(service.list_relation_modes, [BANK_FLOW_RULE_BATCH_RELATION_MODE])
+        self.assertIsNone(response)
+        self.assertEqual(service.calls, [])
+        self.assertEqual(service.list_relation_modes, [])
 
     def test_route_owner_handles_http_mapping_with_platform_ports(self) -> None:
         service = FakeNoOaApplicationService()
@@ -260,30 +256,6 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_paging")
         self.assertEqual(payload["message"], "page_size must be <= 200.")
         self.assertEqual(service.calls, [("list", {"page": ["1"], "page_size": ["201"]})])
-
-    def test_bank_flow_reset_submitted_route_maps_actor_and_reason(self) -> None:
-        service = FakeNoOaApplicationService()
-        routes = NoOaBankBatchApiRoutes(application_service=service)
-
-        status, payload = routes.reset_submitted_bank_flow_batches(
-            {"reason": "  全部重新过规则  "},
-            session=fake_session("finance-user"),
-        )
-
-        self.assertEqual(status, HTTPStatus.OK)
-        self.assertEqual(payload["summary"]["reset_count"], 2)
-        self.assertEqual(
-            service.calls,
-            [
-                (
-                    "reset_submitted_bank_flow_rule_batches",
-                    {
-                        "actor": "finance-user",
-                        "reason": "全部重新过规则",
-                    },
-                )
-            ],
-        )
 
     def test_tag_selection_version_conflict_returns_409_and_error_code(self) -> None:
         service = FakeNoOaApplicationService()

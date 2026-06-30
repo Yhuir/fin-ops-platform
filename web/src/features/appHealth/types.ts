@@ -134,6 +134,7 @@ export type OperationsDashboardInventorySource = {
   key: string;
   label: string;
   count: number | null;
+  supplementary_count?: number | null;
   latest_synced_at: string | null;
   status: OperationsDashboardAvailability;
 };
@@ -143,6 +144,18 @@ export type OperationsDashboardInventoryBlock = {
   latest_synced_at: string | null;
   status: OperationsDashboardAvailability;
   sources: OperationsDashboardInventorySource[];
+};
+
+export type OperationsDashboardImportEvent = {
+  key: string;
+  source_key: string;
+  label: string;
+  source_name: string;
+  imported_by: string;
+  count: number | null;
+  supplementary_count: number | null;
+  imported_at: string | null;
+  status: string;
 };
 
 export type OperationsDashboardEndpointPerformance = {
@@ -223,6 +236,7 @@ export type OperationsDashboardPayload = {
     bank: OperationsDashboardInventoryBlock;
     invoice: OperationsDashboardInventoryBlock;
     oa: OperationsDashboardInventoryBlock;
+    import_events: OperationsDashboardImportEvent[];
   };
   request_performance: {
     window: {

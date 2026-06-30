@@ -314,7 +314,6 @@ function mapMutationResult(payload: ApiMutationResult): BatchAccountingMutationR
 
 export async function fetchBatchAccounting({
   bankYear,
-  oaYear,
   bucket,
   bankPage,
   bankPageSize,
@@ -324,7 +323,6 @@ export async function fetchBatchAccounting({
 }: FetchBatchAccountingRequest): Promise<BatchAccountingResponse> {
   const params = new URLSearchParams();
   params.set("bank_year", bankYear);
-  params.set("oa_year", oaYear);
   params.set("bucket", bucket);
   if (bankPage !== undefined) {
     params.set("bank_page", String(bankPage));
@@ -361,7 +359,6 @@ export async function fetchBatchAccounting({
 
 export async function submitBatchAccounting({
   bankYear,
-  oaYear,
   bankRowId,
   oaRowIds,
   expectedVersion,
@@ -373,7 +370,6 @@ export async function submitBatchAccounting({
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       bank_year: bankYear,
-      oa_year: oaYear,
       bank_row_id: bankRowId,
       oa_row_ids: oaRowIds,
       expected_version: expectedVersion,

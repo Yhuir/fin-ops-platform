@@ -4,7 +4,7 @@
 
 ## 模块目标
 
-`app.workbench_pair_relations` 是 confirmed relation fact。`workbench_relation` read model 是下游页面读取 linked/candidate/unlinked relation context 的统一边界。Browser E2E 必须证明用户写入 relation 后，下游页面通过后端事实重新读取到一致结果；也必须证明 candidate 不会被当作 confirmed fact。
+`app.workbench_pair_relations` 是 confirmed relation fact。`workbench_relation` read model 是下游页面读取 linked/unlinked relation context 的统一边界。Browser E2E 必须证明用户写入 relation 后，下游页面通过后端事实重新读取到一致结果；也必须证明未正式化自动决策不会被当作 confirmed fact。
 
 ## Spec 场景
 
@@ -14,7 +14,7 @@
 | `WB-REL-E2E-002` | 关联台 confirm -> pending invoices linked status | P0 | confirm 后，待找发票 linked-only 状态更新为已开票，显示发票号码/OA 申请人。 |
 | `WB-REL-E2E-003` | batch accounting submit/withdraw -> relation barrier -> bucket recovery | P0 | 批量账务提交后进入已提交 bucket，撤回后回未提交 bucket，期间等待 `workbench_relation` barrier。 |
 | `WB-REL-E2E-004` | turnover closure confirm/withdraw -> turnover/workbench barriers -> grouped recovery | P0 | 外部往来闭环后显示收支闭环，撤回后恢复，期间等待目标 freshness barriers。 |
-| `WB-REL-E2E-005` | candidate relation status 只展示候选，不驱动 linked-only 业务状态 | P0 | 下游页面可显示候选 chip，但支付/开票/收款/成本等业务状态只按 linked 计算。 |
+| `WB-REL-E2E-005` | 未正式化自动决策不驱动 linked-only 业务状态 | P0 | 下游页面不能把 open/proposed automatic decision 推断成候选或已关联 chip；支付/开票/收款/成本等业务状态只按 linked relation 计算。 |
 | `WB-REL-E2E-006` | relation read model non-fresh | P0 | 页面显示 freshness 诊断，不把空 relation 当真实空，不全局禁用具备 canonical write safety 的无关 mutation。 |
 | `WB-REL-E2E-007` | canonical write safety 和 idempotency | P0 | 重复提交不创建第二条 active relation；version conflict 显示明确错误。 |
 | `WB-REL-E2E-008` | relation fan-out 到 invoice usage / output collection / OA pending / cost / tax / search | P1 | 关键下游页面在 relation 写后通过自己的 read model 展示一致状态；candidate 不进入 linked-only 金额。 |
@@ -29,4 +29,3 @@
 - 大数据下游全链路 P95/P99。
 
 这些风险必须由 staging、生产只读工具和 runbook smoke 承接。
-

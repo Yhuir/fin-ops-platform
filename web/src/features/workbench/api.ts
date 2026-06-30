@@ -1735,7 +1735,7 @@ function mapWorkbenchExceptionEvidence(
 ): WorkbenchExceptionCandidateEvidence {
   const mapped: WorkbenchExceptionCandidateEvidence = {
     id: typeof evidence.id === "string" && evidence.id.trim() ? evidence.id.trim() : undefined,
-    label: String(evidence.label ?? evidence.id ?? "候选证据").trim(),
+    label: String(evidence.label ?? evidence.id ?? "关系证据").trim(),
   };
   if (typeof evidence.detail === "string" && evidence.detail.trim()) {
     mapped.detail = evidence.detail.trim();
@@ -2646,7 +2646,7 @@ export async function fetchWorkbenchInitialPage(
     signal,
   });
   onProgress?.({
-    label: "加载首屏候选组",
+    label: "加载首屏关系分组",
     loadedBytes: 0,
     totalBytes: 0,
     percent: 55,

@@ -191,7 +191,11 @@ class NoOaBankBatchApplicationService:
                 scope_key=refresh_scope_keys[0] if len(refresh_scope_keys) == 1 else "all",
                 relation_mode=relation_mode,
             )
-        list_read_model_batches = getattr(self._no_oa_bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
+        list_read_model_batches = getattr(
+            self._no_oa_bank_batch_read_model_repository,
+            self._read_model_list_method_for_relation_mode(relation_mode),
+            None,
+        )
         if callable(list_read_model_batches):
             summary_read_model_batches = list_read_model_batches(summary_filters)
             read_model_batches = list_read_model_batches(filters)
@@ -994,9 +998,18 @@ class NoOaBankBatchApplicationService:
         return "no_oa_bank_batch"
 
     @staticmethod
+    def _read_model_list_method_for_relation_mode(relation_mode: str) -> str:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return "list_bank_flow_rule_batch_rows"
+        return "list_no_oa_bank_batch_rows"
+
+    @staticmethod
     def _read_model_refresh_metadata_for_relation_mode(relation_mode: str) -> dict[str, object] | None:
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
-            return {"action_name": "bank_flow_rule_batch_read_model_refresh"}
+            return {
+                "action_name": "bank_flow_rule_batch_read_model_refresh",
+                "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            }
         return None
 
     @staticmethod
@@ -1827,7 +1840,23 @@ class NoOaBankBatchApplicationService:
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
             return False
-        return bool(refresh_gateway.enqueue_many("no_oa_bank_batch", scope_keys, reason=reason, metadata=metadata))
+        return bool(
+            refresh_gateway.enqueue_many(
+                self._read_model_key_from_refresh_metadata(metadata),
+                scope_keys,
+                reason=reason,
+                metadata=metadata,
+            )
+        )
+
+    @staticmethod
+    def _read_model_key_from_refresh_metadata(metadata: dict[str, object] | None) -> str:
+        payload = metadata if isinstance(metadata, dict) else {}
+        relation_mode = str(payload.get("relation_mode") or "").strip()
+        action_name = str(payload.get("action_name") or "").strip()
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE or action_name.startswith("bank_flow_rule_batch"):
+            return BANK_FLOW_RULE_BATCH_RELATION_MODE
+        return "no_oa_bank_batch"
 
     def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
         if self._state_store is None:

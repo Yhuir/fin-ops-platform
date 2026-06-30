@@ -374,6 +374,31 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
     return invoices.filter((invoice) => invoiceIds.has(invoice.id));
   };
 
+  const monthFromBatchIdentifier = (value: unknown) => {
+    const text = String(value ?? "");
+    const dashed = text.match(/(20\d{2})[-/年](0?[1-9]|1[0-2])/);
+    if (dashed) {
+      return `${dashed[1]}-${String(dashed[2]).padStart(2, "0")}`;
+    }
+    const compact = text.match(/(20\d{2})(0[1-9]|1[0-2])(?:\d{2})?/);
+    return compact ? `${compact[1]}-${compact[2]}` : "";
+  };
+
+  const batchScopeMonth = (batch: (typeof batches)[number], items = invoicesForBatch(batch)) => {
+    const rawBatch = batch as Record<string, unknown>;
+    const amountBreakdown = typeof rawBatch.amount_breakdown === "object" && rawBatch.amount_breakdown !== null
+      ? rawBatch.amount_breakdown as Record<string, unknown>
+      : typeof rawBatch.amountBreakdown === "object" && rawBatch.amountBreakdown !== null
+        ? rawBatch.amountBreakdown as Record<string, unknown>
+        : {};
+    return textField(rawBatch, "scope_month", "scopeMonth")
+      || textField(amountBreakdown, "scope_month", "scopeMonth")
+      || monthFromBatchIdentifier(textField(rawBatch, "external_etc_batch_id", "externalEtcBatchId"))
+      || monthFromBatchIdentifier(textField(rawBatch, "external_batch_id", "externalBatchId"))
+      || monthFromBatchIdentifier(textField(rawBatch, "etc_batch_id", "etcBatchId"))
+      || String(items[0]?.issue_date ?? "").slice(0, 7);
+  };
+
   const batchCounts = () => ({
     unsubmitted: batches.filter((batch) => batch.status === "unsubmitted").length,
     submitted: batches.filter((batch) => batch.status === "submitted").length,
@@ -430,6 +455,12 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
     const batchId = "id" in batch ? batch.id : "";
     const rawBatch = batch as Record<string, unknown>;
     const isSubmitted = batch.status === "submitted";
+    const scopeMonth = batchScopeMonth(batch);
+    const amountBreakdown = typeof rawBatch.amount_breakdown === "object" && rawBatch.amount_breakdown !== null
+      ? rawBatch.amount_breakdown as Record<string, unknown>
+      : typeof rawBatch.amountBreakdown === "object" && rawBatch.amountBreakdown !== null
+        ? rawBatch.amountBreakdown as Record<string, unknown>
+        : {};
     const businessBatchId = textField(rawBatch, "business_batch_id", "businessBatchId") || batchId;
     const importBatchIds = stringListField(rawBatch, "import_batch_ids", "importBatchIds");
     const submissionBatchId = textField(rawBatch, "submission_batch_id", "submissionBatchId");
@@ -461,6 +492,11 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
       invoice_summary: {
         count: numberField(invoiceSummary ?? {}, hydrated.invoice_count, "count"),
         amount: textField(invoiceSummary ?? {}, "amount") || hydrated.total_amount,
+      },
+      scope_month: scopeMonth,
+      amount_breakdown: {
+        ...amountBreakdown,
+        scope_month: scopeMonth,
       },
       invoice_ids: getBatchInvoiceIds(batch),
       import_attempts: [
@@ -566,14 +602,15 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
       const filteredBatches = batches
         .filter((batch) => {
           const items = invoicesForBatch(batch);
-          if (
-            month
-            && !items.some((invoice) => [
+          const scopeMonth = batchScopeMonth(batch, items);
+          if (month && scopeMonth) {
+            return scopeMonth === month;
+          }
+          if (month && !items.some((invoice) => [
               invoice.issue_date,
               invoice.passage_start_date,
               invoice.passage_end_date,
-            ].some((value) => String(value ?? "").startsWith(month)))
-          ) {
+            ].some((value) => String(value ?? "").startsWith(month)))) {
             return false;
           }
           if (normalizedPlate && !items.some((invoice) => invoice.plate_number.toLowerCase().includes(normalizedPlate))) {
@@ -4833,10 +4870,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               latest_synced_at: "2026-05-23T09:48:00+08:00",
               status: "available",
               sources: [
-                { key: "standard_import", label: "普通导入", count: 180, latest_synced_at: "2026-05-23T09:44:00+08:00", status: "available" },
-                { key: "oa_attachment", label: "OA 解析", count: 40, latest_synced_at: "2026-05-23T09:48:00+08:00", status: "available" },
-                { key: "etc", label: "ETC", count: 30, latest_synced_at: "2026-05-23T09:30:00+08:00", status: "available" },
-                { key: "manual", label: "手工导入", count: 6, latest_synced_at: "2026-05-23T09:20:00+08:00", status: "available" },
+                { key: "manual", label: "手工导入", count: 216, latest_synced_at: "2026-05-23T09:44:00+08:00", status: "available" },
+                { key: "oa_attachment", label: "OA 解析", count: 40, supplementary_count: 5, latest_synced_at: "2026-05-23T09:48:00+08:00", status: "available" },
               ],
             },
             oa: {
@@ -4848,6 +4883,74 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 { key: "oa_items", label: "明细", count: 316, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
               ],
             },
+            import_events: [
+              {
+                key: "bank-5",
+                source_key: "bank_transactions",
+                label: "流水导入",
+                source_name: "bank-5.xlsx",
+                imported_by: "admin.ops",
+                count: 42,
+                supplementary_count: null,
+                imported_at: "2026-05-23T09:58:00+08:00",
+                status: "completed",
+              },
+              {
+                key: "invoice-4",
+                source_key: "manual",
+                label: "手工导入",
+                source_name: "invoice-4.xlsx",
+                imported_by: "admin.ops",
+                count: 18,
+                supplementary_count: null,
+                imported_at: "2026-05-23T09:54:00+08:00",
+                status: "completed",
+              },
+              {
+                key: "oa-attachment-1",
+                source_key: "oa_attachment",
+                label: "OA 解析",
+                source_name: "OA 附件解析",
+                imported_by: "oa_sync",
+                count: 40,
+                supplementary_count: 5,
+                imported_at: "2026-05-23T09:48:00+08:00",
+                status: "completed",
+              },
+              {
+                key: "oa-run-1",
+                source_key: "oa_records",
+                label: "OA 同步",
+                source_name: "oa_projection",
+                imported_by: "oa_sync",
+                count: 72,
+                supplementary_count: null,
+                imported_at: "2026-05-23T09:45:00+08:00",
+                status: "succeeded",
+              },
+              {
+                key: "bank-4",
+                source_key: "bank_transactions",
+                label: "流水导入",
+                source_name: "bank-4.xlsx",
+                imported_by: "admin.ops",
+                count: 16,
+                supplementary_count: null,
+                imported_at: "2026-05-23T09:40:00+08:00",
+                status: "completed",
+              },
+              {
+                key: "bank-6",
+                source_key: "bank_transactions",
+                label: "流水导入",
+                source_name: "bank-6.xlsx",
+                imported_by: "admin.ops",
+                count: 8,
+                supplementary_count: null,
+                imported_at: "2026-05-23T09:20:00+08:00",
+                status: "completed",
+              },
+            ],
           },
           request_performance: {
             window: { type: "process_rolling_window", sample_limit_per_endpoint: 512, reset_on_restart: true },

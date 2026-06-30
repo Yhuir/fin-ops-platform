@@ -53,13 +53,13 @@
 
 `app.workbench_pair_relations` 是 OA、银行流水、正式发票和 OA 附件发票跨页面已确认配对关系的 canonical write model。`app.workbench_pair_relation_history` 保存 confirm、cancel、withdraw、repair 等操作历史。当前 PostgreSQL migration 已经提供 `case_id`、`relation_mode`、`status`、`version`、`month_scope`、`row_ids`、`row_types`、`amount_check`、`special_metadata`、`source_versions` 和 raw payload。
 
-`workbench_relation` 是跨页面 relation distribution read model。它从 `app.workbench_pair_relations` 读取 active 手工关系，同时从 `read_model.workbench_reconciliation_decisions` 补充分发已 paired 的自动决策和未配对区 open/proposed 候选。自动决策只作为候选或展示上下文，不是已确认写事实，不能被页面当作 active relation 写模型。
+`workbench_relation` 是跨页面 relation distribution read model。它只从 `app.workbench_pair_relations` 读取 active confirmed relation 并分发 linked/unlinked 业务口径；`read_model.workbench_reconciliation_decisions` 只属于自动匹配内部计算过程，不再作为 downstream candidate relation 分发。
 
-`relation_status='linked'` 和关联台 paired zone 不是同一个概念。普通 `manual_confirmed` 两栏 active relation 仍应向下游分发为 linked，用于已建立关系、row 占用和撤回事实；但关联台页面必须把它展示在 canonical `case:<case_id>` open/candidate group 中，等待第三栏补齐。只有三栏完整或显式业务例外才进入 paired zone。
+`relation_status='linked'` 和关联台 paired zone 不是同一个概念。普通 `manual_confirmed` 两栏 active relation 仍应向下游分发为 linked，用于已建立关系、row 占用和撤回事实；但关联台页面必须把它展示在 canonical `case:<case_id>` open 待处理 group 中，等待第三栏补齐。只有三栏完整或显式业务例外才进入 paired zone。历史代码名中的 `candidate group` 只表示待处理展示容器，不是第三种业务关系状态。
 
-自动三栏补齐只允许作为 relation command service 上的升级动作：当 `WorkbenchReconciliationEngine` 生成 `decision_status=paired`、`display_state=paired`、`match_shape=oa_bank_invoice` 的自由匹配 decision，且该 decision 覆盖且仅覆盖一个普通 `manual_confirmed` 两栏 active relation 的 row-set 时，后台 worker 可以调用 `WorkbenchRelationCommandService.confirm_relation(..., replace_existing=True)` 把原 case 替换为三栏 active relation，并把自动 decision 标记为 `consumed`。自由匹配 decision 可以由 OA+银行、OA+发票或银行+发票任意强证据边作为 anchor，也可以由通用 `oa_bank_invoice_exact_sum` 规则在任意非空 OA/银行/发票组之间建立 exact-sum 证据闭环；通用规则必须满足三栏总额严格相等、证据图连通、每个 row 有确定性证据边、组合大小有界且无 competing candidates，不能只靠金额相同。文本字段中的误输入空格在 matching 层按确定性归一化视为缺失或被移除，不使用 NLP 猜测关系。这条路径复用 canonical relation 写边界、history、row occupation、幂等和下游 refresh；不得由前端、本地 grouping 或 decision distribution 直接伪造 active relation。
+自动配对必须作为 relation command service 上的写动作：当 `WorkbenchReconciliationEngine` 生成 `free + decision_status=paired + display_state=paired` 的确定性 decision，且金额校验为 `matched`、当前 row-set 没有 active relation、同 row-set 没有撤回历史时，后台 worker 调用 `WorkbenchRelationCommandService.confirm_relation(...)` 创建 `manual_confirmed` active relation，并把自动 decision 标记为 `consumed`。若该 decision 是补齐一个普通 `manual_confirmed` 两栏 active relation 的第三栏，则继续使用 `confirm_relation(..., replace_existing=True)` 原子升级原 case。自由匹配 decision 可以由 OA+银行、OA+发票或银行+发票任意强证据边作为 anchor，也可以由通用 `oa_bank_invoice_exact_sum` 规则在任意非空 OA/银行/发票组之间建立 exact-sum 证据闭环；通用规则必须满足三栏总额严格相等、证据图连通、每个 row 有确定性证据边、组合大小有界且无 competing candidates，不能只靠金额相同。文本字段中的误输入空格在 matching 层按确定性归一化视为缺失或被移除，不使用 NLP 猜测关系。这条路径复用 canonical relation 写边界、history、row occupation、幂等和下游 refresh；不得由前端、本地 grouping 或 decision distribution 直接伪造 active relation。
 
-distribution payload 必须保留关系展示语义：`relation_status='linked'` 表示已确认或已 paired 的关系上下文；`relation_status='candidate'` 表示关联台未配对候选，只能用于页面展示候选证据，不得作为 confirmed fact、支付完成判断或 row 占用事实。下游 mapper 不得把 candidate 硬编码成 `status='active'`。
+distribution payload 必须保留二态业务语义：`relation_status='linked'` 表示已确认 active relation；没有 linked relation 的 row 输出 `unlinked`。`candidate` 不再作为 downstream 业务状态输出；自动建议未落库前不得驱动支付完成、已关联筛选或 row 占用事实。
 
 `read_model.workbench_reconciliation_decisions` 的写入、规则版本过期和 missing 清理会改变 relation distribution，同时也会改变 Workbench 主 active generation 的 open/paired 分组。因此这些事务内 writer 必须同时入队 `workbench_relation` 和主 `workbench` month scope refresh；只刷新 relation 会让下游 relation fresh 但关联台继续发布旧 generation。
 
@@ -121,7 +121,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 - 读结果必须包含 `status`、`read_model_scope_keys`、`stale_reasons`、`refresh_enqueued`、`source_versions`。
 - 业务写 API 不能把 facade 返回的空 rows 当成真实无关系。
 - 下游 SQL read model 的 expected source versions 必须包含当前 `workbench_relation_scopes.source_versions`；relation distribution 变化后，进项发票使用、销项发票收款和 OA 待付款不能继续把旧 payload 标为 fresh。
-- 读结果必须保留 `linked` / `candidate` / `unlinked` 语义。进项发票使用、OA 待付款、待找发票等下游页面可以展示 candidate 作为关联台候选证据，但只有 linked 能参与已支付、已关联、已占用等业务判断。
+- 读结果必须保留 `linked` / `unlinked` 业务语义。进项发票使用、OA 待付款、待找发票等下游页面只能把 linked 当作已配对；没有 linked relation 的对象按 unlinked/未配对处理。
 
 ### `WorkbenchPairRelationService`
 
@@ -178,7 +178,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 - `POST /api/workbench/actions/confirm-link`、`cancel-link` 和 `withdraw-link` 已迁入 command service；缺 command service 时 fail fast，不再回退到 direct pair snapshot 写入。`withdraw-link` preview/submit 由 command service 锁定 relation identity；无 history 时撤到无关联，不再由 facade 合成恢复关系。个人暂借款还清 `confirm_personal_advance_repayment` 已迁入 command service。Workbench exception closed apply 已通过 command service 写入 `normal_match` / `oa_exempt`，并在创建本地 exception case 前执行 canonical relation write safety。`server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 已通过 command service 写入；其他 server 读/展示/persist helper 仍待后续抽离。
 
 `split_candidate` 不属于 relation lifecycle，不写入 `app.workbench_pair_relations` 或 relation history。关联台未配对区统一按钮在没有 active relation 但命中自动候选时，由 `WorkbenchWriteFacade` 复用 `WorkbenchCandidateMatchService.mark_candidates_suppressed(..., suppressed_reason="manual_override")` suppress 候选，并触发 Workbench read model refresh。
-- pending invoice manual invoice confirm、attach existing 单条和批量已迁入 command service；读侧 active/candidate relation 仍走 `WorkbenchRelationReadFacade` distribution，写侧 row occupation、version、idempotency 和状态转换由 canonical relation command 负责。
+- pending invoice manual invoice confirm、attach existing 单条和批量已迁入 command service；读侧 active linked relation 仍走 `WorkbenchRelationReadFacade` distribution，写侧 row occupation、version、idempotency 和状态转换由 canonical relation command 负责。
 - no-OA `submit-selection`、`submit-batch`、`withdraw` 已迁入 command service；`no_oa_bank_batch.read_model.refresh` 不再执行 relation repair；legacy relation migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 已通过 command service 写入或取消 relation。已有 submitted batch 与 legacy active relation 命中同一 row set 时，迁移复用 existing submitted batch 的 relation case，避免创建第二条 active relation。
 - turnover manual zero-difference closure、withdraw 已迁入 command service；legacy fallback 缺少 command service 时的 direct pair write fallback 已删除，缺 command 会 fail fast。
 - batch accounting submit、withdraw 已迁入 command service；submit 缺 command 时的 direct pair fallback 已删除；legacy case id collision repair 已通过 command service 写入。

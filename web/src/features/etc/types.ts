@@ -64,6 +64,7 @@ export type EtcBatchSummary = {
   id: string;
   etcBatchId: string;
   externalBatchId: string;
+  scopeMonth: string;
   status: EtcBatchStatus;
   sourceType: string;
   invoiceCount: number;
@@ -175,6 +176,7 @@ export type EtcBusinessBatchSummary = {
   taskId: string;
   status: EtcBusinessBatchStatus;
   version: number;
+  scopeMonth: string;
   ownerUserId: string;
   ownerOrgId: string;
   importBatchIds: string[];

@@ -18,7 +18,7 @@ type PendingInvoiceReadModelMockStatus = "fresh" | "refreshing" | "stale" | "mis
 type BankDetailReadModelMockStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
 type CostStatisticsReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
 type TaxOffsetReadModelMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "missing" | "unavailable";
-type NoOaBankBatchReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
+type BankFlowRuleBatchReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type BatchAccountingReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type TurnoverLedgerReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
 type BankDetailClassificationMockMode = "auto_matched" | "needs_confirmation" | "unmatched";
@@ -68,12 +68,12 @@ type ApiMockOptions = {
   invoiceImportDownstreamFanout?: boolean;
   invoiceImportIncludeCorruptFile?: boolean;
   invoiceImportPreviewDelayMs?: number;
-  noOaCostFanout?: boolean;
-  noOaBankBatchFailOnce?: boolean;
-  noOaBankBatchFailuresBeforeSuccess?: number;
-  noOaBankBatchReadModelStatus?: NoOaBankBatchReadModelMockStatus;
-  noOaBankBatchReadModelStatuses?: NoOaBankBatchReadModelMockStatus[];
-  noOaBankBatchScenario?: NoOaBankBatchMockScenario;
+  bankFlowRuleCostFanout?: boolean;
+  bankFlowRuleBatchFailOnce?: boolean;
+  bankFlowRuleBatchFailuresBeforeSuccess?: number;
+  bankFlowRuleBatchReadModelStatus?: BankFlowRuleBatchReadModelMockStatus;
+  bankFlowRuleBatchReadModelStatuses?: BankFlowRuleBatchReadModelMockStatus[];
+  bankFlowRuleBatchScenario?: BankFlowRuleBatchMockScenario;
   settingsProjectScopeFanout?: boolean;
   turnoverCostFanout?: boolean;
   turnoverLedgerFailOnce?: boolean;
@@ -194,8 +194,8 @@ type BatchAccountingBucket = "unsubmitted" | "submitted";
 type ImportScenario = "bank" | "invoice";
 type SettingsDataResetAction = "reset_bank_transactions" | "reset_invoices" | "reset_oa_and_rebuild";
 type EtcBusinessBatchStatus = "imported" | "oa_confirmation_pending" | "manually_marked_submitted" | "not_submitted";
-type NoOaBrowserBatchStatus = "draft" | "submitted" | "withdrawn";
-type NoOaBankBatchMockScenario = "single" | "ordinaryDraftMatrix";
+type BankFlowRuleBrowserBatchStatus = "draft" | "submitted" | "withdrawn";
+type BankFlowRuleBatchMockScenario = "single" | "ordinaryDraftMatrix";
 type CostBrowserProjectRow = {
   transaction_id: string;
   trade_time: string;
@@ -696,7 +696,7 @@ function buildWorkbenchGroup(zone: WorkbenchZone, linked: boolean, includeCashSp
   };
 }
 
-function bankFlowRuleBankRow(
+function bankFlowRuleSourceRow(
   index: number,
   overrides: Record<string, unknown> = {},
 ) {
@@ -756,7 +756,7 @@ function bankFlowRuleInvoiceRow() {
 }
 
 function bankFlowRuleInvoiceRequiredGroup(zone: WorkbenchZone, linked: boolean) {
-  const bankRow = bankFlowRuleBankRow(9, {
+  const bankRow = bankFlowRuleSourceRow(9, {
     id: "bk-flow-rule-e2e-needs-invoice",
     case_id: "bank_flow_rule_batch_e2e_invoice_required",
     remark: linked ? "补齐发票后进入已配对" : "需要发票后才进入已配对",
@@ -804,9 +804,9 @@ function bankFlowRuleInvoiceRequiredGroup(zone: WorkbenchZone, linked: boolean) 
 function bankFlowRuleWorkbenchGroups(zone: WorkbenchZone, invoiceRequiredConfirmed = false) {
   const invoiceRequiredGroup = bankFlowRuleInvoiceRequiredGroup(zone, invoiceRequiredConfirmed);
   if (zone === "paired") {
-    const collapsedRows = [1, 2, 3, 4].map((index) => bankFlowRuleBankRow(index));
+    const collapsedRows = [1, 2, 3, 4].map((index) => bankFlowRuleSourceRow(index));
     const summaryRow = {
-      ...bankFlowRuleBankRow(0, {
+      ...bankFlowRuleSourceRow(0, {
         id: "bank-flow-rule-summary-e2e-fee",
         source_kind: "bank_flow_rule_batch_summary",
         trade_time: "2026-05",
@@ -2539,7 +2539,7 @@ function inputInvoiceUsageWorkbenchRelationRow(relationConfirmed: boolean) {
         bank_name: "建设银行",
         account_last4: "1138",
         summary: relationConfirmed ? "设备尾款已闭环" : "设备尾款候选关系",
-        remark: relationConfirmed ? "关联台已确认" : "关联台候选证据",
+        remark: relationConfirmed ? "关联台已确认" : "关联台关系证据",
         detail_available: true,
         relation_case_id: "CASE-202603-101",
         relation_status: relationConfirmed ? "linked" : "candidate",
@@ -3932,7 +3932,7 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
           counterpartyBankName: "建设银行",
           bookedDate: "20260328",
           summary: relationConfirmed ? "设备尾款已闭环" : "设备尾款候选关系",
-          remark: relationConfirmed ? "关联台已确认" : "关联台候选证据",
+          remark: relationConfirmed ? "关联台已确认" : "关联台关系证据",
           amount: "58000.00",
           paidTotal: relationConfirmed ? "58000.00" : "0.00",
           relationCount: 1,
@@ -4306,8 +4306,8 @@ const bankImportCostRow: CostBrowserProjectRow = {
   counterparty_name: "导入浏览器测试客户",
   payment_account_label: "建设银行 8826",
 };
-const noOaCostProjectName = "免OA手续费成本项目";
-const noOaCostRow: CostBrowserProjectRow = {
+const bankFlowRuleCostProjectName = "免OA手续费成本项目";
+const bankFlowRuleCostRow: CostBrowserProjectRow = {
   transaction_id: "no-oa-bank-e2e-001",
   trade_time: "2026-05-03 10:20:00",
   direction: "支出",
@@ -4352,7 +4352,7 @@ function costProjectRowsForMonth(
   includeInvoiceImportEvidence = false,
   includeEtcImportEvidence = false,
   includeBankImportEvidence = false,
-  includeNoOaCostEvidence = false,
+  includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
   includeLargeCostDataset = false,
 ) {
@@ -4403,12 +4403,12 @@ function costProjectRowsForMonth(
       ],
     };
   }
-  if (month === "2026-05" && includeNoOaCostEvidence) {
+  if (month === "2026-05" && includeBankFlowRuleCostEvidence) {
     result = {
       ...result,
-      [noOaCostProjectName]: [
-        ...(result[noOaCostProjectName] ?? []),
-        noOaCostRow,
+      [bankFlowRuleCostProjectName]: [
+        ...(result[bankFlowRuleCostProjectName] ?? []),
+        bankFlowRuleCostRow,
       ],
     };
   }
@@ -4430,7 +4430,7 @@ function allCostProjectRows(
   includeInvoiceImportEvidence = false,
   includeEtcImportEvidence = false,
   includeBankImportEvidence = false,
-  includeNoOaCostEvidence = false,
+  includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
   includeLargeCostDataset = false,
 ) {
@@ -4447,7 +4447,7 @@ function allCostProjectRows(
   if (includeBankImportEvidence) {
     months.add("2026-03");
   }
-  if (includeNoOaCostEvidence) {
+  if (includeBankFlowRuleCostEvidence) {
     months.add("2026-05");
   }
   if (includeTurnoverCostEvidence) {
@@ -4461,7 +4461,7 @@ function allCostProjectRows(
       includeInvoiceImportEvidence,
       includeEtcImportEvidence,
       includeBankImportEvidence,
-      includeNoOaCostEvidence,
+      includeBankFlowRuleCostEvidence,
       includeTurnoverCostEvidence,
       includeLargeCostDataset,
     ));
@@ -4481,14 +4481,14 @@ function costTimeRows(
   includeInvoiceImportEvidence = false,
   includeEtcImportEvidence = false,
   includeBankImportEvidence = false,
-  includeNoOaCostEvidence = false,
+  includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
   completedProjectNames = completedCostProjectNames,
   includeLargeCostDataset = false,
 ) {
   const sourceProjectRowMap = month === "all"
-    ? allCostProjectRows(relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeNoOaCostEvidence, includeTurnoverCostEvidence, includeLargeCostDataset)
-    : costProjectRowsForMonth(month, relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeNoOaCostEvidence, includeTurnoverCostEvidence, includeLargeCostDataset);
+    ? allCostProjectRows(relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence, includeLargeCostDataset)
+    : costProjectRowsForMonth(month, relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence, includeLargeCostDataset);
   return Object.entries(sourceProjectRowMap)
     .filter(([projectName]) => isCostProjectVisibleForScope(projectName, projectScope, completedProjectNames))
     .flatMap(([projectName, rows]) =>
@@ -4516,7 +4516,7 @@ function costStatisticsExplorerPayload(
   includeInvoiceImportEvidence = false,
   includeEtcImportEvidence = false,
   includeBankImportEvidence = false,
-  includeNoOaCostEvidence = false,
+  includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
   readModelStatus: CostStatisticsReadModelMockStatus = "fresh",
   completedProjectNames = completedCostProjectNames,
@@ -4530,7 +4530,7 @@ function costStatisticsExplorerPayload(
     includeInvoiceImportEvidence,
     includeEtcImportEvidence,
     includeBankImportEvidence,
-    includeNoOaCostEvidence,
+    includeBankFlowRuleCostEvidence,
     includeTurnoverCostEvidence,
     completedProjectNames,
     includeLargeCostDataset,
@@ -4586,10 +4586,10 @@ function costTransactionPayload(
   includeInvoiceImportEvidence = false,
   includeEtcImportEvidence = false,
   includeBankImportEvidence = false,
-  includeNoOaCostEvidence = false,
+  includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
 ) {
-  const row = costTimeRows("all", "all", relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeNoOaCostEvidence, includeTurnoverCostEvidence)
+  const row = costTimeRows("all", "all", relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence)
     .find((item) => item.transaction_id === transactionId);
   return {
     month: transactionId.includes("101") ? "2026-04" : "2026-03",
@@ -4629,7 +4629,7 @@ function costStatisticsExportPreviewPayload(
   includeInvoiceImportEvidence = false,
   includeEtcImportEvidence = false,
   includeBankImportEvidence = false,
-  includeNoOaCostEvidence = false,
+  includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
 ) {
   const month = url.searchParams.get("month") ?? "all";
@@ -4637,7 +4637,7 @@ function costStatisticsExportPreviewPayload(
   const projectScope = url.searchParams.get("project_scope") ?? "active";
   const projectNames = new Set(url.searchParams.getAll("project_name").filter(Boolean));
   const expenseTypes = new Set(url.searchParams.getAll("expense_type").filter(Boolean));
-  const rows = costTimeRows(month, projectScope, relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeNoOaCostEvidence, includeTurnoverCostEvidence)
+  const rows = costTimeRows(month, projectScope, relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence)
     .filter((row) => (projectNames.size > 0 ? projectNames.has(row.project_name) : true))
     .filter((row) => (expenseTypes.size > 0 ? expenseTypes.has(row.expense_type) : true));
   const fileName = view === "project"
@@ -4674,7 +4674,7 @@ function costStatisticsExportBody(
   includeInvoiceImportEvidence = false,
   includeEtcImportEvidence = false,
   includeBankImportEvidence = false,
-  includeNoOaCostEvidence = false,
+  includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
 ) {
   const month = url.searchParams.get("month") ?? "all";
@@ -4689,7 +4689,7 @@ function costStatisticsExportBody(
     includeInvoiceImportEvidence,
     includeEtcImportEvidence,
     includeBankImportEvidence,
-    includeNoOaCostEvidence,
+    includeBankFlowRuleCostEvidence,
     includeTurnoverCostEvidence,
   )
     .filter((row) => (projectNames.size > 0 ? projectNames.has(row.project_name) : true))
@@ -4701,7 +4701,7 @@ function costStatisticsExportBody(
     includeInvoiceImportEvidence,
     includeEtcImportEvidence,
     includeBankImportEvidence,
-    includeNoOaCostEvidence,
+    includeBankFlowRuleCostEvidence,
     includeTurnoverCostEvidence,
   );
   return [
@@ -4730,7 +4730,7 @@ function costStatisticsExportBody(
   ].join("\n");
 }
 
-function noOaBankBatchVersion(status: NoOaBrowserBatchStatus) {
+function bankFlowRuleBatchVersion(status: BankFlowRuleBrowserBatchStatus) {
   if (status === "draft") {
     return 1;
   }
@@ -4740,7 +4740,7 @@ function noOaBankBatchVersion(status: NoOaBrowserBatchStatus) {
   return 3;
 }
 
-function noOaBankBatch(status: NoOaBrowserBatchStatus, overrides: Record<string, unknown> = {}) {
+function bankFlowRuleBatch(status: BankFlowRuleBrowserBatchStatus, overrides: Record<string, unknown> = {}) {
   return {
     batch_id: "no-oa-batch-e2e-001",
     batch_type: "fee",
@@ -4766,12 +4766,12 @@ function noOaBankBatch(status: NoOaBrowserBatchStatus, overrides: Record<string,
     withdrawn_at: status === "withdrawn" ? "2026-06-17T09:40:00+08:00" : null,
     conflict_reason: "",
     blocked_reason: "",
-    version: noOaBankBatchVersion(status),
+    version: bankFlowRuleBatchVersion(status),
     ...overrides,
   };
 }
 
-const noOaOrdinaryDraftMatrixDefinitions = [
+const bankFlowRuleOrdinaryDraftMatrixDefinitions = [
   { batchType: "fee", batchLabel: "手续费", primaryLabel: "费用", subLabel: "手续费", bankName: "建设银行", accountLast4: "8106", amount: "1.00" },
   { batchType: "salary", batchLabel: "工资", primaryLabel: "薪资社保福利", subLabel: "工资", bankName: "工商银行", accountLast4: "6386", amount: "2.00" },
   { batchType: "holiday_bonus", batchLabel: "过节费", primaryLabel: "薪资社保福利", subLabel: "过节费", bankName: "中国银行", accountLast4: "7001", amount: "3.00" },
@@ -4781,8 +4781,8 @@ const noOaOrdinaryDraftMatrixDefinitions = [
   { batchType: "social_security", batchLabel: "社保", primaryLabel: "薪资社保福利", subLabel: "社保", bankName: "民生银行", accountLast4: "5566", amount: "7.00" },
 ];
 
-function noOaOrdinaryDraftMatrixBatches() {
-  return noOaOrdinaryDraftMatrixDefinitions.map((definition) => noOaBankBatch("draft", {
+function bankFlowRuleOrdinaryDraftMatrixBatches() {
+  return bankFlowRuleOrdinaryDraftMatrixDefinitions.map((definition) => bankFlowRuleBatch("draft", {
     batch_id: `no-oa-batch-e2e-${definition.batchType}`,
     batch_type: definition.batchType,
     batch_label: definition.batchLabel,
@@ -4798,14 +4798,14 @@ function noOaOrdinaryDraftMatrixBatches() {
   }));
 }
 
-function noOaBatchesForScenario(status: NoOaBrowserBatchStatus, scenario: NoOaBankBatchMockScenario = "single") {
+function bankFlowRuleBatchesForScenario(status: BankFlowRuleBrowserBatchStatus, scenario: BankFlowRuleBatchMockScenario = "single") {
   if (scenario === "ordinaryDraftMatrix" && status === "draft") {
-    return noOaOrdinaryDraftMatrixBatches();
+    return bankFlowRuleOrdinaryDraftMatrixBatches();
   }
-  return [noOaBankBatch(status)];
+  return [bankFlowRuleBatch(status)];
 }
 
-function noOaMoneyTotal(batches: Array<Record<string, unknown>>) {
+function bankFlowRuleMoneyTotal(batches: Array<Record<string, unknown>>) {
   const total = batches.reduce((sum, batch) => {
     const amount = Number(batch.total_amount ?? 0);
     return Number.isFinite(amount) ? sum + amount : sum;
@@ -4813,7 +4813,7 @@ function noOaMoneyTotal(batches: Array<Record<string, unknown>>) {
   return total.toFixed(2);
 }
 
-function noOaBankBatchSummary(status: NoOaBrowserBatchStatus, batches = noOaBatchesForScenario(status)) {
+function bankFlowRuleBatchSummary(status: BankFlowRuleBrowserBatchStatus, batches = bankFlowRuleBatchesForScenario(status)) {
   const draft = batches.filter((batch) => batch.status_bucket === "unsubmitted" && batch.status === "draft").length;
   const submitted = batches.filter((batch) => batch.status_bucket === "submitted").length;
   const withdrawn = batches.filter((batch) => batch.status_bucket === "withdrawn").length;
@@ -4862,7 +4862,7 @@ function noOaBankBatchSummary(status: NoOaBrowserBatchStatus, batches = noOaBatc
     if (batch.status === "stale") {
       current.stale += 1;
     }
-    current.total_amount = noOaMoneyTotal([{
+    current.total_amount = bankFlowRuleMoneyTotal([{
       total_amount: current.total_amount,
     }, batch]);
     categoriesByCode.set(code, current);
@@ -4873,18 +4873,18 @@ function noOaBankBatchSummary(status: NoOaBrowserBatchStatus, batches = noOaBatc
     withdrawn_count: withdrawn,
     conflict_count: 0,
     stale_count: stale,
-    total_amount: noOaMoneyTotal(batches),
+    total_amount: bankFlowRuleMoneyTotal(batches),
     categories: Array.from(categoriesByCode.values()),
   };
 }
 
-function noOaBankBatchesPayload(
-  status: NoOaBrowserBatchStatus,
+function bankFlowRuleBatchesPayload(
+  status: BankFlowRuleBrowserBatchStatus,
   bucket: string | null,
-  readModelStatus: NoOaBankBatchReadModelMockStatus = "fresh",
-  scenario: NoOaBankBatchMockScenario = "single",
+  readModelStatus: BankFlowRuleBatchReadModelMockStatus = "fresh",
+  scenario: BankFlowRuleBatchMockScenario = "single",
 ) {
-  const batches = noOaBatchesForScenario(status, scenario);
+  const batches = bankFlowRuleBatchesForScenario(status, scenario);
   const visibleBatches = batches.filter((batch) => {
     if (bucket === "submitted") {
       return batch.status_bucket === "submitted";
@@ -4897,7 +4897,7 @@ function noOaBankBatchesPayload(
       : true;
   });
   return {
-    summary: noOaBankBatchSummary(status, batches),
+    summary: bankFlowRuleBatchSummary(status, batches),
     batches: visibleBatches,
     pagination: {
       page: 1,
@@ -4909,14 +4909,14 @@ function noOaBankBatchesPayload(
   };
 }
 
-function noOaBankBatchDetailPayload(
-  status: NoOaBrowserBatchStatus,
+function bankFlowRuleBatchDetailPayload(
+  status: BankFlowRuleBrowserBatchStatus,
   batchId = "no-oa-batch-e2e-001",
-  scenario: NoOaBankBatchMockScenario = "single",
+  scenario: BankFlowRuleBatchMockScenario = "single",
 ) {
-  const batch = noOaBatchesForScenario(status, scenario)
+  const batch = bankFlowRuleBatchesForScenario(status, scenario)
     .find((candidate) => candidate.batch_id === batchId)
-    ?? noOaBankBatch(status);
+    ?? bankFlowRuleBatch(status);
   const transactionId = String(batch.batch_id ?? "no-oa-batch-e2e-001").replace("no-oa-batch", "no-oa-bank");
   const isDefaultFee = batch.batch_id === "no-oa-batch-e2e-001";
   return {
@@ -4952,9 +4952,9 @@ function noOaBankBatchDetailPayload(
   };
 }
 
-function noOaBankBatchMutationPayload(status: NoOaBrowserBatchStatus) {
+function bankFlowRuleBatchMutationPayload(status: BankFlowRuleBrowserBatchStatus) {
   return {
-    batch: noOaBankBatch(status),
+    batch: bankFlowRuleBatch(status),
     affected_months: ["2026-05"],
     affected_scope_keys: ["2026-05"],
     read_model_scope_keys: ["2026-05"],
@@ -4969,15 +4969,15 @@ function noOaBankBatchMutationPayload(status: NoOaBrowserBatchStatus) {
   };
 }
 
-function noOaBankBatchResetSubmittedPayload() {
+function bankFlowRuleBatchResetSubmittedPayload() {
   return {
-    ...noOaBankBatchMutationPayload("withdrawn"),
+    ...bankFlowRuleBatchMutationPayload("withdrawn"),
     batch: null,
     results: [{ batch_id: "no-oa-batch-e2e-001", status: "withdrawn" }],
   };
 }
 
-function noOaRebaselineManifest(applied = false) {
+function bankFlowRuleRebaselineManifest(applied = false) {
   return {
     dry_run: !applied,
     applied,
@@ -5004,13 +5004,13 @@ function noOaRebaselineManifest(applied = false) {
   };
 }
 
-const defaultNoOaBankBatchTagRules = [
+const defaultBankFlowRuleBatchTagRules = [
   { tag_code: "fee", requires_oa: false, requires_invoice: false },
   { tag_code: "salary", requires_oa: false, requires_invoice: false },
 ];
 
-function noOaBankBatchTagSelectionPayload(
-  rules: Array<{ tag_code?: string; requires_oa?: boolean; requires_invoice?: boolean }> = defaultNoOaBankBatchTagRules,
+function bankFlowRuleBatchTagSelectionPayload(
+  rules: Array<{ tag_code?: string; requires_oa?: boolean; requires_invoice?: boolean }> = defaultBankFlowRuleBatchTagRules,
   salarySubLabel = "工资",
 ) {
   return {
@@ -7676,12 +7676,12 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   const etcWorkflowTaskId = options.etcTicketWorkflowTaskMatchesBusinessBatch
     ? "etc-recon-e2e-001"
     : "etc-recon-workflow-e2e-001";
-  let noOaBankBatchStatus: NoOaBrowserBatchStatus = "draft";
-  let noOaBankBatchFailuresRemaining =
-    options.noOaBankBatchFailuresBeforeSuccess ?? (options.noOaBankBatchFailOnce ? 1 : 0);
-  let noOaBankBatchesRequestCount = 0;
-  let noOaTagRules = [...defaultNoOaBankBatchTagRules];
-  let noOaRebaselineApplied = false;
+  let bankFlowRuleBatchStatus: BankFlowRuleBrowserBatchStatus = "draft";
+  let bankFlowRuleBatchFailuresRemaining =
+    options.bankFlowRuleBatchFailuresBeforeSuccess ?? (options.bankFlowRuleBatchFailOnce ? 1 : 0);
+  let bankFlowRuleBatchesRequestCount = 0;
+  let bankFlowRuleTagRules = [...defaultBankFlowRuleBatchTagRules];
+  let bankFlowRuleRebaselineApplied = false;
   let turnoverLedgerFailuresRemaining =
     options.turnoverLedgerFailuresBeforeSuccess ?? (options.turnoverLedgerFailOnce ? 1 : 0);
   let turnoverLedgerRequestCount = 0;
@@ -7988,7 +7988,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         etcTicketOaDraftFailuresRemaining -= 1;
         return json(route, {
           error: "etc_oa_draft_temporarily_unavailable",
-          message: "OA 草稿创建暂时失败，请重试。",
+          message: "审批草稿创建暂时失败，请重试。",
         }, 503);
       }
       etcBusinessBatchStatus = "oa_confirmation_pending";
@@ -8012,7 +8012,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     const invoiceImportDownstreamConfirmed = importConfirmed.invoice && Boolean(options.invoiceImportDownstreamFanout);
     const etcImportDownstreamConfirmed = etcImportConfirmed && Boolean(options.etcImportDownstreamFanout);
     const bankImportDownstreamConfirmed = importConfirmed.bank && Boolean(options.bankImportDownstreamFanout);
-    const noOaCostConfirmed = noOaBankBatchStatus === "submitted" && Boolean(options.noOaCostFanout);
+    const bankFlowRuleCostConfirmed = bankFlowRuleBatchStatus === "submitted" && Boolean(options.bankFlowRuleCostFanout);
     const turnoverCostConfirmed = turnoverClosureConfirmed && Boolean(options.turnoverCostFanout);
     const costCompletedProjectNames = new Set(completedCostProjectNames);
     if (settingsCompletedProjectIds.includes(settingsCostProject.id)) {
@@ -8480,7 +8480,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         invoiceImportDownstreamConfirmed,
         etcImportDownstreamConfirmed,
         bankImportDownstreamConfirmed,
-        noOaCostConfirmed,
+        bankFlowRuleCostConfirmed,
         turnoverCostConfirmed,
         readModelStatus,
         costCompletedProjectNames,
@@ -8512,7 +8512,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         invoiceImportDownstreamConfirmed,
         etcImportDownstreamConfirmed,
         bankImportDownstreamConfirmed,
-        noOaCostConfirmed,
+        bankFlowRuleCostConfirmed,
         turnoverCostConfirmed,
       ));
     }
@@ -8541,7 +8541,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             invoiceImportDownstreamConfirmed,
             etcImportDownstreamConfirmed,
             bankImportDownstreamConfirmed,
-            noOaCostConfirmed,
+            bankFlowRuleCostConfirmed,
             turnoverCostConfirmed,
           ),
         });
@@ -8571,7 +8571,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         invoiceImportDownstreamConfirmed,
         etcImportDownstreamConfirmed,
         bankImportDownstreamConfirmed,
-        noOaCostConfirmed,
+        bankFlowRuleCostConfirmed,
         turnoverCostConfirmed,
       ));
     }
@@ -8587,7 +8587,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           invoiceImportDownstreamConfirmed,
           etcImportDownstreamConfirmed,
           bankImportDownstreamConfirmed,
-          noOaCostConfirmed,
+          bankFlowRuleCostConfirmed,
           turnoverCostConfirmed,
         ).summary,
         rows: [],
@@ -8599,61 +8599,61 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         rules?: Array<{ tag_code?: string; requires_oa?: boolean; requires_invoice?: boolean }>;
       };
       if (Array.isArray(body.rules)) {
-        noOaTagRules = body.rules;
+        bankFlowRuleTagRules = body.rules;
       }
       return json(route, {
-        ...noOaBankBatchTagSelectionPayload(noOaTagRules, bankAutoTagRulesSalarySubLabel),
+        ...bankFlowRuleBatchTagSelectionPayload(bankFlowRuleTagRules, bankAutoTagRulesSalarySubLabel),
         version: 4,
       });
     }
 
     if (path === "/api/bank-flow-rule-batches/tag-rules") {
-      return json(route, noOaBankBatchTagSelectionPayload(noOaTagRules, bankAutoTagRulesSalarySubLabel));
+      return json(route, bankFlowRuleBatchTagSelectionPayload(bankFlowRuleTagRules, bankAutoTagRulesSalarySubLabel));
     }
 
     if (path === "/api/bank-flow-rule-batches") {
-      if (noOaBankBatchFailuresRemaining > 0) {
-        noOaBankBatchFailuresRemaining -= 1;
+      if (bankFlowRuleBatchFailuresRemaining > 0) {
+        bankFlowRuleBatchFailuresRemaining -= 1;
         return json(route, {
           error: "no_oa_bank_batch_temporarily_unavailable",
           message: "流水规则批次加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      const readModelStatuses = options.noOaBankBatchReadModelStatuses;
+      const readModelStatuses = options.bankFlowRuleBatchReadModelStatuses;
       const readModelStatus = readModelStatuses?.[
-        Math.min(noOaBankBatchesRequestCount, readModelStatuses.length - 1)
-      ] ?? options.noOaBankBatchReadModelStatus ?? "fresh";
-      noOaBankBatchesRequestCount += 1;
-      return json(route, noOaBankBatchesPayload(
-        noOaBankBatchStatus,
+        Math.min(bankFlowRuleBatchesRequestCount, readModelStatuses.length - 1)
+      ] ?? options.bankFlowRuleBatchReadModelStatus ?? "fresh";
+      bankFlowRuleBatchesRequestCount += 1;
+      return json(route, bankFlowRuleBatchesPayload(
+        bankFlowRuleBatchStatus,
         url.searchParams.get("bucket"),
         readModelStatus,
-        options.noOaBankBatchScenario ?? "single",
+        options.bankFlowRuleBatchScenario ?? "single",
       ));
     }
 
     if (path === "/api/bank-flow-rule-batches/reset-submitted") {
-      const payload = noOaBankBatchResetSubmittedPayload();
-      noOaBankBatchStatus = "draft";
+      const payload = bankFlowRuleBatchResetSubmittedPayload();
+      bankFlowRuleBatchStatus = "draft";
       return json(route, payload);
     }
 
-    const noOaBankBatchDetailMatch = path.match(/^\/api\/bank-flow-rule-batches\/([^/]+)$/);
-    if (noOaBankBatchDetailMatch && request.method() === "GET") {
-      return json(route, noOaBankBatchDetailPayload(
-        noOaBankBatchStatus,
-        decodeURIComponent(noOaBankBatchDetailMatch[1] ?? ""),
-        options.noOaBankBatchScenario ?? "single",
+    const bankFlowRuleBatchDetailMatch = path.match(/^\/api\/bank-flow-rule-batches\/([^/]+)$/);
+    if (bankFlowRuleBatchDetailMatch && request.method() === "GET") {
+      return json(route, bankFlowRuleBatchDetailPayload(
+        bankFlowRuleBatchStatus,
+        decodeURIComponent(bankFlowRuleBatchDetailMatch[1] ?? ""),
+        options.bankFlowRuleBatchScenario ?? "single",
       ));
     }
 
     if (path === "/api/bank-flow-rule-batches/submit-selection") {
-      noOaBankBatchStatus = "submitted";
-      return json(route, noOaBankBatchMutationPayload(noOaBankBatchStatus));
+      bankFlowRuleBatchStatus = "submitted";
+      return json(route, bankFlowRuleBatchMutationPayload(bankFlowRuleBatchStatus));
     }
 
     if (path === "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run") {
-      return json(route, noOaRebaselineManifest(noOaRebaselineApplied));
+      return json(route, bankFlowRuleRebaselineManifest(bankFlowRuleRebaselineApplied));
     }
 
     if (path === "/api/bank-flow-rule-batches/rebaseline-no-oa/apply") {
@@ -8665,13 +8665,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "需要先生成 dry-run 清单。",
         }, 400);
       }
-      noOaRebaselineApplied = true;
-      return json(route, noOaRebaselineManifest(true));
+      bankFlowRuleRebaselineApplied = true;
+      return json(route, bankFlowRuleRebaselineManifest(true));
     }
 
     if (path === "/api/bank-flow-rule-batches/no-oa-batch-e2e-001/withdraw") {
-      noOaBankBatchStatus = "withdrawn";
-      return json(route, noOaBankBatchMutationPayload(noOaBankBatchStatus));
+      bankFlowRuleBatchStatus = "withdrawn";
+      return json(route, bankFlowRuleBatchMutationPayload(bankFlowRuleBatchStatus));
     }
 
     if (path === "/api/output-invoice-collections/export-preview") {

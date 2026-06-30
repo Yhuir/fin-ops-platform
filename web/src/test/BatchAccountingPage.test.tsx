@@ -265,7 +265,6 @@ function installFetchMock() {
     if (url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET")) {
       const bucket = url.searchParams.get("bucket");
       const bankYear = url.searchParams.get("bank_year");
-      const oaYear = url.searchParams.get("oa_year");
       const payload = bucket === "submitted"
         ? submittedPayload
         : {
@@ -275,7 +274,7 @@ function installFetchMock() {
             unsubmitted_count: bankYear === "2026" ? unsubmittedPayload.bank_rows.length : 0,
           },
           bank_rows: bankYear === "2026" ? unsubmittedPayload.bank_rows : [],
-          oa_rows: oaYear === "2025" ? oa2025Rows : unsubmittedPayload.oa_rows,
+          oa_rows: [...unsubmittedPayload.oa_rows, ...oa2025Rows],
         };
       return new Response(JSON.stringify(withPagination(payload, url)), { status: 200, headers: { "Content-Type": "application/json" } });
     }
@@ -454,18 +453,19 @@ describe("BatchAccountingPage", () => {
       expect(url.searchParams.get("bank_page_size")).toBe("200");
       expect(url.searchParams.get("oa_page")).toBe("1");
       expect(url.searchParams.get("oa_page_size")).toBe("200");
+      expect(url.searchParams.has("oa_year")).toBe(false);
     });
     expect(screen.getByRole("button", { name: "未提交 2" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
     expect(screen.queryByLabelText("年份")).not.toBeInTheDocument();
     expect(screen.getByLabelText("流水年份")).toHaveValue(2026);
-    expect(screen.getByLabelText("OA年份")).toHaveValue(2026);
+    expect(screen.queryByLabelText("OA年份")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
 
     const bankList = screen.getByRole("region", { name: "批量账务流水" });
     expect(within(bankList).getAllByRole("button", { name: /批量账务集中处理/ })).toHaveLength(2);
     expect(screen.getByRole("group", { name: "批量账务流水分页" })).toHaveTextContent("1-2 / 2");
-    expect(screen.getByRole("group", { name: "可关联OA项分页" })).toHaveTextContent("1-2 / 2");
+    expect(screen.getByRole("group", { name: "可关联OA项分页" })).toHaveTextContent("1-3 / 3");
     expect(within(bankList).queryByRole("table")).not.toBeInTheDocument();
     expect(within(bankList).getByText("2026-01-07 15:54:00")).toBeInTheDocument();
     expect(within(bankList).queryByText("2026-01-07T15:54:00+08:00")).not.toBeInTheDocument();
@@ -619,7 +619,6 @@ describe("BatchAccountingPage", () => {
             method: "POST",
             body: JSON.stringify({
               bank_year: "2026",
-              oa_year: "2026",
               bank_row_id: "bank-row-001",
               oa_row_ids: ["oa-exp-1001", "oa-exp-1002"],
               expected_version: 1,
@@ -657,7 +656,6 @@ describe("BatchAccountingPage", () => {
     await waitFor(() => {
       expect(lastSubmitBody(fetchMock)).toMatchObject({
         bank_year: "2026",
-        oa_year: "2026",
         bank_row_id: "bank-row-001",
         oa_row_ids: ["oa-exp-1001"],
         expected_version: 1,
@@ -837,7 +835,7 @@ describe("BatchAccountingPage", () => {
     })).toBe(false);
   });
 
-  test("keeps selected bank and OA rows when changing only the OA year", async () => {
+  test("submits cross-year unpaired daily reimbursement OA without an OA year filter", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
 
@@ -847,10 +845,6 @@ describe("BatchAccountingPage", () => {
     await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
     expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
-
-    const oaYearInput = screen.getByLabelText("OA年份");
-    await user.clear(oaYearInput);
-    await user.type(oaYearInput, "2025");
 
     const oaTable = await screen.findByRole("table", { name: "可关联OA项" });
     expect(within(oaTable).getByText("陈雄兵")).toBeInTheDocument();
@@ -872,7 +866,6 @@ describe("BatchAccountingPage", () => {
           method: "POST",
           body: JSON.stringify({
             bank_year: "2026",
-            oa_year: "2025",
             bank_row_id: "bank-row-001",
             oa_row_ids: ["oa-exp-1001", "oa-exp-1981"],
             expected_version: 1,
@@ -955,7 +948,7 @@ describe("BatchAccountingPage", () => {
     }
   });
 
-  test("sidebar exposes the batch accounting entry near no OA bank batches", () => {
+  test("sidebar exposes the batch accounting entry near bank flow rule batches", () => {
     const financeItems = sidebarGroups.find((group) => group.title === "财务业务")?.items ?? [];
 
     expect(financeItems).toEqual(

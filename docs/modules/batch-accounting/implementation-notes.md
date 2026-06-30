@@ -1,5 +1,15 @@
 # 批量账务 实施记录
 
+## 2026-06-30 - 右侧 OA 候选移除年份过滤
+
+- 目标：右侧 OA 栏改为展示没有 active `workbench_relation` 配对关系的日常报销 OA 主单，不再通过 OA 年份输入或 `oa_year` 参数过滤候选。
+- 影响范围：`BatchAccountingService` 候选规则、SQL Workbench payload loader、batch accounting route/API DTO、`BatchAccountingPage` 页面控件、SLO probe、API/页面/SQL loader 回归测试和模块/API 文档。
+- 关键决策：保留左侧银行流水年份作为银行候选范围；删除前端 `OA年份` 控件和 submit/fetch 的 `oa_year` 字段；后端 route 不再传 `oa_year`，service/repository 不再接收 OA 年份；旧 query 参数即使出现也不得影响 OA 候选结果。提交 metadata 只保留实际选中 OA 推导出的 `oa_years` 审计信息，不再写单值 `oa_year`。
+- 文档影响：同步 README、boundary I/O、state-machine、tests、business flow 和 API contract。
+- 测试覆盖：后端 API 覆盖旧 `oa_year` 不过滤候选、跨年 OA 提交和 metadata；SQL runtime 覆盖 OA/invoice 查询不再带年份范围；前端组件/API 覆盖无 `OA年份` 控件、GET/POST 不发送 `oa_year`、跨年 OA 默认可选并可提交。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_batch_accounting_loader_reads_only_active_workbench_generations -v`；`cd web && npm test -- --run src/test/BatchAccountingApi.test.ts src/test/BatchAccountingPage.test.tsx`；`cd web && npx playwright test e2e/batch-accounting-flow.spec.ts --project=chromium`。
+- 未测风险：未跑真实 PostgreSQL 大历史 OA 数据量和 worker drain；当前实现沿用既有显式分页和 relation freshness 边界。
+
 ## 2026-06-24 - 模块闭环审计与生产证据 defer
 
 - 目标：对照模块化 IO 完成定义审计 batch-accounting 当前状态，判断是否可以进入 full closed。

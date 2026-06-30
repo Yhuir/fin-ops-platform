@@ -414,7 +414,7 @@ function CandidateGroupGrid({
 
   const gridBody = useMemo(() => (
     <div className="candidate-grid-body">
-      {groups.length === 0 ? <div className="state-panel">当前区域暂无候选组。</div> : null}
+      {groups.length === 0 ? <div className="state-panel">当前区域暂无记录。</div> : null}
       {groups.map((group, index) => {
         const renderCollapseControls = (paneId: WorkbenchRecordType): ReactNode => {
           const collapsedRows = group.collapsedRows?.[paneId] ?? [];

@@ -33,7 +33,7 @@ export default function ProcessedExceptionsModal({
         <header className="detail-modal-header">
           <div>
             <h2>已处理异常</h2>
-            <p>异常处理后的 OA、银行流水、发票按同一候选组横向展示；同栏多项会在单元格内上下排列。</p>
+            <p>异常处理后的 OA、银行流水、发票按同一关系组横向展示；同栏多项会在单元格内上下排列。</p>
           </div>
           <button aria-label="关闭已处理异常弹窗" className="detail-close-btn" type="button" onClick={onClose}>
             关闭

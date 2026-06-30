@@ -192,6 +192,8 @@ type ApiEtcBusinessBatch = ApiEtcBatch & {
   taskId?: string;
   task_id?: string;
   version?: number;
+  scopeMonth?: string | null;
+  scope_month?: string | null;
   ownerUserId?: string | null;
   owner_user_id?: string | null;
   ownerOrgId?: string | null;
@@ -220,6 +222,8 @@ type ApiEtcBusinessBatch = ApiEtcBatch & {
   } | null;
   invoiceIds?: string[] | null;
   invoice_ids?: string[] | null;
+  amountBreakdown?: Record<string, unknown> | null;
+  amount_breakdown?: Record<string, unknown> | null;
   importAttempts?: ApiEtcBusinessBatchImportAttempt[] | null;
   import_attempts?: ApiEtcBusinessBatchImportAttempt[] | null;
   auditEvents?: ApiEtcBusinessBatchAuditEvent[] | null;
@@ -811,6 +815,7 @@ function mapBatchSummary(batch: ApiEtcBatch): EtcBatchSummary {
     id,
     etcBatchId,
     externalBatchId: batch.externalBatchId ?? batch.external_batch_id ?? etcBatchId,
+    scopeMonth: "",
     status: (batch.status ?? "unsubmitted") as EtcBatchStatus,
     sourceType: batch.sourceType ?? batch.source_type ?? "",
     invoiceCount: batch.invoiceCount ?? batch.invoice_count ?? 0,
@@ -834,7 +839,7 @@ function mapBatchSummary(batch: ApiEtcBatch): EtcBatchSummary {
     displayCountText:
       batch.displayCountText
       ?? batch.display_count_text
-      ?? `ETC票 ${batch.etcInvoiceCount ?? batch.etc_invoice_count ?? batch.invoiceCount ?? batch.invoice_count ?? 0} + 补充凭证 ${batch.supplementCount ?? batch.supplement_count ?? 0}`,
+      ?? `发票 ${batch.etcInvoiceCount ?? batch.etc_invoice_count ?? batch.invoiceCount ?? batch.invoice_count ?? 0} + 补充凭证 ${batch.supplementCount ?? batch.supplement_count ?? 0}`,
     note: batch.note ?? "",
   };
 }
@@ -882,6 +887,7 @@ function mapBusinessBatchAuditEvent(event: ApiEtcBusinessBatchAuditEvent): EtcBu
 function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSummary {
   const legacySummary = mapBatchSummary(batch);
   const invoiceSummary = batch.invoiceSummary ?? batch.invoice_summary;
+  const amountBreakdown = batch.amountBreakdown ?? batch.amount_breakdown ?? {};
   const businessBatchId = batch.businessBatchId ?? batch.business_batch_id ?? batch.id ?? batch.batchId ?? batch.batch_id ?? "";
   const externalEtcBatchId =
     batch.externalEtcBatchId
@@ -897,6 +903,7 @@ function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSu
     taskId: batch.taskId ?? batch.task_id ?? "",
     status: (batch.status ?? "draft") as EtcBusinessBatchStatus,
     version: batch.version ?? 0,
+    scopeMonth: String(batch.scopeMonth ?? batch.scope_month ?? amountBreakdown.scope_month ?? amountBreakdown.scopeMonth ?? ""),
     ownerUserId: batch.ownerUserId ?? batch.owner_user_id ?? "",
     ownerOrgId: batch.ownerOrgId ?? batch.owner_org_id ?? "",
     importBatchIds: stringArray(batch.importBatchIds ?? batch.import_batch_ids),

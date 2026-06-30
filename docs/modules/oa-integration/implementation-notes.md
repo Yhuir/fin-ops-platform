@@ -9,7 +9,7 @@
 - OA Mongo 仍按外部只读源处理；本系统只能建立映射、缓存和投影，不写 OA 原始库。
 - 目标 OA 申请人凭据只允许 admin 维护，response/log/audit 不得回显 password；创建 OA 草稿前必须先通过目标申请人登录拿 token。
 - 进项 OA 反提和 ETC OA 草稿的本地撤销/删除只处理本系统状态，不删除或撤销真实 OA 草稿/流程。
-- OA source alias / migration identity 修复必须先只读审计再显式建模；不得通过删除 `app.oa_applications`、`app.oa_attachments`、`app.oa_attachment_invoice_cache` 或伪造 read model readiness 来消除重复。
+- OA source alias / migration identity 修复必须先只读审计再显式建模；`app.oa_source_aliases` 中只有 `active` alias 可参与 canonicalization，不得通过删除 `app.oa_applications`、`app.oa_attachments`、`app.oa_attachment_invoice_cache` 或伪造 read model readiness 来消除重复。
 - OA 附件 OCR/parser 输出不是正式发票事实源；进入统一发票池前必须经过 `InvoiceAttachmentRecognitionService`，结果只允许为关联已存在发票、受控创建并关联、忽略；同一强 identity 命中多张 canonical 发票时必须按多义匹配忽略，不得任选一张建立关系。
 
 ## 记录模板
@@ -28,6 +28,19 @@
 ```
 
 ## 历史记录
+
+## 2026-06-30 - OA source alias 表与附件票审计归一化
+
+- 目标：治理生产发现的 6 组历史 OA 附件发票跨 OA duplicate blocker，避免把同一 OA 生命周期中的进行中文档与已完成流程文档误判为不同 OA 报销。
+- 影响范围：PostgreSQL migration `0081_oa_source_aliases.sql`、`audit_object_identity` 的 OA attachment invoice duplicate 分类、OA 集成边界文档和对象身份运维文档；不改 OA 原始投影、附件、附件发票 cache 或正式发票池。
+- 关键决策：新增 `app.oa_source_aliases` 作为显式、可审计 alias 事实表，字段包含 `alias_row_id`、`canonical_row_id`、`reason`、`evidence_hash`、`status`、review 信息和 `raw_payload`。审计工具只读取 `status='active'` 的 alias；未激活 alias 或缺表时保持旧逻辑，继续按原 OA row/source 判定 cross-OA blocker。
+- 文档影响：更新本记录、`boundary-io.md`、`tests.md` 和 `docs/operations/object-identity-dedup.md`；read model 文档继续保留“不得通过下游投影或 readiness 规避事实冲突”的决策。
+- 测试覆盖：新增 `tests/test_audit_object_identity_tool.py::AuditObjectIdentityToolTests::test_active_oa_source_alias_downgrades_lifecycle_duplicate`；更新 `tests/test_postgres_migrations.py` 覆盖 0081 migration discovery、required table 和 core table raw payload/identity guard。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_audit_object_identity_tool.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_expected_migration_files_are_present_and_ordered tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_sql_contains_required_schemas_and_tables tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_core_tables_keep_legacy_or_external_identity_and_raw_payload -q`。
+- 生产执行：2026-06-30 在生产 `app.oa_source_aliases` 写入 3 条 `active` alias：`oa-exp-69898450db8c0a3633bd748c -> oa-exp-2005`、`oa-exp-69a7aeaedb8c0a3633bd74a7 -> oa-exp-2035`、`oa-exp-69c0b43adb8c0a3633bd74c4 -> oa-exp-2062`。未删除 `app.oa_applications`、`app.oa_attachments`、`app.oa_attachment_invoice_cache*` 或 read model 行。
+- 生产验证：生产固定入口 `finops-deploy-control workbench-audit-identity etc-ticket-fix-477cbf08-20260630204229 --json --limit 1` 返回 `blocking_issue_count=0`、`oa_attachment_invoice_blocking_duplicate_group_count=0`、`oa_attachment_invoice_duplicate_group_count=0`；`/health/ready` 返回 `status=ready` 且 release runtime consistent。
+- 未测风险：本地不连接真实 OA Mongo；完整 `tests/test_postgres_migrations.py` 当前受无关 `bank_flow_rule_batch` WIP storage contract 影响，不能作为本变更唯一结论。生产 active release 中的 audit helper 已同步本补丁以支持本次固定入口复核，后续正式发布仍应包含 migration 0081 和同一代码变更，避免下次 release 覆盖。
+- 后续事项：后续遇到同类 OA lifecycle alias 时仍必须先只读审计并显式登记 active alias；不得通过弱业务指纹、删除 cache 或伪造 readiness 自动收敛。
 
 ## 2026-06-22 - OA projection 保留真实申请日期
 

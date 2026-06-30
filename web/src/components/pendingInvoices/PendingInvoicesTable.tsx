@@ -372,19 +372,30 @@ export default function PendingInvoicesTable({
 
   return (
     <div className="pending-invoices-table-frame">
-      <div aria-hidden="true" className="pending-invoices-table-zone-header-grid">
-        <div className="pending-invoices-table-group-header pending-invoices-table-group-header--bank">{bankGroupLabel}</div>
-        <div className="pending-invoices-table-group-header pending-invoices-table-group-header--status pending-invoices-table-cell--left-border">发票获取状态</div>
-        <div className="pending-invoices-table-group-header pending-invoices-table-group-header--invoice pending-invoices-table-cell--left-border">{invoiceGroupLabel}</div>
-        <div className="pending-invoices-table-group-header pending-invoices-table-group-header--oa pending-invoices-table-cell--left-border">OA</div>
-      </div>
       <Table variant="secondary">
         <Table.ScrollContainer ref={tableWrapRef} className="pending-invoices-table-shell" data-testid="pending-invoices-table-shell">
+          <div aria-hidden="true" className="pending-invoices-table-zone-header-grid">
+            <div className="pending-invoices-table-group-header pending-invoices-table-group-header--bank">{bankGroupLabel}</div>
+            <div className="pending-invoices-table-group-header pending-invoices-table-group-header--status pending-invoices-table-cell--left-border">发票获取状态</div>
+            <div className="pending-invoices-table-group-header pending-invoices-table-group-header--invoice pending-invoices-table-cell--left-border">{invoiceGroupLabel}</div>
+            <div className="pending-invoices-table-group-header pending-invoices-table-group-header--oa pending-invoices-table-cell--left-border">OA</div>
+          </div>
           <table
             aria-label="待找发票四区表"
             className="pending-invoices-table"
             role="grid"
           >
+            <colgroup>
+              <col className="pending-invoices-col-counterparty" />
+              <col className="pending-invoices-col-amount" />
+              <col className="pending-invoices-col-summary" />
+              <col className="pending-invoices-col-status" />
+              <col className="pending-invoices-col-invoice-no" />
+              <col className="pending-invoices-col-seller" />
+              <col className="pending-invoices-col-invoice-amount" />
+              <col className="pending-invoices-col-oa-applicant" />
+              <col className="pending-invoices-col-oa-project" />
+            </colgroup>
             <thead>
               <tr>
                 <th aria-label="对方户名 / 时间" aria-sort={ariaSortFor("counterparty_name")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-counterparty" id="counterparty_name" scope="col">

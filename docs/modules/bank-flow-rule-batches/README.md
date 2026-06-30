@@ -4,7 +4,7 @@
 - 类型: 页面模块
 - Route: `/bank-flow-rule-batches`
 - Page key: `bank-flow-rule-batches`
-- 状态: implemented-transition。当前生产入口、API、规则抽屉、提交、关联台判定、rebaseline API 和 Browser E2E 已接入；底层批次/read model 仍复用旧 no-OA service/repository 作为迁移底座，独立表和 worker 拆分不属于本轮最小闭环。
+- 状态: implemented-independent-io。当前生产入口、API、规则抽屉、提交、关联台判定、rebaseline API、独立 application service、独立 read model key、独立 worker event、独立 persistence IO 和 Browser E2E 已接入；底层历史物理批次存储暂由 bank-flow 命名 adapter 兼容，并通过 `relation_mode=bank_flow_rule_batch` 隔离，独立物理表拆分是后续迁移任务。
 
 ## 修改前必读
 
@@ -20,12 +20,13 @@
 
 ## 当前代码入口
 
-当前代码复用旧 no-OA 批次底座承载新业务入口；新页面和生产 API 不再使用 `selected_tag_codes` 作为规则事实源。
+当前代码使用 bank-flow 独立 HTTP route、application boundary、read model key、refresh producer 和 worker event 承载新业务入口；新页面和生产 API 不再使用 `selected_tag_codes` 作为规则事实源。
 
-- Frontend page: `web/src/pages/NoOaBankBatchPage.tsx`，通过 `/bank-flow-rule-batches` route 作为流水规则批量处理页。
-- Frontend feature: `web/src/features/noOaBankBatches/*`，API 指向 `/api/bank-flow-rule-batches`。
-- Backend route: `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py` 同时承载 legacy no-OA 和新 bank-flow-rule-batches API。
-- Backend service: `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`。
+- Frontend page: `web/src/pages/BankFlowRuleBatchPage.tsx`，通过 `/bank-flow-rule-batches` route 作为流水规则批量处理页。
+- Frontend feature: `web/src/features/bankFlowRuleBatches/*`，API 指向 `/api/bank-flow-rule-batches`。
+- Backend route: `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py`，只承载 `/api/bank-flow-rule-batches/*`。
+- Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，bank-flow 不再继承 no-OA application service。
+- Backend read model: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_read_model_repository.py`、`bank_flow_rule_batch_read_model_refresh.py`、`bank_flow_rule_batch_read_model_refresh_producer.py`。
 - Rule persistence: `app_settings.no_oa_bank_batch_tag_selection.requirements_by_tag_code` 作为过渡 settings family；新 API 只读写 `rules`，拒绝 `selected_tag_codes`。
 - Browser E2E: `web/e2e/bank-flow-rule-batches-flow.spec.ts`。
 
@@ -48,7 +49,7 @@
 - 银行明细标签定义、自动匹配规则和分类确认归 `bank-details`。
 - Workbench relation canonical fact 归 `workbench-relations`。
 - 关联台 paired/open 展示归 `reconciliation-workbench` active generation。
-- 旧 no-OA 批次历史事实在迁移完成前仍归 `no-oa-bank-batches` 管理；本模块只定义迁移目标和 rebaseline 合同。
+- 旧 no-OA 批次历史事实仍归 `no-oa-bank-batches` 管理；本模块只通过受控 rebaseline 合同处理明确 legacy submitted no-OA 批次，不再通过 no-OA route/event/scope 承接新 bank-flow 链路。
 
 ## 维护触发器
 

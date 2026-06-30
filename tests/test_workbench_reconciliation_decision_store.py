@@ -88,6 +88,17 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
         self.assertEqual(rows["decision-c"]["suppressed_by_exception_case_id"], "exception-1")
         self.assertEqual(rows["decision-b"]["decision_status"], DECISION_STATUS_PAIRED)
 
+    def test_upsert_does_not_revive_suppressed_decision(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        store.upsert_decisions([decision("decision-a", row_ids=("oa-1", "bank-1"))])
+        store.suppress_by_row_ids(["oa-1"], exception_case_id="manual-override")
+
+        store.upsert_decisions([decision("decision-a", row_ids=("oa-1", "bank-1"))])
+
+        row = store.list_decisions("2026-05")[0]
+        self.assertEqual(row["decision_status"], DECISION_STATUS_SUPPRESSED)
+        self.assertEqual(row["suppressed_by_exception_case_id"], "manual-override")
+
     def test_expire_stale_source_versions_only_marks_changed_scope_decisions(self) -> None:
         store = WorkbenchReconciliationDecisionStore()
         store.upsert_decisions(
@@ -152,6 +163,14 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
                 for sql, _params in connection.execute_calls
             )
         )
+        upsert_sql = next(
+            sql
+            for sql, _params in connection.execute_calls
+            if "insert into read_model.workbench_reconciliation_decisions" in sql
+        )
+        self.assertIn("decision_status = case", upsert_sql)
+        self.assertIn("decision_status = 'suppressed'", upsert_sql)
+        self.assertIn("suppressed_by_exception_case_id = case", upsert_sql)
         self.assertTrue(
             any(
                 "insert into job.outbox_events" in sql

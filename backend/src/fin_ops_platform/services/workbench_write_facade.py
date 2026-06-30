@@ -2031,7 +2031,7 @@ class WorkbenchWriteFacade:
             "candidate_keys": [candidate_key],
             "can_submit": True,
             "requires_note": False,
-            "message": "将拆分该自动候选组合，保留各记录为未配对状态。",
+            "message": "将取消该系统建议，保留各记录为未配对状态。",
             "affected_row_ids": candidate_row_ids,
             "affected_scope_keys": affected_scope_keys,
             "before": {
@@ -2090,7 +2090,7 @@ class WorkbenchWriteFacade:
             "decision_keys": [decision_key],
             "can_submit": True,
             "requires_note": False,
-            "message": "将拆分该自动候选组合，保留各记录为未配对状态。",
+            "message": "将取消该系统建议，保留各记录为未配对状态。",
             "affected_row_ids": decision_row_ids,
             "affected_scope_keys": affected_scope_keys,
             "before": {
@@ -2212,7 +2212,7 @@ class WorkbenchWriteFacade:
                 "affected_months": changed_scope_keys,
                 "affected_row_ids": affected_row_ids or row_ids,
                 "candidate_keys": candidate_keys,
-                "message": "已拆分 1 个候选组合。",
+                "message": "已取消 1 个系统建议。",
             },
         )
 
@@ -2287,7 +2287,7 @@ class WorkbenchWriteFacade:
                 "affected_row_ids": affected_row_ids,
                 "candidate_keys": decision_keys,
                 "suppressed_count": suppressed_count,
-                "message": "已拆分 1 个候选组合。",
+                "message": "已取消 1 个系统建议。",
             },
         )
 

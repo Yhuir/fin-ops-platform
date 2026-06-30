@@ -112,7 +112,7 @@
 5. `多选收入流水 -> 批量标记 no invoice required/cash income -> pending_invoice_income_status_override_confirmed -> pending/search refresh -> 税金/成本不误刷`
 6. `manual invoice legacy command retry -> command log 恢复旧中断状态；HTTP/UI 新入口保持不可达`
 7. `关联台 confirm -> workbench relation distribution -> pending invoice read model rows fresh -> 待找发票从已支付待开票更新为已支付已开票，并显示发票和 OA`
-8. `candidate relation -> 待找发票显示候选发票/OA 证据，但仍保持已支付待开票，不把 candidate 计入 linked-only 开票状态`
+8. `未正式化 decision / 历史 candidate 兼容值 -> 待找发票仍保持已支付待开票，不把非 active relation 计入 linked-only 开票状态`
 9. `relation-backed pending invoice read model refreshing/stale -> 页面显示刷新/读模型诊断；refreshing 保留选择发票入口，stale 空 rows 不伪装真实空`
 10. `rows 首屏暂时加载失败 -> 页面显示错误和错误态空行文案、禁用导出 -> 用户点击刷新 -> rows fresh 恢复且错误消失`
 11. `选择已有发票 confirm 暂时失败 -> drawer/preview/选择保持、错误可见、rows 不重读且状态不半写 -> 用户重试 -> confirm 成功后 rows refresh 到已开票且无错误残留`
@@ -149,7 +149,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、build 和 deterministic Playwright smoke，覆盖完整待找发票、SQL projection、invoice lifecycle、App Status 和前端测试集，并覆盖真实 Chromium 中 Workbench confirm 后待找发票行状态更新、candidate relation 只展示候选证据不驱动 `已支付已开票` 状态、规则保存 barrier/rows refresh 后无错误残留，以及 relation-backed read model 非 fresh 诊断。单轮模块验证只跑最小闭环。
+`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、build 和 deterministic Playwright smoke，覆盖完整待找发票、SQL projection、invoice lifecycle、App Status 和前端测试集，并覆盖真实 Chromium 中 Workbench confirm 后待找发票行状态更新、未正式化 decision / 历史 candidate 兼容值不驱动 `已支付已开票` 状态、规则保存 barrier/rows refresh 后无错误残留，以及 relation-backed read model 非 fresh 诊断。单轮模块验证只跑最小闭环。
 
 ## 未测风险
 

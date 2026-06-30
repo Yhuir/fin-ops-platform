@@ -13,12 +13,12 @@
 - `已提交 OA` 由用户手动确认后进入本地 `submitted_confirmed` 历史；`未提交 OA` 只清理 FinOps 本地草稿字段并回到可重新创建状态，不调用 OA 删除暂存草稿。
 - 目标 OA 申请人登录需要 `FIN_OPS_OA_BASE_URL`、`FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY`、可选 `FIN_OPS_OA_LOGIN_PATH` 和 OpenSSL runtime；密码登录前必须用 OA 公钥 RSA 加密。
 - OA reverse evidence detected 后的 OA/发票 relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`，relation mode 为 `input_invoice_oa_reverse`；relation read model 不 fresh 或 command service 缺失时 fail fast，不先推进本地 batch。
-- 关联台未配对区 open/proposed 候选必须通过 `WorkbenchRelationReadFacade` 进入进项发票使用情况页面展示；页面不能直接读取关联台候选表。candidate 只展示关系证据，不参与支付状态或 confirmed relation 判断。
+- 只有 Workbench active relation 通过 `WorkbenchRelationReadFacade` 进入进项发票使用情况页面的已关联口径；未正式化的自动匹配 decision 不再作为本页 candidate relation 展示。历史 `candidate` payload 只做兼容未关联处理，不参与支付状态或 confirmed relation 判断。
 - `+N` 详情展开优先读取 `read_model.input_invoice_usage_rows` 单行 payload；SQL read model stale/missing 时返回 refreshing 并入队刷新，不在详情接口中触发全量 live rebuild。
 - 月份 shard 构建时，当前 workbench relation scope 的 unlinked/empty row 不能阻止按发票 row id 定向补查跨月 linked group；补查用于展示 OA/银行流水/发票摘要，但 read model 的 `workbench_relation_source_versions` 仍按当前 shard scope 保存。
 - 支付状态规则保存、OA reverse 草稿创建和 OA submitted/manual status 写成功后，页面必须先等待当前 scope 的 `input_invoice_usage` operation barrier fresh，再重新读取 rows；barrier blocked/timeout 只提示后台同步未完成，不能提前读旧投影。
 - `以发票反提 OA` 的草稿提交确认弹窗可以由用户取消；取消、父页面重渲染和 preview reload 都不能清空当前草稿 batch，状态为 `oa_draft_created` 的 batch 必须出现在 `暂存` 页签。暂存列表不展示 OA 草稿链接，只展示两项处理动作。
-- OA reverse preview 中已有 active/linked OA 关系的发票仍然不是可创建候选，但需要作为 rejected display row 返回给前端，展示 `已关联oa` chip、禁用勾选；关联台未配对区 open/proposed OA candidate 也不是可创建候选，展示 `候选oa` chip、禁用勾选。drawer 支持 `全部/已经关联oa/候选oa/未关联oa` 表头筛选。
+- OA reverse preview 中已有 active/linked OA 关系的发票仍然不是可创建候选，但需要作为 rejected display row 返回给前端，展示 `已关联oa` chip、禁用勾选；没有 active OA relation 的发票统一展示 `未关联oa`。历史 `candidate` 兼容值归入 `未关联oa`，drawer 只支持 `全部/已经关联oa/未关联oa` 表头筛选，并在候选发票清单提供搜索。
 - 2026-06-11 测试闭环审计确认：本模块 P0/P1 已有测试覆盖 read model all scope、OA 反提、凭据加密、目标申请人 token provider、未提交回滚、已提交历史、设置页 UI 和进项页面 drawer；本轮不新增重复测试，主要补齐测试矩阵并同步长期 API 契约。
 
 ## 记录模板
@@ -37,6 +37,26 @@
 ```
 
 ## 历史记录
+
+## 2026-06-30 - OA reverse 二态关系和抽屉布局固化
+
+- 目标：把 `以发票反提 OA` 右侧抽屉同步到二态 OA 关系口径，并消除标题提示导致的布局抖动。
+- 影响范围：`OaReverseWorkspaceDrawer`、`AppDrawer` header aside、候选发票清单筛选/搜索、进项发票使用 API/组件测试和 relation fan-out E2E。
+- 关键决策：抽屉移除 `目标 OA 分组` block；目标 OA 申请人、候选发票数和候选价税合计同排展示；所有提示放在标题右侧 `headerAside`，不占用正文高度。候选发票清单只保留 `全部/已经关联oa/未关联oa`，旧 `candidate` 兼容值归入 `未关联oa`，不再暴露“候选 OA”。
+- 文档影响：同步 README、state-machine、OA reverse design、API contract 和本实施记录；关系事实源由 workbench relation 二态口径解释。
+- 测试覆盖：`InputInvoiceUsageFiltersAndDrawers.test.tsx` 覆盖筛选、搜索、目标分组移除和标题提示；`input-invoice-relation-fanout.spec.ts` 覆盖 linked/未关联行为。
+- 验证命令：见本轮最终说明。
+- 未测风险：真实 OA 系统草稿创建仍依赖 staging/生产凭据 smoke；本轮本地验证覆盖前端行为、API/service 回归和 deterministic Browser 流。
+
+## 2026-06-30 - Detail drawer compact layout and internal field hiding
+
+- 目标：调整进项发票使用情况右侧详情抽屉，移除用户不可读的 App 内部字段，并降低标题区高度。
+- 影响范围：`InputInvoiceUsageDetailDrawer`、对应样式和组件测试；共享该抽屉的 OA 待付款详情入口同享过滤行为。
+- 关键决策：前端渲染层隐藏 `原始字段` sections、英文/下划线字段标签、`ID` 类内部字段和 raw JSON，不改详情 API/read model payload；title 仍由 `AppDrawer` 承载，使用左标题右关闭控件的紧凑 header。
+- 文档影响：模块边界、I/O 和 API contract 不变；本记录和测试矩阵补充 UI 决策。
+- 测试覆盖：新增 `InputInvoiceUsageFiltersAndDrawers.test.tsx` 组件回归，覆盖内部字段隐藏和 header 结构。
+- 验证命令：见本轮最终说明。
+- 未测风险：未跑真实浏览器截图；视觉像素级验收依赖后续人工或 Playwright smoke。
 
 ## 2026-06-25 - Post fresh-gate local closure audit
 

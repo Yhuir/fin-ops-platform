@@ -273,12 +273,15 @@ def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -
         if "delete from app.no_oa_bank_batch_events where no_oa_bank_batch_id in" in sql
     )
     removed_batches_delete_index = next(
-        index for index, sql in enumerate(executed_sql) if "delete from app.no_oa_bank_batches where not" in sql
+        index
+        for index, sql in enumerate(executed_sql)
+        if "delete from app.no_oa_bank_batches" in sql
+        and "not (batch_id = any(%s))" in sql
     )
 
     assert read_model_delete_index < removed_events_delete_index < removed_batches_delete_index
-    assert connection.executed[removed_events_delete_index][1] == (["retained-batch"],)
-    assert connection.executed[removed_batches_delete_index][1] == (["retained-batch"],)
+    assert connection.executed[removed_events_delete_index][1] == ("no_oa_bank_batch", ["retained-batch"])
+    assert connection.executed[removed_batches_delete_index][1] == ("no_oa_bank_batch", ["retained-batch"])
 
 
 def test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables() -> None:
@@ -356,10 +359,19 @@ def test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches() -> None
     repository.save_no_oa_bank_batches({"batches": {}, "audit_log": []})
 
     executed_sql = [sql for sql, _ in connection.executed]
-    events_delete_index = next(index for index, sql in enumerate(executed_sql) if sql == "delete from app.no_oa_bank_batch_events")
-    batches_delete_index = next(index for index, sql in enumerate(executed_sql) if sql == "delete from app.no_oa_bank_batches")
+    events_delete_index = next(
+        index
+        for index, sql in enumerate(executed_sql)
+        if "delete from app.no_oa_bank_batch_events" in sql
+    )
+    batches_delete_index = next(
+        index
+        for index, sql in enumerate(executed_sql)
+        if "delete from app.no_oa_bank_batches" in sql
+    )
 
     assert events_delete_index < batches_delete_index
+    assert all(params == ("no_oa_bank_batch",) for _sql, params in connection.executed[:3])
 
 
 def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() -> None:
@@ -389,10 +401,22 @@ def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() 
                     "row_ids": ["txn-2"],
                     "total_amount": "20.00",
                 },
+                "bank-flow-march-batch": {
+                    "batch_id": "bank-flow-march-batch",
+                    "status": "submitted",
+                    "status_bucket": "submitted",
+                    "version": 1,
+                    "scope_month": "2026-03",
+                    "account_key": "acct",
+                    "row_ids": ["txn-3"],
+                    "total_amount": "30.00",
+                    "relation_mode": "bank_flow_rule_batch",
+                },
             },
             "audit_log": [
                 {"batch_id": "march-batch", "operation": "refresh"},
                 {"batch_id": "april-batch", "operation": "refresh"},
+                {"batch_id": "bank-flow-march-batch", "operation": "refresh"},
             ],
         },
         scope_key="2026-03",
@@ -400,11 +424,13 @@ def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() 
 
     executed_sql = [sql for sql, _ in connection.executed]
     assert "delete from read_model.no_oa_bank_batch_rows where scope_month = %s::date" in executed_sql[0]
+    assert "payload->>'relation_mode'" in executed_sql[0]
     assert "delete from app.no_oa_bank_batch_events where no_oa_bank_batch_id in" in executed_sql[1]
+    assert "raw_payload->'normalized_payload'->>'relation_mode'" in executed_sql[1]
     assert "delete from app.no_oa_bank_batches where scope_month = %s::date" in executed_sql[2]
-    assert connection.executed[0][1] == ("2026-03-01", ["march-batch"])
-    assert connection.executed[1][1] == ("2026-03-01", ["march-batch"])
-    assert connection.executed[2][1] == ("2026-03-01", ["march-batch"])
+    assert connection.executed[0][1] == ("2026-03-01", "no_oa_bank_batch", ["march-batch"])
+    assert connection.executed[1][1] == ("2026-03-01", "no_oa_bank_batch", ["march-batch"])
+    assert connection.executed[2][1] == ("2026-03-01", "no_oa_bank_batch", ["march-batch"])
     assert not any(
         sql == "delete from read_model.no_oa_bank_batch_rows where not (batch_id = any(%s))"
         for sql in executed_sql

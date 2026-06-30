@@ -26,18 +26,13 @@ class FakeOperationsDashboardConnection:
         if "invoice_flags" in normalized:
             return {
                 "total_count": 2,
-                "standard_count": 1,
-                "manual_count": 0,
-                "etc_count": 1,
-                "app_oa_attachment_count": 0,
+                "manual_count": 1,
+                "oa_attachment_count": 1,
+                "oa_attachment_non_manual_count": 1,
                 "latest_synced_at": "2026-05-20T10:00:00+00:00",
-                "standard_latest_synced_at": "2026-05-20T10:00:00+00:00",
-                "manual_latest_synced_at": None,
-                "etc_latest_synced_at": "2026-05-20T10:00:00+00:00",
-                "app_oa_attachment_latest_synced_at": None,
+                "manual_latest_synced_at": "2026-05-20T10:00:00+00:00",
+                "oa_attachment_latest_synced_at": "2026-05-20T10:00:00+00:00",
             }
-        if "from read_model.workbench_rows" in normalized and "oa_attachment_invoice" in normalized:
-            return {"count": 0, "latest_synced_at": None}
         if "oa_records_count" in normalized:
             return {
                 "oa_records_count": 3,
@@ -61,6 +56,36 @@ class FakeOperationsDashboardConnection:
         if self.fail:
             raise RuntimeError("dashboard database timeout")
         normalized = " ".join(sql.lower().split())
+        if "from app.import_batches" in normalized and "batch_type in" in normalized:
+            return [
+                {
+                    "event_id": "batch-bank-1",
+                    "source_key": "bank_transactions",
+                    "label": "流水导入",
+                    "source_name": "bank.xlsx",
+                    "imported_by": "ops",
+                    "count": 1,
+                    "supplementary_count": None,
+                    "imported_at": "2026-05-20T10:00:00+00:00",
+                    "status": "completed",
+                }
+            ]
+        if "oa_attachment_source_links" in normalized:
+            return [
+                {
+                    "event_id": "oa-attachment-1",
+                    "source_key": "oa_attachment",
+                    "label": "OA 解析",
+                    "source_name": "OA 附件解析",
+                    "imported_by": "oa_sync",
+                    "count": 1,
+                    "supplementary_count": 1,
+                    "imported_at": "2026-05-19T10:00:00+00:00",
+                    "status": "completed",
+                }
+            ]
+        if "from app.oa_sync_runs" in normalized and "sync_type = 'oa_projection'" in normalized:
+            return []
         if "from job.outbox_events" in normalized:
             return []
         if "from job.read_model_dirty_scopes" in normalized:
@@ -532,6 +557,10 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertIn("runtime_performance", payload)
         self.assertNotIn("status", payload)
         self.assertEqual(payload["data_inventory"]["bank"]["total_count"], 1)
+        invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
+        self.assertEqual(set(invoice_sources), {"manual", "oa_attachment"})
+        self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 1)
+        self.assertEqual(payload["data_inventory"]["import_events"][0]["source_key"], "bank_transactions")
 
     def test_operations_app_health_dashboard_returns_stale_cached_payload_after_refresh_error(self) -> None:
         current_time = {"value": 100.0}

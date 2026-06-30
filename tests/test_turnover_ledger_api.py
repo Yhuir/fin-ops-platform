@@ -58,16 +58,60 @@ class _TurnoverReadModelRecorder:
 
 
 class _PostgresFakeTransaction:
-    def __init__(self) -> None:
+    def __init__(self, delegate: object | None = None, pair_relation_service: object | None = None) -> None:
+        self._delegate = delegate
+        self._pair_relation_service = pair_relation_service
         self.executed: list[dict[str, object]] = []
+        self.fetch_all_calls: list[dict[str, object]] = []
+        self.fetch_one_calls: list[dict[str, object]] = []
+
+    def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+        self.fetch_all_calls.append({"sql": sql, "params": params})
+        normalized_sql = " ".join(sql.lower().split())
+        if "from app.workbench_pair_relations" in normalized_sql:
+            snapshot = self._workbench_pair_relation_snapshot()
+            relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else {}
+            return [
+                {"key": str(case_id), "raw_payload": {"normalized_payload": dict(payload)}}
+                for case_id, payload in sorted(dict(relations).items())
+                if isinstance(payload, dict)
+            ]
+        if "from app.workbench_pair_relation_history" in normalized_sql:
+            snapshot = self._workbench_pair_relation_snapshot()
+            history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else []
+            return [
+                {"raw_payload": {"normalized_payload": dict(item)}}
+                for item in list(history or [])
+                if isinstance(item, dict)
+            ]
+        if "from app.bank_transactions" in normalized_sql and "scope_key" in normalized_sql:
+            return [{"scope_key": "2026-02"}, {"scope_key": "2026-03"}]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
+        self.fetch_one_calls.append({"sql": sql, "params": params})
+        return {"source_version": len(self.fetch_one_calls)}
 
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
         self.executed.append({"sql": sql, "params": params})
 
+    def _workbench_pair_relation_snapshot(self) -> dict[str, object]:
+        loader = getattr(self._delegate, "load_workbench_pair_relations", None)
+        if callable(loader):
+            snapshot = loader()
+            relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
+            if isinstance(relations, dict):
+                return snapshot
+        pair_snapshot = getattr(self._pair_relation_service, "snapshot", None)
+        if callable(pair_snapshot):
+            snapshot = pair_snapshot()
+            return snapshot if isinstance(snapshot, dict) else {}
+        return {}
+
 
 class _PostgresFakeConnection:
-    def __init__(self) -> None:
-        self.transaction_obj = _PostgresFakeTransaction()
+    def __init__(self, delegate: object | None = None, pair_relation_service: object | None = None) -> None:
+        self.transaction_obj = _PostgresFakeTransaction(delegate, pair_relation_service)
 
     @contextmanager
     def transaction(self) -> object:
@@ -77,9 +121,9 @@ class _PostgresFakeConnection:
 class _PostgresLikeStateStore:
     storage_backend = "postgres"
 
-    def __init__(self, delegate: object) -> None:
+    def __init__(self, delegate: object, pair_relation_service: object | None = None) -> None:
         self._delegate = delegate
-        self._connection = _PostgresFakeConnection()
+        self._connection = _PostgresFakeConnection(delegate, pair_relation_service)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._delegate, name)
@@ -4322,7 +4366,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
             read_repository = _TurnoverReadModelRecorder()
             queue = _PostgresQueueRecorder()
-            app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._state_store = _PostgresLikeStateStore(  # type: ignore[assignment]
+                app._state_store,
+                app._workbench_pair_relation_service,
+            )
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
             app._turnover_ledger_sql_read_repository = read_repository

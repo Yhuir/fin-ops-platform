@@ -70,7 +70,34 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
         self.assertFalse(payload["fresh"])
         self.assertEqual(payload["refreshing_targets"][0]["scope_key"], "2026-05")
 
-    def test_bank_flow_rule_batch_target_reuses_no_oa_readiness(self) -> None:
+    def test_bank_flow_rule_batch_target_uses_independent_readiness(self) -> None:
+        service = OperationFreshnessBarrierService(
+            runtime_snapshot_provider=lambda: {
+                "read_model_statuses": {
+                    "bank_flow_rule_batch": {
+                        "status": "fresh",
+                        "scopes": [
+                            {
+                                "scope_type": "bank_flow_rule_batch",
+                                "scope_key": "2026-05",
+                                "status": "fresh",
+                            }
+                        ],
+                    }
+                },
+                "outbox_statuses": {},
+                "worker_statuses": {"bank-flow-rule-batch": {"status": "ready"}},
+            }
+        )
+
+        payload = service.status_payload([OperationFreshnessTarget("bank_flow_rule_batch", "2026-05")])
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["targets"][0]["read_model_key"], "bank_flow_rule_batch")
+        self.assertEqual(payload["targets"][0]["scope_type"], "bank_flow_rule_batch")
+        self.assertEqual(payload["targets"][0]["worker_status"], "ready")
+
+    def test_bank_flow_rule_batch_target_does_not_fall_back_to_no_oa_readiness(self) -> None:
         service = OperationFreshnessBarrierService(
             runtime_snapshot_provider=lambda: {
                 "read_model_statuses": {
@@ -92,10 +119,10 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
 
         payload = service.status_payload([OperationFreshnessTarget("bank_flow_rule_batch", "2026-05")])
 
-        self.assertEqual(payload["status"], "fresh")
-        self.assertEqual(payload["targets"][0]["read_model_key"], "bank_flow_rule_batch")
-        self.assertEqual(payload["targets"][0]["scope_type"], "no_oa_bank_batch")
-        self.assertEqual(payload["targets"][0]["worker_status"], "ready")
+        self.assertEqual(payload["status"], "refreshing")
+        self.assertFalse(payload["fresh"])
+        self.assertEqual(payload["targets"][0]["scope_type"], "bank_flow_rule_batch")
+        self.assertEqual(payload["targets"][0]["raw_status"], "missing")
 
     def test_target_scope_outbox_pending_keeps_target_refreshing_when_readiness_was_fresh(self) -> None:
         service = OperationFreshnessBarrierService(

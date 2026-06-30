@@ -5,6 +5,7 @@ type AppDrawerProps = {
   open: boolean;
   title: string;
   subtitle?: ReactNode;
+  headerAside?: ReactNode;
   className?: string;
   children: ReactNode;
   closeLabel?: string;
@@ -24,6 +25,7 @@ export default function AppDrawer({
   open,
   title,
   subtitle,
+  headerAside,
   className,
   children,
   closeLabel,
@@ -97,6 +99,7 @@ export default function AppDrawer({
               </h2>
               {subtitle ? <div className="finance-drawer__subtitle">{subtitle}</div> : null}
             </div>
+            {headerAside ? <div className="finance-drawer__header-aside">{headerAside}</div> : null}
             <Button aria-label={closeLabel ?? "关闭抽屉"} isIconOnly onPress={onClose} size="sm" variant="tertiary">
               <span aria-hidden="true">×</span>
             </Button>
@@ -126,6 +129,7 @@ export default function AppDrawer({
               </Drawer.Heading>
               {subtitle ? <div className="finance-drawer__subtitle">{subtitle}</div> : null}
             </div>
+            {headerAside ? <div className="finance-drawer__header-aside">{headerAside}</div> : null}
             <Button aria-label={closeLabel ?? "关闭抽屉"} isIconOnly onPress={onClose} size="sm" variant="tertiary">
               <span aria-hidden="true">×</span>
             </Button>

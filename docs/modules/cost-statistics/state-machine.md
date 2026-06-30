@@ -16,7 +16,7 @@
 关键规则：
 
 - 成本统计页面不重新定义项目归因、发票生命周期、银行标签或 relation identity。
-- 只有 confirmed/linked 成本关系可以进入金额统计；Workbench open/proposed candidate 只作为候选关系展示事实，不能被 live service 或 SQL projection 计入成本行。
+- 只有 confirmed/linked 成本关系可以进入金额统计；未正式化的 Workbench automatic decision 或历史 candidate 兼容值不能被 live service 或 SQL projection 计入成本行。
 - 合法 read model scope 只允许 `active:YYYY-MM`、`all:YYYY-MM`、`active:all`、`all:all`。
 - 裸月份或裸 `all` 只能通过 `ReadModelRefreshGateway` 归一化后入队；未知 project scope 必须拒绝。
 - 月份 shard 成功发布后必须重新入队同 project scope 的父 scope，推动全期间视图收敛。

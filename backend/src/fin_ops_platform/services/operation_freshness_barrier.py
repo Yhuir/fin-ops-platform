@@ -16,9 +16,6 @@ BUSY_READ_MODEL_STATUSES = {
 }
 BLOCKED_OUTBOX_STATUSES = {"failed", "dead_lettered", "publish_failed"}
 BUSY_OUTBOX_STATUSES = {"pending", "processing", "publishing"}
-READ_MODEL_STATUS_SOURCE_KEYS = {
-    "bank_flow_rule_batch": "no_oa_bank_batch",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +117,7 @@ class OperationFreshnessBarrierService:
                 "reason": "runtime_unavailable",
                 "last_error": runtime_status.get("last_error"),
             }
-        read_model_payload = _dict(read_model_statuses.get(READ_MODEL_STATUS_SOURCE_KEYS.get(target.read_model_key, target.read_model_key)))
+        read_model_payload = _dict(read_model_statuses.get(target.read_model_key))
         read_model_scope = _matching_scope(read_model_payload, scope_type=scope_type, scope_key=target.scope_key)
         raw_status = _clean_text((read_model_scope or read_model_payload).get("status")) or "missing"
         target_status = _barrier_status(raw_status)
@@ -207,9 +204,7 @@ def _barrier_status(status: str) -> str:
 
 def _definition_for_target(read_model_key: str) -> Any:
     normalized = _clean_text(read_model_key)
-    return APP_STATUS_READ_MODEL_REGISTRY.get(normalized) or APP_STATUS_READ_MODEL_REGISTRY.get(
-        READ_MODEL_STATUS_SOURCE_KEYS.get(normalized, "")
-    )
+    return APP_STATUS_READ_MODEL_REGISTRY.get(normalized)
 
 
 def _matching_scope(payload: dict[str, Any], *, scope_type: str, scope_key: str) -> dict[str, Any] | None:

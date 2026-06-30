@@ -455,14 +455,29 @@ export default function OaPendingPaymentsPage() {
                       {inProgressCountLabel ? <span className="oa-pending-payments-view-toggle__count">{inProgressCountLabel}</span> : null}
                     </button>
                   </div>
-                  <label className="oa-pending-payments-field">
-                    <span>月份</span>
-                    <input
-                      type="month"
-                      value={query.month}
-                      onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
-                    />
-                  </label>
+                  <div className="oa-pending-payments-field">
+                    <span id="oa-pending-payments-month-label">月份</span>
+                    <span
+                      aria-labelledby="oa-pending-payments-month-label"
+                      className="oa-pending-payments-month-picker"
+                      role="group"
+                    >
+                      <button
+                        aria-pressed={query.month === ""}
+                        className={query.month === "" ? "oa-pending-payments-month-picker__all oa-pending-payments-month-picker__all--active" : "oa-pending-payments-month-picker__all"}
+                        onClick={() => setQuery((current) => ({ ...current, page: 1, month: "" }))}
+                        type="button"
+                      >
+                        全部
+                      </button>
+                      <input
+                        aria-label="选择月份"
+                        type="month"
+                        value={query.month}
+                        onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
+                      />
+                    </span>
+                  </div>
                 </div>
               )}
             />

@@ -4,12 +4,12 @@
 
 ## 模块化状态
 
-- 状态：implemented-transition
-- 当前边界可信度：high for API/UI/relation rules，medium for read model ownership
+- 状态：implemented-independent-io
+- 当前边界可信度：high for API/UI/application service/relation rules/read model runtime，medium for physical storage naming
 - 本 slice 范围：生产入口、API、规则抽屉、批量提交、关联台判定、历史 no-OA rebaseline API、文档和自动化测试。
-- 当前边界：新模块接管“按银行流水标签配置 OA/发票闭环要求并批量提交银行流水 relation”的业务；旧 no-OA 模块只保留 legacy API、历史批次底座和 rebaseline 输入。
-- 当前缺口：独立 `app.bank_flow_rule_batches` 表、独立 `bank_flow_rule_batch` 投影表/worker 尚未拆出；当前对外使用 `bank_flow_rule_batch` operation barrier target，底层 readiness/outbox/worker 复用旧 no-OA 批次/read model 底座。新功能生产路径不接收 `selected_tag_codes`。
-- 旧代码删除条件：独立表/read model/worker 完成后，旧 no-OA 主入口、`selected_tag_codes` 写路径和 no-OA 常驻 worker 应删除或降级为只读/一次性迁移工具。
+- 当前边界：新模块接管“按银行流水标签配置 OA/发票闭环要求并批量提交银行流水 relation”的业务；HTTP route、application service、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port 和 refresh persistence port 已独立为 `bank_flow_rule_batch`。旧 no-OA 模块只保留自身 legacy API 与历史批次功能，不再承接 bank-flow 新链路。
+- 当前缺口：独立 `app.bank_flow_rule_batches` 表、独立 `read_model.bank_flow_rule_batch_rows` 物理表尚未拆出；当前使用 bank-flow 命名 IO 端口适配历史批次存储，并以 `relation_mode=bank_flow_rule_batch` 作为物理隔离条件。新功能生产路径不接收 `selected_tag_codes`。
+- 旧代码删除条件：bank-flow 新链路不得 import/继承 no-OA route、application service、read model refresh、persistence port 或 no-OA worker；no-OA 主入口、`selected_tag_codes` 写路径和 no-OA 常驻 worker 只属于 no-OA legacy 业务，不得重新接入 bank-flow。完成物理表拆分和数据迁移后，应删除 bank-flow storage adapter 对历史表名的兼容。
 
 ## 职责边界
 
@@ -18,7 +18,7 @@
 - 流水规则批量处理页面和右侧紧凑 xlsx/grid 抽屉。
 - 读取银行明细 active 标签事实，并为每个标签维护 `requires_oa` / `requires_invoice` 规则。
 - 基于用户当前选择的银行流水创建批量 relation，并写入足够 metadata 供关联台判定 paired/open。
-- 触发 `bank_flow_rule_batch`、`workbench_relation`、`workbench`、`bank_detail` 等受影响 read model 刷新。
+- 触发独立 `bank_flow_rule_batch`、`workbench_relation`、`workbench`、`bank_detail` 等受影响 read model 刷新。
 - 提供历史 no-OA submitted rebaseline 的 dry-run/apply 合同。
 
 ### 不负责
@@ -72,21 +72,20 @@
 
 当前 read model：
 
-- 过渡期复用 `no_oa_bank_batch` read model 和 refresh scope，页面/API 对外命名为 `bank-flow-rule-batches`，operation barrier 对外使用 `bank_flow_rule_batch` 并在 barrier 层映射到底层 no-OA readiness。
-- 新 relation 写入 `relation_mode=bank_flow_rule_batch`，批次 payload/read model row 也必须携带 `relation_mode=bank_flow_rule_batch`。列表 API 查询 submitted/unsubmitted/withdrawn 时必须把 `relation_mode` 作为 read repository 输入过滤，旧 no-OA payload 缺失该字段时只按 `no_oa_bank_batch` 处理。
-- Read model refresh 从 active relation 或已提交批次 relation fact 回灌 submitted 批次时必须按调用方目标 relation mode 判定；`bank_flow_rule_batch` 刷新不能复用只识别 `no_oa_bank_batch` 的旧 relation 判定，也不能把 bank-flow 批次显示到 legacy no-OA 列表。
-- 过渡期服务内由 submitted batch 反推 relation fact 时，必须继承该 batch 的 `relation_mode`，并且只为当前 refresh `relation_mode` 生成 fact；禁止再把所有 submitted batch 硬编码为 `no_oa_bank_batch`。旧 no-OA legacy migration/repair 只允许处理 no-OA/明确 legacy relation，不得处理 `bank_flow_rule_batch`。
-- 关联台按 relation metadata 判定 open/paired。
-
-目标 read model：
-
 - Read model：`bank_flow_rule_batch`
 - Projection：`scoped_incremental`
 - `all` 语义：`fan_out_command`
-- Scope：month scope；必要时支持 tag/account page scope，但必须在 manifest 中明确。
+- Scope：month scope。
 - Worker：`bank-flow-rule-batch`
+- Event：`bank_flow_rule_batch.read_model.refresh`
 - Query owner：`BankFlowRuleBatchApplicationService`
 - Repository owner：`BankFlowRuleBatchReadModelRepositoryPort`
+- Operation barrier：直接读取 `bank_flow_rule_batch` readiness/outbox/worker facts，不再映射到 `no_oa_bank_batch`。
+- 新 relation 写入 `relation_mode=bank_flow_rule_batch`，批次 payload/read model row 也必须携带 `relation_mode=bank_flow_rule_batch`。列表 API 查询 submitted/unsubmitted/withdrawn 时必须通过 `list_bank_flow_rule_batch_rows` repository port 过滤，旧 no-OA payload 缺失该字段时只按 `no_oa_bank_batch` 处理。
+- 共享物理存储期内，`app.no_oa_bank_batches` 与 `read_model.no_oa_bank_batch_rows` 的 `relation_mode` 是保存和删除的强边界：month scope 与 `all` scope rebuild 只能替换当前 relation mode 的 snapshot rows，必须保留同 scope 其它 relation mode 的批次。Postgres 持久化删除条件必须同时限定 scope 与 relation mode，不能只按月份或 batch id 集合清理。
+- Read model refresh 从 active relation 或已提交批次 relation fact 回灌 submitted 批次时必须按调用方目标 relation mode 判定；`bank_flow_rule_batch` 刷新不能复用 no-OA event/scope/producer，也不能把 bank-flow 批次显示到 legacy no-OA 列表。
+- 服务内由 submitted batch 反推 relation fact 时，必须继承该 batch 的 `relation_mode`，并且只为当前 refresh `relation_mode` 生成 fact；禁止再把所有 submitted batch 硬编码为 `no_oa_bank_batch`。旧 no-OA legacy migration/repair 只允许处理 no-OA/明确 legacy relation，不得处理 `bank_flow_rule_batch`。
+- 关联台按 relation metadata 判定 open/paired。
 
 Workbench relation facts 仍归 `workbench-relations`：
 
@@ -97,12 +96,12 @@ Workbench relation facts 仍归 `workbench-relations`：
 
 | 层 | 计划文件或目录 |
 | --- | --- |
-| Frontend page | `web/src/pages/NoOaBankBatchPage.tsx` via `/bank-flow-rule-batches` |
-| Frontend feature | `web/src/features/noOaBankBatches/*` via `/api/bank-flow-rule-batches` |
-| Frontend tests | `web/src/test/NoOaBankBatch*.test.*`、`web/e2e/bank-flow-rule-batches-flow.spec.ts` |
-| Backend route | `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py` |
-| Backend service | `no_oa_bank_batch_application_service.py`、`no_oa_bank_batch_service.py` |
-| Repository/read model | `no_oa_bank_batch_read_model_repository.py`、`no_oa_bank_batch_read_model_refresh.py`、`no_oa_bank_batch_read_model_refresh_producer.py` |
+| Frontend page | `web/src/pages/BankFlowRuleBatchPage.tsx` via `/bank-flow-rule-batches` |
+| Frontend feature | `web/src/features/bankFlowRuleBatches/*` via `/api/bank-flow-rule-batches` |
+| Frontend tests | `web/src/test/BankFlowRuleBatch*.test.*`、`web/e2e/bank-flow-rule-batches-flow.spec.ts` |
+| Backend route | `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py` |
+| Backend service | `bank_flow_rule_batch_application_service.py`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py` |
+| Repository/read model | `bank_flow_rule_batch_read_model_repository.py`、`bank_flow_rule_batch_read_model_refresh.py`、`bank_flow_rule_batch_read_model_refresh_producer.py`；refresh/mutation 保存走 `save_bank_flow_rule_batch*` 命名 IO |
 | Runtime registry | `read_model_manifest.py`、`runtime_worker_registry.py`、`app_status_domain_registry.py`、`app_status_read_model_registry.py` |
 | Integration | `workbench_candidate_grouping.py`、Workbench display policy/decorator、relation command metadata mapping |
 | Tests | `tests/test_bank_flow_rule_batch*.py`、`tests/test_workbench_candidate_grouping.py`、affected no-OA regression tests |
@@ -127,10 +126,10 @@ Workbench relation facts 仍归 `workbench-relations`：
 
 ## 当前缺口和删除条件
 
-- 代码已实现过渡版本；本文件同时记录目标边界和当前迁移底座。
-- 旧 no-OA 模块仍承载历史事实和过渡 read model，当前不能删除其 route/service/tests。
+- 代码已实现 bank-flow route/service/worker/event/barrier/producer/repository/persistence IO 独立；本文件同时记录物理存储命名迁移底座。
+- 旧 no-OA 模块仍承载自身历史事实和 legacy no-OA read model，当前不能删除其 route/service/tests；但 bank-flow HTTP、application service、read model event、worker、operation barrier、producer、mutation persistence 和 refresh persistence 不得再进入 no-OA route/service/event/scope/worker/persistence port。
 - 历史 submitted no-OA 全量撤回必须单独作为 rebaseline 工具/API 实现，不能在普通页面查询或提交时隐式执行。
-- 完成迁移后，旧 `selected_tag_codes` 写路径、no-OA 页面主入口、no-OA internal transfer 特例和 no-OA read model 常驻 worker 要么删除，要么有明确 retained tooling 边界和退休条件。
+- 完成物理表迁移后，bank-flow storage adapter 对历史 no-OA 表名的兼容必须删除；旧 `selected_tag_codes` 写路径、no-OA 页面主入口、no-OA internal transfer 特例和 no-OA read model 常驻 worker 只能服务 no-OA legacy 域，要么删除，要么有明确 retained tooling 边界和退休条件。
 
 ## Canonical facts ownership
 

@@ -578,6 +578,26 @@ function installPendingInvoiceFetch(options: {
         },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
+    if (url.pathname === "/api/pending-invoices/bank-transactions/txn-paid-pending/detail") {
+      return new Response(JSON.stringify({
+        title: "云南开票供应商",
+        subtitle: "txn_imported_0412",
+        detail_available: true,
+        sections: [{
+          title: "支出流水",
+          fields: [
+            { label: "id", value: "txn_imported_0412" },
+            { label: "account_no", value: "53001905038050548106" },
+            { label: "counterparty_name", value: "云南开票供应商" },
+            { label: "Trade Time", value: "2026-04-19T10:52:02+08:00" },
+            { label: "debit_amount", value: "1200.00" },
+            { label: "balance", value: "9800.00" },
+            { label: "summary", value: "电子转账" },
+            { label: "raw_payload", value: "{\"id\":\"txn_imported_0412\"}" },
+          ],
+        }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (url.pathname === "/api/pending-invoices/rows/txn-invoice-not-paid/relation-detail") {
       return new Response(JSON.stringify({
         transaction_summary: { id: "txn-invoice-not-paid", counterparty_name: "分期供应商", trade_time: "2026-05-03", debit_amount: "1200.00" },
@@ -609,6 +629,14 @@ function installPendingInvoiceFetch(options: {
         sections: [{ title: "发票字段", fields: [{ label: "销方", value: "分期供应商" }, { label: "发票代码", value: "CODE-001" }] }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
+    if (url.pathname === "/api/pending-invoices/invoices/inv-candidate-oa/detail") {
+      return new Response(JSON.stringify({
+        title: "DIG-CAND-OA",
+        subtitle: "候选OA供应商",
+        detail_available: true,
+        sections: [{ title: "发票字段", fields: [{ label: "invoice_no", value: "DIG-CAND-OA" }, { label: "seller_name", value: "候选OA供应商" }] }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (url.pathname === "/api/pending-invoices/oa/oa-001/detail") {
       return new Response(JSON.stringify({
         title: "打印选择",
@@ -637,6 +665,14 @@ function installPendingInvoiceFetch(options: {
           ],
         },
         sections: [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.pathname === "/api/pending-invoices/oa/oa-paid-pending/detail") {
+      return new Response(JSON.stringify({
+        title: "张三",
+        subtitle: "oa-paid-pending",
+        detail_available: true,
+        sections: [{ title: "OA字段", fields: [{ label: "applicant", value: "张三" }, { label: "application_type", value: "支付" }, { label: "id", value: "oa-paid-pending" }] }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/invoice-candidates/batch" && method === "POST") {
@@ -888,11 +924,12 @@ describe("Pending invoices page", () => {
       sourceByPath["src/pages/PendingInvoicesPage.tsx"].includes("PageToolbar") ? null : "PendingInvoicesPage.tsx should use PageToolbar or equivalent project toolbar",
       pendingInvoicesTableSource.includes("@heroui/react") ? null : "PendingInvoicesTable.tsx should use HeroUI React primitives",
       pendingInvoicesTableSource.includes("Table.ScrollContainer") && pendingInvoicesTableSource.includes("<table") ? null : "PendingInvoicesTable.tsx should keep the HeroUI shell with native table content",
+      pendingInvoicesTableSource.includes("<colgroup>") ? null : "PendingInvoicesTable.tsx should keep a colgroup so group headers and body columns share widths",
       !pendingInvoicesTableSource.includes("Table.Content") && !pendingInvoicesTableSource.includes("Table.Column") ? null : "PendingInvoicesTable.tsx should not use RAC table content because it blocks body text selection",
       pendingInvoicesTableSource.includes("aria-sort") && pendingInvoicesTableSource.includes("handleNativeSort") ? null : "PendingInvoicesTable.tsx should keep native accessible sorting",
       pendingInvoicesTableSource.includes("Dropdown.Menu") && pendingInvoicesTableSource.includes('selectionMode="multiple"') ? null : "PendingInvoicesTable.tsx should use HeroUI Dropdown multi-select filtering",
       sourceByPath["src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx"].includes("AppDrawer") ? null : "PendingInvoiceDrawerFrame.tsx should use AppDrawer for right drawer shape",
-      sourceByPath["src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx"].includes("AppDialog") ? null : "PendingInvoiceDetailDrawer.tsx should use AppDialog for OA print dialog",
+      !sourceByPath["src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx"].includes("AppDialog") ? null : "PendingInvoiceDetailDrawer.tsx should keep object details in the right drawer",
     ].filter(Boolean);
 
     expect({
@@ -915,11 +952,57 @@ describe("Pending invoices page", () => {
     expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*user-select:\s*text/s);
     expect(css).toMatch(/\.pending-invoices-sort-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).not.toMatch(/\.pending-invoices-sort-button\s*{[^}]*pointer-events:\s*none/s);
-    expect(css).toMatch(/\.pending-invoices-table-zone-header-grid\s*{[^}]*grid-template-columns:\s*14fr 10fr 11fr 11fr 11fr 10fr 7fr 11fr 15fr/s);
+    expect(css).toMatch(/\.pending-invoices-selection-toolbar\s*{[^}]*display:\s*inline-flex;[^}]*min-height:\s*30px/s);
+    expect(css).toMatch(/\.pending-invoices-table-frame\s*{[^}]*--pending-invoices-table-columns:/s);
+    expect(css).toMatch(/\.pending-invoices-table-zone-header-grid\s*{[^}]*grid-template-columns:\s*var\(--pending-invoices-table-columns\);[^}]*position:\s*sticky/s);
+    expect(css).toMatch(/\.pending-invoices-table-sub-header\s*{[^}]*top:\s*33px/s);
     expect(css).toMatch(/\.pending-invoices-icon-button,\s*\.pending-invoices-inline-action\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.pending-invoice-drawer\s+\.finance-drawer__header\s*{[^}]*padding:\s*10px var\(--fp-space-4\)/s);
+    expect(css).toMatch(/\.pending-invoice-drawer\s+\.finance-drawer__header\s*{[^}]*padding:\s*var\(--fp-space-2\) var\(--fp-space-4\)/s);
+    expect(css).toMatch(/\.pending-invoice-drawer\s+\.finance-drawer__title\s*{[^}]*font-size:\s*var\(--fp-text-body\)/s);
     expect(css).toMatch(/\.pending-invoice-drawer__body\s*{[^}]*padding:\s*var\(--fp-space-3\)/s);
     expect(css).toMatch(/\.pending-invoice-metric-grid\s*{[^}]*gap:\s*var\(--fp-space-2\)/s);
+  });
+
+  test("keeps object detail drawer titles fixed and hides internal fields", async () => {
+    const user = userEvent.setup();
+    installPendingInvoiceFetch();
+    renderAppAt("/pending-invoices");
+
+    const page = await findPendingInvoicesPage();
+    await within(page).findByText("云南开票供应商");
+
+    await user.click(within(page).getByRole("button", { name: "流水详情 云南开票供应商" }));
+    const bankDrawer = await screen.findByRole("dialog", { name: "流水详情" });
+    expect(within(bankDrawer).getByRole("heading", { name: "流水详情" })).toBeInTheDocument();
+    expect(within(bankDrawer).queryByRole("heading", { name: "云南开票供应商" })).not.toBeInTheDocument();
+    expect(within(bankDrawer).getByText("账号")).toBeInTheDocument();
+    expect(within(bankDrawer).getByText("交易时间")).toBeInTheDocument();
+    expect(within(bankDrawer).getByText("对方户名")).toBeInTheDocument();
+    expect(within(bankDrawer).queryByText("account_no")).not.toBeInTheDocument();
+    expect(within(bankDrawer).queryByText(/^id$/i)).not.toBeInTheDocument();
+    expect(within(bankDrawer).queryByText("txn_imported_0412")).not.toBeInTheDocument();
+    expect(within(bankDrawer).queryByText("raw_payload")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "流水详情" })).not.toBeInTheDocument());
+
+    await user.click(within(page).getByRole("button", { name: /发票详情 DIG-CAND-OA/ }));
+    const invoiceDrawer = await screen.findByRole("dialog", { name: "发票详情" });
+    expect(within(invoiceDrawer).getByRole("heading", { name: "发票详情" })).toBeInTheDocument();
+    expect(within(invoiceDrawer).queryByRole("heading", { name: "DIG-CAND-OA" })).not.toBeInTheDocument();
+    expect(within(invoiceDrawer).getByText("发票号码")).toBeInTheDocument();
+    expect(within(invoiceDrawer).getByText("销方名称")).toBeInTheDocument();
+    expect(within(invoiceDrawer).queryByText("invoice_no")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "发票详情" })).not.toBeInTheDocument());
+
+    await user.click(within(page).getByRole("button", { name: /OA详情 张三/ }));
+    const oaDrawer = await screen.findByRole("dialog", { name: "OA 详情" });
+    expect(within(oaDrawer).getByRole("heading", { name: "OA 详情" })).toBeInTheDocument();
+    expect(within(oaDrawer).queryByRole("heading", { name: "张三" })).not.toBeInTheDocument();
+    expect(within(oaDrawer).getByText("申请人")).toBeInTheDocument();
+    expect(within(oaDrawer).getByText("申请类型")).toBeInTheDocument();
+    expect(within(oaDrawer).queryByText("applicant")).not.toBeInTheDocument();
+    expect(within(oaDrawer).queryByText("oa-paid-pending")).not.toBeInTheDocument();
   });
 
   test("renders project four-zone table contract and summarizes multiple relations", async () => {
@@ -1521,6 +1604,9 @@ describe("Pending invoices page", () => {
     const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
     await user.click(await within(page).findByRole("checkbox", { name: "选择流水 云南开票供应商" }));
     expect(within(page).getByText("已选 1 条流水")).toBeInTheDocument();
+    const selectionToolbar = within(page).getByText("已选 1 条流水").closest(".pending-invoices-selection-toolbar");
+    expect(selectionToolbar).not.toBeNull();
+    expect(selectionToolbar?.parentElement).toHaveClass("pending-invoices-toolbar-actions");
     await user.click(within(page).getByRole("button", { name: "选择发票" }));
 
     expect(await screen.findByRole("heading", { name: "选择已有进项发票" })).toBeInTheDocument();

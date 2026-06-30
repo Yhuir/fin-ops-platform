@@ -60,7 +60,7 @@ async function openSplitCandidatePreview(page: Page) {
   await openZone.getByRole("button", { name: "撤回关联" }).click();
   const previewDialog = page.getByRole("dialog", { name: "关联预览" });
   await expect(previewDialog).toBeVisible();
-  await expect(previewDialog.getByText("拆分候选预览")).toBeVisible();
+  await expect(previewDialog.getByText("取消系统建议预览")).toBeVisible();
   await expect(previewDialog.getByTestId("relation-preview-before").getByText("待找流水与发票").first()).toBeVisible();
   return { openZone, openGroup, previewDialog };
 }
@@ -169,7 +169,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
 
     await page.goto("/");
     const { openGroup, previewDialog } = await openSplitCandidatePreview(page);
-    const submitButton = previewDialog.getByRole("button", { name: "确认拆分" });
+    const submitButton = previewDialog.getByRole("button", { name: "确认取消" });
 
     await clickTwiceAtCenter(page, submitButton);
 

@@ -479,7 +479,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
         self.assertIn("input-invoice-nanjing", rows_by_id)
 
-    def test_rebuild_distributes_open_reconciliation_decision_as_candidate_relation(self) -> None:
+    def test_rebuild_keeps_open_reconciliation_decision_unlinked(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
         connection = CandidateDecisionRelationProjectionConnection()
         builder = WorkbenchRelationSqlProjectionBuilder(
@@ -489,17 +489,12 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
 
         result = builder.rebuild_workbench_relation_read_model_scope("2026-01")
 
-        self.assertEqual(result["group_count"], 1)
+        self.assertEqual(result["group_count"], 0)
         saved = repository.saved[0]
-        group = saved["groups"][0]
-        self.assertEqual(group["group_id"], "decision-open-candidate")
-        self.assertEqual(group["relation_source"], "automatic_decision")
-        self.assertEqual(group["relation_status"], "candidate")
-        self.assertEqual(group["payload"]["relation_status"], "candidate")
+        self.assertEqual(saved["groups"], [])
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
-        self.assertEqual(rows_by_id["txn-tian-196"]["relation_status"], "candidate")
-        self.assertEqual(rows_by_id["txn-tian-196"]["group_ids"], ["decision-open-candidate"])
-        self.assertEqual(rows_by_id["txn-tian-196"]["linked_oa"][0]["relation_status"], "candidate")
+        self.assertEqual(rows_by_id["txn-tian-196"]["relation_status"], "unlinked")
+        self.assertEqual(rows_by_id["txn-tian-196"]["group_ids"], [])
         self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
 
     def test_rebuild_excludes_candidate_decisions_using_in_progress_oa_claimed_bank_rows(self) -> None:

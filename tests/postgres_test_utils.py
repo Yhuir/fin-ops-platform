@@ -91,6 +91,7 @@ EXPECTED_MIGRATION_FILES = [
     "0077_workbench_relation_rows_scope_unique.sql",
     "0078_workbench_relation_rows_scope_unique_repair.sql",
     "0079_workbench_relation_rows_scope_unique_hardening.sql",
+    "0080_no_oa_bank_batch_relation_mode_filter.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

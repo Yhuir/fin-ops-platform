@@ -1,4 +1,4 @@
-import { Filter, X } from "lucide-react";
+import { Filter, Search, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import AppDrawer from "../common/AppDrawer";
@@ -43,7 +43,7 @@ export type OaReverseRejectedInvoice = {
 };
 
 type OaRelationStatus = "linked" | "candidate" | "unlinked";
-type OaRelationFilter = "all" | OaRelationStatus;
+type OaRelationFilter = "all" | "linked" | "unlinked";
 
 type OaReverseDisplayInvoice = InputInvoiceUsageOaReverseInvoice & {
   oaRelationStatus: OaRelationStatus;
@@ -120,6 +120,7 @@ export default function OaReverseWorkspaceDrawer({
   const [targetApplicantMenuOpen, setTargetApplicantMenuOpen] = useState(false);
   const [oaRelationFilter, setOaRelationFilter] = useState<OaRelationFilter>("all");
   const [oaRelationFilterMenuOpen, setOaRelationFilterMenuOpen] = useState(false);
+  const [candidateSearch, setCandidateSearch] = useState("");
   const confirmationOpenRef = useRef(false);
   const targetApplicantLabelId = useId();
   const selectedInvoiceIdsKey = selectedInvoiceIds.join("\n");
@@ -157,6 +158,7 @@ export default function OaReverseWorkspaceDrawer({
       setTargetApplicantMenuOpen(false);
       setOaRelationFilter("all");
       setOaRelationFilterMenuOpen(false);
+      setCandidateSearch("");
       return undefined;
     }
 
@@ -191,9 +193,14 @@ export default function OaReverseWorkspaceDrawer({
 
   const candidateInvoices = useMemo(() => (preview ? invoicesFromPreview(preview) : []), [preview]);
   const selectableCandidateInvoices = useMemo(() => candidateInvoices.filter((invoice) => invoice.selectable), [candidateInvoices]);
+  const normalizedCandidateSearch = useMemo(() => candidateSearch.trim().toLowerCase(), [candidateSearch]);
   const visibleCandidateInvoices = useMemo(
-    () => candidateInvoices.filter((invoice) => oaRelationFilter === "all" || invoice.oaRelationStatus === oaRelationFilter),
-    [candidateInvoices, oaRelationFilter],
+    () => candidateInvoices.filter((invoice) => {
+      const businessStatus = oaRelationBusinessStatus(invoice.oaRelationStatus);
+      const relationMatches = oaRelationFilter === "all" || businessStatus === oaRelationFilter;
+      return relationMatches && invoiceMatchesSearch(invoice, normalizedCandidateSearch);
+    }),
+    [candidateInvoices, normalizedCandidateSearch, oaRelationFilter],
   );
   const candidateIdsKey = selectableCandidateInvoices.map((invoice) => invoice.invoiceId).join("\n");
   useEffect(() => {
@@ -213,6 +220,15 @@ export default function OaReverseWorkspaceDrawer({
   );
   const canConfirmSubmission = Boolean(batch && manualStatus && batch.oaDraftUrl && (batch.canConfirmSubmission ?? batch.status === "oa_draft_created"));
   const createDraftDisabled = Boolean(actionLoading) || !canCreateDraft;
+  const headerNotices = useMemo(
+    () => oaReverseHeaderNotices({
+      error,
+      feedback,
+      preview,
+      candidateInvoiceCount: candidateInvoices.length,
+    }),
+    [candidateInvoices.length, error, feedback, preview],
+  );
 
   const runBatchAction = (
     actionName: string,
@@ -368,20 +384,11 @@ export default function OaReverseWorkspaceDrawer({
       onClose={onClose}
       open={open}
       title="以发票反提 OA"
+      headerAside={headerNotices.length > 0 ? <OaReverseHeaderNotices notices={headerNotices} /> : undefined}
       modal={false}
       width="min(920px, 100vw)"
     >
       <div aria-label="以发票反提 OA 工作流" className="input-invoice-usage-drawer-body">
-        {error ? (
-          <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--error" role="alert">
-            {error}
-          </div>
-        ) : null}
-        {feedback ? (
-          <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--success" role="status">
-            {feedback}
-          </div>
-        ) : null}
         <div aria-label="反提 OA 状态" className="input-invoice-usage-oa-tabs" role="tablist">
           <TabButton active={activeTab === "pending"} onClick={() => setActiveTab("pending")}>
             待处理
@@ -417,73 +424,48 @@ export default function OaReverseWorkspaceDrawer({
             ) : null}
             {preview ? (
               <>
-                <div className="input-invoice-usage-oa-metrics">
+                <div className="input-invoice-usage-oa-summary-row">
+                  {targetApplicants.length > 0 ? (
+                    <div className="input-invoice-usage-rules-field input-invoice-usage-oa-target input-invoice-usage-oa-target-card">
+                      <span id={targetApplicantLabelId}>目标 OA 申请人</span>
+                      <button
+                        aria-expanded={targetApplicantMenuOpen}
+                        aria-haspopup="listbox"
+                        aria-labelledby={targetApplicantLabelId}
+                        className="input-invoice-usage-oa-select"
+                        onClick={() => setTargetApplicantMenuOpen((current) => !current)}
+                        type="button"
+                      >
+                        {targetApplicants.find((applicant) => applicant.code === selectedTargetApplicantCode)?.name
+                          ?? preview.targetApplicantName
+                          ?? "请选择"}
+                      </button>
+                      {targetApplicantMenuOpen ? (
+                        <div aria-labelledby={targetApplicantLabelId} className="input-invoice-usage-oa-options" role="listbox">
+                          {targetApplicants.map((applicant) => (
+                            <button
+                              aria-selected={applicant.code === selectedTargetApplicantCode}
+                              className="input-invoice-usage-oa-option"
+                              key={applicant.code}
+                              onClick={() => {
+                                setTargetApplicantCode(applicant.code);
+                                setTargetApplicantMenuOpen(false);
+                              }}
+                              role="option"
+                              type="button"
+                            >
+                              {applicant.name}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <SummaryMetric label="目标 OA 申请人" value={preview.targetApplicantName ?? "-"} />
+                  )}
                   <SummaryMetric label="候选发票数" value={String(preview.invoiceCount)} />
                   <SummaryMetric label="候选价税合计" value={preview.totalWithTax} />
                 </div>
-                {targetApplicants.length > 0 ? (
-                  <div className="input-invoice-usage-rules-field input-invoice-usage-oa-target">
-                    <span id={targetApplicantLabelId}>目标 OA 申请人</span>
-                    <button
-                      aria-expanded={targetApplicantMenuOpen}
-                      aria-haspopup="listbox"
-                      aria-labelledby={targetApplicantLabelId}
-                      className="input-invoice-usage-oa-select"
-                      onClick={() => setTargetApplicantMenuOpen((current) => !current)}
-                      type="button"
-                    >
-                      {targetApplicants.find((applicant) => applicant.code === selectedTargetApplicantCode)?.name
-                        ?? preview.targetApplicantName
-                        ?? "请选择"}
-                    </button>
-                    {targetApplicantMenuOpen ? (
-                      <div aria-labelledby={targetApplicantLabelId} className="input-invoice-usage-oa-options" role="listbox">
-                        {targetApplicants.map((applicant) => (
-                          <button
-                            aria-selected={applicant.code === selectedTargetApplicantCode}
-                            className="input-invoice-usage-oa-option"
-                            key={applicant.code}
-                            onClick={() => {
-                              setTargetApplicantCode(applicant.code);
-                              setTargetApplicantMenuOpen(false);
-                            }}
-                            role="option"
-                            type="button"
-                          >
-                            {applicant.name}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                {preview.warnings && preview.warnings.length > 0 ? (
-                  <div className="input-invoice-usage-oa-stack">
-                    {preview.warnings.map((warning) => (
-                      <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--info" key={warning}>
-                        {warning}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {!(preview.canCreateDraft ?? preview.nextAction === "create_oa_draft") ? (
-                  <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--info">
-                    {previewUnavailableMessage(preview, candidateInvoices.length)}
-                  </div>
-                ) : null}
-                <Section title="目标 OA 分组">
-                  {preview.groups.length === 0 ? <p className="input-invoice-usage-rules-empty">暂无可提交分组。</p> : null}
-                  <div className="input-invoice-usage-oa-stack">
-                    {preview.groups.map((group) => (
-                      <article className="input-invoice-usage-oa-group" key={group.targetApplicantCode || group.targetApplicantName}>
-                        <strong>{group.targetApplicantName}</strong>
-                        {group.targetApplicantCode ? <span className="input-invoice-usage-rules-tag">{group.targetApplicantCode}</span> : null}
-                        <span className="input-invoice-usage-rules-tag">{group.invoiceCount} 张</span>
-                        <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{group.totalWithTax}</span>
-                      </article>
-                    ))}
-                  </div>
-                </Section>
                 <Section title="候选发票清单">
                   {candidateInvoices.length > 0 ? (
                     <div className="input-invoice-usage-oa-actions">
@@ -498,6 +480,19 @@ export default function OaReverseWorkspaceDrawer({
                         清空选择
                       </button>
                       <span className="input-invoice-usage-rules-tag">已选 {selectedCandidateIds.length} 张</span>
+                      <label className="input-invoice-usage-rules-field input-invoice-usage-oa-search">
+                        <span>搜索</span>
+                        <span className="input-invoice-usage-oa-search-control">
+                          <Search aria-hidden="true" size={14} />
+                          <input
+                            aria-label="搜索候选发票"
+                            onChange={(event) => setCandidateSearch(event.target.value)}
+                            placeholder="发票号码、销方、金额"
+                            type="search"
+                            value={candidateSearch}
+                          />
+                        </span>
+                      </label>
                     </div>
                   ) : null}
                   <div className="input-invoice-usage-rules-table-shell">
@@ -592,7 +587,7 @@ export default function OaReverseWorkspaceDrawer({
                                 {oaRelationChipLabel(invoice.oaRelationStatus)}
                               </span>
                             </td>
-                            <td>{invoice.paymentStatusLabel || "候选"}</td>
+                            <td>{invoice.rejectedReason || invoice.paymentStatusLabel || "候选"}</td>
                           </tr>
                         ))}
                         {visibleCandidateInvoices.length === 0 ? (
@@ -653,7 +648,6 @@ export default function OaReverseWorkspaceDrawer({
 const OA_RELATION_FILTER_OPTIONS: Array<{ value: OaRelationFilter; label: string }> = [
   { value: "all", label: "全部" },
   { value: "linked", label: "已经关联oa" },
-  { value: "candidate", label: "候选oa" },
   { value: "unlinked", label: "未关联oa" },
 ];
 
@@ -665,9 +659,6 @@ function oaRelationChipLabel(value: OaRelationStatus) {
   if (value === "linked") {
     return "已关联oa";
   }
-  if (value === "candidate") {
-    return "候选oa";
-  }
   return "未关联oa";
 }
 
@@ -675,18 +666,89 @@ function oaRelationChipClassName(value: OaRelationStatus) {
   if (value === "linked") {
     return "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--warning";
   }
-  if (value === "candidate") {
-    return "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--info";
-  }
   return "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success";
 }
 
 function oaRelationDisabledLabel(value: OaRelationStatus) {
-  return value === "candidate" ? "候选 OA 发票" : "已关联 OA 发票";
+  return value === "linked" ? "已关联 OA 发票" : "未关联 OA 发票";
 }
 
 function normalizeOaRelationStatus(value: unknown): OaRelationStatus {
   return value === "linked" || value === "candidate" ? value : "unlinked";
+}
+
+function oaRelationBusinessStatus(value: OaRelationStatus): OaRelationFilter {
+  return value === "linked" ? "linked" : "unlinked";
+}
+
+function invoiceMatchesSearch(invoice: OaReverseDisplayInvoice, searchTerm: string) {
+  if (!searchTerm) {
+    return true;
+  }
+  const haystack = [
+    invoice.invoiceId,
+    invoice.invoiceNumber,
+    invoice.displayNo,
+    invoice.sellerName,
+    invoice.issueDate,
+    invoice.totalWithTax,
+    invoice.targetApplicantName,
+    invoice.paymentStatusLabel,
+    invoice.rejectedReason,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(searchTerm);
+}
+
+type OaReverseHeaderNotice = {
+  tone: "error" | "info" | "success";
+  text: string;
+};
+
+function oaReverseHeaderNotices({
+  error,
+  feedback,
+  preview,
+  candidateInvoiceCount,
+}: {
+  error: string | null;
+  feedback: string | null;
+  preview: OaReversePreviewPayload | null;
+  candidateInvoiceCount: number;
+}) {
+  const notices: OaReverseHeaderNotice[] = [];
+  if (error) {
+    notices.push({ tone: "error", text: error });
+  }
+  if (feedback) {
+    notices.push({ tone: "success", text: feedback });
+  }
+  for (const warning of preview?.warnings ?? []) {
+    notices.push({ tone: "info", text: warning });
+  }
+  if (preview && !(preview.canCreateDraft ?? preview.nextAction === "create_oa_draft")) {
+    notices.push({ tone: "info", text: previewUnavailableMessage(preview, candidateInvoiceCount) });
+  }
+  return notices;
+}
+
+function OaReverseHeaderNotices({ notices }: { notices: OaReverseHeaderNotice[] }) {
+  return (
+    <div aria-label="以发票反提 OA 提示" className="input-invoice-usage-oa-header-notices">
+      {notices.map((notice, index) => (
+        <span
+          className={`input-invoice-usage-oa-header-notice input-invoice-usage-oa-header-notice--${notice.tone}`}
+          key={`${notice.tone}:${notice.text}:${index}`}
+          role={notice.tone === "error" ? "alert" : "status"}
+          title={notice.text}
+        >
+          {notice.text}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function invoicesFromPreview(preview: OaReversePreviewPayload) {

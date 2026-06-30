@@ -2480,7 +2480,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         connection = BatchAccountingActiveGenerationConnection()
         repository = PostgresReadModelRepository(connection)
 
-        payload = repository.load_batch_accounting_workbench_payload(bank_year="2026", oa_year="2026")
+        payload = repository.load_batch_accounting_workbench_payload(bank_year="2026")
 
         self.assertEqual(payload["open"]["groups"][0]["bank_rows"][0]["id"], "txn_imported_202601_batch_001")
         workbench_row_queries = [
@@ -2491,6 +2491,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             self.assertIn("join read_model.workbench_generations", sql)
             self.assertIn("status = 'active'", sql)
             self.assertIn("generation_id", sql)
+        bank_query = next(sql for sql in workbench_row_queries if "r.source_kind = 'bank'" in sql)
+        oa_query = next(sql for sql in workbench_row_queries if "r.source_kind = 'oa'" in sql)
+        invoice_query = next(sql for sql in workbench_row_queries if "r.source_kind = 'oa_attachment_invoice'" in sql)
+        self.assertIn("r.scope_month >= %s::date", bank_query)
+        self.assertNotIn("r.scope_month >= %s::date", oa_query)
+        self.assertNotIn("r.scope_month >= %s::date", invoice_query)
 
     def test_repository_groups_page_pins_versions_counts_and_rows_to_single_active_generation(self) -> None:
         connection = SwitchingActiveWorkbenchGenerationConnection()

@@ -5,7 +5,7 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("input invoice usage relation browser fan-out", () => {
-  test("keeps candidate OA evidence non-selectable and refreshes downstream read models after workbench confirm", async ({ page }) => {
+  test("keeps legacy OA evidence non-selectable and refreshes downstream read models after workbench confirm", async ({ page }) => {
     const browserErrors: string[] = [];
     page.on("pageerror", (error) => {
       browserErrors.push(`pageerror: ${error.stack || error.message}`);
@@ -48,8 +48,8 @@ test.describe("input invoice usage relation browser fan-out", () => {
     await expect(workflow).toBeVisible();
     const candidateInvoice = workflow.getByRole("row", { name: /SD-INV-E2E-REL-001/ });
     await expect(candidateInvoice).toBeVisible();
-    await expect(candidateInvoice.getByText("候选oa")).toBeVisible();
-    await expect(workflow.getByLabel("候选 OA 发票 SD-INV-E2E-REL-001 不可选择")).toBeDisabled();
+    await expect(candidateInvoice.getByText("未关联oa")).toBeVisible();
+    await expect(workflow.getByLabel("未关联 OA 发票 SD-INV-E2E-REL-001 不可选择")).toBeDisabled();
     await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-001")).toBeChecked();
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
 

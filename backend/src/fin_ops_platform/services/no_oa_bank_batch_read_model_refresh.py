@@ -23,15 +23,21 @@ class NoOaBankBatchReadModelPersistencePort:
     def __init__(self, state_store: Any) -> None:
         self._state_store = state_store
 
-    def save_public_snapshot(self, snapshot: dict[str, Any], *, scope_key: str = "all") -> None:
+    def save_public_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        scope_key: str = "all",
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> None:
         save_scope = getattr(self._state_store, "save_no_oa_bank_batches_scope", None)
         if callable(save_scope):
-            save_scope(snapshot, scope_key=scope_key)
+            save_scope(snapshot, scope_key=scope_key, relation_mode=relation_mode)
             return
         save_snapshot = getattr(self._state_store, "save_no_oa_bank_batches", None)
         if not callable(save_snapshot):
             raise RuntimeError("No-OA read model persistence requires save_no_oa_bank_batches.")
-        save_snapshot(snapshot)
+        save_snapshot(snapshot, relation_mode=relation_mode)
 
 
 class NoOaBankBatchReadModelRefreshService:
@@ -50,7 +56,13 @@ class NoOaBankBatchReadModelRefreshService:
         read_model_persistence: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         relation_facade: Any | None = None,
+        refresh_event_type: str = NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE,
+        scope_type: str = NO_OA_BANK_BATCH_SCOPE_TYPE,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> None:
+        self._refresh_event_type = str(refresh_event_type or NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE).strip()
+        self._scope_type = str(scope_type or NO_OA_BANK_BATCH_SCOPE_TYPE).strip()
+        self._relation_mode = str(relation_mode or NO_OA_BANK_BATCH_RELATION_MODE).strip()
         self._queue_repository = queue_repository
         self._read_model_persistence = read_model_persistence or NoOaBankBatchReadModelPersistencePort(state_store)
         no_oa_bank_batch_read_model_repository = getattr(state_store, "no_oa_bank_batch_sql_read_repository", None)
@@ -71,12 +83,12 @@ class NoOaBankBatchReadModelRefreshService:
         self._no_oa_bank_batch_service = no_oa_bank_batch_service
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
-        if event.event_type != NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE:
-            raise ValueError(f"Unsupported no-OA bank batch read model event type: {event.event_type}")
+        if event.event_type != self._refresh_event_type:
+            raise ValueError(f"Unsupported bank batch read model event type: {event.event_type}")
         scope_type = str(event.scope_type or event.payload.get("scope_type") or "").strip()
         scope_key = str(event.scope_key or event.payload.get("scope_key") or event.aggregate_id or "").strip()
-        if scope_type != NO_OA_BANK_BATCH_SCOPE_TYPE or not scope_key:
-            raise ValueError("No-OA bank batch refresh requires scope_type='no_oa_bank_batch' and scope_key.")
+        if scope_type != self._scope_type or not scope_key:
+            raise ValueError(f"Bank batch refresh requires scope_type={self._scope_type!r} and scope_key.")
 
         if not self._event_source_version_is_current(event, scope_key=scope_key):
             return {
@@ -117,7 +129,11 @@ class NoOaBankBatchReadModelRefreshService:
             relation_mode=relation_mode,
         )
         snapshot = self._no_oa_bank_batch_service.public_snapshot()
-        self._read_model_persistence.save_public_snapshot(snapshot, scope_key=scope_key)
+        self._read_model_persistence.save_public_snapshot(
+            snapshot,
+            scope_key=scope_key,
+            relation_mode=relation_mode,
+        )
         self._complete_dirty_scope(event, scope_key=scope_key)
         batches = snapshot.get("batches") if isinstance(snapshot, dict) else {}
         return {
@@ -131,19 +147,23 @@ class NoOaBankBatchReadModelRefreshService:
         if callable(complete_dirty_scope):
             complete_dirty_scope(
                 tenant_id=event.tenant_id,
-                scope_type=NO_OA_BANK_BATCH_SCOPE_TYPE,
+                scope_type=self._scope_type,
                 scope_key=scope_key,
                 source_version=event.source_version or event.payload.get("source_version"),
             )
 
-    @staticmethod
-    def _relation_mode_for_event(event: RuntimeQueueEvent) -> str:
+    def _relation_mode_for_event(self, event: RuntimeQueueEvent) -> str:
         payload = event.payload if isinstance(event.payload, dict) else {}
         metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        relation_mode = str(metadata.get("relation_mode") or payload.get("relation_mode") or "").strip()
+        if relation_mode:
+            return relation_mode
+        if event.event_type == "bank_flow_rule_batch.read_model.refresh":
+            return BANK_FLOW_RULE_BATCH_RELATION_MODE
         action_name = str(metadata.get("action_name") or payload.get("action_name") or "").strip()
         if action_name.startswith("bank_flow_rule_batch"):
             return BANK_FLOW_RULE_BATCH_RELATION_MODE
-        return NO_OA_BANK_BATCH_RELATION_MODE
+        return self._relation_mode
 
     def _event_source_version_is_current(self, event: RuntimeQueueEvent, *, scope_key: str) -> bool:
         is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)
@@ -152,7 +172,7 @@ class NoOaBankBatchReadModelRefreshService:
         return bool(
             is_current(
                 tenant_id=event.tenant_id,
-                scope_type=NO_OA_BANK_BATCH_SCOPE_TYPE,
+                scope_type=self._scope_type,
                 scope_key=scope_key,
                 source_version=event.source_version or event.payload.get("source_version"),
             )

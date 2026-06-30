@@ -233,6 +233,54 @@ describe("InputInvoiceUsageDetailDrawer", () => {
     expect(await screen.findByText("关联 OA")).toBeInTheDocument();
     expect(screen.getByText("关系数量")).toBeInTheDocument();
   });
+
+  test("hides raw App fields and keeps the title beside the close control", async () => {
+    const loadDetail = vi.fn(() => Promise.resolve<InputInvoiceUsageDetailPayload>({
+      title: "OA详情",
+      subtitle: "OA-2026-001",
+      sections: [
+        {
+          title: "OA主信息",
+          fields: [
+            { label: "申请人", value: "樊租芳" },
+            { label: "金额", value: "362590.00" },
+            { label: "发票行 ID", value: "row-internal-001" },
+            { label: "workflow_request_id", value: "2025" },
+          ],
+        },
+        {
+          title: "OA原始字段",
+          fields: [
+            { label: "付款方式", value: "Bank_transfer" },
+            { label: "票据类型", value: "VAT_ordinary_invoice" },
+            { label: "Mongo文档ID", value: "6a13b7953bb8164165d8c631" },
+          ],
+        },
+      ],
+    }));
+
+    render(
+      <InputInvoiceUsageDetailDrawer
+        open
+        target={{ kind: "oa", id: "oa-internal-row-id" }}
+        loadDetail={loadDetail}
+        onClose={() => undefined}
+      />,
+    );
+
+    const title = await screen.findByText("OA详情");
+    const header = title.closest(".finance-drawer__header");
+    expect(header).toContainElement(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    expect(screen.getByText("申请人")).toBeInTheDocument();
+    expect(screen.getByText("樊租芳")).toBeInTheDocument();
+    expect(screen.queryByText("发票行 ID")).not.toBeInTheDocument();
+    expect(screen.queryByText("workflow_request_id")).not.toBeInTheDocument();
+    expect(screen.queryByText("OA原始字段")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bank_transfer")).not.toBeInTheDocument();
+    expect(screen.queryByText("VAT_ordinary_invoice")).not.toBeInTheDocument();
+    expect(screen.queryByText("oa-internal-row-id")).not.toBeInTheDocument();
+  });
 });
 
 describe("Input invoice usage workflow drawers", () => {
@@ -516,7 +564,9 @@ describe("Input invoice usage workflow drawers", () => {
     expect(await screen.findByText("2")).toBeInTheDocument();
     expect(screen.getAllByText("99.72").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("陈秀云").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("chen_xiuyun")).toBeInTheDocument();
+    expect(screen.queryByText("chen_xiuyun")).not.toBeInTheDocument();
+    expect(screen.queryByText("目标 OA 分组")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("以发票反提 OA 提示")).toHaveTextContent("当前账户或预览状态暂不允许创建 OA 草稿。");
     expect(screen.queryByText("不可提交原因")).not.toBeInTheDocument();
     expect(screen.queryByText("缺少目标 OA 账号")).not.toBeInTheDocument();
     expect(screen.queryByText("create_batch")).not.toBeInTheDocument();
@@ -824,11 +874,12 @@ describe("Input invoice usage workflow drawers", () => {
     expect(await screen.findByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.getByText("SD-INV-LINKED")).toBeInTheDocument();
     expect(screen.getByText("SD-INV-CANDIDATE")).toBeInTheDocument();
-    expect(screen.getByText("未关联oa")).toBeInTheDocument();
+    expect(screen.getAllByText("未关联oa").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("已关联oa")).toBeInTheDocument();
-    expect(screen.getByText("候选oa")).toBeInTheDocument();
+    expect(screen.queryByText("候选oa")).not.toBeInTheDocument();
+    expect(screen.queryByText("目标 OA 分组")).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "已关联 OA 发票 SD-INV-LINKED 不可选择" })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "候选 OA 发票 SD-INV-CANDIDATE 不可选择" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "未关联 OA 发票 SD-INV-CANDIDATE 不可选择" })).toBeDisabled();
     await waitFor(() => {
       expect(screen.getByRole("checkbox", { name: "选择候选发票 SD-INV-001" })).toBeChecked();
       expect(screen.getByText((_content, node) => node?.textContent === "已选 1 张")).toBeInTheDocument();
@@ -841,16 +892,14 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "筛选 OA 关联状态" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "候选oa" }));
-    expect(screen.queryByText("SD-INV-001")).not.toBeInTheDocument();
-    expect(screen.queryByText("SD-INV-LINKED")).not.toBeInTheDocument();
-    expect(screen.getByText("SD-INV-CANDIDATE")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "筛选 OA 关联状态" }));
     await user.click(screen.getByRole("menuitemradio", { name: "未关联oa" }));
     expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.queryByText("SD-INV-LINKED")).not.toBeInTheDocument();
-    expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
+    expect(screen.getByText("SD-INV-CANDIDATE")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("searchbox", { name: "搜索候选发票" }), "候选供应商");
+    expect(screen.queryByText("SD-INV-001")).not.toBeInTheDocument();
+    expect(screen.getByText("SD-INV-CANDIDATE")).toBeInTheDocument();
   });
 
   test("OA reverse drawer lets the backend target applicant list drive preview and batch target", async () => {

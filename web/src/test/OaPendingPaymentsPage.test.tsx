@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -843,6 +843,8 @@ describe("OA pending payments page", () => {
     const styles = readWebSource("src/app/styles.css");
     const button = cssRule(styles, ".oa-pending-payments-button");
     const fieldControls = cssRule(styles, ".oa-pending-payments-field input,\\n.oa-pending-payments-field select");
+    const monthPicker = cssRule(styles, ".oa-pending-payments-month-picker");
+    const monthPickerButton = cssRule(styles, ".oa-pending-payments-month-picker__all");
     const tableShell = cssRule(styles, ".oa-pending-payments-table-shell");
     const loading = cssRule(styles, ".oa-pending-payments-loading__bar,\\n.oa-pending-payments-loading__panel");
     const detailButton = cssRule(styles, ".oa-pending-payments-detail-button");
@@ -865,6 +867,9 @@ describe("OA pending payments page", () => {
     expect(button).toContain("var(--motion-fast)");
     expect(button).toContain("var(--ease-out-quart)");
     expect(fieldControls).toContain("var(--motion-fast)");
+    expect(monthPicker).toContain("display: inline-flex");
+    expect(monthPicker).toContain("overflow: hidden");
+    expect(monthPickerButton).toContain("white-space: nowrap");
     expect(tableShell).toContain("min-height: 320px");
     expect(tableShell).toContain("max-height: calc(100vh - 214px)");
     expect(loading).toContain("border-radius: var(--fp-radius-sm)");
@@ -1041,6 +1046,20 @@ describe("OA pending payments page", () => {
     expect(within(candidateRow).getByText("待支付")).toBeInTheDocument();
     expect(within(candidateRow).queryByRole("button", { name: "确认已支付并写回" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水无需开票规则设置" })).toBeInTheDocument();
+
+    const allMonthsButton = within(page).getByRole("button", { name: "全部" });
+    expect(allMonthsButton).toHaveAttribute("aria-pressed", "true");
+    expect(initialRowsRequest.searchParams.has("month")).toBe(false);
+    fireEvent.change(within(page).getByLabelText("选择月份"), { target: { value: "2026-04" } });
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("month")).toBe("2026-04");
+    });
+    expect(allMonthsButton).toHaveAttribute("aria-pressed", "false");
+    await user.click(allMonthsButton);
+    await waitFor(() => {
+      expect(rowsRequests(fetchMock).at(-1)?.searchParams.has("month")).toBe(false);
+    });
+    expect(allMonthsButton).toHaveAttribute("aria-pressed", "true");
 
     const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");
     await user.type(within(tableFrame).getByLabelText("搜索OA待付款核对"), "张三");

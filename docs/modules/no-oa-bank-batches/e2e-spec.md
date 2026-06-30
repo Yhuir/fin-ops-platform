@@ -1,10 +1,10 @@
 # 免OA流水批量处理 Spec-first E2E Spec
 
-本文件定义 legacy `/no-oa-bank-batches` 页面在真实浏览器中的业务验收合同。新通用方向以 `docs/modules/bank-flow-rule-batches/e2e-spec.md` 为准；本文只保护迁移完成前的免 OA 标签准入、批次提交、freshness barrier、撤回、历史只读、权限门禁和下游 read model fan-out。
+本文件定义 legacy no-OA API/read-model 的兼容验收合同。当前没有 `/no-oa-bank-batches` Browser 页面入口；真实浏览器链路已迁移到 `docs/modules/bank-flow-rule-batches/e2e-spec.md` 的 `/bank-flow-rule-batches`，本文只保护迁移底座的历史 no-OA 标签准入、批次提交、freshness barrier、撤回、历史只读、权限门禁和下游 read model fan-out。
 
 ## 模块目标
 
-免 OA 流水批量处理负责把没有 OA 单据但仍需闭环的银行流水提交成 no-OA 批次，并通过统一 Workbench relation command 形成 `relation_mode=no_oa_bank_batch` 的事实。页面只能消费后端 no-OA read model 和 operation barrier，不能用本地状态伪造已提交、已撤回或下游成本 fresh。
+免 OA 流水批量处理负责维护历史“没有 OA 单据但已闭环”的 no-OA 批次，并通过统一 Workbench relation command 形成 `relation_mode=no_oa_bank_batch` 的事实。legacy API consumer 只能消费后端 no-OA read model 和 operation barrier，不能用本地状态伪造已提交、已撤回或下游成本 fresh。
 
 ## 用户角色
 
@@ -17,14 +17,14 @@
 
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
-| `NO-OA-E2E-001` | 页面 ready、fresh list 和 bucket summary | P0 | 进入 `/no-oa-bank-batches` 后页面显示免 OA 标题、未提交/已提交/历史 bucket、分类 summary 和银行流水表；首屏请求必须有界，不把 missing/stale read model 伪装成最终空结果。 |
-| `NO-OA-E2E-002` | 标签规则保存 freshness closure | P0 | 用户在标签管理 grid 中修改 `OA/发票` 勾选后，页面必须 `PUT /api/no-oa-bank-batches/tag-selection`，带 `expected_version` 和 `rules`，同时保留兼容 `selected_tag_codes` 派生字段，等待 `no_oa_bank_batch:all` operation barrier fresh，再重读列表并显示成功反馈。左侧 `收支类型 / 流水主标签 / 流水子标签` 必须只读且跟随银行明细自动标签。 |
+| `NO-OA-E2E-001` | Legacy list fresh contract | P0 | Legacy list API 或 bank-flow 迁移页面读取批次时，首屏请求必须有界，不把 missing/stale read model 伪装成最终空结果。 |
+| `NO-OA-E2E-002` | 标签规则保存 freshness closure | P0 | Legacy API 保存标签规则时必须带 `expected_version` 和 `rules`，同时保留兼容 `selected_tag_codes` 派生字段，等待 `no_oa_bank_batch:all` operation barrier fresh，再重读列表并显示成功反馈。当前 Browser grid 归 `bank-flow-rule-batches`。 |
 | `NO-OA-E2E-003` | selected-row submit freshness closure | P0 | 用户选择同账户、同月份、同分类的未提交流水后提交；请求体只包含当前选择的 `transaction_ids`，成功后等待 no-OA barrier fresh，再显示已提交结果，不允许重复提交或半写。 |
 | `NO-OA-E2E-003A` | 普通可提交类型的右侧 checkbox | P0 | `fee/salary/holiday_bonus/bonus/tax_payment/treasury_tax_collection/social_security` 等普通 draft 批次必须在右侧流水表显示行级 checkbox；checkbox 可勾选、可取消；`internal_transfer` draft 走整批提交按钮；`submitted/withdrawn` 不走未提交入口；`conflict/stale/superseded` 不得出现在主列表。 |
 | `NO-OA-E2E-004` | 成本统计 downstream fan-out | P0 | no-OA 提交后进入成本统计，成本统计必须通过自己的 fresh read model 展示免 OA 成本项目、费用类型、金额和银行流水证据。 |
 | `NO-OA-E2E-005` | withdraw 和 history 只读 | P0 | 已提交 bucket 可撤回；撤回 dialog 必须要求原因并提交 `expected_version`；撤回成功后历史 bucket 展示已撤回批次，且不再显示提交/撤回写入口。 |
-| `NO-OA-E2E-006` | 权限 gate | P0 | `read_export_only` 用户可查看 no-OA 页面和标签范围，但不能看到/触发提交、撤回或保存标签准入；权限矩阵不得产生 durable mutation API。 |
-| `NO-OA-E2E-007` | internal transfer / Workbench relation boundary | P0 | 关联台确认 internal transfer 必须收敛到 no-OA submitted batch 和 `relation_mode=no_oa_bank_batch`；no-OA 页面和 Workbench 不能为同一 row set 生成两条 active relation；混合 internal transfer 必须拒绝。 |
+| `NO-OA-E2E-006` | 权限 gate | P0 | `read_export_only` 用户可查看迁移页面和标签范围，但不能看到/触发提交、撤回或保存标签准入；权限矩阵不得产生 durable mutation API。 |
+| `NO-OA-E2E-007` | internal transfer / Workbench relation boundary | P0 | 关联台确认 internal transfer 必须收敛到 no-OA submitted batch 和 `relation_mode=no_oa_bank_batch`；legacy no-OA API 和 Workbench 不能为同一 row set 生成两条 active relation；混合 internal transfer 必须拒绝。 |
 | `NO-OA-E2E-008` | read model stale/missing/refreshing | P0 | no-OA list/detail 在 SQL read model missing/stale/source mismatch 时只 enqueue refresh，不同步 rebuild；页面保留可用 rows 或展示刷新语义，不把旧空结果当真实 fresh。 |
 | `NO-OA-E2E-009` | 大数据、长列表和分页稳定性 | P1 | 首屏分页使用 `page=1&page_size=200`，切换页码、月份或 bucket 时清理选择/详情缓存；真实大月份和长标签树不应遮挡或卡死。 |
 | `NO-OA-E2E-010` | 真实基础设施 worker drain | P1 | no-OA submit/withdraw/tag selection 后，真实 PostgreSQL/RabbitMQ/Redis/systemd no-oa-bank-batch、workbench relation、search 和 cost worker 最终 drain 到 fresh；该项必须在 staging/runtime smoke 验证。 |

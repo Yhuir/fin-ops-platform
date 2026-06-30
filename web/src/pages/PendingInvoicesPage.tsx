@@ -795,6 +795,39 @@ export default function PendingInvoicesPage() {
           )}
           right={(
             <div className="pending-invoices-toolbar-actions">
+              {selectedRows.length > 0 ? (
+                <div className="pending-invoices-selection-toolbar" role="status">
+                  <span>已选 {selectedRows.length} 条流水</span>
+                  <span>流水合计 {formatMoney(selectedBankTotal)}</span>
+                  {direction === "income" ? (
+                    <>
+                      <button
+                        className="pending-invoices-button pending-invoices-button--primary"
+                        disabled={!canMutateData || pendingIncomeStatusRows.size > 0}
+                        onClick={() => handleMarkSelectedIncomeStatus("income_no_invoice_required")}
+                        type="button"
+                      >
+                        标记无需开票
+                      </button>
+                      <button
+                        className="pending-invoices-button pending-invoices-button--primary"
+                        disabled={!canMutateData || pendingIncomeStatusRows.size > 0}
+                        onClick={() => handleMarkSelectedIncomeStatus("cash_income")}
+                        type="button"
+                      >
+                        标记现金收入
+                      </button>
+                    </>
+                  ) : (
+                    <button className="pending-invoices-button pending-invoices-button--primary" disabled={!canMutateData} onClick={handleOpenSelectedInvoicePicker} type="button">
+                      选择发票
+                    </button>
+                  )}
+                  <button className="pending-invoices-button" onClick={clearSelectedTransactions} type="button">
+                    清除选择
+                  </button>
+                </div>
+              ) : null}
               <input
                 aria-label="搜索流水"
                 className="pending-invoices-search"
@@ -819,39 +852,6 @@ export default function PendingInvoicesPage() {
         {!canMutateData ? (
           <div className="pending-invoices-status-text pending-invoices-status-text--warning" role="status">
             当前账号仅支持查看和导出，不能选择发票、修改收入状态或保存规则。
-          </div>
-        ) : null}
-        {selectedRows.length > 0 ? (
-          <div className="pending-invoices-selection-toolbar" role="status">
-            <span>已选 {selectedRows.length} 条流水</span>
-            <span>流水合计 {formatMoney(selectedBankTotal)}</span>
-            {direction === "income" ? (
-              <>
-                <button
-                  className="pending-invoices-button pending-invoices-button--primary"
-                  disabled={!canMutateData || pendingIncomeStatusRows.size > 0}
-                  onClick={() => handleMarkSelectedIncomeStatus("income_no_invoice_required")}
-                  type="button"
-                >
-                  标记无需开票
-                </button>
-                <button
-                  className="pending-invoices-button pending-invoices-button--primary"
-                  disabled={!canMutateData || pendingIncomeStatusRows.size > 0}
-                  onClick={() => handleMarkSelectedIncomeStatus("cash_income")}
-                  type="button"
-                >
-                  标记现金收入
-                </button>
-              </>
-            ) : (
-              <button className="pending-invoices-button pending-invoices-button--primary" disabled={!canMutateData} onClick={handleOpenSelectedInvoicePicker} type="button">
-                选择发票
-              </button>
-            )}
-            <button className="pending-invoices-button" onClick={clearSelectedTransactions} type="button">
-              清除选择
-            </button>
           </div>
         ) : null}
         <PendingInvoicesTable

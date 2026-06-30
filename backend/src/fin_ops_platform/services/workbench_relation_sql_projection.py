@@ -239,68 +239,7 @@ class WorkbenchRelationSqlProjectionBuilder:
         row_ids: list[str],
         excluded_bank_transaction_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
-        if not row_ids:
-            return []
-        excluded_bank_ids = {text(row_id) for row_id in (excluded_bank_transaction_ids or set()) if text(row_id)}
-        rows = self._connection.fetch_all(
-            """
-            select decision_key, scope_month, row_ids, row_types, oa_row_ids, bank_row_ids, invoice_row_ids,
-                   amount, payment_amount_closed, invoice_amount_closed, decision_status, display_state,
-                   source_versions, raw_payload
-            from read_model.workbench_reconciliation_decisions d
-            where d.tenant_id = %s
-              and d.scope_month = %s::date
-              and (
-                  (d.decision_status = 'paired' and d.display_state = 'paired')
-                  or (d.decision_status in ('proposed', 'open') and d.display_state = 'open')
-              )
-              and d.row_ids && %s::text[]
-              and not (coalesce(d.bank_row_ids, array[]::text[]) && %s::text[])
-              and not exists (
-                  select 1
-                  from app.workbench_pair_relations pr
-                  where pr.status = 'active'
-                    and pr.row_ids && d.row_ids
-              )
-            order by d.generated_at nulls last, d.decision_key
-            """,
-            (self._tenant_id, month_start(month), row_ids, sorted(excluded_bank_ids)),
-        )
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            if set(text_list(row.get("bank_row_ids"))) & excluded_bank_ids:
-                continue
-            row_ids_payload = text_list(row.get("row_ids"))
-            row_types_payload = text_list(row.get("row_types"))
-            if not row_types_payload:
-                row_types_payload = _decision_row_types(row)
-            relation_status = (
-                "linked"
-                if text(row.get("decision_status")) == "paired" and text(row.get("display_state")) == "paired"
-                else "candidate"
-            )
-            result.append(
-                {
-                    "case_id": text(row.get("decision_key")),
-                    "relation_mode": "automatic_decision",
-                    "relation_status": relation_status,
-                    "month_scope": month_start(month),
-                    "row_ids": row_ids_payload,
-                    "row_types": row_types_payload,
-                    "amount_check": {
-                        "matched": bool(row.get("payment_amount_closed")) or bool(row.get("invoice_amount_closed")),
-                        "status": "matched" if bool(row.get("payment_amount_closed")) or bool(row.get("invoice_amount_closed")) else "",
-                        "amount": _decimal_text(row.get("amount")),
-                    },
-                    "special_metadata": {
-                        "decision_status": text(row.get("decision_status")),
-                        "display_state": text(row.get("display_state")),
-                    },
-                    "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
-                    "raw_payload": row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {},
-                }
-            )
-        return result
+        return []
 
     def _pending_claimed_bank_transaction_ids_for_month(self, month: str) -> list[str]:
         rows = self._connection.fetch_all(
@@ -615,14 +554,6 @@ def _relation_source(relation: dict[str, Any]) -> str:
     if mode == "automatic_decision":
         return "automatic_decision"
     return "manual"
-
-
-def _decision_row_types(row: dict[str, Any]) -> list[str]:
-    row_types: list[str] = []
-    row_types.extend("oa" for _row_id in text_list(row.get("oa_row_ids")))
-    row_types.extend("bank" for _row_id in text_list(row.get("bank_row_ids")))
-    row_types.extend("invoice" for _row_id in text_list(row.get("invoice_row_ids")))
-    return row_types
 
 
 def _put_object(objects: dict[str, dict[str, Any]], object_payload: dict[str, Any]) -> None:

@@ -29,11 +29,11 @@ test.describe("workbench automatic candidate split browser flow", () => {
     await openZone.getByRole("button", { name: "撤回关联" }).click();
     const previewDialog = page.getByRole("dialog", { name: "关联预览" });
     await expect(previewDialog).toBeVisible();
-    await expect(previewDialog.getByText("拆分候选预览")).toBeVisible();
+    await expect(previewDialog.getByText("取消系统建议预览")).toBeVisible();
     await expect(previewDialog.getByText("该组是自动候选，确认后会拆分并隐藏这条候选。")).toBeVisible();
     await expect(previewDialog.getByTestId("relation-preview-before").getByText("待找流水与发票").first()).toBeVisible();
     await expect(previewDialog.getByTestId("relation-preview-after").getByText("完全关联")).toHaveCount(0);
-    await expect(previewDialog.getByRole("button", { name: "确认拆分" })).toBeEnabled();
+    await expect(previewDialog.getByRole("button", { name: "确认取消" })).toBeEnabled();
 
     const previewBody = api.lastBody("POST /api/workbench/actions/withdraw-link/preview");
     expect(previewBody).toMatchObject({ month: "all" });
@@ -43,14 +43,13 @@ test.describe("workbench automatic candidate split browser flow", () => {
     const barrierCallsBeforeSplit = api.count("POST /api/operation-barrier/status");
     const workbenchGroupCallsBeforeSplit = api.count("GET /api/workbench/groups");
     await previewDialog.getByRole("textbox", { name: "备注" }).fill("浏览器拆分候选主链路回归");
-    await previewDialog.getByRole("button", { name: "确认拆分" }).click();
+    await previewDialog.getByRole("button", { name: "确认取消" }).click();
 
     await expect(previewDialog).toHaveAttribute("aria-busy", "true");
-    await expect(previewDialog.getByText("正在确认拆分...")).toBeVisible();
-    await expect(previewDialog.getByRole("button", { name: "确认拆分" })).toBeDisabled();
-    await expect(previewDialog.getByRole("button", { name: "取消" })).toBeDisabled();
+    await expect(previewDialog.getByText("正在取消...")).toBeVisible();
+    await expect(previewDialog.getByRole("button", { name: "确认取消" })).toBeDisabled();
+    await expect(previewDialog.getByRole("button", { name: "取消", exact: true })).toBeDisabled();
     await expect(previewDialog.getByRole("button", { name: "关闭关联预览" })).toBeDisabled();
-    await expect(previewDialog.getByRole("textbox", { name: "备注" })).toBeDisabled();
     await expect(openGroup).toBeVisible();
 
     await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);

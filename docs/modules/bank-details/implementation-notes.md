@@ -361,7 +361,7 @@
 
 - 目标：补齐银行明细导出缺少真实浏览器 download event 的风险，并把导出字段与 Workbench linked relation 事实源绑定到 Spec-first E2E。
 - 影响范围：`web/e2e/bank-details-export-download.spec.ts`、deterministic API mock、`npm run e2e:smoke` 和 bank-details/workbench-relations Spec-first 文档；不改变生产后端导出服务、页面业务逻辑或 API contract。
-- 关键决策：测试从银行明细候选关系开始，先通过关联台 confirm 建立 linked relation，再回银行明细执行“导出全部银行”。断言导出请求携带当前默认全银行/全年筛选，真实浏览器产生 download event，文件名和内容包含 `CASE-202603-101`、`有oa`、`有发票` 和 `linked`。
+- 关键决策：测试从银行明细待处理关系入口开始，先通过关联台 confirm 建立 linked relation，再回银行明细执行“导出全部银行”。断言导出请求携带当前默认全银行/全年筛选，真实浏览器产生 download event，文件名和内容包含 `CASE-202603-101`、`有oa`、`有发票` 和 `linked`。
 - 文档影响：新增 `e2e-spec.md` / `e2e-coverage.md`，更新测试矩阵、全局 Spec-first inventory 和 testing closure 状态。
 - 测试覆盖：新增 `web/e2e/bank-details-export-download.spec.ts`，覆盖 `BANK-E2E-004` 和 `WB-REL-E2E-009` 的首条 Browser 下载证据。
 - 验证命令：`cd web && npx playwright test e2e/bank-details-export-download.spec.ts`、`cd web && npm run e2e:smoke`。

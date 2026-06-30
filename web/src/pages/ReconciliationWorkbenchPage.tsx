@@ -40,7 +40,7 @@ import {
   type WorkbenchActionResult,
   type WorkbenchOperationProjection,
 } from "../features/workbench/api";
-import { fetchNoOaBankBatchDetail, withdrawNoOaBankBatch } from "../features/noOaBankBatches/api";
+import { fetchBankFlowRuleBatchDetail, withdrawBankFlowRuleBatch } from "../features/bankFlowRuleBatches/api";
 import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
@@ -767,14 +767,14 @@ export default function ReconciliationWorkbenchPage() {
 
     let expectedVersion = readNumberMetadata(row.specialMetadata, "batch_version");
     if (expectedVersion === null) {
-      const detail = await fetchNoOaBankBatchDetail(sourceBatchId);
+      const detail = await fetchBankFlowRuleBatchDetail(sourceBatchId);
       expectedVersion = typeof detail.batch.version === "number" ? detail.batch.version : null;
     }
     if (expectedVersion === null) {
       throw new Error("免OA批次版本缺失，无法撤回。");
     }
 
-    const result = await withdrawNoOaBankBatch({
+    const result = await withdrawBankFlowRuleBatch({
       batchId: sourceBatchId,
       expectedVersion,
       reason: "由关联台撤回免OA批次",
@@ -973,7 +973,7 @@ export default function ReconciliationWorkbenchPage() {
         [zone]: result.page,
       }));
     } catch {
-      setLastActionMessage("加载更多候选组失败，请稍后重试。");
+      setLastActionMessage("加载更多关系分组失败，请稍后重试。");
     } finally {
       setLoadingMoreZone(null);
     }
@@ -1846,7 +1846,7 @@ export default function ReconciliationWorkbenchPage() {
 
     const operationCopy = relationPreviewOperationCopy(preview);
     const syncingMessage = preview.operation === "split_candidate"
-      ? "候选已拆分，正在同步关联台最新数据..."
+      ? "系统建议已取消，正在同步关联台最新数据..."
       : "关系已写入，正在同步关联台最新数据...";
     let submittedResult: WorkbenchActionResult | null = null;
     const message = await executeWorkbenchActionWithFreshness({
@@ -2387,10 +2387,10 @@ function countRelationPreviewRows(groups: WorkbenchCandidateGroup[]) {
 function relationPreviewOperationCopy(preview: WorkbenchRelationPreview) {
   if (preview.operation === "split_candidate") {
     return {
-      title: "拆分候选预览",
-      submitLabel: "确认拆分",
-      submittingMessage: "正在确认拆分...",
-      statusLabel: "待拆分",
+      title: "取消系统建议预览",
+      submitLabel: "确认取消",
+      submittingMessage: "正在取消...",
+      statusLabel: "待取消",
     };
   }
   if (preview.operation === "withdraw_link") {

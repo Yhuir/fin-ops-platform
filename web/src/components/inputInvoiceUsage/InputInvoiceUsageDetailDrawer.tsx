@@ -87,7 +87,8 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
   }, [loadDetail, open, target]);
 
   const title = detail?.title ?? (target ? fallbackTitles[target.kind] : "详情");
-  const subtitle = detail?.subtitle ?? target?.id;
+  const subtitle = detail?.subtitle;
+  const sections = detail ? visibleSections(detail.sections) : [];
 
   return (
     <AppDrawer
@@ -113,7 +114,7 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
             <div>{detail.unavailableReason ?? "后端未返回可展示的完整详情。"}</div>
           </div>
         ) : null}
-        {(detail?.sections ?? []).map((section) => (
+        {sections.map((section) => (
           <section className="input-invoice-usage-detail-section" key={section.title}>
             <h3>{section.title}</h3>
             <div className="input-invoice-usage-detail-grid">
@@ -126,12 +127,44 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
             </div>
           </section>
         ))}
-        {!loading && !error && detail && (detail.sections ?? []).length === 0 && detail.detailAvailable !== false ? (
+        {!loading && !error && detail && sections.length === 0 && detail.detailAvailable !== false ? (
           <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--info" role="status">暂无更多详情。</div>
         ) : null}
       </div>
     </AppDrawer>
   );
+}
+
+function visibleSections(sections: InputInvoiceUsageDetailSection[]) {
+  return sections
+    .map((section) => ({
+      ...section,
+      fields: isRawDetailSection(section) ? [] : section.fields.filter(isVisibleField),
+    }))
+    .filter((section) => section.fields.length > 0);
+}
+
+function isRawDetailSection(section: InputInvoiceUsageDetailSection) {
+  return section.title.includes("原始字段");
+}
+
+function isVisibleField(field: InputInvoiceUsageDetailField) {
+  const label = field.label.trim();
+  if (/^OA\s+\d+$/i.test(label)) {
+    return true;
+  }
+  if (!label || /[A-Za-z_]/.test(label) || /\bID\b/i.test(label)) {
+    return false;
+  }
+  return !looksLikeRawData(field.value);
+}
+
+function looksLikeRawData(value: string | number | null | undefined) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const text = value.trim();
+  return (text.startsWith("{") || text.startsWith("[")) && (text.includes('":') || text.includes('","'));
 }
 
 function formatDetailValue(value: string | number | null | undefined) {

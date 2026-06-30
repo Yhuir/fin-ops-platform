@@ -194,6 +194,7 @@ class ReadModelManifestTests(unittest.TestCase):
         expected_port_owners = {
             "bank_account_balance": "BankAccountBalanceReadModelRepositoryPort",
             "bank_detail": "BankDetailReadModelRepositoryPort",
+            "bank_flow_rule_batch": "BankFlowRuleBatchReadModelRepositoryPort",
             "cost_statistics": "CostStatisticsReadModelRepositoryPort",
             "input_invoice_usage": "InputInvoiceUsageReadModelRepositoryPort",
             "invoice_lifecycle": "InvoiceLifecycleReadModelRepositoryPort",
@@ -327,6 +328,8 @@ class ReadModelManifestTests(unittest.TestCase):
             "save_tax_offset_read_models",
             "list_no_oa_bank_batch_rows",
             "no_oa_bank_batch_source_versions_summary",
+            "list_bank_flow_rule_batch_rows",
+            "bank_flow_rule_batch_source_versions_summary",
             "list_turnover_ledger_view",
             "save_turnover_ledger_rows",
             "clear_turnover_ledger_rows",
@@ -554,9 +557,10 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertFalse(set(cost_statistics.repository_port_contract).intersection(turnover_ledger.repository_port_contract))
         self.assertFalse(set(tax_offset.repository_port_contract).intersection(turnover_ledger.repository_port_contract))
 
-    def test_search_and_no_oa_bank_batch_manifest_preserve_read_side_contracts(self) -> None:
+    def test_search_no_oa_and_bank_flow_rule_batch_manifest_preserve_read_side_contracts(self) -> None:
         search = READ_MODEL_MANIFEST["search"]
         no_oa_bank_batch = READ_MODEL_MANIFEST["no_oa_bank_batch"]
+        bank_flow_rule_batch = READ_MODEL_MANIFEST["bank_flow_rule_batch"]
         required_search_ports = {
             "search_index",
             "save_search_index_rows",
@@ -565,8 +569,12 @@ class ReadModelManifestTests(unittest.TestCase):
             "list_no_oa_bank_batch_rows",
             "no_oa_bank_batch_source_versions_summary",
         }
+        required_bank_flow_ports = {
+            "list_bank_flow_rule_batch_rows",
+            "bank_flow_rule_batch_source_versions_summary",
+        }
 
-        for entry in (search, no_oa_bank_batch):
+        for entry in (search, no_oa_bank_batch, bank_flow_rule_batch):
             with self.subTest(read_model_key=entry.key):
                 self.assertEqual(entry.query_status_contract, "self_managed_freshness")
                 self.assertEqual(entry.all_scope_semantics, "fan_out_command")
@@ -576,23 +584,38 @@ class ReadModelManifestTests(unittest.TestCase):
 
         self.assertEqual(search.scope_type, "search")
         self.assertEqual(no_oa_bank_batch.scope_type, "no_oa_bank_batch")
+        self.assertEqual(bank_flow_rule_batch.scope_type, "bank_flow_rule_batch")
         self.assertEqual(search.projection_strategy, "partitioned_scoped_index")
         self.assertEqual(no_oa_bank_batch.projection_strategy, "scoped_incremental")
+        self.assertEqual(bank_flow_rule_batch.projection_strategy, "scoped_incremental")
         self.assertEqual(search.primary_worker_instance, "search")
         self.assertEqual(no_oa_bank_batch.primary_worker_instance, "no-oa-bank-batch")
+        self.assertEqual(bank_flow_rule_batch.primary_worker_instance, "bank-flow-rule-batch")
         self.assertEqual(search.auxiliary_refresh_worker_instances, ("search-pending", "search-secondary", "search-tertiary"))
         self.assertEqual(no_oa_bank_batch.auxiliary_refresh_worker_instances, ())
+        self.assertEqual(bank_flow_rule_batch.auxiliary_refresh_worker_instances, ())
         self.assertEqual(search.query_owner, "Search read API")
         self.assertEqual(no_oa_bank_batch.query_owner, "NoOaBankBatchApplicationService")
+        self.assertEqual(bank_flow_rule_batch.query_owner, "BankFlowRuleBatchApplicationService")
         self.assertEqual(search.permission_owner, "search_api_session")
         self.assertEqual(no_oa_bank_batch.permission_owner, "no_oa_bank_batch_api_session")
+        self.assertEqual(bank_flow_rule_batch.permission_owner, "bank_flow_rule_batch_api_session")
         self.assertEqual(search.test_owner, "tests/test_search_pending_sql_runtime.py")
         self.assertEqual(no_oa_bank_batch.test_owner, "tests/test_no_oa_bank_batch_application_service.py")
+        self.assertEqual(bank_flow_rule_batch.test_owner, "tests/test_bank_flow_rule_batch_backend_boundary.py")
         self.assertEqual(search.repository_owner, "SearchReadModelRepositoryPort")
         self.assertEqual(no_oa_bank_batch.repository_owner, "NoOaBankBatchReadModelRepositoryPort")
+        self.assertEqual(bank_flow_rule_batch.repository_owner, "BankFlowRuleBatchReadModelRepositoryPort")
         self.assertEqual(required_search_ports, set(search.repository_port_contract))
         self.assertEqual(required_no_oa_ports, set(no_oa_bank_batch.repository_port_contract))
+        self.assertEqual(required_bank_flow_ports, set(bank_flow_rule_batch.repository_port_contract))
         self.assertFalse(set(search.repository_port_contract).intersection(no_oa_bank_batch.repository_port_contract))
+        self.assertFalse(set(search.repository_port_contract).intersection(bank_flow_rule_batch.repository_port_contract))
+        self.assertFalse(
+            set(no_oa_bank_batch.repository_port_contract).intersection(
+                bank_flow_rule_batch.repository_port_contract
+            )
+        )
 
 
 if __name__ == "__main__":

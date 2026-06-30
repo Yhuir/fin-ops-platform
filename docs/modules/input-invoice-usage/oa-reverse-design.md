@@ -76,7 +76,7 @@
 
 - 页面顶部使用 `待处理 | 暂存 | 已提交` 切换。
 - `待处理` 展示目标 OA 申请人选择、可反提发票候选和主按钮 `创建 OA 草稿`。
-- 发票清单展示 OA 关联状态三态：可反提发票显示 `未关联oa` 并可勾选；已有 active/linked OA 关系的发票显示 `已关联oa`、禁用勾选；关联台未配对区 open/proposed OA candidate 显示 `候选oa`、禁用勾选。表头提供 `全部`、`已经关联oa`、`候选oa`、`未关联oa` 筛选。
+- 发票清单展示 OA 关联状态二态：可反提发票显示 `未关联oa` 并可勾选；已有 active/linked OA 关系的发票显示 `已关联oa`、禁用勾选；历史 `candidate` 兼容值归入 `未关联oa`，不再显示独立“候选 OA”状态。表头提供 `全部`、`已经关联oa`、`未关联oa` 筛选，并支持清单搜索。
 - 前端不展示 `创建本地批次`。
 - 选择发票后，如果操作人有创建权限且目标申请人凭据已配置，`创建 OA 草稿` 可用。
 
@@ -93,7 +93,7 @@
 7. 保存 `oaDraftId`、`oaDraftUrl` 和本地状态 `oa_draft_created`，该状态立即进入用户可见 `暂存`。
 8. 返回确认弹窗所需的业务摘要。
 
-候选发票仍必须排除已经存在 active/linked OA 关系的发票；这是防止同一发票重复反提 OA 的业务约束。关联台未配对区 open/proposed OA candidate 也必须排除出创建草稿候选，避免在用户尚未处理候选关系时重复反提 OA。为了让用户知道发票为什么不能选，preview 需要把这两类发票作为 rejected display row 返回，前端只展示、禁用勾选，不把它放入创建草稿 payload。
+候选发票仍必须排除已经存在 active/linked OA 关系的发票；这是防止同一发票重复反提 OA 的业务约束。未正式化的自动匹配 decision 不再作为 OA reverse 的独立“候选 OA”状态；只要发票没有 active OA relation，前端按 `未关联oa` 处理。为了让用户知道已关联发票为什么不能选，preview 需要把 active/linked 发票作为 rejected display row 返回，前端只展示、禁用勾选，不把它放入创建草稿 payload。历史 `oaRelationStatus=candidate` 兼容 payload 也归入 `未关联oa` 展示和筛选。
 
 ### 用户手动提交
 
@@ -161,7 +161,7 @@ FinOps 不负责后续 OA 页面操作，也不自动检测 OA 是否已经提�
 - OA 创建草稿失败。
 - 发票候选已过期，需要重新预览。
 - 发票已存在 active OA 关系，不能重复反提。
-- 发票已存在关联台未配对 OA candidate，需要先回关联台确认、忽略或重新处理候选，不能直接重复反提。
+- 发票关系 payload 版本过旧或仍返回历史 candidate 状态时，前端必须归入 `未关联oa`；若后端无法确认 active relation 状态，应返回候选已过期或 read model refreshing，而不是展示第三种 OA 关系状态。
 - 本地 batch 版本冲突或状态不允许当前操作。
 
 错误响应面向用户时使用中文业务提示；日志中可以记录错误码、batch id、目标申请人和调用阶段，但不能记录密码或 token。

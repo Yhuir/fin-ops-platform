@@ -68,8 +68,15 @@ describe("AppHealthOperationsPage", () => {
     expect(data).toHaveTextContent("128");
     expect(data).toHaveTextContent("发票");
     expect(data).toHaveTextContent("256");
+    expect(data).toHaveTextContent("手工导入");
     expect(data).toHaveTextContent("OA 解析");
-    expect(data).toHaveTextContent("ETC");
+    expect(data).toHaveTextContent("40（5）");
+    expect(data).not.toHaveTextContent("普通导入");
+    expect(data).not.toHaveTextContent("ETC");
+    expect(within(data).getByRole("grid", { name: "最近导入记录" })).toBeInTheDocument();
+    expect(data).toHaveTextContent("bank-5.xlsx");
+    expect(data).toHaveTextContent("invoice-4.xlsx");
+    expect(data).not.toHaveTextContent("bank-6.xlsx");
     expect(within(data).getByRole("grid", { name: "银行流水来源" })).toBeInTheDocument();
     expect(within(data).getByRole("grid", { name: "发票来源" })).toBeInTheDocument();
     expect(within(data).getByRole("grid", { name: "OA来源" })).toBeInTheDocument();
@@ -105,6 +112,11 @@ describe("AppHealthOperationsPage", () => {
     expect(runtime).toHaveTextContent("runtime-worker");
     expect(runtime).toHaveTextContent("active");
     expect(runtime).toHaveTextContent("required");
+
+    await userEvent.click(within(data).getByRole("button", { name: "查看全部导入历史" }));
+    const drawer = await screen.findByRole("dialog", { name: "导入历史" }, { timeout: PAGE_TIMEOUT });
+    expect(within(drawer).getByRole("grid", { name: "全部导入历史" })).toBeInTheDocument();
+    expect(drawer).toHaveTextContent("bank-6.xlsx");
 
     expect(screen.queryByTestId("app-health-summary")).not.toBeInTheDocument();
     expect(screen.queryByTestId("app-health-background-jobs")).not.toBeInTheDocument();
@@ -144,10 +156,8 @@ describe("AppHealthOperationsPage", () => {
             latest_synced_at: null,
             status: "unknown",
             sources: [
-              { key: "standard_import", label: "普通导入", count: null, latest_synced_at: null, status: "unknown" },
-              { key: "oa_attachment", label: "OA 解析", count: null, latest_synced_at: null, status: "unknown" },
-              { key: "etc", label: "ETC", count: null, latest_synced_at: null, status: "unknown" },
               { key: "manual", label: "手工导入", count: null, latest_synced_at: null, status: "unknown" },
+              { key: "oa_attachment", label: "OA 解析", count: null, supplementary_count: null, latest_synced_at: null, status: "unknown" },
             ],
           },
           oa: {
@@ -159,6 +169,7 @@ describe("AppHealthOperationsPage", () => {
               { key: "oa_items", label: "明细", count: null, latest_synced_at: null, status: "unknown" },
             ],
           },
+          import_events: [],
         },
         request_performance: {
           window: { type: "process_rolling_window", sample_limit_per_endpoint: 512, reset_on_restart: true },
@@ -238,10 +249,8 @@ describe("AppHealthOperationsPage", () => {
                 latest_synced_at: "2026-05-23T09:48:00+08:00",
                 status: "available",
                 sources: [
-                  { key: "standard_import", label: "普通导入", count: 180, latest_synced_at: "2026-05-23T09:44:00+08:00", status: "available" },
-                  { key: "oa_attachment", label: "OA 解析", count: 40, latest_synced_at: "2026-05-23T09:48:00+08:00", status: "available" },
-                  { key: "etc", label: "ETC", count: 30, latest_synced_at: "2026-05-23T09:30:00+08:00", status: "available" },
                   { key: "manual", label: "手工导入", count: 6, latest_synced_at: "2026-05-23T09:20:00+08:00", status: "available" },
+                  { key: "oa_attachment", label: "OA 解析", count: 40, supplementary_count: 5, latest_synced_at: "2026-05-23T09:48:00+08:00", status: "available" },
                 ],
               },
               oa: {
@@ -253,6 +262,7 @@ describe("AppHealthOperationsPage", () => {
                   { key: "oa_items", label: "明细", count: 316, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
                 ],
               },
+              import_events: [],
             },
             request_performance: {
               window: { type: "process_rolling_window", sample_limit_per_endpoint: 512, reset_on_restart: true },

@@ -635,10 +635,31 @@ class ApplicationStateStore:
             loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
         return loaded if isinstance(loaded, dict) else {}
 
-    def save_no_oa_bank_batches(self, snapshot: dict[str, Any]) -> None:
+    def load_bank_flow_rule_batches(self) -> dict[str, Any]:
+        return self.load_no_oa_bank_batches()
+
+    def save_no_oa_bank_batches(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        relation_mode: str = "no_oa_bank_batch",
+    ) -> None:
+        _ = relation_mode
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
         with self._no_oa_bank_batches_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
+
+    def save_bank_flow_rule_batches(self, snapshot: dict[str, Any]) -> None:
+        self.save_no_oa_bank_batches(snapshot, relation_mode="bank_flow_rule_batch")
+
+    def save_bank_flow_rule_batches_scope(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        scope_key: str,
+    ) -> None:
+        _ = scope_key
+        self.save_bank_flow_rule_batches(snapshot)
 
     def load_workbench_read_models(self) -> dict[str, Any]:
         current_payload = self._load_local_pickle()
@@ -673,6 +694,28 @@ class ApplicationStateStore:
                 changed_case_ids=normalized_case_ids,
             )
         self.save_no_oa_bank_batches(no_oa_bank_batch_snapshot)
+        self.save_workbench_read_models(
+            workbench_read_model_snapshot,
+            changed_scope_keys=normalized_scope_keys,
+        )
+
+    def save_bank_flow_rule_batch_mutation(
+        self,
+        *,
+        pair_relation_snapshot: dict[str, Any],
+        bank_flow_rule_batch_snapshot: dict[str, Any],
+        workbench_read_model_snapshot: dict[str, Any],
+        changed_case_ids: set[str] | list[str] | tuple[str, ...],
+        changed_scope_keys: set[str] | list[str] | tuple[str, ...],
+    ) -> None:
+        normalized_case_ids = [str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()]
+        normalized_scope_keys = [str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()]
+        if normalized_case_ids:
+            self.save_workbench_pair_relations(
+                pair_relation_snapshot,
+                changed_case_ids=normalized_case_ids,
+            )
+        self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
         self.save_workbench_read_models(
             workbench_read_model_snapshot,
             changed_scope_keys=normalized_scope_keys,

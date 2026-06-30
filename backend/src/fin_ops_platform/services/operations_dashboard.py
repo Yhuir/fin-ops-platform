@@ -47,8 +47,9 @@ class OperationsDashboardService:
     def _data_inventory(self, warnings: list[str]) -> dict[str, Any]:
         return {
             "bank": self._safe_block("bank_inventory_unknown", warnings, self._bank_inventory),
-            "invoice": self._safe_block("invoice_inventory_unknown", warnings, lambda: self._invoice_inventory(warnings)),
+            "invoice": self._safe_invoice_inventory(warnings),
             "oa": self._safe_block("oa_inventory_unknown", warnings, self._oa_inventory),
+            "import_events": self._safe_rows("import_events_unknown", warnings, self._import_events),
         }
 
     def _bank_inventory(self) -> dict[str, Any]:
@@ -60,7 +61,9 @@ class OperationsDashboardService:
               )::bigint as total_count,
               max(coalesce(import_batches.imported_at, bank_transactions.updated_at, bank_transactions.created_at)) as latest_synced_at
             from app.bank_transactions
-            left join app.import_batches on import_batches.id = bank_transactions.source_batch_id
+            left join app.import_batches
+              on import_batches.id = bank_transactions.source_batch_id
+              or import_batches.legacy_mongo_id = bank_transactions.legacy_source_batch_id
             """
         ) or {}
         total_count = _optional_int(row.get("total_count"))
@@ -78,7 +81,7 @@ class OperationsDashboardService:
             ],
         )
 
-    def _invoice_inventory(self, warnings: list[str]) -> dict[str, Any]:
+    def _invoice_inventory(self) -> dict[str, Any]:
         row = self._connection.fetch_one(
             """
             with invoice_flags as (
@@ -100,172 +103,58 @@ class OperationsDashboardService:
                     ''
                   )) = 'manual_invoice_import'
                 ) as is_manual,
-                (
-                  nullif(invoices.etc_invoice_id, '') is not null
-                  or coalesce(invoices.tags, array[]::text[]) && array['ETC', 'etc', 'etc_invoice']::text[]
-                  or exists (
-                    select 1
-                    from jsonb_array_elements(
-                      case
-                        when jsonb_typeof(invoices.source_links) = 'array' then invoices.source_links
-                        else '[]'::jsonb
-                      end
-                    ) as source_link(value)
-                    where lower(coalesce(
-                      source_link.value->>'source_type',
-                      source_link.value->>'type',
-                      source_link.value->>'source',
-                      ''
-                    )) in ('etc_import', 'etc_invoice_import', 'etc_submission')
-                  )
-                ) as is_etc,
-                nullif(invoices.oa_form_id, '') is not null as is_oa_attachment
+                exists (
+                  select 1
+                  from jsonb_array_elements(
+                    case
+                      when jsonb_typeof(invoices.source_links) = 'array' then invoices.source_links
+                      else '[]'::jsonb
+                    end
+                  ) as source_link(value)
+                  where lower(coalesce(
+                    source_link.value->>'source_type',
+                    source_link.value->>'type',
+                    source_link.value->>'source',
+                    ''
+                  )) = 'oa_attachment_invoice'
+                ) as is_oa_attachment
               from app.invoices
-              left join app.import_batches on import_batches.id = invoices.source_batch_id
+              left join app.import_batches
+                on import_batches.id = invoices.source_batch_id
+                or import_batches.legacy_mongo_id = invoices.legacy_source_batch_id
               where coalesce(nullif(invoices.status, ''), 'active') <> 'deleted'
             )
             select
               count(*)::bigint as total_count,
-              count(*) filter (where not is_manual and not is_etc and not is_oa_attachment)::bigint as standard_count,
               count(*) filter (where is_manual)::bigint as manual_count,
-              count(*) filter (where is_etc)::bigint as etc_count,
-              count(*) filter (where is_oa_attachment)::bigint as app_oa_attachment_count,
+              count(*) filter (where is_oa_attachment)::bigint as oa_attachment_count,
+              count(*) filter (where is_oa_attachment and not is_manual)::bigint as oa_attachment_non_manual_count,
               max(latest_synced_at) as latest_synced_at,
-              max(latest_synced_at) filter (where not is_manual and not is_etc and not is_oa_attachment) as standard_latest_synced_at,
               max(latest_synced_at) filter (where is_manual) as manual_latest_synced_at,
-              max(latest_synced_at) filter (where is_etc) as etc_latest_synced_at,
-              max(latest_synced_at) filter (where is_oa_attachment) as app_oa_attachment_latest_synced_at
+              max(latest_synced_at) filter (where is_oa_attachment) as oa_attachment_latest_synced_at
             from invoice_flags
             """
         ) or {}
-        oa_attachment = self._oa_attachment_invoice_inventory(warnings)
-        latest_synced_at = _max_timestamp(
-            row.get("latest_synced_at"),
-            oa_attachment.get("latest_synced_at"),
-        )
+        latest_synced_at = _isoformat(row.get("latest_synced_at"))
         return _inventory_block(
             total_count=_optional_int(row.get("total_count")),
             latest_synced_at=latest_synced_at,
             sources=[
-                _inventory_source(
-                    key="standard_import",
-                    label="普通导入",
-                    count=_optional_int(row.get("standard_count")),
-                    latest_synced_at=_isoformat(row.get("standard_latest_synced_at")),
-                ),
-                _inventory_source(
-                    key="oa_attachment",
-                    label="OA 解析",
-                    count=_optional_int(oa_attachment.get("count")),
-                    latest_synced_at=_isoformat(oa_attachment.get("latest_synced_at")),
-                    status=str(oa_attachment.get("status") or "available"),
-                ),
-                _inventory_source(
-                    key="etc",
-                    label="ETC",
-                    count=_optional_int(row.get("etc_count")),
-                    latest_synced_at=_isoformat(row.get("etc_latest_synced_at")),
-                ),
                 _inventory_source(
                     key="manual",
                     label="手工导入",
                     count=_optional_int(row.get("manual_count")),
                     latest_synced_at=_isoformat(row.get("manual_latest_synced_at")),
                 ),
+                _inventory_source(
+                    key="oa_attachment",
+                    label="OA 解析",
+                    count=_optional_int(row.get("oa_attachment_count")),
+                    latest_synced_at=_isoformat(row.get("oa_attachment_latest_synced_at")),
+                    supplementary_count=_optional_int(row.get("oa_attachment_non_manual_count")),
+                ),
             ],
         )
-
-    def _oa_attachment_invoice_inventory(self, warnings: list[str]) -> dict[str, Any]:
-        try:
-            row = self._connection.fetch_one(
-                """
-                with invoice_items as (
-                  select invoice_item.value as invoice
-                  from app.oa_attachment_invoice_cache cache
-                  cross join lateral jsonb_array_elements(
-                    case
-                      when jsonb_typeof(cache.invoices) = 'array' then cache.invoices
-                      else '[]'::jsonb
-                    end
-                  ) as invoice_item(value)
-                ),
-                formal_invoices as (
-                  select
-                    nullif(trim(coalesce(
-                      invoice->>'invoice_no',
-                      invoice->>'invoice_number',
-                      invoice->>'digital_invoice_no',
-                      invoice->>'发票号码',
-                      invoice->>'数电发票号码',
-                      invoice->>'number'
-                    )), '') as invoice_no,
-                    nullif(trim(coalesce(
-                      invoice->>'issue_date',
-                      invoice->>'invoice_date',
-                      invoice->>'date',
-                      invoice->>'开票日期'
-                    )), '') as issue_date,
-                    nullif(trim(coalesce(
-                      invoice->>'seller_tax_no',
-                      invoice->>'seller_tax_number',
-                      invoice->>'销方识别号'
-                    )), '') as seller_tax_no,
-                    nullif(trim(coalesce(
-                      invoice->>'buyer_tax_no',
-                      invoice->>'buyer_tax_number',
-                      invoice->>'购方识别号'
-                    )), '') as buyer_tax_no,
-                    nullif(trim(coalesce(
-                      invoice->>'total_with_tax',
-                      invoice->>'total_amount',
-                      invoice->>'价税合计',
-                      invoice->>'amount'
-                    )), '') as amount_text,
-                    lower(nullif(trim(coalesce(invoice->>'document_kind', '')), '')) as document_kind,
-                    nullif(trim(coalesce(invoice->>'invoice_kind', invoice->>'invoice_type', '')), '') as invoice_kind
-                  from invoice_items
-                )
-                select
-                  count(distinct concat_ws('|', invoice_no, issue_date, seller_tax_no, buyer_tax_no, amount_text))::bigint as count,
-                  (select max(parsed_at) from app.oa_attachment_invoice_cache) as latest_synced_at
-                from formal_invoices
-                where invoice_no is not null
-                  and issue_date is not null
-                  and seller_tax_no is not null
-                  and buyer_tax_no is not null
-                  and amount_text is not null
-                  and coalesce(document_kind, '') <> 'non_tax_receipt'
-                  and (
-                    coalesce(document_kind, '') in ('digital_invoice', 'yunnan_machine_invoice')
-                    or position('发票' in invoice_kind) > 0
-                  )
-                """
-            ) or {}
-            return {
-                "count": _optional_int(row.get("count")),
-                "latest_synced_at": row.get("latest_synced_at"),
-                "status": "available",
-            }
-        except Exception:
-            pass
-        try:
-            row = self._connection.fetch_one(
-                """
-                select
-                  count(distinct row_id)::bigint as count,
-                  max(generated_at) as latest_synced_at
-                from read_model.workbench_rows
-                where source_kind = 'oa_attachment_invoice'
-                """
-            ) or {}
-            return {
-                "count": _optional_int(row.get("count")),
-                "latest_synced_at": row.get("latest_synced_at"),
-                "status": "available",
-            }
-        except Exception:
-            warnings.append("invoice_oa_attachment_inventory_unknown")
-            return {"count": None, "latest_synced_at": None, "status": "unknown"}
 
     def _oa_inventory(self) -> dict[str, Any]:
         row = self._connection.fetch_one(
@@ -299,6 +188,126 @@ class OperationsDashboardService:
                 ),
             ],
         )
+
+    def _import_events(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        rows.extend(
+            self._connection.fetch_all(
+                """
+                select
+                  coalesce(legacy_mongo_id, id::text) as event_id,
+                  case
+                    when batch_type = 'bank_transaction' then 'bank_transactions'
+                    else 'manual'
+                  end as source_key,
+                  case
+                    when batch_type = 'bank_transaction' then '流水导入'
+                    else '手工导入'
+                  end as label,
+                  source_name,
+                  imported_by,
+                  success_count::bigint as count,
+                  null::bigint as supplementary_count,
+                  imported_at,
+                  status
+                from app.import_batches
+                where batch_type in ('bank_transaction', 'input_invoice', 'output_invoice')
+                order by imported_at desc, event_id desc
+                """
+            )
+            or []
+        )
+        rows.extend(
+            self._connection.fetch_all(
+                """
+                with invoice_flags as (
+                  select
+                    invoices.id,
+                    invoices.updated_at,
+                    exists (
+                      select 1
+                      from jsonb_array_elements(
+                        case
+                          when jsonb_typeof(invoices.source_links) = 'array' then invoices.source_links
+                          else '[]'::jsonb
+                        end
+                      ) as source_link(value)
+                      where lower(coalesce(
+                        source_link.value->>'source_type',
+                        source_link.value->>'type',
+                        source_link.value->>'source',
+                        ''
+                      )) = 'manual_invoice_import'
+                    ) as is_manual,
+                    case
+                      when jsonb_typeof(invoices.source_links) = 'array' then invoices.source_links
+                      else '[]'::jsonb
+                    end as source_links
+                  from app.invoices
+                  where coalesce(nullif(invoices.status, ''), 'active') <> 'deleted'
+                ),
+                oa_attachment_source_links as (
+                  select
+                    invoice_flags.id,
+                    invoice_flags.is_manual,
+                    coalesce(
+                      case
+                        when nullif(source_link.value->>'created_at', '') ~ '^\\d{4}-\\d{2}-\\d{2}T'
+                        then (source_link.value->>'created_at')::timestamptz
+                        else null
+                      end,
+                      invoice_flags.updated_at
+                    ) as imported_at
+                  from invoice_flags
+                  cross join lateral jsonb_array_elements(invoice_flags.source_links) as source_link(value)
+                  where lower(coalesce(
+                    source_link.value->>'source_type',
+                    source_link.value->>'type',
+                    source_link.value->>'source',
+                    ''
+                  )) = 'oa_attachment_invoice'
+                )
+                select
+                  'oa-attachment-' || to_char(date_trunc('second', imported_at), 'YYYYMMDDHH24MISS') as event_id,
+                  'oa_attachment' as source_key,
+                  'OA 解析' as label,
+                  'OA 附件解析' as source_name,
+                  'oa_sync' as imported_by,
+                  count(distinct id)::bigint as count,
+                  count(distinct id) filter (where not is_manual)::bigint as supplementary_count,
+                  max(imported_at) as imported_at,
+                  'completed' as status
+                from oa_attachment_source_links
+                group by date_trunc('second', imported_at)
+                order by imported_at desc
+                """
+            )
+            or []
+        )
+        rows.extend(
+            self._connection.fetch_all(
+                """
+                select
+                  id::text as event_id,
+                  'oa_records' as source_key,
+                  'OA 同步' as label,
+                  sync_type as source_name,
+                  'oa_sync' as imported_by,
+                  upserted_count::bigint as count,
+                  null::bigint as supplementary_count,
+                  coalesce(finished_at, started_at) as imported_at,
+                  status
+                from app.oa_sync_runs
+                where sync_type = 'oa_projection'
+                order by coalesce(finished_at, started_at) desc, id desc
+                """
+            )
+            or []
+        )
+        return [
+            _inventory_event(row)
+            for row in sorted(rows, key=lambda item: _isoformat(item.get("imported_at")) or "", reverse=True)
+        ]
 
     def _request_performance(self) -> dict[str, Any]:
         summary = self._api_performance_recorder.summary()
@@ -365,6 +374,39 @@ class OperationsDashboardService:
             warnings.append(str(warning))
         return metric
 
+    def _safe_invoice_inventory(self, warnings: list[str]) -> dict[str, Any]:
+        try:
+            return self._invoice_inventory()
+        except Exception:
+            warnings.append("invoice_inventory_unknown")
+            return _inventory_block(
+                total_count=None,
+                latest_synced_at=None,
+                sources=[
+                    _inventory_source(
+                        key="manual",
+                        label="手工导入",
+                        count=None,
+                        latest_synced_at=None,
+                    ),
+                    _inventory_source(
+                        key="oa_attachment",
+                        label="OA 解析",
+                        count=None,
+                        latest_synced_at=None,
+                        supplementary_count=None,
+                    ),
+                ],
+                status="unknown",
+            )
+
+    def _safe_rows(self, warning_code: str, warnings: list[str], loader: Callable[[], list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        try:
+            return loader()
+        except Exception:
+            warnings.append(warning_code)
+            return []
+
     def _runtime_rows(self, warning_code: str, warnings: list[str], loader: Callable[[], list[dict[str, Any]]]) -> list[dict[str, Any]]:
         try:
             rows = loader()
@@ -409,14 +451,32 @@ def _inventory_source(
     label: str,
     count: int | None,
     latest_synced_at: str | None,
+    supplementary_count: int | None = None,
     status: str = "available",
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "key": key,
         "label": label,
         "count": count,
         "latest_synced_at": latest_synced_at,
         "status": status if count is not None else "unknown",
+    }
+    if supplementary_count is not None or key == "oa_attachment":
+        payload["supplementary_count"] = supplementary_count
+    return payload
+
+
+def _inventory_event(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "key": str(row.get("event_id") or ""),
+        "source_key": str(row.get("source_key") or ""),
+        "label": str(row.get("label") or ""),
+        "source_name": str(row.get("source_name") or ""),
+        "imported_by": str(row.get("imported_by") or ""),
+        "count": _optional_int(row.get("count")),
+        "supplementary_count": _optional_int(row.get("supplementary_count")),
+        "imported_at": _isoformat(row.get("imported_at")),
+        "status": str(row.get("status") or "unknown"),
     }
 
 
@@ -455,8 +515,3 @@ def _isoformat(value: object) -> str | None:
         return value.isoformat()
     text = str(value).strip()
     return text or None
-
-
-def _max_timestamp(*values: object) -> str | None:
-    normalized = [_isoformat(value) for value in values if _isoformat(value) is not None]
-    return max(normalized) if normalized else None

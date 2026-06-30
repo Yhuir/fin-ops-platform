@@ -1,5 +1,28 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-30 - 关系二态化和自动匹配正式化
+
+目标：取消下游页面的 `candidate relation` 业务口径，统一为“正式 active relation / 无 active relation”，并让符合条件的系统自动匹配直接写成正式关系。
+
+变更：
+
+- `workbench_relation` read model 只向下游分发 active confirmed relation 和 unlinked rows；`read_model.workbench_reconciliation_decisions` 中未消费的 open/proposed decision 不再作为 downstream candidate relation。
+- `WorkbenchReconciliationEngine` 会把满足条件的 free paired decision 通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写成 active relation，并把已消费 decision 标记为 consumed；同一 row-set 曾被用户撤回后不再被自动重新正式化。
+- automatic decision 的 upsert 保留 suppressed 状态，避免用户取消系统建议后被后续匹配轮次复活。
+- 关联台仍可以有 open 待处理展示区；历史代码名 `candidate group` 只表示待处理展示容器，不代表第三种用户关系状态。
+
+未改变：
+
+- `app.workbench_pair_relations` 仍是 confirmed relation fact 源。
+- 两栏 active relation 仍可向下游分发为 linked，但在关联台展示上可能留在 open 待处理区等待补齐第三栏或满足显式 paired 例外。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_reconciliation_engine.py tests/test_workbench_reconciliation_decision_store.py tests/test_workbench_relation_sql_projection.py -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_auth_context_idempotency.py -k "withdraw_link_preview_splits_reconciliation_decision or withdraw_link_submit_suppresses_reconciliation_decision_candidate or withdraw_link_splits_pure_candidate_group_without_relation_history" -q
+```
+
 ## 2026-06-24 - Workbench group detail route-owner extraction
 
 目标：把 `GET /api/workbench/groups/detail` 的 HTTP 参数校验和 facade response mapping 从 `Application` 抽到显式 read-only route owner。

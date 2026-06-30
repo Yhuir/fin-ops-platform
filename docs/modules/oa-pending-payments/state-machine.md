@@ -29,7 +29,7 @@
 - `oa.sync` 完成后必须入队 `oa_pending_payment.read_model.refresh` 月份 scope 和 `all` scope；页面不直接 live scan Mongo。
 - 当 Workbench active relation 明确包含多条 OA、支出流水或进项发票时，OA 待付款只能按该 relation 生成一条核对行；OA 金额、支出流水已付金额和发票价税合计使用该 relation 下各自事实的合计。
 - `paymentStatus` 必须由 lifecycle policy 或 query service 统一判定，页面不按金额字段自行计算。
-- 进行中 OA 视图复用同一付款状态判定。`relation_status='candidate'` 只能展示候选 chip，不能单独把 OA 判定为 `paid` 或直接写回 OA；completed 视图只有 Workbench active relation 能作为写回证据，in-progress 视图只有 OA 待付款独立 active pending relation 或自动匹配命令刚确认的 pending relation 能作为写回证据。
+- 进行中 OA 视图复用同一付款状态判定。只有 Workbench active relation 能作为 completed 视图写回证据；in-progress 视图只有 OA 待付款独立 active pending relation 或自动匹配命令刚确认的 pending relation 能作为写回证据。历史 `relation_status='candidate'` 兼容值必须按未关联处理，不能单独把 OA 判定为 `paid` 或直接写回 OA。
 - `paymentStatus` 不再输出 `overpaid` 或 `merged_paid`；多 OA 合并付款通过 relation group 合计后判定为 `paid`，支出流水合计大于 OA 合计时进入 `pending_review`。
 - 页面进入后调用自动匹配/写回命令。该命令复用关联台 OA-bank 精确金额/精确合计规则，只自动确认无冲突的 in-progress OA 与没有 Workbench active relation、也没有 pending bank claim 的支出流水；同时扫描 completed 中已有 Workbench active 支出流水 relation 的 OA、in-progress 中已有 active pending relation 的 OA。写回前必须校验银行流水为 outflow、支出流水合计等于 OA 金额、可解析 OA Mongo 文档 ID；校验通过后写回 `t_payment_simple.pay_status=1`。
 - “关联支出流水”抽屉作为自动匹配失败后的人工兜底，创建 OA 待付款独立 active pending relation，并写入 `app.bank_transaction_relation_claims` 独占对应支出流水，不写 `app.workbench_pair_relations`。关联成功后沿用同一写回校验，金额/方向/`flow_id` 通过时自动写回 `t_payment_simple.pay_status=1`，不再需要用户二次点击确认写回。

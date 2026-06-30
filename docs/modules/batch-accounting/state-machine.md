@@ -6,7 +6,7 @@
 
 | 状态 | 含义 | 事实源 |
 | --- | --- | --- |
-| `unsubmitted` | 银行流水符合批量账务条件，且当前没有 active relation 占用；右侧展示可选日常报销 OA 行。 | Workbench payload + `workbench_relation` read model |
+| `unsubmitted` | 银行流水符合批量账务条件，且当前没有 active relation 占用；右侧展示没有 active relation 配对关系的日常报销 OA 主单。 | Workbench payload + `workbench_relation` read model |
 | `submitted` | 银行流水存在 active batch accounting relation；右侧展示该关系下的 OA 行，只允许撤回。 | Workbench pair relation + relation distribution |
 | `stale/conflict` | 前端持有的 bank row 或 relation version 已落后，提交/撤回应失败并要求刷新。 | `expected_version`、active relation version |
 | `mismatch_pending_note` | 银行金额与选中 OA 合计不一致，尚未填写有效差额说明。 | 前端选择状态 + `BatchAccountingService` 金额校验 |
@@ -40,7 +40,6 @@
 | stale/refreshing/missing/failed/unavailable | 显示 relation read model warning、后端 stale reason 和 scope；不能把空关系当真实未提交。普通 relation distribution non-fresh 不应作为长期全局禁用理由，提交/撤回仍由后端 canonical write safety 判定。`refresh_enqueued=false` 时提示刷新未入队并转向系统状态排查。 |
 | mismatch | 显示金额不一致提示和差额说明输入；说明为空时前端阻止提交，后端再次校验。 |
 | bucket 切换 | `unsubmitted` 与 `submitted` 切换时清空 bank/OA selection、差额说明、撤回状态。 |
-| OA 年份切换 | 只切换 OA 年份时尽量保留仍存在的选中银行/OA 行；刷新后不存在的行必须清理。 |
 | search/filter | 右侧 OA 搜索只过滤展示，不改变后端事实或已选中金额。 |
 | operation pending | submit/withdraw API 成功后显示全屏 overlay，等待 `workbench_relation` operation barrier fresh，再重新加载当前 bucket。 |
 | submit success | barrier 与 reload 完成后显示成功 feedback，发送 `workbenchRelationUpdated`。 |

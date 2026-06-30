@@ -58,6 +58,7 @@ class _FakeConnection:
         attachment_cache_rows: list[dict[str, object]] | None = None,
         attachment_cache_source_rows: list[dict[str, object]] | None = None,
         attachment_rows: list[dict[str, object]] | None = None,
+        oa_source_alias_rows: list[dict[str, object]] | None = None,
         workbench_cross_zone_duplicates: list[dict[str, object]] | None = None,
         workbench_open_visible_owner_duplicates: list[dict[str, object]] | None = None,
         workbench_oa_alias_groups: list[dict[str, object]] | None = None,
@@ -70,6 +71,7 @@ class _FakeConnection:
         self._attachment_cache_rows = attachment_cache_rows
         self._attachment_cache_source_rows = attachment_cache_source_rows
         self._attachment_rows = attachment_rows
+        self._oa_source_alias_rows = oa_source_alias_rows
         self._workbench_cross_zone_duplicates = workbench_cross_zone_duplicates
         self._workbench_open_visible_owner_duplicates = workbench_open_visible_owner_duplicates
         self._workbench_oa_alias_groups = workbench_oa_alias_groups
@@ -85,6 +87,7 @@ class _FakeConnection:
             "app.oa_attachment_invoice_cache",
             "app.oa_attachment_invoice_cache_sources",
             "app.oa_attachments",
+            "app.oa_source_aliases",
             "read_model.workbench_group_rows",
             "app.oa_applications",
             "app.workbench_pair_relations",
@@ -157,6 +160,8 @@ class _FakeConnection:
             ]
         if "from app.oa_attachment_invoice_cache_sources" in normalized:
             return list(self._attachment_cache_source_rows or [])
+        if "from app.oa_source_aliases" in normalized:
+            return list(self._oa_source_alias_rows or [])
         if "from app.oa_attachments" in normalized:
             return list(self._attachment_rows or [])
         if "from app.oa_attachment_invoice_cache" in normalized:
@@ -453,6 +458,62 @@ class AuditObjectIdentityToolTests(unittest.TestCase):
         duplicate_group = report["oa_attachment_invoice_blocking_duplicate_groups"][0]
         self.assertEqual(duplicate_group["classification"], "cross_oa")
         self.assertEqual(duplicate_group["distinct_oa_count"], 2)
+
+    def test_active_oa_source_alias_downgrades_lifecycle_duplicate(self) -> None:
+        attachment_cache_rows = [
+            _attachment_cache_row("cache-a", digital_invoice_no="DUP-001"),
+            _attachment_cache_row("cache-b", digital_invoice_no="DUP-001"),
+        ]
+        attachment_cache_source_rows = [
+            {
+                "cache_source_attachment_key": "cache-a",
+                "source_attachment_key": "actual-attachment-1",
+                "source_kind": "invoice",
+                "oa_application_id": "oa-app-1",
+                "oa_row_id": "oa-exp-2005",
+                "oa_source_id": "oa-exp-2005",
+                "applicant": "周洁莹",
+                "application_date": "2026-02-01",
+                "project_name": "云南溯源科技",
+                "amount": Decimal("800.00"),
+            },
+            {
+                "cache_source_attachment_key": "cache-b",
+                "source_attachment_key": "actual-attachment-2",
+                "source_kind": "invoice",
+                "oa_application_id": "oa-app-2",
+                "oa_row_id": "oa-exp-69898450db8c0a3633bd748c",
+                "oa_source_id": "oa-exp-69898450db8c0a3633bd748c",
+                "applicant": "周洁莹",
+                "application_date": "2026-02-01",
+                "project_name": "云南溯源科技",
+                "amount": Decimal("800.00"),
+            },
+        ]
+
+        report = audit_object_identity(
+            connection=_FakeConnection(
+                invoice_rows=[],
+                bank_rows=[],
+                etc_rows=[],
+                attachment_cache_rows=attachment_cache_rows,
+                attachment_cache_source_rows=attachment_cache_source_rows,
+                oa_source_alias_rows=[
+                    {
+                        "alias_row_id": "oa-exp-69898450db8c0a3633bd748c",
+                        "canonical_row_id": "oa-exp-2005",
+                    }
+                ],
+            ),
+            policy=FinancialObjectIdentityPolicy(),
+            example_limit=10,
+        )
+
+        self.assertEqual(report["summary"]["oa_attachment_invoice_duplicate_group_count"], 0)
+        self.assertEqual(report["summary"]["oa_attachment_invoice_blocking_duplicate_group_count"], 0)
+        self.assertEqual(report["summary"]["oa_attachment_invoice_cache_alias_group_count"], 1)
+        self.assertEqual(report["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(report["oa_attachment_invoice_cache_alias_groups"][0]["classification"], "same_oa_multiple_actual_attachments")
 
     def test_audit_treats_weak_oa_attachment_tax_amount_cross_oa_as_suspected_only(self) -> None:
         attachment_cache_rows = [

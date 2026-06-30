@@ -28,9 +28,17 @@ WORKBENCH_RELATION_DOWNSTREAM_SCOPE_TYPES = (
     "cost_statistics",
     "tax_offset",
     "no_oa_bank_batch",
+    "bank_flow_rule_batch",
 )
 
-_NO_OA_RELATION_MODES = frozenset({"no_oa_bank_batch"})
+NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"
+BANK_FLOW_RULE_BATCH_RELATION_MODE = "bank_flow_rule_batch"
+_NO_OA_RELATION_MODES = frozenset({NO_OA_BANK_BATCH_RELATION_MODE})
+_NO_OA_BATCH_READ_MODEL_RELATION_MODES = frozenset(
+    {
+        NO_OA_BANK_BATCH_RELATION_MODE,
+    }
+)
 _EXPENSE_PENDING_INVOICE_SCOPE_KEYS = (
     "expense:all",
     "expense:requires_invoice",
@@ -79,20 +87,34 @@ class PostgresWorkbenchRelationRepository:
             changed_ids = {str(item) for item in changed_case_ids} if changed_case_ids is not None else None
             dirty_scope_keys: set[str] = set()
             downstream_by_scope_key: dict[str, set[str]] = {}
+            no_oa_batch_relation_modes_by_scope: dict[str, set[str]] = {}
+            bank_flow_batch_relation_modes_by_scope: dict[str, set[str]] = {}
             pending_invoice_scope_keys: set[str] = set()
             for case_id, payload in iter_mapping(relations):
                 if changed_ids is not None and case_id not in changed_ids:
                     continue
+                relation_mode = text(payload.get("relation_mode") or payload.get("mode"))
                 domain_scope_keys = _workbench_relation_domain_scope_keys(connection, payload)
                 relation_scope_keys = _workbench_relation_dirty_scope_keys_from_domain_scope_keys(domain_scope_keys)
                 dirty_scope_keys.update(relation_scope_keys)
-                for scope_key, downstream_scope_types in _workbench_relation_downstream_scope_map(
+                scope_map = _workbench_relation_downstream_scope_map(
                     connection,
                     payload,
                     domain_scope_keys=domain_scope_keys,
                     dirty_scope_keys=relation_scope_keys,
-                ).items():
+                )
+                for scope_key, downstream_scope_types in scope_map.items():
                     downstream_by_scope_key.setdefault(scope_key, set()).update(downstream_scope_types)
+                    if (
+                        relation_mode in _NO_OA_BATCH_READ_MODEL_RELATION_MODES
+                        and "no_oa_bank_batch" in downstream_scope_types
+                    ):
+                        no_oa_batch_relation_modes_by_scope.setdefault(scope_key, set()).add(relation_mode)
+                    if (
+                        relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
+                        and "bank_flow_rule_batch" in downstream_scope_types
+                    ):
+                        bank_flow_batch_relation_modes_by_scope.setdefault(scope_key, set()).add(relation_mode)
                 pending_invoice_scope_keys.update(
                     _workbench_relation_pending_invoice_scope_keys(
                         connection,
@@ -153,6 +175,34 @@ class PostgresWorkbenchRelationRepository:
                 for downstream_scope_type in WORKBENCH_RELATION_DOWNSTREAM_SCOPE_TYPES:
                     if downstream_scope_type not in downstream_scope_types:
                         continue
+                    if downstream_scope_type == "no_oa_bank_batch":
+                        relation_modes = sorted(no_oa_batch_relation_modes_by_scope.get(scope_key) or [])
+                        if relation_modes:
+                            for relation_mode in relation_modes:
+                                _enqueue_read_model_refresh_in_transaction(
+                                    connection,
+                                    scope_type=downstream_scope_type,
+                                    scope_key=scope_key,
+                                    reason="workbench_relation_changed",
+                                    priority="high",
+                                    payload_extra={"relation_mode": relation_mode},
+                                    dedupe_kind=relation_mode,
+                                )
+                            continue
+                    if downstream_scope_type == "bank_flow_rule_batch":
+                        relation_modes = sorted(bank_flow_batch_relation_modes_by_scope.get(scope_key) or [])
+                        if relation_modes:
+                            for relation_mode in relation_modes:
+                                _enqueue_read_model_refresh_in_transaction(
+                                    connection,
+                                    scope_type=downstream_scope_type,
+                                    scope_key=scope_key,
+                                    reason="workbench_relation_changed",
+                                    priority="high",
+                                    payload_extra={"relation_mode": relation_mode},
+                                    dedupe_kind=relation_mode,
+                                )
+                            continue
                     _enqueue_read_model_refresh_in_transaction(
                         connection,
                         scope_type=downstream_scope_type,
@@ -293,6 +343,7 @@ def _workbench_relation_downstream_scope_map(
     has_invoice = "invoice" in row_types or unknown_row_types
     has_oa = "oa" in row_types
     is_no_oa_batch = relation_mode in _NO_OA_RELATION_MODES
+    is_bank_flow_rule_batch = relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
     invoice_directions = _workbench_relation_invoice_directions(connection, row_ids) if has_invoice else set()
     unknown_invoice_direction = has_invoice and not invoice_directions
 
@@ -330,12 +381,14 @@ def _workbench_relation_downstream_scope_map(
     cost_scope_keys: set[str] = set()
     if unknown_row_types:
         cost_scope_keys = broad_scope_keys
-    elif has_bank and (has_oa or is_no_oa_batch or relation_mode == "turnover_manual_closure"):
+    elif has_bank and (has_oa or is_no_oa_batch or is_bank_flow_rule_batch or relation_mode == "turnover_manual_closure"):
         cost_scope_keys = bank_scope_keys
     if cost_scope_keys:
         add("cost_statistics", cost_scope_keys)
-    if is_no_oa_batch:
+    if relation_mode in _NO_OA_BATCH_READ_MODEL_RELATION_MODES:
         add("no_oa_bank_batch", bank_scope_keys)
+    if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+        add("bank_flow_rule_batch", bank_scope_keys)
     return scope_map
 
 
@@ -557,6 +610,8 @@ def _enqueue_read_model_refresh_in_transaction(
     reason: str,
     tenant_id: str = "default",
     priority: str = "normal",
+    payload_extra: dict[str, Any] | None = None,
+    dedupe_kind: str | None = None,
 ) -> None:
     if scope_type == "cost_statistics":
         for target_scope_key in CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys([scope_key]):
@@ -567,6 +622,8 @@ def _enqueue_read_model_refresh_in_transaction(
                 reason=reason,
                 tenant_id=tenant_id,
                 priority=priority,
+                payload_extra=payload_extra,
+                dedupe_kind=dedupe_kind,
             )
         return
     _enqueue_single_read_model_refresh_in_transaction(
@@ -576,6 +633,8 @@ def _enqueue_read_model_refresh_in_transaction(
         reason=reason,
         tenant_id=tenant_id,
         priority=priority,
+        payload_extra=payload_extra,
+        dedupe_kind=dedupe_kind,
     )
 
 

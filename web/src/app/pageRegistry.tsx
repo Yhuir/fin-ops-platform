@@ -73,7 +73,7 @@ const pendingInvoicesPage = lazyPage(() => import("../pages/PendingInvoicesPage"
 const inputInvoiceUsagePage = lazyPage(() => import("../pages/InputInvoiceUsagePage"));
 const oaPendingPaymentsPage = lazyPage(() => import("../pages/OaPendingPaymentsPage"));
 const outputInvoiceCollectionsPage = lazyPage(() => import("../pages/OutputInvoiceCollectionsPage"));
-const bankFlowRuleBatchPage = lazyPage(() => import("../pages/NoOaBankBatchPage"));
+const bankFlowRuleBatchPage = lazyPage(() => import("../pages/BankFlowRuleBatchPage"));
 const batchAccountingPage = lazyPage(() => import("../pages/BatchAccountingPage"));
 const turnoverLedgerPage = lazyPage(() => import("../pages/TurnoverLedgerPage"));
 const etcTicketManagementPage = lazyPage(() => import("../pages/EtcTicketManagementPage"));

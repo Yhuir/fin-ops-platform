@@ -387,7 +387,7 @@ const expensePreview: WorkbenchExceptionPreview = {
     {
       id: "candidate-1",
       label: "命中候选分组 CASE-202603-101",
-      detail: "OA 与流水来自同一候选组。",
+      detail: "OA 与流水来自同一关系组。",
     },
   ],
   canApply: true,

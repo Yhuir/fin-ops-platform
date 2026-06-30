@@ -218,7 +218,7 @@ test.describe("input invoice usage browser flow", () => {
 
     const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
     await expect(workflow).toBeVisible();
-    await expect(workflow.getByText("当前账户或预览状态暂不允许创建 OA 草稿。")).toBeVisible();
+    await expect(page.getByLabel("以发票反提 OA 提示").getByText("当前账户或预览状态暂不允许创建 OA 草稿。")).toBeVisible();
     await expect(workflow.getByRole("table", { name: "反提 OA 候选发票清单" })).toBeVisible();
     await expect(workflow.getByRole("button", { name: "创建 OA 草稿" })).toBeDisabled();
 
@@ -577,7 +577,7 @@ test.describe("input invoice usage browser flow", () => {
     expect((await manualStatusResponse).status()).toBe(200);
     expect((await manualStatusRowsRefresh).status()).toBe(200);
 
-    await expect(workflow.getByText("已进入已提交历史。")).toBeVisible();
+    await expect(page.getByLabel("以发票反提 OA 提示").getByText("已进入已提交历史。")).toBeVisible();
     await expect(page.getByRole("tab", { name: "已提交" })).toHaveAttribute("aria-selected", "true");
     await expect(workflow.getByRole("table", { name: "陈秀云已提交发票" })).toBeVisible();
     await expect(workflow.getByText("SD-INV-E2E-001")).toBeVisible();

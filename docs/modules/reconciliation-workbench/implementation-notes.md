@@ -5,11 +5,11 @@
 
 ## 当前决策
 
-- `oa_bank_exact_sum` 属于后端自动候选规则，必须同时覆盖 legacy candidate mode 和 decision/free engine mode；不能只在 `server.py` 或前端补展示逻辑。
-- Workbench matching 仍保留 legacy candidate 与 SQL decision 两条生产相关链路。新增规则时先复用现有 service/helper/test 工具，后续再单独规划匹配逻辑收敛。
+- `oa_bank_exact_sum` 属于后端自动匹配规则；符合正式化条件的 paired decision 必须由后端通过 relation command 写成 active relation，不能只在 `server.py` 或前端补展示逻辑。
+- Workbench matching 的生产关系口径已经收敛为 decision/free engine -> active relation；legacy candidate 名称只作为历史代码/测试兼容，不再作为下游业务关系状态。
 - 旧逻辑清理不和业务规则变更混做。`WorkbenchMatchingRules`、`WorkbenchFreeMatchingEngine`、`WorkbenchReconciliationEngine`、工资/内部转账 legacy rule code 仍有 orchestrator、worker、免 OA、分组和异常投影调用或兼容引用，不能无测试删除。
 - OA 附件解析缓存不是正式发票事实源。Workbench 发票栏和 relation projection 只读取 canonical invoice/read model；OA 附件 OCR 结果是否补充到统一发票池由设置页 `OA附件发票晋级` 控制，默认 `link_existing_only` 只关联已有发票，不创建缺失发票，`disabled` 完全跳过，只有 `create_missing` 才允许受控创建。旧 OA query service 只保留 OA detail 附件摘要。
-- 外部往来 `turnover_manual_closure` 是 confirmed active relation fact；同一个 active case 下两条及以上银行流水形成的外部往来闭环必须保留 canonical ownership 和“收支闭环”证据，但未补齐 OA + 银行 + 发票三栏前留在 open/candidate 区，三栏完整后才进入 paired。
+- 外部往来 `turnover_manual_closure` 是 confirmed active relation fact；同一个 active case 下两条及以上银行流水形成的外部往来闭环必须保留 canonical ownership 和“收支闭环”证据。展示分区由 relation metadata 的 OA/发票 requirement 决定，未满足 paired 条件时留在 open 待处理区，满足后进入 paired。
 - Workbench SQL active generation 的发布跳过逻辑不能只比较 numeric `source_version`。当 incoming `source_versions` 中的 builder/schema/rules/parser 等签名与现有 active generation 不一致时，即使 incoming `source_version` 更低，也必须发布新 generation；否则 schema bump 只能让状态显示 stale/refreshing，无法替换旧 generation。
 
 ## 记录模板
@@ -28,6 +28,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-30 - 自动匹配正式化和关系二态口径
+
+- 目标：把关联台用户关系状态收敛为正式配对关系和无配对关系，取消“候选 OA/候选关系”作为下游业务状态。
+- 影响范围：`WorkbenchReconciliationEngine`、matching orchestrator、decision store、relation SQL projection、withdraw/split copy、Workbench/Open 下游 E2E 和模块文档。
+- 关键决策：free paired decision 满足金额 matched、无 active 冲突、同 row-set 未被撤回后直接通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 active relation；用户撤回过的 row-set 不再自动重新配对；未正式化 decision 只留在自动匹配内部，不再分发给待找发票、OA 待付款、进项/销项、银行明细等下游页面。
+- 文档影响：同步 workbench-relations、reconciliation-workbench、产品规格、API contract、read model 边界和相关下游模块测试说明。
+- 测试覆盖：`test_workbench_reconciliation_engine.py` 覆盖自动正式化和撤回抑制；`test_workbench_reconciliation_decision_store.py` 覆盖 suppressed decision 不复活；`test_workbench_relation_sql_projection.py` 覆盖 open decision 不再分发。
+- 验证命令：见本轮最终说明。
+- 未测风险：真实生产历史 active generation 需要发布后由 worker 重建收敛；本地已覆盖服务、API、前端和 deterministic Browser 回归。
 
 ## 2026-06-30 - 折叠批次计数文案重叠修复
 
@@ -262,7 +272,7 @@
 
 - 目标：修复关联台“已配对”区域出现大量普通 OA+银行、OA+发票、银行+发票两栏 `manual_confirmed` relation 的问题。任意两栏确认仍然允许，但只能表达 partial relation，等待第三栏补齐。
 - 真实原因：`WorkbenchCandidateGroupingService._paired_group_has_enough_row_types()` 曾用 `row_type_count >= 2 and confirmed active relation` 作为宽泛 paired 条件，把 canonical active relation ownership 和三栏闭环展示混为一谈。confirm-link operation projection 也默认把确认后的 relation 放入 `paired_groups`，导致写后投影与 active generation 新规则不一致。
-- 关键决策：`app.workbench_pair_relations.status='active'` 继续是 confirmed fact，用于 row occupation、撤回、审计和下游 `workbench_relation` linked distribution；关联台 paired/open 分区由 active generation/grouping 后端 policy 决定，前端不做本地重排。普通 `manual_confirmed` 两栏 relation 保留 canonical `case:<case_id>` open/candidate group；OA + 银行 + 发票三栏完整进入 paired；no-OA、工资/个人自动闭合、内部转账、个人暂借款还清、OA invoice offset、批量账务、ETC summary/batch relation 和 processed/closed exception 等显式例外保持 paired。
+- 关键决策：`app.workbench_pair_relations.status='active'` 继续是 confirmed fact，用于 row occupation、撤回、审计和下游 `workbench_relation` linked distribution；关联台 paired/open 分区由 active generation/grouping 后端 policy 决定，前端不做本地重排。普通 `manual_confirmed` 两栏 relation 保留 canonical `case:<case_id>` open 待处理 group；OA + 银行 + 发票三栏完整进入 paired；no-OA、工资/个人自动闭合、内部转账、个人暂借款还清、OA invoice offset、批量账务、ETC summary/batch relation 和 processed/closed exception 等显式例外保持 paired。
 - 文档影响：更新本模块 README、state-machine、tests、implementation notes，以及 `workbench-relations` 状态机，撤销 2026-06-21 “普通 active relation 两栏进 paired”的历史错误口径。
 - 测试覆盖：新增/更新普通 OA+银行、OA+发票、银行+发票 active relation 留 open，三栏 active relation 留 paired，SQL projection canonical open owner，confirm-link 两栏 operation projection 走 `open_groups`、三栏走 `paired_groups`，前端 API mapper 和 selection model 对 open manual partial relation 的回归。
 - 验证命令：见本轮最终执行记录。
@@ -272,7 +282,7 @@
 
 - 目标：修复贾小花三笔纯银行外部往来闭环进入关联台“已配对”区域，并被显示成“完全关联”的问题。
 - 真实原因：2026-06-21 的修复把 active relation ownership 和 paired zone completeness 混为一谈；`WorkbenchCandidateGroupingService._paired_group_has_enough_row_types()` 对 bank-only `turnover_manual_closure` 放行到 paired，SQL projection 进入 paired serializer 后又把 chip 覆盖成“完全关联”。
-- 关键决策：`turnover_manual_closure` 继续写 Workbench active relation，外部往来页继续显示“收支闭环”并支持撤回；关联台分区必须遵守三栏规则，bank-only / OA+bank-only 留在 canonical `case:<case_id>` open/candidate，只有 OA + 银行 + 发票完整后进入 paired。generation consistency 允许 active relation row 出现在 canonical open owner，禁止的是非 canonical open/temp owner。
+- 关键决策：`turnover_manual_closure` 继续写 Workbench active relation，外部往来页继续显示“收支闭环”并支持撤回；关联台分区必须遵守 relation metadata requirement，bank-only / OA+bank-only 未满足 paired 条件时留在 canonical `case:<case_id>` open 待处理区，满足后进入 paired。generation consistency 允许 active relation row 出现在 canonical open owner，禁止的是非 canonical open/temp owner。
 - 文档影响：同步产品规格、app architecture、本模块 README/state-machine/tests/implementation notes，以及 turnover-ledger 模块文档。
 - 测试覆盖：新增/更新 `test_bank_only_turnover_manual_closure_rows_stay_open_until_three_way_complete`、`test_two_pane_turnover_manual_closure_rows_stay_open_until_invoice_exists`、`test_three_pane_turnover_manual_closure_rows_render_as_paired_case`、`test_sql_projection_keeps_turnover_manual_closure_bank_only_case_open_until_three_way_complete`、`test_manual_zero_difference_closure_creates_open_bank_only_workbench_relation_until_invoice_exists`、`test_manual_closure_accepts_three_bank_rows_and_keeps_workbench_case_open_until_invoice_exists`。
 
@@ -281,7 +291,7 @@
 - 目标：修复生产 App Status 显示 `Workbench read model generation consistency failed`，且贾小花三笔外部往来闭环银行流水在关联台仍处于 open/temp、没有显示同一个 paired active case 的问题。
 - 真实原因：`turnover_manual_closure` active relation 已经写入 `app.workbench_pair_relations`，但 Workbench grouping 仍沿用 2026-06-11 的 “bank-only 留 open” 规则；SQL projection 写入的银行 row relation code 是 `turnover_manual_closure`，`WorkbenchCandidateGroupingService._is_paired_row()` 不识别该 code，随后 `_paired_group_has_enough_row_types()` 又把纯银行 active relation demote 到 open。生产 consistency checker 正确发现 active relation row 被发布到非 canonical open/temp owner，报 `active_relation_open_membership` 并阻断 worker。
 - 真实原因 2：第一次部署分组修复后，生产仍保留旧月度 active generation。`PostgresReadModelRepository.save_workbench_read_models(...)` 的 stale 写入护栏只比较 numeric `source_version`，没有比较 builder/schema 签名；当 dirty scope 已被清过或 source_version 低于旧 active generation 时，schema bump 后的新月度 generation 会被跳过，all scope 继续引用旧失败 parent generation。
-- 关键决策（历史错误）：`turnover_manual_closure` 多银行 active relation 曾被视为外部往来完整闭环并展示在 paired 区；该 paired zone 口径已在 2026-06-22 撤销，当前规则要求未补齐 OA + 银行 + 发票三栏前留在 open/candidate。
+- 关键决策（历史错误）：`turnover_manual_closure` 多银行 active relation 曾被视为外部往来完整闭环并展示在 paired 区；该 paired zone 口径已在 2026-06-22 撤销，当前规则要求未满足 paired 条件时留在 open 待处理区。
 - 文档影响：同步更新产品规格、app architecture、本模块 README/state-machine/tests/implementation notes，以及 turnover-ledger 模块文档。
 - 测试覆盖（历史，已由 2026-06-22 三栏分区测试替换）：当时新增/更新过 bank-only paired 断言；当前不再作为有效测试口径。
 
@@ -319,7 +329,7 @@
 
 - 目标：修复关联台未配对区仍残留已确认 OA+银行 relation 的问题；这些行带 `完全关联`/`手动确认` 等事实字段，但因为缺少发票栏被分组层按“两栏不完整”降回 open。
 - 影响范围：`WorkbenchCandidateGroupingService` 的 paired/open 分区、Workbench month/all active generation 重建结果、关联台页面分区展示；不改变 relation 写入口、自动匹配规则、发票补齐规则或下游页面事实源。
-- 关键决策（历史错误）：当时把已确认 active relation 的 ownership 优先级提升为 paired zone 规则，认为同一 `case_id` 下带非 `automatic_decision` `relation_mode` 且 relation code 为 `fully_linked` 的多栏 relation，即使只有 OA+银行，也必须留在 paired 区。该结论已在 2026-06-22 撤销；当前规则要求普通两栏 `manual_confirmed` active relation 留在 canonical open/candidate，只有三栏完整或显式例外进入 paired。
+- 关键决策（历史错误）：当时把已确认 active relation 的 ownership 优先级提升为 paired zone 规则，认为同一 `case_id` 下带非 `automatic_decision` `relation_mode` 且 relation code 为 `fully_linked` 的多栏 relation，即使只有 OA+银行，也必须留在 paired 区。该结论已在 2026-06-22 撤销；当前规则要求普通两栏 `manual_confirmed` active relation 留在 canonical open 待处理区，只有三栏完整或显式例外进入 paired。
 - 文档影响：更新本模块 README 和测试矩阵，明确 canonical active relation、display tag、automatic decision 三者的分区优先级。
 - 测试覆盖（历史，已由 2026-06-22 普通两栏 open 测试替换）：当时新增 `test_keeps_confirmed_active_oa_bank_relation_without_invoice_in_paired_section`；当前测试名和断言已反转为 open。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_candidate_grouping.py -q -k 'confirmed_active_oa_bank_relation_without_invoice or demotes_existing_two_type_case_id_rows_back_to_open_section or preserves_automatic_match_label_for_candidate_paired_groups'`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_candidate_grouping.py tests/test_workbench_sql_runtime.py tests/test_workbench_relation_sql_projection.py -q`。
@@ -329,7 +339,7 @@
 
 - 目标：修复关联台未配对区出现带 `完全关联`/`三栏已配对` tag 的行，但没有进入已配对区的问题；同时避免仅凭展示 tag 把没有 canonical active relation 的候选误提升为已配对。
 - 影响范围：Workbench SQL active generation、批量账务写入的 OA+银行 active relation、relation metadata 指定的 ETC summary 同组展示、all/month active generation schema freshness；不改变 relation 写入口、下游 `workbench_relation` 分发合同或前端三栏组件。
-- 关键决策：统一事实源仍是 `app.workbench_pair_relations`。SQL projection 必须在 grouped/open 分区前携带 active relation 的 `special_metadata`、`amount_check`、`display_tags`、`source_versions`；批量账务 relation 中的 `special_metadata.etc_batch_link.external_etc_batch_id` 也是 ETC summary 同组归属证据。UI chip 不是 confirmed fact，自动 decision/candidate 只能保持 open/source-linked 展示。
+- 关键决策：统一事实源仍是 `app.workbench_pair_relations`。SQL projection 必须在 grouped/open 分区前携带 active relation 的 `special_metadata`、`amount_check`、`display_tags`、`source_versions`；批量账务 relation 中的 `special_metadata.etc_batch_link.external_etc_batch_id` 也是 ETC summary 同组归属证据。UI chip 不是 confirmed fact，未正式化 automatic decision 只能保持 open/source-linked 展示。
 - 文档影响：更新本模块 README、测试矩阵和 `workbench-relations` 状态机/实施记录，明确 Workbench active generation 与 `workbench_relation` 都是派生投影，不能互相造事实。
 - 测试覆盖：新增 `tests/test_workbench_sql_runtime.py` 两个回归，覆盖 active `batch_accounting` OA+银行 relation 进入 paired 区，以及 relation metadata 指定 ETC summary 后随同一 case 发布。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py -q -k 'keeps_active_batch_accounting_oa_bank_relation_paired or attaches_etc_summary_from_relation_metadata_batch_link'`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py tests/test_workbench_candidate_grouping.py tests/test_workbench_relation_sql_projection.py -q`；生产库只读 dry-run 验证 1935.45、2411.25 目标行进入 `paired/case:*`，196 目标行仍保持 open/source-linked。
@@ -747,7 +757,7 @@
 
 ## 2026-06-11 - 外部往来 bank-only 闭环保持 open
 
-> 历史记录：本节的 paired 分区规则在 2026-06-22 重新成为当前口径；当前规则要求 `turnover_manual_closure` 未补齐 OA + 银行 + 发票三栏前留在 open/candidate。
+> 历史记录：本节的 paired 分区规则在 2026-06-22 重新成为当前口径；当前规则要求 `turnover_manual_closure` 未满足 paired 条件时留在 open 待处理区。
 
 - 目标：修正外部往来手动闭环在关联台的分区语义，移除 `bank-only + turnover_manual_closure + exactly 2 bank rows` 进入 paired 的例外。
 - 影响范围：Workbench candidate grouping、server pair relation display payload、Workbench read model schema version、外部往来 closure integration、关联台本地 optimistic update。

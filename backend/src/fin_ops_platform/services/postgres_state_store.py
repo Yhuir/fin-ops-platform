@@ -13,6 +13,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from fin_ops_platform.services.bank_account_balance_read_model_repository import BankAccountBalanceReadModelRepositoryPort
 from fin_ops_platform.services.bank_detail_read_model_repository import BankDetailReadModelRepositoryPort
+from fin_ops_platform.services.bank_flow_rule_batch_read_model_repository import BankFlowRuleBatchReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
 from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
@@ -144,6 +145,7 @@ class PostgresStateStore:
         self._output_invoice_collection_sql_read_repository = OutputInvoiceCollectionReadModelRepositoryPort(self._sql_read_model_repository)
         self._oa_pending_payment_sql_read_repository = OaPendingPaymentReadModelRepositoryPort(self._sql_read_model_repository)
         self._no_oa_bank_batch_sql_read_repository = NoOaBankBatchReadModelRepositoryPort(self._sql_read_model_repository)
+        self._bank_flow_rule_batch_sql_read_repository = BankFlowRuleBatchReadModelRepositoryPort(self._sql_read_model_repository)
         self._tax_offset_sql_read_repository = TaxOffsetReadModelRepositoryPort(self._sql_read_model_repository)
         self._turnover_ledger_sql_read_repository = TurnoverLedgerReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
@@ -519,11 +521,47 @@ class PostgresStateStore:
             )
         return {}
 
-    def save_no_oa_bank_batches(self, snapshot: dict[str, Any]) -> None:
-        self._workbench_repository.save_no_oa_bank_batches(snapshot)
+    def load_bank_flow_rule_batches(self) -> dict[str, Any]:
+        return self.load_no_oa_bank_batches()
 
-    def save_no_oa_bank_batches_scope(self, snapshot: dict[str, Any], *, scope_key: str) -> None:
-        self._workbench_repository.save_no_oa_bank_batches_scope(snapshot, scope_key=scope_key)
+    def save_no_oa_bank_batches(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        relation_mode: str = "no_oa_bank_batch",
+    ) -> None:
+        self._workbench_repository.save_no_oa_bank_batches(snapshot, relation_mode=relation_mode)
+
+    def save_no_oa_bank_batches_scope(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        scope_key: str,
+        relation_mode: str = "no_oa_bank_batch",
+    ) -> None:
+        self._workbench_repository.save_no_oa_bank_batches_scope(
+            snapshot,
+            scope_key=scope_key,
+            relation_mode=relation_mode,
+        )
+
+    def save_bank_flow_rule_batches(self, snapshot: dict[str, Any]) -> None:
+        self._workbench_repository.save_no_oa_bank_batches(
+            snapshot,
+            relation_mode="bank_flow_rule_batch",
+        )
+
+    def save_bank_flow_rule_batches_scope(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        scope_key: str,
+    ) -> None:
+        self._workbench_repository.save_no_oa_bank_batches_scope(
+            snapshot,
+            scope_key=scope_key,
+            relation_mode="bank_flow_rule_batch",
+        )
 
     def load_workbench_read_models(self) -> dict[str, Any]:
         snapshot = self._read_model_repository.load_workbench_read_models()
@@ -553,6 +591,32 @@ class PostgresStateStore:
                     changed_case_ids=normalized_case_ids,
                 )
             self.save_no_oa_bank_batches(no_oa_bank_batch_snapshot)
+            self.save_workbench_read_models(
+                workbench_read_model_snapshot,
+                changed_scope_keys=normalized_scope_keys,
+            )
+
+        run_in_transaction(self._connection, write)
+
+    def save_bank_flow_rule_batch_mutation(
+        self,
+        *,
+        pair_relation_snapshot: dict[str, Any],
+        bank_flow_rule_batch_snapshot: dict[str, Any],
+        workbench_read_model_snapshot: dict[str, Any],
+        changed_case_ids: set[str] | list[str] | tuple[str, ...],
+        changed_scope_keys: set[str] | list[str] | tuple[str, ...],
+    ) -> None:
+        normalized_case_ids = {str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()}
+        normalized_scope_keys = {str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()}
+
+        def write(_connection: Any) -> None:
+            if normalized_case_ids:
+                self.save_workbench_pair_relations(
+                    pair_relation_snapshot,
+                    changed_case_ids=normalized_case_ids,
+                )
+            self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
             self.save_workbench_read_models(
                 workbench_read_model_snapshot,
                 changed_scope_keys=normalized_scope_keys,
@@ -711,6 +775,10 @@ class PostgresStateStore:
     @property
     def no_oa_bank_batch_sql_read_repository(self) -> NoOaBankBatchReadModelRepositoryPort:
         return self._no_oa_bank_batch_sql_read_repository
+
+    @property
+    def bank_flow_rule_batch_sql_read_repository(self) -> BankFlowRuleBatchReadModelRepositoryPort:
+        return self._bank_flow_rule_batch_sql_read_repository
 
     def list_invoices_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_invoices_page(**kwargs)

@@ -24,7 +24,6 @@ describe("batch accounting API", () => {
 
     const payload = await fetchBatchAccounting({
       bankYear: "2026",
-      oaYear: "2026",
       bucket: "unsubmitted",
     });
 
@@ -52,7 +51,6 @@ describe("batch accounting API", () => {
 
     const payload = await submitBatchAccounting({
       bankYear: "2026",
-      oaYear: "2026",
       bankRowId: "bank-1",
       oaRowIds: ["oa-1"],
       expectedVersion: 3,
@@ -69,7 +67,6 @@ describe("batch accounting API", () => {
         method: "POST",
         body: JSON.stringify({
           bank_year: "2026",
-          oa_year: "2026",
           bank_row_id: "bank-1",
           oa_row_ids: ["oa-1"],
           expected_version: 3,

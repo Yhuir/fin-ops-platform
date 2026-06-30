@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, Button, Spinner, Tooltip } from "@heroui/react";
-import { RefreshCw } from "lucide-react";
+import { History, RefreshCw } from "lucide-react";
 
+import AppDrawer from "../components/common/AppDrawer";
 import {
   FinanceStatusTag,
   FinanceTable,
@@ -11,12 +12,14 @@ import {
   FinanceTableColumn,
   FinanceTableHeader,
   FinanceTableRow,
+  TableCellStack,
 } from "../components/common/FinanceTable";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import { fetchAppHealthDashboard } from "../features/appHealth/api";
 import type {
   OperationsDashboardEndpointPerformance,
+  OperationsDashboardImportEvent,
   OperationsDashboardInventoryBlock,
   OperationsDashboardPayload,
   OperationsDashboardPercentiles,
@@ -63,6 +66,17 @@ function formatNumber(value: number | null | undefined) {
     return EMPTY_VALUE;
   }
   return new Intl.NumberFormat("zh-CN").format(value);
+}
+
+function formatCountWithSupplement(value: number | null | undefined, supplementary: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return EMPTY_VALUE;
+  }
+  const base = formatNumber(value);
+  if (supplementary === null || supplementary === undefined || !Number.isFinite(supplementary)) {
+    return base;
+  }
+  return `${base}（${formatNumber(supplementary)}）`;
 }
 
 function formatMs(value: number | null | undefined) {
@@ -162,6 +176,21 @@ function workerState(row: OperationsDashboardPayload["runtime_performance"]["wor
   return { label: row.current_effective === false ? "historical" : "active", tone: row.current_effective === false ? "neutral" as const : "success" as const };
 }
 
+function importEventState(row: OperationsDashboardImportEvent) {
+  const rawStatus = String(row.status || "");
+  const status = rawStatus.toLowerCase();
+  if (status === "completed" || status === "success" || status === "succeeded" || status === "done") {
+    return { label: rawStatus || "completed", tone: "success" as const };
+  }
+  if (status === "running" || status === "processing" || status === "pending") {
+    return { label: rawStatus, tone: "warning" as const };
+  }
+  if (status === "failed" || status === "error") {
+    return { label: rawStatus, tone: "danger" as const };
+  }
+  return { label: rawStatus || "unknown", tone: "neutral" as const };
+}
+
 function RuntimeOverview({ payload }: { payload: OperationsDashboardPayload }) {
   const readModels = payload.runtime_performance.read_models;
   const workers = payload.runtime_performance.workers;
@@ -228,7 +257,7 @@ function InventorySourceRows({ title, block }: { title: string; block: Operation
           {block.sources.map((source) => (
             <FinanceTableRow key={source.key} id={source.key}>
               <FinanceTableCell columnRole="identity" textValue={source.label}>{source.label}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(source.count)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatCountWithSupplement(source.count, source.supplementary_count)}</FinanceTableCell>
               <FinanceTableCell columnRole="date">{formatTimestamp(source.latest_synced_at)}</FinanceTableCell>
             </FinanceTableRow>
           ))}
@@ -237,7 +266,52 @@ function InventorySourceRows({ title, block }: { title: string; block: Operation
   );
 }
 
-function DataInventory({ payload }: { payload: OperationsDashboardPayload }) {
+function ImportEventsTable({ ariaLabel, rows }: { ariaLabel: string; rows: OperationsDashboardImportEvent[] }) {
+  return (
+    <FinanceTable ariaLabel={ariaLabel} minWidth={760}>
+      <FinanceTableHeader>
+        <FinanceTableColumn columnRole="identity" isRowHeader>类型</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description">文件/来源</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn>
+        <FinanceTableColumn columnRole="date">时间</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status">状态</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody>
+          {rows.length === 0 ? (
+            <FinanceTableRow id="empty-import-events">
+              <FinanceTableCell columnRole="identity">{EMPTY_VALUE}</FinanceTableCell>
+              <FinanceTableCell columnRole="description">{EMPTY_VALUE}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{EMPTY_VALUE}</FinanceTableCell>
+              <FinanceTableCell columnRole="date">{EMPTY_VALUE}</FinanceTableCell>
+              <FinanceTableCell columnRole="status">{EMPTY_VALUE}</FinanceTableCell>
+            </FinanceTableRow>
+          ) : (
+            rows.map((row, index) => {
+              const state = importEventState(row);
+              const rowKey = row.key || `${row.source_key}:${row.imported_at ?? index}`;
+              return (
+                <FinanceTableRow key={rowKey} id={rowKey}>
+                  <FinanceTableCell columnRole="identity" textValue={row.label}>{row.label}</FinanceTableCell>
+                  <FinanceTableCell columnRole="description" textValue={row.source_name}>
+                    <TableCellStack primary={row.source_name || EMPTY_VALUE} secondary={row.imported_by || undefined} />
+                  </FinanceTableCell>
+                  <FinanceTableCell columnRole="quantity">{formatCountWithSupplement(row.count, row.supplementary_count)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="date">{formatTimestamp(row.imported_at)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="status">
+                    <FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag>
+                  </FinanceTableCell>
+                </FinanceTableRow>
+              );
+            })
+          )}
+      </FinanceTableBody>
+    </FinanceTable>
+  );
+}
+
+function DataInventory({ payload, onOpenImportHistory }: { payload: OperationsDashboardPayload; onOpenImportHistory: () => void }) {
+  const importEvents = payload.data_inventory.import_events ?? [];
+  const latestImportEvents = importEvents.slice(0, 5);
   return (
     <Section title="数据" testId="app-health-data">
       <div className="app-health-inventory-grid">
@@ -249,6 +323,22 @@ function DataInventory({ payload }: { payload: OperationsDashboardPayload }) {
         <InventorySourceRows title="银行流水" block={payload.data_inventory.bank} />
         <InventorySourceRows title="发票" block={payload.data_inventory.invoice} />
         <InventorySourceRows title="OA" block={payload.data_inventory.oa} />
+      </div>
+      <div className="app-health-import-events">
+        <div className="app-health-import-events__header">
+          <h3 className="app-health-import-events__title">最近导入记录</h3>
+          <Button
+            className="app-health-history-button"
+            isDisabled={importEvents.length === 0}
+            onPress={onOpenImportHistory}
+            size="sm"
+            variant="tertiary"
+          >
+            <History aria-hidden="true" size={15} strokeWidth={2.2} />
+            查看全部导入历史
+          </Button>
+        </div>
+        <ImportEventsTable ariaLabel="最近导入记录" rows={latestImportEvents} />
       </div>
     </Section>
   );
@@ -443,6 +533,7 @@ export default function AppHealthOperationsPage() {
   const [payload, setPayload] = useState<OperationsDashboardPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isImportHistoryOpen, setImportHistoryOpen] = useState(false);
   const inFlightRef = useRef<AbortController | null>(null);
 
   const loadDashboard = useCallback(async () => {
@@ -529,9 +620,19 @@ export default function AppHealthOperationsPage() {
 
       {payload ? (
         <>
-          <DataInventory payload={payload} />
+          <DataInventory payload={payload} onOpenImportHistory={() => setImportHistoryOpen(true)} />
           <RequestPerformance rows={payload.request_performance.endpoints} />
           <RuntimePerformance payload={payload} />
+          <AppDrawer
+            className="app-health-import-history-drawer"
+            closeLabel="关闭导入历史"
+            open={isImportHistoryOpen}
+            onClose={() => setImportHistoryOpen(false)}
+            title="导入历史"
+            width={720}
+          >
+            <ImportEventsTable ariaLabel="全部导入历史" rows={payload.data_inventory.import_events ?? []} />
+          </AppDrawer>
         </>
       ) : !loadError ? (
         <AppHealthNotice status="accent">正在加载。</AppHealthNotice>

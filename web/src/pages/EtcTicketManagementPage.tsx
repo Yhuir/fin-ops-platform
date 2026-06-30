@@ -64,8 +64,8 @@ const initialCounts: EtcBatchCounts = {
   submitted: 0,
 };
 
-const MANUAL_OA_SUBMITTED_REASON = "用户确认 OA 草稿已提交。";
-const MANUAL_OA_NOT_SUBMITTED_REASON = "用户确认 OA 草稿未提交。";
+const MANUAL_OA_SUBMITTED_REASON = "用户确认审批草稿已提交。";
+const MANUAL_OA_NOT_SUBMITTED_REASON = "用户确认审批草稿未提交。";
 
 function formatMoney(value: string | number) {
   const parsed = Number(value);
@@ -177,8 +177,8 @@ function batchStatusLabel(status: EtcBatchStatus) {
   const labels: Record<EtcBatchStatus, string> = {
     unsubmitted: "未提交",
     draft_creating: "草稿创建中",
-    draft_created: "OA草稿已创建",
-    not_submitted: "未提交OA",
+    draft_created: "审批草稿已创建",
+    not_submitted: "未提交审批",
     failed: "创建失败",
     submitted: "已提交",
   };
@@ -196,9 +196,9 @@ function businessBatchStatusLabel(status: EtcBusinessBatchStatus) {
     import_partial_failed: "部分导入失败",
     oa_draft_creating: "草稿创建中",
     oa_draft_failed: "草稿创建失败",
-    oa_confirmation_pending: "待确认OA状态",
-    oa_submitted: "OA已提交",
-    not_submitted: "未提交OA",
+    oa_confirmation_pending: "待确认提交",
+    oa_submitted: "已提交审批",
+    not_submitted: "未提交审批",
     manually_marked_submitted: "人工确认已提交",
     manually_marked_not_submitted: "人工确认未提交",
     migration_conflict: "迁移冲突",
@@ -318,9 +318,43 @@ function batchOaLabel(batch: EtcBatchSummary) {
   const parts = [
     batch.linkedOaApplicant,
     batch.linkedOaApplyDate,
-    batch.linkedOaAmount ? `OA ${formatMoney(batch.linkedOaAmount)}` : "",
+    batch.linkedOaAmount ? `审批金额 ${formatMoney(batch.linkedOaAmount)}` : "",
   ].filter(Boolean);
   return parts.join(" / ");
+}
+
+function formatMonthName(value: string | null | undefined) {
+  const [year, month] = String(value || "").split("-");
+  if (!year || !month) {
+    return "";
+  }
+  const parsedMonth = Number(month);
+  return Number.isFinite(parsedMonth) && parsedMonth > 0 ? `${parsedMonth}月` : "";
+}
+
+function monthFromBatchIdentifier(value: string | null | undefined) {
+  const text = String(value || "");
+  const dashed = text.match(/(20\d{2})[-/年](0?[1-9]|1[0-2])/);
+  if (dashed) {
+    return `${dashed[1]}-${String(dashed[2]).padStart(2, "0")}`;
+  }
+  const compact = text.match(/(20\d{2})(0[1-9]|1[0-2])(?:\d{2})?/);
+  return compact ? `${compact[1]}-${compact[2]}` : "";
+}
+
+function batchDisplayTitle(
+  batch: Pick<EtcBatchSummary, "scopeMonth" | "passageStartDate" | "passageEndDate" | "externalBatchId" | "etcBatchId">,
+) {
+  const monthLabel = formatMonthName(
+    batch.scopeMonth
+    || monthFromBatchIdentifier(batch.externalBatchId)
+    || monthFromBatchIdentifier(batch.etcBatchId),
+  );
+  if (monthLabel) {
+    return `${monthLabel}批次`;
+  }
+  const dateRange = formatShortDateRange(batch.passageStartDate, batch.passageEndDate);
+  return dateRange === "未记录日期" ? "未记录月份批次" : `${dateRange}批次`;
 }
 
 function reconciliationStatusLabel(status: EtcReconciliationTask["status"]) {
@@ -405,12 +439,13 @@ function formatTaskTitle(task: EtcReconciliationTask) {
 function formatEtcUiErrorMessage(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
   return message
+    .replace(/OA\s*草稿/g, "审批草稿")
     .replace(/ETC对账任务/g, "ETC批次流程")
     .replace(/对账任务/g, "批次");
 }
 
 function taskCountText(task: Pick<EtcReconciliationTask, "etcInvoiceCount" | "supplementCount">) {
-  return `ETC票 ${task.etcInvoiceCount} + 补充凭证 ${task.supplementCount}`;
+  return `发票 ${task.etcInvoiceCount} + 补充凭证 ${task.supplementCount}`;
 }
 
 function taskHasSubmittedConfirmation(task: Pick<EtcReconciliationTask, "status" | "submittedConfirmedAt">) {
@@ -602,6 +637,7 @@ function businessBatchToBatchSummary(batch: EtcBusinessBatchSummary): EtcBatchSu
     id: batch.businessBatchId,
     etcBatchId: batch.externalEtcBatchId || batch.businessBatchId,
     externalBatchId: batch.externalEtcBatchId || batch.businessBatchId,
+    scopeMonth: batch.scopeMonth,
     status: submitted ? "submitted" : "unsubmitted",
     sourceType: "business_batch",
     invoiceCount: batch.invoiceSummary.count,
@@ -622,15 +658,40 @@ function businessBatchToBatchSummary(batch: EtcBusinessBatchSummary): EtcBatchSu
     etcInvoiceCount: batch.invoiceSummary.count,
     supplementCount: 0,
     supplementAmount: "0.00",
-    displayCountText: `ETC票 ${batch.invoiceSummary.count} + 补充凭证 0`,
+    displayCountText: `发票 ${batch.invoiceSummary.count} + 补充凭证 0`,
     note: businessBatchStatusLabel(batch.status),
   };
 }
 
 function businessBatchToBatchDetail(batch: EtcBusinessBatchDetail): EtcBatchDetail {
+  const invoiceItems = batch.invoiceItems;
+  const issueDates = invoiceItems.map((invoice) => invoice.issueDate).filter(Boolean).sort();
+  const passageDates = invoiceItems
+    .flatMap((invoice) => [invoice.passageStartDate, invoice.passageEndDate])
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  const plateCounts = new Map<string, { invoiceCount: number; totalAmount: number }>();
+  invoiceItems.forEach((invoice) => {
+    const plateNumber = invoice.plateNumber || "未识别车牌";
+    const current = plateCounts.get(plateNumber) ?? { invoiceCount: 0, totalAmount: 0 };
+    current.invoiceCount += 1;
+    const amount = Number(invoice.totalAmount);
+    current.totalAmount += Number.isFinite(amount) ? amount : 0;
+    plateCounts.set(plateNumber, current);
+  });
   return {
     ...businessBatchToBatchSummary(batch),
-    invoiceItems: batch.invoiceItems,
+    issueStartDate: issueDates[0] ?? null,
+    issueEndDate: issueDates[issueDates.length - 1] ?? null,
+    passageStartDate: passageDates[0] ?? null,
+    passageEndDate: passageDates[passageDates.length - 1] ?? null,
+    plateCount: plateCounts.size,
+    plateSummary: Array.from(plateCounts.entries()).map(([plateNumber, item]) => ({
+      plateNumber,
+      invoiceCount: item.invoiceCount,
+      totalAmount: item.totalAmount.toFixed(2),
+    })),
+    invoiceItems,
   };
 }
 
@@ -654,6 +715,7 @@ function taskImportInvoicesToBatchDetail(task: EtcReconciliationTask, invoiceIte
     id: task.importBatchId,
     etcBatchId: task.etcBatchId || task.importBatchId,
     externalBatchId: task.etcBatchId || task.importBatchId,
+    scopeMonth: "",
     status: "unsubmitted",
     sourceType: "etc_import_batch",
     invoiceCount: task.importedInvoiceCount || invoiceItems.length,
@@ -678,7 +740,7 @@ function taskImportInvoicesToBatchDetail(task: EtcReconciliationTask, invoiceIte
     etcInvoiceCount: task.etcInvoiceCount || invoiceItems.length,
     supplementCount: task.supplementCount,
     supplementAmount: task.supplementAmount,
-    displayCountText: `ETC票 ${task.etcInvoiceCount || invoiceItems.length} + 补充凭证 ${task.supplementCount}`,
+    displayCountText: `发票 ${task.etcInvoiceCount || invoiceItems.length} + 补充凭证 ${task.supplementCount}`,
     note: task.title,
     invoiceItems,
   };
@@ -1146,7 +1208,7 @@ export default function EtcTicketManagementPage() {
   const canDeleteTask = (_task: EtcReconciliationTask) => canMutateData;
   const removeImportedInvoicesDisabledReason = (task: EtcReconciliationTask) => {
     if (task.submittedConfirmedAt?.trim()) {
-      return "OA已提交，不能移除已导入发票";
+      return "审批已提交，不能移除已导入发票";
     }
     if (task.status === "importing") {
       return "导入中，不能移除已导入发票";
@@ -1158,12 +1220,12 @@ export default function EtcTicketManagementPage() {
   };
   const deleteTaskDescription = (task: EtcReconciliationTask) => {
     if (task.status === "imported") {
-      return "将删除本地 ETC 批次、上传文件、核对结果和已导入发票。OA 系统中的草稿和已提交记录不会删除。";
+      return "将删除本地批次、上传文件、核对结果和已导入发票。审批系统中的草稿和已提交记录不会删除。";
     }
     if (task.status === "ready_for_import") {
-      return "将删除本地 ETC 批次、上传文件和核对结果。OA 系统中的草稿和已提交记录不会删除。";
+      return "将删除本地批次、上传文件和核对结果。审批系统中的草稿和已提交记录不会删除。";
     }
-    return "将删除本地 ETC 批次、上传文件和核对结果。OA 系统中的草稿和已提交记录不会删除。";
+    return "将删除本地批次、上传文件和核对结果。审批系统中的草稿和已提交记录不会删除。";
   };
   const businessBatchForBatchSummary = (batch: EtcBatchSummary) => {
     const candidateIds = new Set(
@@ -1185,9 +1247,9 @@ export default function EtcTicketManagementPage() {
   const deleteBatchDescription = (target: Extract<DeleteTarget, { kind: "batch" }>) => {
     const businessBatch = businessBatchForBatchSummary(target.item);
     if (businessBatch && isSubmittedBusinessStatus(businessBatch.status)) {
-      return "将删除本地 ETC 批次并取消发票合并，OA 系统中的草稿和已提交记录不会删除。";
+      return "将删除本地批次并取消发票合并，审批系统中的草稿和已提交记录不会删除。";
     }
-    return "将删除本地 ETC 批次及已导入内容，OA 系统中的草稿和已提交记录不会删除。";
+    return "将删除本地批次及已导入内容，审批系统中的草稿和已提交记录不会删除。";
   };
   const batchDeletePlan = (batch: EtcBatchSummary): BatchDeletePlan => {
     const businessBatch = businessBatchForBatchSummary(batch);
@@ -1371,12 +1433,10 @@ export default function EtcTicketManagementPage() {
     ? selectedTaskBusinessBatch
     : selectedBusinessBatch;
   const currentOaDraftBatchId = currentBusinessBatch?.businessBatchId ?? "";
-  const currentOaDraftBatchLabel = selectedTaskImportBatchSelected
-    ? (selectedTaskBusinessBatch?.externalEtcBatchId || selectedTaskBusinessBatch?.businessBatchId || "")
-    : (selectedBusinessBatch?.externalEtcBatchId || selectedBusinessBatch?.businessBatchId || "");
+  const currentOaDraftBatchLabel = selectedBatch ? batchDisplayTitle(selectedBatch) : "";
   const currentOaDraftDescription = selectedTaskImportBatchSelected
-    ? `为当前任务的 ${importedInvoiceCount} 张发票创建 OA 草稿，合计 ${importedInvoiceAmount}。`
-    : "为当前批次创建 OA 草稿。";
+    ? `为当前任务的 ${importedInvoiceCount} 张发票创建审批草稿，合计 ${importedInvoiceAmount}。`
+    : "为当前批次创建审批草稿。";
   const canSubmitCurrentBatch = activeStatus === "unsubmitted"
     && canMutateData
     && (selectedTaskImportBatchSelected
@@ -1913,7 +1973,7 @@ export default function EtcTicketManagementPage() {
         oaDraftUrl: result.oaDraftUrl,
       });
     } catch (caught) {
-      setActionError(formatEtcUiErrorMessage(caught, "OA 草稿创建失败。"));
+      setActionError(formatEtcUiErrorMessage(caught, "审批草稿创建失败。"));
     } finally {
       setDraftCreating(false);
     }
@@ -1989,11 +2049,11 @@ export default function EtcTicketManagementPage() {
   };
 
   const renderOaStatusPanel = (batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => (
-    <section className="etc-oa-status-panel" aria-label="OA提交确认">
+    <section className="etc-oa-status-panel" aria-label="审批提交确认">
       <div className="etc-oa-status-header">
         <div>
-          <strong>OA草稿已创建，等待提交确认。</strong>
-          <p>请选择 OA 草稿的实际提交状态。</p>
+          <strong>审批草稿已创建，等待提交确认。</strong>
+          <p>请选择审批草稿的实际提交状态。</p>
         </div>
         <div className="etc-oa-status-actions">
           {batch.oaDraftUrl ? (
@@ -2222,7 +2282,7 @@ export default function EtcTicketManagementPage() {
           {actionError ? <StatePanel tone="error">{actionError}</StatePanel> : null}
           {!canMutateData ? (
             <StatePanel tone="warning" compact>
-              当前账号仅支持查看和导出，不能创建 OA 草稿、人工确认、上传、删除或新建 ETC 批次。
+              当前账号仅支持查看和导出，不能创建审批草稿、人工确认、上传、删除或新建批次。
             </StatePanel>
           ) : null}
 
@@ -2269,7 +2329,7 @@ export default function EtcTicketManagementPage() {
               <span>关键词</span>
               <input
                 value={keyword}
-                placeholder="批次号/OA/发票号"
+                placeholder="批次、审批或发票"
                 onChange={(event) => setKeyword(event.target.value)}
               />
             </label>
@@ -2282,7 +2342,7 @@ export default function EtcTicketManagementPage() {
                 size="sm"
                 variant="primary"
               >
-                提交OA
+                提交审批
               </Button>
             ) : null}
           </div>
@@ -2317,7 +2377,6 @@ export default function EtcTicketManagementPage() {
                     ? reconciliationTasks.find((task) => task.taskId === batch.id) ?? null
                     : null;
                   const deletable = taskRow ? canDeleteTask(taskRow) : canDeleteBatch(batch);
-                  const batchTitle = batch.externalBatchId || batch.etcBatchId;
                   const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
                   const rowLinkedTask = taskRow ?? (
                     businessBatch?.taskId
@@ -2325,8 +2384,6 @@ export default function EtcTicketManagementPage() {
                       : null
                   );
                   const selected = taskRow ? selectedTaskId === taskRow.taskId : selectedBatchId === batch.id;
-                  const rowStartDate = rowLinkedTask?.periodStart ?? batch.passageStartDate;
-                  const rowEndDate = rowLinkedTask?.periodEnd ?? batch.passageEndDate;
                   const rowCountText = rowLinkedTask
                     ? taskCountText(rowLinkedTask)
                     : batch.displayCountText || taskCountText({ etcInvoiceCount: batch.etcInvoiceCount, supplementCount: batch.supplementCount });
@@ -2336,6 +2393,7 @@ export default function EtcTicketManagementPage() {
                   const rowAmountText = rowLinkedTask
                     ? `金额 ${formatMoney(rowAmount)} 元`
                     : `${batch.invoiceCount} 张 / ${formatMoney(batch.totalAmount)} 元`;
+                  const displayTitle = batchDisplayTitle(batch);
                   return (
                     <li
                       key={batch.id}
@@ -2345,7 +2403,7 @@ export default function EtcTicketManagementPage() {
                       <button
                         type="button"
                         className="etc-list-row-button"
-                        aria-label={`查看ETC批次 ${batchTitle}`}
+                        aria-label={`查看批次 ${displayTitle}`}
                         aria-current={selected ? "true" : undefined}
                         data-selected={selected ? "true" : undefined}
                         onClick={() => {
@@ -2364,13 +2422,12 @@ export default function EtcTicketManagementPage() {
                         }}
                       >
                         <span className="etc-row-title">
-                          <strong>{formatShortDateRange(rowStartDate, rowEndDate)}</strong>
+                          <strong>{displayTitle}</strong>
                           <StatusChip tone={businessBatch ? businessBatchTone(businessBatch.status) : (batch.status === "submitted" ? "success" : "primary")}>
                             {businessBatch ? businessBatchStatusLabel(businessBatch.status) : batchStatusLabel(batch.status)}
                           </StatusChip>
                         </span>
                         <span className="etc-batch-fields">
-                          <span>{batchTitle}</span>
                           <span>{rowCountText}</span>
                           <span>{rowAmountText}</span>
                           {businessBatch?.importAttempts.length ? <span>导入记录 {businessBatch.importAttempts.length} 次</span> : <span>{batch.plateCount} 个车牌</span>}
@@ -2380,7 +2437,7 @@ export default function EtcTicketManagementPage() {
                       <button
                         type="button"
                         className="etc-icon-action etc-icon-action--danger"
-                        aria-label={deletable ? `删除批次 ${batchTitle}` : deleteBatchDisabledReason(batch)}
+                        aria-label={deletable ? `删除批次 ${displayTitle}` : deleteBatchDisabledReason(batch)}
                         title={deletable ? "删除批次" : deleteBatchDisabledReason(batch)}
                         disabled={!deletable || deleteSubmitting}
                         onClick={(event) => {
@@ -2871,7 +2928,7 @@ export default function EtcTicketManagementPage() {
                   <div className="etc-detail-heading">
                     <div>
                       <h2>批次详情</h2>
-                      <p>{selectedBatch ? selectedBatch.externalBatchId || selectedBatch.etcBatchId : "选择左侧批次。"}</p>
+                      <p>{selectedBatch ? batchDisplayTitle(selectedBatch) : "选择左侧批次。"}</p>
                     </div>
                     {selectedBatch ? (
                       <Button
@@ -2896,7 +2953,7 @@ export default function EtcTicketManagementPage() {
                   <div className="etc-detail-heading">
                     <div>
                       <div className="etc-detail-title-line">
-                        <h2>{selectedBatch.externalBatchId || selectedBatch.etcBatchId}</h2>
+                        <h2>{batchDisplayTitle(selectedBatch)}</h2>
                         <StatusChip tone={selectedBusinessBatch ? businessBatchTone(selectedBusinessBatch.status) : (selectedBatch.status === "submitted" ? "success" : "primary")}>
                           {selectedBusinessBatch ? businessBatchStatusLabel(selectedBusinessBatch.status) : batchStatusLabel(selectedBatch.status)}
                         </StatusChip>
@@ -3014,7 +3071,7 @@ export default function EtcTicketManagementPage() {
         <AppDialog
           open={Boolean(supplementUploadCard)}
           title="上传补充凭证"
-          description="补充凭证会直接覆盖当前信用卡项；金额不一致或无法识别时，差异说明会进入审计和 OA 提交口径。"
+          description="补充凭证会直接覆盖当前信用卡项；金额不一致或无法识别时，差异说明会进入审计和审批提交口径。"
           onClose={closeSupplementUploadDialog}
           actions={
             <>
@@ -3111,7 +3168,7 @@ export default function EtcTicketManagementPage() {
             </div>
           ) : deleteTarget?.kind === "batch" ? (
             <div className="etc-dialog-detail-list">
-              <p>批次：{deleteTarget.item.externalBatchId || deleteTarget.item.etcBatchId}</p>
+              <p>批次：{batchDisplayTitle(deleteTarget.item)}</p>
               <p>通行期间：{formatDateRange(deleteTarget.item.passageStartDate, deleteTarget.item.passageEndDate)}</p>
               <p>数量：{deleteTarget.item.displayCountText || taskCountText({ etcInvoiceCount: deleteTarget.item.etcInvoiceCount, supplementCount: deleteTarget.item.supplementCount })}</p>
               <p>金额：{formatMoney(deleteTarget.item.totalAmount)} 元</p>
@@ -3161,7 +3218,7 @@ export default function EtcTicketManagementPage() {
 
         <AppDialog
           open={createDialogOpen}
-          title={draftResult ? "OA提交确认" : "创建OA草稿"}
+          title={draftResult ? "审批提交确认" : "创建审批草稿"}
           onClose={() => setCreateDialogOpen(false)}
           actions={
             draftResult ? (
@@ -3208,8 +3265,8 @@ export default function EtcTicketManagementPage() {
         >
           {draftResult ? (
             <div className="etc-dialog-detail-list">
-              <p>OA草稿已创建，等待提交确认。</p>
-              <p>批次：{draftResult.etcBatchId}</p>
+              <p>审批草稿已创建，等待提交确认。</p>
+              <p>批次：{currentOaActionBatch ? batchDisplayTitle(businessBatchToBatchSummary(currentOaActionBatch)) : currentOaDraftBatchLabel || "-"}</p>
             </div>
           ) : (
             <div className="etc-dialog-detail-list">

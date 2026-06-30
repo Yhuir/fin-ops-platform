@@ -30,6 +30,7 @@
 | OA session/token | `auth.py`、session API | 权限和身份必须可校验 |
 | OA Mongo/query | `mongo_oa_adapter.py` | 外部数据进入 adapter/projection |
 | OA attachment/import | OA attachment services | 识别结果必须审计和可追踪 |
+| OA source alias | `app.oa_source_aliases` | 仅 `active` alias 可参与 OA 附件票 duplicate canonicalization；不得按金额/申请人/项目自动合并 |
 
 ## 输出 I/O
 
@@ -38,6 +39,7 @@
 | OA projection rows | repositories/read models | 带 source version |
 | OA session/permission payload | frontend session | 不泄露 secret |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
+| OA source alias canonicalization | object identity audit / downstream duplicate classifier | 只读消费 `active` alias，未批准 alias 仍按原 OA row/source 判定 |
 | OA manual import mutation result | settings/workbench frontend、operation barrier | `refresh-attachments`、`manual-imports` create/remove 必须返回 affected scopes、read model scope keys、freshness targets 和 operation barrier targets |
 
 ## 持久化与投影
@@ -79,9 +81,9 @@
 
 ## Canonical facts ownership
 
-- Owned facts: `app.oa_applications`、`app.oa_application_items`、`app.oa_attachments`、`app.oa_sync_runs`、`app.oa_sync_watermarks`、`app.oa_attachment_invoice_cache*`、`app.manual_oa_imports`、`app.oa_applicant_credentials`。
-- Allowed writes: OA sync worker、manual OA import service、OA credential service、受控 attachment repair tools。
+- Owned facts: `app.oa_applications`、`app.oa_application_items`、`app.oa_attachments`、`app.oa_sync_runs`、`app.oa_sync_watermarks`、`app.oa_attachment_invoice_cache*`、`app.oa_source_aliases`、`app.manual_oa_imports`、`app.oa_applicant_credentials`。
+- Allowed writes: OA sync worker、manual OA import service、OA credential service、受控 attachment repair/alias tools。
 - Allowed reads: OA projection adapters/read ports、OA integration APIs。
 - Downstream outputs: workbench、pending invoice、OA pending、invoice lifecycle、search dirty scopes 或 owner producer 输出。
-- Forbidden paths: production API 不得直接读 OA Mongo；OA cache 不得当作正式发票池；OA credential 不得通过 settings snapshot fallback 写入。
+- Forbidden paths: production API 不得直接读 OA Mongo；OA cache 不得当作正式发票池；OA source alias 不得由弱业务指纹自动激活；OA credential 不得通过 settings snapshot fallback 写入。
 - Old code deletion: direct Mongo runtime adapter fallback、OA snapshot fallback 和绕过 projection 的 API 读取必须删除；migration/audit/rollback 工具保留不算 closure。

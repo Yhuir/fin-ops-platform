@@ -29,6 +29,8 @@ AUTO_COMPLETABLE_RELATION_MODES = frozenset({"manual_confirmed"})
 THREE_PANE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 AUTO_COMPLETION_ACTOR = "system:workbench-relation-auto-completion"
 AUTO_COMPLETION_HISTORY_OPERATION = "auto_complete_three_way_relation"
+AUTO_PAIR_ACTOR = "system:workbench-relation-auto-pair"
+AUTO_PAIR_HISTORY_OPERATION = "auto_create_relation_from_decision"
 
 
 class WorkbenchMatchingRelationReadPort:
@@ -54,6 +56,37 @@ class WorkbenchMatchingRelationReadPort:
             if not isinstance(relation, dict):
                 raise ValueError("relation_reader returned a non-dict active relation.")
         return [dict(relation) for relation in relations]
+
+    def has_withdrawn_relation_for_row_ids(self, row_ids: list[str]) -> bool:
+        target = {
+            str(row_id or "").strip()
+            for row_id in list(row_ids or [])
+            if str(row_id or "").strip()
+        }
+        if not target:
+            return False
+        checker = getattr(self._relation_reader, "has_withdrawn_relation_for_row_ids", None)
+        if callable(checker):
+            return bool(checker(list(target)))
+        list_history = getattr(self._relation_reader, "list_history", None)
+        if not callable(list_history):
+            return False
+        for history in list(list_history() or []):
+            if not isinstance(history, dict):
+                continue
+            if str(history.get("operation_type") or "") != "withdraw_link":
+                continue
+            for relation in list(history.get("before_relations") or []):
+                if not isinstance(relation, dict):
+                    continue
+                relation_row_ids = {
+                    str(row_id or "").strip()
+                    for row_id in list(relation.get("row_ids") or [])
+                    if str(row_id or "").strip()
+                }
+                if relation_row_ids == target:
+                    return True
+        return False
 
 
 class WorkbenchReconciliationEngine:
@@ -142,6 +175,11 @@ class WorkbenchReconciliationEngine:
             active_decision_keys={decision.decision_key for decision in decisions},
         )
         self._decision_store.upsert_decisions(decisions)
+        auto_created_relation_count = self._auto_create_paired_relations(
+            decisions,
+            rows_by_id=self._rows_by_id((oa_rows, bank_rows, invoice_rows)),
+            scope_month=normalized_scope_month,
+        )
         auto_completed_relation_count = self._auto_complete_two_pane_relations(
             decisions,
             rows_by_id=self._rows_by_id((oa_rows, bank_rows, invoice_rows)),
@@ -152,6 +190,7 @@ class WorkbenchReconciliationEngine:
             decisions=decisions,
             expired_count=expired_count + missing_expired_count,
             suppressed_by_pair_relation_count=len(scoped_held_row_ids),
+            auto_created_relation_count=auto_created_relation_count,
             auto_completed_relation_count=auto_completed_relation_count,
             duration_ms=self._duration_ms(started_at),
         )
@@ -241,6 +280,68 @@ class WorkbenchReconciliationEngine:
             completed += 1
         return completed
 
+    def _auto_create_paired_relations(
+        self,
+        decisions: list[WorkbenchDecision],
+        *,
+        rows_by_id: dict[str, dict[str, Any]],
+        scope_month: str,
+    ) -> int:
+        confirm_relation = getattr(self._relation_command_service, "confirm_relation", None)
+        if not callable(confirm_relation):
+            return 0
+        created = 0
+        for decision in sorted(decisions, key=lambda item: item.decision_key):
+            if not self._decision_can_create_relation(decision):
+                continue
+            row_ids = list(decision.row_ids)
+            if any(row_id not in rows_by_id for row_id in row_ids):
+                continue
+            if self._relation_read_port.active_relations_for_row_ids(row_ids):
+                continue
+            if self._relation_read_port.has_withdrawn_relation_for_row_ids(row_ids):
+                continue
+
+            rows_by_type = self._decision_rows_by_type(decision, rows_by_id)
+            amount_check = self._amount_check_service.check(rows_by_type)
+            if str(amount_check.get("status") or "") != "matched":
+                continue
+            case_id = str(decision.decision_key or "").strip()
+            if not case_id:
+                continue
+            confirm_relation(
+                case_id=case_id,
+                row_ids=row_ids,
+                row_types=self._decision_row_types(decision),
+                relation_mode="manual_confirmed",
+                actor_id=AUTO_PAIR_ACTOR,
+                month_scope=scope_month or str(decision.scope_month or "all").strip(),
+                note="系统自动配对",
+                amount_check=amount_check,
+                special_metadata=self._auto_pair_metadata(decision),
+                evidence=self._plain_value(decision.evidence or {}),
+                rule_version=str(decision.rule_version or ""),
+                relation_created_by=AUTO_PAIR_ACTOR,
+                history_note="系统自动配对",
+                idempotency_key=self._auto_pair_idempotency_key(decision.decision_key),
+                history_operation_type=AUTO_PAIR_HISTORY_OPERATION,
+            )
+            self._decision_store.consume_by_row_ids(row_ids, relation_id=case_id)
+            created += 1
+        return created
+
+    @classmethod
+    def _decision_can_create_relation(cls, decision: WorkbenchDecision) -> bool:
+        row_types = cls._decision_row_types_set(decision)
+        return (
+            decision.decision_status == DECISION_STATUS_PAIRED
+            and decision.display_state == DISPLAY_STATE_PAIRED
+            and decision.match_domain == MATCH_DOMAIN_FREE
+            and len(decision.row_ids) >= 2
+            and bool(row_types)
+            and row_types.issubset(THREE_PANE_ROW_TYPES)
+        )
+
     @classmethod
     def _decision_can_complete_relation(cls, decision: WorkbenchDecision) -> bool:
         return (
@@ -297,6 +398,22 @@ class WorkbenchReconciliationEngine:
     @staticmethod
     def _auto_completion_idempotency_key(case_id: str, decision_key: str) -> str:
         return f"workbench:auto-complete-three-way:{case_id}:{decision_key}"
+
+    @staticmethod
+    def _auto_pair_metadata(decision: WorkbenchDecision) -> dict[str, Any]:
+        return {
+            "auto_pair": {
+                "decision_key": decision.decision_key,
+                "decision_id": decision.decision_id,
+                "match_shape": decision.match_shape,
+                "rule_code": decision.rule_code,
+                "operation": AUTO_PAIR_HISTORY_OPERATION,
+            }
+        }
+
+    @staticmethod
+    def _auto_pair_idempotency_key(decision_key: str) -> str:
+        return f"workbench:auto-pair:{decision_key}"
 
     @classmethod
     def _decision_rows_by_type(
@@ -410,6 +527,7 @@ class WorkbenchReconciliationEngine:
         decisions: list[WorkbenchDecision],
         expired_count: int,
         suppressed_by_pair_relation_count: int,
+        auto_created_relation_count: int,
         auto_completed_relation_count: int,
         duration_ms: int,
     ) -> dict[str, Any]:
@@ -426,6 +544,7 @@ class WorkbenchReconciliationEngine:
             "special_decision_count": special_count,
             "expired_decision_count": int(expired_count or 0),
             "suppressed_by_pair_relation_count": int(suppressed_by_pair_relation_count or 0),
+            "auto_created_relation_count": int(auto_created_relation_count or 0),
             "auto_completed_relation_count": int(auto_completed_relation_count or 0),
             "duration_ms": duration_ms,
         }

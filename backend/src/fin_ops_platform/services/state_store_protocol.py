@@ -78,9 +78,32 @@ class ApplicationStateStoreProtocol(Protocol):
 
     def load_no_oa_bank_batches(self) -> dict[str, Any]: ...
 
-    def save_no_oa_bank_batches(self, snapshot: dict[str, Any]) -> None: ...
+    def save_no_oa_bank_batches(self, snapshot: dict[str, Any], *, relation_mode: str = "no_oa_bank_batch") -> None: ...
 
-    def save_no_oa_bank_batches_scope(self, snapshot: dict[str, Any], *, scope_key: str) -> None: ...
+    def save_no_oa_bank_batches_scope(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        scope_key: str,
+        relation_mode: str = "no_oa_bank_batch",
+    ) -> None: ...
+    def load_bank_flow_rule_batches(self) -> dict[str, Any]: ...
+    def save_bank_flow_rule_batches(self, snapshot: dict[str, Any]) -> None: ...
+    def save_bank_flow_rule_batches_scope(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        scope_key: str,
+    ) -> None: ...
+    def save_bank_flow_rule_batch_mutation(
+        self,
+        *,
+        pair_relation_snapshot: dict[str, Any],
+        bank_flow_rule_batch_snapshot: dict[str, Any],
+        workbench_read_model_snapshot: dict[str, Any],
+        changed_case_ids: set[str] | list[str] | tuple[str, ...],
+        changed_scope_keys: set[str] | list[str] | tuple[str, ...],
+    ) -> None: ...
 
     def load_workbench_read_models(self) -> dict[str, Any]: ...
 

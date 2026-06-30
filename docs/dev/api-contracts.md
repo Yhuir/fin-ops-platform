@@ -13,7 +13,7 @@
 - `/api/session/*`：OA 会话和当前用户。
 - `/api/workbench*`：关联工作台查询、详情、动作、异常、设置。
 - `/imports/*`：导入预览、确认、模板、批次和文件会话。
-- `/api/bank-flow-rule-batches/*`：流水规则批量处理，计划新增。
+- `/api/bank-flow-rule-batches/*`：流水规则批量处理。
 - `/api/no-oa-bank-batches/*`：免 OA 批次 legacy。
 - `/api/etc/business-batches*`：ETC 用户可见业务批次、补充导入、OA 草稿和 OA 提交人工确认。
 - `/api/tax-offset*`：税金抵扣和已认证导入。
@@ -42,7 +42,7 @@
 
 ## 日常报销批量账务管理 API
 
-`GET /api/batch-accounting?bank_year=YYYY&oa_year=YYYY&bucket=unsubmitted|submitted`
+`GET /api/batch-accounting?bank_year=YYYY&bucket=unsubmitted|submitted`
 
 响应字段：
 
@@ -50,9 +50,9 @@
 | --- | --- |
 | `summary.unsubmitted_count` | 当前筛选下未提交候选银行流水数量。 |
 | `summary.submitted_count` | 当前银行年份下已提交批量账务关系数量。 |
-| `summary.bank_year` / `summary.oa_year` | 后端实际使用的银行流水年份和 OA 单据年份。 |
+| `summary.bank_year` | 后端实际使用的银行流水年份；OA 候选不再按年份过滤。 |
 | `bank_rows` | 当前 bucket 的银行流水列表。 |
-| `oa_rows` | `unsubmitted` bucket 的可选 OA 日常报销单据列表。 |
+| `oa_rows` | `unsubmitted` bucket 的可选 OA 日常报销单据列表；候选必须没有 active `workbench_relation` 配对关系。 |
 | `relations_by_bank_row_id` | `submitted` bucket 中按银行流水 ID 索引的已提交关系详情。 |
 | `read_model_status` | 关联台 relation read model 读取状态。非 fresh 时页面不能把空 rows 当作“全部未提交”。 |
 | `read_model_stale_reasons` | relation read model 非 fresh 原因，按后端返回顺序去重。 |
@@ -170,7 +170,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ## 流水规则批量处理 API
 
-状态：planned。以下合同用于后续实现 `bank-flow-rule-batches`，当前生产代码仍以 legacy no-OA API 为主。
+状态：implemented-independent-io。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port 和 refresh persistence port 使用 `bank_flow_rule_batch`。底层历史物理批次存储暂由 bank-flow 命名 adapter 兼容，并通过 `relation_mode=bank_flow_rule_batch` 隔离；legacy `/api/no-oa-bank-batches/*` 仅作为 no-OA 兼容路径保留，不承接 bank-flow 新链路。
 
 `GET /api/bank-flow-rule-batches/tag-rules`
 
@@ -219,7 +219,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 请求不能包含 `selected_tag_codes`；旧字段不得作为新规则事实写入。
 - 只能提交当前 `active_tags` 中存在且可用的标签 code；未知、停用、重复 code 返回业务错误。
 - 成功后返回与 GET 相同结构，写审计动作 `bank_flow_rule_batch_tag_rules_updated`。
-- 保存后触发 `bank_flow_rule_batch`、`workbench`、`workbench_relation` 等受影响 read model refresh；不能递增 `bank_transaction_tags.version`。
+- 保存后触发独立 `bank_flow_rule_batch`、`workbench`、`workbench_relation` 等受影响 read model refresh；不能递增 `bank_transaction_tags.version`。
 
 `GET /api/bank-flow-rule-batches`
 
@@ -260,7 +260,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 `POST /api/bank-flow-rule-batches/reset-submitted`
 
-受控撤回当前所有已提交流水规则批次，让相关银行流水回到可重新按当前规则进入未提交候选的状态。该接口用于整理迁移期数据库状态，不能用手写 SQL 替代。
+受控撤回当前所有已提交流水规则批次，让相关银行流水回到可重新按当前规则进入未提交候选的状态。该接口用于重新按当前规则处理已提交批次，不能用手写 SQL 替代。
 
 请求示例：
 
@@ -784,8 +784,8 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - 列表响应必须包含 rows、summary、filters、read model 状态和可解释的状态字段。
 - filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项；表头下拉筛选通过 `filters` JSON 提交，字段之间按 AND 组合，同一字段内多值按 IN 组合。
 - `filters` 支持四区表字段：`counterparty_name`、`transaction_tag`、`bank_account`、`direction`、`seller_name`、`oa_applicant`、`oa_application_type`、`project_name` 等；SQL read model 和 query service 必须保持同一字段语义。
-- rows 中 `bank_transactions`、`input_invoices` 和 `oa` 都可以携带 `primary`、`relation_count`、`linked_relation_count`、`has_multiple`、`detail_mode` 和 `summaries`。同一 linked 或 candidate relation 下多笔银行流水、多张进项/销项发票或多张 OA 必须来自统一 `workbench_relation` distribution 并聚合为一条待找发票行；多项时前端用 `+N` 表达该类型全部成员，不再同时展示任一成员作为 primary，且同一多流水 relation 的其它成员不得再作为 standalone 行重复出现。
-- `bank_transactions.payment_summary.paid_total` 表示 relation 下 linked 流水合计；`input_invoices.payment_summary` 继续表达发票合计、已付合计、待付金额和差额。候选 relation 可以作为证据展示，但业务状态和 linked-only 金额判断仍只能使用 linked 成员。
+- rows 中 `bank_transactions`、`input_invoices` 和 `oa` 都可以携带 `primary`、`relation_count`、`linked_relation_count`、`has_multiple`、`detail_mode` 和 `summaries`。同一 linked relation 下多笔银行流水、多张进项/销项发票或多张 OA 必须来自统一 `workbench_relation` distribution 并聚合为一条待找发票行；多项时前端用 `+N` 表达该类型全部成员，不再同时展示任一成员作为 primary，且同一多流水 relation 的其它成员不得再作为 standalone 行重复出现。
+- `bank_transactions.payment_summary.paid_total` 表示 relation 下 linked 流水合计；`input_invoices.payment_summary` 继续表达发票合计、已付合计、待付金额和差额。未被正式化为 active relation 的自动匹配 decision 不进入下游 relation distribution，也不能作为开票、付款或已关联状态证据。
 - 关系详情和候选发票接口必须返回来源、匹配原因、冲突原因和可操作权限；关系详情必须能表达同一关系中的全部付款流水、发票、OA 和 relation case id。`GET /api/pending-invoices/rows/{transaction_id}/relation-detail` 可接收 `kind=all|bank|invoice|oa`，默认 `all` 保持全量兼容；`bank`、`invoice`、`oa` 只返回对应类型列表，供 `+N` 分栏展开。
 - `requires_invoice` 在列表、filter-options 和导出中是“需要开票”状态桶，不是 `filter_group='requires_invoice'` 的 SQL/规则分组条件。支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`；收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只用于解释规则命中和表头规则列筛选。
 - 支出状态下拉中的 `已支付待开票` / `已支付已开票` 是 `requires_invoice` 状态桶下的状态快捷筛选，前端通过 `filter=requires_invoice` 加 `filters=[{"field":"status_code","operator":"in","values":[...]}]` 提交，不把状态码伪装成规则组。
@@ -809,11 +809,11 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - `seller_name` 的前端列名为 `销方名称`。`bank_account` 展示为银行名称加账号后四位；`bank_direction` 原始值保持后端事实值，前端展示为 `收入` 或 `支出` chip。
 - 发票号码列表头只提供开票日期排序，不提供下拉筛选。排序通过 `sort_field=invoice_date` 和 `sort_direction` 提交。
 - 支付状态列表只展示状态标签；规则原因和自动闭环解释不在列表行内展示。
-- rows 中 `oa`、`bankTransactions` 和 `invoiceRelations` 都可以携带 `relationCount`、`hasMultiple`、`detailMode`、`relationStatus` 和 `summaries`。同一 linked 或 candidate relation 下多条 OA、银行流水或进项发票必须聚合为一条发票使用情况行，金额字段返回各自合计；前端用 `detailMode=list` 显示 `+N` 并通过 `/rows/{row_id}/relation-details?kind=oa|bank|invoice` 展开全部明细。
-- `relationStatus="candidate"` 表示来自关联台未配对区 open/proposed 候选，只能展示为候选证据；支付状态、已支付判断和 confirmed relation 判断只能使用 `relationStatus="linked"`。后端不得把 candidate 映射为 active。
+- rows 中 `oa`、`bankTransactions` 和 `invoiceRelations` 都可以携带 `relationCount`、`hasMultiple`、`detailMode`、`relationStatus` 和 `summaries`。同一 linked relation 下多条 OA、银行流水或进项发票必须聚合为一条发票使用情况行，金额字段返回各自合计；前端用 `detailMode=list` 显示 `+N` 并通过 `/rows/{row_id}/relation-details?kind=oa|bank|invoice` 展开全部明细。
+- `relationStatus="linked"` 是唯一已关联关系状态；没有 active relation 的行按未关联处理。历史 `relationStatus="candidate"` 只作为旧 payload 兼容值，调用方必须归入未关联/非证明口径，不得展示独立“候选 OA”筛选，也不得参与支付状态、已支付判断或 confirmed relation 判断。
 - `/rows/{row_id}/relation-details` 在 SQL read model 可用时必须按 `row_id` 读取 `read_model.input_invoice_usage_rows` 单行 payload 并展开现有 summaries；missing/stale/source mismatch 时返回 `202`/`read_model_status=refreshing` 并入队刷新，不得在 API 热路径全量 live rebuild。
 - 反提 OA 工作流按 `preview -> one-step create OA draft -> staged draft -> user submission confirmation -> submitted history / local rollback` 推进。前端只暴露 `创建 OA 草稿` 一个创建动作；后端可以继续保存内部 batch，但不得把 `创建本地批次` 作为用户概念暴露。创建 OA 草稿只表示外部 OA 草稿已生成，状态为 `oa_draft_created`，该状态在 UI 中展示为 `暂存`，不得直接等同于已提交 OA 流程。
-- `/api/input-invoice-usage/oa-reverse/preview` 必须把可创建候选和 rejected invoice 明确分开。已有 active/linked OA 关系的发票不得进入候选或创建草稿 payload，rejected row 必须带 `reasonCode=already_has_active_oa`、`oaRelationStatus=linked` 以及发票号、销方、开票日期、价税合计、支付状态等展示字段，供前端显示 `已关联oa`、禁用勾选和按 OA 关联状态筛选。关联台未配对区 open/proposed OA candidate 也不得进入候选或创建草稿 payload，rejected row 必须带 `reasonCode=already_has_candidate_oa`、`oaRelationStatus=candidate` 和同样的展示字段，供前端显示 `候选oa`、禁用勾选和筛选。可创建候选前端展示为 `未关联oa`，对应 `oaRelationStatus=unlinked` 或缺省值。
+- `/api/input-invoice-usage/oa-reverse/preview` 必须把可创建候选和 rejected invoice 明确分开。已有 active/linked OA 关系的发票不得进入候选或创建草稿 payload，rejected row 必须带 `reasonCode=already_has_active_oa`、`oaRelationStatus=linked` 以及发票号、销方、开票日期、价税合计、支付状态等展示字段，供前端显示 `已关联oa`、禁用勾选和按 OA 关联状态筛选。无 active OA relation 的发票展示为 `未关联oa`，对应 `oaRelationStatus=unlinked` 或缺省值；历史 `already_has_candidate_oa` / `oaRelationStatus=candidate` 兼容 payload 也必须按 `未关联oa` 处理，不再提供独立候选 OA 筛选。
 - 进项发票反提 OA 草稿使用支付申请 form `2` 的标准草稿 payload：顶层包含 `formId`、`isDraft`、`data`，`data.userName`/`data.applicant` 来自用户选择的目标 OA 申请人，`data.cause` 必须包含本地反提批次 ID，供 OA 投影回扫识别。
 - `POST /api/input-invoice-usage/oa-reverse/oa-draft` 是当前一键创建入口。请求必须携带 preview id/hash、幂等 key、目标申请人和选中发票；后端重新校验候选、权限和目标申请人凭据后，用目标申请人凭据/token 创建 `isDraft=true` OA 暂存草稿。不得使用当前操作人的请求 token 创建目标申请人草稿。
 - `GET /api/input-invoice-usage/oa-reverse/staged-drafts` 返回状态为 `oa_draft_created` 的暂存批次，供用户在关闭确认弹窗、刷新或重新打开 drawer 后恢复二选一。前端暂存列表不得展示 OA 草稿链接，只展示批次摘要和两项处理动作。
@@ -834,7 +834,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - rows 中 `oa` 必须携带 `workflowStatus`；`oa`、`bankTransaction`、`invoice` 都可以携带 `relationCount`、`detailMode` 和 `summaries`；同一 Workbench active relation 下多条 OA、支出流水或进项发票必须聚合为一条核对行，金额字段展示各自合计。
 - `paymentStatus` 不返回 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计时返回 `pending_review`，多 OA 合并付款按 relation group 合计后判定。
 - rows 可返回 `oaPaymentWriteback`，用于表达 OA MySQL `t_payment_simple` 写回状态。`oaPaymentWriteback.code` 至少支持 `written` / `not_written`，`syncStatus` 表达 `ready`、`unavailable`、`flow_id_missing` 或 `not_required` 等同步语义。
-- 详情接口返回 OA、付款流水、发票、候选关系和异常原因；`/rows/{row_id}/relation-details` 支持 `kind=oa|bank|invoice`。
+- 详情接口返回 OA、付款流水、发票、正式关系和异常原因；`/rows/{row_id}/relation-details` 支持 `kind=oa|bank|invoice`。
 - `filterConfig`/`filter-options` 至少包含 OA 申请人、项目名称、支付状态、对方户名、银行账户、收支、发票方和开票日期等表头筛选/排序字段；银行账户字段使用“银行名称 + 账号后四位”，收支字段使用 `outflow`/`inflow` 值并显示“支出”/“收入”。
 - 外部依赖或 read model 不可用时返回明确业务错误或 stale 状态，不返回 HTML 或空 body。
 
@@ -935,7 +935,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 契约要求：
 
 - 响应必须区分导入批次、业务批次、OA 草稿和人工提交确认状态；ETC 专用 OA 自动检测状态不再作为业务批次 API 合同输出。
-- `GET /api/etc/business-batches` 的 `month` 参数按 ETC 发票开票日期、通行开始日期和通行结束日期任一月份匹配业务批次。响应中的 `counts.active`、`counts.submitted` 必须先应用同一组 scope、`month`、`plate`、`keyword` 筛选，再按状态 bucket 统计；`items` 在同一筛选结果上继续应用请求的 `status` 和分页。
+- `GET /api/etc/business-batches` 的 `month` 参数优先按业务批次归属月份匹配；批次存在 `amountBreakdown.scope_month` / `amount_breakdown.scope_month` 时只匹配该归属月份，缺失归属月份时才按 ETC 发票开票日期、通行开始日期和通行结束日期任一月份匹配。响应中的 `counts.active`、`counts.submitted` 必须先应用同一组 scope、`month`、`plate`、`keyword` 筛选，再按状态 bucket 统计；`items` 在同一筛选结果上继续应用请求的 `status` 和分页。
 - 用户可见批次列表必须以 `/api/etc/business-batches*` 为事实源；`/api/etc/reconciliation-tasks` 只承载导入、核对、source file 和 workflow 状态，前端不得把 task-only 记录无条件混入批次列表或批次计数。
 - `POST /api/etc/business-batches` 可以省略 `taskId`。省略时后端 application service 必须复用现有 reconciliation task service 先创建任务，再通过 business batch service 创建 active 业务批次，并返回统一 `businessBatch` payload；若业务批次创建失败，必须通过 reconciliation task service 删除/tombstone 本次新建任务，避免留下 task-only 空批次。传入 `taskId` 时仍按既有绑定任务语义校验 active business batch 约束。
 - 幂等 key、重复提交、撤销草稿和释放发票规则必须由后端校验。
@@ -971,20 +971,68 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
       "total_count": 128,
       "latest_synced_at": "2026-05-23T09:50:00+08:00",
       "status": "available",
-      "sources": []
+      "sources": [
+        {
+          "key": "bank_transactions",
+          "label": "银行流水",
+          "count": 128,
+          "latest_synced_at": "2026-05-23T09:50:00+08:00",
+          "status": "available"
+        }
+      ]
     },
     "invoice": {
       "total_count": 256,
       "latest_synced_at": "2026-05-23T09:48:00+08:00",
       "status": "available",
-      "sources": []
+      "sources": [
+        {
+          "key": "manual",
+          "label": "手工导入",
+          "count": 216,
+          "latest_synced_at": "2026-05-23T09:44:00+08:00",
+          "status": "available"
+        },
+        {
+          "key": "oa_attachment",
+          "label": "OA 解析",
+          "count": 40,
+          "supplementary_count": 5,
+          "latest_synced_at": "2026-05-23T09:48:00+08:00",
+          "status": "available"
+        }
+      ]
     },
     "oa": {
       "total_count": 72,
       "latest_synced_at": "2026-05-23T09:45:00+08:00",
       "status": "available",
       "sources": []
-    }
+    },
+    "import_events": [
+      {
+        "key": "bank-5",
+        "source_key": "bank_transactions",
+        "label": "流水导入",
+        "source_name": "bank-5.xlsx",
+        "imported_by": "admin.ops",
+        "count": 42,
+        "supplementary_count": null,
+        "imported_at": "2026-05-23T09:58:00+08:00",
+        "status": "completed"
+      },
+      {
+        "key": "oa-attachment-20260523094800",
+        "source_key": "oa_attachment",
+        "label": "OA 解析",
+        "source_name": "OA 附件解析",
+        "imported_by": "oa_sync",
+        "count": 40,
+        "supplementary_count": 5,
+        "imported_at": "2026-05-23T09:48:00+08:00",
+        "status": "completed"
+      }
+    ]
   },
   "request_performance": {
     "window": {
@@ -1009,7 +1057,8 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 契约要求：
 
 - Dashboard 只返回页面需要的聚合读数据，不返回业务 payload、snapshot、raw payload、token、数据库 URL 或 RabbitMQ URL。
-- `data_inventory.invoice.sources` 固定包含 `standard_import`、`oa_attachment`、`etc`、`manual`。
+- `data_inventory.invoice.sources` 固定包含 `manual`、`oa_attachment`。`oa_attachment.supplementary_count` 表示 OA 解析来源且不在手工导入中的 active 发票数；unknown 时为 `null`。
+- `data_inventory.import_events[*]` 是全量导入历史，包含流水、手工发票、OA 解析和 OA 单据同步记录。每条 `count` 必须是真实成功导入/同步数量；`oa_attachment` 事件可带 `supplementary_count` 表示该次 OA 解析新增进入发票池且不在手工导入中的数量。前端主页面只显示最新 5 条，抽屉展示全量历史。
 - `request_performance.endpoints[*]` 包含 `duration_ms`、`database_duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_query_count` 的 p50/p95/p99。
 - `runtime_performance.queues[*]` 基于已知 RabbitMQ route 输出，即使 RabbitMQ Management API 不可用也保留行，数值为 `null`。
 - Dashboard API 可返回短 TTL 缓存 payload。缓存刷新失败但已有旧 payload 时，响应仍为 `200`，并在 `freshness.warnings` 中包含 `dashboard_cache_stale_after_error`。
@@ -1035,7 +1084,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 rows 中统一关系字段要求：
 
 - `oa`、`bankTransactions`、`invoiceRelations` 都携带 `primary` 或兼容 primary 字段、`relationCount`、`hasMultiple`、`detailMode`、`summaries`；多项时 `detailMode=list`。
-- `bankTransactions.receivedTotal` 只统计 linked 收入流水；`relationStatus="candidate"` 的流水可作为候选证据展示，但不得计入已收款和 confirmed relation 判断。
+- `bankTransactions.receivedTotal` 只统计 linked 收入流水；未被正式化为 active relation 的自动匹配 decision 不进入销项收款下游关系字段，也不得计入已收款和 confirmed relation 判断。
 - SQL read model payload 缺少 `oa`、`bankTransactions`、`invoiceRelations`、`redInvoiceRelation` 或 `receipt` 任一结构字段时属于 schema stale，API 必须 enqueue `output_invoice_collection` refresh 并返回 `202 refreshing`。
 
 写接口：

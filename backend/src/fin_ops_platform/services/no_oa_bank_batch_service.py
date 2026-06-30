@@ -287,7 +287,16 @@ class NoOaBankBatchService:
         for batch in generated.values():
             if isinstance(batch, dict):
                 batch["source_versions"] = deepcopy(source_version_payload)
-        self._batches = {batch_id: self._normalize_batch(batch) for batch_id, batch in generated.items()}
+        other_relation_mode_batches = {
+            batch_id: deepcopy(batch)
+            for batch_id, batch in self._batches.items()
+            if self._batch_relation_mode(batch) != normalized_relation_mode
+        }
+        other_relation_mode_batches.update(generated)
+        self._batches = {
+            batch_id: self._normalize_batch(batch)
+            for batch_id, batch in other_relation_mode_batches.items()
+        }
         return self.list_batches()
 
     def _build_batches_for_month_scope(
@@ -302,12 +311,14 @@ class NoOaBankBatchService:
         apply_relation_repairs: bool,
         relation_mode: str,
     ) -> list[dict[str, Any]]:
+        normalized_relation_mode = self._normalize_relation_mode(relation_mode)
         original_batches = deepcopy(self._batches)
         original_audit_log = deepcopy(self._audit_log)
         scoped_batches = {
             batch_id: deepcopy(batch)
             for batch_id, batch in original_batches.items()
             if self._batch_scope_month(batch) == refresh_scope_key
+            and self._batch_relation_mode(batch) == normalized_relation_mode
         }
         scoped_service = NoOaBankBatchService(
             batches=scoped_batches,
@@ -323,7 +334,7 @@ class NoOaBankBatchService:
             eligible_batch_types=eligible_batch_types,
             apply_relation_repairs=apply_relation_repairs,
             refresh_scope_key="all",
-            relation_mode=relation_mode,
+            relation_mode=normalized_relation_mode,
         )
         scoped_snapshot = scoped_service.snapshot()
         scoped_snapshot_batches = scoped_snapshot.get("batches") if isinstance(scoped_snapshot, dict) else {}
@@ -331,6 +342,7 @@ class NoOaBankBatchService:
             batch_id: deepcopy(batch)
             for batch_id, batch in original_batches.items()
             if self._batch_scope_month(batch) != refresh_scope_key
+            or self._batch_relation_mode(batch) != normalized_relation_mode
         }
         merged_batches.update(
             {

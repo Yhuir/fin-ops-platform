@@ -13,10 +13,12 @@ class WorkbenchRelationCommandRepositoryAdapter:
         pair_relation_service: WorkbenchPairRelationService,
         repository: Any | None = None,
         after_apply: Callable[[], None] | None = None,
+        save_repository: bool = True,
     ) -> None:
         self._pair_relation_service = pair_relation_service
         self._repository = repository
         self._after_apply = after_apply
+        self._save_repository = bool(save_repository)
 
     def load_workbench_pair_relations(self) -> dict[str, Any]:
         loader = getattr(self._repository, "load_workbench_pair_relations", None)
@@ -37,7 +39,7 @@ class WorkbenchRelationCommandRepositoryAdapter:
             if str(case_id).strip()
         ]
         saver = getattr(self._repository, "save_workbench_pair_relations", None)
-        if callable(saver):
+        if self._save_repository and callable(saver):
             saver(snapshot, changed_case_ids=normalized_case_ids)
         self._apply_snapshot(snapshot, changed_case_ids=normalized_case_ids)
 

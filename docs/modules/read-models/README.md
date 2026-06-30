@@ -28,7 +28,7 @@
 ## 当前闭环状态
 
 - 状态：PSCIP-L4 closed。
-- 适用范围：当前 14 个 App Status read model；`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 按显式例外语义闭环。
+- 适用范围：当前 15 个 App Status read model；`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 按显式例外语义闭环。
 - 最终证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`。
 - 生产证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`。
 - 远端闭环提交：`c771b894 docs: close read model production evidence`。
@@ -43,7 +43,7 @@ read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时�
 
 生产 PostgreSQL runtime 下，页面 read model API 缺少 SQL read repository 或 SQL view 时必须返回 `read_model_status=refreshing` 并通过 `ReadModelRefreshGateway` 入队；不能回退到旧 `QueryService` / live scan / memory snapshot 来返回 `live_query` 或伪 fresh。legacy/local 模式可以保留旧 query service 作为开发兼容路径，但该路径不得在 `_requires_sql_read_model_runtime()` 为真时执行。
 
-`read_model_scope_policy.py` 是 refresh scope 入口契约。除 `cost_statistics` 与 `pending_invoice` 的特殊 scope 外，主要页面 read model（`bank_detail`、`bank_account_balance`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`invoice_lifecycle`、`search`、`tax_offset`、`turnover_ledger`、`workbench`、`workbench_relation`、`no_oa_bank_batch`）接受 month 或 `all` scope，并在 gateway 阶段拒绝 `active:*` 等非本 read model 合约 scope。新增 read model 或变更 scope 形态时必须先更新 registry、worker manifest、tests 和本模块文档。
+`read_model_scope_policy.py` 是 refresh scope 入口契约。除 `cost_statistics` 与 `pending_invoice` 的特殊 scope 外，主要页面 read model（`bank_detail`、`bank_account_balance`、`bank_flow_rule_batch`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`invoice_lifecycle`、`search`、`tax_offset`、`turnover_ledger`、`workbench`、`workbench_relation`、`no_oa_bank_batch`）接受 month 或 `all` scope，并在 gateway 阶段拒绝 `active:*` 等非本 read model 合约 scope。新增 read model 或变更 scope 形态时必须先更新 registry、worker manifest、tests 和本模块文档。
 
 `read_model_manifest.py` 是 14 个 App Status read model 的共享合同清单。它不替代具体 query service、repository 或 worker 实现，但必须与 `APP_STATUS_READ_MODEL_REGISTRY`、`runtime_worker_registry.py`、RabbitMQ dispatch events 和 `ReadModelScopePolicyRegistry` 保持一致。manifest 还登记每个 read model 的 force refresh 合同和 operation barrier target 合同：受控强制刷新必须通过 gateway/runbook/smoke 入口，写后可见性必须通过 App Status runtime snapshot 目标推导，不能让页面或脚本绕过统一边界。新增 read model、变更 refresh event、变更 primary/auxiliary worker、变更 `all` scope 语义、变更 force refresh/barrier 合同或 query freshness 合同时，必须同步更新 manifest 和 `tests/test_read_model_manifest.py`。
 
@@ -126,7 +126,7 @@ Scoped incremental projection 可以在当前 SQL view 已 fresh 且 `source_ver
 
 ## Read model 合同清单
 
-下表是当前 14 个 App Status read model 的共享合同索引，内容与 `READ_MODEL_MANIFEST` 保持一致，并由 `tests/test_read_model_manifest.py` 防漂移。页面模块可以继续维护自己的业务状态和 UI 细节，但新增或修改 read model 时必须先在这里和 manifest 中记录 `read_model_key`、`scope_type`、分区 key、scoped incremental target、full rebuild fallback、freshness proof、force refresh 合同与 operation barrier 合同。
+下表是当前 15 个 App Status read model 的共享合同索引，内容与 `READ_MODEL_MANIFEST` 保持一致，并由 `tests/test_read_model_manifest.py` 防漂移。页面模块可以继续维护自己的业务状态和 UI 细节，但新增或修改 read model 时必须先在这里和 manifest 中记录 `read_model_key`、`scope_type`、分区 key、scoped incremental target、full rebuild fallback、freshness proof、force refresh 合同与 operation barrier 合同。
 
 | read_model_key | scope_type | 分区 key | 增量目标 | full rebuild fallback | freshness proof | force refresh / operation barrier |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -143,6 +143,7 @@ Scoped incremental projection 可以在当前 SQL view 已 fresh 且 `source_ver
 | `cost_statistics` | `cost_statistics` | cost statistics active/all month scope plus queryable parent aggregate scope | cost statistics month shards and parent rollup summaries | gateway force refresh normalizes legacy all/month scopes into active/all month shards and parent rollup rebuild | ReadModelQueryGateway expected schema/source_versions plus app_status readiness for shard and parent scopes | `gateway_force_refresh` / `app_status_registry_target` |
 | `tax_offset` | `tax_offset` | tax offset invoice month_scope; all is fan-out only | tax offset rows and summary payload for affected month scopes | gateway force refresh all enumerates tax offset month shards | ReadModelQueryGateway expected schema/source_versions plus current-effective dirty/outbox state | `gateway_force_refresh` / `app_status_registry_target` |
 | `no_oa_bank_batch` | `no_oa_bank_batch` | no-OA bank batch month_scope; all is fan-out only | no-OA bank batch public rows for affected month scopes | gateway force refresh all enumerates no-OA month shards through the refresh producer | no-OA source_versions plus app_status readiness and current-effective dirty/outbox state | `gateway_force_refresh` / `app_status_registry_target` |
+| `bank_flow_rule_batch` | `bank_flow_rule_batch` | bank-flow rule batch month_scope; all is fan-out only | bank-flow rule batch public rows for affected month scopes | gateway force refresh all enumerates bank-flow rule batch month shards through the refresh producer | bank_flow_rule_batch source_versions plus app_status readiness and current-effective dirty/outbox state | `gateway_force_refresh` / `app_status_registry_target` |
 | `turnover_ledger` | `turnover_ledger` | turnover ledger month_scope; all is fan-out only | turnover ledger grouped/list rows for affected month scopes | gateway force refresh all enumerates turnover ledger month shards and supports explicit clear/rebuild | ReadModelQueryGateway expected schema/source_versions plus workbench_relation versions and current-effective dirty/outbox state | `gateway_force_refresh` / `app_status_registry_target` |
 
 依赖 `workbench_relation` distribution 的页面 read model 还必须把当前 `read_model.workbench_relation_scopes.source_versions` 纳入 expected source versions。进项发票使用、销项发票收款、OA 待付款等页面即使自身 schema 版本未变，只要 relation scope 版本与 payload 保存时不一致，也必须返回 refreshing/stale 并入队对应页面 read model refresh，不能把旧 OA/流水/发票配对关系展示为空并标为 fresh。待找发票通过 pending invoice source versions 按当前筛选范围读取 `workbench_relation` scope versions，必须保持等价语义。

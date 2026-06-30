@@ -35,12 +35,6 @@ type OutputInvoiceCollectionDetailDrawerProps = {
   onClose: () => void;
 };
 
-const fallbackTitles: Record<OutputInvoiceCollectionDetailTarget["kind"], string> = {
-  invoice: "发票详情",
-  bank: "银行流水详情",
-  relationList: "关联明细",
-};
-
 export default function OutputInvoiceCollectionDetailDrawer({
   open,
   target,
@@ -85,8 +79,8 @@ export default function OutputInvoiceCollectionDetailDrawer({
     };
   }, [loadDetail, open, target]);
 
-  const title = detail?.title ?? (target ? fallbackTitles[target.kind] : "详情");
-  const subtitle = detail?.subtitle ?? target?.id;
+  const title = detail?.title ?? drawerTitle(target);
+  const sections = detail ? visibleSections(detail.sections) : [];
 
   return (
     <AppDrawer
@@ -94,13 +88,7 @@ export default function OutputInvoiceCollectionDetailDrawer({
       closeLabel="关闭详情抽屉"
       onClose={onClose}
       open={open}
-      subtitle={subtitle ? (
-        <>
-          <span>{title}</span>
-          <span>{subtitle}</span>
-        </>
-      ) : title}
-      title="销项发票收款情况详情"
+      title={title}
       width={720}
     >
       <div className="output-invoice-collection-drawer__body">
@@ -115,7 +103,7 @@ export default function OutputInvoiceCollectionDetailDrawer({
             {detail.unavailableReason ?? "后端未返回可展示的完整关联详情。"}
           </StatePanel>
         ) : null}
-        {detail?.sections.map((section) => (
+        {sections.map((section) => (
           <section className="output-invoice-collection-detail-card" key={section.title}>
             <h3>{section.title}</h3>
             <div className="output-invoice-collection-detail-grid">
@@ -128,12 +116,47 @@ export default function OutputInvoiceCollectionDetailDrawer({
             </div>
           </section>
         ))}
-        {!loading && !error && detail && detail.sections.length === 0 && detail.detailAvailable !== false ? (
+        {!loading && !error && detail && sections.length === 0 && detail.detailAvailable !== false ? (
           <StatePanel compact tone="info">暂无更多详情。</StatePanel>
         ) : null}
       </div>
     </AppDrawer>
   );
+}
+
+function drawerTitle(target: OutputInvoiceCollectionDetailTarget | null) {
+  if (target?.kind === "bank" || target?.relationKind === "bank") {
+    return "流水详情";
+  }
+  if (target?.relationKind === "oa") {
+    return "OA详情";
+  }
+  return "销项发票详情";
+}
+
+function visibleSections(sections: OutputInvoiceCollectionDetailSection[]) {
+  return sections
+    .map((section) => ({
+      ...section,
+      fields: section.fields.filter(isVisibleField),
+    }))
+    .filter((section) => section.fields.length > 0);
+}
+
+function isVisibleField(field: OutputInvoiceCollectionDetailField) {
+  const label = field.label.trim();
+  if (!label || /[A-Za-z_]/.test(label)) {
+    return false;
+  }
+  return !looksLikeRawData(field.value);
+}
+
+function looksLikeRawData(value: string | number | null | undefined) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const text = value.trim();
+  return (text.startsWith("{") || text.startsWith("[")) && (text.includes('":') || text.includes('","'));
 }
 
 function formatDetailValue(value: string | number | null | undefined) {

@@ -7,7 +7,7 @@
 - 页面进入 `/pending-invoices` 后必须出现 `pending-invoices-page`，不能停在路由 loading fallback。
 - rows、filter-options、export-preview、export 必须先经过 pending invoice read model fresh gate；非 fresh 不能把空 rows 当真实空态。
 - 支出/收入/全部方向、状态多选、关键字、列筛选、排序和分页必须只改变查询口径，不改变事实状态。
-- OA/流水/发票 relation 不是本页私有事实；linked/candidate 证据必须来自 Workbench relation distribution。
+- OA/流水/发票 relation 不是本页私有事实；linked 已关联证据必须来自 Workbench relation distribution，未正式化的自动匹配 decision 不作为本页关系状态。
 - 导出必须使用当前筛选和排序口径，但不能只导出当前分页。
 - 真实浏览器中的 `pageerror`、未预期 `console.error`、非导航取消的 `requestfailed`、错误弹窗或错误 toast 必须让测试失败。
 
@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | `PENDING-E2E-001` | 打开待找发票页并查看默认支出待找发票 | 页面 ready；四区表显示支出流水、发票获取状态、进项发票和 OA；默认支出 rows 请求带 `page=1&page_size=50`；状态、金额、对方户名和标签可见。 |
 | `PENDING-E2E-002` | 从关联台 confirm OA+银行流水+进项发票 relation 后返回待找发票 | 待找发票重新请求 rows；目标行从 `已支付待开票` 更新为 `已支付已开票`；显示 OA 申请人、进项发票号和 relation case；不能出现错误 toast/dialog。 |
-| `PENDING-E2E-003` | candidate relation 只作为证据展示 | 候选发票/OA 可以显示为证据，但不能把行推进到 linked-only `已支付已开票`；不能产生 mutation。 |
+| `PENDING-E2E-003` | 未正式化 decision 负面语义 | 未正式化自动匹配 decision 或历史 candidate 兼容值不能把行推进到 linked-only `已支付已开票`；不能产生 mutation。 |
 | `PENDING-E2E-004` | relation-backed read model 非 fresh | `refreshing` 时页面显示诊断且不伪装 fresh；`stale` 且 rows 为空时显示读模型警告并禁用导出。 |
 | `PENDING-E2E-005` | 关联确认后导出当前筛选内容 | export-preview 和 export 请求带方向、筛选、关键字和排序；不带 `page/page_size`；预览和下载内容包含 OA 申请人、进项发票号、relation case、linked 状态；文件名合理。 |
 | `PENDING-E2E-006` | 导出失败或超限 | 后端 row-limit / non-fresh / 下载错误必须显示结构化错误；不能显示下载成功。 |

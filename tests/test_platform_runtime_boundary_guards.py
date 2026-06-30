@@ -1162,6 +1162,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "class": "BatchAccountingApiRoutes",
                 "server_markers": ("def _batch_accounting_routes", "_batch_accounting_routes()."),
             },
+            "routes_bank_flow_rule_batches.py": {
+                "module": "fin_ops_platform.app.routes_bank_flow_rule_batches",
+                "class": "BankFlowRuleBatchApiRoutes",
+                "server_markers": ("def _bank_flow_rule_batch_routes", "_bank_flow_rule_batch_routes()."),
+            },
             "routes_cost_statistics.py": {
                 "module": "fin_ops_platform.app.routes_cost_statistics",
                 "class": "CostStatisticsApiRoutes",

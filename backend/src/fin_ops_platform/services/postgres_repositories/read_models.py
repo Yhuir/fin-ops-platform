@@ -3800,6 +3800,19 @@ class PostgresSummaryReadModelRepository:
         )
 
     def list_no_oa_bank_batch_rows(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
+        return self._list_bank_batch_rows(filters, readiness_scope_type="no_oa_bank_batch")
+
+    def list_bank_flow_rule_batch_rows(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
+        resolved_filters = dict(filters) if isinstance(filters, dict) else {}
+        resolved_filters["relation_mode"] = "bank_flow_rule_batch"
+        return self._list_bank_batch_rows(resolved_filters, readiness_scope_type="bank_flow_rule_batch")
+
+    def _list_bank_batch_rows(
+        self,
+        filters: dict[str, Any] | None = None,
+        *,
+        readiness_scope_type: str,
+    ) -> list[dict[str, Any]] | None:
         resolved_filters = filters if isinstance(filters, dict) else {}
         where: list[str] = ["status <> 'superseded'"]
         params: list[Any] = []
@@ -3831,7 +3844,10 @@ class PostgresSummaryReadModelRepository:
             tuple(params),
         )
         if not rows:
-            return [] if self._no_oa_bank_batch_readiness_is_fresh(text(resolved_filters.get("month"))) else None
+            return [] if self._bank_batch_readiness_is_fresh(
+                readiness_scope_type,
+                text(resolved_filters.get("month")),
+            ) else None
         result: list[dict[str, Any]] = []
         for row in rows:
             payload = _read_model_payload(row)
@@ -3847,6 +3863,19 @@ class PostgresSummaryReadModelRepository:
         return result
 
     def no_oa_bank_batch_source_versions_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        return self._bank_batch_source_versions_summary(filters, readiness_scope_type="no_oa_bank_batch")
+
+    def bank_flow_rule_batch_source_versions_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        resolved_filters = dict(filters) if isinstance(filters, dict) else {}
+        resolved_filters["relation_mode"] = "bank_flow_rule_batch"
+        return self._bank_batch_source_versions_summary(resolved_filters, readiness_scope_type="bank_flow_rule_batch")
+
+    def _bank_batch_source_versions_summary(
+        self,
+        filters: dict[str, Any] | None = None,
+        *,
+        readiness_scope_type: str,
+    ) -> dict[str, Any] | None:
         resolved_filters = filters if isinstance(filters, dict) else {}
         where: list[str] = ["status <> 'superseded'"]
         params: list[Any] = []
@@ -3867,7 +3896,7 @@ class PostgresSummaryReadModelRepository:
         )
         normalized_month = text(resolved_filters.get("month"))
         if not rows:
-            if not self._no_oa_bank_batch_readiness_is_fresh(normalized_month):
+            if not self._bank_batch_readiness_is_fresh(readiness_scope_type, normalized_month):
                 return None
             return {
                 "read_model_status": "fresh",
@@ -3882,37 +3911,47 @@ class PostgresSummaryReadModelRepository:
         source_versions = dict(source_versions_values[0]) if source_versions_values else {}
         consistent = bool(source_versions_values) and all(dict(value) == source_versions for value in source_versions_values)
         return {
-            "read_model_status": "fresh" if self._no_oa_bank_batch_readiness_is_fresh(normalized_month) else "refreshing",
+            "read_model_status": "fresh"
+            if self._bank_batch_readiness_is_fresh(readiness_scope_type, normalized_month)
+            else "refreshing",
             "row_count": len(rows),
             "source_versions": source_versions if consistent else {},
         }
 
     def _no_oa_bank_batch_readiness_is_fresh(self, scope_key: str | None = None) -> bool:
+        return self._bank_batch_readiness_is_fresh("no_oa_bank_batch", scope_key)
+
+    def _bank_batch_readiness_is_fresh(self, scope_type: str, scope_key: str | None = None) -> bool:
+        normalized_scope_type = text(scope_type) or "no_oa_bank_batch"
         normalized_scope_key = text(scope_key)
         candidate_scope_keys = [normalized_scope_key, "all"] if normalized_scope_key else ["all"]
-        if normalized_scope_key and self._refresh_status(scope_type="no_oa_bank_batch", scope_key=normalized_scope_key) != "fresh":
+        if normalized_scope_key and self._refresh_status(scope_type=normalized_scope_type, scope_key=normalized_scope_key) != "fresh":
             return False
         for candidate_scope_key in candidate_scope_keys:
             if not candidate_scope_key:
                 continue
-            if self._refresh_status(scope_type="no_oa_bank_batch", scope_key=candidate_scope_key) != "fresh":
+            if self._refresh_status(scope_type=normalized_scope_type, scope_key=candidate_scope_key) != "fresh":
                 continue
-            if self._no_oa_bank_batch_readiness_scope_is_fresh(candidate_scope_key):
+            if self._bank_batch_readiness_scope_is_fresh(normalized_scope_type, candidate_scope_key):
                 return True
         return False
 
     def _no_oa_bank_batch_readiness_scope_is_fresh(self, scope_key: str) -> bool:
+        return self._bank_batch_readiness_scope_is_fresh("no_oa_bank_batch", scope_key)
+
+    def _bank_batch_readiness_scope_is_fresh(self, scope_type: str, scope_key: str) -> bool:
+        normalized_scope_type = text(scope_type) or "no_oa_bank_batch"
         row = self._connection.fetch_one(
             """
             select status
             from read_model.app_status_readiness
             where tenant_id = 'default'
-              and read_model_key = 'no_oa_bank_batch'
-              and scope_type = 'no_oa_bank_batch'
+              and read_model_key = %s
+              and scope_type = %s
               and scope_key = %s
             limit 1
             """,
-            (scope_key,),
+            (normalized_scope_type, normalized_scope_type, scope_key),
         )
         return isinstance(row, dict) and text(row.get("status")) == "fresh"
 
@@ -4487,6 +4526,12 @@ class PostgresReadModelRepository:
 
     def no_oa_bank_batch_source_versions_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.no_oa_bank_batch_source_versions_summary(*args, **kwargs)
+
+    def list_bank_flow_rule_batch_rows(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]] | None:
+        return self._summary_read_model_repository.list_bank_flow_rule_batch_rows(*args, **kwargs)
+
+    def bank_flow_rule_batch_source_versions_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.bank_flow_rule_batch_source_versions_summary(*args, **kwargs)
 
     def list_turnover_ledger_view(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.list_turnover_ledger_view(*args, **kwargs)
@@ -7717,13 +7762,11 @@ class PostgresReadModelRepository:
             "rows": payload_rows,
         }
 
-    def load_batch_accounting_workbench_payload(self, *, bank_year: str, oa_year: str) -> dict[str, Any] | None:
+    def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, Any] | None:
         resolved_bank_year = text(bank_year)
-        resolved_oa_year = text(oa_year)
-        if not resolved_bank_year or not resolved_oa_year:
+        if not resolved_bank_year:
             return None
         bank_start = f"{resolved_bank_year}-01-01"
-        oa_start = f"{resolved_oa_year}-01-01"
         bank_rows = self._connection.fetch_all(
             """
             select r.row_id, r.source_kind, r.status, r.payload, r.raw_payload
@@ -7757,13 +7800,9 @@ class PostgresReadModelRepository:
              and gen.status = 'active'
             where r.scope_key <> 'all'
               and r.source_kind = 'oa'
-              and (
-                    r.scope_month >= %s::date
-                    and r.scope_month < (%s::date + interval '1 year')
-                  )
             order by coalesce(r.payload->>'apply_time', r.payload->>'application_time', r.payload->>'application_date', r.payload->>'created_at', '') desc, r.row_id
             """,
-            (oa_start, oa_start),
+            (),
         )
         invoice_rows = self._connection.fetch_all(
             """
@@ -7775,13 +7814,9 @@ class PostgresReadModelRepository:
              and gen.status = 'active'
             where r.scope_key <> 'all'
               and r.source_kind = 'oa_attachment_invoice'
-              and (
-                    r.scope_month >= %s::date
-                    and r.scope_month < (%s::date + interval '1 year')
-                  )
             order by r.row_id
             """,
-            (oa_start, oa_start),
+            (),
         )
         return {
             "month": "all",
@@ -7790,7 +7825,7 @@ class PostgresReadModelRepository:
             "open": {
                 "groups": [
                     {
-                        "group_id": f"batch-accounting:{resolved_bank_year}:{resolved_oa_year}",
+                        "group_id": f"batch-accounting:{resolved_bank_year}:unpaired-oa",
                         "group_type": "batch_accounting_sql_read_model",
                         "bank_rows": self._payload_rows(bank_rows),
                         "oa_rows": self._payload_rows(oa_rows),
@@ -7890,7 +7925,11 @@ class PostgresReadModelRepository:
                         scope_month = excluded.scope_month,
                         decision_id = excluded.decision_id,
                         display_state = excluded.display_state,
-                        decision_status = excluded.decision_status,
+                        decision_status = case
+                            when read_model.workbench_reconciliation_decisions.decision_status = 'suppressed'
+                                then read_model.workbench_reconciliation_decisions.decision_status
+                            else excluded.decision_status
+                        end,
                         match_domain = excluded.match_domain,
                         match_shape = excluded.match_shape,
                         rule_code = excluded.rule_code,
@@ -7913,8 +7952,16 @@ class PostgresReadModelRepository:
                         source_versions = excluded.source_versions,
                         generated_at = excluded.generated_at,
                         raw_payload = excluded.raw_payload,
-                        consumed_by_relation_id = null,
-                        suppressed_by_exception_case_id = null,
+                        consumed_by_relation_id = case
+                            when read_model.workbench_reconciliation_decisions.decision_status = 'suppressed'
+                                then read_model.workbench_reconciliation_decisions.consumed_by_relation_id
+                            else null
+                        end,
+                        suppressed_by_exception_case_id = case
+                            when read_model.workbench_reconciliation_decisions.decision_status = 'suppressed'
+                                then read_model.workbench_reconciliation_decisions.suppressed_by_exception_case_id
+                            else null
+                        end,
                         updated_at = now()
                     """,
                     (

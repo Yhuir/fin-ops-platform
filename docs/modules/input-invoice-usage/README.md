@@ -32,15 +32,15 @@
 
 OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须通过 `WorkbenchRelationCommandService` 写入 `input_invoice_oa_reverse` 并由 `workbench_relation` read model 分发给相关页面。
 
-进项发票使用情况的列表和关系详情是读路径：关系证据来自 `WorkbenchRelationReadFacade` / `DistributedInvoiceRelationContext`，不直接调用 `WorkbenchRelationCommandService`。关联台未配对区 open/proposed 候选也必须通过同一个 facade 进入本页展示，不能由本页直接读取关联台候选表或自行拼候选。
+进项发票使用情况的列表和关系详情是读路径：关系证据来自 `WorkbenchRelationReadFacade` / `DistributedInvoiceRelationContext`，不直接调用 `WorkbenchRelationCommandService`。只有 Workbench active relation 能进入本页已关联口径；未正式化的自动匹配 decision 不作为本页 candidate relation 展示，本页不能直接读取关联台候选表或自行拼候选。
 
 如果正式进项发票由 OA 附件发票提升或合并而来，列表关系查询必须同时使用发票自身 id 和 `source_links[].source_workbench_row_id` 中的 OA 附件发票 row id 查询统一 relation distribution。这样截图类“正式发票 id 与 OA 附件 row id 不同”的行仍能显示 OA/流水证据，但证据仍来自 `WorkbenchRelationReadFacade`，不能改为本页私有匹配。
 
-关联台页面上的当前选中行、同屏排列或候选高亮不是关系事实。进项发票使用情况只能消费 `workbench_relation` distribution 中已持久化的 `linked` / `candidate` relation；如果某张正式发票在 distribution 中是 `unlinked`，本页必须继续显示未关联，不能用金额相同、销方相似、筛选选中态或关联台视觉行位置推断 OA/流水关系。
+关联台页面上的当前选中行、同屏排列或候选高亮不是关系事实。进项发票使用情况只能消费 `workbench_relation` distribution 中已持久化的 `linked` relation 作为已关联/已支付证明；没有 active relation 的发票必须显示为未关联，不能用金额相同、销方相似、筛选选中态或关联台视觉行位置推断 OA/流水关系。历史或兼容 payload 中的 `candidate` 只作为未正式关联处理，不再作为独立业务状态展示。
 
-`以发票反提 OA` drawer 必须区分 OA 关系三态：`linked` 展示 `已关联oa`、不可勾选；`candidate` 展示 `候选oa`、不可勾选，提示用户先回关联台确认或处理候选；`unlinked` 展示 `未关联oa` 并允许进入创建 OA 草稿 payload。
+`以发票反提 OA` drawer 对用户只展示 OA 关系二态：`linked` 展示 `已关联oa`、不可勾选；其他无 active relation 的发票展示 `未关联oa`。清单筛选只保留 `全部 / 已经关联oa / 未关联oa`，旧 `candidate` 兼容值归入 `未关联oa`，不再提供独立“候选 OA”筛选。
 
-同一 linked 或 candidate relation 中存在多条 OA、银行流水或进项发票时，rows DTO 必须聚合为一条使用情况行，金额展示各自合计，并用 `relationCount`、`detailMode=list`、`summaries` 和 `invoiceRelations` 支持前端显示 `+N` 后打开关系明细。`relationStatus='candidate'` 只能作为候选证据展示；支付状态、已支付判断和已确认关系判断只能使用 `relationStatus='linked'` 的关系。
+同一 linked relation 中存在多条 OA、银行流水或进项发票时，rows DTO 必须聚合为一条使用情况行，金额展示各自合计，并用 `relationCount`、`detailMode=list`、`summaries` 和 `invoiceRelations` 支持前端显示 `+N` 后打开关系明细。支付状态、已支付判断和已确认关系判断只能使用 `relationStatus='linked'` 的关系。
 
 支付状态中的 `已付款` 只能由 confirmed/linked relation 证明。单个 relation 内多条 OA 或多条银行流水时，`InputInvoiceUsageQueryService` 必须用 linked OA 合计和 linked 银行流水合计与发票价税合计比对；不能要求某一条 OA 或某一条流水单独等于整张发票，也不能让 candidate 关系参与支付状态。
 

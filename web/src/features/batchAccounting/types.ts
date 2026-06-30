@@ -74,7 +74,6 @@ export type BatchAccountingResponse = {
 
 export type FetchBatchAccountingRequest = {
   bankYear: string;
-  oaYear: string;
   bucket: BatchAccountingBucket;
   bankPage?: number;
   bankPageSize?: number;
@@ -85,7 +84,6 @@ export type FetchBatchAccountingRequest = {
 
 export type SubmitBatchAccountingRequest = {
   bankYear: string;
-  oaYear: string;
   bankRowId: string;
   oaRowIds: string[];
   expectedVersion?: number | null;

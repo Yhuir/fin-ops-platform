@@ -31,13 +31,11 @@ class BatchAccountingApiRoutes:
     def list_payload(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
         year = (query.get("year") or [""])[0]
         bank_year = (query.get("bank_year") or [year])[0]
-        oa_year = (query.get("oa_year") or [year])[0]
         bucket = (query.get("bucket") or ["unsubmitted"])[0] or "unsubmitted"
         try:
             payload = self._service_factory(use_sql_read_model=True).build_payload(
                 year=year,
                 bank_year=bank_year,
-                oa_year=oa_year,
                 bucket=bucket,
                 page=self._query_value(query, "page"),
                 page_size=self._query_value(query, "page_size", "pageSize"),
@@ -58,7 +56,6 @@ class BatchAccountingApiRoutes:
             result = self._service_factory().submit(
                 year=year,
                 bank_year=str(payload.get("bank_year") or year),
-                oa_year=str(payload.get("oa_year") or year),
                 bank_row_id=str(payload.get("bank_row_id") or ""),
                 oa_row_ids=list(payload.get("oa_row_ids") or []),
                 actor=actor,

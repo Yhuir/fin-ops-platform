@@ -31,6 +31,7 @@
 | 页面读取 | `AppHealthOperationsPage.tsx`、`features/appHealth/api.ts` | 只读 API |
 | Health probe | app health endpoints | 返回 readiness/status |
 | Runtime registry | app status services | 聚合 worker/read model/job/dependency 状态 |
+| Dashboard inventory facts | `app.bank_transactions`、`app.invoices.source_links`、`app.import_batches`、`app.oa_*` | 发票来源只按 canonical invoice source link 统计；导入历史只读真实成功导入/同步数量 |
 
 ## 输出 I/O
 
@@ -38,12 +39,13 @@
 | --- | --- | --- |
 | App health payload | 页面/indicator | 不伪装 readiness |
 | Alert/status | shell/status page | 明确 stale/failed/degraded |
-| Dashboard payload | operations page | 只读聚合 |
+| Dashboard payload | operations page | 只读聚合；`data_inventory.invoice.sources` 固定为 `manual`、`oa_attachment`，`oa_attachment.supplementary_count` 表示 OA 解析进入发票池但不在手工导入中的数量；`data_inventory.import_events` 输出全量导入历史，前端主页面截取最新 5 条并用抽屉展示全量 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
 - Reads readiness of：all app status/read model/job registries。
+- Reads facts of：`app.bank_transactions`、`app.invoices`、`app.import_batches`、`app.oa_applications`、`app.oa_application_items`、`app.oa_sync_runs`。
 - Service owner：`AppHealthService`、`AppStatusOverviewService`、`RuntimeMonitoring`。
 
 ## 文件范围
@@ -69,6 +71,7 @@
 - `tests/test_app_health_api.py`
 - `tests/test_app_health_service.py`
 - `tests/test_app_status_overview_service.py`
+- `tests/test_operations_dashboard_service.py`
 - `web/src/test/AppHealthOperationsPage.test.tsx`
 
 ## 当前缺口和删除条件

@@ -12,6 +12,7 @@
 - 强发票 identity 只包含数电发票号、发票代码+号码。税额指纹、金额、项目、申请人、对方名称等弱字段只用于审计提示，不用于自动跨来源合并。
 - 银行流水只有在稳定 business-fields identity 完整且其中一条已被 paired/异常/忽略占用时，才压制同 identity 的 open 别名；全 open 重复只审计。
 - OA 单据以 `row_id` 为主身份，`form_id`/`workflow_no` 只作为 alias 审计线索，不按金额、申请人或项目推断合并。
+- OA source alias 只能来自 `app.oa_source_aliases.status='active'` 的显式审计事实；用于把同一 OA 生命周期中的旧 source row 归一到 canonical row，不删除 OA 原始投影、附件或 cache。
 - 历史冲突不做破坏性合并。审计输出报告，人工 repair 或 read model rebuild 后再重新审计。
 
 ## 生产审计命令
@@ -40,6 +41,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
 - `app.invoices.etc_invoice_id`：已关联到统一发票池既有 canonical 发票的 ETC metadata 数量。
 - `app.oa_attachment_invoice_cache`：OA 附件票缓存中的正式发票 evidence/invoices canonical、suspected duplicate、missing canonical。
 - `app.oa_attachment_invoice_cache_sources` / `app.oa_attachments`：将 OA 附件票缓存 key 映射回真实附件和 OA，用于区分“缓存内部重复”和“跨 OA 重复发票”。
+- `app.oa_source_aliases`：只读取 `active` alias，将已确认的 OA lifecycle/migration alias 归一到 canonical OA row；缺表或无 active alias 时保持原判定。
 - `read_model.workbench_group_rows` active generation：同一强发票 identity 或稳定银行 identity 是否同时存在于 `paired` 和 `open` zone。
 - `read_model.workbench_group_rows` active generation：同一 row id 或同一强发票 identity 是否在多个 open group 中同时成为 visible/operable owner；银行流水 open/open 只按 row id 审计，不按稳定 business-fields identity 阻断。
 - `app.oa_applications`：同一 `form_id` 是否映射多个 `row_id`，用于排查 OA alias 风险。
@@ -108,8 +110,13 @@ Blocking issue 包含：
 - 先确认业务事实，再处理数据；不要只因为 key 相同就合并。
 - canonical duplicate 优先查原始导入批次、附件来源、ETC 批次和税局认证记录。
 - 修复应通过已有业务命令、专用 repair 工具或 migration 脚本完成，并保留审计记录。
+- OA lifecycle/migration alias 修复优先写入 `app.oa_source_aliases`，并以 `active` 状态受控启用；禁止为了让审计通过而删除 `app.oa_applications`、`app.oa_attachments`、`app.oa_attachment_invoice_cache*` 或手工伪造 read model readiness。
 - 修复或发布后必须重建受影响 workbench/workbench_relation scope，再重新执行审计命令，确认 `blocking_issue_count=0`。
 - relation display 不一致的生产修复只能入队刷新或使用专用 repair 工具重新触发 canonical scope contract；禁止手改 read model 投影行。
+
+## 历史治理记录
+
+- 2026-06-30：生产登记 3 条 `active` OA source alias，覆盖 `oa-exp-69898450db8c0a3633bd748c -> oa-exp-2005`、`oa-exp-69a7aeaedb8c0a3633bd74a7 -> oa-exp-2035`、`oa-exp-69c0b43adb8c0a3633bd74c4 -> oa-exp-2062`。固定入口 `workbench-audit-identity` 复核 `blocking_issue_count=0`、`oa_attachment_invoice_blocking_duplicate_group_count=0`，未删除 OA 投影、附件、附件票 cache 或 read model 行。
 
 ## 后续 read model 条件
 

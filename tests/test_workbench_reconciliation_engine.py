@@ -237,6 +237,63 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         active_relation = pair_service.get_active_relation_by_case_id("case-bank-invoice")
         self.assertEqual(active_relation["row_ids"], ["oa-held", "bank-held", "invoice-held"])
 
+    def test_paired_free_decision_creates_active_relation(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        pair_service = WorkbenchPairRelationService()
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_service),
+            relation_command_service=command_service_for(pair_service),
+        ).run_scope(
+            "2026-05",
+            oa_rows=[oa_row("oa-auto")],
+            bank_rows=[bank_row("bank-auto")],
+            invoice_rows=[],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-05")
+        self.assertEqual(summary["auto_created_relation_count"], 1)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_CONSUMED)
+        active_relations = pair_service.active_relations_for_row_ids(["oa-auto", "bank-auto"])
+        self.assertEqual(len(active_relations), 1)
+        self.assertEqual(active_relations[0]["case_id"], decisions[0]["decision_key"])
+        self.assertEqual(active_relations[0]["row_ids"], ["oa-auto", "bank-auto"])
+        self.assertEqual(active_relations[0]["created_by"], "system:workbench-relation-auto-pair")
+        self.assertEqual(active_relations[0]["special_metadata"]["auto_pair"]["rule_code"], "oa_bank_exact_amount")
+
+    def test_withdrawn_auto_pair_row_set_is_not_auto_created_again(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-withdrawn-auto",
+            row_ids=["oa-auto", "bank-auto"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="system:workbench-relation-auto-pair",
+            month_scope="2026-05",
+        )
+        pair_service.withdraw_latest_for_row_ids(["oa-auto", "bank-auto"], created_by="tester")
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            relation_read_port=WorkbenchMatchingRelationReadPort(pair_service),
+            relation_command_service=command_service_for(pair_service),
+        ).run_scope(
+            "2026-05",
+            oa_rows=[oa_row("oa-auto")],
+            bank_rows=[bank_row("bank-auto")],
+            invoice_rows=[],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-05")
+        self.assertEqual(summary["auto_created_relation_count"], 0)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_PAIRED)
+        self.assertEqual(pair_service.active_relations_for_row_ids(["oa-auto", "bank-auto"]), [])
+
     def test_special_two_pane_relation_is_not_auto_completed_by_free_decision(self) -> None:
         store = WorkbenchReconciliationDecisionStore()
         pair_service = WorkbenchPairRelationService()

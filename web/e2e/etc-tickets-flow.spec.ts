@@ -102,10 +102,10 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
-    await expect(row).toContainText("ETC-E2E-2026-03");
+    await expect(row).toContainText("3月批次");
     await expect(page.getByRole("table", { name: "ETC发票明细" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "ETC-E2E-001" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "提交OA" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
     expect(api.count("GET /api/etc/business-batches")).toBeGreaterThanOrEqual(3);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
@@ -125,12 +125,12 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
-    await expect(row).toContainText("ETC-E2E-2026-03");
+    await expect(row).toContainText("3月批次");
 
-    await row.getByRole("button", { name: "删除批次 ETC-E2E-2026-03" }).click();
+    await row.getByRole("button", { name: "删除批次 3月批次" }).click();
     const deleteDialog = page.getByRole("dialog", { name: "删除批次" });
     await expect(deleteDialog).toBeVisible();
-    await expect(deleteDialog).toContainText("ETC-E2E-2026-03");
+    await expect(deleteDialog).toContainText("3月批次");
 
     const failedDeleteResponse = waitForEtcBusinessBatchDelete(page);
     await deleteDialog.getByRole("button", { name: "确认删除" }).click();
@@ -174,14 +174,14 @@ test.describe("ETC ticket management browser flow", () => {
 
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
-    await expect(row).toContainText("ETC-E2E-2026-03");
+    await expect(row).toContainText("3月批次");
     await expect(row).toContainText("人工确认已提交");
 
-    await row.getByRole("button", { name: "删除批次 ETC-E2E-2026-03" }).click();
+    await row.getByRole("button", { name: "删除批次 3月批次" }).click();
     const deleteDialog = page.getByRole("dialog", { name: "删除批次" });
     await expect(deleteDialog).toBeVisible();
     await expect(deleteDialog).toContainText("取消发票合并");
-    await expect(deleteDialog).toContainText("OA 系统中的草稿和已提交记录不会删除");
+    await expect(deleteDialog).toContainText("审批系统中的草稿和已提交记录不会删除");
 
     const failedDeleteResponse = waitForEtcBusinessBatchDelete(page);
     await deleteDialog.getByRole("button", { name: "确认删除" }).click();
@@ -323,12 +323,12 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
-    await expect(page.getByRole("button", { name: "提交OA" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
 
-    await page.getByRole("button", { name: "提交OA" }).click();
-    const createDialog = page.getByRole("dialog", { name: "创建OA草稿" });
+    await page.getByRole("button", { name: "提交审批" }).click();
+    const createDialog = page.getByRole("dialog", { name: "创建审批草稿" });
     await expect(createDialog).toBeVisible();
-    await expect(createDialog.getByText("为当前批次创建 OA 草稿。")).toBeVisible();
+    await expect(createDialog.getByText("为当前批次创建审批草稿。")).toBeVisible();
 
     const failedDraftResponse = page.waitForResponse((response) =>
       response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
@@ -337,10 +337,10 @@ test.describe("ETC ticket management browser flow", () => {
     await createDialog.getByRole("button", { name: "创建草稿" }).click();
     expect((await failedDraftResponse).status()).toBe(503);
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/oa-draft")).toBe(1);
-    await expect(page.getByText("OA 草稿创建暂时失败，请重试。")).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "创建OA草稿" })).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "OA提交确认" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "提交OA" })).toBeEnabled();
+    await expect(page.getByText("审批草稿创建暂时失败，请重试。")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "创建审批草稿" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "审批提交确认" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
 
     const recoveredDraftResponse = page.waitForResponse((response) =>
       response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
@@ -350,10 +350,10 @@ test.describe("ETC ticket management browser flow", () => {
     expect((await recoveredDraftResponse).status()).toBe(200);
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/oa-draft")).toBe(2);
 
-    const resultDialog = page.getByRole("dialog", { name: "OA提交确认" });
+    const resultDialog = page.getByRole("dialog", { name: "审批提交确认" });
     await expect(resultDialog).toBeVisible();
-    await expect(resultDialog.getByText("OA草稿已创建，等待提交确认。")).toBeVisible();
-    await expect(page.getByText("OA 草稿创建暂时失败，请重试。")).toHaveCount(0);
+    await expect(resultDialog.getByText("审批草稿已创建，等待提交确认。")).toBeVisible();
+    await expect(page.getByText("审批草稿创建暂时失败，请重试。")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
@@ -369,10 +369,10 @@ test.describe("ETC ticket management browser flow", () => {
 
     await page.goto("/etc-tickets");
     await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
-    await expect(page.getByRole("button", { name: "提交OA" })).toBeEnabled();
-    await page.getByRole("button", { name: "提交OA" }).click();
+    await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
+    await page.getByRole("button", { name: "提交审批" }).click();
 
-    const createDialog = page.getByRole("dialog", { name: "创建OA草稿" });
+    const createDialog = page.getByRole("dialog", { name: "创建审批草稿" });
     await expect(createDialog).toBeVisible();
     const draftResponse = page.waitForResponse((response) =>
       response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
@@ -381,9 +381,9 @@ test.describe("ETC ticket management browser flow", () => {
     await createDialog.getByRole("button", { name: "创建草稿" }).click();
     expect((await draftResponse).status()).toBe(200);
 
-    const resultDialog = page.getByRole("dialog", { name: "OA提交确认" });
+    const resultDialog = page.getByRole("dialog", { name: "审批提交确认" });
     await expect(resultDialog).toBeVisible();
-    await expect(resultDialog.getByText("OA草稿已创建，等待提交确认。")).toBeVisible();
+    await expect(resultDialog.getByText("审批草稿已创建，等待提交确认。")).toBeVisible();
 
     const failedManualStatusResponse = page.waitForResponse((response) =>
       response.url().includes("/api/etc/business-batches/etc-business-e2e-001/manual-oa-status")
@@ -393,7 +393,7 @@ test.describe("ETC ticket management browser flow", () => {
     expect((await failedManualStatusResponse).status()).toBe(503);
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/manual-oa-status")).toBe(1);
     await expect(page.getByText("人工确认暂时失败，请重试。")).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "OA提交确认" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible();
     await expect(resultDialog.getByRole("button", { name: "已提交" })).toBeEnabled();
     await expect(resultDialog.getByRole("button", { name: "未提交" })).toBeEnabled();
     await expect(page.getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
@@ -429,19 +429,19 @@ test.describe("ETC ticket management browser flow", () => {
 
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
-    await expect(row).toContainText("ETC-E2E-2026-03");
-    await expect(row).toContainText("ETC票 2 + 补充凭证 0");
+    await expect(row).toContainText("3月批次");
+    await expect(row).toContainText("发票 2 + 补充凭证 0");
     await expect(page.getByRole("table", { name: "ETC发票明细" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "ETC-E2E-001" })).toBeVisible();
 
-    const submitButton = page.getByRole("button", { name: "提交OA" });
+    const submitButton = page.getByRole("button", { name: "提交审批" });
     await expect(submitButton).toBeEnabled();
     await submitButton.click();
 
-    const createDialog = page.getByRole("dialog", { name: "创建OA草稿" });
+    const createDialog = page.getByRole("dialog", { name: "创建审批草稿" });
     await expect(createDialog).toBeVisible();
-    await expect(createDialog.getByText("为当前批次创建 OA 草稿。")).toBeVisible();
-    await expect(createDialog.getByText("批次：ETC-E2E-2026-03")).toBeVisible();
+    await expect(createDialog.getByText("为当前批次创建审批草稿。")).toBeVisible();
+    await expect(createDialog.getByText("批次：3月批次")).toBeVisible();
 
     const draftResponse = page.waitForResponse((response) =>
       response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
@@ -451,9 +451,9 @@ test.describe("ETC ticket management browser flow", () => {
     expect((await draftResponse).status()).toBe(200);
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/oa-draft")).toBe(1);
 
-    const resultDialog = page.getByRole("dialog", { name: "OA提交确认" });
+    const resultDialog = page.getByRole("dialog", { name: "审批提交确认" });
     await expect(resultDialog).toBeVisible();
-    await expect(resultDialog.getByText("OA草稿已创建，等待提交确认。")).toBeVisible();
+    await expect(resultDialog.getByText("审批草稿已创建，等待提交确认。")).toBeVisible();
     await expect(resultDialog.getByRole("button", { name: "打开草稿" })).toBeEnabled();
     await expectNoUnexpectedSuccessUiErrors(page);
 
@@ -466,11 +466,11 @@ test.describe("ETC ticket management browser flow", () => {
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/manual-oa-status")).toBe(1);
 
     await expect(page.getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByRole("button", { name: "提交OA" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "提交审批" })).toHaveCount(0);
     const submittedRow = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(submittedRow).toBeVisible();
     await expect(submittedRow).toContainText("人工确认已提交");
-    await expect(submittedRow).toContainText("ETC-E2E-2026-03");
+    await expect(submittedRow).toContainText("3月批次");
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });

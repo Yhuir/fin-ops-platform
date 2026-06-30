@@ -7,7 +7,7 @@
 | Spec ID | 状态 | 当前覆盖 | 缺口/说明 |
 | --- | --- | --- | --- |
 | `BANK-E2E-001` | `covered` | `web/e2e/bank-details-initial-state.spec.ts`、`web/e2e/workbench-relation-fanout.spec.ts`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/BankDetailsPage.test.tsx` | Browser 已证明当前年默认 query、全部账户首屏、账户余额、账户列表、默认列、relation/category 字段和 fresh 空结果空态；Vitest/API 继续覆盖更多账户组合和 API mapper。 |
-| `BANK-E2E-002` | `covered` | `web/e2e/workbench-relation-fanout.spec.ts`、`web/e2e/workbench-relations-candidate-semantics.spec.ts`、`tests/test_bank_details_service.py` | Browser 已证明 candidate 只显示候选标签，Workbench confirm 后回银行明细显示 linked tags。 |
+| `BANK-E2E-002` | `covered` | `web/e2e/workbench-relation-fanout.spec.ts`、`web/e2e/workbench-relations-candidate-semantics.spec.ts`、`tests/test_bank_details_service.py` | Browser/后端回归已证明未正式化 decision 或历史 candidate 兼容值不显示 linked tags；Workbench confirm 后回银行明细显示 `有oa` / `有发票`。 |
 | `BANK-E2E-003` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`tests/test_import_formalization_api.py`、`tests/test_bank_details_sql_runtime.py` | Browser 已证明银行流水导入确认后进入银行明细看到导入行。 |
 | `BANK-E2E-004` | `covered` | `web/e2e/bank-details-export-download.spec.ts`、`web/e2e/bank-details-filtered-export-permissions.spec.ts`、`tests/test_bank_details_export_service.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx` | Browser 已证明默认全银行/全年导出、当前账户 + 月度 + 关键字 + 分类筛选导出、分页状态不限制导出范围、真实 download event、文件名、linked relation 字段和 account/category/date/filter 字段；deterministic mock 返回真实 XLSX workbook，Playwright 会解析 workbook 后再断言业务字段，避免把 CSV 文本伪装成 `.xlsx`。 |
 | `BANK-E2E-005` | `covered` | `web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | Browser 已覆盖账户切换、月度时间筛选、搜索关键字、分类筛选、page size 和第二页请求后交易 query 与导出 query 一致；Vitest 覆盖年份、月份、全部和分页重置，账户余额不被筛选覆盖由 Vitest/API 回归保护。 |
@@ -19,7 +19,7 @@
 
 ## 现有 E2E 审计结论
 
-- 现有银行明细 Browser smoke 可保留：Workbench confirm -> linked tags、candidate 负面语义、银行流水导入后列表展示，以及本轮新增的真实 XLSX workbook 下载解析。
+- 现有银行明细 Browser smoke 可保留：Workbench confirm -> linked tags、未正式化 decision / 历史 candidate 兼容负面语义、银行流水导入后列表展示，以及本轮新增的真实 XLSX workbook 下载解析。
 - 新增 `web/e2e/bank-details-initial-state.spec.ts` 保护首屏业务合同：默认当前年范围必须请求 accounts/transactions，全部账户视图必须显示总余额、账户余额、默认列、候选 relation tags、自动分类和 fresh 空态；非 fresh 空态仍由 freshness spec 保护。
 - 新增 `web/e2e/bank-details-export-download.spec.ts` 保护的是业务导出合同：导出必须触发真实浏览器下载，必须携带当前筛选，下载文件必须是可解析的 XLSX workbook，文件内容必须包含 confirmed relation 字段，不能只证明按钮被点击。
 - 扩展 `web/e2e/bank-details-stale-refreshing.spec.ts` 保护 freshness 和恢复合同：非 fresh payload 必须给诊断，不能把 stale/missing 空 rows 当真实空列表，导出必须禁用或返回业务错误；account read model 非 fresh 要能自动重试到 fresh，交易请求网络失败后用户重试应恢复当前 rows。

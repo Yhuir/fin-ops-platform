@@ -1,20 +1,20 @@
 # 免OA流水批量处理 模块维护入口
 
 - Module key: `no-oa-bank-batches`
-- 类型: 页面模块
-- Route: `/no-oa-bank-batches`
-- Page key: `no-oa-bank-batches`
+- 类型: legacy API/read-model 兼容模块
+- Route: 无当前 Browser 页面入口；legacy API 路径为 `/api/no-oa-bank-batches/*`
+- Page key: 无当前 page registry key
 - 状态: legacy。新功能方向为 `docs/modules/bank-flow-rule-batches/README.md` 的“流水规则批量处理”；不要继续在本模块扩展新的通用流水规则职责。
 
 ## 迁移说明
 
-免 OA 流水批量处理已被重新定义为流水规则批量处理的历史前身。后续实现应新增 `bank-flow-rule-batches` route/service/read model，并逐步迁移或删除本模块主入口。
+免 OA 流水批量处理已被重新定义为流水规则批量处理的历史前身。当前 Browser 页面与前端 feature 已迁移到 `bank-flow-rule-batches`；本模块只保留 legacy API、历史事实、过渡 read model 和受控迁移/修复工具。
 
 迁移目标：
 
 - 旧 `selected_tag_codes` 不作为新规则事实迁移；所有数据按新 `requires_oa` / `requires_invoice` 规则重新处理。
 - 历史已提交 no-OA 批次通过受控 rebaseline dry-run/apply 撤回到未处理状态。
-- 本模块在迁移完成后只保留历史查询、审计或受控工具边界，不能继续作为通用流水批量提交入口。
+- 本模块只保留历史查询、审计或受控工具边界，不能继续作为通用流水批量提交入口。
 
 ## 修改前必读
 
@@ -29,9 +29,6 @@
 
 ## 代码入口
 
-- `web/src/pages/NoOaBankBatchPage.tsx`
-- `web/src/features/noOaBankBatches/*`
-- `web/src/features/noOaBankBatches/policy.ts`
 - `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`
 - `backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py`
 - `backend/src/fin_ops_platform/services/no_oa_bank_batch_read_model_repository.py`
@@ -47,7 +44,7 @@
 
 ## 当前边界
 
-免 OA 流水批量处理负责没有 OA 单据但仍需业务处理的银行流水批次。它是 Bankdetail 高风险子域，不是脱离银行明细的独立事实源。
+免 OA 流水批量处理负责历史“无 OA 单据但已闭环”的银行流水批次、legacy API 兼容和迁移工具。它是 Bankdetail 高风险子域，不是脱离银行明细的独立事实源，也不再拥有当前 Browser 页面。
 
 当前有效边界：
 
@@ -68,7 +65,7 @@
 - 历史兼容：旧 SQL/read model `status=unsubmitted,status_bucket=unsubmitted` 必须在 API/修复工具中归一为 `draft` 且可提交。relation-backed 的旧 `stale/category drift` 批次（`status_bucket=submitted` 或 `can_withdraw=true`，或通过 active no-OA relation 识别）必须投影为 `submitted` 并保留撤回入口；无 active relation 的旧 `stale` 和不可提交 `conflict` 必须从公开 snapshot 清理，不在未提交区显示。
 - 取消关系兼容：历史批次若仍保存为 `submitted`，但对应 `relation_mode=no_oa_bank_batch` 的 Workbench relation 已经是 `cancelled`，公开 lifecycle 必须归一为 `withdrawn`，且 `can_withdraw=false`。这种批次不能再作为撤回验证样本；修复工具应通过 `PostgresStateStore.save_no_oa_bank_batches` 保存公开 snapshot，不直接 SQL 改表。
 - 数据修复：生产历史数据可用 `PYTHONPATH=backend/src python -m fin_ops_platform.tools.repair_no_oa_bank_batch_lifecycle` 先 dry-run 输出待删除/归一批次；确认后加 `--apply`，通过 `PostgresStateStore.save_no_oa_bank_batches` 同步清理 `app.no_oa_bank_batches` 和 `read_model.no_oa_bank_batch_rows`。
-- 前端操作能力：普通行级选择、内部往来整批提交、撤回可用性由 `web/src/features/noOaBankBatches/policy.ts` 统一判断。普通 draft 批次显示右侧行级 checkbox，`internal_transfer` draft 走整批提交按钮；未提交区域中出现的批次必须都可提交。
+- 前端操作能力：当前 Browser 操作能力归 `bank-flow-rule-batches` 页面和 `web/src/features/bankFlowRuleBatches/*`；legacy no-OA API 只保留兼容 contract 和历史事实，不新增独立前端交互。
 - 撤回路径：已提交批次必须从 no-OA 批次 API 撤回，撤回通过 relation command service 取消 Workbench active relation，并使流水回到可匹配状态。
 - 操作闭环：前端 submit-selection、单批次 submit、withdraw 和 tag-selection 保存必须接入 `GlobalOperationOverlayProvider`。写 API 成功后等待 `no_oa_bank_batch` operation barrier 对 affected months/current scope fresh，再重新加载列表或标签选择；overlay 关闭不能依赖本地列表移动或前端事件。
 - App Status：`no_oa_bank_batches` domain 绑定 `no-oa-bank-batch` worker、`no_oa_bank_batch` read model、`no_oa_bank_batch.read_model.refresh` job type。
@@ -83,7 +80,7 @@
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
 
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
+- Legacy API、迁移工具、read model、worker、历史查询或权限变化。
 - API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
 - 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
 - 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。

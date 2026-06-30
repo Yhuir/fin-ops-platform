@@ -106,8 +106,8 @@ PostgreSQL store 不再读取 legacy GridFS reference；production API 读取文
 
 OA、银行流水、进项发票、销项发票之间的两两/三栏关系上下文统一由 `workbench_relation` read model 分发：
 
-- 手工确认关系事实源仍是 `app.workbench_pair_relations`；确定性自动关系来自 `read_model.workbench_reconciliation_decisions` 中 `paired` 状态的决策，未配对区候选关系来自 `read_model.workbench_reconciliation_decisions` 中仍处于 open/proposed 展示状态的决策。分发 read model 不改写关系事实，只把 active 手工关系、paired 自动决策、open/proposed 候选和对象详情投影成标准只读上下文。
-- distribution 必须区分 `relation_status='linked'` 与 `relation_status='candidate'`：linked 表示可作为已确认关系读取的上下文；candidate 只表示关联台未配对候选展示，不得作为 confirmed write fact、支付完成证明或 row 独占关系。
+- confirmed relation 事实源仍是 `app.workbench_pair_relations`。确定性自动匹配结果先写入 `read_model.workbench_reconciliation_decisions`，满足正式化条件的 paired decision 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写成 active relation 后，才进入 `workbench_relation` 下游分发；open/proposed 或未消费 decision 只属于自动匹配内部过程，不作为下游关系上下文。
+- distribution 只向下游页面表达 `relation_status='linked'` 或 `relation_status='unlinked'` 的业务口径：linked 表示可作为已确认关系读取的上下文；unlinked 表示没有 active relation。历史 `relation_status='candidate'` 只能作为旧 payload 兼容值归入 unlinked，不得作为 confirmed write fact、支付完成证明、row 独占关系或用户筛选状态。
 - 标准表是 `read_model.workbench_relation_scopes`、`read_model.workbench_relation_groups` 和 `read_model.workbench_relation_rows`。groups 保存一组关系，rows 给每个 OA/流水/发票对象一行。
 - `WorkbenchRelationReadFacade` 是下游页面唯一读取入口。待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细关系标签等页面不得再直接 join `app.workbench_pair_relations`、`app.invoices`、OA projection 或 OA 附件票缓存来拼关系。
 - 分发 rows 必须覆盖无关联对象：`relation_status='unlinked'`、`group_ids=[]`、`linked_*=[]`。页面需要显示空 OA/空发票时直接消费空数组，不再自行补空。

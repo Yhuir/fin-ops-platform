@@ -47,6 +47,7 @@ from fin_ops_platform.app.bank_detail_category_api import (
 )
 from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
 from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
+from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes
 from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
 from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
 from fin_ops_platform.app.routes_etc_import import EtcImportApiRoutes
@@ -262,6 +263,13 @@ from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
 from fin_ops_platform.services.matching import MatchingEngineService
+from fin_ops_platform.services.bank_batch_application_service import BankBatchPairRelationSnapshotPort
+from fin_ops_platform.services.bank_batch_service import BankBatchRelationRepairReadPort, BankBatchService
+from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
+from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh_producer import (
+    BankFlowRuleBatchReadModelRefreshProducer,
+)
+from fin_ops_platform.services.bank_flow_rule_batch_read_model_repository import BankFlowRuleBatchReadModelRepositoryPort
 from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NO_OA_BANK_BATCH_RELATION_MODE,
@@ -933,6 +941,11 @@ class Application:
         self._output_invoice_collection_sql_read_repository = getattr(self._state_store, "output_invoice_collection_sql_read_repository", None)
         self._oa_pending_payment_sql_read_repository = getattr(self._state_store, "oa_pending_payment_sql_read_repository", None)
         self._no_oa_bank_batch_sql_read_repository = getattr(self._state_store, "no_oa_bank_batch_sql_read_repository", None)
+        self._bank_flow_rule_batch_sql_read_repository = getattr(
+            self._state_store,
+            "bank_flow_rule_batch_sql_read_repository",
+            None,
+        )
         self._output_invoice_collection_lifecycle_repository = build_output_invoice_collection_lifecycle_repository(
             getattr(self._state_store, "_connection", None)
         )
@@ -1002,6 +1015,16 @@ class Application:
                 "load_no_oa_bank_batches",
             ),
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_command_service=self._workbench_relation_command_service(require_fresh_relations=False),
+        )
+        bank_flow_relation_service = getattr(self, "_workbench_pair_relation" + "_service")
+        self._bank_flow_rule_batch_service = BankBatchService.from_snapshot(
+            self._runtime_repository_snapshot(
+                persisted_state,
+                "bank_flow_rule_batches",
+                "load_bank_flow_rule_batches",
+            ),
+            relation_read_port=BankBatchRelationRepairReadPort(bank_flow_relation_service),
             relation_command_service=self._workbench_relation_command_service(require_fresh_relations=False),
         )
         self._workbench_amount_check_service = WorkbenchAmountCheckService()
@@ -2019,12 +2042,14 @@ class Application:
         if (
             route_path == "/api/no-oa-bank-batches"
             or route_path.startswith("/api/no-oa-bank-batches/")
-            or route_path == "/api/bank-flow-rule-batches"
-            or route_path.startswith("/api/bank-flow-rule-batches/")
         ):
             no_oa_bank_batch_response = self._no_oa_bank_batch_routes().route(method, route_path, query, body, headers)
             if no_oa_bank_batch_response is not None:
                 return no_oa_bank_batch_response
+        if route_path == "/api/bank-flow-rule-batches" or route_path.startswith("/api/bank-flow-rule-batches/"):
+            bank_flow_rule_batch_response = self._bank_flow_rule_batch_routes().route(method, route_path, query, body, headers)
+            if bank_flow_rule_batch_response is not None:
+                return bank_flow_rule_batch_response
         if method == "GET" and route_path == "/api/batch-accounting":
             return self._handle_api_batch_accounting(query)
         if method == "POST" and route_path == "/api/batch-accounting/submit":
@@ -2991,11 +3016,17 @@ class Application:
                 codes[row_id] = category_code
         return codes
 
-    def _workbench_relation_command_repository(self, *, repository: object | None = None) -> WorkbenchRelationCommandRepositoryAdapter:
+    def _workbench_relation_command_repository(
+        self,
+        *,
+        repository: object | None = None,
+        save_repository: bool = True,
+    ) -> WorkbenchRelationCommandRepositoryAdapter:
         return WorkbenchRelationCommandRepositoryAdapter(
             pair_relation_service=self._workbench_pair_relation_service,
             repository=repository,
             after_apply=self._configure_workbench_exception_application_service,
+            save_repository=save_repository,
         )
 
     def _workbench_relation_command_service(
@@ -3003,10 +3034,14 @@ class Application:
         *,
         repository: object | None = None,
         require_fresh_relations: bool | None = None,
+        save_repository: bool = True,
     ) -> WorkbenchRelationCommandService:
         relation_facade = self._workbench_relation_read_facade()
         return WorkbenchRelationCommandService(
-            relation_repository=self._workbench_relation_command_repository(repository=repository),
+            relation_repository=self._workbench_relation_command_repository(
+                repository=repository,
+                save_repository=save_repository,
+            ),
             relation_facade=relation_facade,
             require_fresh_relations=False if require_fresh_relations is None else require_fresh_relations,
         )
@@ -9209,7 +9244,7 @@ class Application:
             state_store=self._state_store,
             tag_selection_service=self._no_oa_bank_batch_tag_selection_service,
             no_oa_bank_batch_read_model_repository=getattr(self, "_no_oa_bank_batch_sql_read_repository", None),
-            workbench_matching_source_versions_provider=self._no_oa_bank_batch_workbench_source_versions,
+            workbench_matching_source_versions_provider=self._bank_flow_rule_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
@@ -9217,12 +9252,58 @@ class Application:
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             read_model_refresh_producer=self._no_oa_bank_batch_read_model_refresh_producer(),
             relation_facade=self._workbench_relation_read_facade(),
-            relation_command_service=self._workbench_relation_command_service(repository=self._state_store),
+            relation_command_service=self._workbench_relation_command_service(
+                repository=self._state_store,
+                save_repository=False,
+            ),
         )
 
     def _no_oa_bank_batch_routes(self) -> NoOaBankBatchApiRoutes:
         return NoOaBankBatchApiRoutes(
             self._no_oa_bank_batch_application_service(),
+            resolve_mutation_session=self._no_oa_bank_batch_mutation_session,
+            load_json_body=self._load_json_body,
+            json_response=self._json_response,
+        )
+
+    def _bank_flow_rule_batch_application_service(self) -> BankFlowRuleBatchApplicationService:
+        read_repository = getattr(self, "_bank_flow_rule_batch_sql_read_repository", None)
+        if read_repository is None:
+            raw_repository = getattr(self, "_workbench_sql_read_repository", None)
+            read_repository = (
+                BankFlowRuleBatchReadModelRepositoryPort(raw_repository)
+                if raw_repository is not None
+                else None
+            )
+        return BankFlowRuleBatchApplicationService(
+            import_service=self._import_service,
+            effective_category_provider=self._bank_transaction_tag_reader(),
+            bank_batch_service=self._bank_flow_rule_batch_service,
+            app_settings_service=self._app_settings_service,
+            bank_transaction_category_service=self._bank_transaction_category_service,
+            pair_relation_snapshot_port=BankBatchPairRelationSnapshotPort(
+                getattr(self, "_workbench_pair_relation" + "_service")
+            ),
+            workbench_read_model_service=self._workbench_read_model_service,
+            state_store=self._state_store,
+            bank_batch_read_model_repository=read_repository,
+            workbench_matching_source_versions_provider=self._no_oa_bank_batch_workbench_source_versions,
+            bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
+            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
+            expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
+            search_cache_clearer=self._search_service.clear_cache,
+            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
+            read_model_refresh_producer=self._bank_flow_rule_batch_read_model_refresh_producer(),
+            relation_facade=self._workbench_relation_read_facade(),
+            relation_command_service=self._workbench_relation_command_service(
+                repository=self._state_store,
+                save_repository=False,
+            ),
+        )
+
+    def _bank_flow_rule_batch_routes(self) -> BankFlowRuleBatchApiRoutes:
+        return BankFlowRuleBatchApiRoutes(
+            self._bank_flow_rule_batch_application_service(),
             resolve_mutation_session=self._no_oa_bank_batch_mutation_session,
             load_json_body=self._load_json_body,
             json_response=self._json_response,
@@ -9307,6 +9388,9 @@ class Application:
 
     def _no_oa_bank_batch_read_model_refresh_producer(self) -> NoOaBankBatchReadModelRefreshProducer:
         return NoOaBankBatchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
+
+    def _bank_flow_rule_batch_read_model_refresh_producer(self) -> BankFlowRuleBatchReadModelRefreshProducer:
+        return BankFlowRuleBatchReadModelRefreshProducer(refresh_gateway_provider=self._read_model_refresh_gateway)
 
     def _no_oa_bank_batch_workbench_payload_decorator(self) -> NoOaBankBatchWorkbenchPayloadDecorator:
         return NoOaBankBatchWorkbenchPayloadDecorator(batch_provider=self._no_oa_bank_batch_service.get_batch)
@@ -11263,6 +11347,13 @@ class Application:
         return payload
 
     def _no_oa_bank_batch_workbench_source_versions(self) -> dict[str, object]:
+        payload = dict(self._workbench_matching_source_versions())
+        payload["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
+        relation_source_versions = self._workbench_relation_source_version_provider()
+        payload["pair_relation_snapshot_version"] = relation_source_versions.pair_relation_snapshot_version()
+        return payload
+
+    def _bank_flow_rule_batch_workbench_source_versions(self) -> dict[str, object]:
         payload = dict(self._workbench_matching_source_versions())
         payload["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
         relation_source_versions = self._workbench_relation_source_version_provider()

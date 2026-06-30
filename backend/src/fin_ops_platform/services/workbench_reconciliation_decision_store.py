@@ -39,7 +39,12 @@ class WorkbenchReconciliationDecisionStore:
             payload["tenant_id"] = self._tenant_id
             payload.setdefault("consumed_by_relation_id", None)
             payload.setdefault("suppressed_by_exception_case_id", None)
-            self._decisions_by_key[str(payload["decision_key"])] = payload
+            decision_key = str(payload["decision_key"])
+            existing = self._decisions_by_key.get(decision_key)
+            if isinstance(existing, dict) and existing.get("decision_status") == DECISION_STATUS_SUPPRESSED:
+                payload["decision_status"] = DECISION_STATUS_SUPPRESSED
+                payload["suppressed_by_exception_case_id"] = existing.get("suppressed_by_exception_case_id")
+            self._decisions_by_key[decision_key] = payload
 
     def list_decisions(self, scope_month: str, *, statuses: set[str] | None = None) -> list[dict[str, object]]:
         if self._repository is not None:

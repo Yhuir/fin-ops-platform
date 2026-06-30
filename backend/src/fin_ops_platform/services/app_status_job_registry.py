@@ -51,6 +51,7 @@ APP_STATUS_BACKGROUND_JOB_REGISTRY: dict[str, AppStatusBackgroundJobDefinition] 
     "oa_pending_payment.read_model.refresh": AppStatusBackgroundJobDefinition("oa_pending_payment.read_model.refresh", "刷新OA待付款", ("oa_pending_payments",), "/oa-pending-payments"),
     "oa.sync": AppStatusBackgroundJobDefinition("oa.sync", "OA同步", ("oa_pending_payments",), "/oa-pending-payments"),
     "no_oa_bank_batch.read_model.refresh": AppStatusBackgroundJobDefinition("no_oa_bank_batch.read_model.refresh", "刷新免OA批次", ("no_oa_bank_batches",), "/no-oa-bank-batches"),
+    "bank_flow_rule_batch.read_model.refresh": AppStatusBackgroundJobDefinition("bank_flow_rule_batch.read_model.refresh", "刷新流水规则批次", ("bank_flow_rule_batches",), "/bank-flow-rule-batches"),
     "turnover_ledger.read_model.refresh": AppStatusBackgroundJobDefinition("turnover_ledger.read_model.refresh", "刷新往来款台账", ("turnover_ledger",), "/turnover-ledger"),
     "settings_refresh": AppStatusBackgroundJobDefinition("settings_refresh", "刷新设置", ("settings",), "/settings", legacy=True),
     "settings_data_reset": AppStatusBackgroundJobDefinition("settings_data_reset", "设置数据重置", ("settings",), "/settings", legacy=True),

@@ -5,20 +5,20 @@
 ## 业务目标
 
 - 将银行流水、OA 单据、进项/销项发票、ETC 票据和项目成本关系收敛到可审计的核销链路。
-- 关联台提供“候选发现、人工确认、撤回、状态刷新、异常处理”的统一操作界面。
+- 关联台提供“自动匹配、正式配对、撤回、状态刷新、异常处理”的统一操作界面。
 - 核销事实必须能被银行明细、待找发票、税金抵扣、成本统计、往来款等页面复用。
 
 ## 关联台职责
 
-- 展示待处理对象、候选对象和已确认关系。
+- 展示待处理对象、系统自动匹配结果和已确认关系；对用户的关系口径只保留正式配对和无配对。
 - 支持搜索、筛选、三栏工作流、批量确认、撤回和详情查看。
 - 消费后端 read model 或 active generation，不在前端重新拼底层事实。
 - 展示 freshness、refreshing、stale、job 等状态，不能把旧 read model 伪装为 fresh。
 
-## 自动候选规则
+## 自动匹配规则
 
-- `oa_bank_exact_sum`：当 1 条 OA 与 2 到 6 条同方向银行流水均通过 OA-bank 业务证据，且银行流水按分精度合计金额唯一等于 OA 金额时，后端生成 OA-bank 候选；候选保持待发票状态，不因缺少发票进入完整三方闭环。
-- 该规则必须由后端 matching service/decision engine 产生，前端只消费 candidate、decision、read model 或 active generation 结果。
+- `oa_bank_exact_sum`：当 1 条 OA 与 2 到 6 条同方向银行流水均通过 OA-bank 业务证据，且银行流水按分精度合计金额唯一等于 OA 金额时，后端生成 paired decision。decision 满足金额校验、无 active 冲突且未被用户撤回过同一 row-set 时，后台通过 relation command 写成正式 active relation；缺少发票时仍是两栏正式关系，不等同于完整三方闭环。
+- 该规则必须由后端 matching service/decision engine 产生。前端消费 active generation/read model 结果，但不能把未正式化 decision 暴露成第三种用户关系状态。
 - 单笔 `oa_bank_exact_amount` 优先于多流水合计；存在多个等额银行流水组合时不自动选择。
 
 ## 核销关系
@@ -26,7 +26,7 @@
 核销关系是跨页面事实，至少需要记录：
 
 - 关系双方对象类型、对象 id、来源系统和 source version。
-- 关系状态、确认/撤回人、确认/撤回时间、原因和审计信息。
+- 关系状态、确认/撤回人、确认/撤回时间、原因和审计信息；用户关系口径只有正式 active relation 与无 active relation。
 - 影响范围，例如月份、项目、流水、发票、OA 单据、业务批次。
 
 ## 异常处理

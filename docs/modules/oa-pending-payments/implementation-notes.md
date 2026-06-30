@@ -3,6 +3,14 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-06-30 - 月份选择器合并全部视图
+
+- 目标：在 OA 待付款核对页顶部月份筛选中提供用户可见的“全部”视图，并把“全部”与原生月份选择合并成同一个控件。
+- 关键决策：不新增 API 字段或 read model scope；“全部”继续使用空 `month` 查询值，具体月份继续传 `YYYY-MM`。控件用分段按钮 + `type="month"`，默认高亮“全部”，选择月份后取消高亮，点击“全部”清空月份。
+- 文档影响：页面筛选 UI 和测试矩阵更新；模块边界、API response shape、read model/worker 合同不变。
+- 测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，锁定默认不传 `month`、选择月份传 `month=YYYY-MM`、点击“全部”清除 `month`，并补充合并控件 CSS contract。
+- 验证命令：`cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`；`cd web && npm run build`。
+
 ## 2026-06-30 - 右侧抽屉候选流水增加分页入口
 
 - 目标：候选接口返回 `100 / 743` 这类超过首屏的结果时，用户可以继续浏览后续支出流水。
@@ -435,7 +443,7 @@
 
 - 目标：在 OA 待付款核对页新增 `已完成 OA / 进行中 OA` 切换，把进行中支付申请/日常报销拉入三列视图，并支持候选流水确认后写回 OA 支付状态。
 - 影响范围：OA Mongo adapter/projection、OA pending payment query/read model/service/API、OA MySQL payment status adapter、Workbench relation confirm command、`OaPendingPaymentsPage`/table/API types/styles、模块/产品/API 文档和相关测试。
-- 关键决策：继续复用 Workbench relation 作为关联事实源；candidate relation 只展示证据和确认按钮，不直接判定 `paid` 或写回；confirm-paid 后端负责金额相等、outflow、workflow_status、flow_id 和 relation command 校验，页面只提交用户确认。
+- 关键决策：继续复用 Workbench relation 作为关联事实源；历史 candidate relation 术语只表示当时未正式确认的自动匹配证据，当前口径下必须按未关联/未正式化 decision 处理，不直接判定 `paid` 或写回；confirm-paid 后端负责金额相等、outflow、workflow_status、flow_id 和 relation command 校验，页面只提交用户确认。
 - 文档影响：更新本模块 README、state-machine、tests、implementation-notes，并同步 `docs/product-specs/invoice-lifecycle.md`、`docs/dev/api-contracts.md` 和 `docs/app-architecture/pages.md`。
 - 测试覆盖：新增/更新 `tests/test_oa_payment_status_service.py`、`tests/test_mongo_oa_adapter.py`、`tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_command_service.py`、`tests/test_oa_pending_payment_api.py` 和 `web/src/test/OaPendingPaymentsPage.test.tsx`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_payment_status_service tests.test_mongo_oa_adapter.MongoOAAdapterTests.test_list_application_records_maps_payment_requests_and_reimbursement_details tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_external_oa_mysql_client_is_confined_to_role_sync_adapter tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_raw_postgres_sql_in_services_is_classified_by_platform_boundary -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_service tests.test_oa_pending_payment_command_service tests.test_oa_pending_payment_api -v`；`cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`；`cd web && npm run build`。

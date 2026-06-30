@@ -91,7 +91,7 @@ describe("workbench api bank amount mapping", () => {
           candidate_keys: ["candidate-1"],
           can_submit: true,
           requires_note: false,
-          message: "将拆分该自动候选组合",
+          message: "将取消该系统建议",
           before: { groups: [] },
           after: { groups: [] },
           amount_summary: {
@@ -2601,7 +2601,7 @@ describe("workbench exception api", () => {
             {
               id: "candidate-1",
               label: "命中候选分组",
-              detail: "OA 与流水来自同一候选组。",
+              detail: "OA 与流水来自同一关系组。",
             },
           ],
           can_apply: true,
@@ -2670,7 +2670,7 @@ describe("workbench exception api", () => {
         {
           id: "candidate-1",
           label: "命中候选分组",
-          detail: "OA 与流水来自同一候选组。",
+          detail: "OA 与流水来自同一关系组。",
         },
       ],
       canApply: true,

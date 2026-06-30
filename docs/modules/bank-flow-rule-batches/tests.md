@@ -1,6 +1,6 @@
 # 流水规则批量处理测试矩阵
 
-状态：partial-covered。本轮实现使用旧 no-OA 文件名承载新流水规则入口；后续独立模块化时应重命名测试文件并拆出专用 service/read model tests。
+状态：covered-independent-io。前端页面、feature 和 Vitest 文件已切到 `BankFlowRuleBatch*` / `bankFlowRuleBatches` 边界；后端 route、application service、read model key、producer、worker event、manifest、operation barrier、repository port、mutation persistence port 和 refresh persistence port 已独立，物理表拆分仍作为后续迁移风险保留。
 
 ## 七类测试适用性
 
@@ -9,7 +9,7 @@
 | 1. Business core unit tests | 适用 | 已覆盖 checkbox requirement metadata、paired/open 判定、`requires_invoice`、`requires_oa`+`requires_invoice`、以及只要求 `requires_oa` 时补齐 OA 即可 paired 的 fail-closed/complete 组合、折叠阈值、`bank_flow_rule_batch` active relation / submitted batch fact 回灌 submitted 批次且不污染 legacy no-OA 列表、rebaseline 状态转换；未知/停用/重复标签仍需扩展。 |
 | 2. Service-layer tests | 适用 | 已覆盖批次提交 relation command payload、规则保存后从 durable relation repository 同步 active `bank_flow_rule_batch` relation requirement metadata、规则保存后同步旧 `turnover:* manual_confirmed` relation 为 `turnover_manual_closure`、adapter repository-load 守卫、reset submitted 批量撤回、应用层列表把 `relation_mode` 传入 read repository、submitted/withdrawn 批次保留按 refresh mode 隔离、rebaseline dry-run/apply manifest 校验和幂等；独立规则审计和 partial failure rollback 仍需扩展。 |
 | 3. API contract tests | 适用 | 已覆盖 `GET/PUT /api/bank-flow-rule-batches/tag-rules`，包括 PUT 后已提交 relation 的 `requires_oa/requires_invoice/flow_rule_version` 同步、PUT 后旧外部往来 relation 的 `requires_oa/requires_invoice/paired_requirement_*` 同步和 relation mode 升级、`GET /api/bank-flow-rule-batches` 路由 relation mode、`POST /submit-selection` 提交后进入 bank-flow submitted 且不进入 legacy no-OA submitted、`POST /reset-submitted`、`POST /rebaseline-no-oa/dry-run`、`POST /rebaseline-no-oa/apply`、缺 manifest 和 stale manifest 错误；权限错误 shape 仍主要靠浏览器 role matrix。 |
-| 4. Read model, cache, and background job tests | 适用 | 当前覆盖过渡期 `no_oa_bank_batch` stale/refreshing fail-closed、`bank_flow_rule_batch` operation barrier alias、relation-mode read model 分区索引、no-OA worker/manifest guard，以及 Workbench SQL active generation 按外部往来 relation metadata 分区；独立 `bank_flow_rule_batch` 投影表、source version、schema version、worker refresh 待 read model 拆分时补。 |
+| 4. Read model, cache, and background job tests | 适用 | 已覆盖 `bank_flow_rule_batch` 独立 operation barrier readiness、禁止回退 no-OA readiness、独立 refresh producer scope、manifest/registry/scope policy/worker event/RabbitMQ dispatch 合同、bank-flow repository port、bank-flow refresh persistence IO、relation-mode read model 分区索引，以及 Workbench SQL active generation 按外部往来 relation metadata 分区；独立物理投影表、专属 source version/schema version 仍待物理表拆分时补。 |
 | 5. Frontend component and interaction tests | 适用 | xlsx/grid 抽屉、左侧只读、OA/发票 checkbox、保存失败、标签变化后 grid 同步、选择清空、批量提交 loading/error/empty/stale 状态、关联台 bank-flow 折叠行不显示旧计数文案且保留“展开 N 条明细”。 |
 | 6. End-to-end business-flow integration tests | 适用 | 已覆盖 bank tag rules -> submit bank rows -> reset submitted -> 未提交候选恢复、bank-flow submit-selection -> bank-flow submitted list visible and no-OA submitted list clean、bank tag rules -> submit bank rows -> workbench open/paired、规则保存 -> 已提交 relation metadata 同步 -> Workbench 可按新 requirement 分区、银行明细标签变更 -> 流水规则抽屉同步、`requires_invoice` open -> 选择补票候选发票 -> 确认后 paired、legacy no-OA rebaseline dry-run -> apply manifest -> barrier 刷新。 |
 | 7. Existing feature regression tests | 适用 | no-OA legacy paths、Workbench paired/open、bank-details tag rules、pending invoices rules、turnover ledger、search、operation barrier、permissions/audit。 |
@@ -18,6 +18,11 @@
 
 - 当前实现：`tests/test_no_oa_bank_batch_tag_selection_api.py`
 - 当前实现：`tests/test_operation_freshness_barrier.py`
+- 当前实现：`tests/test_bank_flow_rule_batch_backend_boundary.py`
+- 当前实现：`tests/test_bank_flow_rule_batch_routes.py`
+- 当前实现：`tests/test_bank_flow_rule_batch_read_model_refresh_producer.py`
+- 当前实现：`tests/test_read_model_manifest.py`
+- 当前实现：`tests/test_runtime_worker_registry.py`
 - 当前实现：`tests/test_workbench_candidate_grouping.py`
 - 当前实现：`tests/test_workbench_relation_command_service.py`
 - 后续拆分：`tests/test_bank_flow_rule_batch_requirement_service.py`
@@ -29,13 +34,12 @@
 - 更新 `tests/test_workbench_candidate_grouping.py`
 - 更新受影响 no-OA regression tests，证明旧入口被迁移或清理后不会误占用银行 rows。
 
-## 计划前端测试入口
+## 当前前端测试入口
 
-- 当前实现：`web/src/test/NoOaBankBatchApi.test.ts`
-- 当前实现：`web/src/test/NoOaBankBatchPage.test.tsx`
+- 当前实现：`web/src/test/BankFlowRuleBatchApi.test.ts`
+- 当前实现：`web/src/test/BankFlowRuleBatchPage.test.tsx`
+- 当前实现：`web/src/test/BankFlowRuleBatchPolicy.test.ts`
 - 当前实现：`web/src/test/CandidateGroupGrid.test.tsx`
-- 后续拆分：`web/src/test/BankFlowRuleBatchApi.test.ts`
-- 后续拆分：`web/src/test/BankFlowRuleBatchPage.test.tsx`
 - `web/src/test/BankFlowRuleBatchRuleDrawer.test.tsx`
 - `web/e2e/bank-flow-rule-batches-flow.spec.ts`
 
@@ -57,8 +61,9 @@
 
 ```bash
 PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_candidate_grouping.py tests/test_workbench_relation_command_service.py -q
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_bank_flow_rule_batch_backend_boundary.py tests/test_bank_flow_rule_batch_routes.py tests/test_bank_flow_rule_batch_read_model_refresh_producer.py tests/test_operation_freshness_barrier.py tests/test_read_model_manifest.py tests/test_runtime_worker_registry.py -q
 PYTHONPATH=backend/src:. pytest tests/test_workbench_turnover_grouping.py tests/test_turnover_workbench_integration.py tests/test_turnover_ledger_uow_contract.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_pairs_turnover_manual_closure_when_no_invoice_required -q
-npm --prefix web test -- --run CandidateGroupGrid.test.tsx NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts App.test.tsx
+npm --prefix web test -- --run CandidateGroupGrid.test.tsx BankFlowRuleBatchPage.test.tsx BankFlowRuleBatchApi.test.ts BankFlowRuleBatchPolicy.test.ts App.test.tsx
 npm --prefix web run e2e -- e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium
 npm --prefix web run e2e -- e2e/permissions-role-matrix.spec.ts --project=chromium
 npm --prefix web run build

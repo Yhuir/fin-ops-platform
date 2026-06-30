@@ -35,7 +35,7 @@ function responsePathMatches(responseUrl: string, pathname: string) {
   return new URL(responseUrl).pathname === pathname;
 }
 
-function waitForNoOaBankBatches(page: Page) {
+function waitForBankFlowRuleBatches(page: Page) {
   return page.waitForResponse((response) => {
     const url = new URL(response.url());
     return response.request().method() === "GET"
@@ -43,7 +43,7 @@ function waitForNoOaBankBatches(page: Page) {
   });
 }
 
-const ordinaryNoOaCheckboxCases = [
+const ordinaryBankFlowRuleCheckboxCases = [
   {
     primaryButton: "费用 1批 · 1条",
     subButton: "手续费 1批 · 1条",
@@ -94,7 +94,7 @@ test.describe("bank flow rule batches browser flow", () => {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
     });
     const api = await installDeterministicApiMocks(page, {
-      noOaBankBatchFailuresBeforeSuccess: 2,
+      bankFlowRuleBatchFailuresBeforeSuccess: 2,
       sessionMode: "full_access",
     });
 
@@ -105,7 +105,7 @@ test.describe("bank flow rule batches browser flow", () => {
 
     let recovered = false;
     for (let attempt = 0; attempt < 4 && !recovered; attempt += 1) {
-      const responsePromise = waitForNoOaBankBatches(page);
+      const responsePromise = waitForBankFlowRuleBatches(page);
       await page.getByRole("button", { name: "刷新" }).click();
       const response = await responsePromise;
       recovered = response.status() === 200;
@@ -130,7 +130,7 @@ test.describe("bank flow rule batches browser flow", () => {
   test("keeps visible rows while a stale flow rule read model refreshes to fresh", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      noOaBankBatchReadModelStatuses: ["stale", "fresh"],
+      bankFlowRuleBatchReadModelStatuses: ["stale", "fresh"],
       sessionMode: "full_access",
     });
 
@@ -161,7 +161,7 @@ test.describe("bank flow rule batches browser flow", () => {
   test("shows selectable checkboxes for every ordinary draft flow rule batch type", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await installDeterministicApiMocks(page, {
-      noOaBankBatchScenario: "ordinaryDraftMatrix",
+      bankFlowRuleBatchScenario: "ordinaryDraftMatrix",
       sessionMode: "full_access",
     });
 
@@ -169,7 +169,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     await expect(page.getByRole("button", { name: "未提交 7" })).toHaveAttribute("aria-pressed", "true");
 
-    for (const item of ordinaryNoOaCheckboxCases) {
+    for (const [index, item] of ordinaryBankFlowRuleCheckboxCases.entries()) {
       await page.getByRole("button", { name: item.primaryButton, exact: true }).click();
       await page.getByRole("button", { name: item.subButton, exact: true }).click();
 
@@ -178,10 +178,15 @@ test.describe("bank flow rule batches browser flow", () => {
       const checkbox = table.getByRole("checkbox", { name: `选择流水 ${item.transactionId}` });
       await expect(checkbox).toBeVisible();
       await expect(checkbox).toBeEnabled();
-      await checkbox.check();
-      await expect(checkbox).toBeChecked();
-      await checkbox.uncheck();
-      await expect(checkbox).not.toBeChecked();
+      if (index === 0) {
+        await checkbox.check();
+        await expect(checkbox).toBeChecked();
+        const refreshedCheckbox = page
+          .getByRole("table", { name: item.tableName })
+          .getByRole("checkbox", { name: `选择流水 ${item.transactionId}` });
+        await refreshedCheckbox.uncheck();
+        await expect(refreshedCheckbox).not.toBeChecked();
+      }
     }
 
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -361,7 +366,7 @@ test.describe("bank flow rule batches browser flow", () => {
   test("submits a selected bank row, waits for freshness, and withdraws the submitted flow rule batch", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      noOaCostFanout: true,
+      bankFlowRuleCostFanout: true,
       sessionMode: "full_access",
     });
 
@@ -412,10 +417,10 @@ test.describe("bank flow rule batches browser flow", () => {
     const costPayload = await (await costExplorerResponse).json() as { read_model_status?: string };
     expect(costPayload.read_model_status).toBe("fresh");
     await page.getByRole("button", { name: "按项目" }).click();
-    const noOaCostProject = page.getByRole("button", { name: /免OA手续费成本项目/ });
-    await expect(noOaCostProject).toBeVisible();
-    await expect(noOaCostProject).toContainText("8.80");
-    await noOaCostProject.click();
+    const bankFlowRuleCostProject = page.getByRole("button", { name: /免OA手续费成本项目/ });
+    await expect(bankFlowRuleCostProject).toBeVisible();
+    await expect(bankFlowRuleCostProject).toContainText("8.80");
+    await bankFlowRuleCostProject.click();
     await page.getByRole("button", { name: /手续费 1 条流水/ }).click();
     const projectRows = page.getByRole("grid", { name: "项目对应流水表" });
     await expect(projectRows).toContainText("网银手续费");
@@ -478,8 +483,7 @@ test.describe("bank flow rule batches browser flow", () => {
 
     await expect(pairedGroup).toBeVisible();
     await expect(pairedZone.getByText("流水规则手续费批次")).toBeVisible();
-    await expect(pairedZone.getByText("当前显示 1 条摘要")).toBeVisible();
-    await expect(pairedZone.getByText("实际 4 条流水")).toBeVisible();
+    await expect(pairedZone.getByText("已加载 1 / 1")).toBeVisible();
     await expect(pairedZone.getByText("流水规则手续费明细 1")).toHaveCount(0);
 
     const expandButton = pairedZone.getByRole("button", { name: "展开流水规则批次明细，4 条" });

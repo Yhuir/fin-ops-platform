@@ -2,21 +2,21 @@
 
 ## Relation 事实与展示上下文
 
-`app.workbench_pair_relations` 只保存 confirmed relation fact。`workbench_relation` read model 可以同时分发 active confirmed relation、paired automatic decision、open/proposed unmatched candidate 和 unlinked rows，但 automatic decision 不是 confirmed write fact。
+`app.workbench_pair_relations` 只保存 confirmed relation fact。`workbench_relation` read model 只向下游业务分发 active confirmed relation 和 unlinked rows；automatic decision/candidate 只属于自动匹配内部计算过程。满足确定性条件的 free paired decision 必须先通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写成 active relation，才能进入下游已配对口径。
 
-Workbench active generation 是面向关联台页面的派生投影；`workbench_relation` 是面向下游页面的关系分发 read model。二者都只能从 canonical relation fact、自动 decision/candidate 和各业务事实表派生，不能互相作为写入事实源。active relation 的 `special_metadata`、`amount_check`、`display_tags` 和 `source_versions` 必须随投影传播，以便批量账务、ETC、待找发票、进项反提等外部 owner 的展示归属保持一致。
+Workbench active generation 是面向关联台页面的派生投影；`workbench_relation` 是面向下游页面的关系分发 read model。二者都只能从 canonical relation fact、自动匹配内部结果和各业务事实表派生，不能互相作为写入事实源。active relation 的 `special_metadata`、`amount_check`、`display_tags` 和 `source_versions` 必须随投影传播，以便批量账务、ETC、待找发票、进项反提等外部 owner 的展示归属保持一致。
 
-confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirmed` OA+银行、OA+发票、银行+发票两栏 relation 必须继续作为 `app.workbench_pair_relations.status='active'` 分发给下游，`workbench_relation` 可读为 `relation_status='linked'`；但关联台 active generation 应把这类 partial relation 发布为 canonical `case:<case_id>` open/candidate group，等待第三栏补齐。只有 OA + 银行 + 发票三栏完整，或 no-OA、工资/个人自动闭合、内部转账、个人暂借款还清、OA invoice offset、批量账务、ETC summary/batch relation、processed/closed exception 等显式业务例外，才能进入关联台 paired zone。
+confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirmed` OA+银行、OA+发票、银行+发票两栏 relation 必须继续作为 `app.workbench_pair_relations.status='active'` 分发给下游，`workbench_relation` 可读为 `relation_status='linked'`；但关联台 active generation 应把这类 partial relation 发布为 canonical `case:<case_id>` open group，等待第三栏补齐。只有 OA + 银行 + 发票三栏完整，或 no-OA、工资/个人自动闭合、内部转账、个人暂借款还清、OA invoice offset、批量账务、ETC summary/batch relation、processed/closed exception 等显式业务例外，才能进入关联台 paired zone。
 
 页面和 downstream read model 不能把以下内容当作 confirmed relation：
 
 - 前端 `workbenchRelationUpdated` event。
-- `read_model.workbench_reconciliation_decisions` 中 `relation_status='candidate'`、未确认或仅用于候选展示的匹配。
+- `read_model.workbench_reconciliation_decisions` 中未被 command service 消费为 active relation 的自动匹配结果。
 - OA 待付款进行中 OA 的 active pending relation 或 `app.bank_transaction_relation_claims`。它们只用于 OA 待付款 in-progress 视图和关联台候选排除，不是 Workbench confirmed relation fact。
 - 页面本地 table rows、drawer state、session state。
 - 非 fresh `workbench_relation` 返回的空 rows。
 
-`relation_status='linked'` 是下游只读页面判断已关联/已支付的唯一关系状态；`relation_status='candidate'` 只表示关联台未配对候选，应展示为候选证据，但不能驱动支付状态、row 独占或撤回/取消业务。
+`relation_status='linked'` 是下游只读页面判断已关联/已支付的唯一关系状态；没有 linked relation 的 row 必须按 unlinked/未配对处理。`candidate` 不再作为下游业务筛选口径。
 
 ## Relation mode
 
@@ -34,7 +34,7 @@ confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirme
 | `etc_historical_repair` | ETC repair | 是 | 历史 ETC 修复工具创建或修复的关系。 |
 | `etc_batch_invoice_link` | ETC repair/link | 是 | 历史 ETC 批次补关联或 existing batch link 兼容关系；新增写入必须通过 command service，不允许页面 service 直接写 pair snapshot。 |
 | `input_invoice_oa_reverse` | 进项发票使用 | 是 | 以发票反提 OA 后的本地确认关系。 |
-| `automatic_decision` | workbench relation read model | 否 | 只能用于 distribution 展示上下文，不能写 active fact。`display_state=paired` 的三栏 decision 可进入关联台已配对展示区；`display_state=open`、两栏 decision 或只由 open 发票附着形成的展示 group 仍是候选。 |
+| `automatic_decision` | 自动匹配内部 read model | 否 | 不能作为 active relation mode 写入。`free + paired + paired display` 且金额校验 matched、无 active 冲突、同 row-set 未被撤回的 decision，会通过 `manual_confirmed` active relation 落库并标记 consumed；open/proposed decision 不进入下游业务关系。 |
 
 新增 mode 必须同时定义：
 
