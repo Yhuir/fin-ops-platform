@@ -23,7 +23,7 @@
 
 生产刷新由专用 `cost-statistics` RabbitMQ consumer 承担独立性能 lane；旧 `cost-tax` 成本统计兼容消费者已移除，`cost-tax` 只保留税金抵扣兼容链路。当前 P2/P3 closure 按首屏 API 或 direct refresh p95 <= 1000ms 验收，写操作链路还要求 operation-to-fresh p99 <= 3000ms。`cost_statistics` freshness 仍以 PostgreSQL dirty scope/outbox/readiness 为事实源，不能为了达标把 stale 伪装成 fresh。
 
-月度 scope projection 必须把对应 `read_model.workbench_generations` active generation 的 `source_versions` 纳入自身 `source_versions`。当 SQL read model 已经 fresh 且 `source_versions` 完全一致时，worker 可以返回 `skipped/source_versions_unchanged`，不得扫描 `read_model.workbench_groups` 或重写 payload；缺少读取接口、状态非 fresh 或版本不一致时必须按原路径重建。
+月度 scope projection 只能消费对应 `read_model.workbench_generations` 的 active generation，并必须把 active generation 的 `source_versions` 纳入自身 `source_versions`。禁止直接按 `scope_key` 扫描 `read_model.workbench_groups` / `workbench_rows` 的历史 generation；父 scope shard 枚举也只能来自 active `workbench_generations`。当 SQL read model 已经 fresh 且 `source_versions` 完全一致时，worker 可以返回 `skipped/source_versions_unchanged`，不得扫描 Workbench groups 或重写 payload；缺少读取接口或版本不一致时必须按 active generation 重建。
 
 ## 维护触发器
 

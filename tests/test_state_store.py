@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
 from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.state_store import ApplicationStateStore
@@ -681,7 +682,7 @@ class StateStoreTests(unittest.TestCase):
                     "active:2026-05": {
                         "scope_key": "active:2026-05",
                         "scope_type": "month",
-                        "schema_version": "2026-05-cost-statistics-explorer-v1",
+                        "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                         "month": "2026-05",
                         "project_scope": "active",
                         "generated_at": "2026-05-04T12:00:00+00:00",
@@ -713,7 +714,7 @@ class StateStoreTests(unittest.TestCase):
                     "active:2026-05": {
                         "scope_key": "active:2026-05",
                         "scope_type": "month",
-                        "schema_version": "2026-05-cost-statistics-explorer-v1",
+                        "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                         "month": "2026-05",
                         "project_scope": "active",
                         "generated_at": "2026-05-04T12:00:00+00:00",

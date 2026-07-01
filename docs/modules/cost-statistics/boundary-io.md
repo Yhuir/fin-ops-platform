@@ -30,6 +30,7 @@
 | --- | --- | --- |
 | 页面筛选/月份/父级聚合查询 | `CostStatisticsPage.tsx`、`features/cost-statistics/api.ts` | 进入成本统计 API/query service |
 | Refresh scope | `cost_statistics` manifest | active/all month + parent aggregate |
+| Workbench 月度输入 | `read_model.workbench_generations` active generation + `read_model.workbench_groups` | 先定位 active generation，再按 `generation_id + scope_key` 读取 groups；禁止按裸 `scope_key` 扫描历史 generation |
 | 关系变更 | workbench relation/downstream lifecycle | 转换为受影响 cost_statistics scopes |
 | 导入确认 | import processing service/job result | 返回规范化后的 cost_statistics operation barrier targets，月份输入经 scope policy 展开为 active/all shards 与 parent aggregate |
 
@@ -49,6 +50,7 @@
 - `all` 语义：`queryable_parent_aggregate`
 - Worker：`cost-statistics`；旧 `cost-tax` 成本统计消费链路已移除
 - Query owner：`CostStatisticsQueryService`
+- Upstream read model 输入：月份 shard 只消费 Workbench active generation；父 scope 从已物化 `read_model.cost_statistics_rows` 聚合，不读 Workbench `all` 或历史 generation。
 
 ## 文件范围
 
@@ -64,9 +66,9 @@
 
 ## 依赖方向
 
-- 允许依赖：workbench relation read model、cost/tax projection, query gateway。
+- 允许依赖：workbench active generation read model、workbench relation read model、cost/tax projection, query gateway。
 - 必须通过：CostStatisticsQueryService 和 read model query gateway。
-- 禁止绕过：页面/API 直接扫描源表伪装 fresh；把税金抵扣状态写入成本统计模块。
+- 禁止绕过：页面/API 直接扫描源表伪装 fresh；成本统计投影按裸 `scope_key` 扫描 Workbench 历史 generation；把税金抵扣状态写入成本统计模块。
 
 ## 测试与验证
 

@@ -55,9 +55,10 @@ class CostStatisticsSqlProjectionBuilder:
             return [f"{project_scope}:{month}"] if MONTH_RE.match(month) else []
         rows = self._connection.fetch_all(
             """
-            select distinct to_char(scope_month, 'YYYY-MM') as scope_key
-            from read_model.workbench_rows
-            where scope_month is not null
+            select scope_key
+            from read_model.workbench_generations
+            where tenant_id = 'default'
+              and status = 'active'
               and scope_key <> 'all'
             order by scope_key desc
             """
@@ -328,23 +329,34 @@ class CostStatisticsSqlProjectionBuilder:
     def _cost_entries_from_workbench(self, month: str, *, project_scope: str) -> list[dict[str, Any]]:
         group_rows = self._connection.fetch_all(
             """
-            select group_id, zone, payload, raw_payload
-            from read_model.workbench_groups
-            where scope_key = %s
-              and zone in ('paired', 'open')
-              and source_kinds && array['oa', 'bank']::text[]
+            with active_generation as (
+                select generation_id
+                from read_model.workbench_generations
+                where tenant_id = 'default'
+                  and scope_key = %s
+                  and status = 'active'
+                order by activated_at desc nulls last, completed_at desc nulls last, updated_at desc
+                limit 1
+            )
+            select g.group_id, g.zone, g.payload, g.raw_payload
+            from active_generation active
+            join read_model.workbench_groups g
+              on g.generation_id = active.generation_id
+            where g.scope_key = %s
+              and g.zone in ('paired', 'open')
+              and g.source_kinds && array['oa', 'bank']::text[]
               and jsonb_path_exists(
-                  coalesce(payload, raw_payload),
+                  coalesce(g.payload, g.raw_payload),
                   '$.oa_rows[*] ? ((@.project_name != null || @.detail_fields."项目名称" != null) && (@.expense_type != null || @.detail_fields."费用类型" != null) && (@.expense_content != null || @.reason != null || @.detail_fields."费用内容" != null))'
               )
               and (
-                  zone = 'paired'
-                  or jsonb_path_exists(coalesce(payload, raw_payload), '$.bank_rows[*].available_actions[*] ? (@ == "cancel_link")')
-                  or jsonb_path_exists(coalesce(payload, raw_payload), '$.oa_rows[*].oa_bank_relation.code ? (@ == "fully_linked" || @ == "automatic_match")')
+                  g.zone = 'paired'
+                  or jsonb_path_exists(coalesce(g.payload, g.raw_payload), '$.bank_rows[*].available_actions[*] ? (@ == "cancel_link")')
+                  or jsonb_path_exists(coalesce(g.payload, g.raw_payload), '$.oa_rows[*].oa_bank_relation.code ? (@ == "fully_linked" || @ == "automatic_match")')
               )
-            order by bank_sort_max desc nulls last, group_id
+            order by g.bank_sort_max desc nulls last, g.group_id
             """,
-            (month,),
+            (month, month),
         )
         groups = []
         for row in group_rows:

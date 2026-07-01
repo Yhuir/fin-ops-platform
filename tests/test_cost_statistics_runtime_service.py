@@ -1,5 +1,7 @@
 import unittest
 
+from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
+
 
 class QueueRecorder:
     def __init__(self) -> None:
@@ -55,7 +57,7 @@ class CostStatisticsRuntimeServiceTests(unittest.TestCase):
         )
         self.assertIn("cost_statistics:explorer:active:2026-05", redis.deletes)
         self.assertIn("cost_statistics:month:active:2026-05", redis.deletes)
-        self.assertTrue(any(":schema:2026-05-cost-statistics-explorer-v1:sources:" in key for key in redis.deletes))
+        self.assertTrue(any(f":schema:{COST_STATISTICS_READ_MODEL_SCHEMA_VERSION}:sources:" in key for key in redis.deletes))
 
     def test_enqueue_read_model_refresh_normalizes_legacy_month_scope(self) -> None:
         from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService

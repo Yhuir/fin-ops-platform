@@ -113,7 +113,7 @@ class CostStatisticsProjectionConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
-        if "from read_model.workbench_groups" in normalized:
+        if "read_model.workbench_groups" in normalized:
             rows = [
                 {
                     "group_id": "group-1",
@@ -685,7 +685,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["amount"], "15.50")
         self.assertTrue(
             redis.sets[0][0].startswith(
-                "cost_statistics:month:active:2026-05:schema:2026-05-cost-statistics-explorer-v1:sources:"
+                f"cost_statistics:month:active:2026-05:schema:{COST_STATISTICS_READ_MODEL_SCHEMA_VERSION}:sources:"
             )
         )
         self.assertLessEqual(redis.sets[0][2], 120)
@@ -761,7 +761,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"][0]["transaction_id"], "txn-1")
         self.assertTrue(
             redis.sets[0][0].startswith(
-                "cost_statistics:explorer:active:2026-05:schema:2026-05-cost-statistics-explorer-v1:sources:"
+                f"cost_statistics:explorer:active:2026-05:schema:{COST_STATISTICS_READ_MODEL_SCHEMA_VERSION}:sources:"
             )
         )
         self.assertLessEqual(redis.sets[0][2], 120)
@@ -868,9 +868,44 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["transaction_count"], 1)
         self.assertEqual(payload["summary"]["total_amount"], "10.00")
         self.assertEqual([row["transaction_id"] for row in payload["time_rows"]], ["bank-1"])
-        workbench_sql = next(sql for sql, _params in connection.fetch_all_calls if "from read_model.workbench_groups" in sql)
+        workbench_sql, workbench_params = next(
+            (sql, params) for sql, params in connection.fetch_all_calls if "read_model.workbench_groups" in sql
+        )
+        self.assertEqual(workbench_params, ("2026-05", "2026-05"))
+        self.assertIn("with active_generation as", workbench_sql)
+        self.assertIn("join read_model.workbench_groups", workbench_sql)
+        self.assertIn("g.generation_id = active.generation_id", workbench_sql)
         self.assertIn("jsonb_path_exists", workbench_sql)
         self.assertIn("available_actions", workbench_sql)
+
+    def test_cost_statistics_scope_shards_are_listed_from_active_workbench_generations(self) -> None:
+        class Connection(CostStatisticsProjectionConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_rows" in normalized:
+                    raise AssertionError("cost statistics shard discovery must not scan historical workbench rows")
+                if "from read_model.workbench_generations" in normalized:
+                    return [
+                        {"scope_key": "2026-06"},
+                        {"scope_key": "all"},
+                        {"scope_key": "legacy"},
+                        {"scope_key": "2026-05"},
+                    ]
+                return []
+
+        connection = Connection()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=CostStatisticsSaveRecorder(),
+        )
+
+        self.assertEqual(
+            builder.list_cost_statistics_scope_shards("active:all"),
+            ["active:2026-06", "active:2026-05"],
+        )
+        workbench_sql = next(sql for sql, _params in connection.fetch_all_calls if "from read_model.workbench_generations" in sql)
+        self.assertIn("status = 'active'", workbench_sql)
 
     def test_cost_statistics_sql_projection_skips_unchanged_month_scope_without_workbench_scan(self) -> None:
         class Connection(CostStatisticsProjectionConnection):
@@ -1092,7 +1127,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertIn("cost_statistics:month:active:2026-05", redis.deletes)
         self.assertIn("cost_statistics:explorer:all:2026-05", redis.deletes)
         self.assertIn("cost_statistics:month:all:2026-05", redis.deletes)
-        self.assertTrue(any(":schema:2026-05-cost-statistics-explorer-v1:sources:" in key for key in redis.deletes))
+        self.assertTrue(any(f":schema:{COST_STATISTICS_READ_MODEL_SCHEMA_VERSION}:sources:" in key for key in redis.deletes))
 
     def test_generic_cost_statistics_enqueue_expands_month_scopes(self) -> None:
         class EmptyCostReadModelService:
