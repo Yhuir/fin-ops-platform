@@ -104,6 +104,49 @@ transport/wakeup，不能作为 read model 状态事实源。
 会调用 `RuntimeQueueRepository.defer_event(...)`，把该 outbox event 短延迟放回 `pending`，生产模板默认 0.25 秒后
 重新 claim。这只用于依赖顺序竞态，不写 fresh readiness、不缓存 payload，也不进入 failed/dead-letter。
 
+### Runtime queue history retention
+
+`job.outbox_events` 和 `job.read_model_dirty_scopes` 是 read model refresh 的 durable queue
+事实源，但它们的完成态历史不能无限保留。当前边界如下：
+
+- 代码 owner：`RuntimeQueueRepository.preview_runtime_queue_history_retention(...)` 和
+  `RuntimeQueueRepository.prune_runtime_queue_history(...)`。
+- 运维入口：`python -m fin_ops_platform.tools.runtime_queue_ops prune-history`，必须显式
+  `--dry-run` 或 `--execute`。
+- 生产自动化：`finops-prune-runtime-queue-history.timer` 每天执行版本化 helper
+  `/usr/local/sbin/finops-prune-runtime-queue-history`。
+- 权限：helper 读取 `/etc/fin-ops/fin-ops.postgres-migrator.env`，把
+  `FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL` 映射为 `FIN_OPS_POSTGRES_DATABASE_URL` 后运行；
+  API/worker role 不获得 delete 权限。
+- 默认策略：`keep_days=30`、`keep_recent_per_type=512`、`limit=20000`。
+
+删除安全边界：
+
+- 只删除 `status='done'` 的历史行。
+- 不删除 pending、processing、failed、dead-lettered。
+- outbox done 行如果同一 tenant/event/scope 仍有 failed/dead-lettered，则保留，避免丢失
+  dead-letter repair 的后续成功证明。
+- dirty scope done 行如果同一 scope 仍有 pending/processing/failed dirty scope 或非 done outbox，
+  则保留，避免误删当前刷新诊断上下文。
+- dirty scope done 行还会按 `(tenant_id, scope_type, scope_key)` 永远保留最新一行，避免下一次
+  同 scope 入队时 source_version 从旧值回退。
+- retention 返回按 event/scope type 聚合的 JSON 统计；生产执行前后必须记录 dry-run/execute
+  输出和 `/health/ready`。
+
+手工执行示例：
+
+```bash
+set -a
+source /etc/fin-ops/fin-ops.common.env
+source /etc/fin-ops/fin-ops.postgres-migrator.env
+set +a
+export FIN_OPS_POSTGRES_DATABASE_URL="$FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL"
+
+PYTHONPATH=/opt/fin-ops/releases/<release>/src/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops prune-history \
+  --dry-run --keep-days 30 --keep-recent-per-type 512 --limit 20000
+```
+
 ### Read model scope contract 检查
 
 发布前后或 App Status 出现无法解释的 cost statistics failed/refreshing scope 时，先运行只读检查：

@@ -97,6 +97,7 @@ EXPECTED_MIGRATIONS = [
     "0081_oa_source_aliases.sql",
     "0082_bank_flow_rule_batch_storage.sql",
     "0083_bank_flow_rule_batch_tag_rules.sql",
+    "0084_runtime_queue_history_retention.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -244,7 +245,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 84)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 85)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -351,6 +352,18 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("'{bank_flow_rule_batch_tag_rules}'", sql)
         self.assertIn("settings_payload->'no_oa_bank_batch_tag_selection'", sql)
         self.assertIn("not (settings_payload ? 'bank_flow_rule_batch_tag_rules')", sql)
+
+    def test_runtime_queue_history_retention_indexes_and_migrator_delete_grants_are_declared(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("outbox_events_done_retention_idx", sql)
+        self.assertIn("read_model_dirty_scopes_done_retention_idx", sql)
+        self.assertIn("where status = 'done'", sql)
+        self.assertIn("grant delete on job.outbox_events to fin_ops_migrator", normalized_sql)
+        self.assertIn("grant delete on job.read_model_dirty_scopes to fin_ops_migrator", normalized_sql)
+        self.assertNotIn("grant select, insert, update, delete on job.outbox_events to fin_ops_worker", normalized_sql)
+        self.assertNotIn("grant select, insert, update, delete on job.outbox_events to fin_ops_api", normalized_sql)
 
     def test_discovery_rejects_invalid_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

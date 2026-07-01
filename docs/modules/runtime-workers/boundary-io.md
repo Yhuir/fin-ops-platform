@@ -39,6 +39,7 @@
 | Job result/status | runtime queue/app health | 成功、失败、重试和 readiness 可观察；影响 read model 的 job completion result summary 必须携带 target envelope 或明确不适用 |
 | Read model projection | 对应 repository | 只写 worker 对应投影 |
 | Wakeup/transport | RabbitMQ 可选 | 不能作为状态事实源 |
+| Queue history retention result | runtime queue ops / deploy timer | 只删除 `done` 历史；输出按 outbox event type 与 dirty scope type 聚合的 candidate/deleted count |
 
 ## 文件范围
 
@@ -48,8 +49,9 @@
 | Worker registry | `backend/src/fin_ops_platform/services/runtime_worker_registry.py` |
 | Worker runtime | `backend/src/fin_ops_platform/services/runtime_worker.py`、`runtime_worker_handlers.py` |
 | App worker entry | `backend/src/fin_ops_platform/app/worker.py` |
+| Queue ops | `backend/src/fin_ops_platform/tools/runtime_queue_ops.py` |
 | RabbitMQ | `backend/src/fin_ops_platform/app/rabbitmq_dispatcher.py`、`rabbitmq_topology.py`、`services/rabbitmq_runtime.py` |
-| Deploy | `deploy/oa/systemd/*.service.example`、`deploy/oa/env/*.env.example`、`deploy/oa/bin/finops-ensure-runtime-workers.sh` |
+| Deploy | `deploy/oa/systemd/*.service.example`、`deploy/oa/env/*.env.example`、`deploy/oa/bin/finops-ensure-runtime-workers.sh`、`deploy/oa/bin/finops-prune-runtime-queue-history.sh` |
 | Tests | `tests/test_runtime_worker*.py`、`tests/test_runtime_queue*.py`、`tests/test_rabbitmq_*.py` |
 
 ## 依赖方向

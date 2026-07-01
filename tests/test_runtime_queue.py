@@ -1449,6 +1449,81 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("group by status", transaction.calls[0][1].lower())
         self.assertIn("extract(epoch from", transaction.calls[1][1].lower())
 
+    def test_runtime_queue_history_retention_preview_counts_done_history_without_delete(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                [{"event_type": "bank_detail.read_model.refresh", "count": 3}],
+                [{"scope_type": "bank_detail", "count": 2}],
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        result = repository.preview_runtime_queue_history_retention(
+            keep_days=30,
+            keep_recent_per_type=512,
+            limit=20_000,
+        )
+
+        self.assertEqual(result["mode"], "dry-run")
+        self.assertEqual(result["outbox_events"]["candidate_count"], 3)
+        self.assertEqual(result["read_model_dirty_scopes"]["candidate_count"], 2)
+        self.assertEqual(result["outbox_events"]["counts_by_event_type"], {"bank_detail.read_model.refresh": 3})
+        self.assertEqual([call[0] for call in transaction.calls], ["fetch_all", "fetch_all"])
+        outbox_sql, outbox_params = transaction.calls[0][1], transaction.calls[0][2]
+        dirty_sql, dirty_params = transaction.calls[1][1], transaction.calls[1][2]
+        normalized_outbox_sql = " ".join(outbox_sql.lower().split())
+        normalized_dirty_sql = " ".join(dirty_sql.lower().split())
+        self.assertIn("from job.outbox_events event", normalized_outbox_sql)
+        self.assertIn("event.status = 'done'", normalized_outbox_sql)
+        self.assertIn("blocker.status in ('failed', 'dead_lettered')", normalized_outbox_sql)
+        self.assertNotIn("delete from job.outbox_events", normalized_outbox_sql)
+        self.assertIn("from job.read_model_dirty_scopes dirty", normalized_dirty_sql)
+        self.assertIn("dirty.status = 'done'", normalized_dirty_sql)
+        self.assertIn("partition by dirty.tenant_id, dirty.scope_type, dirty.scope_key", normalized_dirty_sql)
+        self.assertIn("ranked.scope_keep_rank > 1", normalized_dirty_sql)
+        self.assertIn("blocker.status in ('pending', 'processing', 'failed')", normalized_dirty_sql)
+        self.assertNotIn("delete from job.read_model_dirty_scopes", normalized_dirty_sql)
+        self.assertEqual(outbox_params, (30, 512, 20_000))
+        self.assertEqual(dirty_params, (30, 512, 20_000))
+        self.assertEqual(transaction.outcomes, ["commit"])
+
+    def test_runtime_queue_history_retention_execute_deletes_only_candidates(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                [{"event_type": "workbench.read_model.refresh", "count": 7}],
+                [{"scope_type": "workbench", "count": 5}],
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        result = repository.prune_runtime_queue_history(
+            keep_days=0,
+            keep_recent_per_type=1,
+            limit=100,
+        )
+
+        self.assertEqual(result["mode"], "execute")
+        self.assertEqual(result["outbox_events"]["deleted_count"], 7)
+        self.assertEqual(result["read_model_dirty_scopes"]["deleted_count"], 5)
+        outbox_sql = " ".join(transaction.calls[0][1].lower().split())
+        dirty_sql = " ".join(transaction.calls[1][1].lower().split())
+        self.assertIn("delete from job.outbox_events", outbox_sql)
+        self.assertIn("delete from job.read_model_dirty_scopes", dirty_sql)
+        self.assertIn("where event.id = candidates.id", outbox_sql)
+        self.assertIn("where dirty.id = candidates.id", dirty_sql)
+        self.assertEqual(transaction.calls[0][2], (0, 1, 100))
+        self.assertEqual(transaction.calls[1][2], (0, 1, 100))
+
+    def test_runtime_queue_history_retention_rejects_invalid_policy(self) -> None:
+        repository = RuntimeQueueRepository(FakeConnection(FakeTransaction()))
+
+        with self.assertRaises(RuntimeQueueDataError):
+            repository.preview_runtime_queue_history_retention(keep_days=-1)
+        with self.assertRaises(RuntimeQueueDataError):
+            repository.preview_runtime_queue_history_retention(keep_recent_per_type=0)
+        with self.assertRaises(RuntimeQueueDataError):
+            repository.preview_runtime_queue_history_retention(limit=0)
+
 
 if __name__ == "__main__":
     unittest.main()

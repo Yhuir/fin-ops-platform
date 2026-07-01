@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily fin-ops runtime queue history retention
+
+[Timer]
+OnCalendar=*-*-* 03:55:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=finops-prune-runtime-queue-history.service
+
+[Install]
+WantedBy=timers.target

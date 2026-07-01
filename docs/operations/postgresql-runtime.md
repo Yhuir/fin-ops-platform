@@ -44,6 +44,15 @@ FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
   非 active generation；生产同时使用版本化部署的 `finops-prune-workbench-generations.timer`
   兜底，默认 `keep_recent=1`、`keep_days=0`、`limit=500`，避免
   `read_model.workbench_*` 历史 generation 长期堆积或生产 wrapper 与代码策略漂移。
+- Runtime queue 历史有受控保留策略：`job.outbox_events` 与
+  `job.read_model_dirty_scopes` 只删除 `status='done'` 的完成态历史，默认保留 30 天且每个
+  event/scope type 至少保留最近 512 条，dirty scope 还会按
+  `(tenant_id, scope_type, scope_key)` 保留最新 done 行以保持后续 source_version 递增，单批最多
+  20000 行。pending、processing、failed、dead-lettered 以及仍可作为失败诊断证明的
+  same-scope done outbox 不被 retention 删除。
+  生产通过版本化部署的 `finops-prune-runtime-queue-history.timer` 执行，helper 读取 root-only
+  `fin-ops.postgres-migrator.env`，只把 delete 权限授予 migrator 角色，不扩大 API/worker
+  数据库权限。
 
 Workbench read model 表空间排障边界：
 
@@ -61,6 +70,39 @@ join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'read_model'
   and c.relname like 'workbench_%'
 order by pg_total_relation_size(c.oid) desc;
+```
+
+Runtime queue 历史排障边界：
+
+```sql
+select status, count(*)
+from job.outbox_events
+group by status
+order by status;
+
+select status, count(*)
+from job.read_model_dirty_scopes
+group by status
+order by status;
+
+select
+  n.nspname,
+  c.relname,
+  pg_size_pretty(pg_total_relation_size(c.oid)) as total_size
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'job'
+  and c.relname in ('outbox_events', 'read_model_dirty_scopes')
+order by pg_total_relation_size(c.oid) desc;
+```
+
+手工执行时先 dry-run：
+
+```bash
+PYTHONPATH=/opt/fin-ops/releases/<release>/src/backend/src \
+  FIN_OPS_POSTGRES_DATABASE_URL="$FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL" \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops prune-history \
+  --dry-run --keep-days 30 --keep-recent-per-type 512 --limit 20000
 ```
 
 普通 `delete`/`vacuum` 只能让 PostgreSQL 复用空间，不保证把空间还给文件系统。只有

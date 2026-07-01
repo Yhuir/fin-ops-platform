@@ -50,6 +50,8 @@ class FakeRuntimeQueueRepository:
         self.resolve_calls: list[tuple[str, str]] = []
         self.release_stale_calls: list[dict[str, object]] = []
         self.resolve_superseded_calls: list[dict[str, object]] = []
+        self.preview_retention_calls: list[dict[str, object]] = []
+        self.prune_retention_calls: list[dict[str, object]] = []
 
     def resolve_dead_letter_event(self, event_id: str, *, reason: str = "operator_resolved") -> bool:
         self.resolve_calls.append((event_id, reason))
@@ -102,6 +104,56 @@ class FakeRuntimeQueueRepository:
                 "status": "done",
             }
         ]
+
+    def preview_runtime_queue_history_retention(
+        self,
+        *,
+        keep_days: int,
+        keep_recent_per_type: int,
+        limit: int,
+    ) -> dict[str, object]:
+        self.preview_retention_calls.append(
+            {
+                "keep_days": keep_days,
+                "keep_recent_per_type": keep_recent_per_type,
+                "limit": limit,
+            }
+        )
+        return {
+            "mode": "dry-run",
+            "policy": {
+                "keep_days": keep_days,
+                "keep_recent_per_type": keep_recent_per_type,
+                "limit": limit,
+            },
+            "outbox_events": {"candidate_count": 2},
+            "read_model_dirty_scopes": {"candidate_count": 1},
+        }
+
+    def prune_runtime_queue_history(
+        self,
+        *,
+        keep_days: int,
+        keep_recent_per_type: int,
+        limit: int,
+    ) -> dict[str, object]:
+        self.prune_retention_calls.append(
+            {
+                "keep_days": keep_days,
+                "keep_recent_per_type": keep_recent_per_type,
+                "limit": limit,
+            }
+        )
+        return {
+            "mode": "execute",
+            "policy": {
+                "keep_days": keep_days,
+                "keep_recent_per_type": keep_recent_per_type,
+                "limit": limit,
+            },
+            "outbox_events": {"deleted_count": 2},
+            "read_model_dirty_scopes": {"deleted_count": 1},
+        }
 
 
 class RuntimeQueueOpsTests(unittest.TestCase):
@@ -156,6 +208,60 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         self.assertIn("publish_status = 'unpublished'", normalized_sql)
         self.assertIn("next_publish_at = now()", normalized_sql)
         self.assertEqual(params, (["00000000-0000-0000-0000-000000000001"],))
+
+    def test_prune_history_cli_defaults_to_dry_run_repository_boundary(self) -> None:
+        connection = FakeConnection()
+        repository = FakeRuntimeQueueRepository()
+        stdout = StringIO()
+
+        with (
+            patch.object(runtime_queue_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(runtime_queue_ops, "PostgresConnection", return_value=connection),
+            patch.object(runtime_queue_ops, "RuntimeQueueRepository", return_value=repository),
+        ):
+            exit_code = runtime_queue_ops.main(["prune-history", "--dry-run"], stdout=stdout)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            repository.preview_retention_calls,
+            [{"keep_days": 30, "keep_recent_per_type": 512, "limit": 20_000}],
+        )
+        self.assertEqual(repository.prune_retention_calls, [])
+        self.assertIn('"mode": "dry-run"', stdout.getvalue())
+
+    def test_prune_history_cli_execute_forwards_controlled_policy(self) -> None:
+        connection = FakeConnection()
+        repository = FakeRuntimeQueueRepository()
+        stdout = StringIO()
+
+        with (
+            patch.object(runtime_queue_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(runtime_queue_ops, "PostgresConnection", return_value=connection),
+            patch.object(runtime_queue_ops, "RuntimeQueueRepository", return_value=repository),
+        ):
+            exit_code = runtime_queue_ops.main(
+                [
+                    "prune-history",
+                    "--execute",
+                    "--keep-days",
+                    "14",
+                    "--keep-recent-per-type",
+                    "256",
+                    "--limit",
+                    "5000",
+                ],
+                stdout=stdout,
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(repository.preview_retention_calls, [])
+        self.assertEqual(
+            repository.prune_retention_calls,
+            [{"keep_days": 14, "keep_recent_per_type": 256, "limit": 5000}],
+        )
+        payload = stdout.getvalue()
+        self.assertIn('"mode": "execute"', payload)
+        self.assertIn('"deleted_count": 2', payload)
 
     def test_release_stale_processing_dry_run_lists_candidates_without_update(self) -> None:
         connection = FakeConnection(

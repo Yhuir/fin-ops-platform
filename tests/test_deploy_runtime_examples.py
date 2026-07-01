@@ -12,10 +12,13 @@ WORKER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-worker@.service.example"
 DISPATCHER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example"
 PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.service.example"
 PRUNE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.timer.example"
+RUNTIME_QUEUE_PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-runtime-queue-history.service.example"
+RUNTIME_QUEUE_PRUNE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-prune-runtime-queue-history.timer.example"
 DISPATCHER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example"
 RABBITMQ_WORKER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-worker.env.example"
 WORKER_ENV_DIR = REPO_ROOT / "deploy/oa/env"
 PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh"
+RUNTIME_QUEUE_PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
 
 
 class DeployRuntimeExampleTests(unittest.TestCase):
@@ -116,6 +119,25 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("OnCalendar=*-*-* 03:35:00", timer)
         self.assertIn("install_workbench_generation_retention", deploy_control)
         self.assertIn("finops-prune-workbench-generations.sh", deploy_control)
+        self.assertIn("systemctl enable --now \"$timer_unit\"", deploy_control)
+
+    def test_runtime_queue_history_prune_helper_uses_controlled_retention_defaults(self) -> None:
+        helper = RUNTIME_QUEUE_PRUNE_HELPER.read_text(encoding="utf-8")
+        service = RUNTIME_QUEUE_PRUNE_SERVICE.read_text(encoding="utf-8")
+        timer = RUNTIME_QUEUE_PRUNE_TIMER.read_text(encoding="utf-8")
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+
+        self.assertIn("KEEP_DAYS=\"${FINOPS_RUNTIME_QUEUE_PRUNE_KEEP_DAYS:-30}\"", helper)
+        self.assertIn("KEEP_RECENT_PER_TYPE=\"${FINOPS_RUNTIME_QUEUE_PRUNE_KEEP_RECENT_PER_TYPE:-512}\"", helper)
+        self.assertIn("LIMIT=\"${FINOPS_RUNTIME_QUEUE_PRUNE_LIMIT:-20000}\"", helper)
+        self.assertIn("FIN_OPS_POSTGRES_DATABASE_URL=\"$FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL\"", helper)
+        self.assertIn("-m fin_ops_platform.tools.runtime_queue_ops prune-history", helper)
+        self.assertIn("--execute", helper)
+
+        self.assertIn("ExecStart=/usr/local/sbin/finops-prune-runtime-queue-history", service)
+        self.assertIn("OnCalendar=*-*-* 03:55:00", timer)
+        self.assertIn("install_runtime_queue_history_retention", deploy_control)
+        self.assertIn("finops-prune-runtime-queue-history.sh", deploy_control)
         self.assertIn("systemctl enable --now \"$timer_unit\"", deploy_control)
 
 

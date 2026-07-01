@@ -73,6 +73,17 @@ def build_parser() -> argparse.ArgumentParser:
     superseded_processing_mode.add_argument("--dry-run", action="store_true")
     superseded_processing_mode.add_argument("--execute", action="store_true")
 
+    prune_history = subparsers.add_parser(
+        "prune-history",
+        help="Dry-run or delete completed runtime queue history under the controlled retention policy.",
+    )
+    prune_history.add_argument("--keep-days", type=int, default=30)
+    prune_history.add_argument("--keep-recent-per-type", type=int, default=512)
+    prune_history.add_argument("--limit", type=int, default=20_000)
+    prune_history_mode = prune_history.add_mutually_exclusive_group(required=True)
+    prune_history_mode.add_argument("--dry-run", action="store_true")
+    prune_history_mode.add_argument("--execute", action="store_true")
+
     for command in ("pause-dispatcher", "resume-dispatcher", "pause-consumer", "resume-consumer"):
         subparsers.add_parser(command, help=f"{command.replace('-', ' ')} via app.app_settings control flag.")
 
@@ -138,6 +149,21 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None, std
             reason=args.reason,
             execute=args.execute,
         )
+        print(json.dumps(result, default=str, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+        return 0
+    if args.command == "prune-history":
+        if args.execute:
+            result = repository.prune_runtime_queue_history(
+                keep_days=args.keep_days,
+                keep_recent_per_type=args.keep_recent_per_type,
+                limit=args.limit,
+            )
+        else:
+            result = repository.preview_runtime_queue_history_retention(
+                keep_days=args.keep_days,
+                keep_recent_per_type=args.keep_recent_per_type,
+                limit=args.limit,
+            )
         print(json.dumps(result, default=str, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
         return 0
     if args.command in {"pause-dispatcher", "resume-dispatcher", "pause-consumer", "resume-consumer"}:

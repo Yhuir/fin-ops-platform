@@ -169,6 +169,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("deploy-control helper does not tolerate non-ready worker readiness polls under set -e", remote_script)
         self.assertIn("deploy-control helper does not preserve worker dependency-not-fresh delay in release drop-ins", remote_script)
         self.assertIn("deploy-control helper does not install versioned Workbench generation retention", remote_script)
+        self.assertIn("deploy-control helper does not install versioned runtime queue history retention", remote_script)
         self.assertIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
         self.assertIn("wait_finops_backend_ready", remote_script)
         self.assertIn("check_finops_session_route /fin-ops-api/api/session/me", remote_script)

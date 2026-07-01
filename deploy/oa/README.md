@@ -272,6 +272,10 @@ systemd 模板位于：
 - `deploy/oa/systemd/fin-ops-worker@.service.example`
 - `deploy/oa/systemd/fin-ops-rabbitmq-topology.service.example`
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
+- `deploy/oa/systemd/finops-prune-workbench-generations.service.example`
+- `deploy/oa/systemd/finops-prune-workbench-generations.timer.example`
+- `deploy/oa/systemd/finops-prune-runtime-queue-history.service.example`
+- `deploy/oa/systemd/finops-prune-runtime-queue-history.timer.example`
 
 关联台自动配对必须单独启用 `workbench-matching` worker。它消费
 `job.workbench_matching_dirty_scopes`，生成 `read_model.workbench_reconciliation_decisions`；
@@ -281,6 +285,15 @@ systemd 模板位于：
 - `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
 
 生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。migrator DSN 只能用于手动/受控 migration，不要加载到 API 或 worker unit。
+
+发布激活会安装两个版本化 retention timer：
+
+- `finops-prune-workbench-generations.timer`：清理非 active Workbench generation。
+- `finops-prune-runtime-queue-history.timer`：清理 `job.outbox_events` /
+  `job.read_model_dirty_scopes` 的完成态历史。默认 `keep_days=30`、
+  `keep_recent_per_type=512`、`limit=20000`，只删除 `status='done'`，并为每个 exact
+  dirty scope 保留最新 done source_version；helper 读取
+  `/etc/fin-ops/fin-ops.postgres-migrator.env`，不扩大 API/worker delete 权限。
 
 PostgreSQL migration 示例：
 
@@ -497,6 +510,9 @@ release 会占用服务器磁盘。生产策略不是无限保留，而是默认
 磁盘空间治理规则：
 
 - release 自动清理只管理 `/opt/fin-ops/releases`，不能替代服务器根分区治理。
+- read model / runtime queue 历史由 `finops-prune-workbench-generations.timer` 和
+  `finops-prune-runtime-queue-history.timer` 治理；如果 job/read_model schema 异常增长，先跑
+  dry-run/状态统计，不要手工删除 pending/processing/failed/dead-lettered queue 行。
 - 如果部署在 `storage preflight` 失败，应先用服务器 root 检查 `/var/log`、systemd journal、面板日志、对象存储、缓存和已删除但仍被进程占用的文件；不要用 `finops-deploy` 手工删除不可确认来源的系统文件。
 - 建议在生产机配置持久的 journald/logrotate 上限，避免 `/var/log/messages` 或 `/var/log/journal` 持续增长后把 `/` 填满。
 - 只有在确认业务影响后，才把 `--keep-releases` 降到 4 以下；降低 release 保留数只能释放 release 目录空间，不能解决日志或系统目录导致的根分区满。

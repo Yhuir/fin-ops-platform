@@ -1922,6 +1922,213 @@ class RuntimeQueueRepository:
         )
         return row is None
 
+    def preview_runtime_queue_history_retention(
+        self,
+        *,
+        keep_days: int = 30,
+        keep_recent_per_type: int = 512,
+        limit: int = 20_000,
+    ) -> dict[str, Any]:
+        return self._runtime_queue_history_retention(
+            keep_days=keep_days,
+            keep_recent_per_type=keep_recent_per_type,
+            limit=limit,
+            execute=False,
+        )
+
+    def prune_runtime_queue_history(
+        self,
+        *,
+        keep_days: int = 30,
+        keep_recent_per_type: int = 512,
+        limit: int = 20_000,
+    ) -> dict[str, Any]:
+        return self._runtime_queue_history_retention(
+            keep_days=keep_days,
+            keep_recent_per_type=keep_recent_per_type,
+            limit=limit,
+            execute=True,
+        )
+
+    def _runtime_queue_history_retention(
+        self,
+        *,
+        keep_days: int,
+        keep_recent_per_type: int,
+        limit: int,
+        execute: bool,
+    ) -> dict[str, Any]:
+        normalized_keep_days = _non_negative_int(keep_days, name="keep_days")
+        normalized_keep_recent_per_type = _positive_int_value(keep_recent_per_type, name="keep_recent_per_type")
+        normalized_limit = _positive_int_value(limit, name="limit")
+        params = (normalized_keep_days, normalized_keep_recent_per_type, normalized_limit)
+        with self._connection.transaction() as transaction:
+            outbox_rows = transaction.fetch_all(
+                self._runtime_queue_outbox_retention_sql(execute=execute),
+                params,
+            )
+            dirty_scope_rows = transaction.fetch_all(
+                self._runtime_queue_dirty_scope_retention_sql(execute=execute),
+                params,
+            )
+        outbox_summary = _retention_summary(outbox_rows, key_field="event_type", count_field="count")
+        dirty_scope_summary = _retention_summary(dirty_scope_rows, key_field="scope_type", count_field="count")
+        action_key = "deleted_count" if execute else "candidate_count"
+        return {
+            "mode": "execute" if execute else "dry-run",
+            "policy": {
+                "keep_days": normalized_keep_days,
+                "keep_recent_per_type": normalized_keep_recent_per_type,
+                "limit": normalized_limit,
+            },
+            "outbox_events": {
+                action_key: outbox_summary["total_count"],
+                "limit_reached": outbox_summary["total_count"] >= normalized_limit,
+                "counts_by_event_type": outbox_summary["counts_by_key"],
+            },
+            "read_model_dirty_scopes": {
+                action_key: dirty_scope_summary["total_count"],
+                "limit_reached": dirty_scope_summary["total_count"] >= normalized_limit,
+                "counts_by_scope_type": dirty_scope_summary["counts_by_key"],
+            },
+        }
+
+    @staticmethod
+    def _runtime_queue_outbox_retention_sql(*, execute: bool) -> str:
+        candidate_cte = """
+            with ranked as (
+                select
+                    event.id,
+                    event.tenant_id,
+                    event.event_type,
+                    event.scope_type,
+                    event.scope_key,
+                    coalesce(event.processed_at, event.updated_at, event.created_at) as completed_at,
+                    row_number() over (
+                        partition by event.event_type
+                        order by coalesce(event.processed_at, event.updated_at, event.created_at) desc, event.id desc
+                    ) as keep_rank
+                from job.outbox_events event
+                where event.status = 'done'
+            ),
+            candidates as (
+                select ranked.id, ranked.event_type, ranked.completed_at
+                from ranked
+                where ranked.completed_at < now() - (%s * interval '1 day')
+                  and ranked.keep_rank > %s
+                  and not exists (
+                      select 1
+                      from job.outbox_events blocker
+                      where blocker.tenant_id = ranked.tenant_id
+                        and blocker.event_type = ranked.event_type
+                        and blocker.scope_type is not distinct from ranked.scope_type
+                        and blocker.scope_key is not distinct from ranked.scope_key
+                        and blocker.status in ('failed', 'dead_lettered')
+                  )
+                order by ranked.completed_at, ranked.id
+                limit %s
+            )
+        """
+        if execute:
+            return (
+                candidate_cte
+                + """
+                , deleted as (
+                    delete from job.outbox_events event
+                    using candidates
+                    where event.id = candidates.id
+                    returning candidates.event_type
+                )
+                select event_type, count(*)::bigint as count
+                from deleted
+                group by event_type
+                order by count desc, event_type
+                """
+            )
+        return (
+            candidate_cte
+            + """
+            select event_type, count(*)::bigint as count
+            from candidates
+            group by event_type
+            order by count desc, event_type
+            """
+        )
+
+    @staticmethod
+    def _runtime_queue_dirty_scope_retention_sql(*, execute: bool) -> str:
+        candidate_cte = """
+            with ranked as (
+                select
+                    dirty.id,
+                    dirty.tenant_id,
+                    dirty.scope_type,
+                    dirty.scope_key,
+                    coalesce(dirty.updated_at, dirty.created_at) as completed_at,
+                    row_number() over (
+                        partition by dirty.scope_type
+                        order by coalesce(dirty.updated_at, dirty.created_at) desc, dirty.id desc
+                    ) as keep_rank,
+                    row_number() over (
+                        partition by dirty.tenant_id, dirty.scope_type, dirty.scope_key
+                        order by coalesce(dirty.updated_at, dirty.created_at) desc, dirty.id desc
+                    ) as scope_keep_rank
+                from job.read_model_dirty_scopes dirty
+                where dirty.status = 'done'
+            ),
+            candidates as (
+                select ranked.id, ranked.scope_type, ranked.completed_at
+                from ranked
+                where ranked.completed_at < now() - (%s * interval '1 day')
+                  and ranked.keep_rank > %s
+                  and ranked.scope_keep_rank > 1
+                  and not exists (
+                      select 1
+                      from job.read_model_dirty_scopes blocker
+                      where blocker.tenant_id = ranked.tenant_id
+                        and blocker.scope_type = ranked.scope_type
+                        and blocker.scope_key = ranked.scope_key
+                        and blocker.status in ('pending', 'processing', 'failed')
+                  )
+                  and not exists (
+                      select 1
+                      from job.outbox_events blocker
+                      where blocker.tenant_id = ranked.tenant_id
+                        and blocker.event_type = ranked.scope_type || '.read_model.refresh'
+                        and blocker.scope_type = ranked.scope_type
+                        and blocker.scope_key = ranked.scope_key
+                        and blocker.status in ('pending', 'processing', 'failed', 'dead_lettered')
+                  )
+                order by ranked.completed_at, ranked.id
+                limit %s
+            )
+        """
+        if execute:
+            return (
+                candidate_cte
+                + """
+                , deleted as (
+                    delete from job.read_model_dirty_scopes dirty
+                    using candidates
+                    where dirty.id = candidates.id
+                    returning candidates.scope_type
+                )
+                select scope_type, count(*)::bigint as count
+                from deleted
+                group by scope_type
+                order by count desc, scope_type
+                """
+            )
+        return (
+            candidate_cte
+            + """
+            select scope_type, count(*)::bigint as count
+            from candidates
+            group by scope_type
+            order by count desc, scope_type
+            """
+        )
+
     def record_worker_heartbeat(
         self,
         worker_id: str,
@@ -2064,6 +2271,37 @@ def _positive_int(raw: Any, *, default: int, name: str) -> int:
     if value <= 0:
         raise RuntimeQueueDataError(f"{name} must be positive.")
     return value
+
+
+def _positive_int_value(raw: Any, *, name: str) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeQueueDataError(f"{name} must be an integer.") from exc
+    if value <= 0:
+        raise RuntimeQueueDataError(f"{name} must be positive.")
+    return value
+
+
+def _non_negative_int(raw: Any, *, name: str) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeQueueDataError(f"{name} must be an integer.") from exc
+    if value < 0:
+        raise RuntimeQueueDataError(f"{name} must be zero or greater.")
+    return value
+
+
+def _retention_summary(rows: Iterable[dict[str, Any]], *, key_field: str, count_field: str) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    total_count = 0
+    for row in list(rows or []):
+        key = str(row.get(key_field) or "unknown")
+        count = int(row.get(count_field) or 0)
+        counts[key] = counts.get(key, 0) + count
+        total_count += count
+    return {"total_count": total_count, "counts_by_key": counts}
 
 
 def _positive_float(raw: Any, *, default: float, name: str) -> float:
