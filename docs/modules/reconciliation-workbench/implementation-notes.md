@@ -29,6 +29,15 @@
 
 ## 历史记录
 
+## 2026-07-02 - matching worker relation read bridge 复核
+
+- 目标：复核此前标记的 matching worker snapshot bridge 是否仍是生产旧链路污染面。
+- 影响范围：`WorkbenchMatchingDirtyScopeWorker`、`WorkbenchMatchingOrchestrator`、`WorkbenchReconciliationEngine`、`runtime_worker_handlers.WorkbenchMatchingWorkerFactory`、模块边界 I/O 文档。
+- 关键决策：当前 production worker 已走 `job.workbench_matching_dirty_scopes` claim/complete/fail，matching/orchestrator 通过 `WorkbenchMatchingRelationReadPort` 读取 canonical active relation；worker 内构造的本地 `WorkbenchPairRelationService` 来自 PostgreSQL canonical state store snapshot，用于 command/read 支撑，不是页面 full payload 或 read model legacy fallback。
+- 测试覆盖：既有 `tests.test_workbench_dirty_queue_wiring.WorkbenchDirtyQueueWiringTests.test_worker_wiring_uses_decoupled_dirty_scope_runner`、`tests.test_postgres_state_store.PostgresStateStoreTests.test_postgres_workbench_matching_dirty_scopes_do_not_use_runtime_snapshot`、`tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_compute_reference_state_writes_stay_in_python_boundaries` 覆盖该边界。
+- 验证命令：见本轮最终说明。
+- 未测风险：仍需持续生产 worker lag/dirty scope drain 监控；这不是旧链路删除缺口。
+
 ## 2026-07-02 - full payload 后端生产 SQL fallback 守卫
 
 - 目标：确认并锁定 `GET /api/workbench` full payload 兼容 API 在生产 SQL read model runtime 下只能读取 SQL active generation，不能回退 `_build_api_workbench_payload(...)` raw builder。
@@ -45,7 +54,7 @@
 - 关键决策：非 SQL/legacy 模式仍保留本地兼容 fallback；生产 PostgreSQL runtime 命中 ETC/live/cache/query facade 失败后直接 fail closed，不再检查 `_records_by_id` 或 route query service。
 - 测试覆盖：新增 `tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_row_detail_production_sql_runtime_blocks_route_fallback_even_with_in_memory_record`；更新 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_contamination_surfaces_stay_quarantined`，禁止 row detail route owner 重新接入 query service provider 或 `_records_by_id`。
 - 验证命令：见本轮最终说明。
-- 未测风险：后端 `/api/workbench` full payload 兼容面和 matching snapshot bridge 尚未删除；需要独立 caller-removal 证据。
+- 未测风险：后端 `/api/workbench` full payload 兼容面尚未删除；需要独立 caller-removal 证据。
 
 ## 2026-07-02 - full payload 前端 runtime 回流守卫
 
@@ -54,7 +63,7 @@
 - 关键决策：后端 `/api/workbench` 仍作为兼容迁移面和既有集成测试入口保留；当前生产首屏闭环先用 `fetchWorkbenchInitialPage` + summary/groups API 作为唯一 runtime 主链路，并用边界守卫禁止页面/组件重新调用 full payload fetcher。
 - 测试覆盖：新增 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_full_payload_fetcher_stays_off_runtime_pages`；既有 `web/src/test/App.test.tsx` 继续断言关联台首页不请求 `/api/workbench?`。
 - 验证命令：见本轮最终说明。
-- 未测风险：后端 legacy route 和 matching snapshot bridge 尚未删除；后续删除需要逐步迁移仍依赖 `/api/workbench` 的后端集成测试。
+- 未测风险：后端 legacy route 尚未删除；后续删除需要逐步迁移仍依赖 `/api/workbench` 的后端集成测试。
 
 ## 2026-07-01 - all-scope same-case paired/open 重复 owner 修复
 
@@ -99,7 +108,7 @@
 - 测试覆盖：新增/调整 Workbench SQL runtime 测试，覆盖 summary 只读物化结果、summary 缺失不热路径 repair、groups summary 重字段裁剪、retention CLI 默认合同；前端导入 fallback 改为 `fetchWorkbenchInitialPage(...)`，沿用 Workbench API 测试保护兼容面。
 - 验证命令：见本轮最终说明。
 - 未测风险：本地代码尚未部署到远程生产；生产 API p95、浏览器首屏可交互时间、Redis cache-hit/cold-cache 对比和 read_model enqueue-to-fresh 仍需部署后 smoke。生产剩余 `active_relation_open_membership` 一致性失败需要下一条 GSD prompt 专项修复。
-- 后续事项：执行下一条主控 prompt：先修复 active relation open membership 一致性，再部署并跑生产 smoke；之后再删除 `/api/workbench` full payload、row detail legacy fallback 和 matching worker snapshot bridge。
+- 后续事项：执行下一条主控 prompt：先修复 active relation open membership 一致性，再部署并跑生产 smoke；之后再删除 `/api/workbench` full payload、row detail legacy fallback，并复核 matching worker relation read bridge。
 
 ## 2026-06-30 - 自动匹配正式化和关系二态口径
 
