@@ -5,10 +5,12 @@
 - 目标：降低 `/api/batch-accounting` 未提交首屏耗时，避免为了 `submitted_count` 和关系排除加载过多 `workbench_relation` DTO。
 - 影响范围：`BatchAccountingService` 未提交列表 read path、`WorkbenchRelationReadFacade`、`WorkbenchRelationReadModelRepositoryPort`、PostgreSQL read model repository、read model manifest、SQL Workbench batch loader 和后端回归测试。
 - 关键决策：不新增独立 batch-accounting read model，不加缓存；复用现有 `workbench_relation` fresh/status/enqueue 边界。未提交列表只把批量账务银行候选和日常报销 OA 候选传给 relation facade；`submitted_count` 走 `count_batch_accounting_relations_by_year` 轻量 I/O，不再扫描 12 个月完整 submitted relation payload。
-- 文档影响：更新 README、boundary I/O、tests 和本实施记录。
+- 旧链路删除：未提交首屏不再扫描 12 个月 submitted relation DTO，不再把 Workbench 全量 open OA rows 送进 relation facade。已提交 bucket 因页面需要关系明细，仍保留完整 DTO 读取。
+- 文档影响：更新 README、boundary I/O、tests、本实施记录、`docs/dev/api-contracts.md`、`docs/app-architecture/pages.md`、`docs/app-architecture/runtime-and-ownership.md`、`docs/architecture/module-boundaries/read-model-contracts.md` 和 `docs/modules/workbench-relations/boundary-io.md`。
 - 测试覆盖：新增 `test_unsubmitted_relation_lookup_is_scoped_to_batch_candidates`、`test_unsubmitted_list_uses_relation_count_instead_of_month_relation_scan`、`test_batch_accounting_count_uses_repository_count_without_loading_rows`，并更新 SQL runtime/manifest/port 测试。
-- 验证命令：`pytest -q tests/test_batch_accounting_api.py tests/test_workbench_relation_read_facade.py tests/test_read_model_manifest.py tests/test_workbench_sql_runtime.py`。
-- 未测风险：仍需部署后用生产登录态 smoke 复测 `/api/batch-accounting` p95；本地测试不覆盖真实 PostgreSQL buffer/cache 波动和浏览器渲染耗时。
+- 验证命令：`pytest -q tests/test_batch_accounting_api.py tests/test_workbench_relation_read_facade.py tests/test_read_model_manifest.py tests/test_workbench_sql_runtime.py tests/test_platform_runtime_boundary_guards.py`、`bash scripts/verify.sh docs`、`git diff --check`。
+- 生产 smoke：部署 `main-54ed8296-20260701165026` 后，authenticated `GET /api/batch-accounting?bank_year=2026&bucket=unsubmitted&bank_page_size=200&oa_page_size=200` p95 从约 `1249.872ms` 降到 `457.508ms`；7/7 次返回 `200`，read model 均为 `fresh`。
+- 未测风险：全量 Playwright 前端回归未在本轮重跑；长期生产 p95 仍会随 DB cache、并发和 OA 权限缓存波动。
 
 ## 2026-06-30 - 右侧 OA 候选移除年份过滤
 

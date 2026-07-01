@@ -53,6 +53,12 @@
 | `no_oa_bank_batch` | `no_oa_bank_batch` | `scoped_incremental` | `fan_out_command` | 免 OA 流水批次按批次/关联影响 scope 刷新；共享迁移底座内的 month/all scope save 只能替换 `relation_mode=no_oa_bank_batch` rows，必须保留同 scope bank-flow rows | `no-oa-bank-batch` | `NoOaBankBatchApplicationService` | `NoOaBankBatchReadModelRepositoryPort` | `no_oa_bank_batch_api_session` | `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_no_oa_bank_batch_service.py`、`tests/test_no_oa_bank_batch_read_model_refresh.py` |
 | `turnover_ledger` | `turnover_ledger` | `partitioned_scoped_incremental` | `fan_out_command` | 外部往来款按账期/主体/关联影响 scope 刷新 | `turnover-ledger` | `TurnoverLedgerQueryService` | `TurnoverLedgerReadModelRepositoryPort` | `turnover_ledger_api_session` | `tests/test_turnover_ledger_query_service.py` |
 
+## 下游页面特化读 I/O
+
+- `workbench_relation` 的通用查询 owner 仍是 `WorkbenchRelationReadFacade`。下游页面只能通过 facade/repository port 读取 freshness-gated payload，不能直接读 `read_model.workbench_relation_*` 表。
+- `batch-accounting` 的未提交首屏只允许调用候选 row-id relation lookup 和 `count_batch_accounting_relations_by_year(year)`；该 count I/O 归属 `workbench_relation` repository port，返回年份级 submitted count 和 read model freshness/status，不返回 relation DTO。
+- `batch-accounting` 的已提交 bucket 允许按月份读取完整 submitted relation DTO，因为页面需要展示已提交关系明细；该路径不得复用于未提交首屏 summary。
+
 ## 变更规则
 
 - 新增 read model 时，必须先定义 manifest entry：scope、event type、worker、projection strategy、`all` 语义、query owner、repository owner、permission boundary 和测试入口。

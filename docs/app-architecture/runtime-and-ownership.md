@@ -33,6 +33,15 @@ flowchart LR
 
 页面不能自行假设 read model fresh，也不能为了“有数据”绕过 freshness gate。
 
+### 批量账务读路径
+
+`/api/batch-accounting` 不拥有独立 read model。它的读边界由 `BatchAccountingService` 组合 Workbench active payload 与 `WorkbenchRelationReadFacade`：
+
+1. `unsubmitted` bucket 先从 Workbench payload 得到批量账务银行候选和日常报销 OA 候选，再只把这些候选 row ids 交给 `workbench_relation` facade；不能把 Workbench 全量 open OA rows 当作 relation lookup 输入。
+2. `summary.submitted_count` 使用 `count_batch_accounting_relations_by_year(year)`，该 I/O 只返回年份级统计和 freshness 状态；未提交首屏不能为了统计扫描 12 个月完整 relation DTO。
+3. `submitted` bucket 需要渲染关系详情，可以读取完整 submitted relation DTO，并继续透出 relation read model freshness 诊断。
+4. submit/withdraw 写路径只按本次操作 row ids 做 relation readiness 校验，再交给 `WorkbenchRelationCommandService` 的 canonical write safety；不能因为整页普通 relation distribution 追赶中阻断无关 row 的写操作。
+
 ## OA 会话启动边界
 
 React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `SessionGate` 决定是否渲染业务路由。该请求属于应用 bootstrap 边界，不是页面级 loading：

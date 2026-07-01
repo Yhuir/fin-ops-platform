@@ -33,6 +33,7 @@
 | 流水规则批量处理 relation metadata | `BankFlowRuleBatchApplicationService` submit / tag-rule sync | `relation_mode=bank_flow_rule_batch`；`special_metadata` 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；标签规则保存后也必须通过 command service 更新这些 requirement 字段。关系事实源只保存和分发，不解释银行标签规则 |
 | 外部往来闭环 relation metadata | `TurnoverLedgerWorkbenchPairPort` / 流水规则 tag-rule sync | `relation_mode=turnover_manual_closure`；`special_metadata` 至少包含 `source=turnover_ledger`、`turnover_relation_id`、`requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`。历史 `turnover:* manual_confirmed` 关系只能通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(..., relation_mode=turnover_manual_closure)` 受控升级并记录 before/after history |
 | 关系读请求 | 下游 read facade/service | 只暴露 read facade 或 repository port |
+| 批量账务 submitted count | `BatchAccountingService` | 未提交首屏通过 `WorkbenchRelationReadFacade.count_batch_accounting_relations_by_year(year)` 读取年份级 batch-accounting relation count 和 freshness/status；禁止为了 summary count 读取 12 个月 relation DTO |
 | Refresh scope | `workbench_relation` manifest | month scope；`all` 只允许 fan-out command |
 
 ## 输出 I/O
@@ -52,6 +53,7 @@
 - Repository owner：`WorkbenchRelationReadModelRepositoryPort`
 - Query owner：`WorkbenchRelationReadFacade`
 - 跨月关系合同：一个 active relation 可同时包含 OA、银行流水、进项/销项发票等不同月份对象。每个被重建的 `workbench_relation` month scope 必须保存该 scope 内 relation group 涉及的所有成员 row 索引，而不仅是当前月份原生对象；下游页面按自身 row id 读取时必须能发现跨月 group。
+- 批量账务性能合同：未提交列表只做候选 row-id relation lookup 和年份级 submitted count；已提交列表才读取完整 relation DTO。`count_batch_accounting_relations_by_year` 是 read facade/repository port 合同的一部分，不能被调用方直接 SQL 替代。
 - 旧逻辑已废弃：`read_model.workbench_relation_rows` 不允许再使用 `(tenant_id, row_id)` 全局唯一覆盖模型；迁移 `0077_workbench_relation_rows_scope_unique.sql` 建立目标约束，`0078_workbench_relation_rows_scope_unique_repair.sql` 为已应用早期 0077 的环境做幂等 forward repair，`0079_workbench_relation_rows_scope_unique_hardening.sql` 在已接受 0077/0078 checksum drift 的环境中重新断言目标唯一性并清理同 scope 重复投影行，避免最后一次重建的月份覆盖其它月份的关系索引。跨月成员索引属于 projection schema 合同，当前版本为 `2026-06-cross-month-relation-member-index-v1`；发布该版本后必须受控重建 `workbench_relation` 月份 shard，再重建依赖它的 `input_invoice_usage` 等下游 read model。
 
 ## 文件范围

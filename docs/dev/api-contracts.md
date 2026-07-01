@@ -44,6 +44,8 @@
 
 `GET /api/batch-accounting?bank_year=YYYY&bucket=unsubmitted|submitted`
 
+可选分页参数：`page/page_size` 同时作用于银行和 OA 列表；`bank_page/bank_page_size`、`oa_page/oa_page_size` 分别作用于银行列表和 OA 列表。显式分页时 `page_size` 上限为 200，超限返回 `400 invalid_paging`。
+
 响应字段：
 
 | 字段 | 说明 |
@@ -61,7 +63,7 @@
 
 `read_model_status` 的优先级按后端聚合：`unavailable > schema_mismatch > missing > failed > stale > refreshing > fresh`。接口仍返回当前可用 payload；前端需要展示刷新/陈旧状态并避免在非 fresh 时把缺失关系误解释成真实未提交。
 
-列表读取 relation distribution 必须通过现有 `workbench_relation` read facade freshness 边界请求 fresh payload；`missing`/`stale` scope 由 facade/gateway 负责 normalize、validate、dedupe 和入队，GET 不同步 rebuild，也不直接写 durable queue。
+列表读取 relation distribution 必须通过现有 `workbench_relation` read facade freshness 边界请求 fresh payload；`missing`/`stale` scope 由 facade/gateway 负责 normalize、validate、dedupe 和入队，GET 不同步 rebuild，也不直接写 durable queue。`unsubmitted` bucket 只能把批量账务银行候选和日常报销 OA 候选作为 relation lookup 输入，`summary.submitted_count` 通过年份级 count I/O 读取；不能为未提交首屏扫描 12 个月 submitted relation 明细。`submitted` bucket 仍可读取完整 submitted relation DTO，因为页面需要渲染已提交关系详情。
 
 `POST /api/batch-accounting/submit`
 
