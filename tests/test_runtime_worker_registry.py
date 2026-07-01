@@ -116,6 +116,24 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["tax_offset"].worker_instance, "tax-offset")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["bank_flow_rule_batch"].worker_instance, "bank-flow-rule-batch")
 
+    def test_cost_tax_worker_no_longer_consumes_cost_statistics_refreshes(self) -> None:
+        registration = registration_by_instance_name()["cost-tax"]
+
+        self.assertEqual(registration.worker_kind, "cost-tax-read-model")
+        self.assertEqual(registration.handler_flags, ("--enable-tax-offset-read-model-refresh",))
+        self.assertEqual(registration.event_types, ("tax_offset.read_model.refresh",))
+        self.assertEqual(registration.read_model_key, "tax_offset")
+        self.assertEqual(registration.read_model_scope_type, "tax_offset")
+        self.assertNotIn("cost_statistics.read_model.refresh", registration.event_types)
+        self.assertEqual(
+            worker_command_args(registration, transport="postgres"),
+            (
+                "--enable-tax-offset-read-model-refresh",
+                "--event-type",
+                "tax_offset.read_model.refresh",
+            ),
+        )
+
     def test_import_claim_events_include_import_fact_changed_in_all_transports(self) -> None:
         registration = registration_by_instance_name()["import"]
 

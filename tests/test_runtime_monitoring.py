@@ -300,7 +300,7 @@ class FakeWorkerMetricsConnection:
                 "heartbeat_lag_seconds": 4.0,
                 "payload": {
                     "worker_instance": "cost-tax",
-                    "configured_event_types": ["cost_statistics.read_model.refresh", "tax_offset.read_model.refresh"],
+                    "configured_event_types": ["tax_offset.read_model.refresh"],
                 },
             },
             {

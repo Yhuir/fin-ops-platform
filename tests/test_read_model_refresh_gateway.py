@@ -302,6 +302,25 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         self.assertEqual(queue.active_checks, [("default", "bank_detail", "2026-02")])
         self.assertEqual(queue.refreshes, [])
 
+    def test_cost_statistics_shard_convergence_reasons_do_not_bump_active_scope(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        for reason in ("cost_statistics_all_shard", "cost_statistics_shard_converged"):
+            with self.subTest(reason=reason):
+                queue = QueueRecorder()
+                queue.active_refreshes.add(("default", "cost_statistics", "active:all"))
+                gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+                enqueued = gateway.enqueue_many(
+                    "cost_statistics",
+                    ["active:all"],
+                    reason=reason,
+                )
+
+                self.assertEqual(enqueued, ["active:all"])
+                self.assertEqual(queue.active_checks, [("default", "cost_statistics", "active:all")])
+                self.assertEqual(queue.refreshes, [])
+
     def test_mutating_refresh_reason_still_bumps_active_scope(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 

@@ -47,7 +47,7 @@
 - Read model：`cost_statistics`
 - Projection：`partitioned_scoped_parent_rollup`
 - `all` 语义：`queryable_parent_aggregate`
-- Worker：`cost-statistics`，辅助 `cost-tax`
+- Worker：`cost-statistics`；旧 `cost-tax` 成本统计消费链路已移除
 - Query owner：`CostStatisticsQueryService`
 
 ## 文件范围

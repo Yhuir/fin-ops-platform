@@ -201,14 +201,14 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
     RuntimeWorkerRegistration(
         instance_name="cost-tax",
         worker_kind="cost-tax-read-model",
-        handler_flags=("--enable-cost-statistics-read-model-refresh", "--enable-tax-offset-read-model-refresh"),
-        event_types=("cost_statistics.read_model.refresh", "tax_offset.read_model.refresh"),
+        handler_flags=("--enable-tax-offset-read-model-refresh",),
+        event_types=("tax_offset.read_model.refresh",),
         required=True,
         rabbitmq_eligible=True,
         env_example="fin-ops.worker.cost-tax.env.example",
         rabbitmq_env_example="fin-ops.worker.cost-tax-rabbitmq.env.example",
-        read_model_key="cost_statistics",
-        read_model_scope_type="cost_statistics",
+        read_model_key="tax_offset",
+        read_model_scope_type="tax_offset",
     ),
     RuntimeWorkerRegistration(
         instance_name="cost-statistics",

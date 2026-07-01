@@ -34,6 +34,7 @@ FRONTEND_ROUTES = {
     "/oa-pending-payments",
     "/output-invoice-collections",
     "/no-oa-bank-batches",
+    "/bank-flow-rule-batches",
     "/batch-accounting",
     "/turnover-ledger",
     "/etc-tickets",

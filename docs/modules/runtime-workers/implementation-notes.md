@@ -11,6 +11,7 @@
 - `*_read_model_not_fresh` 可携带 `parent_scope_keys=YYYY-MM,...` 表示同一 read model 的 parent shard 依赖；runtime worker 必须允许这类 same-scope parent refresh。若错误包含 `parent_generation_inconsistent`，即使 readiness 显示 fresh，也要强制补投 parent scope，因为 consistency failure 比 readiness 更接近发布边界。
 - Same-scope parent dependency 的当前 event 必须使用 retry 级别退避，而不是全局 `dependency_not_fresh_delay_seconds` 的快速 retry；否则 RabbitMQ transport 下 `all` 聚合事件会被快速重新发布并抢占父月 shard，形成 backlog/refreshing 风暴。
 - App Status read model registry、runtime worker registry、RabbitMQ dispatch、SLO smoke、migration storage contract 和 Redis/deploy env 模板必须保持本地 parity；生产 worker/read model 不允许新增第二套手写清单。
+- `cost-tax` worker 只保留 `tax_offset.read_model.refresh` 兼容职责；`cost_statistics.read_model.refresh` 的唯一 worker owner 是 `cost-statistics`。
 
 ## 记录模板
 

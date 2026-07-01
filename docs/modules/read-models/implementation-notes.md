@@ -9,6 +9,7 @@
 - 生产旧 runtime 状态的 scope contract 检查/清理由 `ReadModelScopeContractService` 编排，SQL 限定在 `PostgresReadModelScopeContractRepository`，清理后通过 `ReadModelRefreshGateway` 补投规范 replacement scope。
 - RabbitMQ real consumers 只负责 transport/wakeup；`job.outbox_events`、`job.read_model_dirty_scopes` 与 `read_model.app_status_readiness` 仍是 read model 状态事实源。Redis payload 只能在 fresh gate 后缓存。
 - App Status read model registry、runtime worker registry、migration storage contract、critical SLO smoke 和 deploy env 模板必须通过本地测试交叉约束；新增 read model 不能只登记一个 registry。
+- `cost_statistics` 的 refresh worker owner 是 `cost-statistics`；旧 `cost-tax` 只保留 `tax_offset` 辅助 worker 职责，不再消费 `cost_statistics.read_model.refresh`。
 - authenticated HTTP SLO gate 的当前 P2/P3 默认目标是首屏 API p95 <= 1000ms，并且必须同时满足 HTTP status、latency 和 freshness：任何 `read_model_status != fresh` 或 `refresh_enqueued=true` 都算失败，不能把快速返回的 refreshing 当作“已同步”。read model enqueue-to-fresh 采用分层生产目标：轻量 read model p95 <= 3000ms；Workbench/Search/Cost/Turnover 等重型或聚合 read model 的 bounded apply smoke 目标 <= 5000ms，除非后续基线被明确收紧。写操作同步门禁仍按具体 runbook/safety ticket 记录 operation-to-fresh 目标。
 - `bank_detail:all` 不是可读 freshness scope，而是 fan-out 控制 scope；真实 readiness 和 downstream dependency 应以具体月份 shard 或明确 read model status 为准。
 

@@ -50,8 +50,9 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | `input_invoice_usage` | `/input-invoice-usage` | `input_invoice_usage`、invoice usage collection worker |
 | `output_invoice_collections` | `/output-invoice-collections` | `output_invoice_collection`、invoice usage collection worker；rows 展示 `workbench_relation` 统一关系中的 OA、收入流水和销项发票项 |
 | `tax_offset` | `/tax-offset` | `tax_offset`、`tax-offset` worker，旧 `cost-tax` 兼容 worker |
-| `cost_statistics` | `/cost-statistics` | `cost_statistics`、`cost-statistics` worker、cache warmup jobs，旧 `cost-tax` 兼容 worker |
+| `cost_statistics` | `/cost-statistics` | `cost_statistics`、`cost-statistics` worker、cache warmup jobs |
 | `no_oa_bank_batches` | `/no-oa-bank-batches` | `no_oa_bank_batch`、no-OA worker |
+| `bank_flow_rule_batches` | `/bank-flow-rule-batches` | `bank_flow_rule_batch`、bank-flow-rule-batch worker |
 | `batch_accounting` | `/batch-accounting` | workbench relation read model |
 | `turnover_ledger` | `/turnover-ledger` | `turnover_ledger`、turnover ledger worker |
 | `etc_tickets` | `/etc-tickets` | ETC import jobs、ETC business batch manual OA status |

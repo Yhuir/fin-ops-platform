@@ -10,7 +10,7 @@
 | 项目范围 | `all` | app settings project status / cost statistics API query | 用户选择 all project scope 后展示所有项目。 |
 | 成本行 | `included` | `CostStatisticsService`、SQL projection payload | 支出流水或可计入成本关系满足项目/费用字段要求后进入统计。 |
 | 成本行 | `excluded` | cost attribution policy / relation context | OA 发票抵扣、现金代收代付确认组等不应计入成本的关系被排除。 |
-| 月份 shard | `active:YYYY-MM` / `all:YYYY-MM` | `read_model.cost_statistics_rows`、readiness | 由 `cost-statistics` 专用 worker 从对应 Workbench 月份 read model 构建；旧 `cost-tax` 仅作为兼容消费者。 |
+| 月份 shard | `active:YYYY-MM` / `all:YYYY-MM` | `read_model.cost_statistics_rows`、readiness | 由 `cost-statistics` 专用 worker 从对应 Workbench 月份 read model 构建；旧 `cost-tax` 不再消费成本统计刷新。 |
 | 全期间父 scope | `active:all` / `all:all` | `read_model.cost_statistics_read_models`、readiness | 从已物化月份 shard rows 聚合生成；不读取 Workbench `all` 全量 payload。 |
 
 关键规则：

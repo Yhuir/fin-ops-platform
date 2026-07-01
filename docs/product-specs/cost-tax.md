@@ -10,10 +10,10 @@
 - 页面负责筛选、排序、分页、导出 shape，不重新定义项目归因。
 - 导入、成本相关关系确认、发票状态变化和项目配置变化都可能影响统计。仅 bank+invoice 的关联不会形成成本统计行；成本统计主表只从含成本归因上下文的 OA+bank / 受控 no-OA / turnover 成本关系和对应银行月份构建，不因单纯发票月份关系刷新成本 read model。
 - 成本统计 read model 的物化 scope 包含 `active:YYYY-MM`、`all:YYYY-MM`、`active:all` 和 `all:all`。`active:all` / `all:all` 是全期间视图的一等 read model，不只是月份分片 fan-out 的父 scope。
-- 月份 scope 由 `cost-statistics` 专用 worker 从对应工作台月份 read model 构建；旧 `cost-tax` combined worker 只作为兼容消费者。`active:all` / `all:all` 父 scope 从已物化的成本统计月份 rows 聚合并原子发布，不再读取工作台 `all` scope 的全量 JSON payload。
+- 月份 scope 由 `cost-statistics` 专用 worker 从对应工作台月份 read model 构建；旧 `cost-tax` 不再消费成本统计刷新。`active:all` / `all:all` 父 scope 从已物化的成本统计月份 rows 聚合并原子发布，不再读取工作台 `all` scope 的全量 JSON payload。
 - 刷新 `active:all` / `all:all` 时，worker 必须先检查所需月份 shard readiness。缺失、stale 或 failed 的 shard 先通过 durable queue 入队，父 scope 记录 `refreshing`，不得伪造 `fresh`；所有 shard 都 fresh 后才聚合发布父 scope 并写入父 scope readiness。
 - 月份 shard 成功后会重新入队同 project scope 的父 scope，使全期间视图最终收敛。月份分片失败只影响该分片 readiness，不能反向污染已成功的全期间 scope。
-- App Health 只根据 `cost_statistics` read model 的真实 readiness、dirty scope、outbox 和 `cost-statistics`/兼容 `cost-tax` worker 状态判定成本统计页面。历史 failed readiness 必须由后续真实成功 rebuild 覆盖，不能手工伪造绿色。
+- App Health 只根据 `cost_statistics` read model 的真实 readiness、dirty scope、outbox 和 `cost-statistics` worker 状态判定成本统计页面。历史 failed readiness 必须由后续真实成功 rebuild 覆盖，不能手工伪造绿色。
 - App Status 必须保留 `cost_statistics` 的 scope-level readiness：`active:all`、`all:all`、`active:YYYY-MM`、`all:YYYY-MM`。全期间父 scope failed/unavailable 代表成本统计主体验不可用；单个月份 shard failed/unavailable 只代表局部分片需要重试，域级显示 busy/attention，不阻断已经 fresh 的全期间视图。
 - 页面 API 只表达当前查询 scope 的数据平面状态，例如 `fresh`、`refreshing`、`stale`、`failed` 或 `unavailable`；App Status 负责解释多个 scope、dirty scope、outbox、worker heartbeat 和 last error 的状态平面。两者必须使用同一套 scope key 语义，不能用页面请求线程同步重建来掩盖缺失 read model。
 

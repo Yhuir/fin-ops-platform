@@ -434,7 +434,7 @@ PostgreSQL done/fresh。
 
 ### Cost Statistics Scope Readiness
 
-`cost-tax` worker 仍作为兼容 combined consumer 处理 `cost_statistics.read_model.refresh` 与 `tax_offset.read_model.refresh`；生产 SLO lane 还会启动专用 `cost-statistics` 与 `tax-offset` RabbitMQ consumers。成本统计是跨银行流水、发票、OA 关系、项目归因和费用分类的派生 read model，因此 App Status 必须展示 scope 级 readiness，而不是只显示一个聚合后的 `cost_statistics=failed`。
+`cost_statistics.read_model.refresh` 只由 `cost-statistics` worker 消费；`cost-tax` 兼容 worker 只保留 `tax_offset.read_model.refresh`。成本统计是跨银行流水、发票、OA 关系、项目归因和费用分类的派生 read model，因此 App Status 必须展示 scope 级 readiness，而不是只显示一个聚合后的 `cost_statistics=failed`。
 
 高频 read model 的专用 consumers 是当前 P2/P3 一秒级 closure 的基础；历史 5s SLO 记录只是旧基线，不是当前验收上限。当前 direct refresh / 首屏 API 以 p95 <= 1000ms 为门禁，写操作链路还要求 operation-to-fresh p99 <= 3000ms：
 
@@ -444,7 +444,7 @@ PostgreSQL done/fresh。
 - `tax-offset`：只消费 `tax_offset.read_model.refresh`。
 - `invoice-lifecycle-secondary`：作为第二条 `invoice_lifecycle.read_model.refresh` consumer，和 `invoice-lifecycle` 并发 drain 多月份 scope。
 
-这些 worker 不改变 PostgreSQL durable queue / readiness 事实源；它们只是同一 outbox event type 的并发消费者。旧 `search-pending`、`cost-tax` 不应作为唯一性能 lane 依赖，后续清理必须先确认生产 SLO 稳定。
+这些 worker 不改变 PostgreSQL durable queue / readiness 事实源；它们只是同一 outbox event type 的并发消费者。旧 `search-pending` 不应作为唯一性能 lane 依赖；`cost-tax` 不再消费 `cost_statistics.read_model.refresh`，避免旧成本统计链路与专用 lane 竞争长 SQL。
 
 成本统计 scope 分为：
 
