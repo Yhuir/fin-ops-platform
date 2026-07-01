@@ -6407,7 +6407,7 @@ class PostgresReadModelRepository:
         scope_keys: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         keep_recent = max(1, int_value(keep_recent_generations_per_scope, 3))
-        keep_days_value = max(1, int_value(keep_days, 14))
+        keep_days_value = max(0, int_value(keep_days, 14))
         limit_value = min(5000, max(1, int_value(limit, 500)))
         normalized_scope_keys = self._normalize_workbench_retention_scope_keys(scope_keys)
         scope_filter = ""

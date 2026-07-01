@@ -2838,6 +2838,57 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(calls[0]["limit"], 500)
         self.assertEqual(calls[0]["dry_run"], True)
 
+    def test_prune_workbench_generations_cli_allows_zero_keep_days_for_emergency_cleanup(self) -> None:
+        from fin_ops_platform.tools import prune_workbench_generations
+
+        calls: list[dict[str, object]] = []
+
+        class FakeRepository:
+            def __init__(self, _connection: object) -> None:
+                pass
+
+            def prune_workbench_generations(self, **kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                return {
+                    "dry_run": kwargs.get("dry_run"),
+                    "candidate_count": 1,
+                    "deleted_count": 0,
+                    "generations": [{"generation_id": "old-gen"}],
+                }
+
+        with patch.object(prune_workbench_generations.PostgresSettings, "from_env", return_value=object()):
+            with patch.object(prune_workbench_generations, "PostgresConnection", return_value=object()):
+                with patch.object(prune_workbench_generations, "PostgresReadModelRepository", FakeRepository):
+                    exit_code = prune_workbench_generations.main(
+                        ["--keep-days", "0", "--dry-run"],
+                        stdout=StringIO(),
+                    )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls[0]["keep_days"], 0)
+        self.assertEqual(calls[0]["dry_run"], True)
+
+    def test_repository_retention_preview_allows_zero_keep_days(self) -> None:
+        class PreviewConnection:
+            def __init__(self) -> None:
+                self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
+                self.fetch_all_calls.append((sql, params))
+                return []
+
+        connection = PreviewConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        result = repository.preview_workbench_generation_retention(
+            keep_recent_generations_per_scope=1,
+            keep_days=0,
+            limit=10,
+        )
+
+        self.assertEqual(result["keep_days"], 0)
+        self.assertEqual(connection.fetch_all_calls[0][1], (1, 0, 10))
+
     def test_repository_filters_workbench_groups_page_from_structured_group_rows(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)

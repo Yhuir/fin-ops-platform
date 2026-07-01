@@ -220,10 +220,31 @@ tail -n 100 /var/log/fin-ops/workbench-generation-prune-$(date +%Y%m%d).log
 
 当根分区已经接近或达到满盘，按以下顺序处理：先降低 systemd journal 占用，随后只 dry-run
 非 active generation 候选并执行一个 bounded batch，接着对 `read_model.workbench_generations`、
-`workbench_groups`、`workbench_group_rows`、`workbench_rows`、`workbench_summary`、`workbench_stats`
+`workbench_groups`、`workbench_group_rows`、`workbench_rows`、`workbench_summary`、`workbench_generation_stats`
 执行普通 `VACUUM (ANALYZE)`。不要连续盲删大量 read model generation，因为删除会产生 WAL，可能在
 满盘状态下进一步压缩可用空间。若清理后 Workbench 仍处于 `refreshing`，必须继续检查 active generation
 consistency failure、dirty scope 和 worker defer 原因；不能把磁盘空间恢复误判为 read model 已 fresh。
+
+如果 `--keep-days 1` dry-run 没有候选，而当天大量 superseded generation 已经阻塞 refresh，可执行一次
+显式 emergency 清理。该命令仍只删非 active generation，仍保留每个 scope 最近 1 个非 active
+generation；`--keep-days 0` 禁止作为 timer 默认值使用：
+
+```bash
+set -a
+. /etc/fin-ops/fin-ops.common.env
+. /etc/fin-ops/fin-ops.secrets.env
+set +a
+PYTHONPATH=/opt/fin-ops/current/backend/src /opt/fin-ops/venv/bin/python \
+  -m fin_ops_platform.tools.prune_workbench_generations \
+  --execute \
+  --keep-recent-generations-per-scope 1 \
+  --keep-days 0 \
+  --limit 5000
+```
+
+emergency 清理后必须重新执行普通 `VACUUM (ANALYZE)`、确认 active generation builder/schema 已更新、
+检查 consistency failure 清零、dirty scope 完成和 worker defer 不再重复，最后再跑 Workbench API
+耗时 smoke。
 
 ### Workbench matching source-version recovery
 
