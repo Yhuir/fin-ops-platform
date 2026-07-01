@@ -40,7 +40,7 @@
 
 - 银行流水、OA 行和已有关联关系来自 Workbench / Workbench relation read model。
 - `GET /api/batch-accounting` 必须返回 `summary`、`bank_rows`、`oa_rows`、`relations_by_bank_row_id`、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。显式传入 `page/page_size`、`bank_page/bank_page_size` 或 `oa_page/oa_page_size` 时，后端只裁剪对应列表并返回 `pagination`；不传分页参数时保持旧响应 shape。
-- 前端未提交 bucket 首屏默认以 200 行页大小分别请求银行流水和可关联 OA 项，并提供独立分页控件；切换 bucket 或流水年份会重置页码、选择和差额说明，避免跨页旧选择误提交。右侧 OA 不按年份过滤，只展示没有 active `workbench_relation` 配对关系的日常报销 OA 主单。已提交 bucket 只分页银行关系列表，OA 明细来自当前可见 relation bucket。
+- 前端未提交 bucket 首屏默认以 200 行页大小分别请求银行流水和可关联 OA 项，并提供独立分页控件；切换 bucket 或流水年份会重置页码、选择和差额说明，避免跨页旧选择误提交。右侧 OA 不按年份过滤，只展示没有关联银行流水的日常报销 OA 主单；仅发票关系或无流水候选关系不应把该 OA 排除。已提交 bucket 只分页银行关系列表，OA 明细来自当前可见 relation bucket。
 - `POST /api/batch-accounting/submit` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注；撤回只恢复真实 relation history，OA 附件 case_id / `existing_case` 显示归属不得被恢复成 active relation。
 - `repair_legacy_case_id_collisions(...)` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 恢复历史 batch relation；缺少 command service 时 fail fast，不回退 direct pair relation mutation。

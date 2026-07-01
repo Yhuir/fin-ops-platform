@@ -15,6 +15,7 @@
 - 允许流转：
   - 导入确认后创建或更新同一个业务批次，不在前端拆成“导入任务”和“对账任务”两个用户可见任务。
   - 用户点击“新建批次”时，由 `POST /api/etc/business-batches` 闭环编排创建 reconciliation task 和 active business batch，并返回统一业务批次 payload；前端不得先创建空 task 再把 task 当作批次显示。
+  - 未提交业务批次允许通过 `PATCH /api/etc/business-batches/{id}` 修改 `title`，必须带 `expectedVersion` 防并发覆盖；标题更新写入业务批次审计，并同步 linked reconciliation task title。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
@@ -24,6 +25,7 @@
 - 禁止流转：
   - ETC 页面不得提供自动 OA 检测、刷新检测或异常检测入口。
   - ETC 后端不得保留专用 OA 检测 refresh API、detector adapter 或 worker；批次已人工确认后不得被后台检测覆盖。
+  - 已提交、人工确认已提交或 closed 业务批次不得继续修改标题。
   - 关联台未找到 OA 和银行流水三项匹配前，`etc_invoice_summary` 不得直接进入已配对区。
 
 ## UI 状态
@@ -31,7 +33,8 @@
 - loading：页面加载业务批次、导入/草稿/人工确认动作执行中时显示按钮级 loading，不展示后台英文状态码作为主文案。
 - empty：未提交或已提交 tab 下无批次时只显示该 bucket 的空态；一个业务批次在前端只出现一次。
 - initial load：页面进入和刷新只能读取已有业务批次/对账任务，不得自动创建空 ETC 对账任务；新建批次只能由用户点击“新建批次”触发。
-- batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 事实；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
+- batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 事实；页面不再提供月份选择器，默认展示全部用户可见批次并只分“未提交/已提交”两个 bucket；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
+- title editing：未提交 business batch 行的标题可点击内联编辑，Enter 或失焦保存，Esc 取消；保存失败保留错误提示，不伪装为已保存。已提交 bucket 不展示标题编辑入口。
 - error：导入、创建草稿、人工确认、删除失败时显示本地化业务错误；内部对象 id、文件 id、旧检测码不作为主要用户文案。
 - submitted delete confirm：已提交批次删除确认框必须说明“取消发票合并，OA 系统中的草稿和已提交记录不会删除”，不得展示为撤销 OA。
 - stale/refreshing：ETC 页面本身不触发 OA 自动检测；关联台 read model 刷新状态由关联台页面展示。
@@ -51,6 +54,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-01 | ETC 页面移除月份选择器，未提交业务批次支持提交前内联编辑标题并同步 linked task title | ETC 页面 UI 状态、business batch `title` payload、ETC 发票导入 ready task 下拉标题 | `tests.test_etc_backend.EtcServiceTests.test_business_batch_title_update_persists_and_locks_submitted`；`tests.test_etc_backend.EtcApiTests.test_business_batch_title_patch_updates_linked_task_title`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts` |
 | 2026-06-17 | 补充 ETC 票据管理 Browser e2e，覆盖未提交业务批次、发票明细、OA 草稿创建、人工已提交确认和已提交 bucket 展示 | ETC 页面 UI 状态、business batch `imported -> oa_confirmation_pending -> manually_marked_submitted` 可见链路、Playwright smoke | `cd web && npx playwright test e2e/etc-tickets-flow.spec.ts` |
 | 2026-06-12 | 删除 ETC repair/link/migration service 的 direct pair relation 写 fallback，缺少 Workbench relation command service 时 fail fast 且不先写本地批次 | 历史 repair、historical business batch migration、existing batch link、Workbench relation command 边界 | `tests/test_etc_backend.py`；`tests/test_historical_etc_business_batch_migration_service.py`；`tests/test_platform_runtime_boundary_guards.py` |
 | 2026-06-12 | 已提交 ETC 业务批次删除/reset 在本地 mutation 前先校验 Workbench relation read model fresh，summary relation 取消、历史 repair 和 existing link 生产写入迁入 `WorkbenchRelationCommandService` | ETC 业务批次删除、绑定 reconciliation task 删除、历史 repair/migration/link 工具、Workbench relation 事实源 | `tests/test_etc_backend.py`；`tests/test_workbench_relation_command_service.py`；`tests/test_historical_etc_business_batch_migration_service.py`；`tests/test_platform_runtime_boundary_guards.py` |

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import BytesIO
+from copy import deepcopy
 import re
 from typing import Any, Callable
 import warnings
@@ -259,32 +260,37 @@ class FileImportService:
             self.assert_session_preview_current(session_id=session_id)
         progress_total = len(selected_items)
         progress_current = 0
-        for item in session.files:
-            if item.id not in selected:
-                if item.status == "preview_ready":
-                    item.status = "skipped"
-                    item.batch_id = None
-                continue
-            progress_current += 1
-            if item.status == "confirmed":
+        rollback_session = deepcopy(session)
+        try:
+            for item in session.files:
+                if item.id not in selected:
+                    if item.status == "preview_ready":
+                        item.status = "skipped"
+                        item.batch_id = None
+                    continue
+                progress_current += 1
+                if item.status == "confirmed":
+                    confirmed_any = True
+                    if progress_callback is not None:
+                        progress_callback(session, progress_current, progress_total)
+                    continue
+                if not item.preview_batch_id:
+                    if progress_callback is not None:
+                        progress_callback(session, progress_current, progress_total)
+                    continue
+                batch = self._import_service.confirm_import(item.preview_batch_id)
+                item.batch_id = batch.id
+                item.status = "confirmed"
                 confirmed_any = True
                 if progress_callback is not None:
                     progress_callback(session, progress_current, progress_total)
-                continue
-            if not item.preview_batch_id:
-                if progress_callback is not None:
-                    progress_callback(session, progress_current, progress_total)
-                continue
-            batch = self._import_service.confirm_import(item.preview_batch_id)
-            item.batch_id = batch.id
-            item.status = "confirmed"
-            confirmed_any = True
-            if progress_callback is not None:
-                progress_callback(session, progress_current, progress_total)
 
-        session.status = "confirmed" if confirmed_any else "skipped"
-        self._sessions[session.id] = session
-        return session
+            session.status = "confirmed" if confirmed_any else "skipped"
+            self._sessions[session.id] = session
+            return session
+        except Exception:
+            self._sessions[session.id] = rollback_session
+            raise
 
     def assert_session_preview_current(self, *, session_id: str) -> None:
         session = self._sessions[session_id]

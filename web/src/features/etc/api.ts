@@ -11,6 +11,7 @@ import type {
   EtcBusinessBatchReasonedPayload,
   EtcBusinessBatchStatus,
   EtcBusinessBatchSummary,
+  EtcUpdateBusinessBatchTitlePayload,
   EtcBusinessBatchVersionedPayload,
   EtcBatchDetail,
   EtcBatchStatus,
@@ -191,6 +192,8 @@ type ApiEtcBusinessBatch = ApiEtcBatch & {
   business_batch_id?: string;
   taskId?: string;
   task_id?: string;
+  title?: string | null;
+  name?: string | null;
   version?: number;
   scopeMonth?: string | null;
   scope_month?: string | null;
@@ -901,6 +904,7 @@ function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSu
   return {
     businessBatchId,
     taskId: batch.taskId ?? batch.task_id ?? "",
+    title: batch.title ?? batch.name ?? "",
     status: (batch.status ?? "draft") as EtcBusinessBatchStatus,
     version: batch.version ?? 0,
     scopeMonth: String(batch.scopeMonth ?? batch.scope_month ?? amountBreakdown.scope_month ?? amountBreakdown.scopeMonth ?? ""),
@@ -1511,9 +1515,34 @@ export async function createEtcBusinessBatch(payload: EtcCreateBusinessBatchPayl
     },
     body: JSON.stringify({
       ...(payload.taskId ? { taskId: payload.taskId } : {}),
+      ...(payload.title ? { title: payload.title } : {}),
       ...(payload.idempotencyKey ? { idempotencyKey: payload.idempotencyKey } : {}),
     }),
   });
+  return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
+}
+
+export async function updateEtcBusinessBatchTitle(
+  businessBatchId: string,
+  payload: EtcUpdateBusinessBatchTitlePayload,
+): Promise<EtcBusinessBatchDetail> {
+  const title = payload.title.trim();
+  if (!title) {
+    throw new Error("批次标题不能为空。");
+  }
+  const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>(
+    `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title,
+        ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
+      }),
+    },
+  );
   return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
 }
 

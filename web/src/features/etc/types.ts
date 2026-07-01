@@ -174,6 +174,7 @@ export type EtcBusinessBatchAuditEvent = {
 export type EtcBusinessBatchSummary = {
   businessBatchId: string;
   taskId: string;
+  title: string;
   status: EtcBusinessBatchStatus;
   version: number;
   scopeMonth: string;
@@ -210,12 +211,18 @@ export type EtcBusinessBatchListPayload = {
 
 export type EtcCreateBusinessBatchPayload = {
   taskId?: string;
+  title?: string;
   idempotencyKey?: string;
 };
 
 export type EtcBusinessBatchVersionedPayload = {
   expectedVersion?: number;
   idempotencyKey?: string;
+};
+
+export type EtcUpdateBusinessBatchTitlePayload = {
+  title: string;
+  expectedVersion?: number;
 };
 
 export type EtcBusinessBatchReasonedPayload = EtcBusinessBatchVersionedPayload & {

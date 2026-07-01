@@ -24214,6 +24214,42 @@ body.column-layout-dragging {
   font-size: 13px;
 }
 
+.etc-batch-title-button {
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+  background: transparent;
+  border: 0;
+}
+
+.etc-batch-title-button:hover,
+.etc-batch-title-button:focus-visible {
+  color: var(--fp-primary);
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.etc-batch-title-input {
+  width: min(220px, 100%);
+  min-width: 0;
+  padding: 2px 6px;
+  color: var(--fp-text);
+  font: inherit;
+  font-weight: 800;
+  background: var(--fp-surface);
+  border: 1px solid var(--fp-primary);
+  border-radius: var(--fp-radius-xs);
+  outline: none;
+}
+
+.etc-batch-title-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 16%, transparent);
+}
+
 .etc-batch-fields {
   display: flex;
   flex-wrap: wrap;

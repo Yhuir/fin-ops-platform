@@ -112,16 +112,18 @@ class EtcBusinessBatchApplicationService:
 
     def create_batch_payload(self, payload: dict[str, Any], *, actor: EtcBusinessBatchActor) -> dict[str, object]:
         task_id = self._first_text(payload.get("taskId"), payload.get("task_id"))
+        title = self._first_text(payload.get("title"), payload.get("name")) or "新建ETC批次"
         created_task = None
         if not task_id:
             created_task = self._reconciliation_task_service.create_task(
-                title=self._first_text(payload.get("title"), payload.get("name")) or "新建ETC对账批次",
+                title=title,
                 created_by=actor.actor_id,
             )
             task_id = str(getattr(created_task, "task_id", "") or "").strip()
         try:
             batch = self._etc_service.create_business_batch(
                 task_id=task_id,
+                title=title,
                 owner_user_id=self._first_text(actor.username, actor.user_id, payload.get("ownerUserId"), payload.get("owner_user_id")),
                 owner_org_id=self._first_text(actor.dept_id, payload.get("ownerOrgId"), payload.get("owner_org_id")),
                 idempotency_key=self._first_text(payload.get("idempotencyKey"), payload.get("idempotency_key")),
@@ -135,6 +137,28 @@ class EtcBusinessBatchApplicationService:
                     import_cleanup_confirmed=True,
                 )
             raise
+        return {"businessBatch": self.business_batch_payload(batch)}
+
+    def update_title_payload(
+        self,
+        business_batch_id: str,
+        payload: dict[str, Any],
+        *,
+        actor: EtcBusinessBatchActor,
+    ) -> dict[str, object]:
+        self._scoped_batch(business_batch_id, actor)
+        title = self._first_text(payload.get("title"), payload.get("name"))
+        if not title:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "ETC business batch title is required.",
+                code="invalid_business_batch_title",
+            )
+        batch = self._etc_service.update_business_batch_title(
+            business_batch_id,
+            title=title,
+            expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
+        )
+        self._update_reconciliation_task_title(batch, title=title, actor=actor)
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def detail_payload(self, business_batch_id: str, *, actor: EtcBusinessBatchActor) -> dict[str, object]:
@@ -401,6 +425,25 @@ class EtcBusinessBatchApplicationService:
             actor=actor.actor_id,
         )
 
+    def _update_reconciliation_task_title(
+        self,
+        batch: EtcBusinessBatch,
+        *,
+        title: str,
+        actor: EtcBusinessBatchActor,
+    ) -> None:
+        task_id = str(getattr(batch, "task_id", "") or "").strip()
+        if not task_id or not hasattr(self._reconciliation_task_service, "update_task_title"):
+            return
+        try:
+            self._reconciliation_task_service.update_task_title(
+                task_id=task_id,
+                title=title,
+                actor=actor.actor_id,
+            )
+        except KeyError:
+            return
+
     def _matches_list_filters(self, batch: EtcBusinessBatch, *, month: str, plate: str, keyword: str) -> bool:
         invoices = self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))
         amount_breakdown = getattr(batch, "amount_breakdown", {}) if isinstance(getattr(batch, "amount_breakdown", {}), dict) else {}
@@ -421,6 +464,7 @@ class EtcBusinessBatchApplicationService:
             return False
         if keyword:
             batch_fields = [
+                batch.title,
                 batch.business_batch_id,
                 batch.external_etc_batch_id,
                 batch.oa_row_id,

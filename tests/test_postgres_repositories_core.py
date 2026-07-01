@@ -138,6 +138,21 @@ class CoreReadConnection:
                             "batch_id": "batch_1",
                             "stored_file_path": "/tmp/input.xlsx",
                             "session_id": "session_1",
+                            "session_audit": {"original_count": 1, "importable_count": 1, "confirmable_count": 1},
+                            "audit": {"original_count": 1, "importable_count": 1, "confirmable_count": 1},
+                            "row_results": [
+                                {
+                                    "id": "row_1",
+                                    "batch_id": "batch_1",
+                                    "row_no": 1,
+                                    "source_record_type": "invoice",
+                                    "decision": ImportDecision.CREATED.value,
+                                    "decision_reason": "Ready to create new invoice.",
+                                    "linked_object_type": "invoice",
+                                    "linked_object_id": "invoice_1",
+                                }
+                            ],
+                            "normalized_rows": [{"invoice_no": "INV-001", "invoice_date": "2026-03-01"}],
                         }
                     },
                 }
@@ -161,6 +176,10 @@ def test_core_repository_loads_domain_snapshots_accepted_by_services() -> None:
     sessions = file_service.snapshot()["sessions"]
     assert sessions["session_1"].files[0].id == "file_1"
     assert sessions["session_1"].files[0].batch_id == "batch_1"
+    assert sessions["session_1"].audit.confirmable_count == 1
+    assert sessions["session_1"].files[0].audit.importable_count == 1
+    assert sessions["session_1"].files[0].row_results[0].linked_object_id == "invoice_1"
+    assert sessions["session_1"].files[0].normalized_rows[0]["invoice_no"] == "INV-001"
 
 
 class PagedFactConnection:
@@ -388,7 +407,7 @@ class IdentityConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
-        if "from app.invoices" in normalized and "source_unique_key = any(%s)" in normalized:
+        if "from app.invoices" in normalized and "source_unique_key = any(%s::text[])" in normalized:
             return [
                 {
                     "legacy_id": "invoice_existing_sql",
@@ -515,8 +534,8 @@ def test_find_invoices_by_identity_keys_uses_single_bulk_lookup() -> None:
 
     assert [invoice.id for invoice in matches] == ["invoice_duplicate_1", "invoice_duplicate_2"]
     assert connection.fetch_all_params == [(["26532000000141671581"], ["26532000000141671581"], ["suspected-key"])]
-    assert "source_unique_key = any(%s)" in connection.fetch_all_sql[0]
-    assert "data_fingerprint = any(%s)" in connection.fetch_all_sql[0]
+    assert "source_unique_key = any(%s::text[])" in connection.fetch_all_sql[0]
+    assert "data_fingerprint = any(%s::text[])" in connection.fetch_all_sql[0]
 
 
 class SubmittedEtcInvoiceIdentityConnection:
@@ -574,6 +593,8 @@ def test_find_submitted_etc_invoice_by_identity_returns_active_batch_metadata() 
         )
     ]
     assert "from app.etc_invoices" in connection.fetch_one_sql[0]
+    assert "etc_invoices.invoice_no = any(%s::text[])" in connection.fetch_one_sql[0]
+    assert "%s::text is not null" in connection.fetch_one_sql[0]
     assert "manually_marked_submitted" in connection.fetch_one_sql[0]
     assert "coalesce(etc_business_batches.status, '') <> 'deleted'" in connection.fetch_one_sql[0]
 

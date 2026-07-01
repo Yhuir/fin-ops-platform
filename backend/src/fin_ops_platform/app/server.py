@@ -5213,6 +5213,15 @@ class Application:
                 return session
             status_code, payload = self._etc_business_routes().detail(business_batch_id, session=session)
             return self._json_response(status_code, payload)
+        if len(parts) == 1 and method == "PATCH":
+            session = self._etc_business_session(headers, require_mutation=True)
+            if isinstance(session, Response):
+                return session
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+            status_code, result = self._etc_business_routes().update_batch(business_batch_id, payload, session=session)
+            return self._json_response(status_code, result)
         if len(parts) == 1 and method == "DELETE":
             session = self._etc_business_session(headers, require_mutation=True)
             if isinstance(session, Response):
@@ -11652,7 +11661,7 @@ class Application:
             return
         self._state_store.save(
             {
-                "imports": self._import_service.snapshot(),
+                "imports": self._import_service.snapshot(include_facts=False),
                 "file_imports": self._file_import_service.snapshot(),
             }
         )

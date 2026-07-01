@@ -77,6 +77,11 @@ class SubmittedEtcIdentityRepository(BulkInvoiceIdentityRepository):
         return {"id": "etc-link-1", **kwargs}
 
 
+class FailingSubmittedEtcIdentityRepository(BulkInvoiceIdentityRepository):
+    def find_submitted_etc_invoice_by_identity(self, **kwargs: object) -> object | None:
+        raise RuntimeError("submitted etc lookup failed")
+
+
 class ImportNormalizationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.counterparty = Counterparty(
@@ -863,6 +868,60 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             [link["source_type"] for link in imported.source_links],
             ["manual_invoice_import", "etc_invoice_import"],
         )
+
+    def test_confirm_import_rolls_back_when_submitted_etc_lookup_fails(self) -> None:
+        service = ImportNormalizationService(fact_repository=FailingSubmittedEtcIdentityRepository())
+        preview = service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="input.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "digital_invoice_no": "26537912570200055449",
+                    "seller_tax_no": "9153000077859986X2",
+                    "seller_name": "供应商A",
+                    "buyer_tax_no": "915300007194052520",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "counterparty_name": "供应商A",
+                    "invoice_date": "2026-02-28",
+                    "amount": "18.63",
+                    "tax_amount": "0.56",
+                    "total_with_tax": "19.19",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "submitted etc lookup failed"):
+            service.confirm_import(preview.id)
+
+        restored = service.get_batch(preview.id)
+        self.assertEqual(restored.batch.status.value, "pending")
+        self.assertEqual(service.list_invoices(), [])
+        self.assertIsNone(restored.row_results[0].linked_object_id)
+
+    def test_preview_snapshot_can_exclude_formalized_facts(self) -> None:
+        preview = self.service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="input.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_no": "INV-SNAPSHOT",
+                    "counterparty_name": "供应商A",
+                    "invoice_date": "2026-02-28",
+                    "amount": "18.63",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+        self.service.confirm_import(preview.id)
+
+        preview_snapshot = self.service.snapshot(include_facts=False)
+
+        self.assertNotIn("invoices", preview_snapshot)
+        self.assertNotIn("transactions", preview_snapshot)
+        self.assertIn(preview.id, preview_snapshot["batches"])
 
     def test_input_invoice_import_marks_etc_tag_when_source_or_tags_indicate_etc(self) -> None:
         preview = self.service.preview_import(

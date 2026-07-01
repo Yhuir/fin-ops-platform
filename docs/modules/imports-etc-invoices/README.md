@@ -62,6 +62,8 @@ ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入
 | lifecycle refresh | `etc_import_confirmed` | 关联台、ETC summary row、invoice lifecycle、税金抵扣、成本统计、历史 ETC repair、search |
 | 业务批次提交/删除 | `manual-oa-status`、business batch delete | ETC 票据管理、关联台 summary row、税金/成本刷新 |
 
+ETC 导入页 ready task 下拉展示 `EtcReconciliationTask.title`。ETC 票据管理页允许未提交 business batch 在提交前修改 `title`，保存后会同步 linked reconciliation task title；因此导入页不得缓存旧标题或自行从 business batch ID 派生标题。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

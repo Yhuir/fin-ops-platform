@@ -331,13 +331,13 @@ describe("ETC ticket management page", () => {
     expect(within(page).getAllByRole("heading", { name: "批次列表" })).toHaveLength(1);
     expect(within(page).getByRole("link", { name: "导入发票" })).toHaveAttribute("href", "/imports/etc-invoices");
 
-    fireEvent.change(within(page).getByLabelText("月份"), { target: { value: "2026-03" } });
+    expect(within(page).queryByLabelText("月份")).not.toBeInTheDocument();
     await user.type(within(page).getByLabelText("车牌"), "云ADA0381");
     await user.type(within(page).getByLabelText("关键词"), "ETC-2026");
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?status=active&month=2026-03&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
+        "/api/etc/business-batches?status=active&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -346,7 +346,7 @@ describe("ETC ticket management page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?status=submitted&month=2026-03&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
+        "/api/etc/business-batches?status=submitted&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -356,36 +356,119 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("button", { name: "提交审批" })).not.toBeInTheDocument();
   });
 
-  test("business batch tab counts use the same month filter as the visible list", async () => {
+  test("business batch tab counts come from all batches without a month selector", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
-
-    fireEvent.change(within(page).getByLabelText("月份"), { target: { value: "2026-04" } });
+    expect(within(page).queryByLabelText("月份")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?status=active&month=2026-04&page=1&page_size=100",
+        "/api/etc/business-batches?status=active&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });
 
     await waitFor(() => {
-      expect(within(page).getByRole("radio", { name: "已提交 0" })).toBeInTheDocument();
+      expect(within(page).getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
     });
-    expect(within(page).queryByRole("radio", { name: "已提交 1" })).not.toBeInTheDocument();
 
-    await user.click(within(page).getByRole("radio", { name: "已提交 0" }));
+    await user.click(within(page).getByRole("radio", { name: "已提交 1" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?status=submitted&month=2026-04&page=1&page_size=100",
+        "/api/etc/business-batches?status=submitted&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });
-    expect(within(page).getByRole("radio", { name: "已提交 0" })).toHaveAttribute("aria-checked", "true");
-    expect(within(page).getByText("无匹配批次。")).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  test("renames an unsubmitted business batch inline and refreshes the linked import task title", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const batch = businessBatchFixture({
+      businessBatchId: "etc-business-rename-001",
+      taskId: "etc-recon-rename-001",
+      title: "旧高速批次",
+      status: "draft",
+      version: 7,
+      invoiceSummary: { count: 0, amount: "0.00" },
+      importAttempts: [],
+    });
+    const renamedBatch = {
+      ...batch,
+      title: "高速费三月批次",
+      version: 8,
+      invoiceItems: [],
+    };
+    const task = {
+      taskId: "etc-recon-rename-001",
+      status: "ready_for_import",
+      version: 7,
+      title: "旧高速批次",
+      periodStart: null,
+      periodEnd: null,
+      statementPeriodStart: null,
+      statementPeriodEnd: null,
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "",
+      oaTotalAmount: "0.00",
+      etcInvoiceAmount: "0.00",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 0,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: [],
+      confirmedItemSetHash: "",
+      importBatchId: "",
+      etcBatchId: "",
+      hasImportedInvoices: false,
+      importedInvoiceCount: 0,
+      importedInvoiceAmount: "0.00",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      reconciledItems: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    const fetchTasks = vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
+      .mockResolvedValueOnce({ items: [task] } as never)
+      .mockResolvedValueOnce({ items: [{ ...task, title: "高速费三月批次", version: 8 }] } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { active: 1, submitted: 0 },
+      items: [batch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
+      ...batch,
+      invoiceItems: [],
+    } as never);
+    const rename = vi.spyOn(etcApi, "updateEtcBusinessBatchTitle").mockResolvedValue(renamedBatch as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByRole("button", { name: "编辑批次标题 旧高速批次" }));
+    const input = within(page).getByLabelText("批次标题 旧高速批次");
+    await user.clear(input);
+    await user.type(input, "高速费三月批次{enter}");
+
+    await waitFor(() => {
+      expect(rename).toHaveBeenCalledWith("etc-business-rename-001", {
+        title: "高速费三月批次",
+        expectedVersion: 7,
+      });
+    });
+    expect(await within(page).findByRole("button", { name: "编辑批次标题 高速费三月批次" })).toBeInTheDocument();
+    expect(await within(page).findByText("高速费三月批次 / v8")).toBeInTheDocument();
+    expect(fetchTasks).toHaveBeenCalledTimes(2);
   });
 
   test("keeps submitted business batches visible when their workflow task shares the ETC batch id", async () => {

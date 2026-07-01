@@ -1,6 +1,6 @@
 # 批量账务模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-01
 
 ## 模块化状态
 
@@ -17,7 +17,7 @@
 - 批量账务页面、批量选择、批量关系操作和账务候选展示。
 - 调用 workbench relation 事实源完成关系写入。
 - 触发相关 derived lifecycle/read model refresh。
-- 定义右侧 OA 候选：日常报销 OA 主单，且没有 active `workbench_relation` 配对关系；不再按 OA 年份过滤。
+- 定义右侧 OA 候选：日常报销 OA 主单，且没有关联银行流水；仅发票关系或无流水候选关系不排除该 OA，不再按 OA 年份过滤。
 
 ### 不负责
 
@@ -32,7 +32,7 @@
 | 页面批量选择/操作 | `BatchAccountingPage.tsx`、`features/batchAccounting/api.ts` | 进入 batch accounting API/service |
 | 关系写入请求 | `BatchAccountingService` | 必须委托 workbench relation command boundary |
 | lifecycle trigger | derived data lifecycle | 更新下游 read model scopes |
-| OA 候选事实 | Workbench active read model + `workbench_relation` read facade | 不接收 OA 年份；“没有流水”只表示没有 active relation 配对 |
+| OA 候选事实 | Workbench active read model + `workbench_relation` read facade | 不接收 OA 年份；“没有流水”表示 relation distribution 中该 OA 没有 `linked_bank_transactions`，仅发票关系或无流水候选关系仍可进入批量账务右侧 OA 栏 |
 
 ## 输出 I/O
 

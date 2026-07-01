@@ -6,7 +6,7 @@
 
 | 状态 | 含义 | 事实源 |
 | --- | --- | --- |
-| `unsubmitted` | 银行流水符合批量账务条件，且当前没有 active relation 占用；右侧展示没有 active relation 配对关系的日常报销 OA 主单。 | Workbench payload + `workbench_relation` read model |
+| `unsubmitted` | 银行流水符合批量账务条件，且当前没有 active relation 占用；右侧展示没有关联银行流水的日常报销 OA 主单，仅发票关系或无流水候选关系不排除该 OA。 | Workbench payload + `workbench_relation` read model |
 | `submitted` | 银行流水存在 active batch accounting relation；右侧展示该关系下的 OA 行，只允许撤回。 | Workbench pair relation + relation distribution |
 | `stale/conflict` | 前端持有的 bank row 或 relation version 已落后，提交/撤回应失败并要求刷新。 | `expected_version`、active relation version |
 | `mismatch_pending_note` | 银行金额与选中 OA 合计不一致，尚未填写有效差额说明。 | 前端选择状态 + `BatchAccountingService` 金额校验 |
@@ -24,7 +24,7 @@
 
 - `read_model_status !== "fresh"` 时不能把空关系显示为真实未提交，但不得仅因普通 relation distribution non-fresh 禁止提交和撤回；submit/withdraw 后端必须执行 canonical relation write safety、owner 状态、权限/session、idempotency 和 DB 可写性校验。
 - 已有关联关系占用的银行流水不能再次作为 `unsubmitted` 提交。
-- 非日常报销 OA 行、已有关联关系的 OA 行、空 OA 列表、空银行流水 ID、非法年份或非法 bucket 必须拒绝。
+- 非日常报销 OA 行、已有关联银行流水的 OA 行、空 OA 列表、空银行流水 ID、非法年份或非法 bucket 必须拒绝；仅发票关系或无流水候选关系不能作为批量账务提交拒绝原因。
 - 金额不一致但差额说明为空或仅空白字符时必须拒绝。
 - 非 batch accounting relation 不能通过批量账务撤回接口撤回。
 - GET 列表路径禁止执行 legacy relation repair 或其他写操作。
@@ -85,3 +85,4 @@ Refresh 触发来源：
 | 2026-06-11 | relation read model missing/stale 闭环 | 列表读取走 require_fresh 入队；页面展示 reason/scope 和未入队提示。写阻断口径已由 2026-06-13 canonical write safety 更新替代。 | `test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh`、`test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh` |
 | 2026-06-13 | 写安全改为默认 canonical relation gate | 普通 relation distribution non-fresh 只作为读侧诊断；submit/withdraw 默认由 relation command service、owner 状态、权限/session、DB 可写性、version/idempotency 决定 | `tests/test_workbench_relation_command_service.py`、`tests/test_batch_accounting_api.py` |
 | 2026-06-14 | submit/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `workbench_relation` barrier fresh 并 reload，避免旧 bucket/旧关系暴露给用户 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
+| 2026-07-01 | 右侧 OA 候选口径从“没有任何 active relation”收窄为“没有关联银行流水” | 日常报销 OA 即便已有发票关系或无流水候选关系，也应进入未提交右侧 OA 栏；已有 `linked_bank_transactions` 或 canonical 银行关系的 OA 继续排除/拒绝 | `tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_filters_oa_rows_by_linked_bank_transactions_only`、`test_submit_allows_invoice_only_oa_relation_without_linked_bank_flow` |

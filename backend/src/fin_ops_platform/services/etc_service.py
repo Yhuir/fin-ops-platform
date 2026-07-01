@@ -415,6 +415,7 @@ class EtcImportBatch:
 class EtcBusinessBatch:
     business_batch_id: str
     task_id: str
+    title: str | None = None
     status: str = EtcBusinessBatchStatus.DRAFT.value
     version: int = 1
     idempotency_key: str | None = None
@@ -708,6 +709,7 @@ class EtcService:
         self,
         *,
         task_id: str,
+        title: str | None = None,
         owner_user_id: str | None = None,
         owner_org_id: str | None = None,
         idempotency_key: str | None = None,
@@ -727,6 +729,7 @@ class EtcService:
             batch = EtcBusinessBatch(
                 business_batch_id=f"etc_business_batch_{self._business_batch_counter:04d}",
                 task_id=normalized_task_id,
+                title=str(title or "").strip() or None,
                 idempotency_key=normalized_idempotency_key,
                 owner_user_id=str(owner_user_id or "").strip() or None,
                 owner_org_id=str(owner_org_id or "").strip() or None,
@@ -736,6 +739,41 @@ class EtcService:
             )
             self._append_business_batch_audit(batch, "business_batch_created", before_status=None, after_status=batch.status)
             self._business_batches[batch.business_batch_id] = batch
+            self._persist()
+            return self._copy_business_batch(batch)
+
+    def update_business_batch_title(
+        self,
+        business_batch_id: str,
+        *,
+        title: str,
+        expected_version: int | None = None,
+    ) -> EtcBusinessBatch:
+        normalized_title = str(title or "").strip()
+        if not normalized_title:
+            raise EtcBusinessBatchInvalidTransitionError("ETC business batch title is required.", code="invalid_business_batch_title")
+        with self._business_batch_lock:
+            batch = self._get_business_batch_mutable(business_batch_id)
+            self._assert_business_batch_version(batch, expected_version)
+            if str(batch.status) in {
+                EtcBusinessBatchStatus.OA_SUBMITTED.value,
+                EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
+                EtcBusinessBatchStatus.CLOSED.value,
+            }:
+                raise EtcBusinessBatchInvalidTransitionError(
+                    "Submitted ETC business batch title cannot be changed.",
+                    code="business_batch_title_locked",
+                )
+            if str(batch.title or "").strip() == normalized_title:
+                return self._copy_business_batch(batch)
+            batch.title = normalized_title
+            self._bump_business_batch_version(
+                batch,
+                event_type="business_batch_title_updated",
+                before_status=batch.status,
+                after_status=batch.status,
+                reason=normalized_title,
+            )
             self._persist()
             return self._copy_business_batch(batch)
 
@@ -1213,6 +1251,7 @@ class EtcService:
         return {
             "businessBatchId": batch.business_batch_id,
             "taskId": batch.task_id,
+            "title": batch.title,
             "status": batch.status,
             "version": batch.version,
             "idempotencyKey": batch.idempotency_key,
@@ -2226,6 +2265,7 @@ class EtcService:
         defaults: dict[str, object] = {
             "status": EtcBusinessBatchStatus.DRAFT.value,
             "version": 1,
+            "title": None,
             "idempotency_key": None,
             "owner_user_id": None,
             "owner_org_id": None,

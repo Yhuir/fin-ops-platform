@@ -167,6 +167,41 @@ class NonFreshBatchRelationFacade(FakeBatchRelationFacade):
         }
 
 
+class RowsBatchRelationFacade:
+    def __init__(self, rows: list[dict[str, object]], groups: list[dict[str, object]] | None = None) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._rows = rows
+        self._groups = groups or []
+
+    def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
+        self.calls.append({"month": month, **kwargs})
+        if month != "2026-01":
+            return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}, "read_model_scope_keys": [month]}
+        return self._payload()
+
+    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
+        self.calls.append({"row_ids": list(row_ids), **kwargs})
+        row_id_set = {str(row_id) for row_id in row_ids}
+        payload = self._payload()
+        payload["rows"] = [
+            row
+            for row in list(payload["rows"])
+            if str(row.get("row_id") or "") in row_id_set
+        ]
+        return payload
+
+    def _payload(self) -> dict[str, object]:
+        return {
+            "status": "fresh",
+            "rows": [dict(row) for row in self._rows],
+            "groups": [dict(group) for group in self._groups],
+            "source_versions": {"schema_version": 52},
+            "read_model_scope_keys": ["2026-01"],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+        }
+
+
 class WriteBlockingPairRelationService(WorkbenchPairRelationService):
     def replace_with_confirmed_relation(self, **kwargs):  # type: ignore[no-untyped-def]
         raise AssertionError("BatchAccountingService must delegate submit relation writes to WorkbenchRelationCommandService.")
@@ -728,6 +763,50 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(payload["bank_rows"], [])
         self.assertEqual(payload["summary"]["unsubmitted_count"], 0)
 
+    def test_unsubmitted_list_filters_oa_rows_by_linked_bank_transactions_only(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+        app._workbench_relation_facade = RowsBatchRelationFacade(
+            [
+                {
+                    "row_id": "oa-exp-ba-001",
+                    "row_type": "oa",
+                    "relation_status": "linked",
+                    "group_ids": ["CASE-INVOICE-ONLY"],
+                    "linked_bank_transactions": [],
+                    "linked_input_invoices": [{"id": "oa-att-inv-oa-exp-ba-001-01"}],
+                    "linked_output_invoices": [],
+                },
+                {
+                    "row_id": "oa-exp-ba-002",
+                    "row_type": "oa",
+                    "relation_status": "candidate",
+                    "group_ids": ["CASE-CANDIDATE-NO-BANK"],
+                    "linked_bank_transactions": [],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [],
+                },
+                {
+                    "row_id": "oa-exp-ba-003",
+                    "row_type": "oa",
+                    "relation_status": "candidate",
+                    "group_ids": ["CASE-CANDIDATE-WITH-BANK"],
+                    "linked_bank_transactions": [{"id": "txn_imported_202601_other"}],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [],
+                },
+            ]
+        )
+
+        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
+        payload = json.loads(response.body)
+        oa_row_ids = [row["id"] for row in payload["oa_rows"]]
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
+        self.assertIn("oa-exp-ba-001", oa_row_ids)
+        self.assertIn("oa-exp-ba-002", oa_row_ids)
+        self.assertNotIn("oa-exp-ba-003", oa_row_ids)
+
     def test_unsubmitted_list_exposes_relation_read_model_missing_status(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
         app._workbench_relation_facade = NonFreshBatchRelationFacade(
@@ -858,7 +937,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: self._grouped_payload(),
-            relation_facade=FakeBatchRelationFacade(),
+            relation_facade=RowsBatchRelationFacade([]),
             relation_command_service=relation_command,
         )
 
@@ -973,6 +1052,55 @@ class BatchAccountingApiTests(unittest.TestCase):
                 {"read_model_key": "workbench_relation", "scope_key": "2026-01"},
                 {"read_model_key": "workbench_relation", "scope_key": "all"},
             ],
+        )
+
+    def test_submit_allows_invoice_only_oa_relation_without_linked_bank_flow(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+        app._workbench_relation_facade = RowsBatchRelationFacade(
+            [
+                {
+                    "row_id": "oa-exp-ba-001",
+                    "row_type": "oa",
+                    "relation_status": "linked",
+                    "group_ids": ["CASE-INVOICE-ONLY"],
+                    "linked_bank_transactions": [],
+                    "linked_input_invoices": [{"id": "oa-att-inv-oa-exp-ba-001-01"}],
+                    "linked_output_invoices": [],
+                }
+            ]
+        )
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-INVOICE-ONLY",
+            row_ids=["oa-exp-ba-001", "oa-att-inv-oa-exp-ba-001-01"],
+            row_types=["oa", "invoice"],
+            relation_mode="oa_invoice_offset_auto_match",
+            created_by="system",
+            month_scope="2026-01",
+            special_metadata={"source": "oa_invoice_offset_auto_match"},
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001"],
+                    "note": "OA 已有关联发票，本次补关联流水。",
+                    "actor": "finance-user",
+                }
+            ),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-ba-001")
+        assert relation is not None
+        self.assertEqual(relation["case_id"], payload["relation_id"])
+        self.assertCountEqual(
+            relation["row_ids"],
+            ["txn_imported_202601_batch_001", "oa-exp-ba-001", "oa-att-inv-oa-exp-ba-001-01"],
         )
 
     def test_submit_rejects_when_relation_read_model_is_not_fresh(self) -> None:

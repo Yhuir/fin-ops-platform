@@ -86,6 +86,14 @@ class FakeImportEntityRegistry:
         return transaction_id in self._existing_transaction_ids
 
 
+class FailingSubmittedEtcIdentityRepository:
+    def find_invoices_by_identity_keys(self, *, canonical_keys: list[str], suspected_keys: list[str]) -> list[object]:
+        return []
+
+    def find_submitted_etc_invoice_by_identity(self, **kwargs: object) -> object | None:
+        raise RuntimeError("submitted etc lookup failed")
+
+
 class ImportFileServiceTests(unittest.TestCase):
     def test_company_identity_name_keywords_use_yunnan_and_generic_suyuan_names(self) -> None:
         self.assertTrue(is_company_identity(None, "云南溯源科技有限公司"))
@@ -507,6 +515,27 @@ class ImportFileServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "preview_stale"):
             service.confirm_session(session_id=session.id, selected_file_ids=[session.files[0].id])
+
+    def test_confirm_session_rolls_back_when_import_confirm_fails(self) -> None:
+        import_service = ImportNormalizationService(
+            id_registry=FakeImportEntityRegistry(),
+            fact_repository=FailingSubmittedEtcIdentityRepository(),
+        )
+        service = FileImportService(import_service)
+        upload = invoice_export_file("jan.xlsx")
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=upload.name, content=upload.content)],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "submitted etc lookup failed"):
+            service.confirm_session(session_id=session.id, selected_file_ids=[session.files[0].id])
+
+        restored = service.get_session(session.id)
+        self.assertEqual(restored.status, "preview_ready")
+        self.assertEqual(restored.files[0].status, "preview_ready")
+        self.assertIsNone(restored.files[0].batch_id)
+        self.assertEqual(import_service.list_invoices(), [])
 
     def test_preview_detects_icbc_last4_from_explicit_file_account(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())

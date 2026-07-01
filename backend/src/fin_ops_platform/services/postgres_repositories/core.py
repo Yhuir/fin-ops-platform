@@ -10,6 +10,7 @@ from typing import Any
 from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection, TransactionStatus
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, ImportedBatch, ImportedBatchRowResult, Invoice
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportSession
+from fin_ops_platform.services.import_preview_audit import ImportPreviewAuditCounts, ImportPreviewDuplicateGroup
 from fin_ops_platform.services.imports import ImportPreview
 from fin_ops_platform.services.postgres_repositories.common import jsonb as _jsonb
 
@@ -323,10 +324,10 @@ class PostgresCoreRepository:
         clauses: list[str] = []
         params: list[Any] = []
         if normalized_canonical_keys:
-            clauses.append("(source_unique_key = any(%s) or digital_invoice_no = any(%s))")
+            clauses.append("(source_unique_key = any(%s::text[]) or digital_invoice_no = any(%s::text[]))")
             params.extend([normalized_canonical_keys, normalized_canonical_keys])
         if normalized_suspected_keys:
-            clauses.append("data_fingerprint = any(%s)")
+            clauses.append("data_fingerprint = any(%s::text[])")
             params.append(normalized_suspected_keys)
         if not clauses:
             return []
@@ -456,12 +457,12 @@ class PostgresCoreRepository:
             left join app.etc_business_batches etc_business_batches
               on etc_business_batches.business_batch_id = etc_invoices.business_batch_id
             where (
-                    etc_invoices.invoice_no = any(%s)
+                    etc_invoices.invoice_no = any(%s::text[])
                  or (
-                        %s is not null
-                    and %s is not null
-                    and etc_invoices.invoice_code = %s
-                    and etc_invoices.invoice_no = %s
+                        %s::text is not null
+                    and %s::text is not null
+                    and etc_invoices.invoice_code = %s::text
+                    and etc_invoices.invoice_no = %s::text
                  )
             )
               and (
@@ -855,6 +856,10 @@ class PostgresCoreRepository:
                     created_at=self._datetime(payload.get("created_at") or row.get("uploaded_at")),
                 ),
             )
+            if "session_audit" in payload:
+                session.audit = self._audit_counts_from_payload(payload.get("session_audit"))
+            if "duplicate_groups" in payload:
+                session.duplicate_groups = self._duplicate_groups_from_payload(payload.get("duplicate_groups"))
             item = self._file_item_from_row(row, payload)
             session.files.append(item)
             session.file_count = len(session.files)
@@ -907,7 +912,17 @@ class PostgresCoreRepository:
                         self._text(raw_file.get("file_name")) or file_id,
                         self._text(raw_file.get("template_code")),
                         self._text(raw_file.get("status")) or "stored",
-                        _jsonb({"normalized_payload": {**raw_file, "session_id": self._text(session_payload.get("id") or session_id)}}),
+                        _jsonb(
+                            {
+                                "normalized_payload": {
+                                    **raw_file,
+                                    "session_id": self._text(session_payload.get("id") or session_id),
+                                    "session_status": self._text(session_payload.get("status")),
+                                    "session_audit": session_payload.get("audit"),
+                                    "duplicate_groups": session_payload.get("duplicate_groups"),
+                                }
+                            }
+                        ),
                     ),
                 )
 
@@ -1411,7 +1426,73 @@ class PostgresCoreRepository:
             preview_batch_id=self._text(payload.get("preview_batch_id") or row.get("joined_batch_id")),
             batch_id=self._text(payload.get("batch_id") or row.get("joined_batch_id")),
             stored_file_path=self._text(payload.get("stored_file_path") or row.get("stored_file_path")),
+            override_template_code=self._text(payload.get("override_template_code")),
+            override_batch_type=BatchType(self._text(payload.get("override_batch_type"))) if self._text(payload.get("override_batch_type")) else None,
+            selected_bank_mapping_id=self._text(payload.get("selected_bank_mapping_id")),
+            selected_bank_name=self._text(payload.get("selected_bank_name")),
+            selected_bank_short_name=self._text(payload.get("selected_bank_short_name")),
+            selected_bank_last4=self._text(payload.get("selected_bank_last4")),
+            detected_bank_name=self._text(payload.get("detected_bank_name")),
+            detected_last4=self._text(payload.get("detected_last4")),
+            bank_selection_conflict=bool(payload.get("bank_selection_conflict") or False),
+            conflict_message=self._text(payload.get("conflict_message")),
+            row_results=self._file_row_results_from_payload(payload),
+            normalized_rows=self._file_normalized_rows_from_payload(payload),
+            audit=self._audit_counts_from_payload(payload.get("audit")),
         )
+
+    def _file_row_results_from_payload(self, payload: dict[str, Any]) -> list[ImportedBatchRowResult]:
+        rows = payload.get("row_results")
+        if not isinstance(rows, list):
+            return []
+        results: list[ImportedBatchRowResult] = []
+        for row in rows:
+            if isinstance(row, dict):
+                results.append(self._batch_row_from_row({"raw_payload": {"normalized_payload": row}}))
+        return results
+
+    @staticmethod
+    def _file_normalized_rows_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = payload.get("normalized_rows")
+        if not isinstance(rows, list):
+            return []
+        return [dict(row) for row in rows if isinstance(row, dict)]
+
+    def _audit_counts_from_payload(self, payload: Any) -> ImportPreviewAuditCounts:
+        if isinstance(payload, ImportPreviewAuditCounts):
+            return payload
+        payload = payload if isinstance(payload, dict) else {}
+        return ImportPreviewAuditCounts(
+            original_count=self._int(payload.get("original_count"), 0),
+            unique_count=self._int(payload.get("unique_count"), 0),
+            duplicate_count=self._int(payload.get("duplicate_count"), 0),
+            duplicate_in_file_count=self._int(payload.get("duplicate_in_file_count"), 0),
+            duplicate_across_files_count=self._int(payload.get("duplicate_across_files_count"), 0),
+            existing_duplicate_count=self._int(payload.get("existing_duplicate_count"), 0),
+            importable_count=self._int(payload.get("importable_count"), 0),
+            update_count=self._int(payload.get("update_count"), 0),
+            merge_count=self._int(payload.get("merge_count"), 0),
+            suspected_duplicate_count=self._int(payload.get("suspected_duplicate_count"), 0),
+            error_count=self._int(payload.get("error_count"), 0),
+            confirmable_count=self._int(payload.get("confirmable_count"), 0),
+            skipped_count=self._int(payload.get("skipped_count"), 0),
+        )
+
+    def _duplicate_groups_from_payload(self, payload: Any) -> list[ImportPreviewDuplicateGroup]:
+        groups = payload if isinstance(payload, list) else []
+        result: list[ImportPreviewDuplicateGroup] = []
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            result.append(
+                ImportPreviewDuplicateGroup(
+                    identity_key=self._text(group.get("identity_key")) or "",
+                    record_type=self._text(group.get("record_type")) or "",
+                    duplicate_type=self._text(group.get("duplicate_type")) or "",
+                    rows=[dict(row) for row in group.get("rows", []) if isinstance(row, dict)],
+                )
+            )
+        return result
 
     def _fetch_invoice_by_clause(self, where_clause: str, params: tuple[Any, ...]) -> Invoice | None:
         row = self._connection.fetch_one(

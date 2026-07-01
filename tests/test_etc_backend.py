@@ -21,6 +21,7 @@ from fin_ops_platform.services.etc_service import (
     EtcBusinessBatchInvalidTransitionError,
     EtcBusinessBatchNotFoundError,
     EtcBusinessBatchStatus,
+    EtcBusinessBatchVersionConflictError,
     EtcBusinessBatch,
     EtcDraftRequestError,
     EtcOAHttpClientSettings,
@@ -332,10 +333,11 @@ class EtcServiceTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir))
 
-            batch = service.create_business_batch(task_id="ETC-TASK-001", owner_user_id="alice", owner_org_id="finance")
+            batch = service.create_business_batch(task_id="ETC-TASK-001", title="高速费三月批次", owner_user_id="alice", owner_org_id="finance")
 
             self.assertEqual(batch.business_batch_id, "etc_business_batch_0001")
             self.assertEqual(batch.task_id, "ETC-TASK-001")
+            self.assertEqual(batch.title, "高速费三月批次")
             self.assertEqual(batch.status, EtcBusinessBatchStatus.DRAFT.value)
             self.assertEqual(batch.version, 1)
             self.assertTrue(batch.is_active)
@@ -346,6 +348,45 @@ class EtcServiceTests(unittest.TestCase):
             self.assertEqual([item.business_batch_id for item in service.list_business_batches()], [batch.business_batch_id])
             with self.assertRaises(EtcBusinessBatchActiveExistsError):
                 service.create_business_batch(task_id="ETC-TASK-001")
+
+    def test_business_batch_title_update_persists_and_locks_submitted(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+            batch = service.create_business_batch(task_id="ETC-TASK-001", title="旧高速批次")
+
+            updated = service.update_business_batch_title(
+                batch.business_batch_id,
+                title=" 高速费三月批次 ",
+                expected_version=batch.version,
+            )
+
+            self.assertEqual(updated.title, "高速费三月批次")
+            self.assertEqual(updated.version, batch.version + 1)
+            self.assertEqual(service.business_batch_payload(updated)["title"], "高速费三月批次")
+            self.assertIn("business_batch_title_updated", [event["event_type"] for event in updated.audit_events])
+            reloaded = EtcService(data_dir=Path(temp_dir))
+            self.assertEqual(reloaded.get_business_batch(batch.business_batch_id).title, "高速费三月批次")
+            with self.assertRaises(EtcBusinessBatchVersionConflictError):
+                service.update_business_batch_title(
+                    batch.business_batch_id,
+                    title="过期版本标题",
+                    expected_version=batch.version,
+                )
+            with self.assertRaises(EtcBusinessBatchInvalidTransitionError) as blank_error:
+                service.update_business_batch_title(
+                    batch.business_batch_id,
+                    title=" ",
+                    expected_version=updated.version,
+                )
+            self.assertEqual(blank_error.exception.code, "invalid_business_batch_title")
+            service._business_batches[batch.business_batch_id].status = EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value
+            with self.assertRaises(EtcBusinessBatchInvalidTransitionError) as locked_error:
+                service.update_business_batch_title(
+                    batch.business_batch_id,
+                    title="提交后标题",
+                    expected_version=updated.version,
+                )
+            self.assertEqual(locked_error.exception.code, "business_batch_title_locked")
 
     def test_business_batch_supplement_merge_rejects_after_draft_and_allows_after_revoke(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2491,7 +2532,7 @@ class EtcApiTests(unittest.TestCase):
                 create_response = app.handle_request(
                     "POST",
                     "/api/etc/business-batches",
-                    json.dumps({}),
+                    json.dumps({"title": "新建高速批次"}),
                 )
                 self.assertEqual(create_response.status_code, 201, create_response.body)
                 created = json.loads(create_response.body)["data"]["businessBatch"]
@@ -2506,13 +2547,64 @@ class EtcApiTests(unittest.TestCase):
 
         self.assertEqual(create_response.status_code, 201)
         self.assertTrue(created["taskId"].startswith("ETC-RECON-"))
+        self.assertEqual(created["title"], "新建高速批次")
         self.assertEqual(created["status"], "draft")
         self.assertEqual(task_response.status_code, 200)
-        self.assertEqual(json.loads(task_response.body)["taskId"], created["taskId"])
+        task_payload = json.loads(task_response.body)
+        self.assertEqual(task_payload["taskId"], created["taskId"])
+        self.assertEqual(task_payload["title"], "新建高速批次")
         self.assertEqual(active_batches["total"], 1)
         self.assertEqual(active_batches["items"][0]["businessBatchId"], created["businessBatchId"])
+        self.assertEqual(active_batches["items"][0]["title"], "新建高速批次")
         self.assertEqual(reloaded_batches["total"], 1)
         self.assertEqual(reloaded_batches["items"][0]["taskId"], created["taskId"])
+        self.assertEqual(reloaded_batches["items"][0]["title"], "新建高速批次")
+
+    def test_business_batch_title_patch_updates_linked_task_title(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = PostgresLikeReconciliationStateStore(Path(temp_dir))
+            with patch("fin_ops_platform.app.server.build_state_store", return_value=store):
+                app = build_application(data_dir=Path(temp_dir))
+                created = json.loads(app.handle_request(
+                    "POST",
+                    "/api/etc/business-batches",
+                    json.dumps({"title": "旧高速批次"}),
+                ).body)["data"]["businessBatch"]
+                patch_response = app.handle_request(
+                    "PATCH",
+                    f"/api/etc/business-batches/{created['businessBatchId']}",
+                    json.dumps({"title": " 高速费三月批次 ", "expectedVersion": created["version"]}),
+                )
+                patched = json.loads(patch_response.body)["data"]["businessBatch"]
+                task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{created['taskId']}").body)
+                blank_response = app.handle_request(
+                    "PATCH",
+                    f"/api/etc/business-batches/{created['businessBatchId']}",
+                    json.dumps({"title": " ", "expectedVersion": patched["version"]}),
+                )
+                app._etc_service._business_batches[created["businessBatchId"]].status = EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value
+                locked_response = app.handle_request(
+                    "PATCH",
+                    f"/api/etc/business-batches/{created['businessBatchId']}",
+                    json.dumps({"title": "提交后标题", "expectedVersion": patched["version"]}),
+                )
+                reloaded_app = build_application(data_dir=Path(temp_dir))
+                reloaded_batch = json.loads(reloaded_app.handle_request(
+                    "GET",
+                    f"/api/etc/business-batches/{created['businessBatchId']}",
+                ).body)["data"]["businessBatch"]
+                reloaded_task = json.loads(reloaded_app.handle_request("GET", f"/api/etc/reconciliation-tasks/{created['taskId']}").body)
+
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patched["title"], "高速费三月批次")
+        self.assertEqual(patched["version"], created["version"] + 1)
+        self.assertEqual(task_payload["title"], "高速费三月批次")
+        self.assertEqual(blank_response.status_code, 422)
+        self.assertEqual(json.loads(blank_response.body)["error"]["code"], "invalid_business_batch_title")
+        self.assertEqual(locked_response.status_code, 422)
+        self.assertEqual(json.loads(locked_response.body)["error"]["code"], "business_batch_title_locked")
+        self.assertEqual(reloaded_batch["title"], "高速费三月批次")
+        self.assertEqual(reloaded_task["title"], "高速费三月批次")
 
     def test_business_batch_create_without_task_id_tombstones_created_task_when_batch_create_fails(self) -> None:
         with TemporaryDirectory() as temp_dir:

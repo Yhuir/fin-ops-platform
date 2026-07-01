@@ -37,8 +37,8 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 预览 rows/errors | 前端页面 | 未确认前不作为业务事实 |
-| 导入结果 | state store/repository | 可审计、可幂等 |
+| 预览 rows/errors | 前端页面 / `app.import_batches` / `app.import_batch_rows` / `app.import_files` | 未确认前不作为业务事实；预览持久化不得携带正式 `invoices` / `transactions` facts |
+| 导入结果 | state store/repository | 可审计、可幂等；确认异常必须回滚 import service 与 file session 内存状态 |
 | Dirty scope | derived lifecycle/runtime queue | invoice lifecycle/search/input/output/pending invoice |
 | Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets，消费 completed job 的页面必须先等待 targets |
 
@@ -89,3 +89,4 @@
 - Downstream outputs: invoice lifecycle、pending invoice、input/output invoice usage、search、workbench、workbench_relation、tax、cost read model dirty scopes 或 owner producer 输出。
 - Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或 OA/ETC cache 直接构造第二发票池。
 - Old code deletion: 旧同步导入、直接状态写入或 snapshot 发票池 fallback 必须删除；migration/audit/rollback 工具保留不算 closure。
+- 2026-07-01：文件发票导入预览保存改为 `ImportNormalizationService.snapshot(include_facts=False)`，禁止旧 full snapshot 预览链路把失败确认残留的正式发票写入发票池；确认路径仍负责正式 facts 和下游 dirty scope。

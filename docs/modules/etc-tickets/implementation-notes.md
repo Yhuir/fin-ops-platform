@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-01 - ETC批次移除月份选择器并支持标题编辑
+
+- 目标：ETC 票据管理页直接展示全部业务批次，只分未提交/已提交两个 bucket；未提交业务批次在提交前可内联修改标题，并让 ETC 发票导入下拉同步显示新标题。
+- 影响范围：`EtcBusinessBatch` title payload、`PATCH /api/etc/business-batches/{id}`、linked reconciliation task title、`EtcTicketManagementPage` 筛选栏和批次行、ETC 前端 API/mock、ETC/导入模块文档。
+- 关键决策：前端页面不再发送 `month`，但后端 `GET /api/etc/business-batches` 保留可选 `month` 作为兼容/运维筛选；标题只允许未提交 business batch 修改，保存带 `expectedVersion`，已提交/closed 批次返回锁定错误；保存成功后同步 linked reconciliation task title，导入页 ready task selector 不自行派生标题。
+- 文档影响：更新产品口径、API 契约、运维 smoke、ETC 模块 README/boundary/state/tests 和 ETC 发票导入模块 README/boundary。
+- 测试覆盖：新增 service 测试覆盖 title 持久化、版本、审计和提交后锁定；新增 API 测试覆盖 PATCH title 同步 linked task title、空标题/锁定错误；新增前端 API 和页面交互测试覆盖 title mapper/update、页面无月份选择器、不发送 month、未提交内联改名和 task title 刷新。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcServiceTests.test_business_batch_title_update_persists_and_locks_submitted tests.test_etc_backend.EtcApiTests.test_business_batch_title_patch_updates_linked_task_title -v`；`cd web && npm test -- --run src/test/EtcApi.test.ts src/test/EtcTicketManagementPage.test.tsx`；`cd web && npm exec tsc -- --noEmit`。
+- 未测风险：真实生产历史数据中缺少 `title` 的老批次仍走月份/日期 fallback；真实浏览器和 staging 代理的 PATCH smoke 需要随发布窗口执行。
+
 ## 2026-06-25 - ETC business batch route owner local closure audit
 
 - 目标：审计 business-batch delete/revoke callback collapse 后，ETC business-batch route owner 本地实现支持是否已闭合。

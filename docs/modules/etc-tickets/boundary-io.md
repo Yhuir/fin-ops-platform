@@ -28,7 +28,8 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；已导入任务详情通过 `/api/etc/invoices?importBatchId=...` 读取 canonical ETC invoice list |
+| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；批次列表不发送月份筛选，只按状态 bucket、车牌、关键词读取全部用户可见 business batches；已导入任务详情通过 `/api/etc/invoices?importBatchId=...` 读取 canonical ETC invoice list |
+| 批次标题编辑 | `EtcTicketManagementPage.tsx`、`PATCH /api/etc/business-batches/{id}` | 只允许未提交 business batch 修改 `title`；请求带 `expectedVersion`，后端持久化 business batch title 并同步 linked reconciliation task title |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
 | 历史修复/迁移 | tools | 只作为显式运维入口 |
 
@@ -36,7 +37,8 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| ETC ticket/batch payload | 前端页面 | API response shape 稳定 |
+| ETC ticket/batch payload | 前端页面 | API response shape 稳定，business batch payload 包含用户可见 `title` |
+| linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
 | 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复 |
 | Completed import job consumption | background job progress / operation barrier | ETC 发票导入 job 完成后，页面必须读取 job `operation_barrier_targets`，等待 targets fresh 后再刷新批次和任务列表 |

@@ -50,8 +50,8 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - `GET /health` 返回健康。
 - `GET /api/session/me` 返回 JSON，不返回 HTML。
 - `GET /api/etc/business-batches` 返回 JSON envelope；无权限时返回结构化 403 JSON。
-- `POST /api/etc/business-batches` 可省略 `taskId`，成功响应必须返回已绑定 `taskId` 的 business batch；随后 `GET /api/etc/business-batches?status=active` 能看到该批次，且 `/api/etc/reconciliation-tasks` 中的 task-only 记录不得额外混入 ETC 左侧批次列表。
-- `POST /api/etc/business-batches`、`POST /api/etc/business-batches/{id}/etc-import/preview`、`POST /api/etc/business-batches/{id}/etc-import/confirm`、`POST /api/etc/business-batches/{id}/manual-oa-status` 和 `DELETE /api/etc/business-batches/{id}` 的代理路径都命中后端。
+- `POST /api/etc/business-batches` 可省略 `taskId`，成功响应必须返回已绑定 `taskId` 和 `title` 的 business batch；随后 `GET /api/etc/business-batches?status=active` 能看到该批次，且 `/api/etc/reconciliation-tasks` 中的 task-only 记录不得额外混入 ETC 左侧批次列表。
+- `POST /api/etc/business-batches`、`PATCH /api/etc/business-batches/{id}`、`POST /api/etc/business-batches/{id}/etc-import/preview`、`POST /api/etc/business-batches/{id}/etc-import/confirm`、`POST /api/etc/business-batches/{id}/manual-oa-status` 和 `DELETE /api/etc/business-batches/{id}` 的代理路径都命中后端。
 - Nginx `/api/` 与 `/fin-ops-api/` 下的 GET、POST、DELETE 都不返回 HTML 502、官网 HTML 或 React shell。
 - 旧 `/api/etc/batches` 已删除；任何探针、脚本或前端回滚都不得依赖该兼容入口。
 - 生产日志可按 `requestId`、`businessBatchId`、`taskId`、`externalEtcBatchId` 和 `oaRowId` 检索。
@@ -60,6 +60,7 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 
 ```bash
 curl -i https://<host>/fin-ops-api/api/etc/business-batches
+curl -i -X PATCH https://<host>/fin-ops-api/api/etc/business-batches/<id> -H 'Content-Type: application/json' --data '{"title":"ETC smoke batch","expectedVersion":1}'
 curl -i -X POST https://<host>/fin-ops-api/api/etc/business-batches/<id>/manual-oa-status
 curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 ```

@@ -48,7 +48,9 @@
 当前事实边界：
 
 - 用户可见事实源是 `/api/etc/business-batches*` 与 `etc_business_batches`；`etc_reconciliation_tasks` 保留为导入、核对、source file 和 workflow 状态。
+- ETC 票据管理页不再提供月份选择器；左侧列表直接读取全部用户可见业务批次，只分“未提交”和“已提交”两个 bucket，并可按车牌和关键词过滤。后端 `month` 参数只作为兼容/运维筛选保留。
 - “新建批次”入口调用 `POST /api/etc/business-batches`；前端不直接把空 reconciliation task 当作批次展示，后端 application service 负责编排 task + active business batch 并返回统一 business batch payload。
+- 未提交业务批次标题由 business batch `title` 持久化；页面允许点击批次标题内联编辑，保存走 `PATCH /api/etc/business-batches/{id}` 并使用 `expectedVersion`。保存成功后必须同步 linked reconciliation task title，确保 `/imports/etc-invoices` ready task 下拉显示最新标题；已提交/closed 批次标题锁定。
 - 没有 active business batch 绑定的 task-only 记录不得进入左侧批次列表或 tab 计数；只可作为 workflow 内部状态、异常恢复线索或运维清理对象处理。
 - 旧 `/api/etc/batches*` 后端兼容入口已删除；页面、测试和运维入口不得重新依赖它。
 - ETC 专用 OA 自动检测链路已移除；创建 OA 草稿后只允许用户通过 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。

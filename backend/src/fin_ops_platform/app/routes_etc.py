@@ -76,6 +76,23 @@ class EtcBusinessBatchApiRoutes:
             return self._error_response(exc)
         return self._success(HTTPStatus.OK, result)
 
+    def update_batch(
+        self,
+        business_batch_id: str,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            result = self._application_service.update_title_payload(
+                business_batch_id,
+                payload,
+                actor=self._actor(session),
+            )
+        except Exception as exc:
+            return self._error_response(exc)
+        return self._success(HTTPStatus.OK, result)
+
     def delete_batch(
         self,
         business_batch_id: str,

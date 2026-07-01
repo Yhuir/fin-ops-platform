@@ -473,6 +473,7 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
     return {
       business_batch_id: businessBatchId,
       task_id: textField(rawBatch, "task_id", "taskId") || (batchId === "etc-batch-unsubmitted-01" ? "etc-recon-task-001" : ""),
+      title: textField(rawBatch, "title", "name"),
       status: businessStatusForBatch(batch),
       version: numberField(rawBatch, 7, "version"),
       owner_user_id: "web_finance_user",
@@ -571,7 +572,9 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
             return false;
           }
           if (normalizedKeyword) {
+            const rawBatch = batch as Record<string, unknown>;
             const searchable = [
+              textField(rawBatch, "title", "name"),
               "etc_batch_id" in batch ? batch.etc_batch_id : batch.etcBatchId,
               "external_batch_id" in batch ? batch.external_batch_id : batch.externalBatchId,
               "linked_oa_row_id" in batch ? batch.linked_oa_row_id : batch.linkedOaRowId,
@@ -653,12 +656,13 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         error: null,
       };
     },
-    createBusinessBatch(taskId: string) {
+    createBusinessBatch(taskId: string, title = "新建ETC批次") {
       const id = `etc_business_batch_new_${String(batches.length + 1).padStart(4, "0")}`;
       const batch = {
         id,
         business_batch_id: id,
         task_id: taskId,
+        title,
         etc_batch_id: "新建ETC批次",
         external_batch_id: "新建ETC批次",
         business_status: "draft",
@@ -683,6 +687,48 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
           businessBatch: cloneJson(hydrateBusinessBatch(batch as (typeof batches)[number], true)),
         },
         error: null,
+      };
+    },
+    updateBusinessBatchTitle(batchId: string, title: string) {
+      const normalizedTitle = String(title ?? "").trim();
+      if (!normalizedTitle) {
+        return {
+          status: 422,
+          body: { ok: false, data: null, error: { code: "invalid_business_batch_title", message: "批次标题不能为空。" } },
+        };
+      }
+      const existing = findBatchByBusinessId(batchId);
+      if (!existing) {
+        return {
+          status: 404,
+          body: { ok: false, data: null, error: { code: "business_batch_not_found", message: "ETC业务批次不存在。" } },
+        };
+      }
+      if (businessBatchIsSubmitted(existing)) {
+        return {
+          status: 422,
+          body: { ok: false, data: null, error: { code: "business_batch_title_locked", message: "已提交批次不能修改标题。" } },
+        };
+      }
+      batches = batches.map((item) =>
+        batchBusinessIds(item).has(batchId)
+          ? {
+              ...item,
+              title: normalizedTitle,
+              version: numberField(item as Record<string, unknown>, 1, "version") + 1,
+            }
+          : item,
+      );
+      const updated = findBatchByBusinessId(batchId);
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          data: {
+            businessBatch: updated ? cloneJson(hydrateBusinessBatch(updated, true)) : null,
+          },
+          error: null,
+        },
       };
     },
     batchDetail(batchId: string) {
@@ -1059,6 +1105,18 @@ function createEtcReconciliationTaskStore() {
     get(taskId: string) {
       const task = findTask(taskId);
       return task ? cloneJson(task) : null;
+    },
+    updateTitle(taskId: string, title: string) {
+      const normalizedTitle = String(title ?? "").trim();
+      if (!normalizedTitle || !findTask(taskId)) {
+        return null;
+      }
+      tasks = tasks.map((task) =>
+        task.taskId === taskId
+          ? { ...task, title: normalizedTitle, version: task.version + 1 }
+          : task,
+      );
+      return cloneJson(findTask(taskId));
     },
     deleteTask(taskId: string, expectedVersion: number) {
       const task = findTask(taskId);
@@ -5475,10 +5533,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         keyword: url.searchParams.get("keyword"),
       }),
     }),
-    "/api/etc/business-batches": ({ url, init }) => {
+    "/api/etc/business-batches": ({ url, init, jsonBody }) => {
       if (init?.method === "POST") {
-        const task = etcReconciliationTaskStore.create("新建ETC对账批次");
-        return { status: 201, body: etcInvoiceStore.createBusinessBatch(String(task.taskId ?? "")) };
+        const title = String(jsonBody?.title ?? "新建ETC批次").trim() || "新建ETC批次";
+        const task = etcReconciliationTaskStore.create(title);
+        return { status: 201, body: etcInvoiceStore.createBusinessBatch(String(task.taskId ?? ""), title) };
       }
       return {
         body: etcInvoiceStore.listBusinessBatches({
@@ -7391,6 +7450,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return batch
           ? jsonResponse({ body: { ok: true, data: { businessBatch: batch }, error: null } })
           : jsonResponse({ status: 404, body: { ok: false, data: null, error: { code: "business_batch_not_found", message: "ETC业务批次不存在。" } } });
+      }
+      if (!segment && method === "PATCH") {
+        const result = etcInvoiceStore.updateBusinessBatchTitle(businessBatchId, String(jsonBody?.title ?? ""));
+        const updatedBatch = (result.body as { data?: { businessBatch?: Record<string, unknown> | null } }).data?.businessBatch;
+        const taskId = String(updatedBatch?.task_id ?? updatedBatch?.taskId ?? "");
+        if (result.status === 200 && taskId) {
+          etcReconciliationTaskStore.updateTitle(taskId, String(jsonBody?.title ?? ""));
+        }
+        return jsonResponse({ status: result.status, body: result.body });
       }
       if (!segment && method === "DELETE") {
         const beforeDelete = etcInvoiceStore.businessBatchDetail(businessBatchId);

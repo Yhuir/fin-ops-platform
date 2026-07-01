@@ -97,6 +97,25 @@ class EtcReconciliationTaskService:
         task = self._get_active_task_mutable(task_id)
         return _copy_task(task)
 
+    def update_task_title(self, *, task_id: str, title: str, actor: str) -> EtcReconciliationTask:
+        task = self._get_active_task_mutable(task_id)
+        normalized_title = str(title or "").strip()
+        if not normalized_title:
+            raise ValueError("task_title_required")
+        if str(task.title or "").strip() == normalized_title:
+            return _copy_task(task)
+        task.title = normalized_title
+        self._touch(task)
+        task.audit_events.append(
+            self._new_audit_event(
+                task_id=task_id,
+                event_type="task_title_updated",
+                actor=actor,
+            )
+        )
+        self._persist()
+        return _copy_task(task)
+
     def list_tasks(self) -> list[EtcReconciliationTask]:
         return [
             _copy_task(task)

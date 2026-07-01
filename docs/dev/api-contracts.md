@@ -935,9 +935,11 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 契约要求：
 
 - 响应必须区分导入批次、业务批次、OA 草稿和人工提交确认状态；ETC 专用 OA 自动检测状态不再作为业务批次 API 合同输出。
-- `GET /api/etc/business-batches` 的 `month` 参数优先按业务批次归属月份匹配；批次存在 `amountBreakdown.scope_month` / `amount_breakdown.scope_month` 时只匹配该归属月份，缺失归属月份时才按 ETC 发票开票日期、通行开始日期和通行结束日期任一月份匹配。响应中的 `counts.active`、`counts.submitted` 必须先应用同一组 scope、`month`、`plate`、`keyword` 筛选，再按状态 bucket 统计；`items` 在同一筛选结果上继续应用请求的 `status` 和分页。
+- business batch payload 必须返回 `businessBatchId`、`taskId`、`title`、`status`、`version`、导入/提交/OA 字段、`invoiceSummary` 和审计字段；`title` 是用户可见批次标题，空历史数据允许回退到月份/日期派生标题。
+- ETC 票据管理页不得再向 `GET /api/etc/business-batches` 发送 `month`，只按 `status`、`plate`、`keyword` 查询全部批次并展示未提交/已提交两个 bucket。API 仍保留可选 `month` 参数作为兼容/运维筛选：传入 `month` 时优先按业务批次归属月份匹配；批次存在 `amountBreakdown.scope_month` / `amount_breakdown.scope_month` 时只匹配该归属月份，缺失归属月份时才按 ETC 发票开票日期、通行开始日期和通行结束日期任一月份匹配。响应中的 `counts.active`、`counts.submitted` 必须先应用同一组 scope、可选 `month`、`plate`、`keyword` 筛选，再按状态 bucket 统计；`items` 在同一筛选结果上继续应用请求的 `status` 和分页。
 - 用户可见批次列表必须以 `/api/etc/business-batches*` 为事实源；`/api/etc/reconciliation-tasks` 只承载导入、核对、source file 和 workflow 状态，前端不得把 task-only 记录无条件混入批次列表或批次计数。
-- `POST /api/etc/business-batches` 可以省略 `taskId`。省略时后端 application service 必须复用现有 reconciliation task service 先创建任务，再通过 business batch service 创建 active 业务批次，并返回统一 `businessBatch` payload；若业务批次创建失败，必须通过 reconciliation task service 删除/tombstone 本次新建任务，避免留下 task-only 空批次。传入 `taskId` 时仍按既有绑定任务语义校验 active business batch 约束。
+- `POST /api/etc/business-batches` 可以省略 `taskId`。省略时后端 application service 必须复用现有 reconciliation task service 先创建任务，再通过 business batch service 创建 active 业务批次，并返回统一 `businessBatch` payload；若业务批次创建失败，必须通过 reconciliation task service 删除/tombstone 本次新建任务，避免留下 task-only 空批次。传入 `taskId` 时仍按既有绑定任务语义校验 active business batch 约束。请求可带 `title`，未传时默认 `新建ETC批次`，并同步作为 linked reconciliation task title。
+- `PATCH /api/etc/business-batches/{id}` 只用于修改未提交业务批次标题。请求体为 `{ "title": string, "expectedVersion"?: number }`；空标题返回 `422 invalid_business_batch_title`，版本冲突返回 `409 version_conflict`，已提交、人工确认已提交或 closed 批次返回 `422 business_batch_title_locked`。成功响应返回更新后的 `businessBatch`，版本递增，并同步 linked reconciliation task title；ETC 发票导入 ready task 下拉必须显示同步后的标题。
 - 幂等 key、重复提交、撤销草稿和释放发票规则必须由后端校验。
 - 权限不足、状态冲突、发票占用、OA 草稿失败和撤销失败需要返回稳定错误码。
 - dry-run、迁移和人工确认动作要返回 affected batches、affected invoices、affected months 和审计信息。

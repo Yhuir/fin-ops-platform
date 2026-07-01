@@ -95,6 +95,7 @@ class _WorkbenchContext:
     open_oa_rows: list[dict[str, Any]]
     invoice_ids_by_oa_id: dict[str, list[str]]
     linked_row_ids: set[str]
+    bank_linked_row_ids: set[str]
     eligible_bank_rows: list[dict[str, Any]]
     eligible_oa_rows: list[dict[str, Any]]
     relation_read_model_status: _RelationReadModelStatus
@@ -142,6 +143,12 @@ class BatchAccountingService:
     def _active_relation_by_row_id(self, row_id: str) -> dict[str, Any] | None:
         relations = self._active_relations_for_row_ids([row_id])
         return deepcopy(relations[0]) if relations else None
+
+    def _active_bank_relation_by_row_id(self, row_id: str) -> dict[str, Any] | None:
+        for relation in self._active_relations_for_row_ids([row_id]):
+            if self._relation_has_bank_row(relation):
+                return deepcopy(relation)
+        return None
 
     def _active_relation_by_case_id(self, case_id: str) -> dict[str, Any] | None:
         command_service = self._require_relation_command_service()
@@ -367,15 +374,15 @@ class BatchAccountingService:
         eligible_oa_by_id = {
             str(row.get("id")): row
             for row in context.open_oa_rows
-            if self._is_eligible_oa_row_for_submission(row)
+            if self._is_eligible_oa_row_for_submission(row, linked_row_ids=context.bank_linked_row_ids)
         }
         selected_oa_rows: list[dict[str, Any]] = []
         for oa_row_id in normalized_oa_row_ids:
             oa_row = eligible_oa_by_id.get(oa_row_id)
             if not isinstance(oa_row, dict):
                 raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据不符合批量账务提交条件。")
-            if self._active_relation_by_row_id(oa_row_id) is not None:
-                raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据已有关联关系，请刷新后重试。")
+            if self._active_bank_relation_by_row_id(oa_row_id) is not None:
+                raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据已有关联流水，请刷新后重试。")
             selected_oa_rows.append(oa_row)
 
         bank_amount = self._bank_expense_amount(bank_row)
@@ -691,7 +698,7 @@ class BatchAccountingService:
                 unique_invoice_rows.append(row)
             if section == "open":
                 self._index_group_invoice_links(unique_group_oa_rows, unique_invoice_rows, invoice_ids_by_oa_id)
-        linked_row_ids = self._linked_distribution_row_ids(
+        linked_row_ids, bank_linked_row_ids = self._relation_distribution_row_id_sets(
             [*bank_rows, *open_oa_rows],
             read_model_status=relation_read_model_status,
         )
@@ -708,7 +715,7 @@ class BatchAccountingService:
         eligible_oa_rows = [
             row
             for row in open_oa_rows
-            if self._is_eligible_oa_row(row, linked_row_ids=linked_row_ids)
+            if self._is_eligible_oa_row(row, linked_row_ids=bank_linked_row_ids)
         ]
         return _WorkbenchContext(
             rows_by_id=rows_by_id,
@@ -717,6 +724,7 @@ class BatchAccountingService:
             open_oa_rows=open_oa_rows,
             invoice_ids_by_oa_id=invoice_ids_by_oa_id,
             linked_row_ids=linked_row_ids,
+            bank_linked_row_ids=bank_linked_row_ids,
             eligible_bank_rows=eligible_bank_rows,
             eligible_oa_rows=eligible_oa_rows,
             relation_read_model_status=relation_read_model_status,
@@ -818,16 +826,28 @@ class BatchAccountingService:
         *,
         read_model_status: _RelationReadModelStatus,
     ) -> set[str]:
+        linked_row_ids, _bank_linked_row_ids = self._relation_distribution_row_id_sets(
+            rows,
+            read_model_status=read_model_status,
+        )
+        return linked_row_ids
+
+    def _relation_distribution_row_id_sets(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        read_model_status: _RelationReadModelStatus,
+    ) -> tuple[set[str], set[str]]:
         row_ids = self._dedupe(
             str(row.get("id") or "").strip()
             for row in list(rows or [])
             if isinstance(row, dict) and str(row.get("id") or "").strip()
         )
         if not row_ids or self._relation_facade is None:
-            return set()
+            return set(), set()
         reader = getattr(self._relation_facade, "get_by_row_ids", None)
         if not callable(reader):
-            return set()
+            return set(), set()
         scope_keys_hint = self._scope_keys_for_rows(rows)
         try:
             payload = reader(
@@ -840,8 +860,9 @@ class BatchAccountingService:
             payload = reader(row_ids)
         read_model_status.record(payload if isinstance(payload, dict) else None)
         if not isinstance(payload, dict):
-            return set()
+            return set(), set()
         linked: set[str] = set()
+        bank_linked: set[str] = set()
         for row in list(payload.get("rows") or []):
             if not isinstance(row, dict):
                 continue
@@ -852,7 +873,16 @@ class BatchAccountingService:
             relation_status = str(row.get("relation_status") or "").strip()
             if group_ids or relation_status in {"linked", "partial", "conflict", "stale_source"}:
                 linked.add(row_id)
-        return linked
+            if self._distribution_row_has_linked_bank_transaction(row):
+                bank_linked.add(row_id)
+        for relation in relation_dicts_from_distribution_payload(payload):
+            if not self._relation_has_bank_row(relation):
+                continue
+            for row_id in list(relation.get("row_ids") or []):
+                normalized_row_id = str(row_id or "").strip()
+                if normalized_row_id:
+                    bank_linked.add(normalized_row_id)
+        return linked, bank_linked
 
     def _submitted_relations(self, year: str, context: _WorkbenchContext) -> list[dict[str, Any]]:
         if self._relation_facade is None:
@@ -1234,6 +1264,29 @@ class BatchAccountingService:
         if len(relation_bank_row_ids) == 1:
             return relation_bank_row_ids[0]
         return ""
+
+    @classmethod
+    def _relation_has_bank_row(cls, relation: Any) -> bool:
+        if not isinstance(relation, dict):
+            return False
+        row_ids = [cls._clean_text(row_id) for row_id in list(relation.get("row_ids") or [])]
+        row_types = [cls._clean_text(row_type) for row_type in list(relation.get("row_types") or [])]
+        for index, row_id in enumerate(row_ids):
+            row_type = row_types[index] if index < len(row_types) else cls._row_type_for_row_id(row_id)
+            if row_type in {"bank", "bank_transaction"} or cls._row_type_for_row_id(row_id) == "bank":
+                return True
+        return False
+
+    @classmethod
+    def _distribution_row_has_linked_bank_transaction(cls, row: dict[str, Any]) -> bool:
+        for item in list(row.get("linked_bank_transactions") or []):
+            if isinstance(item, dict):
+                bank_row_id = cls._clean_text(item.get("id") or item.get("transaction_id") or item.get("row_id"))
+            else:
+                bank_row_id = cls._clean_text(item)
+            if bank_row_id:
+                return True
+        return False
 
     @staticmethod
     def _clean_text(value: Any) -> str:

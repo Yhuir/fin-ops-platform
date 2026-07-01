@@ -32,6 +32,7 @@
 | ETC 文件/ZIP | `ImportEtcInvoicesPage.tsx` | 进入 ETC import/parsing service |
 | 预览确认 | import workflow | 创建 job 并持久化导入结果 |
 | Reconciliation trigger | ETC services | 产生后续候选和 lifecycle |
+| Ready task selector | `EtcReconciliationTaskService.list_ready_for_import_tasks()` | 下拉标题使用 reconciliation task `title`；ETC business batch title 修改后由 ETC 票据管理同步该 task title，导入页不得自行派生或缓存旧标题 |
 
 ## 输出 I/O
 
@@ -39,6 +40,7 @@
 | --- | --- | --- |
 | ETC import preview/result | 前端页面 | 可审计、可失败恢复 |
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
+| Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |
 | Dirty scope | lifecycle/runtime queue | 影响 workbench/invoice/search 等下游 |
 | Job completion target envelope | background job result summary / ETC 票据页 | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`operation_barrier_targets`，消费 completed job 的页面必须先等待 barrier 再刷新最终列表 |
 
