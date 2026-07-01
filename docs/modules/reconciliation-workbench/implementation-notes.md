@@ -29,6 +29,15 @@
 
 ## 历史记录
 
+## 2026-07-02 - full payload 前端 runtime 回流守卫
+
+- 目标：防止旧 `fetchWorkbenchWithProgress` / `/api/workbench?month=...` full payload 再次进入关联台首屏或导入后 fallback 运行链路。
+- 影响范围：`web/src` runtime import/call 边界、`tests/test_platform_runtime_boundary_guards.py`、本模块测试矩阵。
+- 关键决策：后端 `/api/workbench` 仍作为兼容迁移面和既有集成测试入口保留；当前生产首屏闭环先用 `fetchWorkbenchInitialPage` + summary/groups API 作为唯一 runtime 主链路，并用边界守卫禁止页面/组件重新调用 full payload fetcher。
+- 测试覆盖：新增 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_full_payload_fetcher_stays_off_runtime_pages`；既有 `web/src/test/App.test.tsx` 继续断言关联台首页不请求 `/api/workbench?`。
+- 验证命令：见本轮最终说明。
+- 未测风险：后端 legacy route、row detail fallback 和 matching snapshot bridge 尚未删除；后续删除需要逐步迁移仍依赖 `/api/workbench` 的后端集成测试。
+
 ## 2026-07-01 - all-scope same-case paired/open 重复 owner 修复
 
 - 目标：修复生产 `workbench:all` 新 generation 剩余 `duplicate_row_membership` consistency failure；同一自动 decision case 在部分月份为 paired、部分月份仍有 open candidate 残留时，all 视图不能同时发布 paired/open 两份相同行。

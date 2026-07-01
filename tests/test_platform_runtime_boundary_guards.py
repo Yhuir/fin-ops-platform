@@ -23,6 +23,7 @@ APP_ROOT = SOURCE_ROOT / "app"
 SERVICES_ROOT = SOURCE_ROOT / "services"
 TOOLS_ROOT = SOURCE_ROOT / "tools"
 SCRIPTS_ROOT = REPO_ROOT / "scripts"
+WEB_SRC_ROOT = REPO_ROOT / "web" / "src"
 
 
 def _relative(path: Path) -> str:
@@ -6121,6 +6122,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in analysis_source:
                 violations.append(f"Workbench legacy SQL provider analysis missing marker: {marker}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_full_payload_fetcher_stays_off_runtime_pages(self) -> None:
+        violations: list[str] = []
+        allowed = {WEB_SRC_ROOT / "features" / "workbench" / "api.ts"}
+        for path in sorted(WEB_SRC_ROOT.rglob("*.ts*")):
+            if path in allowed or "/test/" in path.as_posix() or path.name.endswith((".test.ts", ".test.tsx")):
+                continue
+            source = path.read_text(encoding="utf-8")
+            for marker in ("fetchWorkbench(", "fetchWorkbenchWithProgress("):
+                if marker in source:
+                    violations.append(f"{_relative(path)} calls legacy Workbench full payload fetcher: {marker}")
 
         self.assertEqual(violations, [])
 
