@@ -308,8 +308,9 @@ class CostStatisticsSaveRecorder:
 
 
 class UnchangedCostStatisticsSaveRecorder(CostStatisticsSaveRecorder):
-    def __init__(self) -> None:
+    def __init__(self, *, refresh_status: str = "fresh") -> None:
         super().__init__()
+        self.refresh_status = refresh_status
         self.source_versions: dict[str, object] = {}
         self.views: list[str] = []
 
@@ -317,7 +318,7 @@ class UnchangedCostStatisticsSaveRecorder(CostStatisticsSaveRecorder):
         self.views.append(scope_key)
         return {
             "scope_key": scope_key,
-            "refresh_status": "fresh",
+            "refresh_status": self.refresh_status,
             "entry_count": 1,
             "payload": {"time_rows": [{"transaction_id": "bank-1"}]},
             "source_versions": dict(self.source_versions),
@@ -899,6 +900,34 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["skip_reason"], "source_versions_unchanged")
         self.assertTrue(result["skipped"])
         self.assertEqual(result["source_versions"]["workbench_source_versions"]["workbench_generation"], "stable-v1")
+
+    def test_cost_statistics_sql_projection_skips_unchanged_scope_while_dirty_scope_is_processing(self) -> None:
+        class Connection(CostStatisticsProjectionConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from read_model.workbench_generations" in normalized:
+                    return {"source_versions": {"workbench_generation": "stable-v1", "source_version": 42}}
+                return super().fetch_one(sql, params)
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.workbench_groups" in normalized:
+                    raise AssertionError("current dirty scope must not defeat unchanged source-version skip")
+                return super().fetch_all(sql, params)
+
+        repository = UnchangedCostStatisticsSaveRecorder(refresh_status="refreshing")
+        connection = Connection()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+        repository.source_versions = builder._source_versions("2026-05")
+
+        result = builder.rebuild_cost_statistics_read_model_scope("active:2026-05")
+
+        self.assertEqual(result["skip_reason"], "source_versions_unchanged")
+        self.assertTrue(result["skipped"])
 
     def test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows(self) -> None:
         repository = CostStatisticsSaveRecorder()

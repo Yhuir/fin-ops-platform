@@ -249,7 +249,7 @@ class CostStatisticsSqlProjectionBuilder:
             view = get_view(scope_key=scope_key)
         except AttributeError:
             return None
-        if not isinstance(view, dict) or str(view.get("refresh_status") or "") != "fresh":
+        if not isinstance(view, dict):
             return None
         existing_source_versions = view.get("source_versions")
         if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
