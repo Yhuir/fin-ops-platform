@@ -29,6 +29,15 @@
 
 ## 历史记录
 
+## 2026-07-02 - full payload 后端生产 SQL fallback 守卫
+
+- 目标：确认并锁定 `GET /api/workbench` full payload 兼容 API 在生产 SQL read model runtime 下只能读取 SQL active generation，不能回退 `_build_api_workbench_payload(...)` raw builder。
+- 影响范围：`Application._handle_api_workbench(...)`、`WorkbenchLegacyApiSqlReadProvider` 静态边界 guard、模块边界 I/O 文档。
+- 关键决策：`/api/workbench` 暂时保留为兼容迁移面；生产 SQL runtime 下 repository/provider 缺失时 fail closed 为 `read_model_unavailable`，raw builder 仅允许非 SQL/legacy 模式使用。
+- 测试覆盖：更新 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_legacy_api_sql_read_provider_extraction_stays_local`，要求 `_build_api_workbench_payload(...)` 位于 production SQL runtime guard 之后。
+- 验证命令：见本轮最终说明。
+- 未测风险：`/api/workbench` 兼容 API 本身尚未删除；删除需要迁移仍依赖该 full payload shape 的后端集成测试和外部调用方。
+
 ## 2026-07-02 - row detail 生产 SQL runtime 旧 route fallback 关闭
 
 - 目标：关闭 `GET /api/workbench/rows/{row_id}` 在生产 SQL read model runtime 下的 legacy route fallback，避免旧 `WorkbenchApiRoutes.get_row_detail(...)` 和旧 query service 内存记录污染新 read model/query facade 链路。

@@ -97,6 +97,7 @@
 
 - 对 legacy workbench API 的任何修改都必须同时写清是否仍有调用方。
 - `fetchWorkbenchInitialPage` 是当前首屏和导入后 fallback 刷新入口；`fetchWorkbenchWithProgress` / `/api/workbench` full payload 只允许作为兼容迁移面存在，不能重新进入页面 runtime 主链路。
+- `GET /api/workbench` 在生产 SQL read model runtime 下必须通过 `WorkbenchLegacyApiSqlReadProvider` 读取 SQL active generation；repository/provider 缺失时返回 `read_model_unavailable`，不得回退 `_build_api_workbench_payload(...)` raw builder。
 - `GET /api/workbench/rows/{row_id}` 在生产 SQL read model runtime 下不得回退到 `WorkbenchApiRoutes.get_row_detail(...)` 或旧 query service 内存记录；命中 live/cache/query facade 失败时必须 fail closed。
 - 删除旧路径前必须证明 route、frontend、worker、tests、生产脚本都不再依赖。
 - legacy exception action 不得再丢弃 `_apply_exception_payload` 计算出的 affected scopes；删除旧异常入口前必须保留 target envelope 回归。

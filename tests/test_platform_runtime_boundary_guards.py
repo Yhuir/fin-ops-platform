@@ -6089,10 +6089,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in (
             "sql_result = self._workbench_legacy_api_sql_read_provider().read(",
             "return self._json_response(sql_result.status_code, sql_result.payload)",
+            "if self._requires_sql_read_model_runtime():",
+            "\"error\": \"read_model_unavailable\"",
             "self._build_api_workbench_payload(current_month)",
         ):
             if marker not in api_handler_source:
                 violations.append(f"Application legacy workbench handler missing delegation marker: {marker}")
+        sql_runtime_guard_index = api_handler_source.find("if self._requires_sql_read_model_runtime():")
+        raw_builder_index = api_handler_source.find("self._build_api_workbench_payload(current_month)")
+        if sql_runtime_guard_index < 0 or raw_builder_index < 0 or sql_runtime_guard_index > raw_builder_index:
+            violations.append("legacy /api/workbench raw payload builder is not behind the production SQL runtime guard")
         for marker in (
             "WorkbenchLegacyApiSqlReadProvider(",
             "repository_provider=lambda: getattr(self, \"_workbench_sql_read_repository\", None)",
