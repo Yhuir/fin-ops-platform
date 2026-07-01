@@ -4163,6 +4163,90 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in canonical_group["bank_rows"]], ["txn_imported_1284"])
         self.assertEqual([row["id"] for row in canonical_group["invoice_rows"]], ["inv_imported_1643"])
 
+    def test_repository_all_scope_visible_paired_group_wins_over_same_case_open_candidate(self) -> None:
+        class AggregateAllSameCasePairedAndOpenConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from app.workbench_pair_relations" in normalized:
+                    return [
+                        {
+                            "case_id": "decision:2026-04:oa_bank_exact_amount:oa-exp-2004:txn_imported_0025",
+                            "row_ids": ["oa-exp-2004", "txn_imported_0025"],
+                        }
+                    ]
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                group_id = "case:decision:2026-04:oa_bank_exact_amount:oa-exp-2004:txn_imported_0025"
+                oa_row = {
+                    "id": "oa-exp-2004",
+                    "type": "oa",
+                    "source_kind": "oa",
+                    "case_id": "decision:2026-04:oa_bank_exact_amount:oa-exp-2004:txn_imported_0025",
+                }
+                bank_row = {
+                    "id": "txn_imported_0025",
+                    "type": "bank",
+                    "source_kind": "bank_transaction",
+                    "case_id": "decision:2026-04:oa_bank_exact_amount:oa-exp-2004:txn_imported_0025",
+                }
+                invoice_row = {"id": "inv-legacy-context", "type": "invoice", "source_kind": "invoice"}
+                return [
+                    {
+                        "scope_key": "2025-12",
+                        "scope_month": "2025-12-01",
+                        "zone": "paired",
+                        "group_id": group_id,
+                        "generated_at": "2026-07-01T23:51:00+08:00",
+                        "source_versions": {"source_version": 3},
+                        "payload": {
+                            "group_id": group_id,
+                            "zone": "paired",
+                            "group_type": "manual_confirmed",
+                            "reason": "existing_case_group",
+                            "case_id": "decision:2026-04:oa_bank_exact_amount:oa-exp-2004:txn_imported_0025",
+                            "oa_rows": [oa_row],
+                            "bank_rows": [bank_row],
+                            "invoice_rows": [invoice_row],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-04",
+                        "scope_month": "2026-04-01",
+                        "zone": "open",
+                        "group_id": group_id,
+                        "generated_at": "2026-07-01T23:50:00+08:00",
+                        "source_versions": {"source_version": 4},
+                        "payload": {
+                            "group_id": group_id,
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "reason": "existing_case_candidate",
+                            "case_id": "decision:2026-04:oa_bank_exact_amount:oa-exp-2004:txn_imported_0025",
+                            "oa_rows": [dict(oa_row, status="open")],
+                            "bank_rows": [dict(bank_row, status="open")],
+                            "invoice_rows": [],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllSameCasePairedAndOpenConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+
+        aggregate_group_payloads = [
+            params[16].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        ]
+        paired_groups = [group for group in aggregate_group_payloads if group["zone"] == "paired"]
+        open_groups = [group for group in aggregate_group_payloads if group["zone"] == "open"]
+        self.assertEqual(len(paired_groups), 1)
+        self.assertEqual(open_groups, [])
+        self.assertEqual([row["id"] for row in paired_groups[0]["oa_rows"]], ["oa-exp-2004"])
+        self.assertEqual([row["id"] for row in paired_groups[0]["bank_rows"]], ["txn_imported_0025"])
+
     def test_repository_all_scope_drops_partial_automatic_decision_groups_claimed_by_paired_shards(self) -> None:
         class AggregateAllPartialAutomaticDecisionConnection(WorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:

@@ -36,7 +36,7 @@ BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 1
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
 BANK_DETAIL_NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
-WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.oa_attachment_source_promotion.v1"
+WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.same_case_visible_paired_owner.v1"
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
@@ -9867,16 +9867,21 @@ def _suppress_all_scope_open_rows_claimed_by_paired(
         key: set(value)
         for key, value in (canonical_relation_claims_by_row_key or {}).items()
     }
+    visible_paired_row_keys: set[tuple[str, str]] = set()
+    visible_paired_identity_keys: set[tuple[str, str, str]] = set()
     for group in paired_groups:
         for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
             if row_role == "summary":
                 continue
             row_id = _workbench_row_id(row)
             if row_id is not None:
-                paired_row_keys.add((pane, row_id))
+                row_key = (pane, row_id)
+                paired_row_keys.add(row_key)
+                visible_paired_row_keys.add(row_key)
             identity = _workbench_strong_object_identity(row, pane)
             if identity is not None:
                 paired_identity_keys.add(identity)
+                visible_paired_identity_keys.add(identity)
 
     if not paired_row_keys and not paired_identity_keys:
         return
@@ -9887,6 +9892,8 @@ def _suppress_all_scope_open_rows_claimed_by_paired(
             group,
             paired_row_keys=paired_row_keys,
             paired_identity_keys=paired_identity_keys,
+            visible_paired_row_keys=visible_paired_row_keys,
+            visible_paired_identity_keys=visible_paired_identity_keys,
             canonical_relation_claims_by_row_key=relation_claims_by_row_key,
         )
         _drop_partial_all_scope_automatic_decision_group(group, before_row_count=before_row_count)
@@ -10026,6 +10033,8 @@ def _remove_workbench_rows_from_group(
     *,
     paired_row_keys: set[tuple[str, str]],
     paired_identity_keys: set[tuple[str, str, str]],
+    visible_paired_row_keys: set[tuple[str, str]] | None = None,
+    visible_paired_identity_keys: set[tuple[str, str, str]] | None = None,
     canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
 ) -> None:
     group_relation_case_id = _workbench_canonical_relation_case_id_for_group(group)
@@ -10041,6 +10050,8 @@ def _remove_workbench_rows_from_group(
                     pane,
                     paired_row_keys=paired_row_keys,
                     paired_identity_keys=paired_identity_keys,
+                    visible_paired_row_keys=visible_paired_row_keys or set(),
+                    visible_paired_identity_keys=visible_paired_identity_keys or set(),
                     canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
                     group_relation_case_id=group_relation_case_id,
                 )
@@ -10059,6 +10070,8 @@ def _remove_workbench_rows_from_group(
                     str(pane),
                     paired_row_keys=paired_row_keys,
                     paired_identity_keys=paired_identity_keys,
+                    visible_paired_row_keys=visible_paired_row_keys or set(),
+                    visible_paired_identity_keys=visible_paired_identity_keys or set(),
                     canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
                     group_relation_case_id=group_relation_case_id,
                 )
@@ -10071,16 +10084,28 @@ def _workbench_row_claimed_by_paired(
     *,
     paired_row_keys: set[tuple[str, str]],
     paired_identity_keys: set[tuple[str, str, str]],
+    visible_paired_row_keys: set[tuple[str, str]],
+    visible_paired_identity_keys: set[tuple[str, str, str]],
     canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
     group_relation_case_id: str | None = None,
 ) -> bool:
     row_id = _workbench_row_id(row)
-    if row_id is not None and (pane, row_id) in paired_row_keys:
-        claim_case_ids = (canonical_relation_claims_by_row_key or {}).get((pane, row_id), set())
+    if row_id is not None:
+        row_key = (pane, row_id)
+        if row_key in visible_paired_row_keys:
+            return True
+        if row_key not in paired_row_keys:
+            identity = _workbench_strong_object_identity(row, pane)
+            if identity is not None and identity in visible_paired_identity_keys:
+                return True
+            return identity is not None and identity in paired_identity_keys
+        claim_case_ids = (canonical_relation_claims_by_row_key or {}).get(row_key, set())
         if group_relation_case_id and group_relation_case_id in claim_case_ids:
             return False
         return True
     identity = _workbench_strong_object_identity(row, pane)
+    if identity is not None and identity in visible_paired_identity_keys:
+        return True
     return identity is not None and identity in paired_identity_keys
 
 

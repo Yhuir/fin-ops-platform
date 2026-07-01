@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-07-01 - all-scope same-case paired/open 重复 owner 修复
+
+- 目标：修复生产 `workbench:all` 新 generation 剩余 `duplicate_row_membership` consistency failure；同一自动 decision case 在部分月份为 paired、部分月份仍有 open candidate 残留时，all 视图不能同时发布 paired/open 两份相同行。
+- 影响范围：`PostgresReadModelRepository` all-scope aggregate owner suppress、`WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION`、active generation consistency。
+- 生产证据：`2026-04` parent month active generation 本身 consistent 且只含 open group；`all` 聚合后同一 `case:decision:2026-04:oa_bank_exact_amount:oa-exp-2004:txn_imported_0025` 同时出现在 paired 与 open，row `oa-exp-2004`、`txn_imported_0025` 触发 `duplicate_row_membership count=2`。同 case 的 active relation 已存在，且 2025-11/2025-12 shard 有 visible paired group。
+- 关键决策：all aggregate 必须区分 visible paired group claim 与 canonical relation extra claim。visible paired group 是 strict owner，必须从 open 删除相同 row；same-case canonical relation 例外只用于没有 visible paired group、但 partial relation 仍需要 `case:<case_id>` open 展示的场景。
+- 文档影响：更新本模块 boundary I/O、状态机、测试矩阵和本实施记录。
+- 测试覆盖：新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests.test_repository_all_scope_visible_paired_group_wins_over_same_case_open_candidate`，并保留 canonical open 保护测试。
+- 验证命令：见本轮最终说明。
+- 未测风险：需要部署后重建 `workbench:all`，确认 `duplicate_row_membership` 和 `active_relation_open_membership` 均为 0，并跑 API 耗时 smoke。
+
 ## 2026-07-01 - Workbench emergency retention 参数补齐
 
 - 目标：补齐生产根分区 99% 且当天 superseded generation 堆积时的受控清理入口，避免 Workbench refresh 因磁盘不足持续失败。

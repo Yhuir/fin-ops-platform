@@ -58,7 +58,10 @@
 
 - Read model：`workbench`
 - Projection：`active_generation_scoped_publish`
-- Partition：month scope active generation；`all` 聚合 active month shards。
+- Partition：month scope active generation；`all` 聚合 active month shards。`all` 聚合必须把可见 paired group 的 row ownership
+  作为 strict claim；同一个 `case:<case_id>` 在部分月份为 paired、部分月份仍残留 open candidate 时，paired 可见 owner
+  必须赢，open 重复行不得发布。只有“没有可见 paired group、仅 canonical active relation 额外 claim”的 same-case open group
+  才允许保留为 partial/open 展示。
 - Worker：`workbench`
 - 特殊例外：保留 active generation 原子发布模型，不机械改成普通 read model gateway。
 - Summary 物化合同：`read_model.workbench_summary` 是 summary 读路径唯一事实源；repository 不再用 groups/group_rows/app.invoices 在 API 请求内补算 summary。

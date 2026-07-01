@@ -43,7 +43,7 @@
 - 禁止 ETC 批次人工确认后直接进入 paired；必须仍经过普通 OA/银行/发票关系确认。
 - 禁止 failed generation、building generation 或 stale Redis payload 被展示为 fresh。
 - 禁止 active relation payload 保留重复 row id，或以不同 active case 复用同一 row id 来表达多付款/多发票场景；这类场景必须合并到同一 relation 并通过 summaries/+N 展开。
-- 禁止 all-scope open 区把已被 `app.workbench_pair_relations.status='active'` 占用的 row 发布到非 canonical owner（例如 `scope:*:temp:*`、standalone、candidate 残留）。active relation 的合法 open/display owner 必须是 `case:<case_id>`；非 canonical owner 必须在 publish/consistency 阶段被抑制或标为 inconsistent，不能进入 fresh。
+- 禁止 all-scope open 区把已被 `app.workbench_pair_relations.status='active'` 占用的 row 发布到非 canonical owner（例如 `scope:*:temp:*`、standalone、candidate 残留）。active relation 的合法 open/display owner 必须是 `case:<case_id>`；非 canonical owner 必须在 publish/consistency 阶段被抑制或标为 inconsistent，不能进入 fresh。若 all-scope 中同一个 `case:<case_id>` 已经存在可见 paired group，则该 paired group 的 row owner 优先级高于 same-case canonical-open 例外，open candidate 残留必须被删除。
 
 ## UI 状态
 
@@ -85,7 +85,7 @@ Refresh 触发来源：
 - Workbench SQL active generation 的 `source_versions` 必须包含 `workbench_matching_rules_version`。匹配规则版本变化后，旧 generation 必须被 freshness 判为 stale 并入队刷新，不能继续被 API 当作 fresh。
 - `workbench-matching` worker 每轮 claim 前会把 completed 但 matching source versions 落后的 scope run 原子转回 dirty。这个自愈路径是规则版本发布后的主恢复机制；`startup_stale_scan` 只是 opt-in 补扫，不是常驻一致性边界。
 - Workbench `all` active generation 必须从所有 month shard source versions 聚合 `workbench_matching_rules_version`；缺失或多版本混杂时 all scope 不发布该版本证明，后续 freshness/审计必须按 source mismatch 处理。
-- Workbench `all` 聚合执行 open group owner 去重时，只能移除被更强 open group 明确拥有的 row；如果自动决策 group 被剥离 OA 后仍剩余未被任何 group 认领的银行流水或发票，剩余事实行必须保留。只有 paired shard 或 canonical active relation claim 抢占 row 时，partial automatic decision group 才能被整体清空，避免已配对流水回流到 open 区。
+- Workbench `all` 聚合执行 open group owner 去重时，只能移除被更强 open group 明确拥有的 row；如果自动决策 group 被剥离 OA 后仍剩余未被任何 group 认领的银行流水或发票，剩余事实行必须保留。只有 paired shard 或 canonical active relation claim 抢占 row 时，partial automatic decision group 才能被整体清空，避免已配对流水回流到 open 区。同一个 case 同时存在 visible paired shard 与 open shard 时，visible paired shard 是 strict owner；same-case canonical relation 例外只适用于没有可见 paired group、但仍需以 `case:<case_id>` open 展示 partial relation 的场景。
 - `startup_stale_scan` 默认关闭；启用时只标记 stale matching dirty scopes；它不直接 invalidating workbench read model。
 - PostgreSQL formal read path 必须恢复 `job.workbench_matching_dirty_scopes.status='completed'` 的 scope run，供 `WorkbenchCandidateMatchService.is_scope_fresh(...)` 判断 freshness；否则 opt-in 启动补扫会因为缺少 scope run 证明而把已完成月份重新标 dirty。
 
@@ -100,6 +100,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-01 | all-scope aggregate 区分 visible paired strict claim 与 canonical relation extra claim；同一 case 已有 paired group 时删除 open candidate 残留，避免 `duplicate_row_membership` consistency failure | `WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION`、all-scope active generation owner 去重、active generation consistency | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests.test_repository_all_scope_visible_paired_group_wins_over_same_case_open_candidate`、`tests/test_workbench_sql_runtime.py` |
 | 2026-07-01 | 跨月 active relation 月度投影改为按 `row_ids && 当前月行集合` 读取，不再用 relation `month_scope` 限制成员投影；同步 bump Workbench SQL projection schema version，避免旧 generation 继续被视为 fresh | `WorkbenchSqlProjectionBuilder._active_pair_relations_for_month`、`WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION`、active generation consistency | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_reads_cross_month_active_relations_by_row_overlap`、`tests/test_workbench_sql_runtime.py` |
 | 2026-06-30 | 外部往来闭环 paired/open 判定改为 relation metadata 驱动：规则保存会把旧 `turnover:* manual_confirmed` relation 升级为 `turnover_manual_closure` 并写入 `requires_oa/requires_invoice`；Workbench 仅在显式 requirement 满足时进 paired，metadata 缺失仍 fail closed | `WorkbenchCandidateGroupingService`、`NoOaBankBatchApplicationService` 规则保存同步、`WorkbenchRelationCommandService.update_relation_metadata_for_case_id`、外部往来闭环 relation metadata 合同 | `tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_two_pane_turnover_manual_closure_with_no_invoice_requirement_is_paired`、`tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_tag_rule_update_upgrades_legacy_turnover_relation_from_persistent_repository`、`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_update_relation_metadata_for_case_id_can_upgrade_relation_mode` |
 | 2026-06-23 | Amount-check 输入优先级合同守卫：显式 `reconciliation_amount` 必须优先于旧 `detail_fields.明细金额合计` fallback；fallback 只作旧 read model 兼容 | `WorkbenchAmountCheckService` 输入合同；不改变业务/UI/read model/worker 状态定义 | `tests/test_workbench_amount_check_service.py::WorkbenchAmountCheckServiceTests::test_explicit_reconciliation_amount_wins_over_legacy_detail_mismatch_fields` |
