@@ -8524,17 +8524,12 @@ class Application:
             looks_like_oa_row_id=self._workbench_row_detail_looks_like_oa_row_id,
             legacy_row_detail=self._workbench_api_routes.get_row_detail,
             requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
-            route_query_service_provider=self._workbench_row_detail_route_query_service,
-            query_service_provider=lambda: getattr(self, "_workbench_query_service", None),
             apply_row_override=self._workbench_override_service.apply_to_row,
         )
 
     def _workbench_row_detail_query_facade(self) -> object | None:
         facade_factory = getattr(self, "_workbench_query_facade", None)
         return facade_factory() if callable(facade_factory) else None
-
-    def _workbench_row_detail_route_query_service(self) -> object | None:
-        return getattr(getattr(self, "_workbench_api_routes", None), "_query_service", None)
 
     def _workbench_row_detail_looks_like_oa_row_id(self, row_id: str) -> bool:
         query_service = getattr(self, "_workbench_query_service", None)

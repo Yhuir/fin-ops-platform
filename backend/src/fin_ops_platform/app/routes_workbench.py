@@ -27,8 +27,6 @@ class WorkbenchRowDetailApiRoutes:
         looks_like_oa_row_id: Callable[[str], bool],
         legacy_row_detail: Callable[[str], dict[str, object]],
         requires_sql_read_model_runtime: Callable[[], bool],
-        route_query_service_provider: Callable[[], Any | None],
-        query_service_provider: Callable[[], Any | None],
         apply_row_override: Callable[[dict[str, object]], dict[str, object]],
     ) -> None:
         self._etc_summary_row_detail = etc_summary_row_detail
@@ -39,8 +37,6 @@ class WorkbenchRowDetailApiRoutes:
         self._looks_like_oa_row_id = looks_like_oa_row_id
         self._legacy_row_detail = legacy_row_detail
         self._requires_sql_read_model_runtime = requires_sql_read_model_runtime
-        self._route_query_service_provider = route_query_service_provider
-        self._query_service_provider = query_service_provider
         self._apply_row_override = apply_row_override
 
     def get_payload(self, row_id: str, *, month: str | None = None) -> dict[str, object]:
@@ -89,12 +85,7 @@ class WorkbenchRowDetailApiRoutes:
         return row if isinstance(row, dict) else None
 
     def _legacy_route_fallback_allowed(self, row_id: str) -> bool:
-        if not self._requires_sql_read_model_runtime():
-            return True
-        route_query_service = self._route_query_service_provider()
-        query_service = route_query_service or self._query_service_provider()
-        records_by_id = getattr(query_service, "_records_by_id", None)
-        return isinstance(records_by_id, dict) and row_id in records_by_id
+        return not self._requires_sql_read_model_runtime()
 
 
 class WorkbenchGroupDetailApiRoutes:

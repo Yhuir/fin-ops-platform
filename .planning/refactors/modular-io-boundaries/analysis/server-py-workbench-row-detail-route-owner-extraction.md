@@ -46,7 +46,7 @@ This is a narrow server ownership implementation slice. It does not change Workb
 - Live row detail still wins over cache/query/legacy fallback.
 - Cached read model rows still apply only when fresh enough for `_resolve_rows_from_cached_read_models(...)`.
 - Opaque OA row ids still use `WorkbenchQueryFacade.row_detail(...)` after live/cache miss and do not fall through to legacy route detail in production PostgreSQL runtime.
-- Production PostgreSQL runtime still blocks the legacy route fallback unless the route query service has an in-memory record.
+- Production PostgreSQL runtime now blocks the legacy route fallback completely; old route query service in-memory records do not re-enable it.
 - Row overrides are still applied exactly once before returning the row payload.
 - The new route owner is read-only; it does not import relation command services, enqueue read model refresh, write dirty scopes/outbox/readiness, or mutate canonical facts.
 
@@ -66,7 +66,7 @@ Rationale:
 ## Non-Goals
 
 - Do not change Workbench group detail behavior in this slice.
-- Do not remove `WorkbenchApiRoutes.get_row_detail(...)`; it remains the existing allowed legacy route fallback surface until a later caller audit proves it can be deleted.
+- Do not remove `WorkbenchApiRoutes.get_row_detail(...)` from non-SQL/legacy compatibility mode in this slice; production SQL read model runtime must not call it.
 - Do not mark Workbench relation, read model, worker, server.py or Go admission globally closed.
 - Do not perform production writes, deploy, restart services, requeue jobs, mark scopes done, mutate readiness, run repair tools with `--apply`, or execute production mutating HTTP scenarios.
 

@@ -44,7 +44,7 @@ This is an audit slice. It does not change row detail runtime behavior, response
   6. legacy `WorkbenchApiRoutes.get_row_detail(...)` fallback only when `_workbench_row_detail_route_fallback_allowed(...)` allows it.
   7. row override application through `WorkbenchOverrideService.apply_to_row(...)`.
 - `Application._workbench_row_detail_from_query_facade(...)` adapts `WorkbenchQueryFacade.row_detail(...)` into a row-only payload.
-- `Application._workbench_row_detail_route_fallback_allowed(...)` blocks the old route fallback in production PostgreSQL runtime unless the route query service still has an in-memory row record.
+- Production PostgreSQL runtime blocks the old route fallback completely; route query service in-memory records no longer re-enable it.
 
 The current no-write boundary is locally protected:
 

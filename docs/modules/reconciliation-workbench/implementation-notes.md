@@ -29,6 +29,15 @@
 
 ## 历史记录
 
+## 2026-07-02 - row detail 生产 SQL runtime 旧 route fallback 关闭
+
+- 目标：关闭 `GET /api/workbench/rows/{row_id}` 在生产 SQL read model runtime 下的 legacy route fallback，避免旧 `WorkbenchApiRoutes.get_row_detail(...)` 和旧 query service 内存记录污染新 read model/query facade 链路。
+- 影响范围：`WorkbenchRowDetailApiRoutes`、`Application._build_workbench_row_detail_api_routes(...)`、row detail SQL runtime 回归测试、平台边界静态 guard、模块边界 I/O 文档。
+- 关键决策：非 SQL/legacy 模式仍保留本地兼容 fallback；生产 PostgreSQL runtime 命中 ETC/live/cache/query facade 失败后直接 fail closed，不再检查 `_records_by_id` 或 route query service。
+- 测试覆盖：新增 `tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_row_detail_production_sql_runtime_blocks_route_fallback_even_with_in_memory_record`；更新 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_contamination_surfaces_stay_quarantined`，禁止 row detail route owner 重新接入 query service provider 或 `_records_by_id`。
+- 验证命令：见本轮最终说明。
+- 未测风险：后端 `/api/workbench` full payload 兼容面和 matching snapshot bridge 尚未删除；需要独立 caller-removal 证据。
+
 ## 2026-07-02 - full payload 前端 runtime 回流守卫
 
 - 目标：防止旧 `fetchWorkbenchWithProgress` / `/api/workbench?month=...` full payload 再次进入关联台首屏或导入后 fallback 运行链路。
@@ -36,7 +45,7 @@
 - 关键决策：后端 `/api/workbench` 仍作为兼容迁移面和既有集成测试入口保留；当前生产首屏闭环先用 `fetchWorkbenchInitialPage` + summary/groups API 作为唯一 runtime 主链路，并用边界守卫禁止页面/组件重新调用 full payload fetcher。
 - 测试覆盖：新增 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_full_payload_fetcher_stays_off_runtime_pages`；既有 `web/src/test/App.test.tsx` 继续断言关联台首页不请求 `/api/workbench?`。
 - 验证命令：见本轮最终说明。
-- 未测风险：后端 legacy route、row detail fallback 和 matching snapshot bridge 尚未删除；后续删除需要逐步迁移仍依赖 `/api/workbench` 的后端集成测试。
+- 未测风险：后端 legacy route 和 matching snapshot bridge 尚未删除；后续删除需要逐步迁移仍依赖 `/api/workbench` 的后端集成测试。
 
 ## 2026-07-01 - all-scope same-case paired/open 重复 owner 修复
 
@@ -742,7 +751,7 @@
 
 - 目标：审计会污染新模块 IO 边界的旧路径，优先确认是否有可安全删除的 route/service/read model/frontend API 入口；证据不足时只做 quarantine，不改业务行为。
 - 影响范围：`WorkbenchRowDetailApiRoutes.legacy_row_detail`、`BatchAccountingService.repair_legacy_case_id_collisions`、平台边界静态 guard、T5 handoff。
-- 关键决策：`GET /api/workbench/rows/{row_id}` 的旧 row detail fallback 仍是上一切片明确保留的本地兼容路径，且生产 PostgreSQL runtime 只允许 route query service 已有 in-memory record 时 fallback；本轮不删除。新增 guard 把该 link 限定为唯一 route-owner wiring，并继续禁止它获得 relation command、refresh gateway、dirty/outbox/readiness/cache/App Status 等副作用。`BatchAccountingService.repair_legacy_case_id_collisions` 的 CodeGraph caller 只命中测试，但它是财务关系修复行为，删除条件不足，本轮只记录为 test-observed compat repair surface。
+- 关键决策：`GET /api/workbench/rows/{row_id}` 的旧 row detail fallback 当时仍作为本地兼容路径保留；2026-07-02 后生产 SQL read model runtime 已完全关闭该 fallback。新增 guard 把该 link 限定为唯一 route-owner wiring，并继续禁止它获得 relation command、refresh gateway、dirty/outbox/readiness/cache/App Status 等副作用。`BatchAccountingService.repair_legacy_case_id_collisions` 的 CodeGraph caller 只命中测试，但它是财务关系修复行为，删除条件不足，本轮只记录为 test-observed compat repair surface。
 - 文档影响：更新本模块实施记录，并新增 `.planning/refactors/modular-io-boundaries/parallel/handoffs/T5-legacy-contamination.md`；长期业务/API 口径未变化。
 - 测试覆盖：新增 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_legacy_contamination_surfaces_stay_quarantined`，证明新 route owner 没有新增未分类旧内部 link、旧 row detail fallback 不具备写/queue/cache/App Status 副作用、batch accounting repair 没有 app/service active caller。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_contamination_surfaces_stay_quarantined -v`；`python3 -m py_compile tests/test_platform_runtime_boundary_guards.py`；`git diff --check`。

@@ -114,7 +114,7 @@ git diff --check
 
 - 当前 row detail 仍由 `Application._get_api_workbench_row_detail_payload(...)` 编排 fallback：ETC summary、live service、cached read model、`WorkbenchQueryFacade.row_detail(...)`、opaque OA fail-closed 和旧 `WorkbenchApiRoutes.get_row_detail(...)` fallback。
 - `WorkbenchQueryFacade.row_detail(...)` 和 `PostgresReadModelRepository.get_workbench_row_detail(...)` 是只读 SQL active generation 边界，不写 relation、dirty scope、outbox、readiness 或 canonical facts。
-- 生产 PostgreSQL runtime 下，旧 route fallback 被 `_workbench_row_detail_route_fallback_allowed(...)` 阻止，除非 route query service 明确还有内存 row record。
+- 生产 PostgreSQL runtime 下，旧 route fallback 已完全关闭；即使 route query service 仍有内存 row record，也不能回退到 `WorkbenchApiRoutes.get_row_detail(...)`。
 - 现有测试已覆盖 live path、route fallback、生产 fallback blocking、stale cached row rejection 和 opaque OA SQL active generation fallback。
 
 未关闭：

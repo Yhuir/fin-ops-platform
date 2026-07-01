@@ -5862,6 +5862,43 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload, {"error": "workbench_row_not_found", "row_id": "bank-row-route"})
         self.assertEqual(route_calls, [])
 
+    def test_row_detail_production_sql_runtime_blocks_route_fallback_even_with_in_memory_record(self) -> None:
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = SimpleNamespace(storage_backend="postgres")
+        app._etc_invoice_summary_row_detail = lambda _row_id: None
+        app._live_workbench_service = SimpleNamespace(
+            get_row_detail=lambda row_id: (_ for _ in ()).throw(KeyError(row_id))
+        )
+        app._row_month_scope_from_row_id = lambda _row_id: None
+        app._resolve_rows_from_cached_read_models = lambda _row_ids, **_kwargs: {}
+        app._workbench_query_service = SimpleNamespace(
+            _looks_like_oa_row_id=lambda _row_id: False,
+            _records_by_id={"bank-row-route": {"id": "bank-row-route", "source": "legacy-memory"}},
+        )
+        route_calls: list[str] = []
+
+        def route_detail(row_id: str) -> dict[str, object]:
+            route_calls.append(row_id)
+            return {"row": {"id": row_id, "source": "route"}}
+
+        app._workbench_api_routes = SimpleNamespace(
+            _query_service=app._workbench_query_service,
+            get_row_detail=route_detail,
+        )
+        app._workbench_override_service = SimpleNamespace(
+            apply_to_row=lambda row: (_ for _ in ()).throw(
+                AssertionError("production SQL runtime must not apply legacy route fallback rows")
+            )
+        )
+
+        response = app._handle_api_workbench_row_detail("bank-row-route")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.NOT_FOUND))
+        self.assertEqual(payload, {"error": "workbench_row_not_found", "row_id": "bank-row-route"})
+        self.assertEqual(route_calls, [])
+
     def test_row_detail_production_sql_runtime_ignores_stale_cached_read_model_row(self) -> None:
         app = object.__new__(Application)
         app._bootstrap_mode = "production"

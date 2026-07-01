@@ -5557,6 +5557,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for removed_helper in (
             "def _workbench_row_detail_from_query_facade",
             "def _workbench_row_detail_route_fallback_allowed",
+            "def _workbench_row_detail_route_query_service",
         ):
             if removed_helper in server_source:
                 violations.append(f"Application still owns row detail fallback helper: {removed_helper}")
@@ -5625,6 +5626,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "clear_cache",
             "set_cached",
             "save_workbench",
+            "route_query_service_provider",
+            "query_service_provider",
+            "_records_by_id",
         ):
             if forbidden in row_detail_route_source:
                 violations.append(f"row-detail legacy fallback quarantine gained write/runtime side effect: {forbidden}")

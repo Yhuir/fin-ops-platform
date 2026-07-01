@@ -31,10 +31,10 @@ Find old route/service/repository/read model/frontend API paths that can still p
 - Location: `backend/src/fin_ops_platform/app/routes_workbench.py`
 - Owner wiring: `Application._build_workbench_row_detail_api_routes(...)`
 - Old surface: `legacy_row_detail=self._workbench_api_routes.get_row_detail`
-- Classification: retained local compatibility fallback, not removable in this slice.
-- Reason: the row-detail route-owner extraction intentionally preserved this fallback until a later caller audit. Production SQL runtime already blocks the fallback unless the route query service has an in-memory record. Removing it here would change row-detail compatibility behavior without enough evidence.
+- Classification: retained non-SQL/legacy compatibility fallback, removed from production SQL read model runtime.
+- Reason: the row-detail route-owner extraction intentionally preserved this fallback until a later caller audit. The 2026-07-02 follow-up closed the production SQL runtime exception: route query service in-memory records no longer re-enable fallback. Full deletion still needs caller evidence for non-SQL/legacy compatibility behavior.
 - Guard added: `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_legacy_contamination_surfaces_stay_quarantined`
-- Guard contract: exactly one route-owner wiring; no relation command service, read model refresh gateway, dirty scope, outbox, readiness, cache or App Status side effects in the row-detail route owner.
+- Guard contract: exactly one route-owner wiring; no relation command service, read model refresh gateway, dirty scope, outbox, readiness, cache, App Status side effects, route query service provider or `_records_by_id` checks in the row-detail route owner.
 
 ### BatchAccountingService.repair_legacy_case_id_collisions
 
@@ -77,6 +77,6 @@ Updated `docs/modules/reconciliation-workbench/implementation-notes.md`. No prod
 
 Continue with a future narrow slice only after one of these is true:
 
-- `WorkbenchRowDetailApiRoutes.legacy_row_detail` has stronger caller evidence showing the fallback is unreachable in all supported local/legacy modes.
+- `WorkbenchRowDetailApiRoutes.legacy_row_detail` has stronger caller evidence showing the fallback is unreachable in all supported non-SQL/legacy modes.
 - Batch accounting repair has an explicit owner/deletion condition proving the finance repair path is obsolete.
 - A specific old route/service/repository/read model/frontend API path is proven to have no active caller and no finance behavior ambiguity.
