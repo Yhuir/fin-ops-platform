@@ -2834,7 +2834,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(calls[0]["keep_recent_generations_per_scope"], 1)
-        self.assertEqual(calls[0]["keep_days"], 1)
+        self.assertEqual(calls[0]["keep_days"], 0)
         self.assertEqual(calls[0]["limit"], 500)
         self.assertEqual(calls[0]["dry_run"], True)
 

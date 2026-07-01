@@ -201,7 +201,7 @@ scripts/check-read-model-scope-contracts.py \
 
 Workbench 使用 active generation 原子发布模型，`read_model.workbench_generations.status='active'`
 是页面读路径的边界。发布新的月份或 `all` active generation 后，repository 会对本次发布涉及的
-scope 执行 bounded retention：保留每个 scope 最近 1 个非 active generation，且只删除超过 1 天的
+scope 执行 bounded retention：保留每个 scope 最近 1 个非 active generation，并清理其余已被替代的
 旧 generation，每次最多 500 个。retention 只删除 `read_model.workbench_*` generation 投影行，
 不删除 `app.*`、`job.*` 或其他业务事实；删除条件始终包含 `status <> 'active'`。
 
@@ -225,9 +225,8 @@ tail -n 100 /var/log/fin-ops/workbench-generation-prune-$(date +%Y%m%d).log
 满盘状态下进一步压缩可用空间。若清理后 Workbench 仍处于 `refreshing`，必须继续检查 active generation
 consistency failure、dirty scope 和 worker defer 原因；不能把磁盘空间恢复误判为 read model 已 fresh。
 
-如果 `--keep-days 1` dry-run 没有候选，而当天大量 superseded generation 已经阻塞 refresh，可执行一次
-显式 emergency 清理。该命令仍只删非 active generation，仍保留每个 scope 最近 1 个非 active
-generation；`--keep-days 0` 禁止作为 timer 默认值使用：
+如果当天大量 superseded generation 已经阻塞 refresh，可执行一次显式清理。该命令仍只删非 active
+generation，仍保留每个 scope 最近 1 个非 active generation；`--keep-days 0` 是默认策略：
 
 ```bash
 set -a

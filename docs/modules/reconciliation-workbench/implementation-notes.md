@@ -80,8 +80,8 @@
 
 - 目标：补齐生产根分区 99% 且当天 superseded generation 堆积时的受控清理入口，避免 Workbench refresh 因磁盘不足持续失败。
 - 影响范围：`PostgresReadModelRepository.preview_workbench_generation_retention(...)`、`fin_ops_platform.tools.prune_workbench_generations` 和 runtime worker 运维文档。
-- 关键决策：默认 retention 仍保留每个 scope 最近 1 个非 active generation、超过 1 天才删；显式传 `--keep-days 0` 时允许 emergency 删除当天非 active generation。repository 删除仍限定 `status <> 'active'`，不触碰 `app.*`、`job.*` 或业务事实表。
-- 文档影响：更新 `docs/operations/runtime-worker-governance.md`，记录 `--keep-days 0` 只能作为人工确认后的 emergency 参数使用，并修正 `workbench_generation_stats` 表名。
+- 关键决策：默认 retention 保留每个 scope 最近 1 个非 active generation，其余当天 superseded/failed generation 也允许删除。repository 删除仍限定 `status <> 'active'`，不触碰 `app.*`、`job.*` 或业务事实表。
+- 文档影响：更新 `docs/operations/runtime-worker-governance.md`，记录 `--keep-days 0` 是默认策略，并修正 `workbench_generation_stats` 表名。
 - 测试覆盖：新增 CLI 显式 `--keep-days 0` 合同测试和 repository preview 参数传递测试。
 - 验证命令：见本轮最终说明。
 - 未测风险：需要部署后执行 emergency prune、普通 `VACUUM (ANALYZE)`、重建 `2026-06`/`all` active generation，并跑生产 read/API smoke。
