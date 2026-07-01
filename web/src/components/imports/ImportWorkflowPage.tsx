@@ -24,7 +24,7 @@ import {
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
 import { confirmEtcImportSession, fetchReadyEtcReconciliationTasks, previewEtcZipFiles } from "../../features/etc/api";
-import { fetchWorkbenchSettings, fetchWorkbenchWithProgress } from "../../features/workbench/api";
+import { fetchWorkbenchInitialPage, fetchWorkbenchSettings } from "../../features/workbench/api";
 import { waitForOperationFreshness } from "../../features/operationBarrier/api";
 import type {
   ImportBatchType,
@@ -1252,7 +1252,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       if (payload.operationBarrierTargets.length > 0) {
         await waitForOperationFreshness(payload.operationBarrierTargets);
       } else {
-        await fetchWorkbenchWithProgress(WORKBENCH_VIEW_MONTH);
+        await fetchWorkbenchInitialPage(WORKBENCH_VIEW_MONTH);
       }
       setProgress({ tone: "success", label: `已导入 ${confirmedCount} 个文件。` });
     } catch {

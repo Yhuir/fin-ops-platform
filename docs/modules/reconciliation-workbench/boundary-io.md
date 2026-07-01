@@ -1,13 +1,13 @@
 # 关联台模块边界与 I/O
 
-日期：2026-06-30
+日期：2026-07-01
 
 ## 模块化状态
 
 - 状态：partial
 - 当前边界可信度：medium
-- 目标边界：页面查询走 `workbench` read model active generation；写操作通过 workbench action/relation service 进入关系事实源和 dirty scope。
-- 当前缺口：`server.py` 与历史 workbench service 仍保留部分入口，后续变更必须继续向 route owner、service、repository/read model 边界收敛。
+- 目标边界：页面查询走 `workbench` read model active generation；首屏 summary 只读物化 `read_model.workbench_summary`，groups summary 页只输出 UI 必需字段；写操作通过 workbench action/relation service 进入关系事实源和 dirty scope。
+- 当前缺口：`server.py` 与历史 workbench service 仍保留部分入口，`GET /api/workbench` full payload、row detail legacy fallback 和 matching worker snapshot bridge 仍是旧链路污染风险，后续变更必须继续向 route owner、service、repository/read model 边界收敛。
 - 旧代码删除条件：没有 API、前端、worker、测试继续读取 legacy live/pickle 路径，并且 active generation freshness 与回归测试覆盖写后刷新。
 
 ## 职责边界
@@ -31,6 +31,7 @@
 | --- | --- | --- |
 | 页面过滤、月份、分页、候选分组操作 | `web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/*` | 前端状态只进入 workbench API，不直接拼持久化查询 |
 | 查询请求 | `backend/src/fin_ops_platform/app/routes_workbench.py`、历史 `server.py` 入口 | 必须返回 read model freshness/status |
+| 首屏读取 | `fetchWorkbenchInitialPage(...)` -> `/api/workbench/summary` + `/api/workbench/groups` | summary 缺失时返回 refreshing/stale 并入队，不允许在请求线程从 `workbench_group_rows` 或 `app.invoices` 重算；groups `detail_level=summary` 不输出 search/debug/raw payload |
 | 写操作 | workbench action/relation services | 写后污染受影响 workbench/workbench_relation/downstream scopes |
 | 流水规则批量处理 relation metadata | `workbench_relation` / bank-flow-rule-batch submit and tag-rule sync | `special_metadata.requires_oa`、`requires_invoice` 决定 `relation_mode=bank_flow_rule_batch` 是否具备进入 paired 区的 row type；`source_row_count>3` 时默认折叠。Workbench 不读取当前标签设置作为 fallback；规则 owner 必须在保存设置后同步 active relation metadata。 |
 | 外部往来闭环 relation metadata | `workbench_relation` / turnover manual closure and tag-rule sync | `relation_mode=turnover_manual_closure` 且 metadata 显式声明 `requires_oa` / `requires_invoice` 时，按 required row type 判定 open/paired；metadata 缺失的旧关系 fail closed。旧 `turnover:* manual_confirmed` 必须由规则 owner 通过 relation command 升级，Workbench 不回读当前标签设置。 |
@@ -44,6 +45,8 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 关联台页面 payload | 前端 workbench components | 来自 active generation read model |
+| Summary payload | 前端首屏和 App 状态 | 来自 `read_model.workbench_summary` 物化结果；缺少 `summary` 视为 read model 未完成，不做热路径 repair |
+| Groups summary page | 前端三栏列表 | 保留 rows、counts、display tags、核心 decision 字段；剔除 `searchable_text`、`source_versions`、`group_metadata`、`object_identity*`、decision evidence/debug 等非首屏 UI 字段 |
 | paired/open 分区 | 前端 workbench components | 已确认 `bank_flow_rule_batch`、`turnover_manual_closure` 或 legacy no-OA relation 若缺少 metadata 声明要求的 OA 或发票 row，必须留在 open 区；补齐 required row type 后才进入 paired 区 |
 | 折叠批次展示 | `CandidateGroupGrid` | `collapsed_summary` 默认只展示摘要 row 和“展开 N 条/张明细”按钮；不得再渲染“当前显示 1 条摘要 / 实际 N 条流水”等绝对定位计数文案，避免与流水标签和日期重叠。 |
 | 配对/撤回结果 | 调用方和页面刷新 | 返回业务结果并触发 dirty scope |
@@ -58,6 +61,7 @@
 - Partition：month scope active generation；`all` 聚合 active month shards。
 - Worker：`workbench`
 - 特殊例外：保留 active generation 原子发布模型，不机械改成普通 read model gateway。
+- Summary 物化合同：`read_model.workbench_summary` 是 summary 读路径唯一事实源；repository 不再用 groups/group_rows/app.invoices 在 API 请求内补算 summary。
 
 ## 文件范围
 
@@ -89,6 +93,7 @@
 ## 当前缺口和删除条件
 
 - 对 legacy workbench API 的任何修改都必须同时写清是否仍有调用方。
+- `fetchWorkbenchInitialPage` 是当前首屏和导入后 fallback 刷新入口；`fetchWorkbenchWithProgress` / `/api/workbench` full payload 只允许作为兼容迁移面存在，不能重新进入页面 runtime 主链路。
 - 删除旧路径前必须证明 route、frontend、worker、tests、生产脚本都不再依赖。
 - legacy exception action 不得再丢弃 `_apply_exception_payload` 计算出的 affected scopes；删除旧异常入口前必须保留 target envelope 回归。
 

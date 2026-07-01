@@ -29,6 +29,30 @@
 
 ## 历史记录
 
+## 2026-07-01 - 跨月 active relation 月度投影漏读修复
+
+- 目标：修复生产 `workbench:all` / `2026-06` 卡在 `active_relation_open_membership` consistency failure，导致关联台持续 refreshing、Load 变慢的问题。
+- 影响范围：`WorkbenchSqlProjectionBuilder._active_pair_relations_for_month(...)`、Workbench SQL projection schema version、月度 active generation 重建和 all aggregate。
+- 真实原因：生产样本显示 active relation 的 `month_scope` 可落在 2026-04/2026-05，但 relation 内的 invoice、OA 或 bank row 属于 2026-06 等其它月份。旧月度投影查询同时要求 `month_scope = 当前月` 和 `row_ids && 当前月源行`，把这些跨月 relation 漏掉；对应 row 继续按普通 open/temp group 发布，consistency checker 正确报 `active_relation_open_membership`。
+- 关键决策：月度 Workbench 投影读取 active relation 时以 `row_ids && 当前月行集合` 为边界，去掉 `month_scope` 过滤；`month_scope` 只是 relation 创建归属，不是跨月成员投影范围。保留 `row_ids` GIN overlap 约束，不新增缓存或新 worker。同步 bump `WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION=2026-07-01-cross-month-active-relation-v1`，让旧 active generation 按 schema mismatch 重建。
+- 文档影响：更新本模块实施记录、状态机、测试矩阵和 GSD planning 记录。
+- 测试覆盖：新增 `tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_sql_projection_reads_cross_month_active_relations_by_row_overlap`；既有 grouping/consistency 测试继续覆盖 relation 进入投影后必须进入 canonical `case:<case_id>` group 或合法 paired group。
+- 验证命令：见本轮最终说明。
+- 未测风险：需要部署后由 worker 重建生产 `2026-06` 和 `all` scope，再验证 `active_relation_open_membership` 清零、App Health 收敛和首屏 p95。
+
+## 2026-07-01 - 关联台 Load 热路径收窄和生产 retention 证据
+
+- 目标：按 GSD 主控 prompt 闭环分析并执行关联台首屏读取性能第一轮修复，优先消除请求线程内热路径重算和过宽 summary payload，同时用生产只读证据定位同步慢的真实阻塞。
+- 影响范围：`PostgresReadModelRepository.get_workbench_summary(...)`、groups summary compaction、导入后 Workbench fallback 刷新、Workbench generation retention 工具和 runtime-worker 运维文档。
+- 关键决策：`read_model.workbench_summary` 是 summary 读路径唯一事实源；缺 summary 时返回未完成，由 query facade/freshness 边界入队刷新，禁止在 API 请求内 join `workbench_group_rows` 或读取 `app.invoices` 补算。groups `detail_level=summary` 只输出首屏 UI 必需字段，剔除 `searchable_text`、debug/source/object identity、decision evidence 等重字段。生产 retention 收紧为每 scope 保留 1 个非 active generation、超过 1 天可删、每批最多 500，且永远不删 active generation。
+- 生产证据：2026-07-01 生产 profiling 显示 `groups open summary page1` 响应约 2.2MB，其中 group `searchable_text` 约 1.26MB；根分区一度 100%，Workbench read model generation/TOAST 膨胀导致 `No space left on device`。已在生产执行 systemd journal 限额、一个 bounded 非 active generation 删除批次和普通 `VACUUM (ANALYZE)`，空间恢复到可继续诊断状态。
+- 剩余阻塞：生产 `workbench:all` 与 `2026-06` 仍为 `refreshing`，当前 blocker 已从满盘转为 active generation consistency failure：`active_relation_open_membership`。下一轮必须定位 relation/projection 分区一致性，不能继续盲删 read model 行，也不能把旧 failed/dirty 状态手工改 fresh。
+- 文档影响：更新本模块 `boundary-io.md`、`tests.md`、本实施记录、`docs/operations/runtime-worker-governance.md` 和 GSD planning 记录。
+- 测试覆盖：新增/调整 Workbench SQL runtime 测试，覆盖 summary 只读物化结果、summary 缺失不热路径 repair、groups summary 重字段裁剪、retention CLI 默认合同；前端导入 fallback 改为 `fetchWorkbenchInitialPage(...)`，沿用 Workbench API 测试保护兼容面。
+- 验证命令：见本轮最终说明。
+- 未测风险：本地代码尚未部署到远程生产；生产 API p95、浏览器首屏可交互时间、Redis cache-hit/cold-cache 对比和 read_model enqueue-to-fresh 仍需部署后 smoke。生产剩余 `active_relation_open_membership` 一致性失败需要下一条 GSD prompt 专项修复。
+- 后续事项：执行下一条主控 prompt：先修复 active relation open membership 一致性，再部署并跑生产 smoke；之后再删除 `/api/workbench` full payload、row detail legacy fallback 和 matching worker snapshot bridge。
+
 ## 2026-06-30 - 自动匹配正式化和关系二态口径
 
 - 目标：把关联台用户关系状态收敛为正式配对关系和无配对关系，取消“候选 OA/候选关系”作为下游业务状态。

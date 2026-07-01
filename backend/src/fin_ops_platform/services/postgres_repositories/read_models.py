@@ -40,9 +40,9 @@ WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggrega
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
-WORKBENCH_GENERATION_RETENTION_KEEP_RECENT = 3
+WORKBENCH_GENERATION_RETENTION_KEEP_RECENT = 1
 WORKBENCH_GENERATION_RETENTION_KEEP_DAYS = 1
-WORKBENCH_GENERATION_RETENTION_LIMIT = 100
+WORKBENCH_GENERATION_RETENTION_LIMIT = 500
 LOGGER = logging.getLogger(__name__)
 
 
@@ -5493,16 +5493,7 @@ class PostgresReadModelRepository:
                 if isinstance(result.get("summary"), dict):
                     result["summary"] = _normalize_workbench_summary_counts(result["summary"])
                 else:
-                    structured_summary = self._workbench_summary_counts_from_group_rows(
-                        scope_key=normalized_scope_key,
-                        generation_id=active_generation_id,
-                    )
-                    if isinstance(structured_summary, dict):
-                        result["summary"] = structured_summary["summary"]
-                        result["generated_at"] = (
-                            structured_summary.get("generated_at")
-                            or text(materialized_row.get("generated_at"))
-                        )
+                    return None
                 result.setdefault("month", normalized_scope_key)
                 result.setdefault("scope_key", normalized_scope_key)
                 result.setdefault("generated_at", text(materialized_row.get("generated_at")))
@@ -5519,116 +5510,7 @@ class PostgresReadModelRepository:
                 result.pop("diagnostics", None)
                 return result
 
-        structured_summary = self._workbench_summary_counts_from_group_rows(
-            scope_key=normalized_scope_key,
-            generation_id=active_generation_id,
-        )
-        if not isinstance(structured_summary, dict):
-            return None
-        summary = structured_summary["summary"]
-        generated_at = structured_summary.get("generated_at")
-        refresh_status = self.get_workbench_refresh_status(scope_key=normalized_scope_key)
-        return {
-            "month": normalized_scope_key,
-            "scope_key": normalized_scope_key,
-            "summary": summary,
-            "invoice_inventory": self._workbench_invoice_inventory(
-                scope_key=normalized_scope_key,
-                generation_id=active_generation_id,
-            ),
-            "read_model_status": refresh_status["read_model_status"],
-            "generated_at": generated_at,
-            "source_versions": active_source_versions,
-            "active_generation_id": active_generation_id,
-            "read_model_version": active_generation_id,
-        }
-
-    def _workbench_summary_counts_from_group_rows(
-        self,
-        *,
-        scope_key: str,
-        generation_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        normalized_scope_key = str(scope_key or "").strip() or "all"
-        group_where, group_params = self._workbench_scope_filter(normalized_scope_key)
-        generation_clause = ""
-        generation_params: list[Any] = []
-        if generation_id:
-            generation_clause = " and g.generation_id = %s"
-            generation_params.append(generation_id)
-        group_rows = self._connection.fetch_all(
-            f"""
-            select
-                g.zone,
-                count(distinct g.group_id)::bigint as count,
-                count(distinct r.row_id) filter (
-                    where r.pane = 'oa'
-                      and coalesce(r.row_role, '') <> 'summary'
-                )::bigint as oa_count,
-                count(distinct r.row_id) filter (
-                    where r.pane = 'bank'
-                      and coalesce(r.row_role, '') <> 'summary'
-                      and coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'
-                )::bigint as bank_count,
-                count(distinct r.row_id) filter (
-                    where r.pane = 'invoice'
-                      and coalesce(r.row_role, '') <> 'summary'
-                )::bigint as invoice_count
-            from read_model.workbench_groups
-            g
-            left join read_model.workbench_group_rows r
-              on r.scope_key = g.scope_key
-             and r.generation_id = g.generation_id
-             and r.zone = g.zone
-             and r.group_id = g.group_id
-            where g.{group_where}{generation_clause}
-            group by g.zone
-            """,
-            tuple([*group_params, *generation_params]),
-        )
-        generated_row = self._connection.fetch_one(
-            f"""
-            select max(generated_at)::text as generated_at
-            from read_model.workbench_groups
-            where {group_where}{generation_clause.replace('g.', '')}
-            """,
-            tuple([*group_params, *generation_params]),
-        )
-        summary = {
-            "oa_count": 0,
-            "bank_count": 0,
-            "invoice_count": 0,
-            "paired_count": 0,
-            "open_count": 0,
-            "exception_count": 0,
-            "zone_counts": _empty_workbench_zone_counts(),
-        }
-        for row in group_rows:
-            zone = text(row.get("zone")) or ""
-            count = int_value(row.get("count"), 0)
-            if zone == "paired":
-                summary["paired_count"] += count
-            elif zone == "open":
-                summary["open_count"] += count
-            if zone in {"paired", "open"}:
-                zone_counts = summary["zone_counts"][zone]
-                zone_counts["groups"] += count
-                zone_counts["oa"] += int_value(row.get("oa_count"), 0)
-                zone_counts["bank"] += int_value(row.get("bank_count"), 0)
-                zone_counts["invoice"] += int_value(row.get("invoice_count"), 0)
-                zone_counts["rows"] = zone_counts["oa"] + zone_counts["bank"] + zone_counts["invoice"]
-        for zone in ("paired", "open"):
-            zone_counts = summary["zone_counts"][zone]
-            summary["oa_count"] += zone_counts["oa"]
-            summary["bank_count"] += zone_counts["bank"]
-            summary["invoice_count"] += zone_counts["invoice"]
-        generated_at = text((generated_row or {}).get("generated_at"))
-        if generated_at is None and not any(summary.values()):
-            return None
-        return {
-            "summary": summary,
-            "generated_at": generated_at,
-        }
+        return None
 
     def _workbench_bank_count_diagnostics(
         self,
@@ -10958,7 +10840,22 @@ def _workbench_payload_row_matches_preview_criteria(
 
 
 def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str, Any]:
-    compact = without_keys(dict(group), {"raw_payload", "payload"})
+    compact = without_keys(
+        dict(group),
+        {
+            "raw_payload",
+            "payload",
+            "searchable_text",
+            "source_versions",
+            "group_metadata",
+            "oa_sort_min",
+            "oa_sort_max",
+            "bank_sort_min",
+            "bank_sort_max",
+            "invoice_sort_min",
+            "invoice_sort_max",
+        },
+    )
     normalized_counts = _with_workbench_group_counts(group)
     compact["row_counts"] = _normalize_workbench_row_counts(group.get("row_counts"), normalized_counts["row_counts"])
     compact["display_row_counts"] = _normalize_workbench_row_counts(
@@ -10998,7 +10895,7 @@ def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str
 
 def _compact_workbench_row_for_summary_page(row: dict[str, Any]) -> dict[str, Any]:
     compact_source = _normalize_workbench_invoice_display_fields(row)
-    return without_keys(
+    compact = without_keys(
         compact_source,
         {
             "detail_fields",
@@ -11006,12 +10903,48 @@ def _compact_workbench_row_for_summary_page(row: dict[str, Any]) -> dict[str, An
             "payload",
             "original_payload",
             "source_payload",
+            "source_links",
+            "source_versions",
             "artifacts",
             "evidences",
             "ocr_text",
             "full_text",
+            "searchable_text",
+            "object_identity",
+            "object_identity_key",
+            "object_identity_kind",
+            "object_identity_source",
+            "object_identity_confidence",
+            "candidate_ids",
+            "group_metadata",
         },
     )
+    decision = compact.get("workbench_reconciliation_decision")
+    if isinstance(decision, dict):
+        compact["workbench_reconciliation_decision"] = _compact_workbench_reconciliation_decision_for_summary_page(decision)
+    reconciliation_decision = compact.get("reconciliation_decision")
+    if isinstance(reconciliation_decision, dict):
+        compact["reconciliation_decision"] = _compact_workbench_reconciliation_decision_for_summary_page(
+            reconciliation_decision
+        )
+    return compact
+
+
+def _compact_workbench_reconciliation_decision_for_summary_page(decision: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in decision.items()
+        if key
+        not in {
+            "evidence",
+            "blockers",
+            "source_versions",
+            "sourceVersions",
+            "debug",
+            "raw_payload",
+            "payload",
+        }
+    }
 
 
 def _normalize_workbench_invoice_display_fields(row: dict[str, Any]) -> dict[str, Any]:

@@ -478,8 +478,25 @@ class WorkbenchSummaryGroupsConnection(WorkbenchSqlReadConnection):
                         "group_type": "candidate",
                         "match_confidence": "medium",
                         "reason": "sql page",
+                        "searchable_text": "large searchable text that must stay out of summary responses",
+                        "source_versions": {"source_version": 12},
+                        "group_metadata": {"debug": True},
                         "oa_rows": [
-                            {"id": f"oa-{index}", "type": "oa", "detail_fields": {"OA单号": f"215{index}"}}
+                            {
+                                "id": f"oa-{index}",
+                                "type": "oa",
+                                "detail_fields": {"OA单号": f"215{index}"},
+                                "source_versions": {"source_version": 12},
+                                "object_identity": {"key": f"oa-{index}", "kind": "oa_row"},
+                                "object_identity_key": f"oa-{index}",
+                                "workbench_reconciliation_decision": {
+                                    "decision_id": f"decision-{index}",
+                                    "decision_status": "proposed",
+                                    "warnings": [{"code": "amount_mismatch", "message": "金额不一致"}],
+                                    "evidence": {"debug": "large"},
+                                    "source_versions": {"rules": "v1"},
+                                },
+                            }
                             for index in range(1, 6)
                         ],
                         "bank_rows": [],
@@ -618,6 +635,27 @@ class SwitchingActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnect
             if "generation_id = %s" in normalized:
                 return {"source_versions": {"source_version": 12}}
             return {"source_versions": {"source_version": 99}}
+        if "from read_model.workbench_summary" in normalized:
+            self.fetch_one_calls.append((normalized, params))
+            return {
+                "scope_key": "all",
+                "generation_id": "gen-active",
+                "generated_at": "2026-05-28T09:00:00+00:00",
+                "source_versions": {"source_version": 12},
+                "payload": {
+                    "month": "all",
+                    "scope_key": "all",
+                    "summary": {
+                        "oa_count": 1,
+                        "bank_count": 2,
+                        "invoice_count": 3,
+                        "paired_count": 4,
+                        "open_count": 5,
+                        "exception_count": 0,
+                    },
+                    "invoice_inventory": {},
+                },
+            }
         return super().fetch_one(sql, params)
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
@@ -1083,6 +1121,33 @@ class PendingClaimedBankProjectionConnection(WorkbenchProjectionSettingsConnecti
                 },
             ]
         return super().fetch_all(sql, params)
+
+
+class CrossMonthActiveRelationProjectionConnection(WorkbenchProjectionSettingsConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.active_relation_query = ""
+        self.active_relation_params: tuple = ()
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.workbench_pair_relations" not in normalized:
+            return super().fetch_all(sql, params)
+        self.active_relation_query = normalized
+        self.active_relation_params = params
+        return [
+            {
+                "case_id": "decision:2026-05:bank_invoice_exact_amount:txn_imported_0118:inv_imported_0481",
+                "relation_mode": "manual_confirmed",
+                "month_scope": "2026-05-01",
+                "row_ids": ["txn_imported_0118", "inv_imported_0481"],
+                "row_types": ["bank", "invoice"],
+                "amount_check": {},
+                "special_metadata": {},
+                "source_versions": {},
+                "raw_payload": {},
+            }
+        ]
 
 
 class EtcSummaryProjectionConnection(WorkbenchProjectionSettingsConnection):
@@ -2060,6 +2125,17 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertIn("from app.workbench_pair_relations", connection.active_relation_query)
 
+    def test_sql_projection_reads_cross_month_active_relations_by_row_overlap(self) -> None:
+        connection = CrossMonthActiveRelationProjectionConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        relations = builder._active_pair_relations_for_month("2026-06", {"inv_imported_0481"})
+
+        self.assertEqual(len(relations), 1)
+        self.assertEqual(relations[0]["case_id"], "decision:2026-05:bank_invoice_exact_amount:txn_imported_0118:inv_imported_0481")
+        self.assertNotIn("month_scope is null or month_scope =", connection.active_relation_query)
+        self.assertEqual(connection.active_relation_params, (["inv_imported_0481"],))
+
     def test_sql_projection_scope_shards_include_etc_business_sources(self) -> None:
         connection = WorkbenchScopeShardEtcConnection()
         builder = WorkbenchSqlProjectionBuilder(connection=connection)
@@ -2390,27 +2466,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
 
     def test_repository_reads_workbench_summary_without_full_snapshot_payloads(self) -> None:
-        connection = WorkbenchSummaryGroupsConnection(dirty_status="processing")
+        connection = MaterializedWorkbenchSummaryConnection()
         repository = PostgresReadModelRepository(connection)
 
         summary = repository.get_workbench_summary(scope_key="all")
 
-        self.assertEqual(summary["summary"]["oa_count"], 3)
-        self.assertEqual(summary["summary"]["bank_count"], 4)
-        self.assertEqual(summary["summary"]["invoice_count"], 5)
-        self.assertEqual(summary["summary"]["paired_count"], 1)
-        self.assertEqual(summary["summary"]["open_count"], 2)
-        self.assertEqual(summary["invoice_inventory"]["system_total"], 9)
-        self.assertEqual(summary["invoice_inventory"]["oa_attachment_total"], 5)
-        self.assertEqual(summary["read_model_status"], "refreshing")
-        self.assertEqual(summary["generated_at"], "2026-05-22T09:30:00+00:00")
-        self.assertEqual(
-            summary["summary"]["zone_counts"],
-            {
-                "paired": {"groups": 1, "oa": 1, "bank": 2, "invoice": 0, "rows": 3},
-                "open": {"groups": 2, "oa": 2, "bank": 2, "invoice": 5, "rows": 9},
-            },
-        )
+        self.assertEqual(summary["summary"]["oa_count"], 10)
+        self.assertEqual(summary["summary"]["bank_count"], 11)
+        self.assertEqual(summary["summary"]["invoice_count"], 12)
+        self.assertEqual(summary["summary"]["paired_count"], 13)
+        self.assertEqual(summary["summary"]["open_count"], 14)
+        self.assertEqual(summary["invoice_inventory"]["system_total"], 99)
+        self.assertEqual(summary["read_model_status"], "fresh")
+        self.assertEqual(summary["generated_at"], "2026-05-22T10:00:00+00:00")
         self.assertFalse(
             any("jsonb_array_length(payload->'bank_rows')" in sql for sql, _params in connection.fetch_all_calls)
         )
@@ -2420,6 +2488,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 for sql, _params in connection.fetch_all_calls
             )
         )
+
+    def test_repository_missing_workbench_summary_does_not_repair_from_group_rows(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection(dirty_status="processing")
+        repository = PostgresReadModelRepository(connection)
+
+        summary = repository.get_workbench_summary(scope_key="all")
+
+        self.assertIsNone(summary)
+        self.assertTrue(any("from read_model.workbench_summary" in sql for sql, _params in connection.fetch_one_calls))
+        self.assertFalse(
+            any("left join read_model.workbench_group_rows" in sql for sql, _params in connection.fetch_all_calls)
+        )
+        self.assertFalse(any("from app.invoices" in sql for sql, _params in connection.fetch_one_calls))
 
     def test_repository_reads_materialized_workbench_summary_without_hot_path_repair(self) -> None:
         connection = MaterializedWorkbenchSummaryConnection()
@@ -2749,14 +2830,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         with patch.object(prune_workbench_generations.PostgresSettings, "from_env", return_value=object()):
             with patch.object(prune_workbench_generations, "PostgresConnection", return_value=object()):
                 with patch.object(prune_workbench_generations, "PostgresReadModelRepository", FakeRepository):
-                    exit_code = prune_workbench_generations.main(
-                        ["--keep-days", "7", "--limit", "10"],
-                        stdout=StringIO(),
-                    )
+                    exit_code = prune_workbench_generations.main([], stdout=StringIO())
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(calls[0]["keep_days"], 7)
-        self.assertEqual(calls[0]["limit"], 10)
+        self.assertEqual(calls[0]["keep_recent_generations_per_scope"], 1)
+        self.assertEqual(calls[0]["keep_days"], 1)
+        self.assertEqual(calls[0]["limit"], 500)
         self.assertEqual(calls[0]["dry_run"], True)
 
     def test_repository_filters_workbench_groups_page_from_structured_group_rows(self) -> None:
@@ -3050,7 +3129,16 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["collapsed_rows"]["oa"]], ["collapsed-oa-1", "collapsed-oa-2", "collapsed-oa-3"])
         self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
         self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
+        self.assertNotIn("searchable_text", group)
+        self.assertNotIn("source_versions", group)
+        self.assertNotIn("group_metadata", group)
         self.assertNotIn("detail_fields", group["oa_rows"][0])
+        self.assertNotIn("source_versions", group["oa_rows"][0])
+        self.assertNotIn("object_identity", group["oa_rows"][0])
+        self.assertNotIn("object_identity_key", group["oa_rows"][0])
+        self.assertEqual(group["oa_rows"][0]["workbench_reconciliation_decision"]["decision_id"], "decision-1")
+        self.assertNotIn("evidence", group["oa_rows"][0]["workbench_reconciliation_decision"])
+        self.assertNotIn("source_versions", group["oa_rows"][0]["workbench_reconciliation_decision"])
         self.assertNotIn("raw_payload", group)
 
     def test_repository_groups_page_row_counts_use_fact_rows_before_pagination(self) -> None:
@@ -3163,25 +3251,29 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         connection = DiagnosticsConnection()
         repository = PostgresReadModelRepository(connection)
 
-        summary = repository.get_workbench_summary(scope_key="all")
-        assert summary is not None
+        summary = {
+            "bank_count": 4,
+            "zone_counts": {
+                "paired": {"groups": 1, "oa": 1, "bank": 2, "invoice": 0, "rows": 3},
+                "open": {"groups": 2, "oa": 2, "bank": 2, "invoice": 5, "rows": 9},
+            },
+        }
         diagnostics = repository._workbench_bank_count_diagnostics(
             scope_key="all",
-            summary=summary["summary"],
-            generation_id=summary["active_generation_id"],
+            summary=summary,
+            generation_id="gen-active",
         )
 
-        self.assertEqual(summary["summary"]["bank_count"], 4)
+        self.assertEqual(summary["bank_count"], 4)
         self.assertEqual(
-            summary["summary"]["bank_count"],
-            summary["summary"]["zone_counts"]["paired"]["bank"] + summary["summary"]["zone_counts"]["open"]["bank"],
+            summary["bank_count"],
+            summary["zone_counts"]["paired"]["bank"] + summary["zone_counts"]["open"]["bank"],
         )
-        self.assertNotIn("diagnostics", summary)
         self.assertEqual(diagnostics["bank_detail_count"], 5)
         self.assertEqual(diagnostics["ignored_bank_count"], 1)
         self.assertEqual(
             diagnostics["bank_detail_count"],
-            summary["summary"]["bank_count"] + diagnostics["ignored_bank_count"],
+            summary["bank_count"] + diagnostics["ignored_bank_count"],
         )
         self.assertEqual(diagnostics["bank_detail_reconciliation_status"], "matched")
         self.assertTrue(

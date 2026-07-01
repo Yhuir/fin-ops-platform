@@ -12,8 +12,8 @@ from fin_ops_platform.services.postgres_repositories.read_models import Postgres
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Prune old non-active Workbench read model generations.")
-    parser.add_argument("--keep-recent-generations-per-scope", type=int, default=3)
-    parser.add_argument("--keep-days", type=int, default=14)
+    parser.add_argument("--keep-recent-generations-per-scope", type=int, default=1)
+    parser.add_argument("--keep-days", type=int, default=1)
     parser.add_argument("--limit", type=int, default=500)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="Preview candidates without deleting them. This is the default.")

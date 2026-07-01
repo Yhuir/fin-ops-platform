@@ -201,8 +201,8 @@ scripts/check-read-model-scope-contracts.py \
 
 Workbench 使用 active generation 原子发布模型，`read_model.workbench_generations.status='active'`
 是页面读路径的边界。发布新的月份或 `all` active generation 后，repository 会对本次发布涉及的
-scope 执行 bounded retention：保留每个 scope 最近 3 个非 active generation，且只删除超过 1 天的
-旧 generation，每次最多 100 个。retention 只删除 `read_model.workbench_*` generation 投影行，
+scope 执行 bounded retention：保留每个 scope 最近 1 个非 active generation，且只删除超过 1 天的
+旧 generation，每次最多 500 个。retention 只删除 `read_model.workbench_*` generation 投影行，
 不删除 `app.*`、`job.*` 或其他业务事实；删除条件始终包含 `status <> 'active'`。
 
 retention 是发布后的维护动作，不得让清理失败回滚已经发布成功的 fresh generation。生产环境还应
@@ -217,6 +217,13 @@ tail -n 100 /var/log/fin-ops/workbench-generation-prune-$(date +%Y%m%d).log
 如果 Workbench read model 表再次膨胀，先确认 retention timer、`workbench_generations` 状态分布、
 `pg_wal` 大小和 `/health/ready`。不得直接 `VACUUM FULL` 大表，除非根分区或临时表空间已满足重写
 空间需求；read model 可重建但业务事实表不可清空。
+
+当根分区已经接近或达到满盘，按以下顺序处理：先降低 systemd journal 占用，随后只 dry-run
+非 active generation 候选并执行一个 bounded batch，接着对 `read_model.workbench_generations`、
+`workbench_groups`、`workbench_group_rows`、`workbench_rows`、`workbench_summary`、`workbench_stats`
+执行普通 `VACUUM (ANALYZE)`。不要连续盲删大量 read model generation，因为删除会产生 WAL，可能在
+满盘状态下进一步压缩可用空间。若清理后 Workbench 仍处于 `refreshing`，必须继续检查 active generation
+consistency failure、dirty scope 和 worker defer 原因；不能把磁盘空间恢复误判为 read model 已 fresh。
 
 ### Workbench matching source-version recovery
 

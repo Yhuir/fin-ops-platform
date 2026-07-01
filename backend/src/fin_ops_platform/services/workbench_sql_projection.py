@@ -47,7 +47,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-23-oa-attachment-source-promotion-v1"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-01-cross-month-active-relation-v1"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -626,11 +626,10 @@ class WorkbenchSqlProjectionBuilder:
                    amount_check, special_metadata, source_versions, raw_payload
             from app.workbench_pair_relations
             where status = 'active'
-              and (month_scope is null or month_scope = %s::date)
               and row_ids && %s::text[]
             order by case_id
             """,
-            (month_start(month), sorted(row_ids)),
+            (sorted(row_ids),),
         )
         result: list[dict[str, Any]] = []
         for row in rows:
