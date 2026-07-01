@@ -39,6 +39,8 @@ class RecordingConnection:
     def __init__(self) -> None:
         self.executed: list[tuple[str, tuple]] = []
         self.executed_many: list[tuple[str, list[tuple]]] = []
+        self.fetched_all: list[tuple[str, tuple]] = []
+        self.fetched_one: list[tuple[str, tuple]] = []
         self.transaction_enters = 0
         self.transaction_exits = 0
 
@@ -54,9 +56,11 @@ class RecordingConnection:
         return len(params_seq)
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        self.fetched_all.append((" ".join(sql.split()), params))
         return []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.fetched_one.append((" ".join(sql.split()), params))
         return None
 
 
@@ -448,6 +452,92 @@ def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() 
         if sql == "delete from app.no_oa_bank_batch_events where batch_id = %s"
     ]
     assert replaced_event_params == [("march-batch",)]
+
+
+def test_bank_flow_rule_batch_save_uses_dedicated_physical_tables() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRepository(connection)
+
+    repository.save_bank_flow_rule_batches(
+        {
+            "batches": {
+                "bank-flow-batch": {
+                    "batch_id": "bank-flow-batch",
+                    "status": "submitted",
+                    "status_bucket": "submitted",
+                    "version": 2,
+                    "scope_month": "2026-03",
+                    "account_key": "acct",
+                    "row_ids": ["txn-1"],
+                    "total_amount": "10.00",
+                    "relation_mode": "bank_flow_rule_batch",
+                }
+            },
+            "audit_log": [{"batch_id": "bank-flow-batch", "operation": "submitted"}],
+        }
+    )
+
+    executed_sql = [sql for sql, _ in connection.executed]
+    assert any("delete from read_model.bank_flow_rule_batch_rows" in sql for sql in executed_sql)
+    assert any("delete from app.bank_flow_rule_batch_events" in sql for sql in executed_sql)
+    assert any("delete from app.bank_flow_rule_batches" in sql for sql in executed_sql)
+    assert any("insert into app.bank_flow_rule_batches(" in sql for sql in executed_sql)
+    assert any("insert into read_model.bank_flow_rule_batch_rows(" in sql for sql in executed_sql)
+    assert any("insert into app.bank_flow_rule_batch_events(" in sql for sql in executed_sql)
+    forbidden_tables = (
+        "app.no_oa_bank_batches",
+        "app.no_oa_bank_batch_events",
+        "read_model.no_oa_bank_batch_rows",
+    )
+    assert not any(forbidden in sql for sql in executed_sql for forbidden in forbidden_tables)
+
+
+def test_no_oa_bank_batch_save_does_not_touch_bank_flow_physical_tables() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRepository(connection)
+
+    repository.save_no_oa_bank_batches(
+        {
+            "batches": {
+                "no-oa-batch": {
+                    "batch_id": "no-oa-batch",
+                    "status": "submitted",
+                    "status_bucket": "submitted",
+                    "version": 2,
+                    "scope_month": "2026-03",
+                    "account_key": "acct",
+                    "row_ids": ["txn-1"],
+                    "total_amount": "10.00",
+                }
+            },
+            "audit_log": [{"batch_id": "no-oa-batch", "operation": "submitted"}],
+        }
+    )
+
+    executed_sql = [sql for sql, _ in connection.executed]
+    forbidden_tables = (
+        "app.bank_flow_rule_batches",
+        "app.bank_flow_rule_batch_events",
+        "read_model.bank_flow_rule_batch_rows",
+    )
+    assert not any(forbidden in sql for sql in executed_sql for forbidden in forbidden_tables)
+
+
+def test_bank_flow_rule_batch_read_model_queries_dedicated_table_without_relation_mode_predicate() -> None:
+    connection = RecordingConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.list_bank_flow_rule_batch_rows(
+        {"month": "2026-03", "bucket": "submitted", "relation_mode": "bank_flow_rule_batch"}
+    )
+    repository.bank_flow_rule_batch_source_versions_summary(
+        {"month": "2026-03", "relation_mode": "bank_flow_rule_batch"}
+    )
+
+    read_sql = [sql for sql, _ in connection.fetched_all]
+    assert any("from read_model.bank_flow_rule_batch_rows" in sql for sql in read_sql)
+    assert not any("from read_model.no_oa_bank_batch_rows" in sql for sql in read_sql)
+    assert not any("payload->>'relation_mode'" in sql for sql in read_sql)
 
 
 def test_workbench_category_confirmation_uses_confirmation_fact_table() -> None:

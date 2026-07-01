@@ -892,15 +892,89 @@ class OutputInvoiceCollectionQueryService:
             invoice
             for invoice in context.list_invoices(month=source_month, invoice_type=InvoiceType.OUTPUT)
         ]
+        current_invoice_ids = {invoice.id for invoice in invoices}
+        all_output_invoices_by_id = {
+            invoice.id: invoice
+            for invoice in context.list_invoices(month="all", invoice_type=InvoiceType.OUTPUT)
+        }
+        context.preload_relation_rows([invoice.id for invoice in invoices])
         grouped: dict[str, list[Invoice]] = {}
         for invoice in invoices:
             grouped.setdefault(self._identity_key(invoice), []).append(invoice)
-        groups = []
+        base_groups = []
         for identity_key, line_items in grouped.items():
             sorted_items = sorted(line_items, key=lambda item: str(item.id))
-            groups.append({"identity_key": identity_key, "primary": sorted_items[0], "line_items": sorted_items})
+            base_groups.append({"identity_key": identity_key, "primary": sorted_items[0], "line_items": sorted_items})
+
+        relation_groups: list[dict[str, Any]] = []
+        emitted_invoice_ids: set[str] = set()
+        emitted_case_ids: set[str] = set()
+        for invoice in invoices:
+            for relation in context.distributed_relations_for_row_ids([invoice.id]):
+                case_id = str(relation.get("case_id") or relation.get("relation_id") or "").strip()
+                if not case_id or case_id in emitted_case_ids or not relation_is_linked(relation):
+                    continue
+                output_invoice_ids = self._relation_output_invoice_ids(relation, all_output_invoices_by_id)
+                if len(output_invoice_ids) <= 1 or invoice.id not in output_invoice_ids:
+                    continue
+                line_items = [
+                    all_output_invoices_by_id[invoice_id]
+                    for invoice_id in output_invoice_ids
+                    if invoice_id in all_output_invoices_by_id
+                ]
+                if not line_items:
+                    continue
+                primary = self._primary_invoice_for_relation_group(line_items, current_invoice_ids=current_invoice_ids)
+                sorted_items = sorted(line_items, key=lambda item: str(item.id))
+                relation_groups.append(
+                    {
+                        "identity_key": self._identity_key(primary),
+                        "primary": primary,
+                        "line_items": sorted_items,
+                        "relation_case_id": case_id,
+                    }
+                )
+                emitted_case_ids.add(case_id)
+                emitted_invoice_ids.update(invoice.id for invoice in line_items)
+
+        groups = [
+            *relation_groups,
+            *[
+                group
+                for group in base_groups
+                if not any(line.id in emitted_invoice_ids for line in group["line_items"])
+            ],
+        ]
         groups.sort(key=lambda group: (str(group["primary"].invoice_date or ""), str(group["identity_key"])))
         return groups
+
+    def _relation_output_invoice_ids(
+        self,
+        relation: dict[str, Any],
+        invoices_by_id: dict[str, Invoice],
+    ) -> list[str]:
+        return _dedupe_ordered(
+            row_id
+            for row_id, row_type in self._typed_relation_rows(relation)
+            if row_type == "invoice" and row_id in invoices_by_id
+        )
+
+    @staticmethod
+    def _primary_invoice_for_relation_group(
+        line_items: list[Invoice],
+        *,
+        current_invoice_ids: set[str],
+    ) -> Invoice:
+        candidates = sorted(
+            line_items,
+            key=lambda invoice: (
+                0 if invoice.id in current_invoice_ids else 1,
+                0 if _invoice_sign(invoice, _invoice_total(invoice)) > 0 else 1,
+                str(invoice.invoice_date or ""),
+                str(invoice.id),
+            ),
+        )
+        return candidates[0]
 
     def _invoice_group_for_invoice_id(
         self,
@@ -1851,6 +1925,18 @@ def _join_non_empty(values: Any) -> str:
         if text and text not in result:
             result.append(text)
     return "；".join(result)
+
+
+def _dedupe_ordered(values: Any) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _within_cent(left: Decimal, right: Decimal) -> bool:

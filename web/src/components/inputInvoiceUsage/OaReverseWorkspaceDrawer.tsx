@@ -480,6 +480,14 @@ export default function OaReverseWorkspaceDrawer({
                         清空选择
                       </button>
                       <span className="input-invoice-usage-rules-tag">已选 {selectedCandidateIds.length} 张</span>
+                      <button
+                        className="input-invoice-usage-button input-invoice-usage-button--primary"
+                        disabled={createDraftDisabled}
+                        onClick={handleCreateDraft}
+                        type="button"
+                      >
+                        {actionLoading === "createDraft" ? "创建草稿中..." : "创建 OA 草稿"}
+                      </button>
                       <label className="input-invoice-usage-rules-field input-invoice-usage-oa-search">
                         <span>搜索</span>
                         <span className="input-invoice-usage-oa-search-control">
@@ -597,28 +605,6 @@ export default function OaReverseWorkspaceDrawer({
                         ) : null}
                       </tbody>
                     </table>
-                  </div>
-                </Section>
-                <Section title="OA 草稿">
-                  {batch?.oaDraftUrl ? (
-                    <DraftStatusPanel batch={batch} />
-                  ) : (
-                    <p className="input-invoice-usage-rules-empty">请选择候选发票后创建 OA 草稿。</p>
-                  )}
-                  <div className="input-invoice-usage-oa-actions">
-                    <button
-                      className="input-invoice-usage-button input-invoice-usage-button--primary"
-                      disabled={createDraftDisabled}
-                      onClick={handleCreateDraft}
-                      type="button"
-                    >
-                      {actionLoading === "createDraft" ? "创建草稿中..." : "创建 OA 草稿"}
-                    </button>
-                    {batch?.oaDraftUrl ? (
-                      <a className="input-invoice-usage-button" href={batch.oaDraftUrl} rel="noreferrer" target="_blank">
-                        打开 OA 草稿
-                      </a>
-                    ) : null}
                   </div>
                 </Section>
               </>
@@ -885,19 +871,6 @@ function TabButton({ active, children, onClick }: { active: boolean; children: R
     >
       {children}
     </button>
-  );
-}
-
-function DraftStatusPanel({ batch }: { batch: InputInvoiceUsageOaReverseBatch }) {
-  return (
-    <article className="input-invoice-usage-oa-batch">
-      <div className="input-invoice-usage-oa-group">
-        <strong>{batch.targetApplicantName || batch.targetApplicantCode || "目标申请人"}</strong>
-        <span className="input-invoice-usage-rules-tag">{batch.invoiceIds.length || batch.invoiceRows.length} 张</span>
-        <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{batch.totalWithTax || "-"}</span>
-      </div>
-      <p>OA 草稿已创建。请在 OA 页面提交后回到这里确认结果。</p>
-    </article>
   );
 }
 

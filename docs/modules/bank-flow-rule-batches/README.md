@@ -4,7 +4,7 @@
 - 类型: 页面模块
 - Route: `/bank-flow-rule-batches`
 - Page key: `bank-flow-rule-batches`
-- 状态: implemented-independent-io。当前生产入口、API、规则抽屉、提交、关联台判定、rebaseline API、独立 application service、独立 read model key、独立 worker event、独立 persistence IO 和 Browser E2E 已接入；底层历史物理批次存储暂由 bank-flow 命名 adapter 兼容，并通过 `relation_mode=bank_flow_rule_batch` 隔离，独立物理表拆分是后续迁移任务。
+- 状态: implemented-modular-closure。当前生产入口、API、规则抽屉、提交、关联台判定、rebaseline API、独立 application service、独立 read model key、独立 worker event、独立 persistence IO、独立 PostgreSQL 批次/read model 表、独立 tag-rule settings family、前端 feature I/O/view model/components 和 Browser E2E 已接入。
 
 ## 修改前必读
 
@@ -20,14 +20,14 @@
 
 ## 当前代码入口
 
-当前代码使用 bank-flow 独立 HTTP route、application boundary、read model key、refresh producer 和 worker event 承载新业务入口；新页面和生产 API 不再使用 `selected_tag_codes` 作为规则事实源。
+当前代码使用 bank-flow 独立 HTTP route、application boundary、read model key、refresh producer、worker event、批次/read model 表和 tag-rule settings key 承载新业务入口；新页面和生产 API 不再使用 `selected_tag_codes` 作为规则事实源。
 
 - Frontend page: `web/src/pages/BankFlowRuleBatchPage.tsx`，通过 `/bank-flow-rule-batches` route 作为流水规则批量处理页。
-- Frontend feature: `web/src/features/bankFlowRuleBatches/*`，API 指向 `/api/bank-flow-rule-batches`。
+- Frontend feature: `web/src/features/bankFlowRuleBatches/api.ts`（HTTP/DTO mapping）、`types.ts`（public DTO/domain types）、`policy.ts`（状态/权限策略）、`viewModel.ts`（格式化、规则 grid view model、operation barrier target helpers）、`components.tsx`（分页、状态标签、label rail）。API 指向 `/api/bank-flow-rule-batches`。
 - Backend route: `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py`，只承载 `/api/bank-flow-rule-batches/*`。
 - Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，bank-flow 不再继承 no-OA application service。
 - Backend read model: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_read_model_repository.py`、`bank_flow_rule_batch_read_model_refresh.py`、`bank_flow_rule_batch_read_model_refresh_producer.py`。
-- Rule persistence: `app_settings.no_oa_bank_batch_tag_selection.requirements_by_tag_code` 作为过渡 settings family；新 API 只读写 `rules`，拒绝 `selected_tag_codes`。
+- Rule persistence: `app_settings.bank_flow_rule_batch_tag_rules.requirements_by_tag_code`；新 API 和服务边界只读写 `rules`，拒绝 `selected_tag_codes`，重复 `tag_code` fail fast。`0083_bank_flow_rule_batch_tag_rules.sql` 只负责一次性从历史 no-OA settings key 复制缺失值。
 - Browser E2E: `web/e2e/bank-flow-rule-batches-flow.spec.ts`。
 
 ## 当前目标边界

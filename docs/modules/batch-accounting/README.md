@@ -41,7 +41,7 @@
 - 银行流水、OA 行和已有关联关系来自 Workbench / Workbench relation read model。
 - `GET /api/batch-accounting` 必须返回 `summary`、`bank_rows`、`oa_rows`、`relations_by_bank_row_id`、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。显式传入 `page/page_size`、`bank_page/bank_page_size` 或 `oa_page/oa_page_size` 时，后端只裁剪对应列表并返回 `pagination`；不传分页参数时保持旧响应 shape。
 - 前端未提交 bucket 首屏默认以 200 行页大小分别请求银行流水和可关联 OA 项，并提供独立分页控件；切换 bucket 或流水年份会重置页码、选择和差额说明，避免跨页旧选择误提交。右侧 OA 不按年份过滤，只展示没有关联银行流水的日常报销 OA 主单；仅发票关系或无流水候选关系不应把该 OA 排除。已提交 bucket 只分页银行关系列表，OA 明细来自当前可见 relation bucket。
-- `POST /api/batch-accounting/submit` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
+- `POST /api/batch-accounting/submit` 必须优先通过 Workbench SQL active read model 读取候选 row payload，并通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注；撤回只恢复真实 relation history，OA 附件 case_id / `existing_case` 显示归属不得被恢复成 active relation。
 - `repair_legacy_case_id_collisions(...)` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 恢复历史 batch relation；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - 前端提交/撤回成功后发送 `workbenchRelationUpdated`，作为同浏览器会话刷新提示；事实源仍以后端 dirty scope、read model freshness 和 worker readiness 为准。
@@ -51,7 +51,7 @@
 - 必须透出 `workbench_relation` read model 状态，不能把非 fresh 空关系显示为真实未提交。
 - `read_model_status !== "fresh"` 时，页面可以展示当前可用 payload 和 freshness 诊断，但不能仅因普通 read model non-fresh 全局阻止提交和撤回；写操作必须由权限/session、DB/目标写模型可用性、canonical relation version/idempotency/owner 状态决定。
 - `GET /api/batch-accounting` 的 relation 读取必须通过现有 relation read facade/freshness 边界请求 `require_fresh`；缺失或 stale scope 只能经 facade/gateway 入队刷新，不能在页面 GET 路径同步 rebuild 或直接写 durable queue。
-- `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须走 command service，并基于 canonical relation、idempotency、owner 状态、权限/session 和 DB 可写性校验；不允许在缺少 command service 时静默写旧 pair service，也不能把普通 relation distribution 追赶中作为默认写阻断条件。
+- `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须走 command service，并基于 canonical relation、idempotency、owner 状态、权限/session、DB 可写性和本次操作 row ids 的 relation readiness 校验；不允许在缺少 command service 时静默写旧 pair service，也不能把整页普通 relation distribution 追赶中作为默认写阻断条件。
 - 前端 submit/withdraw 必须接入 `GlobalOperationOverlayProvider`。写 API 成功后先等待 `workbench_relation` operation barrier 对 affected months fresh，再重新加载批量账务 payload；overlay 关闭只能表示后端 relation read model 已真实收敛，不能用本地事件或前端临时列表移动替代。
 - 批量账务关系变化会影响关联台、银行明细、成本统计、搜索、进项/销项/OA 待付款等依赖关系 read model 或 invoice lifecycle 的页面。
 - read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。

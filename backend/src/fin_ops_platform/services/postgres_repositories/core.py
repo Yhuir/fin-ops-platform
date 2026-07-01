@@ -272,10 +272,8 @@ class PostgresCoreRepository:
                    import_files.session_id, import_files.stored_file_path,
                    import_files.original_filename, import_files.template_kind, import_files.status,
                    import_files.uploaded_by, import_files.uploaded_at,
-                   coalesce(batches.legacy_mongo_id, batches.id::text) as joined_batch_id,
                    import_files.raw_payload
             from app.import_files import_files
-            left join app.import_batches batches on batches.id = import_files.import_batch_id
             {where_sql}
             order by import_files.uploaded_at desc, legacy_id desc
             limit %s offset %s
@@ -832,10 +830,8 @@ class PostgresCoreRepository:
                    import_files.session_id, import_files.stored_file_path,
                    import_files.original_filename, import_files.template_kind, import_files.status,
                    import_files.uploaded_by, import_files.uploaded_at,
-                   coalesce(batches.legacy_mongo_id, batches.id::text) as joined_batch_id,
                    import_files.raw_payload
             from app.import_files import_files
-            left join app.import_batches batches on batches.id = import_files.import_batch_id
             order by import_files.session_id, import_files.original_filename, legacy_id
             """
         )
@@ -1423,8 +1419,8 @@ class PostgresCoreRepository:
             duplicate_count=self._int(payload.get("duplicate_count"), 0),
             suspected_duplicate_count=self._int(payload.get("suspected_duplicate_count"), 0),
             updated_count=self._int(payload.get("updated_count"), 0),
-            preview_batch_id=self._text(payload.get("preview_batch_id") or row.get("joined_batch_id")),
-            batch_id=self._text(payload.get("batch_id") or row.get("joined_batch_id")),
+            preview_batch_id=self._text(payload.get("preview_batch_id")),
+            batch_id=self._text(payload.get("batch_id")),
             stored_file_path=self._text(payload.get("stored_file_path") or row.get("stored_file_path")),
             override_template_code=self._text(payload.get("override_template_code")),
             override_batch_type=BatchType(self._text(payload.get("override_batch_type"))) if self._text(payload.get("override_batch_type")) else None,

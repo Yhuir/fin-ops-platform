@@ -118,12 +118,20 @@ class BankFlowRuleBatchApiRoutes:
         except AppSettingsValidationError as exc:
             status = (
                 HTTPStatus.CONFLICT
-                if exc.error_code == "no_oa_bank_batch_tag_selection_version_conflict"
+                if exc.error_code
+                in {
+                    "bank_flow_rule_batch_tag_rules_version_conflict",
+                    "no_oa_bank_batch_tag_selection_version_conflict",
+                }
                 else HTTPStatus.BAD_REQUEST
             )
             error = (
                 "bank_flow_rule_batch_tag_rules_version_conflict"
-                if exc.error_code == "no_oa_bank_batch_tag_selection_version_conflict"
+                if exc.error_code
+                in {
+                    "bank_flow_rule_batch_tag_rules_version_conflict",
+                    "no_oa_bank_batch_tag_selection_version_conflict",
+                }
                 else exc.error_code
             )
             return status, {"error": error, "message": str(exc)}

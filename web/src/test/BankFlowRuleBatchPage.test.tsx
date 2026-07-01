@@ -259,6 +259,8 @@ const conflictTransferDetailPayload = {
 
 const bankFlowRuleBatchSourceFiles = [
   "src/pages/BankFlowRuleBatchPage.tsx",
+  "src/features/bankFlowRuleBatches/components.tsx",
+  "src/features/bankFlowRuleBatches/viewModel.ts",
 ] as const;
 
 function readWebSource(path: string) {
@@ -500,6 +502,7 @@ describe("BankFlowRuleBatchPage", () => {
         : [];
     });
     const pageSource = sourceByPath["src/pages/BankFlowRuleBatchPage.tsx"];
+    const primitiveSource = `${pageSource}\n${sourceByPath["src/features/bankFlowRuleBatches/components.tsx"]}`;
     const missingPrimitiveTargets = [
       pageSource.includes("PageScaffold") ? null : "BankFlowRuleBatchPage.tsx should keep PageScaffold",
       pageSource.includes("StatePanel") ? null : "BankFlowRuleBatchPage.tsx should keep StatePanel for loading/empty/error states",
@@ -512,7 +515,7 @@ describe("BankFlowRuleBatchPage", () => {
       /finance-table|no-oa-bank-batch.*table|bank-flow-rule-batches.*table/.test(pageSource)
         ? null
         : "Transaction details should use a project dense table class",
-      /no-oa-bank-batch.*rail|bank-flow-rule-batches.*rail/.test(pageSource)
+      /no-oa-bank-batch.*rail|bank-flow-rule-batches.*rail/.test(primitiveSource)
         ? null
         : "Main and child label rails should use project rail classes",
     ].filter(Boolean);

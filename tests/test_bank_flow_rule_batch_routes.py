@@ -26,7 +26,9 @@ class FakeBankFlowRuleBatchApplicationService:
     def update_tag_selection(self, payload, *, actor_id):  # type: ignore[no-untyped-def]
         self.calls.append(("update_tag_rules", {"payload": payload, "actor_id": actor_id}))
         if payload.get("expected_version") == 0:
-            raise AppSettingsValidationError("no_oa_bank_batch_tag_selection_version_conflict", "version conflict")
+            raise AppSettingsValidationError("bank_flow_rule_batch_tag_rules_version_conflict", "version conflict")
+        if payload.get("duplicate_rule"):
+            raise AppSettingsValidationError("duplicate_bank_flow_rule_batch_tag_rule", "duplicate tag rule")
         return {"version": 2, "selected_tag_codes": ["fee"], "rules": [{"tag_code": "fee"}]}
 
     def submit_batch(self, batch_id, *, actor, expected_version, note, relation_mode):  # type: ignore[no-untyped-def]
@@ -109,6 +111,25 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         self.assertNotIn("selected_tag_codes", payload)
         self.assertEqual(conflict_status, HTTPStatus.CONFLICT)
         self.assertEqual(conflict_payload["error"], "bank_flow_rule_batch_tag_rules_version_conflict")
+
+    def test_tag_rules_reject_legacy_selection_and_duplicate_rules(self) -> None:
+        service = FakeBankFlowRuleBatchApplicationService()
+        routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]
+        session = SimpleNamespace(identity=SimpleNamespace(username="finance-user", user_id="oa-001"))
+
+        selected_status, selected_payload = routes.update_tag_rules(
+            {"expected_version": 1, "selected_tag_codes": ["fee"]},
+            session=session,
+        )
+        duplicate_status, duplicate_payload = routes.update_tag_rules(
+            {"expected_version": 1, "duplicate_rule": True},
+            session=session,
+        )
+
+        self.assertEqual(selected_status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(selected_payload["error"], "bank_flow_rule_batch_selected_tag_codes_forbidden")
+        self.assertEqual(duplicate_status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(duplicate_payload["error"], "duplicate_bank_flow_rule_batch_tag_rule")
 
     def test_submit_and_withdraw_use_bank_flow_write_targets(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()

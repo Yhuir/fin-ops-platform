@@ -41,6 +41,7 @@ class ApplicationStateStore:
         self._background_jobs_path = root / "background_jobs.pkl"
         self._app_health_alerts_path = root / "app_health_alerts.pkl"
         self._no_oa_bank_batches_path = root / "no_oa_bank_batches.pkl"
+        self._bank_flow_rule_batches_path = root / "bank_flow_rule_batches.pkl"
         self._local_pickle_lock = RLock()
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -80,6 +81,7 @@ class ApplicationStateStore:
             "bank_transaction_tags": {},
             "pending_invoice_tag_groups": {},
             "pending_output_invoice_tag_groups": {},
+            "bank_flow_rule_batch_tag_rules": {},
             "input_invoice_usage_payment_status_rules": {},
         }
         if not self._app_settings_path.exists():
@@ -105,6 +107,7 @@ class ApplicationStateStore:
             "bank_transaction_tags": dict(loaded.get("bank_transaction_tags") or {}),
             "pending_invoice_tag_groups": dict(loaded.get("pending_invoice_tag_groups") or {}),
             "pending_output_invoice_tag_groups": dict(loaded.get("pending_output_invoice_tag_groups") or {}),
+            "bank_flow_rule_batch_tag_rules": dict(loaded.get("bank_flow_rule_batch_tag_rules") or {}),
             "input_invoice_usage_payment_status_rules": dict(
                 loaded.get("input_invoice_usage_payment_status_rules") or {}
             ),
@@ -135,6 +138,7 @@ class ApplicationStateStore:
             "bank_transaction_tags": dict(payload.get("bank_transaction_tags") or {}),
             "pending_invoice_tag_groups": dict(payload.get("pending_invoice_tag_groups") or {}),
             "pending_output_invoice_tag_groups": dict(payload.get("pending_output_invoice_tag_groups") or {}),
+            "bank_flow_rule_batch_tag_rules": dict(payload.get("bank_flow_rule_batch_tag_rules") or {}),
             "input_invoice_usage_payment_status_rules": dict(
                 payload.get("input_invoice_usage_payment_status_rules") or {}
             ),
@@ -636,7 +640,11 @@ class ApplicationStateStore:
         return loaded if isinstance(loaded, dict) else {}
 
     def load_bank_flow_rule_batches(self) -> dict[str, Any]:
-        return self.load_no_oa_bank_batches()
+        if not self._bank_flow_rule_batches_path.exists():
+            return {}
+        with self._bank_flow_rule_batches_path.open("rb") as handle:
+            loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
+        return loaded if isinstance(loaded, dict) else {}
 
     def save_no_oa_bank_batches(
         self,
@@ -650,7 +658,9 @@ class ApplicationStateStore:
             pickle.dump(normalized_snapshot, handle)
 
     def save_bank_flow_rule_batches(self, snapshot: dict[str, Any]) -> None:
-        self.save_no_oa_bank_batches(snapshot, relation_mode="bank_flow_rule_batch")
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        with self._bank_flow_rule_batches_path.open("wb") as handle:
+            pickle.dump(normalized_snapshot, handle)
 
     def save_bank_flow_rule_batches_scope(
         self,

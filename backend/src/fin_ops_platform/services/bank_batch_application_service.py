@@ -134,6 +134,7 @@ class BankBatchApplicationService:
         read_model_refresh_producer: Any | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
+        rebaseline_no_oa_batch_service: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._effective_category_provider = effective_category_provider
@@ -162,6 +163,7 @@ class BankBatchApplicationService:
         self._read_model_refresh_producer = read_model_refresh_producer
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
+        self._rebaseline_no_oa_batch_service = rebaseline_no_oa_batch_service
 
     def list_batches_payload(
         self,
@@ -211,7 +213,7 @@ class BankBatchApplicationService:
                     metadata=refresh_metadata,
                 )
                 return {
-                    "summary": self.summary([]),
+                    "summary": self.summary([], relation_mode=relation_mode),
                     "batches": [],
                     **self._pagination_payload([], pagination),
                     "read_model_status": "missing",
@@ -221,7 +223,10 @@ class BankBatchApplicationService:
                 }
             if summary_read_model_batches is not None and read_model_batches is not None:
                 self.load_relation_source_versions_for_scope_keys(refresh_scope_keys)
-                stale_reasons = self.no_oa_bank_batch_stale_reasons(summary_read_model_batches + read_model_batches)
+                stale_reasons = self.no_oa_bank_batch_stale_reasons(
+                    summary_read_model_batches + read_model_batches,
+                    relation_mode=relation_mode,
+                )
                 summary_public_batches = self._public_batches(summary_read_model_batches)
                 read_model_public_batches = self._public_batches(read_model_batches)
                 if stale_reasons:
@@ -236,7 +241,7 @@ class BankBatchApplicationService:
                         metadata=refresh_metadata,
                     )
                     return {
-                        "summary": self.summary(summary_public_batches),
+                        "summary": self.summary(summary_public_batches, relation_mode=relation_mode),
                         "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
                         **self._pagination_payload(read_model_public_batches, pagination),
                         "read_model_status": "stale",
@@ -245,7 +250,7 @@ class BankBatchApplicationService:
                         "refresh_reason": refresh_reason,
                     }
                 return {
-                    "summary": self.summary(summary_public_batches),
+                    "summary": self.summary(summary_public_batches, relation_mode=relation_mode),
                     "batches": self.resolve_labels(self._page_items(read_model_public_batches, pagination)),
                     **self._pagination_payload(read_model_public_batches, pagination),
                     "read_model_status": "fresh",
@@ -256,7 +261,7 @@ class BankBatchApplicationService:
             summary_public_batches = self._public_batches(summary_batches)
             read_public_batches = self._public_batches(read_batches)
             return {
-                "summary": self.summary(summary_public_batches),
+                "summary": self.summary(summary_public_batches, relation_mode=relation_mode),
                 "batches": self.resolve_labels(self._page_items(read_public_batches, pagination)),
                 **self._pagination_payload(read_public_batches, pagination),
                 "read_model_status": "fresh",
@@ -272,7 +277,7 @@ class BankBatchApplicationService:
             metadata=refresh_metadata,
         )
         return {
-            "summary": self.summary([]),
+            "summary": self.summary([], relation_mode=relation_mode),
             "batches": [],
             **self._pagination_payload([], pagination),
             "read_model_status": "unavailable",
@@ -284,6 +289,11 @@ class BankBatchApplicationService:
     def tag_selection_payload(self) -> dict[str, Any]:
         if self._tag_selection_service is not None:
             return self._tag_selection_service.get_tag_selection_payload()
+        return self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+
+    def _tag_rules_payload_for_relation_mode(self, relation_mode: str) -> dict[str, Any]:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
         return self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
 
     def update_tag_selection(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
@@ -695,7 +705,7 @@ class BankBatchApplicationService:
                 bank_rows=bank_rows,
                 categories_by_transaction_id=categories_by_transaction_id,
                 active_relations=self._workbench_relation_active_relations_for_bank_rows(bank_rows),
-                source_versions=self.no_oa_bank_batch_source_versions(),
+                source_versions=self.no_oa_bank_batch_source_versions(relation_mode=relation_mode),
                 eligible_batch_types=self._eligible_tag_codes_for_relation_mode(relation_mode),
                 row_ids=row_ids,
                 actor=actor,
@@ -816,10 +826,11 @@ class BankBatchApplicationService:
                     changed_case_ids.append(relation_case_id)
                 affected_months.update(self.affected_months(withdrawn))
             if withdrawn_batches:
-                self.refresh_batches(
-                    relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                    scope_key="all",
-                )
+                for refresh_scope_key in sorted(affected_months) or ["all"]:
+                    self.refresh_batches(
+                        relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                        scope_key=refresh_scope_key,
+                    )
             workbench_rebuild_queued = self.after_mutation(
                 sorted(affected_months),
                 changed_case_ids=changed_case_ids,
@@ -860,10 +871,15 @@ class BankBatchApplicationService:
         reason: str | None,
         manifest: object | None,
     ) -> dict[str, object]:
-        previous_batch_snapshot = self._bank_batch_service.snapshot()
+        rebaseline_batch_service = self._batch_service_for_relation_mode(NO_OA_BANK_BATCH_RELATION_MODE)
+        previous_batch_snapshot = rebaseline_batch_service.snapshot()
         previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
         candidates = self._submitted_no_oa_rebaseline_candidates()
-        self._assert_rebaseline_manifest_matches(candidates, manifest)
+        self._assert_rebaseline_manifest_matches(
+            candidates,
+            manifest,
+            rebaseline_batch_service=rebaseline_batch_service,
+        )
         withdrawn_batches: list[dict[str, object]] = []
         changed_case_ids: list[str] = []
         affected_months: set[str] = set()
@@ -873,9 +889,9 @@ class BankBatchApplicationService:
                 batch_id = str(candidate.get("batch_id") or "").strip()
                 if not batch_id:
                     continue
-                before_batch = self._bank_batch_service.get_batch(batch_id)
+                before_batch = rebaseline_batch_service.get_batch(batch_id)
                 already_withdrawn = str(before_batch.get("status") or "") == "withdrawn"
-                withdrawn = self._bank_batch_service.withdraw_batch(
+                withdrawn = rebaseline_batch_service.withdraw_batch(
                     batch_id,
                     actor=actor,
                     expected_version=int(before_batch.get("version") or 1),
@@ -897,11 +913,19 @@ class BankBatchApplicationService:
             workbench_rebuild_queued = self.after_mutation(
                 sorted(affected_months),
                 changed_case_ids=changed_case_ids,
-                persist=True,
+                persist=False,
                 action_name="bank_flow_rule_rebaseline_no_oa",
             )
+            self.persist_no_oa_rebaseline_mutation(
+                rebaseline_batch_service=rebaseline_batch_service,
+                changed_case_ids=changed_case_ids,
+                changed_scope_keys=self._expand_workbench_read_model_scope_keys_for_base_scopes(
+                    ["all", *sorted(affected_months)]
+                ),
+            )
         except Exception:
-            self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
+            self._restore_batch_service_snapshot(rebaseline_batch_service, previous_batch_snapshot)
+            self._pair_relation_snapshot_port.restore(previous_relation_snapshot)
             raise
         manifest = self._rebaseline_no_oa_manifest(withdrawn_batches, applied=True)
         return {
@@ -913,9 +937,10 @@ class BankBatchApplicationService:
         return self._submitted_batches_for_relation_mode(NO_OA_BANK_BATCH_RELATION_MODE)
 
     def _submitted_batches_for_relation_mode(self, relation_mode: str) -> list[dict[str, object]]:
+        batch_service = self._batch_service_for_relation_mode(relation_mode)
         return [
             batch
-            for batch in self._bank_batch_service.list_batches(
+            for batch in batch_service.list_batches(
                 {
                     "bucket": "submitted",
                     "relation_mode": self._read_model_key_for_relation_mode(relation_mode),
@@ -924,7 +949,44 @@ class BankBatchApplicationService:
             if str(batch.get("status") or "").strip() == "submitted"
         ]
 
-    def _assert_rebaseline_manifest_matches(self, candidates: list[dict[str, object]], manifest: object | None) -> None:
+    def _batch_service_for_relation_mode(self, relation_mode: str) -> Any:
+        if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE and self._rebaseline_no_oa_batch_service is not None:
+            return self._rebaseline_no_oa_batch_service
+        return self._bank_batch_service
+
+    def persist_no_oa_rebaseline_mutation(
+        self,
+        *,
+        rebaseline_batch_service: Any,
+        changed_case_ids: list[str],
+        changed_scope_keys: list[str],
+    ) -> None:
+        if self._state_store is None:
+            return
+        try:
+            self._search_cache_clearer()
+            save_mutation = getattr(self._state_store, "save_no_oa_bank_batch_mutation", None)
+            if not callable(save_mutation):
+                raise RuntimeError("bank_flow_rule_batch rebaseline requires save_no_oa_bank_batch_mutation.")
+            save_mutation(
+                pair_relation_snapshot=self._pair_relation_snapshot_port.snapshot_case_ids(changed_case_ids)
+                if changed_case_ids
+                else self._pair_relation_snapshot_port.snapshot(),
+                no_oa_bank_batch_snapshot=rebaseline_batch_service.public_snapshot(),
+                workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
+                changed_case_ids=changed_case_ids,
+                changed_scope_keys=changed_scope_keys,
+            )
+        except Exception as exc:
+            raise BankBatchPersistenceError(str(exc)) from exc
+
+    def _assert_rebaseline_manifest_matches(
+        self,
+        candidates: list[dict[str, object]],
+        manifest: object | None,
+        *,
+        rebaseline_batch_service: Any,
+    ) -> None:
         if not isinstance(manifest, dict):
             raise ValueError("bank_flow_rule_rebaseline_manifest_required")
         expected_rows = manifest.get("batches")
@@ -940,15 +1002,27 @@ class BankBatchApplicationService:
             if isinstance(row, dict) and str(row.get("batch_id") or "").strip()
         )
         actual = sorted(key(row) for row in candidates)
-        if not actual and expected and self._rebaseline_manifest_already_applied(expected):
+        if (
+            not actual
+            and expected
+            and self._rebaseline_manifest_already_applied(
+                expected,
+                rebaseline_batch_service=rebaseline_batch_service,
+            )
+        ):
             return
         if expected != actual:
             raise ValueError("bank_flow_rule_rebaseline_manifest_mismatch")
 
-    def _rebaseline_manifest_already_applied(self, expected: list[tuple[str, int]]) -> bool:
+    def _rebaseline_manifest_already_applied(
+        self,
+        expected: list[tuple[str, int]],
+        *,
+        rebaseline_batch_service: Any,
+    ) -> bool:
         for batch_id, _version in expected:
             try:
-                batch = self._bank_batch_service.get_batch(batch_id)
+                batch = rebaseline_batch_service.get_batch(batch_id)
             except KeyError:
                 return False
             if str(batch.get("status") or "").strip() != "withdrawn":
@@ -991,7 +1065,7 @@ class BankBatchApplicationService:
 
     def _eligible_tag_codes_for_relation_mode(self, relation_mode: str) -> set[str]:
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
-            payload = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+            payload = self._tag_rules_payload_for_relation_mode(relation_mode)
             return {
                 str(tag.get("code") or "").strip()
                 for tag in list(payload.get("active_tags") or [])
@@ -1042,7 +1116,10 @@ class BankBatchApplicationService:
         relation_command_service = self._require_relation_command_service()
         payload = self._bank_batch_service.relation_command_payload_for_batch(batch, note=note)
         special_metadata = payload.get("special_metadata") if isinstance(payload.get("special_metadata"), dict) else {}
-        requirement_metadata = self._no_oa_paired_requirement_metadata(str(batch.get("batch_type") or ""))
+        requirement_metadata = self._paired_requirement_metadata_for_relation_mode(
+            str(batch.get("batch_type") or ""),
+            relation_mode,
+        )
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             requirement_metadata = self._bank_flow_rule_requirement_metadata(batch, requirement_metadata)
         payload["special_metadata"] = {
@@ -1099,8 +1176,15 @@ class BankBatchApplicationService:
         }
 
     def _no_oa_paired_requirement_metadata(self, batch_type: str) -> dict[str, object]:
+        return self._paired_requirement_metadata_for_relation_mode(batch_type, NO_OA_BANK_BATCH_RELATION_MODE)
+
+    def _paired_requirement_metadata_for_relation_mode(
+        self,
+        batch_type: str,
+        relation_mode: str,
+    ) -> dict[str, object]:
         tag_code = str(batch_type or "").strip()
-        payload = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+        payload = self._tag_rules_payload_for_relation_mode(relation_mode)
         requirements = payload.get("requirements_by_tag_code") if isinstance(payload.get("requirements_by_tag_code"), dict) else {}
         rule = requirements.get(tag_code) if isinstance(requirements.get(tag_code), dict) else {}
         return {
@@ -1249,12 +1333,17 @@ class BankBatchApplicationService:
         *,
         scope_key: str,
         source_versions: dict[str, object],
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> dict[str, object] | None:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
         filters = {"month": normalized_scope_key} if SEARCH_MONTH_RE.match(normalized_scope_key) else {}
         source_versions_summary_loader = getattr(
             self._bank_batch_read_model_repository,
-            "no_oa_bank_batch_source_versions_summary",
+            (
+                "bank_flow_rule_batch_source_versions_summary"
+                if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
+                else "no_oa_bank_batch_source_versions_summary"
+            ),
             None,
         )
         if callable(source_versions_summary_loader):
@@ -1271,7 +1360,11 @@ class BankBatchApplicationService:
                 "skipped": True,
                 "skip_reason": "source_versions_unchanged",
             }
-        list_read_model_batches = getattr(self._bank_batch_read_model_repository, "list_no_oa_bank_batch_rows", None)
+        list_read_model_batches = getattr(
+            self._bank_batch_read_model_repository,
+            self._read_model_list_method_for_relation_mode(relation_mode),
+            None,
+        )
         if not callable(list_read_model_batches):
             return None
         read_model_rows = list_read_model_batches(filters)
@@ -1333,7 +1426,11 @@ class BankBatchApplicationService:
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
         refresh_scope_key = str(scope_key or "all").strip() or "all"
-        source_version_payload = dict(source_versions) if isinstance(source_versions, dict) else self.no_oa_bank_batch_source_versions()
+        source_version_payload = (
+            dict(source_versions)
+            if isinstance(source_versions, dict)
+            else self.no_oa_bank_batch_source_versions(relation_mode=relation_mode)
+        )
         self._apply_categories_to_rows(bank_rows, categories_by_transaction_id)
         self._bank_batch_service.build_batches(
             bank_rows,
@@ -1499,15 +1596,23 @@ class BankBatchApplicationService:
             categories_by_transaction_id[normalized_transaction_id] = merged
         return categories_by_transaction_id
 
-    def selected_tag_codes(self) -> list[str]:
-        payload = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+    def selected_tag_codes(
+        self,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> list[str]:
+        payload = self._tag_rules_payload_for_relation_mode(relation_mode)
         return [str(code) for code in list(payload.get("selected_tag_codes") or []) if str(code).strip()]
 
-    def summary(self, batches: list[dict[str, object]]) -> dict[str, object]:
+    def summary(
+        self,
+        batches: list[dict[str, object]],
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> dict[str, object]:
         public_batches = self._public_batches(batches)
         counts: dict[str, int] = {"draft": 0, "submitted": 0, "withdrawn": 0, "conflict": 0, "stale": 0}
         selected_or_existing_codes = [
-            *self.selected_tag_codes(),
+            *self.selected_tag_codes(relation_mode),
             *[
                 str(batch.get("batch_type") or "").strip()
                 for batch in public_batches
@@ -1642,17 +1747,25 @@ class BankBatchApplicationService:
             next_batch["blocked_reason"] = ""
         return next_batch
 
-    def no_oa_bank_batch_source_versions(self) -> dict[str, object]:
-        no_oa_selection = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+    def no_oa_bank_batch_source_versions(
+        self,
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> dict[str, object]:
+        tag_rules_payload = self._tag_rules_payload_for_relation_mode(relation_mode)
         source_versions = {
             **_stable_dependency_source_versions(self._workbench_matching_source_versions_provider()),
-            "no_oa_bank_batch_schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
-            "no_oa_bank_batch_tag_selection_version": int(no_oa_selection.get("version") or 1),
             "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
             "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
                 self._bank_transaction_category_service.snapshot()
             ),
         }
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            source_versions["bank_flow_rule_batch_schema_version"] = NO_OA_BANK_BATCH_SCHEMA_VERSION
+            source_versions["bank_flow_rule_batch_tag_rules_version"] = int(tag_rules_payload.get("version") or 1)
+        else:
+            source_versions["no_oa_bank_batch_schema_version"] = NO_OA_BANK_BATCH_SCHEMA_VERSION
+            source_versions["no_oa_bank_batch_tag_selection_version"] = int(tag_rules_payload.get("version") or 1)
         bank_detail_source_versions = getattr(self._effective_category_provider, "last_source_versions", None)
         if isinstance(bank_detail_source_versions, dict) and bank_detail_source_versions:
             source_versions["bank_detail_source_versions"] = _stable_dependency_source_versions(bank_detail_source_versions)
@@ -1783,13 +1896,22 @@ class BankBatchApplicationService:
             enriched.append(next_row)
         return enriched
 
-    def no_oa_bank_batch_stale_reasons(self, batches: object) -> list[str]:
+    def no_oa_bank_batch_stale_reasons(
+        self,
+        batches: object,
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> list[str]:
         batch_rows = batches if isinstance(batches, list) else []
         if not batch_rows:
             return []
         expected = require_expected_source_versions(
-            self.no_oa_bank_batch_source_versions(),
-            context="no_oa_bank_batch_read_model",
+            self.no_oa_bank_batch_source_versions(relation_mode=relation_mode),
+            context=(
+                "bank_flow_rule_batch_read_model"
+                if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
+                else "no_oa_bank_batch_read_model"
+            ),
         )
         reasons: list[str] = []
         for batch in batch_rows:
@@ -2091,10 +2213,14 @@ class BankBatchApplicationService:
         batch_snapshot: dict[str, Any],
         relation_snapshot: dict[str, Any],
     ) -> None:
-        restored_batch_service = BankBatchService.from_snapshot(batch_snapshot)
-        self._bank_batch_service._batches = deepcopy(restored_batch_service._batches)
-        self._bank_batch_service._audit_log = deepcopy(restored_batch_service._audit_log)
+        self._restore_batch_service_snapshot(self._bank_batch_service, batch_snapshot)
         self._pair_relation_snapshot_port.restore(relation_snapshot)
+
+    @staticmethod
+    def _restore_batch_service_snapshot(batch_service: Any, batch_snapshot: dict[str, Any]) -> None:
+        restored_batch_service = BankBatchService.from_snapshot(batch_snapshot)
+        batch_service._batches = deepcopy(restored_batch_service._batches)
+        batch_service._audit_log = deepcopy(restored_batch_service._audit_log)
 
     def bank_transaction_tag_definition_current(self, code: str) -> dict[str, object] | None:
         tag_code = str(code or "").strip()

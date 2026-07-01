@@ -88,5 +88,5 @@
 - Allowed reads: invoice import facts repository、发票查询/context ports、owner API。
 - Downstream outputs: invoice lifecycle、pending invoice、input/output invoice usage、search、workbench、workbench_relation、tax、cost read model dirty scopes 或 owner producer 输出。
 - Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或 OA/ETC cache 直接构造第二发票池。
-- Old code deletion: 旧同步导入、直接状态写入或 snapshot 发票池 fallback 必须删除；migration/audit/rollback 工具保留不算 closure。
+- Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 必须删除；migration/audit/rollback 工具保留不算 closure。
 - 2026-07-01：文件发票导入预览保存改为 `ImportNormalizationService.snapshot(include_facts=False)`，禁止旧 full snapshot 预览链路把失败确认残留的正式发票写入发票池；确认路径仍负责正式 facts 和下游 dirty scope。

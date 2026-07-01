@@ -12,7 +12,17 @@
 - PostgreSQL 写路径必须使用 transaction-bound queue writer 或等价 gateway，把事实写入和 `output_invoice_collection` dirty/outbox 收敛在同一边界。
 - 手动状态、提醒、红蓝票关系和正式收据写入成功后，API 必须返回 `read_model_scope_keys` 与 `freshness_targets`；页面必须优先等待返回的具体月份 `output_invoice_collection:<YYYY-MM>` operation barrier fresh，再刷新 rows。只有无法定位具体月份时才 fallback 到当前可见 scope 或 fan-out-only `all`；barrier blocked/timeout 时不得提前读取旧投影。
 - 正式收据 history 只返回真实 lifecycle facts；不得为了 UI 方便伪造历史。
-- OA、收入流水和销项发票项统一走 `workbench_relation` 分发事实源；多项时 UI 使用 `+N`，其中 `N=relationCount-1` 表示额外项数。销项发票栏多项时仍展示当前行发票主信息和多张发票价税合计，再显示 `+N` 展开全部发票 summaries。
+- OA、收入流水和销项发票项统一走 `workbench_relation` 分发事实源；linked relation 下多张销项发票由 read model 投影为一条净额收款行，负数/红字发票必须保留在 `invoiceRelations.summaries`。多项时 UI 使用 `+N`，其中 `N=relationCount-1` 表示额外项数。销项发票栏多项时仍展示当前行发票主信息和多张发票价税合计，再显示 `+N` 展开全部发票 summaries。
+
+## 2026-07-01 - linked 多销项发票 relation 单行净额投影
+
+- 目标：修复关联台中 3 张销项发票（含一张负数/红字发票）+ 1 条收入流水已确认关联后，销项发票收款情况页面漏掉负数发票并把 364800 relation group 显示两次的问题。
+- 影响范围：`OutputInvoiceCollectionQueryService` row projection、`output_invoice_collection` source version、service/API/SQL runtime/fresh gate 回归和本模块文档；未改前端 DTO shape、worker registry、repository port 或 lifecycle 写接口。
+- 关键决策：row ownership 先按 linked `workbench_relation` 的多销项发票 relation 归并；每个 relation 只输出一条收款行，成员发票按净额汇总，负数/红字发票进入 `invoiceRelations.summaries`。不属于多销项发票 relation 的发票继续回退到原 invoice identity group。`OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION` 提升到 `output-invoice-collections:v4-relation-group-rows`。
+- 文档影响：同步 `README.md`、`boundary-io.md`、`state-machine.md`、`tests.md`、`docs/dev/api-contracts.md` 和 read model 边界合同；产品口径不变，read model 投影口径变化。
+- 测试覆盖：新增 `test_multi_output_relation_emits_single_net_collection_row`，先证明旧行为返回 3 行，再实现后锁定单行净额、3 张发票 summary、收入流水已收和 `collected` 状态；更新既有统一 relation 回归以适配 relation-group sort 变化。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_api tests.test_invoice_usage_collection_sql_runtime tests.test_output_invoice_collection_read_model_fresh_gate_service -v`；`bash scripts/verify.sh docs`。
+- 未测风险：未跑真实浏览器和真实 PostgreSQL/worker drain；历史 SQL read model 需要依赖 source version stale 后重投影，生产回放仍需 staging/运维 smoke。
 
 ## 2026-06-23 - 统一关系 OA/流水/发票项 +N 展示
 

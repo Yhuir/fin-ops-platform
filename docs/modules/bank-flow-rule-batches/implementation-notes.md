@@ -1,5 +1,100 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-01 最终校验闭环
+
+目标：关闭收口检查发现的 validation drift，确保 bank-flow tag-rule 边界即使被服务层直接调用，也不会接受旧 no-OA selected-tag 语义或重复规则覆盖。
+
+关键决策：
+
+- `AppSettingsService.update_bank_flow_rule_batch_tag_rules(...)` 在服务边界拒绝 `selected_tag_codes` / `selectedTagCodes`，错误码为 `bank_flow_rule_batch_selected_tag_codes_forbidden`。
+- `rules[]` 中重复 `tag_code` 在归一化前 fail fast，错误码为 `duplicate_bank_flow_rule_batch_tag_rule`，不再允许后写覆盖前写。
+- 不改变 no-OA legacy `selected_tag_codes` 合同；该旧写路径只属于 `no-oa-bank-batches`。
+- 长期文档状态更新为 modular closure：页面级 state/effect 编排保留在 page，纯 I/O、DTO、策略、view model、operation barrier helper 和通用组件位于 feature 边界。
+
+测试覆盖：
+
+- `tests/test_app_settings_service.py::AppSettingsServiceTests::test_bank_flow_rule_batch_tag_rules_reject_legacy_selection_and_duplicate_rules`
+- `tests/test_bank_flow_rule_batch_routes.py::BankFlowRuleBatchRoutesTests::test_tag_rules_reject_legacy_selection_and_duplicate_rules`
+
+验证命令：
+
+- `PYTHONPATH=backend/src:. python3 -m pytest tests/test_app_settings_service.py tests/test_bank_flow_rule_batch_routes.py -q`
+- 其余回归命令见本次最终答复。
+
+## 2026-07-01 Read model / 操作 API 性能收敛
+
+目标：降低流水规则批量处理页面常用操作耗时，移除 detail/withdraw/reset 中可避免的 `all` scope 同步刷新，并让 bank-flow worker 使用专属 source-version summary 跳过 unchanged scope。
+
+关键决策：
+
+- `detail_payload(batch_id)` 和 `withdraw_batch(batch_id)` 先读取当前 bank-flow batch storage；只有 batch 缺失时才 fallback `scope_key=all` runtime snapshot refresh。
+- `reset_submitted_bank_flow_rule_batches()` 不再做前置 `all` refresh；撤回后只同步刷新受影响月份 scope，没有月份时才 fallback `all`。
+- `unchanged_read_model_scope_result(...)` 按 relation mode 选择 `bank_flow_rule_batch_source_versions_summary(...)` 或 no-OA summary；worker 对 bank-flow 也启用 unchanged skip。
+- `tag-rules` 保存仍保留 `all` refresh enqueue，因为规则变更可能影响所有 active bank-flow relation requirement metadata；要进一步优化需要先引入 tag/relation 到 affected scope 的可靠索引。
+
+测试覆盖：
+
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_detail_uses_current_bank_flow_batch_without_all_scope_refresh`
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_detail_falls_back_to_all_scope_refresh_when_batch_is_missing`
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_withdraw_uses_current_bank_flow_batch_without_all_scope_refresh`
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_withdraw_falls_back_to_all_scope_refresh_when_batch_is_missing`
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_reset_submitted_refreshes_affected_months_without_preflight_all_refresh`
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_unchanged_read_model_scope_uses_bank_flow_source_version_summary`
+
+验证命令：
+
+- `PYTHONPATH=backend/src:. python3 -m pytest tests/test_bank_flow_rule_batch_application_service.py tests/test_bank_flow_rule_batch_routes.py tests/test_bank_flow_rule_batch_read_model_refresh_producer.py tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_postgres_repositories_boundaries.py -q`
+
+## 2026-07-01 Tag-rule settings family 独立切换
+
+目标：关闭 `bank_flow_rule_batch` 运行时规则仍读取/写入 `no_oa_bank_batch_tag_selection` 的问题，避免银行流水规则批处理页面继续被 no-OA settings family 污染。
+
+关键决策：
+
+- 新增迁移 `0083_bank_flow_rule_batch_tag_rules.sql`，在 `app.app_settings.settings_payload` 缺失 `bank_flow_rule_batch_tag_rules` 时，从历史 `no_oa_bank_batch_tag_selection` 一次性复制规则值；运行时不做隐式 fallback。
+- `AppSettingsService` 新增 `get_bank_flow_rule_batch_tag_rules_payload()` / `update_bank_flow_rule_batch_tag_rules(...)`，保留原 public payload shape、乐观锁、active tag 校验、审计和自动标签归档时的失效规则清理。
+- `BankFlowRuleBatchApplicationService` 的规则读写切到 bank-flow settings key；`BankBatchApplicationService` 按 relation mode 选择 tag rules payload 和 source versions，`bank_flow_rule_batch` read model freshness 使用 `bank_flow_rule_batch_tag_rules_version`。
+- `rebaseline-no-oa` 保留为显式跨模块管理操作：通过注入的 no-OA batch service 扫描/撤回历史 submitted no-OA 批次，并通过 no-OA mutation persistence 写回旧批次状态；普通 bank-flow submit/reset/list 不再读写 no-OA batch service。
+
+测试覆盖：
+
+- `tests/test_app_settings_service.py::AppSettingsServiceTests::test_bank_flow_rule_batch_tag_rules_are_independent_from_no_oa_selection`
+- `tests/test_app_settings_service.py::AppSettingsServiceTests::test_update_settings_preserves_bank_flow_rule_batch_tag_rules`
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_update_tag_selection_uses_bank_flow_rule_settings_boundary`
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_source_versions_use_bank_flow_rule_version_boundary`
+- `tests/test_bank_flow_rule_batch_routes.py::BankFlowRuleBatchRoutesTests::test_tag_rules_strip_no_oa_selection_fields_and_map_conflict`
+- `tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_bank_flow_rule_rebaseline_no_oa_dry_run_and_apply_withdraw_submitted_history`
+- `tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_bank_flow_rule_batch_tag_rules_settings_are_split_from_no_oa_settings`
+
+验证命令：
+
+- `PYTHONPATH=backend/src:. python3 -m pytest tests/test_app_settings_service.py tests/test_bank_flow_rule_batch_application_service.py tests/test_bank_flow_rule_batch_routes.py tests/test_bank_flow_rule_batch_read_model_refresh_producer.py tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_postgres_migrations.py tests/test_postgres_repositories_boundaries.py tests/test_state_store.py -q`
+
+## 2026-07-01 PostgreSQL 独立物理存储切换
+
+目标：关闭 `bank_flow_rule_batch` 逻辑边界已独立但生产批次存储/read model 仍复用 no-OA 物理表的问题。
+
+关键决策：
+
+- 新增迁移 `0082_bank_flow_rule_batch_storage.sql`，创建 `app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events`、`read_model.bank_flow_rule_batch_rows`，并从历史 no-OA 表中按 `relation_mode=bank_flow_rule_batch` 回填旧数据。
+- `PostgresStateStore.load/save_bank_flow_rule_batches*` 改为调用 `PostgresWorkbenchRepository` 的 bank-flow 专属 I/O；`PostgresReadModelRepository.list_bank_flow_rule_batch_rows` 和 `bank_flow_rule_batch_source_versions_summary` 改为查询 `read_model.bank_flow_rule_batch_rows`。
+- legacy no-OA 继续使用 `app.no_oa_bank_batches`、`app.no_oa_bank_batch_events`、`read_model.no_oa_bank_batch_rows`；`relation_mode` 仍保留在 bank-flow payload/metadata 中供 API 和 Workbench relation 兼容，但不再作为 bank-flow 运行时读写 no-OA 表的条件。
+- 本次不迁移标签规则 family，也不拆分前端页面状态；标签规则 family 风险已在上方 2026-07-01 `bank_flow_rule_batch_tag_rules` 切换中关闭，前端状态拆分仍保留为后续任务。
+
+测试覆盖：
+
+- `tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_bank_flow_rule_batch_independent_storage_schema_and_backfill_are_declared`
+- `tests/test_postgres_repositories_boundaries.py::test_bank_flow_rule_batch_save_uses_dedicated_physical_tables`
+- `tests/test_postgres_repositories_boundaries.py::test_no_oa_bank_batch_save_does_not_touch_bank_flow_physical_tables`
+- `tests/test_postgres_repositories_boundaries.py::test_bank_flow_rule_batch_read_model_queries_dedicated_table_without_relation_mode_predicate`
+- `tests/test_bank_flow_rule_batch_backend_boundary.py::BankFlowRuleBatchBackendBoundaryTests::test_postgres_state_store_bank_flow_storage_uses_dedicated_repository_io`
+- `tests/test_state_store.py::StateStoreTests::test_bank_flow_rule_batches_use_independent_local_snapshot_file`
+
+验证命令：
+
+- `PYTHONPATH=backend/src:. python3 -m pytest tests/test_postgres_migrations.py tests/test_postgres_repositories_boundaries.py tests/test_bank_flow_rule_batch_application_service.py tests/test_bank_flow_rule_batch_backend_boundary.py tests/test_bank_flow_rule_batch_routes.py tests/test_bank_flow_rule_batch_read_model_refresh_producer.py tests/test_no_oa_bank_batch_application_service.py -q`
+- `git diff --check -- backend/src/fin_ops_platform/postgres/migrations backend/src/fin_ops_platform/services tests docs .planning/quick/20260701-bank-flow-rule-batches-full-closure-goal`
+
 ## 2026-06-30 App Status storage contract 补齐
 
 目标：修复 `bank_flow_rule_batch` 已登记到 App Status read model registry，但 migration storage contract 未登记，导致完整 `tests/test_postgres_migrations.py` 失败的问题。
@@ -7,8 +102,8 @@
 关键决策：
 
 - 保留 `bank_flow_rule_batch` 作为独立 read model key、scope、worker event、operation barrier target 和 App Status readiness 目标；不回退到 `no_oa_bank_batch` registry。
-- 当前不新增 `read_model.bank_flow_rule_batch_rows` 物理表。按现有模块边界，过渡期继续使用 `read_model.no_oa_bank_batch_rows`，并由 `payload.relation_mode=bank_flow_rule_batch` 及 relation-mode filter/index 隔离。
-- `READ_MODEL_STORAGE_CONTRACTS["bank_flow_rule_batch"]` 显式指向 `read_model.no_oa_bank_batch_rows`，把共享物理存储从隐式 WIP 变成可验证合同。后续拆出独立表时必须同步更新 migration、storage contract、read model 文档和生产迁移/回滚方案。
+- 当时不新增 `read_model.bank_flow_rule_batch_rows` 物理表，过渡期继续使用 `read_model.no_oa_bank_batch_rows`，并由 `payload.relation_mode=bank_flow_rule_batch` 及 relation-mode filter/index 隔离。该过渡判断已在 2026-07-01 被 `0082_bank_flow_rule_batch_storage.sql` 取代。
+- 当时 `READ_MODEL_STORAGE_CONTRACTS["bank_flow_rule_batch"]` 显式指向 `read_model.no_oa_bank_batch_rows`，把共享物理存储从隐式 WIP 变成可验证合同；当前合同已更新为 `read_model.bank_flow_rule_batch_rows`。
 
 测试覆盖：
 
@@ -25,7 +120,7 @@
 - 新增 `routes_bank_flow_rule_batches.py`、`BankFlowRuleBatchApplicationService`、`BankFlowRuleBatchReadModelRefreshProducer`、`BankFlowRuleBatchReadModelRefreshService`、`BankFlowRuleBatchReadModelRepositoryPort`；`routes_no_oa_bank_batches.py` 不再处理 `/api/bank-flow-rule-batches/*`。
 - `READ_MODEL_MANIFEST`、App Status read model registry、scope policy、runtime worker registry、RabbitMQ dispatch event 和 deploy env 示例均登记 `bank_flow_rule_batch` / `bank-flow-rule-batch` / `bank_flow_rule_batch.read_model.refresh`。
 - Operation barrier 删除 `bank_flow_rule_batch -> no_oa_bank_batch` alias，bank-flow readiness/outbox/worker 缺失会真实返回 refreshing/blocked，不再被 no-OA fresh 状态掩盖。
-- 物理存储仍共享 `app.no_oa_bank_batches` 与 `read_model.no_oa_bank_batch_rows`，必须继续用 `relation_mode=bank_flow_rule_batch` 隔离；后续物理表拆分需要单独迁移计划和回滚方案。
+- 当时批次物理存储仍使用 `app.no_oa_bank_batches` 与 `read_model.no_oa_bank_batch_rows`，必须继续用 `relation_mode=bank_flow_rule_batch` 隔离；该风险已在 2026-07-01 通过 `0082_bank_flow_rule_batch_storage.sql` 关闭。
 
 测试覆盖：
 
@@ -154,7 +249,7 @@
 
 后续事项：
 
-- 新增实现计划前，先决定规则持久化使用独立表还是 settings family。
+- 规则持久化当前使用独立 settings key `app_settings.bank_flow_rule_batch_tag_rules`；如未来升级到独立表，必须保留版本、审计、主动迁移和删除条件。
 - 实现新 route/service/read model 后，再迁移导航和旧 no-OA route。
 - 编写 Playwright E2E 前先把 `e2e-spec.md` 中的 Spec ID 映射到测试名。
 
@@ -192,7 +287,7 @@
 剩余风险：
 
 - 真实生产历史数据的全量 rebaseline 仍需先 dry-run 导出清单并人工确认后执行 apply。
-- 独立 `bank_flow_rule_batch` 物理表尚未拆出；当前由 bank-flow 命名 IO adapter 使用历史批次存储，并通过 `relation_mode=bank_flow_rule_batch` 隔离。
+- 独立 `bank_flow_rule_batch` 物理表已在 2026-07-01 `0082_bank_flow_rule_batch_storage.sql` 中拆出；旧 statement 仅保留为当时实现 slice 的历史风险记录。
 - “补齐 OA/发票后从 open 进入 paired”的完整跨页浏览器动作仍需后续接入真实补票/补 OA 流程测试。
 
 ## 2026-06-30 标签规则抽屉分组 UI slice

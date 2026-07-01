@@ -9308,6 +9308,7 @@ class Application:
                 repository=self._state_store,
                 save_repository=False,
             ),
+            rebaseline_no_oa_batch_service=self._no_oa_bank_batch_service,
         )
 
     def _bank_flow_rule_batch_routes(self) -> BankFlowRuleBatchApiRoutes:

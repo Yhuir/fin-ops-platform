@@ -182,6 +182,41 @@ def test_core_repository_loads_domain_snapshots_accepted_by_services() -> None:
     assert sessions["session_1"].files[0].normalized_rows[0]["invoice_no"] == "INV-001"
 
 
+class LegacyJoinedBatchFileConnection:
+    def __init__(self) -> None:
+        self.sql: str = ""
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        self.sql = " ".join(sql.lower().split())
+        return [
+            {
+                "legacy_id": "file_legacy",
+                "session_id": "session_legacy",
+                "stored_file_path": "/tmp/legacy.xlsx",
+                "original_filename": "legacy.xlsx",
+                "template_kind": "invoice_export",
+                "status": "preview_ready",
+                "uploaded_by": "tester",
+                "uploaded_at": datetime(2026, 3, 1, tzinfo=UTC),
+                "joined_batch_id": "batch_must_not_leak",
+                "raw_payload": {"normalized_payload": {"id": "file_legacy", "file_name": "legacy.xlsx"}},
+            }
+        ]
+
+
+def test_load_file_imports_does_not_infer_batch_state_from_legacy_join() -> None:
+    connection = LegacyJoinedBatchFileConnection()
+    repository = PostgresCoreRepository(connection)
+
+    snapshot = repository.load_file_imports()
+    item = snapshot["sessions"]["session_legacy"].files[0]
+
+    assert "left join app.import_batches" not in connection.sql
+    assert "joined_batch_id" not in connection.sql
+    assert item.preview_batch_id is None
+    assert item.batch_id is None
+
+
 class PagedFactConnection:
     def __init__(self) -> None:
         self.fetch_all_calls: list[tuple[str, tuple]] = []

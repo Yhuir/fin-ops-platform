@@ -21,6 +21,7 @@
 | --- | --- | --- |
 | 首屏 `GET /api/batch-accounting` 暂时失败时显示错误态、不显示普通空态，点击刷新后恢复银行/OA rows 且清除失败文案 | covered | `BatchAccountingPage.test.tsx::recovers after a transient batch accounting load failure when refreshed`、`web/e2e/batch-accounting-flow.spec.ts::recovers list after a transient load failure when refreshed` |
 | unsubmitted 列表优先走 SQL read model loader；银行按流水年份筛选，OA 按“日常报销且没有关联银行流水”筛选，旧 `oa_year` 参数不能过滤候选 | covered | `test_unsubmitted_list_uses_sql_read_model_loader_when_available`、`test_unsubmitted_list_ignores_legacy_oa_year_filter`、`test_unsubmitted_list_filters_oa_rows_by_linked_bank_transactions_only` |
+| submit 优先走 SQL read model loader，通过 submit context 边界读取 rows，relation readiness / active relation 检查只按本次选中的银行/OA/发票 rows 执行，不扫描整页候选 relation distribution | covered | `test_submit_uses_sql_read_model_loader_when_available`、`test_submit_scopes_relation_readiness_and_active_relation_checks_to_selected_rows`、`test_batch_accounting_route_handlers_do_not_bypass_service_boundaries` |
 | unsubmitted 列表显式分页首屏保护 | covered | `test_unsubmitted_list_explicit_pagination_protects_first_screen_slo`、`BatchAccountingPage.test.tsx::uses backend pagination for bank and OA first screens` |
 | GET 列表只读，不触发 legacy repair | covered | `test_unsubmitted_list_does_not_run_legacy_relation_repair` |
 | 未提交列表排除已经被其他关系占用的银行行 | covered | `test_unsubmitted_list_excludes_bank_rows_already_linked_elsewhere` |

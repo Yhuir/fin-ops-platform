@@ -30,6 +30,10 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面批量选择/操作 | `BatchAccountingPage.tsx`、`features/batchAccounting/api.ts` | 进入 batch accounting API/service |
+| 批量账务候选 payload | Workbench SQL active read model，fallback 为 Workbench payload builder | GET 列表和 submit 行校验都应优先走 `load_batch_accounting_workbench_payload(bank_year=...)`，不能在提交热路径默认扫描全量旧工作台 |
+| workbench row context | `BatchAccountingService._build_workbench_row_context` | 只解析 row/index/invoice links，不读取整页 relation distribution |
+| list context | `BatchAccountingService._build_list_context` | 仅列表读取使用，允许读取整页 relation distribution 并产出 eligible bank/OA |
+| submit context | `BatchAccountingService._build_submit_context` | 仅提交使用，禁止读取整页 relation distribution；relation readiness 只按本次 row ids 校验 |
 | 关系写入请求 | `BatchAccountingService` | 必须委托 workbench relation command boundary |
 | lifecycle trigger | derived data lifecycle | 更新下游 read model scopes |
 | OA 候选事实 | Workbench active read model + `workbench_relation` read facade | 不接收 OA 年份；“没有流水”表示 relation distribution 中该 OA 没有 `linked_bank_transactions`，仅发票关系或无流水候选关系仍可进入批量账务右侧 OA 栏 |
@@ -65,6 +69,7 @@
 - 允许依赖：workbench relation command/read facade, derived lifecycle service。
 - 必须通过：BatchAccountingService then relation boundary。
 - 禁止绕过：直接写 relation/read model 表；在页面批量合成业务状态。
+- submit 写操作必须经过 `_build_submit_context`，只按本次选中的银行/OA/发票 row ids 请求 relation readiness 和 active relation；不能调用 `_build_list_context` 或为了校验一次提交扫描整页银行/OA relation distribution。
 
 ## 测试与验证
 

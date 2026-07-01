@@ -3728,7 +3728,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"BatchAccountingApiRoutes list bypasses read-only route boundary via {forbidden}")
 
         mutation_handlers = (
-            ("submit", submit_source, route_submit_source, "_batch_accounting_routes().submit", "_service_factory().submit"),
+            (
+                "submit",
+                submit_source,
+                route_submit_source,
+                "_batch_accounting_routes().submit",
+                "_service_factory(use_sql_read_model=True).submit",
+            ),
             (
                 "withdraw",
                 withdraw_source,
@@ -3744,6 +3750,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"batch accounting {name} route no longer delegates mutation to BatchAccountingApiRoutes")
             if service_call not in route_source:
                 violations.append(f"BatchAccountingApiRoutes {name} no longer delegates mutation to BatchAccountingService")
+            if name == "submit":
+                service_path = SERVICES_ROOT / "batch_accounting_service.py"
+                service_source = service_path.read_text(encoding="utf-8")
+                service_tree = _parse(service_path)
+                submit_unlocked_source = _function_source(service_tree, service_source, "_submit_unlocked")
+                if "_build_submit_context(" not in submit_unlocked_source:
+                    violations.append("BatchAccountingService submit no longer uses the submit context boundary")
+                if "_build_list_context(" in submit_unlocked_source or "_context_with_candidate_relation_distribution(" in submit_unlocked_source:
+                    violations.append("BatchAccountingService submit is polluted by list relation distribution context")
             for forbidden in (
                 "repair_legacy_case_id_collisions",
                 "confirm_relation(",

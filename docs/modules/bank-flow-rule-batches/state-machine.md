@@ -1,6 +1,6 @@
 # 流水规则批量处理状态机
 
-> 本文件定义当前流水规则批量处理状态。当前代码已提供 `/bank-flow-rule-batches` / `/api/bank-flow-rule-batches`，并使用独立 `bank_flow_rule_batch` read model key、worker event、operation barrier target 和 repository port；底层物理批次存储仍共享现有 no-OA batch storage 并以 `relation_mode=bank_flow_rule_batch` 隔离。
+> 本文件定义当前流水规则批量处理状态。当前代码已提供 `/bank-flow-rule-batches` / `/api/bank-flow-rule-batches`，并使用独立 `bank_flow_rule_batch` read model key、worker event、operation barrier target、repository port、PostgreSQL 批次/read model 表和 `app_settings.bank_flow_rule_batch_tag_rules` 规则 family。
 
 ## 标签规则状态
 

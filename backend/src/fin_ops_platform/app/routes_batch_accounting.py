@@ -53,7 +53,7 @@ class BatchAccountingApiRoutes:
         year = str(payload.get("year") or "")
         previous_pair_snapshot = self._pair_relation_snapshot()
         try:
-            result = self._service_factory().submit(
+            result = self._service_factory(use_sql_read_model=True).submit(
                 year=year,
                 bank_year=str(payload.get("bank_year") or year),
                 bank_row_id=str(payload.get("bank_row_id") or ""),

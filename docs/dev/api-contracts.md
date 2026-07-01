@@ -52,7 +52,7 @@
 | `summary.submitted_count` | 当前银行年份下已提交批量账务关系数量。 |
 | `summary.bank_year` | 后端实际使用的银行流水年份；OA 候选不再按年份过滤。 |
 | `bank_rows` | 当前 bucket 的银行流水列表。 |
-| `oa_rows` | `unsubmitted` bucket 的可选 OA 日常报销单据列表；候选必须没有 active `workbench_relation` 配对关系。 |
+| `oa_rows` | `unsubmitted` bucket 的可选 OA 日常报销单据列表；候选必须没有关联银行流水，只有发票关系或无流水候选关系时仍可进入右侧 OA 栏。 |
 | `relations_by_bank_row_id` | `submitted` bucket 中按银行流水 ID 索引的已提交关系详情。 |
 | `read_model_status` | 关联台 relation read model 读取状态。非 fresh 时页面不能把空 rows 当作“全部未提交”。 |
 | `read_model_stale_reasons` | relation read model 非 fresh 原因，按后端返回顺序去重。 |
@@ -67,7 +67,7 @@
 
 `POST /api/batch-accounting/{relation_id}/withdraw`
 
-写操作在业务校验和持久化前必须再次校验 `workbench_relation` read model fresh，避免页面加载后到点击提交/撤回之间发生 stale/missing race。非 fresh 时返回 `400`：
+写操作在业务校验和持久化前必须按本次操作 row ids 再次校验 `workbench_relation` read model fresh，避免页面加载后到点击提交/撤回之间发生 stale/missing race；不得因为整页普通 relation distribution 追赶中而阻断无关 rows 的提交。非 fresh 时返回 `400`：
 
 ```json
 {
@@ -170,7 +170,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ## 流水规则批量处理 API
 
-状态：implemented-independent-io。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port 和 refresh persistence port 使用 `bank_flow_rule_batch`。底层历史物理批次存储暂由 bank-flow 命名 adapter 兼容，并通过 `relation_mode=bank_flow_rule_batch` 隔离；legacy `/api/no-oa-bank-batches/*` 仅作为 no-OA 兼容路径保留，不承接 bank-flow 新链路。
+状态：implemented-independent-storage-and-rule-family-io。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。迁移 `0082_bank_flow_rule_batch_storage.sql` 从历史 no-OA 表回填旧 bank-flow rows；迁移 `0083_bank_flow_rule_batch_tag_rules.sql` 只在缺失新规则 key 时从历史 no-OA settings 复制值。运行时不再把 no-OA 物理表或 no-OA settings family 作为 bank-flow source of truth。legacy `/api/no-oa-bank-batches/*` 仅作为 no-OA 兼容路径保留，不承接 bank-flow 新链路。
 
 `GET /api/bank-flow-rule-batches/tag-rules`
 
@@ -216,7 +216,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 保存规则：
 
 - `expected_version` 必填；版本不一致返回 `409 bank_flow_rule_batch_tag_rules_version_conflict`。
-- 请求不能包含 `selected_tag_codes`；旧字段不得作为新规则事实写入。
+- 请求和 service 边界都不能包含 `selected_tag_codes`；旧字段不得作为新规则事实写入。
 - 只能提交当前 `active_tags` 中存在且可用的标签 code；未知、停用、重复 code 返回业务错误。
 - 成功后返回与 GET 相同结构，写审计动作 `bank_flow_rule_batch_tag_rules_updated`。
 - 保存后触发独立 `bank_flow_rule_batch`、`workbench`、`workbench_relation` 等受影响 read model refresh；不能递增 `bank_transaction_tags.version`。
@@ -1077,7 +1077,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 读接口：
 
-- `GET /api/output-invoice-collections/rows`：优先读取 SQL read model；miss/stale/schema/source version 不匹配时返回 `202` 与 `read_model_status=refreshing`，不在请求线程 live rebuild。响应包含 `summary`、统一关系 `oa`、`bankTransactions`、`invoiceRelations`、手动状态/提醒、人工红蓝票关系和正式收据摘要。
+- `GET /api/output-invoice-collections/rows`：优先读取 SQL read model；miss/stale/schema/source version 不匹配时返回 `202` 与 `read_model_status=refreshing`，不在请求线程 live rebuild。响应包含 `summary`、统一关系 `oa`、`bankTransactions`、`invoiceRelations`、手动状态/提醒、人工红蓝票关系和正式收据摘要。linked relation 下多张销项发票必须归并为一条收款 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额。
 - `GET /api/output-invoice-collections/filter-options`：基于同一行集生成筛选项。
 - `GET /api/output-invoice-collections/status-rules`：返回 Sheet6 静态规则、手动状态选项和权限。
 - `GET /api/output-invoice-collections/receipts/history?invoice_id=...`：返回正式收据 lifecycle facts，不再伪造空历史。
@@ -1086,6 +1086,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 rows 中统一关系字段要求：
 
 - `oa`、`bankTransactions`、`invoiceRelations` 都携带 `primary` 或兼容 primary 字段、`relationCount`、`hasMultiple`、`detailMode`、`summaries`；多项时 `detailMode=list`。
+- linked relation 下多张销项发票只输出一条 rows 记录；负数/红字发票不得被过滤，必须进入 `invoiceRelations.summaries` 并参与 `invoiceRelations.totalWithTax`、`invoiceTotal` 和收款状态计算。
 - `bankTransactions.receivedTotal` 只统计 linked 收入流水；未被正式化为 active relation 的自动匹配 decision 不进入销项收款下游关系字段，也不得计入已收款和 confirmed relation 判断。
 - SQL read model payload 缺少 `oa`、`bankTransactions`、`invoiceRelations`、`redInvoiceRelation` 或 `receipt` 任一结构字段时属于 schema stale，API 必须 enqueue `output_invoice_collection` refresh 并返回 `202 refreshing`。
 

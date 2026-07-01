@@ -3800,18 +3800,28 @@ class PostgresSummaryReadModelRepository:
         )
 
     def list_no_oa_bank_batch_rows(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
-        return self._list_bank_batch_rows(filters, readiness_scope_type="no_oa_bank_batch")
+        return self._list_bank_batch_rows(
+            filters,
+            readiness_scope_type="no_oa_bank_batch",
+            table_name="read_model.no_oa_bank_batch_rows",
+            relation_mode_filter_enabled=True,
+        )
 
     def list_bank_flow_rule_batch_rows(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
-        resolved_filters = dict(filters) if isinstance(filters, dict) else {}
-        resolved_filters["relation_mode"] = "bank_flow_rule_batch"
-        return self._list_bank_batch_rows(resolved_filters, readiness_scope_type="bank_flow_rule_batch")
+        return self._list_bank_batch_rows(
+            filters,
+            readiness_scope_type="bank_flow_rule_batch",
+            table_name="read_model.bank_flow_rule_batch_rows",
+            relation_mode_filter_enabled=False,
+        )
 
     def _list_bank_batch_rows(
         self,
         filters: dict[str, Any] | None = None,
         *,
         readiness_scope_type: str,
+        table_name: str,
+        relation_mode_filter_enabled: bool,
     ) -> list[dict[str, Any]] | None:
         resolved_filters = filters if isinstance(filters, dict) else {}
         where: list[str] = ["status <> 'superseded'"]
@@ -3831,13 +3841,13 @@ class PostgresSummaryReadModelRepository:
         if value := text(resolved_filters.get("account_key")):
             where.append("account_key = %s")
             params.append(value)
-        if value := text(resolved_filters.get("relation_mode")):
+        if relation_mode_filter_enabled and (value := text(resolved_filters.get("relation_mode"))):
             where.append("coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s")
             params.append(value)
         rows = self._connection.fetch_all(
             f"""
             select batch_id, source_versions, payload, raw_payload
-            from read_model.no_oa_bank_batch_rows
+            from {table_name}
             where {" and ".join(where)}
             order by scope_month desc nulls last, generated_at desc, batch_id
             """,
@@ -3863,18 +3873,28 @@ class PostgresSummaryReadModelRepository:
         return result
 
     def no_oa_bank_batch_source_versions_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any] | None:
-        return self._bank_batch_source_versions_summary(filters, readiness_scope_type="no_oa_bank_batch")
+        return self._bank_batch_source_versions_summary(
+            filters,
+            readiness_scope_type="no_oa_bank_batch",
+            table_name="read_model.no_oa_bank_batch_rows",
+            relation_mode_filter_enabled=True,
+        )
 
     def bank_flow_rule_batch_source_versions_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any] | None:
-        resolved_filters = dict(filters) if isinstance(filters, dict) else {}
-        resolved_filters["relation_mode"] = "bank_flow_rule_batch"
-        return self._bank_batch_source_versions_summary(resolved_filters, readiness_scope_type="bank_flow_rule_batch")
+        return self._bank_batch_source_versions_summary(
+            filters,
+            readiness_scope_type="bank_flow_rule_batch",
+            table_name="read_model.bank_flow_rule_batch_rows",
+            relation_mode_filter_enabled=False,
+        )
 
     def _bank_batch_source_versions_summary(
         self,
         filters: dict[str, Any] | None = None,
         *,
         readiness_scope_type: str,
+        table_name: str,
+        relation_mode_filter_enabled: bool,
     ) -> dict[str, Any] | None:
         resolved_filters = filters if isinstance(filters, dict) else {}
         where: list[str] = ["status <> 'superseded'"]
@@ -3882,13 +3902,13 @@ class PostgresSummaryReadModelRepository:
         if value := text(resolved_filters.get("month")):
             where.append("scope_month = %s::date")
             params.append(month_start(value))
-        if value := text(resolved_filters.get("relation_mode")):
+        if relation_mode_filter_enabled and (value := text(resolved_filters.get("relation_mode"))):
             where.append("coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s")
             params.append(value)
         rows = self._connection.fetch_all(
             f"""
             select source_versions
-            from read_model.no_oa_bank_batch_rows
+            from {table_name}
             where {" and ".join(where)}
             order by scope_month desc nulls last, batch_id
             """,

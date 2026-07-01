@@ -6,7 +6,7 @@ from typing import Any
 from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 
-OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION = "output-invoice-collections:v3"
+OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION = "output-invoice-collections:v4-relation-group-rows"
 
 MANUAL_COLLECTION_STATUS_OPTIONS: tuple[dict[str, Any], ...] = (
     {

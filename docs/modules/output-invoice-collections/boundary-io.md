@@ -1,12 +1,12 @@
 # 销项发票收款情况模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-01
 
 ## 模块化状态
 
 - 状态：partial
 - 当前边界可信度：high
-- 目标边界：销项发票收款情况通过 `output_invoice_collection` read model 查询；收款/红冲/生命周期变更产生 scoped refresh。
+- 目标边界：销项发票收款情况通过 `output_invoice_collection` read model 查询；linked relation 下多张销项发票先归并为一条收款行，成员发票按净额汇总且负数/红字发票必须保留在 relation summaries；收款/红冲/生命周期变更产生 scoped refresh。
 - 当前缺口：与 invoice lifecycle、workbench relation、receipt service 关联紧密，旧路径删除需要多模块回归。
 - 旧代码删除条件：旧 service 直读路径不再参与页面 API，fresh gate tests 覆盖。
 
@@ -16,6 +16,7 @@
 
 - 销项发票收款情况页面、明细、收款状态、红冲关系和导出。
 - `output_invoice_collection` read model。
+- linked `workbench_relation` 中多张销项发票到单条收款行的投影归并规则。
 - 与 invoice usage collection worker 的 scoped projection。
 - 生命周期状态、提醒、收据创建/作废/重开等写操作返回统一 write target envelope，页面优先等待 `operation_barrier_targets`。
 
@@ -30,6 +31,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面查询/筛选 | `OutputInvoiceCollectionsPage.tsx`、`features/outputInvoiceCollections/api.ts` | 进入 read model service/fresh gate |
+| 统一关系事实 | `workbench_relation` read facade | 只有 `relationStatus="linked"` 的 typed rows 可驱动 OA/流水/销项发票 relation summaries；多张销项发票 relation 归并为一条收款行 |
 | 收款/状态写入 | output invoice collection services | 触发 lifecycle 和 read model dirty scope |
 | 写后 target envelope | `output_invoice_collection_freshness_metadata(...)` | 按发票所属月份返回 `output_invoice_collection` 的 affected/read-model scope 和 operation barrier target |
 | Refresh scope | `output_invoice_collection` manifest | month or `all`；`all` 是 fan-out command |
@@ -38,7 +40,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 收款 rows/details | 前端页面 | fresh/status 可见 |
+| 收款 rows/details | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额 |
 | lifecycle/status result | API | 写后可恢复、可审计 |
 | operation barrier targets | 前端页面 | lifecycle/receipt 写成功后用服务端返回 targets 等待 fresh；缺省时才回退当前查询月份 |
 | Dirty scope | runtime queue | `output_invoice_collection.read_model.refresh` |
@@ -50,6 +52,7 @@
 - Worker：`invoice-usage-collection`
 - Query owner：`OutputInvoiceCollectionService`
 - Repository owner：`OutputInvoiceCollectionReadModelRepositoryPort`
+- Source version：改变 row ownership、relation grouping、金额口径或 relation summaries 字段时必须 bump `OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION`，防止旧投影被 freshness gate 当作 fresh。
 
 ## 文件范围
 
@@ -75,6 +78,7 @@
 - `tests/test_output_invoice_collection_read_model_fresh_gate_service.py`
 - `web/src/test/OutputInvoiceCollectionsPage.test.tsx` 覆盖页面等待 operation barrier 行为。
 - `web/e2e/output-invoice-collections-flow.spec.ts`
+- `tests/test_output_invoice_collection_service.py::OutputInvoiceCollectionQueryServiceTests.test_multi_output_relation_emits_single_net_collection_row` 覆盖 linked 多销项发票 relation 只输出一条净额收款行，且负数发票进入 summaries。
 
 ## 当前缺口和删除条件
 

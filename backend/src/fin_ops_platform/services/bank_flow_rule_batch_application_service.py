@@ -16,8 +16,15 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
 
+    def _refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(self, batch_id: str) -> None:
+        try:
+            self._bank_batch_service.get_batch(batch_id)
+            return
+        except KeyError:
+            self._refresh_bank_flow_rule_batch_runtime_snapshot()
+
     def detail_payload(self, batch_id: str) -> dict[str, object]:
-        self._refresh_bank_flow_rule_batch_runtime_snapshot()
+        self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)
         return super().detail_payload(batch_id)
 
     def withdraw_batch(
@@ -28,7 +35,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         expected_version: int | None,
         reason: str | None,
     ) -> dict[str, object]:
-        self._refresh_bank_flow_rule_batch_runtime_snapshot()
+        self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)
         return super().withdraw_batch(
             batch_id,
             actor=actor,
@@ -42,7 +49,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         actor: str,
         reason: str | None,
     ) -> dict[str, object]:
-        self._refresh_bank_flow_rule_batch_runtime_snapshot()
         return super().reset_submitted_bank_flow_rule_batches(actor=actor, reason=reason)
 
     def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
@@ -65,13 +71,16 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         except Exception as exc:
             raise BankBatchPersistenceError(str(exc)) from exc
 
+    def tag_selection_payload(self) -> dict[str, Any]:
+        return self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+
     def update_tag_selection(
         self,
         payload: dict[str, Any],
         *,
         actor_id: str,
     ) -> dict[str, Any]:
-        result = self._app_settings_service.update_no_oa_bank_batch_tag_selection(
+        result = self._app_settings_service.update_bank_flow_rule_batch_tag_rules(
             payload,
             actor_id=actor_id,
         )

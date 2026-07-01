@@ -223,8 +223,10 @@ class RecordingBatchRelationCommandService:
         self._pair_relation_service = pair_relation_service
         self.confirm_calls: list[dict[str, object]] = []
         self.withdraw_calls: list[dict[str, object]] = []
+        self.active_relation_calls: list[list[str]] = []
 
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        self.active_relation_calls.append([str(row_id) for row_id in list(row_ids or [])])
         if self._pair_relation_service is None:
             return []
         return self._pair_relation_service.active_relations_for_row_ids(row_ids)
@@ -582,6 +584,73 @@ class BatchAccountingApiTests(unittest.TestCase):
             [row["id"] for row in payload["oa_rows"]],
             ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
         )
+
+    def test_submit_uses_sql_read_model_loader_when_available(self) -> None:
+        class SqlReadModel:
+            def __init__(self, payload: dict[str, object]) -> None:
+                self.payload = payload
+                self.calls: list[str] = []
+
+            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
+                self.calls.append(bank_year)
+                return self.payload
+
+        app = build_application()
+        sql_read_model = SqlReadModel(self._grouped_payload())
+        app._workbench_sql_read_repository = sql_read_model
+        payload_patcher = patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("full workbench loader must not run"))
+        payload_patcher.start()
+        self.addCleanup(payload_patcher.stop)
+
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
+                    "actor": "finance-user",
+                }
+            ),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(sql_read_model.calls, ["2026"])
+        self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
+
+    def test_submit_scopes_relation_readiness_and_active_relation_checks_to_selected_rows(self) -> None:
+        facade = RowsBatchRelationFacade([])
+        relation_command = RecordingBatchRelationCommandService()
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: self._large_batch_accounting_payload(),
+            relation_facade=facade,
+            relation_command_service=relation_command,
+        )
+
+        result = service.submit(
+            year="2026",
+            bank_row_id="txn_imported_202601_batch_007",
+            oa_row_ids=["oa-exp-ba-007"],
+            actor="finance-user",
+        )
+
+        selected_row_ids = ["txn_imported_202601_batch_007", "oa-exp-ba-007"]
+        self.assertEqual(result["affected_row_ids"], selected_row_ids)
+        self.assertEqual(
+            [call for call in facade.calls if "row_ids" in call],
+            [
+                {
+                    "row_ids": selected_row_ids,
+                    "require_fresh": True,
+                    "reason": "batch_accounting_submit_relation_readiness",
+                    "month_hint": "2026-01",
+                    "scope_keys_hint": ["2026-01"],
+                }
+            ],
+        )
+        self.assertEqual(relation_command.active_relation_calls, [selected_row_ids])
 
     def test_unsubmitted_list_explicit_pagination_protects_first_screen_slo(self) -> None:
         app = build_application()

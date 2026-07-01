@@ -64,6 +64,7 @@ def _default_app_settings_payload() -> dict[str, Any]:
         "bank_transaction_tags": {},
         "pending_invoice_tag_groups": {},
         "pending_output_invoice_tag_groups": {},
+        "bank_flow_rule_batch_tag_rules": {},
         "input_invoice_usage_payment_status_rules": {},
     }
 
@@ -522,7 +523,15 @@ class PostgresStateStore:
         return {}
 
     def load_bank_flow_rule_batches(self) -> dict[str, Any]:
-        return self.load_no_oa_bank_batches()
+        snapshot = self._workbench_repository.load_bank_flow_rule_batches()
+        if snapshot:
+            batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
+            audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else None
+            return normalize_no_oa_bank_batches(
+                batches if batches else None,
+                audit_log if audit_log else None,
+            )
+        return {}
 
     def save_no_oa_bank_batches(
         self,
@@ -546,10 +555,7 @@ class PostgresStateStore:
         )
 
     def save_bank_flow_rule_batches(self, snapshot: dict[str, Any]) -> None:
-        self._workbench_repository.save_no_oa_bank_batches(
-            snapshot,
-            relation_mode="bank_flow_rule_batch",
-        )
+        self._workbench_repository.save_bank_flow_rule_batches(snapshot)
 
     def save_bank_flow_rule_batches_scope(
         self,
@@ -557,10 +563,9 @@ class PostgresStateStore:
         *,
         scope_key: str,
     ) -> None:
-        self._workbench_repository.save_no_oa_bank_batches_scope(
+        self._workbench_repository.save_bank_flow_rule_batches_scope(
             snapshot,
             scope_key=scope_key,
-            relation_mode="bank_flow_rule_batch",
         )
 
     def load_workbench_read_models(self) -> dict[str, Any]:

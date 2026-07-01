@@ -253,6 +253,14 @@ class AppSettingsServiceTests(unittest.TestCase):
                 {"expected_version": selection["version"], "selected_tag_codes": ["salary"]},
                 actor_id="settings-owner",
             )
+            bank_flow_rules = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+            app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+                {
+                    "expected_version": bank_flow_rules["version"],
+                    "rules": [{"tag_code": "salary", "requires_oa": False, "requires_invoice": False}],
+                },
+                actor_id="settings-owner",
+            )
             turnover_selection = app._app_settings_service.get_turnover_ledger_tag_selection_payload()
             turnover_code = turnover_selection["active_tags"][0]["code"]
             app._app_settings_service.update_turnover_ledger_tag_selection(
@@ -279,6 +287,12 @@ class AppSettingsServiceTests(unittest.TestCase):
             settings["no_oa_bank_batch_tag_selection"]["version"],
             3,
         )
+        self.assertEqual(settings["bank_flow_rule_batch_tag_rules"]["selected_tag_codes"], [])
+        self.assertNotIn("salary", settings["bank_flow_rule_batch_tag_rules"]["requirements_by_tag_code"])
+        self.assertEqual(
+            settings["bank_flow_rule_batch_tag_rules"]["version"],
+            3,
+        )
         audit = app._audit_service.as_dicts()[-1]
         self.assertEqual(audit["action"], "bank_auto_tag_rules_updated")
         self.assertEqual(
@@ -287,6 +301,10 @@ class AppSettingsServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             audit["metadata"]["detached_no_oa_bank_batch_tag_references"],
+            [{"tag_code": "salary"}],
+        )
+        self.assertEqual(
+            audit["metadata"]["detached_bank_flow_rule_batch_tag_rule_references"],
             [{"tag_code": "salary"}],
         )
         self.assertEqual(
@@ -416,6 +434,127 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(
             audit["metadata"]["new_rules"],
             {"fee": {"requires_oa": True, "requires_invoice": False}},
+        )
+
+    def test_bank_flow_rule_batch_tag_rules_are_independent_from_no_oa_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "path": ["费用", "手续费"],
+                        "source": "system",
+                        "status": "active",
+                        "output_primary_label": "费用",
+                        "output_sub_label": "手续费",
+                        "direction": "expense",
+                        "account_scope": {"type": "any", "values": []},
+                        "rules": {
+                            "match_fields": ["summary_text"],
+                            "contains_any": ["手续费"],
+                            "contains_all": [],
+                            "exact_any": [],
+                            "regex_any": [],
+                            "none_of": [],
+                        },
+                    },
+                ],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            no_oa_before = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+            bank_flow_before = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+
+            saved = app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+                {
+                    "expected_version": bank_flow_before["version"],
+                    "rules": [{"tag_code": "fee", "requires_oa": True, "requires_invoice": False}],
+                },
+                actor_id="settings-owner",
+            )
+            no_oa_after = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+
+        self.assertEqual(saved["version"], bank_flow_before["version"] + 1)
+        self.assertEqual(
+            saved["requirements_by_tag_code"]["fee"],
+            {"requires_oa": True, "requires_invoice": False},
+        )
+        self.assertEqual(no_oa_after["version"], no_oa_before["version"])
+        self.assertEqual(
+            no_oa_after["requirements_by_tag_code"]["fee"],
+            {"requires_oa": True, "requires_invoice": True},
+        )
+        audit = app._audit_service.as_dicts()[-1]
+        self.assertEqual(audit["action"], "bank_flow_rule_batch_tag_rules_updated")
+
+    def test_bank_flow_rule_batch_tag_rules_reject_legacy_selection_and_duplicate_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[self._custom_auto_rule("fee", "手续费")],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            current = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+
+            with self.assertRaises(AppSettingsValidationError) as selected_context:
+                app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+                    {"expected_version": current["version"], "selected_tag_codes": ["fee"]},
+                    actor_id="settings-owner",
+                )
+
+            with self.assertRaises(AppSettingsValidationError) as duplicate_context:
+                app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+                    {
+                        "expected_version": current["version"],
+                        "rules": [
+                            {"tag_code": "fee", "requires_oa": False, "requires_invoice": False},
+                            {"tag_code": "fee", "requires_oa": True, "requires_invoice": False},
+                        ],
+                    },
+                    actor_id="settings-owner",
+                )
+
+            after = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+
+        self.assertEqual(selected_context.exception.error_code, "bank_flow_rule_batch_selected_tag_codes_forbidden")
+        self.assertEqual(duplicate_context.exception.error_code, "duplicate_bank_flow_rule_batch_tag_rule")
+        self.assertEqual(after["version"], current["version"])
+        self.assertEqual(app._audit_service.as_dicts(), [])
+
+    def test_update_settings_preserves_bank_flow_rule_batch_tag_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[self._custom_auto_rule("fee", "手续费")],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            bank_flow_before = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+            saved_rules = app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+                {
+                    "expected_version": bank_flow_before["version"],
+                    "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}],
+                },
+                actor_id="settings-owner",
+            )
+            current = app._app_settings_service.get_settings_payload()
+
+            saved_settings = app._app_settings_service.update_settings(
+                completed_project_ids=current["projects"]["completed_project_ids"],
+                bank_account_mappings=current["bank_account_mappings"],
+                allowed_usernames=current["access_control"]["allowed_usernames"],
+                readonly_export_usernames=current["access_control"]["readonly_export_usernames"],
+                admin_usernames=current["access_control"]["admin_usernames"],
+                actor_id="settings-owner",
+            )
+
+        self.assertEqual(
+            saved_settings["bank_flow_rule_batch_tag_rules"]["version"],
+            saved_rules["version"],
+        )
+        self.assertEqual(
+            saved_settings["bank_flow_rule_batch_tag_rules"]["requirements_by_tag_code"]["fee"],
+            {"requires_oa": False, "requires_invoice": False},
         )
 
     def test_settings_payload_includes_bank_transaction_tags_and_pending_invoice_groups(self) -> None:

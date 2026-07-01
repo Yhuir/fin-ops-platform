@@ -38,6 +38,16 @@
 
 ## 历史记录
 
+## 2026-07-01 - 反提 OA 抽屉创建草稿入口排版调整
+
+- 目标：按 GSD UI 排版约束，把 `创建 OA 草稿` 从抽屉底部 `OA 草稿` block 提升到候选发票清单工具栏，并放在候选搜索框左侧。
+- 影响范围：仅更新 `OaReverseWorkspaceDrawer` 的待处理 tab 布局、对应 CSS 死样式清理和前端 drawer 测试；不改变 API、权限、read model、状态机或后端 OA reverse 流程。
+- 关键决策：创建动作继续位于右侧抽屉内，与候选选择、已选数量和搜索同一操作区；创建成功后的外部草稿链接仍只在提交确认弹窗展示，暂存 tab 继续不暴露草稿链接。
+- 文档影响：更新本实施记录；模块边界、状态机、API 合同和测试矩阵不变。
+- 测试覆盖：更新 `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`，覆盖创建按钮位于候选搜索框左侧、底部 `OA 草稿` block 不再渲染。
+- 验证命令：`cd web && npm test -- --run src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`；`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx`；`cd web && npm run build`。
+- 未测风险：未连接真实 OA 草稿页面；该风险沿用既有 OA reverse staging/manual 联调要求。
+
 ## 2026-06-30 - OA reverse 二态关系和抽屉布局固化
 
 - 目标：把 `以发票反提 OA` 右侧抽屉同步到二态 OA 关系口径，并消除标题提示导致的布局抖动。

@@ -16,7 +16,7 @@ type DynamicWriteControlOpener = {
 };
 
 const mutationCallPattern = /^(POST|PUT|PATCH|DELETE) /;
-const enabledWriteControlPattern = /^保存$|保存设置|保存计划|保存规则|保存并刷新|保存外部往来款|保存补充信息|保存收据编号设置|保存凭据|清空密码|新增账户|重新应用规则|新增标签|拖动 .* 列|确认导入|确认对账|确认闭环|确认关系|确认关联|确认已支付|确认作废|确认重开|确认拆分|确认撤回|确认买票|确认为买票|确认为过账|写回|撤回批次|撤回关联|撤回忽略|删除|作废收据|重开收据|新建批次|创建正式收据|创建 OA 草稿|创建OA草稿|上传|关联OA项|关联支出流水|关联所选记录|接受推荐票根|选择发票|标记无需开票|标记现金收入|标记异常|异常处理|取消异常处理|取消现金处理|提交异常|继续报异常|排除非ETC|手工确认|已认证发票导入|开始预览|数据重置|重置数据|提交OA|提交 OA|提交批次|人工提交/;
+const enabledWriteControlPattern = /^保存$|保存设置|保存计划|保存规则|保存并刷新|保存外部往来款|保存补充信息|保存收据编号设置|保存凭据|清空密码|新增账户|重新应用规则|新增标签|拖动 .* 列|确认导入|确认对账|确认闭环|确认关系|确认关联|确认已支付|确认作废|确认重开|确认拆分|确认撤回|确认买票|确认为买票|确认为过账|写回|撤回批次|撤回关联|撤回忽略|删除|作废收据|重开收据|新建批次|创建正式收据|创建 OA 草稿|创建OA草稿|上传|关联OA项|关联支出流水|关联所选记录|接受推荐票根|选择发票|标记无需开票|标记现金收入|标记异常|异常处理|取消异常处理|取消现金处理|提交异常|继续报异常|排除非ETC|手工确认|已认证发票导入|开始预览|数据重置|重置数据|提交OA|提交 OA|提交审批|提交批次|人工提交/;
 
 const readablePages: PageExpectation[] = [
   {
@@ -474,7 +474,7 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
     verify: async (page) => {
       await page.goto("/etc-tickets");
       await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
-      await expect(page.getByText("当前账号仅支持查看和导出，不能创建 OA 草稿、人工确认、上传、删除或新建 ETC 批次。")).toBeVisible();
+      await expect(page.getByText(/当前账号仅支持查看和导出，不能创建.*草稿、人工确认、上传、删除或新建.*批次。/)).toBeVisible();
       await expect(page.getByRole("region", { name: "ETC批次流程" })).toBeVisible();
       const uploadRegion = page.getByLabel("ETC对账文件上传");
       await expect(uploadRegion).toBeVisible();
@@ -695,8 +695,7 @@ test.describe("permissions browser role matrix", () => {
 
     await page.goto("/etc-tickets");
     await expect(page.getByRole("heading", { name: "ETC票据" })).toBeVisible();
-    await expect(page.getByText("当前账号仅支持查看和导出，不能创建 OA 草稿、人工确认、上传、删除或新建 ETC 批次。")).toBeVisible();
-    await expect(page.getByRole("button", { name: "提交OA" })).toBeDisabled();
+    await expect(page.getByText(/当前账号仅支持查看和导出，不能创建.*草稿、人工确认、上传、删除或新建.*批次。/)).toBeVisible();
     await expect(page.getByRole("button", { name: "新建批次" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "当前账号仅支持查看和导出，不能删除 ETC 批次。" }).first()).toBeDisabled();
     await expectNoEnabledWriteControlCandidates(page, etcReadOnlyDisclosureControls);

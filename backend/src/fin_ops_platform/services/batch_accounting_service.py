@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
@@ -221,7 +221,7 @@ class BatchAccountingService:
             page_size=oa_page_size if oa_page_size is not None else page_size,
             requested=any(value is not None for value in (page, page_size, oa_page, oa_page_size)),
         )
-        context = self._build_context(bank_year=resolved_bank_year)
+        context = self._build_list_context(bank_year=resolved_bank_year)
         submitted_relations = self._submitted_relations(resolved_bank_year, context)
         if bucket == "submitted":
             bank_rows, relations_by_bank_row_id = self._submitted_payload(submitted_relations, context)
@@ -358,14 +358,10 @@ class BatchAccountingService:
         resolved_bank_year = self._validate_year(bank_year or fallback_year)
         normalized_bank_row_id = self._required_id(bank_row_id, "bank_row_id")
         normalized_oa_row_ids = self._normalize_ids(oa_row_ids)
-        context = self._build_context(bank_year=resolved_bank_year)
-        self._ensure_relation_read_model_fresh(context.relation_read_model_status)
+        context = self._build_submit_context(bank_year=resolved_bank_year)
         bank_row = context.rows_by_id.get(normalized_bank_row_id)
         if not isinstance(bank_row, dict) or not self._is_batch_bank_row(bank_row, resolved_bank_year, require_unlinked=False):
             raise BatchAccountingError("invalid_batch_accounting_bank_row", "银行流水不符合批量账务提交条件。")
-        active_bank_relation = self._active_relation_by_row_id(normalized_bank_row_id)
-        if isinstance(active_bank_relation, dict):
-            raise BatchAccountingError("batch_accounting_bank_row_already_linked", "银行流水已有关联关系，请刷新后重试。")
         if expected_version is not None:
             row_version = self._optional_int(bank_row.get("version"))
             if row_version is not None and row_version != expected_version:
@@ -374,15 +370,13 @@ class BatchAccountingService:
         eligible_oa_by_id = {
             str(row.get("id")): row
             for row in context.open_oa_rows
-            if self._is_eligible_oa_row_for_submission(row, linked_row_ids=context.bank_linked_row_ids)
+            if self._is_eligible_oa_row_for_submission(row, linked_row_ids=set())
         }
         selected_oa_rows: list[dict[str, Any]] = []
         for oa_row_id in normalized_oa_row_ids:
             oa_row = eligible_oa_by_id.get(oa_row_id)
             if not isinstance(oa_row, dict):
                 raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据不符合批量账务提交条件。")
-            if self._active_bank_relation_by_row_id(oa_row_id) is not None:
-                raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据已有关联流水，请刷新后重试。")
             selected_oa_rows.append(oa_row)
 
         bank_amount = self._bank_expense_amount(bank_row)
@@ -402,10 +396,25 @@ class BatchAccountingService:
         row_ids = self._dedupe([normalized_bank_row_id, *normalized_oa_row_ids, *invoice_row_ids])
         rows = [context.rows_by_id.get(row_id, {"id": row_id, "type": self._row_type_for_row_id(row_id)}) for row_id in row_ids]
         row_types = [self._row_type(row, row_id) for row, row_id in zip(rows, row_ids, strict=False)]
+        month_scope = self._month_scope(rows)
+        relation_read_model_status = self._relation_read_model_status_for_row_ids(
+            row_ids,
+            month_scope=month_scope,
+            reason="batch_accounting_submit_relation_readiness",
+        )
+        self._ensure_relation_read_model_fresh(relation_read_model_status)
         before_relations = self._active_relations_for_row_ids(row_ids)
+        if any(normalized_bank_row_id in self._relation_row_id_set(relation) for relation in before_relations):
+            raise BatchAccountingError("batch_accounting_bank_row_already_linked", "银行流水已有关联关系，请刷新后重试。")
+        for oa_row_id in normalized_oa_row_ids:
+            if any(
+                oa_row_id in self._relation_row_id_set(relation) and self._relation_has_bank_row(relation)
+                for relation in before_relations
+            ):
+                raise BatchAccountingError("invalid_batch_accounting_oa_row", "OA 单据已有关联流水，请刷新后重试。")
         history_before_relations = self._merge_relation_snapshots(
             before_relations,
-            self._synthetic_existing_case_relations(rows, existing_relations=before_relations, month_scope=self._month_scope(rows)),
+            self._synthetic_existing_case_relations(rows, existing_relations=before_relations, month_scope=month_scope),
         )
         special_metadata = {
             "source": BATCH_ACCOUNTING_SOURCE,
@@ -431,7 +440,7 @@ class BatchAccountingService:
                 row_types=row_types,
                 relation_mode=BATCH_ACCOUNTING_SOURCE,
                 actor_id=actor,
-                month_scope=self._month_scope(rows),
+                month_scope=month_scope,
                 note=relation_note,
                 amount_check=amount_check,
                 special_metadata=special_metadata,
@@ -639,7 +648,16 @@ class BatchAccountingService:
             "message": "已撤回批量账务关联。",
         }
 
-    def _build_context(self, *, bank_year: str) -> _WorkbenchContext:
+    def _build_list_context(self, *, bank_year: str) -> _WorkbenchContext:
+        return self._context_with_candidate_relation_distribution(
+            self._build_workbench_row_context(bank_year=bank_year),
+            bank_year=bank_year,
+        )
+
+    def _build_submit_context(self, *, bank_year: str) -> _WorkbenchContext:
+        return self._build_workbench_row_context(bank_year=bank_year)
+
+    def _build_workbench_row_context(self, *, bank_year: str) -> _WorkbenchContext:
         payload = None
         if self._batch_workbench_loader is not None:
             payload = self._batch_workbench_loader(bank_year=bank_year)
@@ -698,13 +716,32 @@ class BatchAccountingService:
                 unique_invoice_rows.append(row)
             if section == "open":
                 self._index_group_invoice_links(unique_group_oa_rows, unique_invoice_rows, invoice_ids_by_oa_id)
+        return _WorkbenchContext(
+            rows_by_id=rows_by_id,
+            groups=groups,
+            bank_rows=bank_rows,
+            open_oa_rows=open_oa_rows,
+            invoice_ids_by_oa_id=invoice_ids_by_oa_id,
+            linked_row_ids=set(),
+            bank_linked_row_ids=set(),
+            eligible_bank_rows=[],
+            eligible_oa_rows=[],
+            relation_read_model_status=relation_read_model_status,
+        )
+
+    def _context_with_candidate_relation_distribution(
+        self,
+        context: _WorkbenchContext,
+        *,
+        bank_year: str,
+    ) -> _WorkbenchContext:
         linked_row_ids, bank_linked_row_ids = self._relation_distribution_row_id_sets(
-            [*bank_rows, *open_oa_rows],
-            read_model_status=relation_read_model_status,
+            [*context.bank_rows, *context.open_oa_rows],
+            read_model_status=context.relation_read_model_status,
         )
         eligible_bank_rows = [
             row
-            for row in bank_rows
+            for row in context.bank_rows
             if self._is_batch_bank_row(
                 row,
                 bank_year,
@@ -714,20 +751,15 @@ class BatchAccountingService:
         ]
         eligible_oa_rows = [
             row
-            for row in open_oa_rows
+            for row in context.open_oa_rows
             if self._is_eligible_oa_row(row, linked_row_ids=bank_linked_row_ids)
         ]
-        return _WorkbenchContext(
-            rows_by_id=rows_by_id,
-            groups=groups,
-            bank_rows=bank_rows,
-            open_oa_rows=open_oa_rows,
-            invoice_ids_by_oa_id=invoice_ids_by_oa_id,
+        return replace(
+            context,
             linked_row_ids=linked_row_ids,
             bank_linked_row_ids=bank_linked_row_ids,
             eligible_bank_rows=eligible_bank_rows,
             eligible_oa_rows=eligible_oa_rows,
-            relation_read_model_status=relation_read_model_status,
         )
 
     @staticmethod
@@ -1120,6 +1152,10 @@ class BatchAccountingService:
             if case_id:
                 merged[case_id] = relation
         return list(merged.values())
+
+    @staticmethod
+    def _relation_row_id_set(relation: dict[str, Any]) -> set[str]:
+        return {str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()}
 
     def _linked_invoice_row_ids(self, oa_row_ids: list[str], context: _WorkbenchContext) -> list[str]:
         invoice_row_ids: list[str] = []

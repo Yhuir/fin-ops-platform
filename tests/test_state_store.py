@@ -367,6 +367,27 @@ class StateStoreTests(unittest.TestCase):
 
         self.assertEqual(loaded, snapshot)
 
+    def test_bank_flow_rule_batches_use_independent_local_snapshot_file(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            no_oa_snapshot = {"batches": {"no-oa": {"batch_id": "no-oa"}}}
+            bank_flow_snapshot = {
+                "batches": {
+                    "bank-flow": {
+                        "batch_id": "bank-flow",
+                        "relation_mode": "bank_flow_rule_batch",
+                    }
+                }
+            }
+
+            store = ApplicationStateStore(data_dir)
+            store.save_no_oa_bank_batches(no_oa_snapshot)
+            store.save_bank_flow_rule_batches(bank_flow_snapshot)
+            reloaded = ApplicationStateStore(data_dir)
+
+            self.assertEqual(reloaded.load_no_oa_bank_batches(), no_oa_snapshot)
+            self.assertEqual(reloaded.load_bank_flow_rule_batches(), bank_flow_snapshot)
+
     def test_oa_pending_payment_bank_relations_persist_locally_across_store_instances(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)

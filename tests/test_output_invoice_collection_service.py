@@ -145,7 +145,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         payload = service.list_rows()
 
         self.assertEqual(payload["readModelStatus"], "live_query")
-        self.assertEqual(payload["sourceVersion"], "output-invoice-collections:v3")
+        self.assertEqual(payload["sourceVersion"], "output-invoice-collections:v4-relation-group-rows")
         self.assertIn("generatedAt", payload)
         self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 50, "total": 1})
         row = payload["rows"][0]
@@ -195,7 +195,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         row = service.list_rows(page_size=20)["rows"][0]
 
         self.assertEqual(row["oa"]["relationCount"], 2)
-        self.assertEqual([summary["oaId"] for summary in row["oa"]["summaries"]], ["oa-unified-a", "oa-unified-b"])
+        self.assertEqual({summary["oaId"] for summary in row["oa"]["summaries"]}, {"oa-unified-a", "oa-unified-b"})
         self.assertEqual(row["bankTransactions"]["relationCount"], 2)
         self.assertEqual(row["bankTransactions"]["receivedTotal"], "600.00")
         self.assertEqual(row["invoiceRelations"]["relationCount"], 3)
@@ -213,6 +213,50 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
             {summary["invoiceId"] for summary in invoice_details["summaries"]},
             {"out-unified-a", "out-unified-b", "out-unified-c"},
         )
+
+    def test_multi_output_relation_emits_single_net_collection_row(self) -> None:
+        buyer = self._counterparty("buyer", "成都智领趋势科技有限公司", tax_no="91510100MA6ABGYT4T")
+        blue_a = self._invoice("out-blue-a", "09764126", buyer, total_with_tax="182400.00")
+        red = self._invoice(
+            "out-red",
+            "367761",
+            buyer,
+            amount="-161415.93",
+            tax_amount="-20984.07",
+            total_with_tax="-182400.00",
+            is_positive_invoice="否",
+        )
+        blue_b = self._invoice("out-blue-b", "09302711", buyer, total_with_tax="182400.00")
+        bank = self._bank("bank-receipt", "182400.00", TransactionDirection.INFLOW, trade_time="2026-05-21 17:11:30")
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-output-net-receipt",
+            row_ids=[blue_a.id, red.id, blue_b.id, bank.id],
+            row_types=["invoice", "invoice", "invoice", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            amount_check={"matched": True},
+        )
+        service = self._service(
+            invoices=[blue_a, red, blue_b],
+            transactions=[bank],
+            pair_service=pair_service,
+        )
+
+        payload = service.list_rows(page_size=20)
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["invoice"]["totalWithTax"], "182400.00")
+        self.assertEqual(row["invoiceRelations"]["relationCount"], 3)
+        self.assertEqual(row["invoiceRelations"]["totalWithTax"], "182400.00")
+        self.assertEqual(
+            {summary["invoiceId"]: summary["totalWithTax"] for summary in row["invoiceRelations"]["summaries"]},
+            {"out-blue-a": "182400.00", "out-red": "-182400.00", "out-blue-b": "182400.00"},
+        )
+        self.assertEqual(row["bankTransactions"]["receivedTotal"], "182400.00")
+        self.assertEqual(row["collectionStatus"]["code"], "collected")
+        self.assertEqual(row["collectionStatus"]["pendingAmount"], "0.00")
 
     def test_collection_status_uses_red_refund_priority_before_collected_and_pending_rules(self) -> None:
         buyer = self._counterparty("buyer", "客户")

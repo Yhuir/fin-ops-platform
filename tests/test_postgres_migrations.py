@@ -95,6 +95,8 @@ EXPECTED_MIGRATIONS = [
     "0079_workbench_relation_rows_scope_unique_hardening.sql",
     "0080_no_oa_bank_batch_relation_mode_filter.sql",
     "0081_oa_source_aliases.sql",
+    "0082_bank_flow_rule_batch_storage.sql",
+    "0083_bank_flow_rule_batch_tag_rules.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -126,6 +128,8 @@ EXPECTED_TABLES = [
     "app.workbench_exception_case_events",
     "app.no_oa_bank_batches",
     "app.no_oa_bank_batch_events",
+    "app.bank_flow_rule_batches",
+    "app.bank_flow_rule_batch_events",
     "app.oa_applications",
     "app.oa_application_items",
     "app.oa_attachments",
@@ -195,6 +199,7 @@ EXPECTED_TABLES = [
     "read_model.tax_offset_read_models",
     "read_model.tax_offset_items",
     "read_model.no_oa_bank_batch_rows",
+    "read_model.bank_flow_rule_batch_rows",
     "read_model.turnover_ledger_rows",
 ]
 READ_MODEL_STORAGE_CONTRACTS = {
@@ -221,8 +226,7 @@ READ_MODEL_STORAGE_CONTRACTS = {
     "cost_statistics": ("read_model.cost_statistics_read_models", "read_model.cost_statistics_rows"),
     "tax_offset": ("read_model.tax_offset_read_models", "read_model.tax_offset_items"),
     "no_oa_bank_batch": ("read_model.no_oa_bank_batch_rows",),
-    # ponytail: shared physical table until bank-flow gets its own table; relation_mode isolates rows.
-    "bank_flow_rule_batch": ("read_model.no_oa_bank_batch_rows",),
+    "bank_flow_rule_batch": ("read_model.bank_flow_rule_batch_rows",),
     "turnover_ledger": ("read_model.turnover_ledger_rows",),
 }
 
@@ -240,7 +244,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 82)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 84)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -322,6 +326,31 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("special_metadata->>'origin' = 'oa_pending_payment_in_progress'", sql)
         self.assertIn("migrated_to_pending_relation_id", sql)
         self.assertIn("oa_pending_payment_in_progress_relation_migrated", sql)
+
+    def test_bank_flow_rule_batch_independent_storage_schema_and_backfill_are_declared(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("create table if not exists app.bank_flow_rule_batches", sql)
+        self.assertIn("create table if not exists app.bank_flow_rule_batch_events", sql)
+        self.assertIn("create table if not exists read_model.bank_flow_rule_batch_rows", sql)
+        self.assertIn("bank_flow_rule_batch_rows_filters_idx", sql)
+        self.assertIn("bank_flow_rule_batch_rows_generated_idx", sql)
+        self.assertIn("bank_flow_rule_batch_rows_source_versions_gin", sql)
+        self.assertIn("from app.no_oa_bank_batches", sql)
+        self.assertIn("from app.no_oa_bank_batch_events", sql)
+        self.assertIn("from read_model.no_oa_bank_batch_rows", sql)
+        self.assertIn("= 'bank_flow_rule_batch'", sql)
+        self.assertIn("grant select, insert, update, delete on app.bank_flow_rule_batches to fin_ops_app_runtime", sql)
+        self.assertIn("grant select, insert, update, delete on read_model.bank_flow_rule_batch_rows to fin_ops_worker", sql)
+
+    def test_bank_flow_rule_batch_tag_rules_settings_are_split_from_no_oa_settings(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("0083_bank_flow_rule_batch_tag_rules", sql)
+        self.assertIn("update app.app_settings", sql)
+        self.assertIn("'{bank_flow_rule_batch_tag_rules}'", sql)
+        self.assertIn("settings_payload->'no_oa_bank_batch_tag_selection'", sql)
+        self.assertIn("not (settings_payload ? 'bank_flow_rule_batch_tag_rules')", sql)
 
     def test_discovery_rejects_invalid_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -883,12 +912,19 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "bank_transaction_relation_claims",
             "oa_pending_payment_bank_relation_events",
             "workbench_pair_relation_history",
+            "bank_flow_rule_batches",
+            "bank_flow_rule_batch_events",
         ):
             sql = re.sub(
                 rf"\binsert\s+into\s+app\.{table_name}\b",
                 f"insert into allowed_0073_{table_name}",
                 sql,
             )
+        sql = re.sub(
+            r"\binsert\s+into\s+read_model\.bank_flow_rule_batch_rows\b",
+            "insert into allowed_0082_bank_flow_rule_batch_rows",
+            sql,
+        )
         sql = re.sub(
             r"\binsert\s+into\s+read_model\.workbench_generations\s*\(.*?on\s+conflict\s*\(generation_id\)\s+do\s+nothing;",
             "insert into allowed_workbench_generation_backfill",

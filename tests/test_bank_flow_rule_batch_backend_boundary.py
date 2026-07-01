@@ -77,6 +77,21 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertNotIn("READ_MODEL_STATUS_SOURCE_KEYS", source)
         self.assertNotIn('"bank_flow_rule_batch": "no_oa_bank_batch"', source)
 
+    def test_postgres_state_store_bank_flow_storage_uses_dedicated_repository_io(self) -> None:
+        source = (SERVICES_ROOT / "postgres_state_store.py").read_text(encoding="utf-8")
+        start = source.index("    def load_bank_flow_rule_batches")
+        end = source.index("\n    def save_no_oa_bank_batches", start)
+        load_body = source[start:end]
+        self.assertIn("load_bank_flow_rule_batches()", load_body)
+        self.assertNotIn("load_no_oa_bank_batches()", load_body)
+
+        start = source.index("    def save_bank_flow_rule_batches")
+        end = source.index("\n    def load_workbench_read_models", start)
+        save_body = source[start:end]
+        self.assertIn("_workbench_repository.save_bank_flow_rule_batches(snapshot)", save_body)
+        self.assertIn("_workbench_repository.save_bank_flow_rule_batches_scope(", save_body)
+        self.assertNotIn("save_no_oa_bank_batches", save_body)
+
     def test_bank_flow_read_model_runtime_contract_is_independent(self) -> None:
         definition = APP_STATUS_READ_MODEL_REGISTRY["bank_flow_rule_batch"]
         manifest = READ_MODEL_MANIFEST["bank_flow_rule_batch"]

@@ -68,6 +68,11 @@ DEFAULT_NO_OA_BANK_BATCH_TAG_SELECTION = {
     "selected_tag_codes": [],
     "requirements_by_tag_code": {},
 }
+DEFAULT_BANK_FLOW_RULE_BATCH_TAG_RULES = {
+    "version": 1,
+    "selected_tag_codes": [],
+    "requirements_by_tag_code": {},
+}
 DEFAULT_TURNOVER_LEDGER_TAG_SELECTION = {
     "version": 1,
     "selected_tag_codes": None,
@@ -119,6 +124,7 @@ class AppSettingsService:
             isinstance(loaded_settings, dict)
             and (
                 "no_oa_bank_batch_tag_selection" not in loaded_settings
+                or "bank_flow_rule_batch_tag_rules" not in loaded_settings
                 or "turnover_ledger_tag_selection" not in loaded_settings
             )
             and isinstance(getattr(self, "_snapshot", None), dict)
@@ -130,6 +136,13 @@ class AppSettingsService:
                         "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
                     }
                     if "no_oa_bank_batch_tag_selection" not in loaded_settings
+                    else {}
+                ),
+                **(
+                    {
+                        "bank_flow_rule_batch_tag_rules": self._snapshot.get("bank_flow_rule_batch_tag_rules", {}),
+                    }
+                    if "bank_flow_rule_batch_tag_rules" not in loaded_settings
                     else {}
                 ),
                 **(
@@ -212,6 +225,10 @@ class AppSettingsService:
             "bank_transaction_tags": self._public_bank_transaction_tags(self._snapshot["bank_transaction_tags"]),
             "no_oa_bank_batch_tag_selection": self._public_no_oa_bank_batch_tag_selection(
                 self._snapshot["no_oa_bank_batch_tag_selection"],
+                bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            ),
+            "bank_flow_rule_batch_tag_rules": self._public_no_oa_bank_batch_tag_selection(
+                self._snapshot["bank_flow_rule_batch_tag_rules"],
                 bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             ),
             "turnover_ledger_tag_selection": self._public_turnover_ledger_tag_selection(
@@ -299,6 +316,7 @@ class AppSettingsService:
                     else self._snapshot.get("pending_output_invoice_tag_groups", {})
                 ),
                 "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
+                "bank_flow_rule_batch_tag_rules": self._snapshot.get("bank_flow_rule_batch_tag_rules", {}),
                 "turnover_ledger_tag_selection": self._snapshot.get("turnover_ledger_tag_selection", {}),
                 INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: self._snapshot.get(
                     INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
@@ -451,6 +469,12 @@ class AppSettingsService:
             previous_snapshot["no_oa_bank_batch_tag_selection"],
             tag_codes=set(normalized["changes"].get("archived_codes") or []),
         )
+        next_bank_flow_rule_batch_tag_rules, detached_bank_flow_rule_batch_references = (
+            self._detach_no_oa_bank_batch_tag_references(
+                previous_snapshot["bank_flow_rule_batch_tag_rules"],
+                tag_codes=set(normalized["changes"].get("archived_codes") or []),
+            )
+        )
         next_turnover_selection, detached_turnover_references = self._detach_turnover_ledger_tag_references(
             previous_snapshot["turnover_ledger_tag_selection"],
             tag_codes=set(normalized["changes"].get("archived_codes") or []),
@@ -460,6 +484,7 @@ class AppSettingsService:
             and not detached_pending_invoice_references
             and not detached_pending_output_invoice_references
             and not detached_no_oa_references
+            and not detached_bank_flow_rule_batch_references
             and not detached_turnover_references
         ):
             return self.get_bank_auto_tag_rules_payload(can_save=True)
@@ -483,6 +508,7 @@ class AppSettingsService:
             ),
         }
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
+        next_snapshot["bank_flow_rule_batch_tag_rules"] = next_bank_flow_rule_batch_tag_rules
         next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
         saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
         self._snapshot = saved_snapshot
@@ -495,6 +521,7 @@ class AppSettingsService:
             "detached_pending_invoice_tag_references": detached_pending_invoice_references,
             "detached_pending_output_invoice_tag_references": detached_pending_output_invoice_references,
             "detached_no_oa_bank_batch_tag_references": detached_no_oa_references,
+            "detached_bank_flow_rule_batch_tag_rule_references": detached_bank_flow_rule_batch_references,
             "detached_turnover_ledger_tag_references": detached_turnover_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
@@ -531,6 +558,12 @@ class AppSettingsService:
             previous_snapshot["no_oa_bank_batch_tag_selection"],
             tag_codes=archived_codes,
         )
+        next_bank_flow_rule_batch_tag_rules, detached_bank_flow_rule_batch_references = (
+            self._detach_no_oa_bank_batch_tag_references(
+                previous_snapshot["bank_flow_rule_batch_tag_rules"],
+                tag_codes=archived_codes,
+            )
+        )
         next_turnover_selection, detached_turnover_references = self._detach_turnover_ledger_tag_references(
             previous_snapshot["turnover_ledger_tag_selection"],
             tag_codes=archived_codes,
@@ -540,6 +573,7 @@ class AppSettingsService:
             and not detached_pending_invoice_references
             and not detached_pending_output_invoice_references
             and not detached_no_oa_references
+            and not detached_bank_flow_rule_batch_references
             and not detached_turnover_references
         ):
             return self.get_bank_auto_tag_rules_payload(can_save=True)
@@ -563,6 +597,7 @@ class AppSettingsService:
             ),
         }
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
+        next_snapshot["bank_flow_rule_batch_tag_rules"] = next_bank_flow_rule_batch_tag_rules
         next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
         saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
         self._snapshot = saved_snapshot
@@ -575,6 +610,7 @@ class AppSettingsService:
             "detached_pending_invoice_tag_references": detached_pending_invoice_references,
             "detached_pending_output_invoice_tag_references": detached_pending_output_invoice_references,
             "detached_no_oa_bank_batch_tag_references": detached_no_oa_references,
+            "detached_bank_flow_rule_batch_tag_rule_references": detached_bank_flow_rule_batch_references,
             "detached_turnover_ledger_tag_references": detached_turnover_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
@@ -586,6 +622,13 @@ class AppSettingsService:
         self._refresh_snapshot_from_state_store()
         return self._public_no_oa_bank_batch_tag_selection(
             self._snapshot["no_oa_bank_batch_tag_selection"],
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+        )
+
+    def get_bank_flow_rule_batch_tag_rules_payload(self) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        return self._public_no_oa_bank_batch_tag_selection(
+            self._snapshot["bank_flow_rule_batch_tag_rules"],
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
         )
 
@@ -633,6 +676,73 @@ class AppSettingsService:
             }
         )
         return self.get_no_oa_bank_batch_tag_selection_payload()
+
+    def update_bank_flow_rule_batch_tag_rules(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        if "selected_tag_codes" in payload or "selectedTagCodes" in payload:
+            raise AppSettingsValidationError(
+                "bank_flow_rule_batch_selected_tag_codes_forbidden",
+                "Bank flow rule batch tag rules must be updated with rules.",
+            )
+        self._assert_unique_bank_flow_rule_batch_rule_codes(payload)
+        current = self._snapshot["bank_flow_rule_batch_tag_rules"]
+        requested_version = BankTransactionCategoryService._normalize_version(
+            payload.get("expected_version", payload.get("version", 0))
+        )
+        if requested_version != int(current.get("version") or 1):
+            raise AppSettingsValidationError(
+                "bank_flow_rule_batch_tag_rules_version_conflict",
+                "Bank flow rule batch tag rules version conflict.",
+            )
+        next_rules = self._normalize_no_oa_bank_batch_tag_selection(
+            {
+                "version": int(current.get("version") or 1) + 1,
+                "rules": payload.get("rules"),
+                "requirements_by_tag_code": payload.get("requirements_by_tag_code"),
+            },
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            validate=True,
+        )
+        next_snapshot = dict(self._snapshot)
+        next_snapshot["bank_flow_rule_batch_tag_rules"] = next_rules
+        if self._state_store is not None:
+            self._state_store.save_app_settings(next_snapshot)
+        self._snapshot = next_snapshot
+        self._configure_category_service(next_snapshot)
+        self._record_bank_flow_rule_batch_tag_rules_audit(
+            {
+                "actor_id": actor_id,
+                "old_version": int(current.get("version") or 1),
+                "new_version": int(next_rules.get("version") or 1),
+                "old_rules": dict(current.get("requirements_by_tag_code") or {}),
+                "new_rules": dict(next_rules.get("requirements_by_tag_code") or {}),
+            }
+        )
+        return self.get_bank_flow_rule_batch_tag_rules_payload()
+
+    @staticmethod
+    def _assert_unique_bank_flow_rule_batch_rule_codes(payload: dict[str, Any]) -> None:
+        raw_rules = payload.get("rules")
+        if not isinstance(raw_rules, list):
+            return
+        seen: set[str] = set()
+        for item in raw_rules:
+            if not isinstance(item, dict):
+                continue
+            tag_code = str(item.get("tag_code") or item.get("code") or "").strip()
+            if not tag_code:
+                continue
+            if tag_code in seen:
+                raise AppSettingsValidationError(
+                    "duplicate_bank_flow_rule_batch_tag_rule",
+                    f"Duplicate bank flow rule batch tag rule: {tag_code}",
+                )
+            seen.add(tag_code)
 
     def get_turnover_ledger_tag_selection_payload(self) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
@@ -813,6 +923,7 @@ class AppSettingsService:
             "bank_transaction_tags",
             "pending_invoice_tag_groups",
             "no_oa_bank_batch_tag_selection",
+            "bank_flow_rule_batch_tag_rules",
             "turnover_ledger_tag_selection",
         )
         try:
@@ -1185,6 +1296,11 @@ class AppSettingsService:
             bank_transaction_tags=bank_transaction_tags,
             validate=False,
         )
+        bank_flow_rule_batch_tag_rules = AppSettingsService._normalize_no_oa_bank_batch_tag_selection(
+            raw_payload.get("bank_flow_rule_batch_tag_rules", DEFAULT_BANK_FLOW_RULE_BATCH_TAG_RULES),
+            bank_transaction_tags=bank_transaction_tags,
+            validate=False,
+        )
         turnover_ledger_tag_selection = AppSettingsService._normalize_turnover_ledger_tag_selection(
             raw_payload.get("turnover_ledger_tag_selection"),
             bank_transaction_tags=bank_transaction_tags,
@@ -1215,6 +1331,7 @@ class AppSettingsService:
             "pending_invoice_tag_groups": pending_invoice_tag_groups,
             "pending_output_invoice_tag_groups": pending_output_invoice_tag_groups,
             "no_oa_bank_batch_tag_selection": no_oa_bank_batch_tag_selection,
+            "bank_flow_rule_batch_tag_rules": bank_flow_rule_batch_tag_rules,
             "turnover_ledger_tag_selection": turnover_ledger_tag_selection,
             INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: input_invoice_usage_payment_rules,
         }
@@ -1905,6 +2022,9 @@ class AppSettingsService:
                 "detached_no_oa_bank_batch_tag_references": list(
                     event.get("detached_no_oa_bank_batch_tag_references") or []
                 ),
+                "detached_bank_flow_rule_batch_tag_rule_references": list(
+                    event.get("detached_bank_flow_rule_batch_tag_rule_references") or []
+                ),
                 "detached_turnover_ledger_tag_references": list(
                     event.get("detached_turnover_ledger_tag_references") or []
                 ),
@@ -1924,6 +2044,22 @@ class AppSettingsService:
                 "new_version": int(event.get("new_version") or 0),
                 "old_selected_tag_codes": list(event.get("old_selected_tag_codes") or []),
                 "new_selected_tag_codes": list(event.get("new_selected_tag_codes") or []),
+                "old_rules": dict(event.get("old_rules") or {}),
+                "new_rules": dict(event.get("new_rules") or {}),
+            },
+        )
+
+    def _record_bank_flow_rule_batch_tag_rules_audit(self, event: dict[str, Any]) -> None:
+        if self._audit_service is None:
+            return
+        self._audit_service.record_action(
+            actor_id=str(event.get("actor_id") or "bank_flow_rule_batch_tag_rules"),
+            action="bank_flow_rule_batch_tag_rules_updated",
+            entity_type="app_settings",
+            entity_id="bank_flow_rule_batch_tag_rules",
+            metadata={
+                "old_version": int(event.get("old_version") or 0),
+                "new_version": int(event.get("new_version") or 0),
                 "old_rules": dict(event.get("old_rules") or {}),
                 "new_rules": dict(event.get("new_rules") or {}),
             },

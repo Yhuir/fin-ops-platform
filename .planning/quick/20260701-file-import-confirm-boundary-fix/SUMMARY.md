@@ -9,6 +9,7 @@
 - `FileImportService.confirm_session` 增加 session 级异常回滚，失败时不把文件推进到 `confirmed`。
 - 预览持久化改用 `snapshot(include_facts=False)`，移除旧 full snapshot 预览链路写正式发票池的入口。
 - `app.import_files.raw_payload` load/save 恢复 `row_results`、`normalized_rows`、file audit、session audit 和 duplicate groups。
+- 移除 `app.import_files.import_batch_id` -> file session `preview_batch_id/batch_id` 的旧 fallback：file session 状态只能来自 `raw_payload.normalized_payload`，不能通过 legacy batch join 反推。
 - 更新 `docs/modules/imports-invoices/boundary-io.md` 的 I/O 合同。
 
 ## 验证
@@ -18,6 +19,15 @@ python -m pytest tests/test_import_service.py tests/test_import_file_service.py 
 ```
 
 结果：75 passed。
+
+2026-07-01 旧 fallback 移除后追加验证：
+
+```bash
+python -m pytest tests/test_postgres_repositories_core.py tests/test_import_service.py tests/test_import_file_service.py tests/test_import_processing_service.py tests/test_import_file_api.py tests/test_import_api.py
+git diff --check
+```
+
+结果：80 passed；diff check passed。
 
 ## 剩余事项
 
@@ -53,3 +63,7 @@ python -m pytest tests/test_import_service.py tests/test_import_file_service.py 
 - Clean release commit：`368b662a0 Fix invoice file import confirm rollback`，只包含 8 个 import 相关文件。
 - 发布 release：`import-confirm-fix-20260701-368b662a`。
 - 部署结果：后端 readiness/public session route check 通过；API、RabbitMQ dispatcher 和 runtime worker units 均 active；runtime worker ensure 完成。
+- 追加旧 fallback 清除 commit：`a0cfdafcb Remove legacy file import batch fallback`。
+- 发布 release：`import-confirm-fix-20260701-no-legacy-file-batch`。
+- 部署结果：后端 readiness/public session route check 通过；API、RabbitMQ dispatcher 和 runtime worker units 均 active；runtime worker ensure 完成。
+- 远端产物确认：`/opt/fin-ops/releases/import-confirm-fix-20260701-no-legacy-file-batch/src/backend/src/fin_ops_platform/services/postgres_repositories/core.py` 中 file import 查询已不再 join `app.import_batches`，也不再投影 `joined_batch_id`。

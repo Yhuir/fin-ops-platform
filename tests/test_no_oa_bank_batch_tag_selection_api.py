@@ -620,7 +620,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             reset["operation_barrier_targets"],
             [{"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}],
         )
-        self.assertEqual(app._no_oa_bank_batch_service.get_batch(batch_id)["status"], "withdrawn")
+        self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))
 
         app._no_oa_bank_batch_application_service().refresh_batches()
@@ -670,7 +670,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
 
         self.assertEqual(reset_response.status_code, 200)
         self.assertEqual(_json(reset_response)["results"], [{"batch_id": batch_id, "status": "withdrawn"}])
-        self.assertEqual(app._no_oa_bank_batch_service.get_batch(batch_id)["status"], "withdrawn")
+        self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
         unsubmitted = _json(app.handle_request("GET", "/api/bank-flow-rule-batches?bucket=unsubmitted"))
         self.assertEqual([batch["batch_type"] for batch in unsubmitted["batches"]], ["fee"])
 

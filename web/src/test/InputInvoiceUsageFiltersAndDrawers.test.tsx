@@ -575,7 +575,13 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getByText("2026-05-02")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
     expect(screen.queryByText("尚未创建本地批次。")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创建 OA 草稿" })).toBeDisabled();
+    const candidateSection = screen.getByRole("heading", { name: "候选发票清单" }).closest("section") as HTMLElement;
+    const createDraftButton = within(candidateSection).getByRole("button", { name: "创建 OA 草稿" });
+    const candidateSearchInput = within(candidateSection).getByLabelText("搜索候选发票");
+    expect(createDraftButton.compareDocumentPosition(candidateSearchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "OA 草稿" })).not.toBeInTheDocument();
+    expect(screen.queryByText("请选择候选发票后创建 OA 草稿。")).not.toBeInTheDocument();
+    expect(createDraftButton).toBeDisabled();
   });
 
   test("OA reverse drawer creates OA draft directly and records submitted confirmation", async () => {
