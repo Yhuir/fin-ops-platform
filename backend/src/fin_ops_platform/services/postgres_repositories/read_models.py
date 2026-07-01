@@ -3443,6 +3443,44 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         )
 
 
+    def count_batch_accounting_relations_by_year(
+        self,
+        *,
+        year: str,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_year = text(year)
+        if not re.fullmatch(r"\d{4}", normalized_year):
+            return None
+        scope_keys = [f"{normalized_year}-{month:02d}" for month in range(1, 13)]
+        payload = self._workbench_relation_payload_from_rows(
+            rows=[],
+            groups=[],
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+        )
+        if payload.get("read_model_status") != "fresh":
+            payload["submitted_count"] = 0
+            return payload
+        row = self._connection.fetch_one(
+            """
+            select count(distinct group_id)::integer as submitted_count
+            from read_model.workbench_relation_groups
+            where tenant_id = %s
+              and scope_key = any(%s)
+              and relation_status = 'linked'
+              and payload->'special_metadata'->>'source' = 'batch_accounting'
+              and coalesce(
+                    nullif(payload->'special_metadata'->>'bank_year', ''),
+                    nullif(payload->'special_metadata'->>'year', '')
+                  ) = %s
+            """,
+            (tenant_id, scope_keys, normalized_year),
+        )
+        payload["submitted_count"] = int_value((row or {}).get("submitted_count"), 0)
+        return payload
+
+
     def get_workbench_relation_groups_by_ids(
         self,
         group_ids: list[str],
@@ -4588,6 +4626,9 @@ class PostgresReadModelRepository:
 
     def workbench_relation_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.workbench_relation_scope_summary(*args, **kwargs)
+
+    def count_batch_accounting_relations_by_year(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._search_workbench_relation_repository.count_batch_accounting_relations_by_year(*args, **kwargs)
 
     def bank_detail_scope_keys_for_range(self, *args: Any, **kwargs: Any) -> list[str]:
         return self._bank_read_model_repository.bank_detail_scope_keys_for_range(*args, **kwargs)
@@ -7820,9 +7861,13 @@ class PostgresReadModelRepository:
              and gen.status = 'active'
             where r.scope_key <> 'all'
               and r.source_kind = 'oa'
+              and (
+                    r.payload->>'apply_type' like %s
+                    or r.payload->>'expense_type' like %s
+                  )
             order by coalesce(r.payload->>'apply_time', r.payload->>'application_time', r.payload->>'application_date', r.payload->>'created_at', '') desc, r.row_id
             """,
-            (),
+            ("%日常报销%", "%日常报销%"),
         )
         invoice_rows = self._connection.fetch_all(
             """

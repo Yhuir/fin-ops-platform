@@ -306,6 +306,7 @@ class ReadModelManifestTests(unittest.TestCase):
             "list_workbench_relation_rows",
             "get_workbench_relation_groups_by_ids",
             "workbench_relation_source_versions",
+            "count_batch_accounting_relations_by_year",
         }
 
         for method_name in owned_methods:

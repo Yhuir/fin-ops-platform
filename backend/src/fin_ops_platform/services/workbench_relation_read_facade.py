@@ -138,6 +138,39 @@ class WorkbenchRelationReadFacade:
         self._last_result = result
         return result
 
+    def count_batch_accounting_relations_by_year(
+        self,
+        year: str,
+        *,
+        require_fresh: bool = True,
+        reason: str = "batch_accounting_submitted_relation_count",
+    ) -> dict[str, Any]:
+        normalized_year = text(year) or ""
+        scope_keys = _year_scope_keys(normalized_year)
+        reader = getattr(self._read_model_repository, "count_batch_accounting_relations_by_year", None)
+        if not callable(reader) or not scope_keys:
+            return self._non_fresh_result(
+                status="unavailable",
+                scope_keys=scope_keys,
+                require_fresh=require_fresh,
+                reason=reason,
+                stale_reasons=["repository_method_unavailable" if not callable(reader) else "year_required"],
+            )
+        payload = reader(year=normalized_year, tenant_id=self._tenant_id)
+        result = self._result_from_repository_payload(
+            payload,
+            require_fresh=require_fresh,
+            reason=reason,
+            fallback_scope_keys=scope_keys,
+        )
+        if isinstance(payload, dict):
+            try:
+                result["submitted_count"] = int(payload.get("submitted_count") or 0)
+            except (TypeError, ValueError):
+                result["submitted_count"] = 0
+        self._last_result = result
+        return result
+
     def list_unlinked(
         self,
         month: str,
@@ -324,6 +357,13 @@ def _fallback_scope_keys(*, month_hint: str | None = None, scope_keys_hint: list
         return scope_keys
     month = text(month_hint)
     return [month] if month else []
+
+
+def _year_scope_keys(year: str) -> list[str]:
+    normalized_year = text(year)
+    if len(normalized_year) == 4 and normalized_year.isdigit():
+        return [f"{normalized_year}-{month:02d}" for month in range(1, 13)]
+    return []
 
 
 def _dedupe_preserve_order(values: Any) -> list[str]:

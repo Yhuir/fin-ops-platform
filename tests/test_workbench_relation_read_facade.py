@@ -137,6 +137,17 @@ class UnderlyingWorkbenchRelationRepository:
             "source_versions": {"workbench_relation_schema_version": "test"},
         }
 
+    def count_batch_accounting_relations_by_year(self, *, year: str, tenant_id: str = "default") -> dict[str, object]:
+        self.calls.append(("count_batch_accounting_relations_by_year", {"year": year, "tenant_id": tenant_id}))
+        return {
+            "read_model_status": "fresh",
+            "rows": [],
+            "groups": [],
+            "source_versions": {"workbench_relation_schema_version": "test"},
+            "read_model_scope_keys": [f"{year}-{month:02d}" for month in range(1, 13)],
+            "submitted_count": 7,
+        }
+
     def save_workbench_relation_distribution(
         self,
         *,
@@ -328,6 +339,10 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
             port.workbench_relation_scope_summary(scope_key="2026-01", tenant_id="tenant")["row_count"],
             1,
         )
+        self.assertEqual(
+            port.count_batch_accounting_relations_by_year(year="2026", tenant_id="tenant")["submitted_count"],
+            7,
+        )
         port.save_workbench_relation_distribution(
             scope_key="2026-01",
             rows=[{"row_id": "txn-1"}],
@@ -350,6 +365,7 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
                 "get_workbench_relation_groups_by_ids",
                 "workbench_relation_source_versions",
                 "workbench_relation_scope_summary",
+                "count_batch_accounting_relations_by_year",
                 "save_workbench_relation_distribution",
                 "mark_workbench_relation_scope_empty",
             ],
@@ -370,6 +386,21 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(
             repository.calls,
             [("workbench_relation_source_versions", {"scope_key": "2026-01", "tenant_id": "default"})],
+        )
+
+    def test_batch_accounting_count_uses_repository_count_without_loading_rows(self) -> None:
+        repository = UnderlyingWorkbenchRelationRepository()
+        facade = WorkbenchRelationReadFacade(read_model_repository=repository)
+
+        payload = facade.count_batch_accounting_relations_by_year("2026")
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["submitted_count"], 7)
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["groups"], [])
+        self.assertEqual(
+            repository.calls,
+            [("count_batch_accounting_relations_by_year", {"year": "2026", "tenant_id": "default"})],
         )
 
     def test_get_by_row_ids_returns_fresh_linked_and_unlinked_contexts(self) -> None:

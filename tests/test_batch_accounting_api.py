@@ -25,6 +25,29 @@ class FakeBatchRelationFacade:
             return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}, "read_model_scope_keys": [month]}
         return self._payload()
 
+    def count_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
+        self.calls.append({"year": year, **kwargs})
+        payload = self._payload()
+        submitted_count = 0
+        for group in list(payload.get("groups") or []):
+            if not isinstance(group, dict):
+                continue
+            group_payload = group.get("payload") if isinstance(group.get("payload"), dict) else {}
+            metadata = group_payload.get("special_metadata") if isinstance(group_payload.get("special_metadata"), dict) else {}
+            relation_year = str(metadata.get("bank_year") or metadata.get("year") or "")
+            if metadata.get("source") == "batch_accounting" and relation_year == year:
+                submitted_count += 1
+        return {
+            "status": payload.get("status", "fresh"),
+            "rows": [],
+            "groups": [],
+            "source_versions": payload.get("source_versions", {}),
+            "read_model_scope_keys": [f"{year}-{month:02d}" for month in range(1, 13)],
+            "refresh_enqueued": payload.get("refresh_enqueued", False),
+            "stale_reasons": payload.get("stale_reasons", []),
+            "submitted_count": submitted_count,
+        }
+
     def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
         self.calls.append({"row_ids": list(row_ids), **kwargs})
         payload = self._payload()
@@ -178,6 +201,26 @@ class RowsBatchRelationFacade:
         if month != "2026-01":
             return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}, "read_model_scope_keys": [month]}
         return self._payload()
+
+    def count_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
+        self.calls.append({"year": year, **kwargs})
+        submitted_count = 0
+        for group in self._groups:
+            group_payload = group.get("payload") if isinstance(group.get("payload"), dict) else {}
+            metadata = group_payload.get("special_metadata") if isinstance(group_payload.get("special_metadata"), dict) else {}
+            relation_year = str(metadata.get("bank_year") or metadata.get("year") or "")
+            if metadata.get("source") == "batch_accounting" and relation_year == year:
+                submitted_count += 1
+        return {
+            "status": "fresh",
+            "rows": [],
+            "groups": [],
+            "source_versions": {"schema_version": 52},
+            "read_model_scope_keys": [f"{year}-{month:02d}" for month in range(1, 13)],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
+            "submitted_count": submitted_count,
+        }
 
     def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
         self.calls.append({"row_ids": list(row_ids), **kwargs})
@@ -699,6 +742,107 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(invalid_response.status_code, 400, invalid_response.body)
         self.assertEqual(invalid_payload["error"], "invalid_paging")
         self.assertEqual(invalid_payload["message"], "page_size must be <= 200.")
+
+    def test_unsubmitted_list_uses_relation_count_instead_of_month_relation_scan(self) -> None:
+        facade = RowsBatchRelationFacade(
+            [],
+            groups=[
+                {
+                    "group_id": "CASE-BATCH-txn_imported_202601_batch_001",
+                    "payload": {
+                        "special_metadata": {
+                            "source": "batch_accounting",
+                            "year": "2026",
+                            "bank_row_id": "txn_imported_202601_batch_001",
+                        }
+                    },
+                }
+            ],
+        )
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            relation_facade=facade,
+        )
+
+        payload = service.build_payload(year="2026", bucket="unsubmitted")
+
+        self.assertEqual(payload["summary"]["submitted_count"], 1)
+        self.assertIn(
+            {"year": "2026", "require_fresh": True, "reason": "batch_accounting_submitted_relation_count"},
+            facade.calls,
+        )
+        self.assertFalse([call for call in facade.calls if "month" in call], facade.calls)
+
+    def test_unsubmitted_relation_lookup_is_scoped_to_batch_candidates(self) -> None:
+        payload = {
+            "month": "all",
+            "summary": {},
+            "paired": {"groups": []},
+            "open": {
+                "groups": [
+                    {
+                        "group_id": "mixed-candidates",
+                        "bank_rows": [
+                            {
+                                "id": "txn_imported_202601_batch_001",
+                                "type": "bank",
+                                "trade_time": "2026-01-02 09:00:00",
+                                "counterparty_name": "批量账务集中处理",
+                                "debit_amount": "100.00",
+                            },
+                            {
+                                "id": "txn_imported_202601_other_001",
+                                "type": "bank",
+                                "trade_time": "2026-01-03 09:00:00",
+                                "counterparty_name": "其他供应商",
+                                "debit_amount": "100.00",
+                            },
+                        ],
+                        "oa_rows": [
+                            {
+                                "id": "oa-exp-ba-001",
+                                "type": "oa",
+                                "applicant": "刘晨",
+                                "apply_time": "2026-01-06",
+                                "amount": "100.00",
+                                "apply_type": "日常报销",
+                            },
+                            {
+                                "id": "oa-exp-other-001",
+                                "type": "oa",
+                                "applicant": "非报销",
+                                "apply_time": "2026-01-07",
+                                "amount": "100.00",
+                                "apply_type": "采购申请",
+                            },
+                        ],
+                        "invoice_rows": [],
+                    }
+                ]
+            },
+        }
+        facade = RowsBatchRelationFacade([])
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: payload,
+            relation_facade=facade,
+        )
+
+        result = service.build_payload(year="2026", bucket="unsubmitted")
+
+        self.assertEqual([row["id"] for row in result["bank_rows"]], ["txn_imported_202601_batch_001"])
+        self.assertEqual([row["id"] for row in result["oa_rows"]], ["oa-exp-ba-001"])
+        row_id_calls = [call for call in facade.calls if "row_ids" in call]
+        self.assertEqual(
+            row_id_calls,
+            [
+                {
+                    "row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
+                    "require_fresh": True,
+                    "reason": "batch_accounting_unsubmitted_relations",
+                    "scope_keys_hint": ["2026-01"],
+                }
+            ],
+        )
 
     def test_unsubmitted_list_deduplicates_sql_read_model_rows_by_row_id(self) -> None:
         duplicate_payload = self._grouped_payload()

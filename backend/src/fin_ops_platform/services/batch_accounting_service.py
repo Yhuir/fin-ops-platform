@@ -221,12 +221,15 @@ class BatchAccountingService:
             page_size=oa_page_size if oa_page_size is not None else page_size,
             requested=any(value is not None for value in (page, page_size, oa_page, oa_page_size)),
         )
-        context = self._build_list_context(bank_year=resolved_bank_year)
-        submitted_relations = self._submitted_relations(resolved_bank_year, context)
         if bucket == "submitted":
+            context = self._build_list_context(bank_year=resolved_bank_year)
+            submitted_relations = self._submitted_relations(resolved_bank_year, context)
             bank_rows, relations_by_bank_row_id = self._submitted_payload(submitted_relations, context)
             oa_rows: list[dict[str, Any]] = []
+            submitted_count = len(submitted_relations)
         else:
+            context = self._build_list_context(bank_year=resolved_bank_year)
+            submitted_count = self._submitted_relation_count(resolved_bank_year, context)
             bank_rows = [self._bank_row_payload(row) for row in context.eligible_bank_rows]
             oa_rows = [self._oa_row_payload(row, context.invoice_ids_by_oa_id.get(str(row.get("id")), [])) for row in context.eligible_oa_rows]
             relations_by_bank_row_id = {}
@@ -242,7 +245,7 @@ class BatchAccountingService:
         return {
             "summary": {
                 "unsubmitted_count": len(context.eligible_bank_rows),
-                "submitted_count": len(submitted_relations),
+                "submitted_count": submitted_count,
                 "bank_year": resolved_bank_year,
             },
             "bank_rows": visible_bank_rows,
@@ -735,13 +738,27 @@ class BatchAccountingService:
         *,
         bank_year: str,
     ) -> _WorkbenchContext:
+        candidate_bank_rows = [
+            row
+            for row in context.bank_rows
+            if self._is_batch_bank_row(
+                row,
+                bank_year,
+                require_unlinked=False,
+            )
+        ]
+        candidate_oa_rows = [
+            row
+            for row in context.open_oa_rows
+            if self._is_eligible_oa_row(row, linked_row_ids=set())
+        ]
         linked_row_ids, bank_linked_row_ids = self._relation_distribution_row_id_sets(
-            [*context.bank_rows, *context.open_oa_rows],
+            [*candidate_bank_rows, *candidate_oa_rows],
             read_model_status=context.relation_read_model_status,
         )
         eligible_bank_rows = [
             row
-            for row in context.bank_rows
+            for row in candidate_bank_rows
             if self._is_batch_bank_row(
                 row,
                 bank_year,
@@ -751,7 +768,7 @@ class BatchAccountingService:
         ]
         eligible_oa_rows = [
             row
-            for row in context.open_oa_rows
+            for row in candidate_oa_rows
             if self._is_eligible_oa_row(row, linked_row_ids=bank_linked_row_ids)
         ]
         return replace(
@@ -761,6 +778,34 @@ class BatchAccountingService:
             eligible_bank_rows=eligible_bank_rows,
             eligible_oa_rows=eligible_oa_rows,
         )
+
+    def _submitted_relation_count(self, year: str, context: _WorkbenchContext) -> int:
+        if context.relation_read_model_status.status != "fresh":
+            return 0
+        if self._relation_facade is None:
+            return 0
+        counter = getattr(self._relation_facade, "count_batch_accounting_relations_by_year", None)
+        if not callable(counter):
+            context.relation_read_model_status.record(
+                {
+                    "status": "unavailable",
+                    "read_model_scope_keys": self._month_scope_keys_for_year(year),
+                    "stale_reasons": ["batch_accounting_relation_count_unavailable"],
+                }
+            )
+            return 0
+        try:
+            payload = counter(
+                year,
+                require_fresh=True,
+                reason="batch_accounting_submitted_relation_count",
+            )
+        except TypeError:
+            payload = counter(year)
+        context.relation_read_model_status.record(payload if isinstance(payload, dict) else None)
+        if not isinstance(payload, dict):
+            return 0
+        return self._optional_int(payload.get("submitted_count")) or 0
 
     @staticmethod
     def _groups_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:

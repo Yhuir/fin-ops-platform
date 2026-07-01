@@ -1,5 +1,15 @@
 # 批量账务 实施记录
 
+## 2026-07-01 - 未提交首屏 relation I/O 收窄
+
+- 目标：降低 `/api/batch-accounting` 未提交首屏耗时，避免为了 `submitted_count` 和关系排除加载过多 `workbench_relation` DTO。
+- 影响范围：`BatchAccountingService` 未提交列表 read path、`WorkbenchRelationReadFacade`、`WorkbenchRelationReadModelRepositoryPort`、PostgreSQL read model repository、read model manifest、SQL Workbench batch loader 和后端回归测试。
+- 关键决策：不新增独立 batch-accounting read model，不加缓存；复用现有 `workbench_relation` fresh/status/enqueue 边界。未提交列表只把批量账务银行候选和日常报销 OA 候选传给 relation facade；`submitted_count` 走 `count_batch_accounting_relations_by_year` 轻量 I/O，不再扫描 12 个月完整 submitted relation payload。
+- 文档影响：更新 README、boundary I/O、tests 和本实施记录。
+- 测试覆盖：新增 `test_unsubmitted_relation_lookup_is_scoped_to_batch_candidates`、`test_unsubmitted_list_uses_relation_count_instead_of_month_relation_scan`、`test_batch_accounting_count_uses_repository_count_without_loading_rows`，并更新 SQL runtime/manifest/port 测试。
+- 验证命令：`pytest -q tests/test_batch_accounting_api.py tests/test_workbench_relation_read_facade.py tests/test_read_model_manifest.py tests/test_workbench_sql_runtime.py`。
+- 未测风险：仍需部署后用生产登录态 smoke 复测 `/api/batch-accounting` p95；本地测试不覆盖真实 PostgreSQL buffer/cache 波动和浏览器渲染耗时。
+
 ## 2026-06-30 - 右侧 OA 候选移除年份过滤
 
 - 目标：右侧 OA 栏改为展示没有 active `workbench_relation` 配对关系的日常报销 OA 主单，不再通过 OA 年份输入或 `oa_year` 参数过滤候选。
