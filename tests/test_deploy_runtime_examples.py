@@ -10,9 +10,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY_CONTROL = REPO_ROOT / "deploy/oa/bin/finops-deploy-control.sh"
 WORKER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-worker@.service.example"
 DISPATCHER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example"
+PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.service.example"
+PRUNE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.timer.example"
 DISPATCHER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example"
 RABBITMQ_WORKER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-worker.env.example"
 WORKER_ENV_DIR = REPO_ROOT / "deploy/oa/env"
+PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh"
 
 
 class DeployRuntimeExampleTests(unittest.TestCase):
@@ -93,6 +96,27 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             self.assertIn("--event-type search.read_model.refresh", env_example)
             self.assertIn("--event-type pending_invoice.read_model.refresh", env_example)
         self.assertIn("pending_invoice.read_model.refresh", dispatcher_env)
+
+    def test_workbench_generation_prune_helper_uses_current_retention_defaults(self) -> None:
+        helper = PRUNE_HELPER.read_text(encoding="utf-8")
+        service = PRUNE_SERVICE.read_text(encoding="utf-8")
+        timer = PRUNE_TIMER.read_text(encoding="utf-8")
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+
+        self.assertIn("KEEP_RECENT=\"${FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-1}\"", helper)
+        self.assertIn("KEEP_DAYS=\"${FINOPS_WORKBENCH_PRUNE_KEEP_DAYS:-0}\"", helper)
+        self.assertIn("LIMIT=\"${FINOPS_WORKBENCH_PRUNE_LIMIT:-500}\"", helper)
+        self.assertNotIn("FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-3", helper)
+        self.assertNotIn("FINOPS_WORKBENCH_PRUNE_KEEP_DAYS:-1", helper)
+        self.assertIn("--keep-recent-generations-per-scope \"$KEEP_RECENT\"", helper)
+        self.assertIn("--keep-days \"$KEEP_DAYS\"", helper)
+        self.assertIn("status <> 'active'", (REPO_ROOT / "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py").read_text(encoding="utf-8"))
+
+        self.assertIn("ExecStart=/usr/local/sbin/finops-prune-workbench-generations", service)
+        self.assertIn("OnCalendar=*-*-* 03:35:00", timer)
+        self.assertIn("install_workbench_generation_retention", deploy_control)
+        self.assertIn("finops-prune-workbench-generations.sh", deploy_control)
+        self.assertIn("systemctl enable --now \"$timer_unit\"", deploy_control)
 
 
 if __name__ == "__main__":

@@ -41,8 +41,9 @@ FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
 - Redis 只缓存 freshness gate 后的 payload。
 - RabbitMQ 只能作为可选 transport/wakeup，不能替代 PostgreSQL dirty scope 状态。
 - Workbench read model generation 有保留策略：发布新 active generation 后自动 bounded prune 旧的
-  非 active generation；生产同时使用 `finops-prune-workbench-generations.timer` 兜底，避免
-  `read_model.workbench_*` 历史 generation 长期堆积。
+  非 active generation；生产同时使用版本化部署的 `finops-prune-workbench-generations.timer`
+  兜底，默认 `keep_recent=1`、`keep_days=0`、`limit=500`，避免
+  `read_model.workbench_*` 历史 generation 长期堆积或生产 wrapper 与代码策略漂移。
 
 Workbench read model 表空间排障边界：
 

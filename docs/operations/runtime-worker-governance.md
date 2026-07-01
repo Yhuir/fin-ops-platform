@@ -206,7 +206,12 @@ scope 执行 bounded retention：保留每个 scope 最近 1 个非 active gener
 不删除 `app.*`、`job.*` 或其他业务事实；删除条件始终包含 `status <> 'active'`。
 
 retention 是发布后的维护动作，不得让清理失败回滚已经发布成功的 fresh generation。生产环境还应
-保留 `finops-prune-workbench-generations.timer` 作为兜底防线，低峰期运行同一保留策略并记录：
+保留 `finops-prune-workbench-generations.timer` 作为兜底防线，低峰期运行同一保留策略并记录。
+该 helper 和 systemd timer 由 `deploy/oa/bin/finops-deploy-control.sh` 在 release activate 时从
+`deploy/oa/bin/finops-prune-workbench-generations.sh` 与 `deploy/oa/systemd/finops-prune-workbench-generations.*.example`
+安装，生产不得维护漂移的手写 wrapper。默认策略必须与 repository/CLI 保持一致：
+`FINOPS_WORKBENCH_PRUNE_KEEP_RECENT=1`、`FINOPS_WORKBENCH_PRUNE_KEEP_DAYS=0`、
+`FINOPS_WORKBENCH_PRUNE_LIMIT=500`。
 
 ```bash
 systemctl list-timers finops-prune-workbench-generations.timer

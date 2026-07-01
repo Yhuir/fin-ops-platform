@@ -86,6 +86,15 @@
 - 验证命令：见本轮最终说明。
 - 未测风险：需要部署后执行 emergency prune、普通 `VACUUM (ANALYZE)`、重建 `2026-06`/`all` active generation，并跑生产 read/API smoke。
 
+## 2026-07-02 - Workbench retention 生产 wrapper 漂移修正
+
+- 目标：消除生产 `/usr/local/sbin/finops-prune-workbench-generations` 手写 wrapper 与 repository/CLI retention 策略不一致的问题，避免新代码默认 `keep_days=0` 被旧 wrapper 的 `keep_days=1`、`keep_recent=3` 覆盖。
+- 影响范围：`deploy/oa/bin/finops-prune-workbench-generations.sh`、`deploy/oa/systemd/finops-prune-workbench-generations.*.example`、`deploy/oa/bin/finops-deploy-control.sh`、`scripts/deploy_oa.py`、runtime worker 运维文档和部署测试。
+- 关键决策：Workbench generation retention 的生产入口必须版本化；release activate 时由 deploy-control 安装 helper/service/timer 并 enable timer。部署脚本 contract 会拒绝不支持 `install_workbench_generation_retention` 的旧 deploy-control，避免生产继续运行漂移脚本。
+- 文档影响：更新 `docs/operations/runtime-worker-governance.md`、`docs/operations/postgresql-runtime.md` 和本模块测试矩阵。
+- 测试覆盖：新增/更新 `tests/test_deploy_runtime_examples.py` 与 `tests/test_deploy_oa_script.py`，固定 wrapper 默认值、timer 安装链路和旧 deploy-control 拒绝合同。
+- 验证命令：见本轮最终说明。
+
 ## 2026-07-01 - 跨月 active relation 月度投影漏读修复
 
 - 目标：修复生产 `workbench:all` / `2026-06` 卡在 `active_relation_open_membership` consistency failure，导致关联台持续 refreshing、Load 变慢的问题。

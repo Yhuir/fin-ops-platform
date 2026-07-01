@@ -18,6 +18,9 @@ COMMON_ENV="$ENV_DIR/fin-ops.common.env"
 SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
 MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
+PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
+PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
+PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.timer}"
 
 usage() {
   cat <<'USAGE'
@@ -186,6 +189,25 @@ ensure_runtime_workers() {
   local src="$1"
   [[ -x "$ENSURE_RUNTIME_WORKERS_HELPER" ]] || die "runtime worker ensure helper is not executable: $ENSURE_RUNTIME_WORKERS_HELPER"
   "$ENSURE_RUNTIME_WORKERS_HELPER" "$src"
+}
+
+install_workbench_generation_retention() {
+  local src="$1"
+  local helper_src service_src timer_src timer_unit
+  helper_src="$src/deploy/oa/bin/finops-prune-workbench-generations.sh"
+  service_src="$src/deploy/oa/systemd/finops-prune-workbench-generations.service.example"
+  timer_src="$src/deploy/oa/systemd/finops-prune-workbench-generations.timer.example"
+  timer_unit="$(basename "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT")"
+
+  [[ -f "$helper_src" ]] || die "missing Workbench generation prune helper in release: $helper_src"
+  [[ -f "$service_src" ]] || die "missing Workbench generation prune service unit in release: $service_src"
+  [[ -f "$timer_src" ]] || die "missing Workbench generation prune timer unit in release: $timer_src"
+
+  install -m 0755 -o root -g root "$helper_src" "$PRUNE_WORKBENCH_GENERATIONS_HELPER"
+  install -m 0644 -o root -g root "$service_src" "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT"
+  install -m 0644 -o root -g root "$timer_src" "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT"
+  systemctl daemon-reload
+  systemctl enable --now "$timer_unit"
 }
 
 publish_frontend() {
@@ -419,6 +441,7 @@ case "$cmd" in
     write_worker_dropin "$src"
     write_dispatcher_dropin "$src"
     ensure_runtime_workers "$src"
+    install_workbench_generation_retention "$src"
     publish_frontend "$src"
     restart_services
     wait_required_workers_ready
