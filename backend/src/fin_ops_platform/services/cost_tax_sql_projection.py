@@ -333,6 +333,15 @@ class CostStatisticsSqlProjectionBuilder:
             where scope_key = %s
               and zone in ('paired', 'open')
               and source_kinds && array['oa', 'bank']::text[]
+              and jsonb_path_exists(
+                  coalesce(payload, raw_payload),
+                  '$.oa_rows[*] ? ((@.project_name != null || @.detail_fields."项目名称" != null) && (@.expense_type != null || @.detail_fields."费用类型" != null) && (@.expense_content != null || @.reason != null || @.detail_fields."费用内容" != null))'
+              )
+              and (
+                  zone = 'paired'
+                  or jsonb_path_exists(coalesce(payload, raw_payload), '$.bank_rows[*].available_actions[*] ? (@ == "cancel_link")')
+                  or jsonb_path_exists(coalesce(payload, raw_payload), '$.oa_rows[*].oa_bank_relation.code ? (@ == "fully_linked" || @ == "automatic_match")')
+              )
             order by bank_sort_max desc nulls last, group_id
             """,
             (month,),

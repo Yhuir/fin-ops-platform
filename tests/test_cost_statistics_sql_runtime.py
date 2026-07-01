@@ -868,6 +868,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["transaction_count"], 1)
         self.assertEqual(payload["summary"]["total_amount"], "10.00")
         self.assertEqual([row["transaction_id"] for row in payload["time_rows"]], ["bank-1"])
+        workbench_sql = next(sql for sql, _params in connection.fetch_all_calls if "from read_model.workbench_groups" in sql)
+        self.assertIn("jsonb_path_exists", workbench_sql)
+        self.assertIn("available_actions", workbench_sql)
 
     def test_cost_statistics_sql_projection_skips_unchanged_month_scope_without_workbench_scan(self) -> None:
         class Connection(CostStatisticsProjectionConnection):
