@@ -1,0 +1,57 @@
+{
+  "_command_exit_code": 0,
+  "critical_only": false,
+  "failed_count": 0,
+  "generated_at": "2026-07-02T07:43:38.966868+00:00",
+  "missing_read_model_keys": [],
+  "planned_scope_count": 1,
+  "planned_scopes": [
+    {
+      "read_model_key": "workbench",
+      "row_count": null,
+      "scope_key": "all",
+      "scope_type": "workbench",
+      "source": "override",
+      "updated_at": null
+    }
+  ],
+  "result_count": 1,
+  "results": [
+    {
+      "dirty_status": "pending",
+      "enqueue_to_fresh_ms": 397.159,
+      "error": null,
+      "event_id": "e1f183d0-1770-4355-9fe6-f0d1fae17258",
+      "event_status": "done",
+      "event_type": "workbench.read_model.refresh",
+      "handler_duration_ms": 352.381,
+      "read_model_key": "workbench",
+      "readiness_status": "fresh",
+      "scope_key": "all",
+      "scope_type": "workbench",
+      "source_version": 3180,
+      "status": "pass"
+    }
+  ],
+  "status": "pass",
+  "summary": {
+    "enqueue_to_fresh_ms": {
+      "max": 397.159,
+      "p50": 397.159,
+      "p95": 397.159,
+      "p99": 397.159
+    },
+    "failed_count": 0,
+    "handler_duration_ms": {
+      "max": 352.381,
+      "p50": 352.381,
+      "p95": 352.381,
+      "p99": 352.381
+    },
+    "measured_enqueue_sample_count": 1,
+    "sample_count": 1
+  },
+  "target_ms": 1000.0,
+  "tenant_id": "default",
+  "version": 1
+}

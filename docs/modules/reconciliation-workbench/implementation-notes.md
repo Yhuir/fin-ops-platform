@@ -941,4 +941,6 @@
 - 决策：不改变 all-scope active generation 语义，也不让页面动态回退 month shards；先删除新 generation 的重复 raw JSON 写入。`payload` 仍是前端/API/read model 的规范输出，`raw_payload` 只为历史数据 fallback 服务。
 - 代码影响：`PostgresReadModelRepository.save_workbench_read_models(...)` 和 `_refresh_workbench_all_scope_from_month_shards(...)` 对 Workbench snapshot、summary、rows、groups、group_rows 的 `raw_payload` 写 `{}`，避免把同一 payload 再包一层 `normalized_payload` 写入 TOAST。
 - 测试覆盖：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_writes_workbench_payload_without_duplicate_raw_payload` 和 all-scope batch test 断言 payload 保留、raw payload 为空。
-- 未闭合：本切片尚待发布复测；不能据此声明 Workbench 1s 或 full external PSCIP-L4 closed。
+- 发布后证据：release `pscip-l4-workbench-raw-51cba11e8` 上 `/health/ready` ready，runtime release 指向新路径；scope contract default/invalid-scope 均 `ok=true`。critical 5s SLO `16/16` pass，max enqueue-to-fresh `3581.490ms`；targeted `workbench:all` 1s SLO pass，enqueue-to-fresh `397.159ms`、handler `352.381ms`。
+- 生产 raw payload 证明：active `workbench:all` generation 的 snapshot、summary、`1701` rows、`960` groups、`1941` group_rows 全部 `raw_payload={}`、`raw_has_normalized=0` 且 canonical `payload` 非空；active `workbench:2026-02` 同样满足该合同。
+- 未闭合：当前 release 后没有真实 Workbench relation confirm/withdraw、bank-invoice/bank-turnover confirm/withdraw 或 no-OA withdraw 写样本；关联撤回和跨页面 fan-out SLO 仍需 Admin Token/authenticated HTTP 或受控真实写样本验证，不能只用 read model smoke 声明 full external PSCIP-L4 closed。

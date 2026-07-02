@@ -1,0 +1,29 @@
+{
+  "_command_exit_code": 0,
+  "action": "invalid_read_model_refresh_scope_check",
+  "cleanup": {
+    "applied": false,
+    "deleted": {
+      "job.outbox_events": 0,
+      "job.read_model_dirty_scopes": 0,
+      "read_model.app_status_readiness": 0
+    }
+  },
+  "invalid_scope_count": 0,
+  "items": [],
+  "ok": true,
+  "repair_audit": {
+    "enabled": false,
+    "event_id": "",
+    "recorded": false
+  },
+  "rollback": {
+    "manifest_item_count": 0,
+    "strategy": "restore deleted runtime rows from items[].row if operator cleanup is reverted."
+  },
+  "summary": {
+    "job.outbox_events": 0,
+    "job.read_model_dirty_scopes": 0,
+    "read_model.app_status_readiness": 0
+  }
+}

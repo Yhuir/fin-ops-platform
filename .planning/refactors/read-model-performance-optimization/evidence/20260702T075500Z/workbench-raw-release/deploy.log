@@ -1,0 +1,190 @@
+spawn ./scripts/deploy-oa.sh --host 139.155.5.132 --user root --release-name pscip-l4-workbench-raw-51cba11e8 --skip-build
+== finops deploy step: initialize release variables ==
+== finops deploy step: validate release name ==
+== finops deploy step: verify deploy-control contract ==
+== finops deploy step: ensure releases directory ==
+== finops deploy step: preflight cleanup old releases ==
+== finops deploy step: storage preflight ==
+release storage available: path=/opt/fin-ops/releases available_mb=57644 required_mb=512
+== finops deploy step: prepare release directory ==
+== finops deploy step: extract release archive ==
+== finops deploy step: validate release layout ==
+== finops deploy step: deploy-control check-release ==
+/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src
+== finops deploy step: install runtime worker ensure helper ==
+== finops deploy step: deploy-control activate ==
+
+[notice] A new release of pip is available: 26.0.1 -> 26.1.2
+[notice] To update, run: /opt/fin-ops/venv/bin/python -m pip install --upgrade pip
+
+[notice] A new release of pip is available: 26.1.1 -> 26.1.2
+[notice] To update, run: /opt/fin-ops/rabbitmq-runtime/20260522-224452/venv/bin/python -m pip install --upgrade pip
+0001 skipped extensions_and_schemas
+0002 skipped core_imports_invoices_bank
+0003 skipped workbench_relations_exceptions
+0004 skipped-accepted-checksum-drift oa_projection_sync
+0005 skipped-accepted-checksum-drift tax_etc_turnover_settings_jobs
+0006 skipped-accepted-checksum-drift read_models
+0007 skipped-accepted-checksum-drift grants
+0008 skipped pending_invoice_commands
+0009 skipped runtime_infrastructure
+0010 skipped runtime_phase2_cutover
+0011 skipped runtime_phase2_query_indexes
+0012 skipped workbench_rows_scope_unique
+0013 skipped oa_attachment_cache_sources
+0014 skipped-accepted-checksum-drift workbench_groups_read_model
+0015 skipped workbench_groups_sort_columns
+0016 skipped runtime_outbox_envelope_fields
+0017 skipped rabbitmq_outbox_publish_state
+0018 skipped-accepted-checksum-drift api_performance_read_model
+0019 skipped import_jobs
+0020 skipped oa_attachment_cache_source_identity_links
+0021 skipped read_model_hot_path_indexes
+0022 skipped read_model_native_closeout
+0023 skipped workbench_group_rows_filters
+0024 skipped pending_invoice_query_fields
+0025 skipped pending_invoice_runtime_grants
+0026 skipped invoice_usage_collection_read_models
+0027 skipped invoice_usage_collection_runtime_grants
+0028 skipped workbench_reconciliation_decisions
+0029 skipped workbench_reconciliation_runtime_grants
+0030 skipped bank_detail_read_model
+0031 skipped bank_transaction_auto_category_context_index
+0032 skipped bank_detail_runtime_grants
+0033 skipped bank_detail_primary_sub_labels
+0034 skipped workbench_generation_convergence
+0035 skipped workbench_generation_runtime_grants
+0036 skipped workbench_generation_consistency
+0037 skipped workbench_generation_stats_retention
+0038 skipped workbench_generation_stats_runtime_grants
+0039 skipped bank_account_balance_read_model
+0040 skipped pending_invoice_source_versions
+0041 skipped bank_transaction_category_confirmations
+0042 skipped bank_detail_candidate_projection
+0043 skipped workbench_idempotency_records
+0044 skipped bank_detail_external_turnover_third_labels
+0045 skipped output_invoice_collection_lifecycle
+0046 skipped input_invoice_usage_oa_reverse_batches
+0047 skipped oa_pending_payment_read_model
+0048 skipped oa_pending_payment_bank_paid_total
+0049 skipped oa_pending_payment_detail_lookup_indexes
+0050 skipped tax_offset_plans
+0051 skipped pending_invoice_cash_income_scope
+0052 skipped workbench_relation_distribution
+0053 skipped pending_invoice_cash_income_rows
+0054 skipped workbench_relation_hot_path_indexes
+0055 skipped invoice_lifecycle_distribution
+0056 skipped app_status_readiness
+0057 skipped app_health_dashboard_metrics_indexes
+0058 skipped workbench_object_identity
+0059 skipped input_invoice_usage_bank_filters
+0060 skipped oa_pending_payment_bank_filters
+0061 skipped output_invoice_collection_bank_filters
+0062 skipped workbench_relation_etc_external_batch_idx
+0063 skipped etc_remove_oa_detection_runtime
+0064 skipped etc_scrub_oa_detection_metadata
+0065 skipped invoice_canonical_identity_fingerprint_invariant
+0066 skipped oa_applicant_credentials
+0067 skipped app_status_current_effective_outbox_index
+0068 skipped outbox_read_model_refresh_metric_samples
+0069 skipped oa_attachment_identity_bridge_repair
+0070 skipped workbench_unused_write_indexes
+0071 skipped oa_application_workflow_status
+0072 skipped oa_pending_payment_workflow_status
+0073 skipped oa_pending_payment_bank_relations
+0074 skipped etc_batch_invoice_links
+0075 skipped etc_batch_invoice_links_runtime_grants
+0076 skipped outbox_read_model_refresh_metric_attention
+0077 skipped-accepted-checksum-drift workbench_relation_rows_scope_unique
+0078 skipped-accepted-checksum-drift workbench_relation_rows_scope_unique_repair
+0079 skipped workbench_relation_rows_scope_unique_hardening
+0080 skipped no_oa_bank_batch_relation_mode_filter
+0081 skipped oa_source_aliases
+0082 skipped bank_flow_rule_batch_storage
+0083 skipped bank_flow_rule_batch_tag_rules
+0084 skipped runtime_queue_history_retention
+active
+active
+fin-ops-worker@bank-account-balance.service active
+fin-ops-worker@bank-detail.service active
+fin-ops-worker@bank-flow-rule-batch.service active
+fin-ops-worker@cost-statistics.service active
+fin-ops-worker@cost-tax.service active
+fin-ops-worker@import.service active
+fin-ops-worker@invoice-lifecycle-secondary.service active
+fin-ops-worker@invoice-lifecycle.service active
+fin-ops-worker@invoice-usage-collection.service active
+fin-ops-worker@no-oa-bank-batch.service active
+fin-ops-worker@oa-sync.service active
+fin-ops-worker@pending-invoice.service active
+fin-ops-worker@search-pending.service active
+fin-ops-worker@search-secondary.service active
+fin-ops-worker@search.service active
+fin-ops-worker@search-tertiary.service active
+fin-ops-worker@tax-offset.service active
+fin-ops-worker@turnover-ledger.service active
+fin-ops-worker@workbench-matching.service active
+fin-ops-worker@workbench-relation.service active
+fin-ops-worker@workbench.service active
+ExecStart={ path=/opt/fin-ops/venv/bin/python ; argv[]=/opt/fin-ops/venv/bin/python -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001 ; ignore_errors=no ; start_time=[Thu 2026-07-02 15:39:48 CST] ; stop_time=[n/a] ; pid=1304280 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/etc/fin-ops/fin-ops.common.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.secrets.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.rabbitmq-monitoring.env (ignore_errors=yes)
+WorkingDirectory=/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src
+ExecStart={ path=/opt/fin-ops/rabbitmq-runtime/20260522-224452/venv/bin/python ; argv[]=/opt/fin-ops/rabbitmq-runtime/20260522-224452/venv/bin/python -m fin_ops_platform.app.rabbitmq_dispatcher --publisher-id rabbitmq-dispatcher-shadow-1 --batch-size 100 --lock-timeout-seconds 300 --retry-delay-seconds 60 --poll-interval-seconds ${RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS} ; ignore_errors=no ; start_time=[Thu 2026-07-02 15:39:53 CST] ; stop_time=[n/a] ; pid=1304544 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/etc/fin-ops/fin-ops.common.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.secrets.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.rabbitmq-dispatcher.env (ignore_errors=yes)
+WorkingDirectory=/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src
+Environment=PYTHONPATH=/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src/backend/src FIN_OPS_DATA_DIR=/opt/fin-ops/data FIN_OPS_WORKER_ID=VM-0-6-opencloudos-workbench FIN_OPS_WORKER_INSTANCE=workbench FIN_OPS_WORKER_KIND=workbench FIN_OPS_WORKER_ARGS= FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS=300 FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS=60 FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS=30 FIN_OPS_WORKER_MAX_ATTEMPTS=5 FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS=0.25
+EnvironmentFiles=/etc/fin-ops/fin-ops.common.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.secrets.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.rabbitmq-worker.env (ignore_errors=yes)
+EnvironmentFiles=/etc/fin-ops/fin-ops.worker.workbench.env (ignore_errors=yes)
+WorkingDirectory=/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src
+== finops deploy step: backend readiness check ==
+== finops deploy step: deploy-control status ==
+active
+active
+fin-ops-worker@bank-account-balance.service active
+fin-ops-worker@bank-detail.service active
+fin-ops-worker@bank-flow-rule-batch.service active
+fin-ops-worker@cost-statistics.service active
+fin-ops-worker@cost-tax.service active
+fin-ops-worker@import.service active
+fin-ops-worker@invoice-lifecycle-secondary.service active
+fin-ops-worker@invoice-lifecycle.service active
+fin-ops-worker@invoice-usage-collection.service active
+fin-ops-worker@no-oa-bank-batch.service active
+fin-ops-worker@oa-sync.service active
+fin-ops-worker@pending-invoice.service active
+fin-ops-worker@search-pending.service active
+fin-ops-worker@search-secondary.service active
+fin-ops-worker@search.service active
+fin-ops-worker@search-tertiary.service active
+fin-ops-worker@tax-offset.service active
+fin-ops-worker@turnover-ledger.service active
+fin-ops-worker@workbench-matching.service active
+fin-ops-worker@workbench-relation.service active
+fin-ops-worker@workbench.service active
+ExecStart={ path=/opt/fin-ops/venv/bin/python ; argv[]=/opt/fin-ops/venv/bin/python -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001 ; ignore_errors=no ; start_time=[Thu 2026-07-02 15:39:48 CST] ; stop_time=[n/a] ; pid=1304280 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/etc/fin-ops/fin-ops.common.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.secrets.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.rabbitmq-monitoring.env (ignore_errors=yes)
+WorkingDirectory=/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src
+ExecStart={ path=/opt/fin-ops/rabbitmq-runtime/20260522-224452/venv/bin/python ; argv[]=/opt/fin-ops/rabbitmq-runtime/20260522-224452/venv/bin/python -m fin_ops_platform.app.rabbitmq_dispatcher --publisher-id rabbitmq-dispatcher-shadow-1 --batch-size 100 --lock-timeout-seconds 300 --retry-delay-seconds 60 --poll-interval-seconds ${RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS} ; ignore_errors=no ; start_time=[Thu 2026-07-02 15:39:53 CST] ; stop_time=[n/a] ; pid=1304544 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/etc/fin-ops/fin-ops.common.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.secrets.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.rabbitmq-dispatcher.env (ignore_errors=yes)
+WorkingDirectory=/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src
+Environment=PYTHONPATH=/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src/backend/src FIN_OPS_DATA_DIR=/opt/fin-ops/data FIN_OPS_WORKER_ID=VM-0-6-opencloudos-workbench FIN_OPS_WORKER_INSTANCE=workbench FIN_OPS_WORKER_KIND=workbench FIN_OPS_WORKER_ARGS= FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS=300 FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS=60 FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS=30 FIN_OPS_WORKER_MAX_ATTEMPTS=5 FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS=0.25
+EnvironmentFiles=/etc/fin-ops/fin-ops.common.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.secrets.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.rabbitmq-worker.env (ignore_errors=yes)
+EnvironmentFiles=/etc/fin-ops/fin-ops.worker.workbench.env (ignore_errors=yes)
+WorkingDirectory=/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src
+== finops deploy step: runtime worker ensure ==
+== finops deploy step: frontend hash check ==
+== finops deploy step: public session route check ==
+== finops deploy step: cleanup old releases ==
+deleted HEAD-9db1d7a8-20260702140736

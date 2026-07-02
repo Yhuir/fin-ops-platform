@@ -79,3 +79,14 @@ Deploy/apply the migration in a controlled release, then compare production full
 - Local change: new Workbench generation writes keep canonical `payload` unchanged but stop duplicating the same JSON into `raw_payload.normalized_payload`; `raw_payload` is written as `{}` for Workbench snapshot, summary, rows, groups, and group_rows. Old data fallback remains in `_read_model_payload(...)`; new chain no longer carries the duplicate raw payload branch.
 - Local verification: `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py -q` passed `178`; `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py tests/test_runtime_worker.py tests/test_read_model_slo_smoke.py tests/test_postgres_connection.py -q` passed `211`.
 - Decision: `CONTINUE`. This is a bounded persistence I/O reduction, not a full high-performance closure. It must be released and measured with Workbench targeted SLO and critical grouped SLO before claiming improvement.
+
+## 2026-07-02 Workbench raw payload release evidence
+
+- Evidence directory: `.planning/refactors/read-model-performance-optimization/evidence/20260702T075500Z/workbench-raw-release/`.
+- Release `pscip-l4-workbench-raw-51cba11e8` deployed from commit `51cba11e82d5b439da72633dbcc92ea48c350b79`; `/health/ready` returned `status=ready` and runtime metadata pointed to `/opt/fin-ops/releases/pscip-l4-workbench-raw-51cba11e8/src`.
+- Scope contract default and invalid-scope checks both passed: default `ok=true`, `violation_count=0`, current uncovered outbox failures `0`; invalid read model scopes `0`.
+- Critical read model 5s SLO passed `16/16`: max enqueue-to-fresh `3581.490ms`, p50 `568.217ms`, p95 `3581.490ms`; max handler duration `3391.024ms`.
+- Targeted `workbench:all` 1s SLO passed: enqueue-to-fresh `397.159ms`, handler `352.381ms`.
+- Production raw payload proof: active `workbench:all` generation has `1701` rows, `960` groups, `1941` group_rows, and snapshot/summary/details all have `raw_payload={}` with `raw_has_normalized=0` while canonical `payload` remains non-empty. Active `workbench:2026-02` generation shows the same contract.
+- Write-operation audit since release activation (`2026-07-02T07:39:48+00:00`) still failed because all selected confirm/withdraw/no-OA withdraw expectations are `missing` (`51/51`). There is no current-release real write sample proving association withdraw or cross-page fan-out latency.
+- Decision: `CONTINUE`. The read model and Workbench persistence performance slice is production-verified; full PSCIP-L4/high-performance closure still needs authenticated page/API evidence or approved controlled real write samples for confirm/withdraw/no-OA withdraw.

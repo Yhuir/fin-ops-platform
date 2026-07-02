@@ -1,0 +1,93 @@
+{
+  "scope_contract_default.json": {
+    "exit_code": 0,
+    "failed_count": null,
+    "failed_expectation_count": null,
+    "missing_expectation_count": null,
+    "ok": true,
+    "planned_scope_count": null,
+    "status": null,
+    "summary": {},
+    "target_ms": null
+  },
+  "scope_contract_invalid.json": {
+    "exit_code": 0,
+    "failed_count": null,
+    "failed_expectation_count": null,
+    "missing_expectation_count": null,
+    "ok": true,
+    "planned_scope_count": null,
+    "status": null,
+    "summary": {
+      "job.outbox_events": 0,
+      "job.read_model_dirty_scopes": 0,
+      "read_model.app_status_readiness": 0
+    },
+    "target_ms": null
+  },
+  "slo_critical_5s.json": {
+    "exit_code": 0,
+    "failed_count": 0,
+    "failed_expectation_count": null,
+    "missing_expectation_count": null,
+    "ok": null,
+    "planned_scope_count": 16,
+    "status": "pass",
+    "summary": {
+      "enqueue_to_fresh_ms": {
+        "max": 3581.49,
+        "p50": 568.217,
+        "p95": 3581.49,
+        "p99": 3581.49
+      },
+      "failed_count": 0,
+      "handler_duration_ms": {
+        "max": 3391.024,
+        "p50": 217.01,
+        "p95": 3391.024,
+        "p99": 3391.024
+      },
+      "measured_enqueue_sample_count": 16,
+      "sample_count": 16
+    },
+    "target_ms": 5000.0
+  },
+  "slo_workbench_all_1s.json": {
+    "exit_code": 0,
+    "failed_count": 0,
+    "failed_expectation_count": null,
+    "missing_expectation_count": null,
+    "ok": null,
+    "planned_scope_count": 1,
+    "status": "pass",
+    "summary": {
+      "enqueue_to_fresh_ms": {
+        "max": 397.159,
+        "p50": 397.159,
+        "p95": 397.159,
+        "p99": 397.159
+      },
+      "failed_count": 0,
+      "handler_duration_ms": {
+        "max": 352.381,
+        "p50": 352.381,
+        "p95": 352.381,
+        "p99": 352.381
+      },
+      "measured_enqueue_sample_count": 1,
+      "sample_count": 1
+    },
+    "target_ms": 1000.0
+  },
+  "write_audit_since.json": {
+    "exit_code": 1,
+    "failed_count": null,
+    "failed_expectation_count": 51,
+    "missing_expectation_count": 51,
+    "ok": null,
+    "planned_scope_count": null,
+    "status": "fail",
+    "summary": null,
+    "target_ms": 1000.0
+  }
+}

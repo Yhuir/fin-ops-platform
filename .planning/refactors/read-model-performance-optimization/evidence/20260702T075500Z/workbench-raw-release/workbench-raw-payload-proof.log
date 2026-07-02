@@ -1,0 +1,151 @@
+spawn scp -o StrictHostKeyChecking=accept-new /tmp/finops_query_workbench_raw_51cba11e8_remote.sh root@139.155.5.132:/tmp/finops_query_workbench_raw_51cba11e8_remote.sh
+
+
+finops_query_workbench_raw_51cba11e8_remote.s   0%    0     0.0KB/s   --:-- ETA
+finops_query_workbench_raw_51cba11e8_remote.s 100% 2511   104.4KB/s   00:00    
+spawn ssh -o StrictHostKeyChecking=accept-new root@139.155.5.132 bash /tmp/finops_query_workbench_raw_51cba11e8_remote.sh; rm -f /tmp/finops_query_workbench_raw_51cba11e8_remote.sh
+
+{
+  "2026-02:workbench:2026-02:85f31794972544f79341dfbeada6d02d:group_rows": {
+    "payload_non_empty": 318,
+    "raw_empty": 318,
+    "raw_has_normalized": 0,
+    "total": 318
+  },
+  "2026-02:workbench:2026-02:85f31794972544f79341dfbeada6d02d:groups": {
+    "payload_non_empty": 120,
+    "raw_empty": 120,
+    "raw_has_normalized": 0,
+    "total": 120
+  },
+  "2026-02:workbench:2026-02:85f31794972544f79341dfbeada6d02d:rows": {
+    "payload_non_empty": 213,
+    "raw_empty": 213,
+    "raw_has_normalized": 0,
+    "total": 213
+  },
+  "2026-02:workbench:2026-02:85f31794972544f79341dfbeada6d02d:snapshot": {
+    "payload_non_empty": 1,
+    "raw_empty": 1,
+    "raw_has_normalized": 0,
+    "total": 1
+  },
+  "2026-02:workbench:2026-02:85f31794972544f79341dfbeada6d02d:summary": {
+    "payload_non_empty": 1,
+    "raw_empty": 1,
+    "raw_has_normalized": 0,
+    "total": 1
+  },
+  "active_generations": [
+    {
+      "activated_at": "2026-07-02 15:43:44.91773+08",
+      "completed_at": "2026-07-02 15:43:44.91773+08",
+      "generation_id": "workbench:2026-02:85f31794972544f79341dfbeada6d02d",
+      "group_count": 120,
+      "row_count": 213,
+      "scope_key": "2026-02",
+      "started_at": "2026-07-02 15:43:44.915409+08",
+      "summary_count": 1,
+      "updated_at": "2026-07-02 15:43:44.91773+08"
+    },
+    {
+      "activated_at": "2026-07-02 15:43:47.471651+08",
+      "completed_at": "2026-07-02 15:43:47.471651+08",
+      "generation_id": "workbench:all:6977c8abc3254f6b9cb3874c37d0db4b",
+      "group_count": 960,
+      "row_count": 1701,
+      "scope_key": "all",
+      "started_at": "2026-07-02 15:43:47.423007+08",
+      "summary_count": 1,
+      "updated_at": "2026-07-02 15:43:47.471651+08"
+    }
+  ],
+  "all:workbench:all:6977c8abc3254f6b9cb3874c37d0db4b:group_rows": {
+    "payload_non_empty": 1941,
+    "raw_empty": 1941,
+    "raw_has_normalized": 0,
+    "total": 1941
+  },
+  "all:workbench:all:6977c8abc3254f6b9cb3874c37d0db4b:groups": {
+    "payload_non_empty": 960,
+    "raw_empty": 960,
+    "raw_has_normalized": 0,
+    "total": 960
+  },
+  "all:workbench:all:6977c8abc3254f6b9cb3874c37d0db4b:rows": {
+    "payload_non_empty": 1701,
+    "raw_empty": 1701,
+    "raw_has_normalized": 0,
+    "total": 1701
+  },
+  "all:workbench:all:6977c8abc3254f6b9cb3874c37d0db4b:snapshot": {
+    "payload_non_empty": 1,
+    "raw_empty": 1,
+    "raw_has_normalized": 0,
+    "total": 1
+  },
+  "all:workbench:all:6977c8abc3254f6b9cb3874c37d0db4b:summary": {
+    "payload_non_empty": 1,
+    "raw_empty": 1,
+    "raw_has_normalized": 0,
+    "total": 1
+  },
+  "latest_generations": [
+    {
+      "activated_at": "2026-07-02 15:43:17.503212+08",
+      "completed_at": "2026-07-02 15:43:17.503212+08",
+      "generation_id": "workbench:all:fd876f24b9d64e2298e2a60436f59648",
+      "group_count": 960,
+      "raw_empty": true,
+      "raw_has_normalized": false,
+      "row_count": 1701,
+      "scope_key": "all",
+      "started_at": "2026-07-02 15:43:16.520133+08",
+      "status": "superseded",
+      "summary_count": 1,
+      "updated_at": "2026-07-02 15:43:47.471651+08"
+    },
+    {
+      "activated_at": "2026-07-02 15:43:47.471651+08",
+      "completed_at": "2026-07-02 15:43:47.471651+08",
+      "generation_id": "workbench:all:6977c8abc3254f6b9cb3874c37d0db4b",
+      "group_count": 960,
+      "raw_empty": true,
+      "raw_has_normalized": false,
+      "row_count": 1701,
+      "scope_key": "all",
+      "started_at": "2026-07-02 15:43:47.423007+08",
+      "status": "active",
+      "summary_count": 1,
+      "updated_at": "2026-07-02 15:43:47.471651+08"
+    },
+    {
+      "activated_at": "2026-07-02 15:43:16.522781+08",
+      "completed_at": "2026-07-02 15:43:16.522781+08",
+      "generation_id": "workbench:2026-02:e47696fec3a24765a75135a50cb32101",
+      "group_count": 120,
+      "raw_empty": true,
+      "raw_has_normalized": false,
+      "row_count": 213,
+      "scope_key": "2026-02",
+      "started_at": "2026-07-02 15:43:16.520133+08",
+      "status": "superseded",
+      "summary_count": 1,
+      "updated_at": "2026-07-02 15:43:44.91773+08"
+    },
+    {
+      "activated_at": "2026-07-02 15:43:44.91773+08",
+      "completed_at": "2026-07-02 15:43:44.91773+08",
+      "generation_id": "workbench:2026-02:85f31794972544f79341dfbeada6d02d",
+      "group_count": 120,
+      "raw_empty": true,
+      "raw_has_normalized": false,
+      "row_count": 213,
+      "scope_key": "2026-02",
+      "started_at": "2026-07-02 15:43:44.915409+08",
+      "status": "active",
+      "summary_count": 1,
+      "updated_at": "2026-07-02 15:43:44.91773+08"
+    }
+  ]
+}
