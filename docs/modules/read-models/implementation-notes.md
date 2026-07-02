@@ -1501,3 +1501,14 @@
 - 改动：`PostgresTransaction.execute_many_values(...)` 默认 chunk size 从 `200` 提高到 `1000`，继续受现有 `60_000 / params_per_row` 参数上限保护。该改动不改变 projection 内容、scope/source_versions、dirty scope、readiness 或 worker 事件合同。
 - 测试覆盖：`tests/test_postgres_connection.py::PostgresConnectionTests::test_execute_many_values_defaults_to_large_chunks_for_read_model_writes`。
 - 剩余：需要发布后复跑 Workbench profile 和 critical SLO；若 `workbench:all` 仍慢，下一步应拆 snapshot payload 或 all aggregate worker lane，而不是恢复小批量。
+
+## 2026-07-02 - Workbench runtime source_version 与 generation 明细 insert-only
+
+- 目标：继续按模块化 I/O 收敛 Workbench read model 性能，不在页面、API 或 worker 外侧堆补丁。输入边界是 durable queue event 的 `source_version`；输出边界是 `PostgresReadModelRepository.save_workbench_read_models(...)` 发布新的 active generation。
+- 改动 1：`WorkbenchSqlProjectionBuilder.rebuild_workbench_read_model_scope(...)` 改为优先使用调用方传入的 `source_version`，只有缺失时才查询 dirty scope current source version。旧写法把 `_current_dirty_scope_source_version(...)` 放在默认参数表达式中，导致 event 已携带版本时仍做一次冗余 DB I/O。
+- 改动 2：Workbench generation 明细表 `read_model.workbench_rows`、`read_model.workbench_groups`、`read_model.workbench_group_rows` 删除旧 `(generation_id, scope_key, ...) ON CONFLICT DO UPDATE` 分支。每次 rebuild 都创建新的 `generation_id`，明细表冲突更新不是幂等边界，而是旧 scope-key upsert 语义残留；snapshot、summary、generation 状态机仍保留各自发布语义。
+- 本地验证：`tests/test_workbench_sql_runtime.py`、`tests/test_runtime_worker.py`、`tests/test_read_model_slo_smoke.py`、`tests/test_postgres_connection.py` 共 `210 passed`；边界/API/部署相关回归 `92 passed`；`git diff --check` 通过。
+- 生产发布：`pscip-l4-workbench-sv-200f66b9d` 验证 source_version 修复在线；`pscip-l4-workbench-insert-5f530d1b5` 验证 backend/worker 均指向新 release，生产源码 `DETAIL_CONFLICT_COUNT=0`，`source_version` 修复行存在。
+- 生产 read model 证据：新 release scope contract default `ok=true`、`violation_count=0`、current uncovered outbox failure count `0`，invalid read model scope count `0`。critical 5s gate 为 16/16 pass，max enqueue-to-fresh `3601.804ms`；但 Workbench targeted 1s 仍 fail，样本 `2536.163ms` 和 `1499.147ms`，critical 5s run 中 Workbench 为 `1160.102ms`。
+- 写操作证据：72h `write_operation_slo_audit` 对 Workbench relation confirm/withdraw cross-page 仍 fail，历史 p95 最高到数十秒；按 `pscip-l4-workbench-insert-5f530d1b5` 激活时间之后过滤，confirm/withdraw/no-OA withdraw 均为 `missing`，没有当前 release 真实写样本。不能用 read model smoke 代替真实写操作闭环。
+- 结论：read model runtime 可收敛，旧明细 upsert 逻辑已移出主链路；高性能全域目标仍 open。下一阶段应先获取受控真实 confirm/withdraw/no-OA withdraw 样本或 Admin Token authenticated HTTP/SSE，再针对 Workbench save/write transaction 或 worker lane 做 profile，不应继续猜测 SQL。

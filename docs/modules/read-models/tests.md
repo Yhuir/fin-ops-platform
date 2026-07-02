@@ -445,6 +445,14 @@ git diff --check
 - 覆盖类别：read model/cache/background job tests、service-layer persistence boundary regression、existing feature regression。API contract、frontend interaction、E2E business-flow 本轮不适用，因为没有改变 HTTP response shape、页面行为或业务写入口。
 - 生产复测：release `pscip-l4-bulk-persistence-abcca6f78` 发布后运行 `read_model_slo_smoke --critical-only --apply --target-ms 5000` 和 `--target-ms 1000`；5s 为 13/16 pass，1s 为 9/16 pass。`turnover_ledger:all` 1s pass，`workbench:2026-03` 仍 fail。运行 `write_operation_slo_audit --lookback-hours 24 --target-ms 1000 --p99-target-ms 3000 --limit 2000`，结果仍 fail，且缺少部分真实写操作样本。
 
+## 2026-07-02 - Workbench source_version / insert-only generation detail tests
+
+- 更新测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_month_rebuild_defers_all_scope_aggregation` 现在断言 worker/event 已传入 `source_version` 时不得再查询 dirty scope source version，并验证 snapshot source version 沿输入 I/O 传播。
+- 更新测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_persists_workbench_groups_alongside_rows_and_snapshot`、`test_repository_persists_workbench_rows_alongside_snapshot` 断言 generation 明细表不再包含旧 `(generation_id, scope_key, ...) ON CONFLICT DO UPDATE` 分支。
+- 覆盖类别：read model/cache/background job tests、service-layer persistence boundary、existing feature regression。API contract、frontend interaction、business core、E2E 真实业务流本轮未新增，因为外部 HTTP/API shape、页面行为和业务 relation 写入口没有变化。
+- 本地验证：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py tests/test_runtime_worker.py tests/test_read_model_slo_smoke.py tests/test_postgres_connection.py -q` 为 `210 passed`；边界/API/部署回归命令为 `92 passed`。
+- 生产验证：release `pscip-l4-workbench-insert-5f530d1b5` 上 `/health/ready` ready、required worker missing/stale/mismatch `0/0/0`、scope contract default/invalid-scope 均 `ok=true`；critical 5s gate 16/16 pass，max `3601.804ms`。Workbench 1s targeted 仍 fail，真实 confirm/withdraw/no-OA withdraw 当前 release 样本缺失，保留为未测风险。
+
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 
 ## Nightly CI 覆盖

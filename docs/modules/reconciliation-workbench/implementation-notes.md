@@ -925,3 +925,12 @@
 - 测试覆盖：`tests/test_workbench_relation_alignment_service.py` 新增大关系唯一合计与 ambiguous 合计不猜测回归；复跑 Workbench generation batching tests。
 - 发布后证据：release `pscip-l4-alignment-d725fdb6d` 中 `workbench:2026-03` profile month shard rebuild `1299.692ms`，`builder._group_payload` `334.799ms`，保存阶段 `391.616ms`；targeted 1s SLO 仍 fail，`enqueue_to_fresh_ms=2801.281`、`handler_duration_ms=2559.983`。
 - 未闭合：Workbench 已从 5s 失败项降到 5s pass，但仍不是稳定 1s；`all` parent aggregate profile 仍约 `13.97s`，真实 confirm/withdraw 写操作还缺受控 post-deploy 样本验证。
+
+## 2026-07-02 - Workbench source_version 输入与 generation 明细旧 upsert 删除
+
+- 触发事实：release `pscip-l4-main-poll-chunk-d51665816` 生产 profile 显示 Workbench worker handler 约 `1.94s`，其中存在 event 已携带 `source_version` 但 builder 仍查询 dirty scope source version 的冗余 I/O；后续 profile 证明剩余热点集中在 `save_workbench_read_models(changed_scope_keys=2026-02)` 的 generation 明细写入。
+- 决策：保持 Workbench active generation 原子发布和 `workbench:all` parent aggregate 例外，不迁移成普通 read model gateway。handler 输入边界改为直接消费 durable queue event 的 `source_version`；repository 写入边界改为新 generation 明细 insert-only，删除 `workbench_rows/groups/group_rows` 上旧 `(generation_id, scope_key, ...) ON CONFLICT DO UPDATE` 分支。
+- 代码影响：`WorkbenchSqlProjectionBuilder.rebuild_workbench_read_model_scope(...)` 只在 `source_version is None` 时查询 dirty scope source version；`PostgresReadModelRepository.save_workbench_read_models(...)` 和 `_refresh_workbench_all_scope_from_month_shards(...)` 的 rows/groups/group_rows 明细写入不再包含旧 conflict update。snapshot、summary、generation start/activate/fail 的状态机不变。
+- 测试覆盖：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_month_rebuild_defers_all_scope_aggregation` 锁定传入 source_version 时不得查询 dirty scope；`test_repository_persists_workbench_groups_alongside_rows_and_snapshot`、`test_repository_persists_workbench_rows_alongside_snapshot` 锁定 generation 明细不再包含旧 conflict 分支；复跑 Workbench SQL runtime、runtime worker、SLO smoke 和 PostgreSQL connection tests。
+- 生产证据：release `pscip-l4-workbench-insert-5f530d1b5` 部署后 backend/worker cwd 与 PYTHONPATH 均指向新 release，生产源码 `DETAIL_CONFLICT_COUNT=0`，scope contract default/invalid-scope 均 `ok=true`。critical 5s gate 16/16 pass，max `3601.804ms`，Workbench 在该 run 中 `1160.102ms`。
+- 未闭合：Workbench 1s targeted smoke 仍 fail，样本 `2536.163ms`、`1499.147ms`；按新 release 激活时间过滤后没有真实 confirm/withdraw/no-OA withdraw 写操作样本。关联台不能声明“非常高性能”闭环，下一步应以受控真实写样本或 handler profile 决定是否拆 Workbench 写 worker lane、压缩 snapshot payload 或继续优化 save transaction。
