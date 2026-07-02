@@ -6971,7 +6971,7 @@ class PostgresReadModelRepository:
                         cache_status,
                         row_count,
                         jsonb(payload),
-                        jsonb({"normalized_payload": payload}),
+                        jsonb({}),
                     ),
                 )
                 connection.execute(
@@ -7002,7 +7002,7 @@ class PostgresReadModelRepository:
                         jsonb(summary_payload.get("summary") if isinstance(summary_payload.get("summary"), dict) else {}),
                         jsonb(summary_payload.get("invoice_inventory") if isinstance(summary_payload.get("invoice_inventory"), dict) else {}),
                         jsonb(summary_payload),
-                        jsonb({"normalized_payload": summary_payload}),
+                        jsonb({}),
                     ),
                 )
                 self._upsert_workbench_generation_stats(
@@ -7041,7 +7041,7 @@ class PostgresReadModelRepository:
                             generated_at,
                             cache_status,
                             jsonb(row),
-                            jsonb({"normalized_payload": row}),
+                            jsonb({}),
                         ),
                     )
                 _execute_many(
@@ -7089,7 +7089,7 @@ class PostgresReadModelRepository:
                             generated_at,
                             cache_status,
                             jsonb(group.get("payload") if isinstance(group.get("payload"), dict) else group),
-                            jsonb({"normalized_payload": group}),
+                            jsonb({}),
                         ),
                     )
                     for group_row in _workbench_group_row_records(_workbench_group_payload_for_rows(group)):
@@ -7118,7 +7118,7 @@ class PostgresReadModelRepository:
                                 generated_at,
                                 cache_status,
                                 jsonb(group_row.get("payload") if isinstance(group_row.get("payload"), dict) else group_row),
-                                jsonb({"normalized_payload": group_row}),
+                                jsonb({}),
                             ),
                         )
                 _execute_many(
@@ -7384,7 +7384,7 @@ class PostgresReadModelRepository:
                         "source_versions": aggregate_source_versions,
                     }
                 ),
-                jsonb({"normalized_payload": aggregate_payload}),
+                jsonb({}),
             ),
         )
         workbench_row_params: list[tuple[Any, ...]] = []
@@ -7410,7 +7410,7 @@ class PostgresReadModelRepository:
                     jsonb(aggregate_source_versions),
                     generated_at,
                     jsonb(row),
-                    jsonb({"normalized_payload": row}),
+                    jsonb({}),
                 ),
             )
         _execute_many(
@@ -7455,7 +7455,7 @@ class PostgresReadModelRepository:
                     jsonb(aggregate_source_versions),
                     generated_at,
                     jsonb(group.get("payload") if isinstance(group.get("payload"), dict) else group),
-                    jsonb({"normalized_payload": group}),
+                    jsonb({}),
                 ),
             )
             for group_row in _workbench_group_row_records(_workbench_group_payload_for_rows(group)):
@@ -7481,7 +7481,7 @@ class PostgresReadModelRepository:
                         jsonb(aggregate_source_versions),
                         generated_at,
                         jsonb(group_row.get("payload") if isinstance(group_row.get("payload"), dict) else group_row),
-                        jsonb({"normalized_payload": group_row}),
+                        jsonb({}),
                     ),
                 )
         _execute_many(
@@ -7554,7 +7554,7 @@ class PostgresReadModelRepository:
                     else {}
                 ),
                 jsonb(final_summary_payload),
-                jsonb({"normalized_payload": final_summary_payload}),
+                jsonb({}),
             ),
         )
         self._upsert_workbench_generation_stats(

@@ -69,3 +69,13 @@ Deploy/apply the migration in a controlled release, then compare production full
 - Workbench 1s targeted: still fail, `enqueue_to_fresh_ms=1485.007`, `handler_duration_ms=1181.262`.
 - Write operation audit since the release activation time (`2026-07-02T06:57:41+00:00`): fail because required confirm/withdraw/no-OA withdraw samples are missing, not because current release samples are slow.
 - Decision: `CONTINUE`. Full PSCIP-L4/high-performance closure is not proven. Next useful step is either authenticated HTTP/page SLO with Admin Token, or a controlled reversible real write sample for confirm/withdraw/no-OA withdraw; without that, only read model worker convergence is evidenced.
+
+## 2026-07-02 Workbench raw payload write amplification slice
+
+- Evidence directory: `.planning/refactors/read-model-performance-optimization/evidence/20260702T071757Z/workbench-profile/`.
+- Production profile on release `pscip-l4-workbench-insert-5f530d1b5`: recent `workbench:all` aggregate handlers were `7.7s-16.3s`; `workbench:2026-02` month shard handlers were usually `1.1s-3.5s`.
+- Active all generation size: `1701` workbench rows, `960` groups, `1941` group_rows. Table stats showed no dead tuple blocker; active detail count queries were millisecond-level.
+- Shadow profile without writes: all aggregate read+CPU path took `3309.583ms` (`consistency_check=375.700ms`, `fetch_active_month_groups=239.949ms`, `normalize_groups=420.521ms`, `aggregate_payload=1104.259ms`, `iter_rows_and_groups=687.310ms`, `build_group_row_records=454.940ms`). Remaining production latency is write amplification plus runtime variance.
+- Local change: new Workbench generation writes keep canonical `payload` unchanged but stop duplicating the same JSON into `raw_payload.normalized_payload`; `raw_payload` is written as `{}` for Workbench snapshot, summary, rows, groups, and group_rows. Old data fallback remains in `_read_model_payload(...)`; new chain no longer carries the duplicate raw payload branch.
+- Local verification: `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py -q` passed `178`; `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py tests/test_runtime_worker.py tests/test_read_model_slo_smoke.py tests/test_postgres_connection.py -q` passed `211`.
+- Decision: `CONTINUE`. This is a bounded persistence I/O reduction, not a full high-performance closure. It must be released and measured with Workbench targeted SLO and critical grouped SLO before claiming improvement.

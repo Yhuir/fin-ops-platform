@@ -934,3 +934,11 @@
 - 测试覆盖：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_month_rebuild_defers_all_scope_aggregation` 锁定传入 source_version 时不得查询 dirty scope；`test_repository_persists_workbench_groups_alongside_rows_and_snapshot`、`test_repository_persists_workbench_rows_alongside_snapshot` 锁定 generation 明细不再包含旧 conflict 分支；复跑 Workbench SQL runtime、runtime worker、SLO smoke 和 PostgreSQL connection tests。
 - 生产证据：release `pscip-l4-workbench-insert-5f530d1b5` 部署后 backend/worker cwd 与 PYTHONPATH 均指向新 release，生产源码 `DETAIL_CONFLICT_COUNT=0`，scope contract default/invalid-scope 均 `ok=true`。一次 critical 5s gate 16/16 pass，max `3601.804ms`；最新重采样 14/16 pass，Workbench 在该 grouped run 中 `4183.895ms`，未成为 5s fail 项。
 - 未闭合：Workbench 1s targeted smoke 仍 fail，最新样本 `1485.007ms`；按新 release 激活时间过滤后没有真实 confirm/withdraw/no-OA withdraw 写操作样本。关联台不能声明“非常高性能”闭环，下一步应以受控真实写样本或 handler profile 决定是否拆 Workbench 写 worker lane、压缩 snapshot payload 或继续优化 save transaction。
+
+## 2026-07-02 - Workbench generation raw payload write amplification
+
+- 触发事实：release `pscip-l4-workbench-insert-5f530d1b5` 当前 profile 显示 `workbench:all` aggregate handler 多次 `7.7s-16.3s`；active all generation 约 `1701` rows、`960` groups、`1941` group_rows。无写 shadow profile 为 `3309.583ms`，其中 `aggregate_payload=1104.259ms`、`iter_rows_and_groups=687.310ms`、`build_group_row_records=454.940ms`。
+- 决策：不改变 all-scope active generation 语义，也不让页面动态回退 month shards；先删除新 generation 的重复 raw JSON 写入。`payload` 仍是前端/API/read model 的规范输出，`raw_payload` 只为历史数据 fallback 服务。
+- 代码影响：`PostgresReadModelRepository.save_workbench_read_models(...)` 和 `_refresh_workbench_all_scope_from_month_shards(...)` 对 Workbench snapshot、summary、rows、groups、group_rows 的 `raw_payload` 写 `{}`，避免把同一 payload 再包一层 `normalized_payload` 写入 TOAST。
+- 测试覆盖：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_writes_workbench_payload_without_duplicate_raw_payload` 和 all-scope batch test 断言 payload 保留、raw payload 为空。
+- 未闭合：本切片尚待发布复测；不能据此声明 Workbench 1s 或 full external PSCIP-L4 closed。

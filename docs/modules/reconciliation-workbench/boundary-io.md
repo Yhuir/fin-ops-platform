@@ -47,6 +47,7 @@
 | 关联台页面 payload | 前端 workbench components | 来自 active generation read model |
 | Summary payload | 前端首屏和 App 状态 | 来自 `read_model.workbench_summary` 物化结果；缺少 `summary` 视为 read model 未完成，不做热路径 repair |
 | Groups summary page | 前端三栏列表 | 保留 rows、counts、display tags、核心 decision 字段；剔除 `searchable_text`、`source_versions`、`group_metadata`、`object_identity*`、decision evidence/debug 等非首屏 UI 字段 |
+| Generation raw payload | read_model.workbench_* 新 generation | 新发布的 Workbench generation 以 `payload` 为规范输出；`raw_payload` 只保留旧数据 fallback 语义，新写入不得再复制 `normalized_payload` 放大持久化 I/O |
 | paired/open 分区 | 前端 workbench components | 已确认 `bank_flow_rule_batch`、`turnover_manual_closure` 或 legacy no-OA relation 若缺少 metadata 声明要求的 OA 或发票 row，必须留在 open 区；补齐 required row type 后才进入 paired 区 |
 | batch-accounting paired 分区 | 前端 workbench components | active `relation_mode=batch_accounting` 且 `special_metadata.source=batch_accounting` 是批量账务模块的 confirmed relation I/O；行级 relation code 为 `batch_accounting` 时也必须作为 paired row 参与分组，不得落入 open `existing_case_candidate` |
 | 折叠批次展示 | `CandidateGroupGrid` | `collapsed_summary` 默认只展示摘要 row 和“展开 N 条/张明细”按钮；不得再渲染“当前显示 1 条摘要 / 实际 N 条流水”等绝对定位计数文案，避免与流水标签和日期重叠。 |

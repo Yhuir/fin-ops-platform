@@ -53,6 +53,7 @@
 | Fresh payload | 页面 API/Redis | Redis 只能缓存 fresh gate 后 payload |
 | Readiness/status | app status/operation barrier | 页面不能伪装 fresh |
 | Workbench relation fan-out | runtime queue / workers | confirm/withdraw UoW 显式输出 `workbench`、`workbench_relation` 和 metadata 声明的 downstream scopes。`PostgresWorkbenchRelationRepository(..., enqueue_refreshes=False)` 是该主链路的持久化-only adapter，不能写 hidden outbox |
+| Workbench generation payload | PostgreSQL read_model.workbench_* | 新 generation 的规范 payload 写入 `payload`；`raw_payload` 不再复制同一 JSON，只作为旧数据 fallback 字段存在 |
 | Source-version proof | Scope rows / API fresh gate | `source_versions_unchanged` 只能在 own schema version 与依赖版本都匹配时跳过重建 |
 | Queue history retention | Runtime worker ops | 只回收 `done` 历史，不改变 pending/processing/failed/dead-lettered freshness 事实源 |
 

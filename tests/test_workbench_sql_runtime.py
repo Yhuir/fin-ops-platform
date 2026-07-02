@@ -4077,6 +4077,24 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([3], [len(batch) for batch in all_row_batches])
         self.assertEqual([1], [len(batch) for batch in all_group_batches])
         self.assertEqual([3], [len(batch) for batch in all_group_row_batches])
+        all_snapshot_params = next(
+            params
+            for statement, params in connection.executed
+            if "insert into read_model.workbench_snapshots" in statement and "values (%s, 'all', null" in statement
+        )
+        all_summary_params = next(
+            params
+            for statement, params in connection.executed
+            if "insert into read_model.workbench_summary" in statement and "values (%s, 'all', null" in statement
+        )
+        self.assertEqual(all_snapshot_params[5].obj, {})
+        self.assertEqual(all_summary_params[6].obj, {})
+        self.assertEqual(all_row_batches[0][0][16].obj, {})
+        self.assertEqual(all_group_batches[0][0][17].obj, {})
+        self.assertEqual(all_group_row_batches[0][0][20].obj, {})
+        self.assertEqual(all_row_batches[0][0][15].obj["id"], "oa-1")
+        self.assertEqual(all_group_batches[0][0][16].obj["group_id"], "case:BULK-ALL")
+        self.assertTrue(all_group_row_batches[0][0][19].obj)
 
     def test_repository_all_scope_suppresses_open_rows_claimed_by_paired_shards(self) -> None:
         class AggregateAllCrossZoneDuplicateConnection(WorkbenchWriteConnection):
@@ -6255,6 +6273,58 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertFalse(any("insert into read_model.workbench_rows" in statement for statement, _params in connection.executed))
         self.assertFalse(any("insert into read_model.workbench_groups" in statement for statement, _params in connection.executed))
         self.assertFalse(any("insert into read_model.workbench_group_rows" in statement for statement, _params in connection.executed))
+
+    def test_repository_writes_workbench_payload_without_duplicate_raw_payload(self) -> None:
+        connection = BulkWorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {
+                            "open": {
+                                "groups": [
+                                    {
+                                        "group_id": "case:RAW-1",
+                                        "group_type": "candidate",
+                                        "bank_rows": [
+                                            {
+                                                "id": "bank-row-1",
+                                                "source_kind": "bank_transaction",
+                                                "status": "open",
+                                                "counterparty_name": "供应商A",
+                                                "amount_value": "1000.00",
+                                            }
+                                        ],
+                                    }
+                                ]
+                            }
+                        },
+                        "source_versions": {"case_snapshot_version": "v1"},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        snapshot_params = next(params for statement, params in connection.executed if "insert into read_model.workbench_snapshots" in statement)
+        summary_params = next(params for statement, params in connection.executed if "insert into read_model.workbench_summary" in statement)
+        row_batch = next(params for statement, params in connection.execute_many_calls if "insert into read_model.workbench_rows" in statement)
+        group_batch = next(params for statement, params in connection.execute_many_calls if "insert into read_model.workbench_groups" in statement)
+        group_row_batch = next(
+            params for statement, params in connection.execute_many_calls if "insert into read_model.workbench_group_rows" in statement
+        )
+
+        self.assertEqual(snapshot_params[8].obj, {})
+        self.assertEqual(summary_params[9].obj, {})
+        self.assertEqual(row_batch[0][18].obj, {})
+        self.assertEqual(group_batch[0][20].obj, {})
+        self.assertEqual(group_row_batch[0][23].obj, {})
+        self.assertEqual(row_batch[0][17].obj["id"], "bank-row-1")
+        self.assertEqual(group_batch[0][19].obj["group_id"], "case:RAW-1")
+        self.assertTrue(group_row_batch[0][22].obj)
 
     def test_repository_reads_workbench_row_detail_from_active_generation_rows(self) -> None:
         class RowDetailConnection(WorkbenchWriteConnection):

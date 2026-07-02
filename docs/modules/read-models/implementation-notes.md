@@ -1512,3 +1512,11 @@
 - 生产 read model 证据：新 release scope contract default `ok=true`、`violation_count=0`、current uncovered outbox failure count `0`，invalid read model scope count `0`。一次 critical 5s gate 为 16/16 pass，max enqueue-to-fresh `3601.804ms`；最新重采样为 14/16 pass，`turnover_ledger:all` `5591.378ms`、`bank_flow_rule_batch:2026-02` `5445.482ms` fail，targeted retry 分别 `993.910ms`、`455.961ms` pass。Workbench targeted 1s 仍 fail，最新样本 `1485.007ms`。
 - 写操作证据：72h `write_operation_slo_audit` 对 Workbench relation confirm/withdraw cross-page 仍 fail，历史 p95 最高到数十秒；按 `pscip-l4-workbench-insert-5f530d1b5` 激活时间之后过滤，confirm/withdraw/no-OA withdraw 均为 `missing`，没有当前 release 真实写样本。不能用 read model smoke 代替真实写操作闭环。
 - 结论：read model runtime 可收敛，旧明细 upsert 逻辑已移出主链路；高性能全域目标仍 open。下一阶段应先获取受控真实 confirm/withdraw/no-OA withdraw 样本或 Admin Token authenticated HTTP/SSE，再针对 Workbench save/write transaction 或 worker lane 做 profile，不应继续猜测 SQL。
+
+## 2026-07-02 - Workbench raw payload write amplification
+
+- 触发事实：production profile 显示 `workbench:all` aggregate handler 多次 `7.7s-16.3s`；只读 shadow profile 证明 all aggregate 读+CPU 约 `3309.583ms`，剩余长尾主要来自持久化写放大和 runtime variance。active all generation 约 `1701` rows、`960` groups、`1941` group_rows。
+- 决策：保持 Workbench active generation、scope/source_versions、freshness gate 和页面 payload 不变；删除新 generation 写入时对 `raw_payload.normalized_payload` 的重复 JSON 复制。`payload` 仍是规范输出，`raw_payload` 仅保留旧数据 fallback 语义。
+- 代码影响：`PostgresReadModelRepository.save_workbench_read_models(...)` 和 `_refresh_workbench_all_scope_from_month_shards(...)` 对 Workbench snapshot、summary、rows、groups、group_rows 写入 `raw_payload={}`。其他 read model raw payload 合同不变。
+- 本地验证：`tests/test_workbench_sql_runtime.py` 新增/更新 raw payload 断言；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py tests/test_runtime_worker.py tests/test_read_model_slo_smoke.py tests/test_postgres_connection.py -q` 为 `211 passed`。
+- 未闭合：该切片尚未发布。发布后必须复跑 Workbench targeted SLO、critical grouped SLO、scope contract 和当前 release write-operation audit；若 `workbench:all` 仍超过目标，下一步应继续拆 all aggregate CPU/summary 写入或 worker lane，而不是恢复 raw payload fallback。
