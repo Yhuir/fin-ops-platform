@@ -1,5 +1,15 @@
 # 批量账务 实施记录
 
+## 2026-07-02 - 提交成功后后台同步假失败修复
+
+- 目标：修复“日常报销批量账务管理”提交 API 已成功写入 relation，但后置 `workbench_relation` operation barrier blocked/timeout 或列表 reload 中断时，页面把结果显示成“操作失败”的假失败。
+- 影响范围：`BatchAccountingPage` submit/withdraw post-command flow、页面 Vitest、模块 README / boundary I/O / tests 文档；不改变后端 relation command service、dirty scope、worker 或 API response shape。
+- 关键决策：命令边界和读侧收敛边界分离。`POST /api/batch-accounting/submit` / withdraw 成功后，页面最多短等 barrier 并尝试 reload；后置同步失败只返回“关联关系仍在后台同步”，不能覆盖 command 成功。真实 command/API 失败仍走原错误路径。
+- 旧链路删除：删除前端把 post-command barrier/reload 异常直接冒泡到 `runOperation` 失败态的链路，避免“成功写入但弹操作失败”污染用户链路。
+- 测试覆盖：新增 `BatchAccountingPage.test.tsx::keeps a successful submit successful when the relation barrier is still blocked`；后端 `tests.test_batch_accounting_api` 继续覆盖 command service、freshness precondition、rollback 和 DTO。
+- 验证命令：`npm --prefix web test -- --run src/test/BatchAccountingPage.test.tsx`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api -v`。
+- 未测风险：真实生产登录态提交 smoke 和真实 operation barrier 长尾仍需发布后验证；本轮修复的是错误语义和等待上限，不替代后续对 `/api/batch-accounting` GET p95 的 SQL/读路径专项优化。
+
 ## 2026-07-01 - 未提交首屏 relation I/O 收窄
 
 - 目标：降低 `/api/batch-accounting` 未提交首屏耗时，避免为了 `submitted_count` 和关系排除加载过多 `workbench_relation` DTO。
@@ -143,7 +153,7 @@
 - `GET /api/batch-accounting` 必须保持只读，不能为了修复历史关系在 GET 路径写入。
 - `read_model_status !== "fresh"` 时前端必须显示 warning，不能把空关系当作真实未提交；写操作是否可提交由后端 canonical write safety、权限/session、DB 和 owner/version/idempotency 判定，普通 relation distribution 追赶中不应作为长期全局禁用理由。
 - 批量账务 submit relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`；缺少 command service 时 fail fast，不回退 direct `WorkbenchPairRelationService.replace_with_confirmed_relation(...)`。
-- 提交/撤回成功后的前端 `workbenchRelationUpdated` 只是刷新提示，不替代后端 dirty scope、worker、operation barrier 和 readiness。页面释放全屏操作 overlay 前必须等 `workbench_relation` barrier fresh 并重新加载。
+- 提交/撤回成功后的前端 `workbenchRelationUpdated` 只是刷新提示，不替代后端 dirty scope、worker、operation barrier 和 readiness。页面会短等 `workbench_relation` barrier 并尝试重新加载；若后置同步等待或 reload 未及时完成，只能提示后台同步，不能把已成功的 command 改写成失败。
 - 历史 case id collision 修复保留在 service 显式路径和 mutation/repair 语义中，不能重新散落到列表读取。
 - `GET /api/batch-accounting` 支持可选显式分页。未传分页参数的旧调用方仍保持旧 response shape；批量账务前端未提交 bucket 默认带 `bank_page/bank_page_size` 和 `oa_page/oa_page_size`，后端裁剪对应列表并返回 `pagination`，`page_size>200` 返回 `invalid_paging`。
 

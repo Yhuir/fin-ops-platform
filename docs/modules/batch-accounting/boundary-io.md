@@ -44,7 +44,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 批量账务操作结果 | 前端页面 | 返回成功/失败、受影响对象、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
+| 批量账务操作结果 | 前端页面 | 返回成功/失败、受影响对象、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。提交/撤回 command 成功后，后置 barrier/reload 只影响读侧收敛提示，不能把 command 成功改写成失败。 |
 | Relation dirty scopes | workbench relation/read model | 不直接写下游 payload |
 | Audit/result | audit/job status | 重要批量操作可追踪 |
 

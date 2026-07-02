@@ -39,6 +39,7 @@ const EMPTY_PAYLOAD: BatchAccountingResponse = {
 };
 
 const BATCH_ACCOUNTING_PAGE_SIZE = 200;
+const BATCH_ACCOUNTING_MUTATION_BARRIER_TIMEOUT_MS = 4_000;
 
 function currentYear() {
   return String(new Date().getFullYear());
@@ -226,6 +227,10 @@ function mutationErrorMessage(caught: unknown, fallback: string) {
     ].filter(Boolean).join(" ");
   }
   return caught instanceof Error ? caught.message : fallback;
+}
+
+function mutationDeferredSyncMessage(message: string | undefined, fallback: string) {
+  return `${message || fallback} 关联关系仍在后台同步，稍后刷新可查看最新结果。`;
 }
 
 function cx(...values: Array<string | false | null | undefined>) {
@@ -555,11 +560,19 @@ export default function BatchAccountingPage() {
             note: isAmountMismatch ? differenceNote : "",
           });
           setMessage("正在等待批量账务关联读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(submitResult, monthFromBankRow(selectedBankRow)),
-          );
-          setMessage("正在刷新批量账务关联数据...");
-          await reloadDataAfterMutation();
+          try {
+            await waitForOperationFreshness(
+              mutationBarrierTargets(submitResult, monthFromBankRow(selectedBankRow)),
+              { timeoutMs: BATCH_ACCOUNTING_MUTATION_BARRIER_TIMEOUT_MS },
+            );
+            setMessage("正在刷新批量账务关联数据...");
+            await reloadDataAfterMutation();
+          } catch {
+            return {
+              ...submitResult,
+              message: mutationDeferredSyncMessage(submitResult.message, "已关联批量账务流水与 OA。"),
+            };
+          }
           return submitResult;
         } finally {
           setMutating(false);
@@ -594,11 +607,19 @@ export default function BatchAccountingPage() {
           setWithdrawOpen(false);
           setWithdrawReason("");
           setMessage("正在等待批量账务关联读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(withdrawResult, monthFromBankRow(selectedBankRow)),
-          );
-          setMessage("正在刷新批量账务关联数据...");
-          await reloadDataAfterMutation();
+          try {
+            await waitForOperationFreshness(
+              mutationBarrierTargets(withdrawResult, monthFromBankRow(selectedBankRow)),
+              { timeoutMs: BATCH_ACCOUNTING_MUTATION_BARRIER_TIMEOUT_MS },
+            );
+            setMessage("正在刷新批量账务关联数据...");
+            await reloadDataAfterMutation();
+          } catch {
+            return {
+              ...withdrawResult,
+              message: mutationDeferredSyncMessage(withdrawResult.message, "已撤回批量账务关联。"),
+            };
+          }
           return withdrawResult;
         } finally {
           setMutating(false);

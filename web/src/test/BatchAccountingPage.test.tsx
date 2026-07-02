@@ -876,6 +876,61 @@ describe("BatchAccountingPage", () => {
     });
   });
 
+  test("keeps a successful submit successful when the relation barrier is still blocked", async () => {
+    const user = userEvent.setup();
+    const relationListener = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET")) {
+        return jsonResponse(withPagination(unsubmittedPayload, url));
+      }
+      if (url.pathname === "/api/batch-accounting/submit") {
+        return jsonResponse({
+          success: true,
+          relation_id: "CASE-202601-001",
+          affected_months: ["2026-01"],
+          message: "已关联批量账务流水与 2 项 OA。",
+        });
+      }
+      if (url.pathname === "/api/operation-barrier/status") {
+        return jsonResponse({
+          status: "blocked",
+          fresh: false,
+          targets: [],
+          refreshing_targets: [],
+          blocked_targets: [{
+            read_model_key: "workbench_relation",
+            scope_type: "workbench_relation",
+            scope_key: "2026-01",
+            status: "blocked",
+            fresh: false,
+            blocking: true,
+            raw_status: "unavailable",
+            reason: "statement timeout",
+          }],
+        });
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.addEventListener("workbenchRelationUpdated", relationListener);
+
+    try {
+      renderPage();
+      await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+
+      await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+      await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
+      await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
+
+      expect(await screen.findByText(/已关联批量账务流水与 2 项 OA。 关联关系仍在后台同步/)).toBeInTheDocument();
+      expect(screen.queryByText("操作失败")).not.toBeInTheDocument();
+      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-01"] });
+    } finally {
+      window.removeEventListener("workbenchRelationUpdated", relationListener);
+    }
+  });
+
   test("filters right side OA rows across applicant, project, amount, and reason", async () => {
     const user = userEvent.setup();
     installFetchMock();

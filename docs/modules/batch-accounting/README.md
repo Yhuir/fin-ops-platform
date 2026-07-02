@@ -53,7 +53,7 @@
 - `read_model_status !== "fresh"` 时，页面可以展示当前可用 payload 和 freshness 诊断，但不能仅因普通 read model non-fresh 全局阻止提交和撤回；写操作必须由权限/session、DB/目标写模型可用性、canonical relation version/idempotency/owner 状态决定。
 - `GET /api/batch-accounting` 的 relation 读取必须通过现有 relation read facade/freshness 边界请求 `require_fresh`；缺失或 stale scope 只能经 facade/gateway 入队刷新，不能在页面 GET 路径同步 rebuild 或直接写 durable queue。
 - `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须走 command service，并基于 canonical relation、idempotency、owner 状态、权限/session、DB 可写性和本次操作 row ids 的 relation readiness 校验；不允许在缺少 command service 时静默写旧 pair service，也不能把整页普通 relation distribution 追赶中作为默认写阻断条件。
-- 前端 submit/withdraw 必须接入 `GlobalOperationOverlayProvider`。写 API 成功后先等待 `workbench_relation` operation barrier 对 affected months fresh，再重新加载批量账务 payload；overlay 关闭只能表示后端 relation read model 已真实收敛，不能用本地事件或前端临时列表移动替代。
+- 前端 submit/withdraw 必须接入 `GlobalOperationOverlayProvider`。写 API 成功是 command 边界完成；随后只短等 `workbench_relation` operation barrier 并尝试重新加载批量账务 payload。barrier blocked/timeout 或 reload 中断不得把已成功的 command 改写成“操作失败”，页面必须提示关系仍在后台同步，并继续以后端 dirty scope、worker 和后续刷新为事实源。
 - 批量账务关系变化会影响关联台、银行明细、成本统计、搜索、进项/销项/OA 待付款等依赖关系 read model 或 invoice lifecycle 的页面。
 - read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。
 - 批量账务 GET 必须保持只读；不能在列表读取路径执行 legacy relation repair。
