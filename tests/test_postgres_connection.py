@@ -96,6 +96,26 @@ class PostgresConnectionTests(unittest.TestCase):
         self.assertEqual(connection.executed[1][1], ("gen-1", "row-3", "2026-06-01T00:00:00+08:00", {"id": "row-3"}))
         self.assertEqual(connection.executemany_calls, [])
 
+    def test_execute_many_values_defaults_to_large_chunks_for_read_model_writes(self) -> None:
+        connection = FakeRawConnection()
+        transaction = PostgresTransaction(connection)
+        rows = [(f"gen-{index}", f"row-{index}") for index in range(1001)]
+
+        affected = transaction.execute_many_values(
+            """
+            insert into read_model.workbench_rows(generation_id, row_id)
+            values (%s, %s)
+            on conflict (generation_id, row_id) do update set row_id = excluded.row_id
+            """,
+            rows,
+        )
+
+        self.assertEqual(affected, 1001)
+        self.assertEqual(len(connection.executed), 2)
+        self.assertEqual(len(connection.executed[0][1]), 2000)
+        self.assertEqual(len(connection.executed[1][1]), 2)
+        self.assertEqual(connection.executemany_calls, [])
+
     def test_execute_many_values_falls_back_for_non_insert_values_sql(self) -> None:
         connection = FakeRawConnection()
         transaction = PostgresTransaction(connection)

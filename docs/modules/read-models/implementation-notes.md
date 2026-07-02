@@ -1494,3 +1494,10 @@
 - 合同：PostgreSQL durable queue 仍是 outbox/dirty/readiness 事实源；RabbitMQ 仍是可选 transport/wakeup；read model freshness、scope policy、source_versions、operation barrier 不变。`workbench-matching` 不是 read model outbox pickup worker，继续保留 5s poll。
 - 本地验证：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py tests/test_deploy_runtime_examples.py -q` 通过，`git diff --check` 通过。
 - 剩余：需要发布后复跑 `/health/ready`、scope contract、critical read model SLO 和 write-operation audit；若仍有 1s fail，下一步必须根据 handler profile 或 HTTP probe p95 继续定位，不得把 targeted pass 当作全域高性能闭环。
+
+## 2026-07-02 - read model bulk values chunk size
+
+- 目标：降低 Workbench `all` aggregate 和其它 SQL read model 批量写的数据库往返次数。生产 profile 显示 `workbench:all` 仅约数千行写入仍被拆成多次 `_execute_many` 往返，单次 aggregate 可达约 `12s` 并阻塞同一 workbench worker。
+- 改动：`PostgresTransaction.execute_many_values(...)` 默认 chunk size 从 `200` 提高到 `1000`，继续受现有 `60_000 / params_per_row` 参数上限保护。该改动不改变 projection 内容、scope/source_versions、dirty scope、readiness 或 worker 事件合同。
+- 测试覆盖：`tests/test_postgres_connection.py::PostgresConnectionTests::test_execute_many_values_defaults_to_large_chunks_for_read_model_writes`。
+- 剩余：需要发布后复跑 Workbench profile 和 critical SLO；若 `workbench:all` 仍慢，下一步应拆 snapshot payload 或 all aggregate worker lane，而不是恢复小批量。

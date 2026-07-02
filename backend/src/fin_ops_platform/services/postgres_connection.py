@@ -299,7 +299,7 @@ class PostgresTransaction:
                 record_database_query((monotonic() - started_at) * 1000)
             return int(cursor.rowcount or 0)
 
-    def execute_many_values(self, sql: str, params_seq: list[tuple[Any, ...]], *, chunk_size: int = 200) -> int:
+    def execute_many_values(self, sql: str, params_seq: list[tuple[Any, ...]], *, chunk_size: int = 1000) -> int:
         rows = list(params_seq or [])
         if not rows:
             return 0
