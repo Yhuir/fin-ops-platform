@@ -2109,7 +2109,11 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                 }
             rows = connection.fetch_all(
                 f"""
-                select payload, raw_payload, missing_invoice, can_create_invoice
+                select
+                    payload,
+                    case when payload = '{{}}'::jsonb then raw_payload else null::jsonb end as raw_payload,
+                    missing_invoice,
+                    can_create_invoice
                 from read_model.pending_invoice_rows
                 where {where_sql}
                 order by {order_sql}
@@ -2343,7 +2347,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                         row_scope_key,
                         text(row_payload.get("generated_at")),
                         jsonb(payload),
-                        jsonb({"normalized_payload": payload}),
+                        jsonb({}),
                     ),
                 )
             self._upsert_pending_invoice_scope(

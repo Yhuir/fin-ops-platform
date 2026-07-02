@@ -1358,6 +1358,9 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["missing_invoice_rows"], 1)
         self.assertEqual(payload["rows"][0]["id"], "txn-1")
         self.assertEqual(connection.transaction_count, 1)
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("case when payload = '{}'::jsonb then raw_payload else null::jsonb end as raw_payload", executed_sql)
+        self.assertNotIn("select payload, raw_payload", executed_sql)
         self.assertEqual(
             payload["summary"]["source_summary"],
             {
@@ -1368,6 +1371,45 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                 "excluded_direction_rows": 75,
             },
         )
+
+    def test_pending_invoice_repository_writes_canonical_payload_without_raw_payload_duplication(self) -> None:
+        connection = SearchIndexBulkWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_pending_invoice_rows(
+            scope_key="expense:all:2026-05",
+            rows=[
+                {
+                    "payload": {
+                        "id": "txn-raw-1",
+                        "bank_transaction": {
+                            "id": "txn-raw-1",
+                            "trade_time": "2026-05-20",
+                            "amount": "128.00",
+                        },
+                        "filter_group": "all",
+                        "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                        "input_invoices": {"primary": None, "payment_summary": {}},
+                        "oa": {"primary": None},
+                        "invoices": [],
+                        "can_create_invoice": True,
+                    }
+                }
+            ],
+            source_versions={"schema": "v1"},
+        )
+
+        insert_calls = [
+            (sql, params)
+            for sql, params in connection.execute_calls
+            if "insert into read_model.pending_invoice_rows" in sql
+        ]
+        self.assertEqual(len(insert_calls), 1)
+        _sql, params = insert_calls[0]
+        payload_param = params[-2]
+        raw_payload_param = params[-1]
+        self.assertEqual(payload_param.obj["id"], "txn-raw-1")
+        self.assertEqual(raw_payload_param.obj, {})
 
     def test_pending_invoice_repository_all_direction_combines_direction_summaries(self) -> None:
         connection = SearchPendingConnection(
