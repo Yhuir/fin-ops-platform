@@ -138,7 +138,9 @@ class WorkbenchSqlProjectionBuilder:
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench SQL projection scope_key must be a month shard YYYY-MM.")
         self._bank_account_mapping_cache = None
-        resolved_source_version = _int_value(source_version, self._current_dirty_scope_source_version(normalized_scope))
+        resolved_source_version = _int_or_none(source_version)
+        if resolved_source_version is None:
+            resolved_source_version = self._current_dirty_scope_source_version(normalized_scope)
         pending_claimed_bank_ids = set(self._pending_claimed_bank_transaction_ids_for_month(normalized_scope))
         rows_by_id = self._workbench_rows_for_month(
             normalized_scope,

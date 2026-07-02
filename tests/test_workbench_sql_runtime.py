@@ -2318,7 +2318,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         recorder = SaveRecorder()
         builder = WorkbenchSqlProjectionBuilder(connection=object(), read_model_repository=recorder)
-        builder._current_dirty_scope_source_version = lambda _scope_key: 11
+
+        def fail_dirty_scope_lookup(_scope_key: str) -> int:
+            raise AssertionError("source_version supplied by the worker should avoid dirty scope lookup")
+
+        builder._current_dirty_scope_source_version = fail_dirty_scope_lookup
         builder._current_bank_auto_tag_rules_version = lambda: 1
         builder._pending_claimed_bank_transaction_ids_for_month = lambda _month: []
         builder._workbench_rows_for_month = lambda _month, **_kwargs: {}
@@ -2334,6 +2338,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(recorder.calls), 1)
         self.assertEqual(recorder.calls[0]["changed_scope_keys"], {"2026-05"})
         self.assertFalse(recorder.calls[0]["refresh_all_scope_from_month_shards"])
+        read_model = recorder.calls[0]["snapshot"]["read_models"]["2026-05"]
+        self.assertEqual(read_model["source_versions"]["source_version"], 12)
 
     def test_etc_state_repository_persists_business_batch_reported_submission_amount(self) -> None:
         connection = EtcStateWriteConnection()
