@@ -36,6 +36,16 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.production_external_gat
 
 该工具只报告 `FIN_OPS_E2E_OA_TOKEN`、`FIN_OPS_E2E_ADMIN_TOKEN`、HTTP SLO token/cookie、PostgreSQL URL、write scenario 和审批 ticket 是否配置，不输出 secret 值。若需要 CI/脚本在缺少外部输入时失败，可加 `--require-ready`，缺输入时退出码为 `2`。admin Browser/AppHealth、authenticated HTTP/SSE 和 write-operation apply 缺 token、cookie、scenario 或 approval 时，应归类为 `external_input_required`，不是产品代码或 deterministic E2E 失败。
 
+Codex 本机执行生产 admin 验证时不要依赖 GitHub Actions secret 反读；GitHub secret 是 write-only，只适合 CI。默认使用本机 `0600` secret 文件，由 wrapper 加载后再运行验证命令：
+
+```bash
+scripts/with-production-admin-token.sh --store
+scripts/with-production-admin-token.sh bash scripts/verify.sh infra-smoke
+cd web && ../scripts/with-production-admin-token.sh npm run e2e:production-admin
+```
+
+默认 secret 文件是 `~/.config/fin-ops-platform/admin-token.env`，也可用 `FIN_OPS_LOCAL_ADMIN_TOKEN_ENV` 指向其它本机路径。该文件只保存 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN` 和 `FIN_OPS_E2E_ADMIN_TOKEN`，不得提交到仓库、上传 artifact 或打印到日志。这个 wrapper 只解决凭证读取，不替代真实写操作的审批 ticket、生产窗口和 `FIN_OPS_INFRA_SMOKE_APPLY=1` 等显式操作开关。
+
 对真实写入链路，不要只用直接 enqueue 的 `read_model_slo_smoke` 证明闭环；还要在 staging/发布前窗口运行 `write_operation_slo_audit` 检查真实业务操作产生的 durable refresh events。导入类页面可分别运行 `--operation bank_import_confirmed`、`--operation invoice_import_confirmed`、`--operation etc_import_confirmed`，或者通过统一入口设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`。其中 `bank_import_confirmed` 同时审计通用 `*.read_model.refresh` 事件、银行账户余额 `bank_account_balance.read_model.refresh` 和银行明细 `import.fact.changed` dirty scope drain；发布前仍要通过 `/api/bank-details/accounts` 或页面 smoke 确认账户余额 API freshness gate 返回 fresh。
 
 ## 后端

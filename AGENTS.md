@@ -50,6 +50,7 @@
 ## 工作约束
 
 - 优先读取现有代码和现有文档，不猜测字段、接口或数据库结构。
+- 需要生产 admin token 做性能验证、只读 smoke 或其它生产操作时，先使用 `scripts/with-production-admin-token.sh <command>` 自动加载本机 token；默认读取 `~/.config/fin-ops-platform/admin-token.env`，或读取 `FIN_OPS_LOCAL_ADMIN_TOKEN_ENV` 指定的文件。不要把 token 粘贴到聊天、提交到仓库或打印到日志；本机缺失时让用户运行一次 `scripts/with-production-admin-token.sh --store`。
 - 变更范围保持最小；如果整理范围扩大到重构代码或改变业务口径，先说明并等待确认。
 - 大型跨模块、read model/worker、后端边界重构或需要全量定位的任务必须使用 GSD 流程。GSD 过程产物可以留在 `.planning/`，但长期事实必须沉淀到 `docs/`；不要把原始 prompt 写入主文档树。
 - 修复旧模块时，优先保持最小变更；但当旧模块职责边界已经错误，且继续补丁会让接口约定、数据流、测试责任或运维边界更分散时，不要在旧模块继续堆砌代码。应先设计符合当前架构方向的中心边界，小步迁移调用点，再删除重复、过期或绕过新边界的旧路径。此类重构必须有测试保护，并且不得扩大到与当前目标无关的业务行为。
