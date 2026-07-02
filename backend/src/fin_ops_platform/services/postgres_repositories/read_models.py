@@ -3480,6 +3480,50 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         payload["submitted_count"] = int_value((row or {}).get("submitted_count"), 0)
         return payload
 
+    def list_batch_accounting_relation_groups_by_year(
+        self,
+        *,
+        year: str,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_year = text(year)
+        if not re.fullmatch(r"\d{4}", normalized_year):
+            return None
+        scope_keys = [f"{normalized_year}-{month:02d}" for month in range(1, 13)]
+        payload = self._workbench_relation_payload_from_rows(
+            rows=[],
+            groups=[],
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+        )
+        if payload.get("read_model_status") != "fresh":
+            return payload
+        groups = self._connection.fetch_all(
+            """
+            select group_id, scope_key, scope_month, relation_source, relation_kind, relation_status,
+                   oa_row_ids, bank_transaction_ids, input_invoice_ids, output_invoice_ids,
+                   source_versions, payload, raw_payload
+            from read_model.workbench_relation_groups
+            where tenant_id = %s
+              and scope_key = any(%s)
+              and relation_status = 'linked'
+              and payload->'special_metadata'->>'source' = 'batch_accounting'
+              and coalesce(
+                    nullif(payload->'special_metadata'->>'bank_year', ''),
+                    nullif(payload->'special_metadata'->>'year', '')
+                  ) = %s
+            order by scope_month desc nulls last, group_id
+            """,
+            (tenant_id, scope_keys, normalized_year),
+        )
+        return self._workbench_relation_payload_from_rows(
+            rows=[],
+            groups=groups,
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+            fallback_source_versions=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+        )
+
 
     def get_workbench_relation_groups_by_ids(
         self,
@@ -4629,6 +4673,9 @@ class PostgresReadModelRepository:
 
     def count_batch_accounting_relations_by_year(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.count_batch_accounting_relations_by_year(*args, **kwargs)
+
+    def list_batch_accounting_relation_groups_by_year(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._search_workbench_relation_repository.list_batch_accounting_relation_groups_by_year(*args, **kwargs)
 
     def bank_detail_scope_keys_for_range(self, *args: Any, **kwargs: Any) -> list[str]:
         return self._bank_read_model_repository.bank_detail_scope_keys_for_range(*args, **kwargs)
@@ -7706,65 +7753,244 @@ class PostgresReadModelRepository:
         }
 
     def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, Any] | None:
+        return self._load_batch_accounting_workbench_payload(
+            bank_year=bank_year,
+            include_oa=True,
+            include_invoices=True,
+        )
+
+    def load_batch_accounting_submitted_bank_workbench_payload(self, *, bank_year: str) -> dict[str, Any] | None:
+        return self._load_batch_accounting_workbench_payload(
+            bank_year=bank_year,
+            include_oa=False,
+            include_invoices=False,
+        )
+
+    def load_batch_accounting_submit_workbench_payload(
+        self,
+        *,
+        bank_year: str,
+        bank_row_id: str,
+        oa_row_ids: list[str],
+    ) -> dict[str, Any] | None:
+        resolved_bank_year = text(bank_year)
+        normalized_bank_row_id = text(bank_row_id)
+        normalized_oa_row_ids = _dedupe_preserve_order(text(row_id) for row_id in list(oa_row_ids or []))
+        if not resolved_bank_year or not normalized_bank_row_id or not normalized_oa_row_ids:
+            return None
+        bank_start = f"{resolved_bank_year}-01-01"
+        bank_rows = self._connection.fetch_all(
+            """
+            with active_rows as (
+                select distinct on (r.row_id)
+                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.updated_at
+                from read_model.workbench_rows r
+                join read_model.workbench_generations gen
+                  on gen.generation_id = r.generation_id
+                 and gen.scope_key = r.scope_key
+                 and gen.status = 'active'
+                where r.row_id = %s
+                  and r.source_kind = 'bank'
+                  and r.scope_month >= %s::date
+                  and r.scope_month < (%s::date + interval '1 year')
+                order by r.row_id, r.updated_at desc nulls last
+            )
+            select row_id, source_kind, status, payload, raw_payload
+            from active_rows
+            order by updated_at desc nulls last, row_id
+            """,
+            (normalized_bank_row_id, bank_start, bank_start),
+        )
+        oa_rows = self._connection.fetch_all(
+            """
+            with active_rows as (
+                select distinct on (r.row_id)
+                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.updated_at
+                from read_model.workbench_rows r
+                join read_model.workbench_generations gen
+                  on gen.generation_id = r.generation_id
+                 and gen.scope_key = r.scope_key
+                 and gen.status = 'active'
+                where r.row_id = any(%s)
+                  and r.source_kind = 'oa'
+                order by r.row_id,
+                  case when r.scope_key = 'all' then 1 else 0 end,
+                  r.updated_at desc nulls last
+            )
+            select row_id, source_kind, status, payload, raw_payload
+            from active_rows
+            order by array_position(%s::text[], row_id), updated_at desc nulls last
+            """,
+            (normalized_oa_row_ids, normalized_oa_row_ids),
+        )
+        invoice_like_patterns = [f"oa-att-inv-{row_id}%" for row_id in normalized_oa_row_ids]
+        invoice_rows = self._connection.fetch_all(
+            """
+            with active_rows as (
+                select distinct on (r.row_id)
+                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.updated_at
+                from read_model.workbench_rows r
+                join read_model.workbench_generations gen
+                  on gen.generation_id = r.generation_id
+                 and gen.scope_key = r.scope_key
+                 and gen.status = 'active'
+                where r.source_kind = 'oa_attachment_invoice'
+                  and (
+                    regexp_replace(
+                      coalesce(
+                        nullif(r.payload->>'source_oa_id', ''),
+                        nullif(r.payload->>'source_oa_row_id', ''),
+                        nullif(r.payload->>'derived_from_oa_id', ''),
+                        nullif(r.payload->>'source_expense_item_id', ''),
+                        nullif(r.payload->>'source_id', '')
+                      ),
+                      ':item:.*$',
+                      ''
+                    ) = any(%s)
+                    or r.row_id like any(%s)
+                    or exists (
+                      select 1
+                      from jsonb_array_elements(
+                        case
+                          when jsonb_typeof(r.payload->'source_links') = 'array' then r.payload->'source_links'
+                          else '[]'::jsonb
+                        end
+                      ) link
+                      where regexp_replace(
+                        coalesce(
+                          nullif(link->>'source_oa_id', ''),
+                          nullif(link->>'source_oa_row_id', ''),
+                          nullif(link->>'derived_from_oa_id', ''),
+                          nullif(link->>'source_expense_item_id', ''),
+                          nullif(link->>'source_id', '')
+                        ),
+                        ':item:.*$',
+                        ''
+                      ) = any(%s)
+                    )
+                  )
+                order by r.row_id,
+                  case when r.scope_key = 'all' then 1 else 0 end,
+                  r.updated_at desc nulls last
+            )
+            select row_id, source_kind, status, payload, raw_payload
+            from active_rows
+            order by row_id
+            """,
+            (normalized_oa_row_ids, invoice_like_patterns, normalized_oa_row_ids),
+        )
+        return self._batch_accounting_payload_from_rows(
+            bank_year=resolved_bank_year,
+            bank_rows=bank_rows,
+            oa_rows=oa_rows,
+            invoice_rows=invoice_rows,
+        )
+
+    def _load_batch_accounting_workbench_payload(
+        self,
+        *,
+        bank_year: str,
+        include_oa: bool,
+        include_invoices: bool,
+    ) -> dict[str, Any] | None:
         resolved_bank_year = text(bank_year)
         if not resolved_bank_year:
             return None
         bank_start = f"{resolved_bank_year}-01-01"
         bank_rows = self._connection.fetch_all(
             """
-            select r.row_id, r.source_kind, r.status, r.payload, r.raw_payload
-            from read_model.workbench_rows r
-            join read_model.workbench_generations gen
-              on gen.generation_id = r.generation_id
-             and gen.scope_key = r.scope_key
-             and gen.status = 'active'
-            where r.scope_key <> 'all'
-              and r.source_kind = 'bank'
-              and (
-                    r.counterparty_name = %s
-                    or r.payload->>'counterparty_name' = %s
-                    or r.payload->>'counterparty_name_raw' = %s
-                  )
-              and (
-                    r.scope_month >= %s::date
-                    and r.scope_month < (%s::date + interval '1 year')
-                  )
-            order by coalesce(r.payload->>'trade_time', r.payload->>'pay_receive_time', r.payload->>'txn_date', '') desc, r.row_id
+            with active_rows as (
+                select distinct on (r.row_id)
+                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.updated_at
+                from read_model.workbench_rows r
+                join read_model.workbench_generations gen
+                  on gen.generation_id = r.generation_id
+                 and gen.scope_key = r.scope_key
+                 and gen.status = 'active'
+                where r.scope_key <> 'all'
+                  and r.source_kind = 'bank'
+                  and (
+                        r.counterparty_name = %s
+                        or r.payload->>'counterparty_name' = %s
+                        or r.payload->>'counterparty_name_raw' = %s
+                      )
+                  and (
+                        r.scope_month >= %s::date
+                        and r.scope_month < (%s::date + interval '1 year')
+                      )
+                order by r.row_id, r.updated_at desc nulls last
+            )
+            select row_id, source_kind, status, payload, raw_payload
+            from active_rows
+            order by coalesce(payload->>'trade_time', payload->>'pay_receive_time', payload->>'txn_date', '') desc, row_id
             """,
             ("批量账务集中处理", "批量账务集中处理", "批量账务集中处理", bank_start, bank_start),
         )
         oa_rows = self._connection.fetch_all(
             """
-            select r.row_id, r.source_kind, r.status, r.payload, r.raw_payload
-            from read_model.workbench_rows r
-            join read_model.workbench_generations gen
-              on gen.generation_id = r.generation_id
-             and gen.scope_key = r.scope_key
-             and gen.status = 'active'
-            where r.scope_key <> 'all'
-              and r.source_kind = 'oa'
-              and (
-                    r.payload->>'apply_type' like %s
-                    or r.payload->>'expense_type' like %s
-                  )
-            order by coalesce(r.payload->>'apply_time', r.payload->>'application_time', r.payload->>'application_date', r.payload->>'created_at', '') desc, r.row_id
+            with active_rows as (
+                select distinct on (r.row_id)
+                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.updated_at
+                from read_model.workbench_rows r
+                join read_model.workbench_generations gen
+                  on gen.generation_id = r.generation_id
+                 and gen.scope_key = r.scope_key
+                 and gen.status = 'active'
+                where r.scope_key <> 'all'
+                  and r.source_kind = 'oa'
+                  and (
+                        r.payload->>'apply_type' like %s
+                        or r.payload->>'expense_type' like %s
+                      )
+                order by r.row_id, r.updated_at desc nulls last
+            )
+            select row_id, source_kind, status, payload, raw_payload
+            from active_rows
+            order by coalesce(payload->>'apply_time', payload->>'application_time', payload->>'application_date', payload->>'created_at', '') desc, row_id
             """,
             ("%日常报销%", "%日常报销%"),
-        )
+        ) if include_oa else []
         invoice_rows = self._connection.fetch_all(
             """
-            select r.row_id, r.source_kind, r.status, r.payload, r.raw_payload
-            from read_model.workbench_rows r
-            join read_model.workbench_generations gen
-              on gen.generation_id = r.generation_id
-             and gen.scope_key = r.scope_key
-             and gen.status = 'active'
-            where r.scope_key <> 'all'
-              and r.source_kind = 'oa_attachment_invoice'
-            order by r.row_id
+            with active_rows as (
+                select distinct on (r.row_id)
+                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.updated_at
+                from read_model.workbench_rows r
+                join read_model.workbench_generations gen
+                  on gen.generation_id = r.generation_id
+                 and gen.scope_key = r.scope_key
+                 and gen.status = 'active'
+                where r.scope_key <> 'all'
+                  and r.source_kind = 'oa_attachment_invoice'
+                order by r.row_id, r.updated_at desc nulls last
+            )
+            select row_id, source_kind, status, payload, raw_payload
+            from active_rows
+            order by row_id
             """,
             (),
+        ) if include_invoices else []
+        return self._batch_accounting_payload_from_rows(
+            bank_year=resolved_bank_year,
+            bank_rows=bank_rows,
+            oa_rows=oa_rows,
+            invoice_rows=invoice_rows,
         )
+
+    def _batch_accounting_payload_from_rows(
+        self,
+        *,
+        bank_year: str,
+        bank_rows: list[dict[str, Any]],
+        oa_rows: list[dict[str, Any]],
+        invoice_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         return {
             "month": "all",
             "summary": {},
@@ -7772,7 +7998,7 @@ class PostgresReadModelRepository:
             "open": {
                 "groups": [
                     {
-                        "group_id": f"batch-accounting:{resolved_bank_year}:unpaired-oa",
+                        "group_id": f"batch-accounting:{bank_year}:unpaired-oa",
                         "group_type": "batch_accounting_sql_read_model",
                         "bank_rows": self._payload_rows(bank_rows),
                         "oa_rows": self._payload_rows(oa_rows),

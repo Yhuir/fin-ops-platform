@@ -9417,11 +9417,27 @@ class Application:
 
     def _batch_accounting_service(self, *, use_sql_read_model: bool = False) -> BatchAccountingService:
         batch_workbench_loader = None
+        batch_submit_workbench_loader = None
+        batch_submitted_workbench_loader = None
         if use_sql_read_model and self._workbench_sql_read_repository is not None:
             batch_workbench_loader = self._workbench_sql_read_repository.load_batch_accounting_workbench_payload
+            batch_submit_workbench_loader = getattr(
+                self._workbench_sql_read_repository,
+                "load_batch_accounting_submit_workbench_payload",
+                None,
+            )
+            batch_submitted_workbench_loader = getattr(
+                self._workbench_sql_read_repository,
+                "load_batch_accounting_submitted_bank_workbench_payload",
+                None,
+            )
         return BatchAccountingService(
             grouped_workbench_loader=lambda month: self._build_api_workbench_payload(month),
             batch_workbench_loader=batch_workbench_loader,
+            batch_submit_workbench_loader=batch_submit_workbench_loader if callable(batch_submit_workbench_loader) else None,
+            batch_submitted_workbench_loader=(
+                batch_submitted_workbench_loader if callable(batch_submitted_workbench_loader) else None
+            ),
             relation_facade=self._workbench_relation_read_facade(),
             relation_command_service=self._workbench_relation_command_service(),
         )

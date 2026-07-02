@@ -148,6 +148,30 @@ class UnderlyingWorkbenchRelationRepository:
             "submitted_count": 7,
         }
 
+    def list_batch_accounting_relation_groups_by_year(
+        self, *, year: str, tenant_id: str = "default"
+    ) -> dict[str, object]:
+        self.calls.append(("list_batch_accounting_relation_groups_by_year", {"year": year, "tenant_id": tenant_id}))
+        return {
+            "read_model_status": "fresh",
+            "rows": [],
+            "groups": [
+                {
+                    "group_id": "CASE-BATCH-txn-1",
+                    "payload": {
+                        "group_id": "CASE-BATCH-txn-1",
+                        "relation_mode": "batch_accounting",
+                        "relation_status": "linked",
+                        "row_ids": ["txn-1", "oa-1"],
+                        "row_types": ["bank", "oa"],
+                        "special_metadata": {"source": "batch_accounting", "year": year},
+                    },
+                }
+            ],
+            "source_versions": {"workbench_relation_schema_version": "test"},
+            "read_model_scope_keys": [f"{year}-{month:02d}" for month in range(1, 13)],
+        }
+
     def save_workbench_relation_distribution(
         self,
         *,
@@ -343,6 +367,12 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
             port.count_batch_accounting_relations_by_year(year="2026", tenant_id="tenant")["submitted_count"],
             7,
         )
+        self.assertEqual(
+            port.list_batch_accounting_relation_groups_by_year(year="2026", tenant_id="tenant")["groups"][0][
+                "group_id"
+            ],
+            "CASE-BATCH-txn-1",
+        )
         port.save_workbench_relation_distribution(
             scope_key="2026-01",
             rows=[{"row_id": "txn-1"}],
@@ -366,6 +396,7 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
                 "workbench_relation_source_versions",
                 "workbench_relation_scope_summary",
                 "count_batch_accounting_relations_by_year",
+                "list_batch_accounting_relation_groups_by_year",
                 "save_workbench_relation_distribution",
                 "mark_workbench_relation_scope_empty",
             ],
@@ -401,6 +432,20 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(
             repository.calls,
             [("count_batch_accounting_relations_by_year", {"year": "2026", "tenant_id": "default"})],
+        )
+
+    def test_batch_accounting_year_list_uses_repository_reader_without_month_scan(self) -> None:
+        repository = UnderlyingWorkbenchRelationRepository()
+        facade = WorkbenchRelationReadFacade(read_model_repository=repository)
+
+        payload = facade.list_batch_accounting_relations_by_year("2026")
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["groups"][0]["group_id"], "CASE-BATCH-txn-1")
+        self.assertEqual(payload["read_model_scope_keys"], [f"2026-{month:02d}" for month in range(1, 13)])
+        self.assertEqual(
+            repository.calls,
+            [("list_batch_accounting_relation_groups_by_year", {"year": "2026", "tenant_id": "default"})],
         )
 
     def test_get_by_row_ids_returns_fresh_linked_and_unlinked_contexts(self) -> None:

@@ -57,7 +57,7 @@
 
 - `workbench_relation` 的通用查询 owner 仍是 `WorkbenchRelationReadFacade`。下游页面只能通过 facade/repository port 读取 freshness-gated payload，不能直接读 `read_model.workbench_relation_*` 表。
 - `batch-accounting` 的未提交首屏只允许调用候选 row-id relation lookup 和 `count_batch_accounting_relations_by_year(year)`；该 count I/O 归属 `workbench_relation` repository port，返回年份级 submitted count 和 read model freshness/status，不返回 relation DTO。
-- `batch-accounting` 的已提交 bucket 允许按月份读取完整 submitted relation DTO，因为页面需要展示已提交关系明细；该路径不得复用于未提交首屏 summary。
+- `batch-accounting` 的已提交 bucket 必须调用 `list_batch_accounting_relations_by_year(year)` 一次读取年份内 batch-accounting relation groups；该 I/O 归属 `workbench_relation` repository port，返回 relation DTO 和 read model freshness/status。禁止按 12 个月循环 list，也禁止把该路径复用于未提交首屏 summary。
 
 ## 变更规则
 

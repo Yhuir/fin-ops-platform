@@ -107,12 +107,16 @@ class BatchAccountingService:
         *,
         grouped_workbench_loader: Callable[[str], dict[str, Any]],
         batch_workbench_loader: Callable[..., dict[str, Any] | None] | None = None,
+        batch_submit_workbench_loader: Callable[..., dict[str, Any] | None] | None = None,
+        batch_submitted_workbench_loader: Callable[..., dict[str, Any] | None] | None = None,
         case_id_provider: Callable[[str], str] | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
         self._grouped_workbench_loader = grouped_workbench_loader
         self._batch_workbench_loader = batch_workbench_loader
+        self._batch_submit_workbench_loader = batch_submit_workbench_loader
+        self._batch_submitted_workbench_loader = batch_submitted_workbench_loader
         self._case_id_provider = case_id_provider or self._default_case_id_for_bank_row
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
@@ -222,7 +226,7 @@ class BatchAccountingService:
             requested=any(value is not None for value in (page, page_size, oa_page, oa_page_size)),
         )
         if bucket == "submitted":
-            context = self._build_list_context(bank_year=resolved_bank_year)
+            context = self._build_submitted_list_context(bank_year=resolved_bank_year)
             submitted_relations = self._submitted_relations(resolved_bank_year, context)
             bank_rows, relations_by_bank_row_id = self._submitted_payload(submitted_relations, context)
             oa_rows: list[dict[str, Any]] = []
@@ -361,7 +365,11 @@ class BatchAccountingService:
         resolved_bank_year = self._validate_year(bank_year or fallback_year)
         normalized_bank_row_id = self._required_id(bank_row_id, "bank_row_id")
         normalized_oa_row_ids = self._normalize_ids(oa_row_ids)
-        context = self._build_submit_context(bank_year=resolved_bank_year)
+        context = self._build_submit_context(
+            bank_year=resolved_bank_year,
+            bank_row_id=normalized_bank_row_id,
+            oa_row_ids=normalized_oa_row_ids,
+        )
         bank_row = context.rows_by_id.get(normalized_bank_row_id)
         if not isinstance(bank_row, dict) or not self._is_batch_bank_row(bank_row, resolved_bank_year, require_unlinked=False):
             raise BatchAccountingError("invalid_batch_accounting_bank_row", "银行流水不符合批量账务提交条件。")
@@ -645,13 +653,40 @@ class BatchAccountingService:
             bank_year=bank_year,
         )
 
-    def _build_submit_context(self, *, bank_year: str) -> _WorkbenchContext:
+    def _build_submitted_list_context(self, *, bank_year: str) -> _WorkbenchContext:
+        return self._build_workbench_row_context(
+            bank_year=bank_year,
+            payload_loader=self._batch_submitted_workbench_loader,
+        )
+
+    def _build_submit_context(
+        self,
+        *,
+        bank_year: str,
+        bank_row_id: str,
+        oa_row_ids: list[str],
+    ) -> _WorkbenchContext:
+        if self._batch_submit_workbench_loader is not None:
+            return self._build_workbench_row_context(
+                bank_year=bank_year,
+                payload_loader=lambda *, bank_year: self._batch_submit_workbench_loader(
+                    bank_year=bank_year,
+                    bank_row_id=bank_row_id,
+                    oa_row_ids=list(oa_row_ids),
+                ),
+            )
         return self._build_workbench_row_context(bank_year=bank_year)
 
-    def _build_workbench_row_context(self, *, bank_year: str) -> _WorkbenchContext:
+    def _build_workbench_row_context(
+        self,
+        *,
+        bank_year: str,
+        payload_loader: Callable[..., dict[str, Any] | None] | None = None,
+    ) -> _WorkbenchContext:
         payload = None
-        if self._batch_workbench_loader is not None:
-            payload = self._batch_workbench_loader(bank_year=bank_year)
+        resolved_loader = payload_loader or self._batch_workbench_loader
+        if resolved_loader is not None:
+            payload = resolved_loader(bank_year=bank_year)
         if not isinstance(payload, dict):
             payload = self._grouped_workbench_loader("all")
         groups = self._groups_from_payload(payload)
@@ -952,6 +987,24 @@ class BatchAccountingService:
     def _submitted_relations(self, year: str, context: _WorkbenchContext) -> list[dict[str, Any]]:
         if self._relation_facade is None:
             return []
+        list_by_year = getattr(self._relation_facade, "list_batch_accounting_relations_by_year", None)
+        if callable(list_by_year):
+            try:
+                payload = list_by_year(
+                    year,
+                    require_fresh=True,
+                    reason="batch_accounting_submitted_relations",
+                )
+            except TypeError:
+                payload = list_by_year(year)
+            context.relation_read_model_status.record(payload if isinstance(payload, dict) else None)
+            if not isinstance(payload, dict):
+                return []
+            return [
+                relation
+                for relation in relation_dicts_from_distribution_payload(payload)
+                if self._is_batch_accounting_relation(relation)
+            ]
         list_by_month = getattr(self._relation_facade, "list_by_month", None)
         if not callable(list_by_month):
             return []

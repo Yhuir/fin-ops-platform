@@ -171,6 +171,34 @@ class WorkbenchRelationReadFacade:
         self._last_result = result
         return result
 
+    def list_batch_accounting_relations_by_year(
+        self,
+        year: str,
+        *,
+        require_fresh: bool = True,
+        reason: str = "batch_accounting_submitted_relations",
+    ) -> dict[str, Any]:
+        normalized_year = text(year) or ""
+        scope_keys = _year_scope_keys(normalized_year)
+        reader = getattr(self._read_model_repository, "list_batch_accounting_relation_groups_by_year", None)
+        if not callable(reader) or not scope_keys:
+            return self._non_fresh_result(
+                status="unavailable",
+                scope_keys=scope_keys,
+                require_fresh=require_fresh,
+                reason=reason,
+                stale_reasons=["repository_method_unavailable" if not callable(reader) else "year_required"],
+            )
+        payload = reader(year=normalized_year, tenant_id=self._tenant_id)
+        result = self._result_from_repository_payload(
+            payload,
+            require_fresh=require_fresh,
+            reason=reason,
+            fallback_scope_keys=scope_keys,
+        )
+        self._last_result = result
+        return result
+
     def list_unlinked(
         self,
         month: str,

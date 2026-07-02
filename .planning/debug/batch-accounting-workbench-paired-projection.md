@@ -28,6 +28,26 @@ The write path also carried an old read-model gate: submit/withdraw checked `wor
 - Remove submit/withdraw write precondition on `workbench_relation` read model freshness; write safety belongs to canonical `WorkbenchRelationCommandService`.
 - Do not patch frontend filtering or API output to hide projection errors.
 
+## Submit Performance Root Cause
+
+The production 1273.06 smoke passed functionally after the paired projection fix, but timings were not acceptable:
+
+- withdraw API: about 9.2s
+- submit API: about 19.8s
+- submitted bucket read: about 7.6s
+
+The command path still used the same full candidate read model payload as the list page. A single submit read all batch-accounting bank rows for the year, all daily reimbursement OA rows, and all OA attachment invoice rows before validating one bank row and five OA rows. The submitted bucket also reused full list context and scanned relation DTOs month by month.
+
+This violates the intended module boundary: command I/O must be bounded by command inputs, while page list I/O may read page-sized candidate sets.
+
+## Submit Performance Design
+
+- Add a SQL read port for submit: `load_batch_accounting_submit_workbench_payload(bank_year, bank_row_id, oa_row_ids)`.
+- Add a SQL read port for submitted bank list: `load_batch_accounting_submitted_bank_workbench_payload(bank_year)`.
+- Add a relation read facade port for submitted DTOs: `list_batch_accounting_relations_by_year(year)`.
+- Keep `load_batch_accounting_workbench_payload(bank_year)` only for the unsubmitted candidate list.
+- Remove the SQL production path where submit and submitted bucket reuse the full candidate loader or loop through 12 months of relation DTOs.
+
 ## Verification Targets
 
 - Local: batch accounting API, candidate grouping, SQL projection, docs verification.

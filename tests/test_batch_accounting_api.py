@@ -48,6 +48,12 @@ class FakeBatchRelationFacade:
             "submitted_count": submitted_count,
         }
 
+    def list_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
+        self.calls.append({"list_year": year, **kwargs})
+        payload = self._payload()
+        payload["read_model_scope_keys"] = [f"{year}-{month:02d}" for month in range(1, 13)]
+        return payload
+
     def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
         self.calls.append({"row_ids": list(row_ids), **kwargs})
         payload = self._payload()
@@ -172,6 +178,12 @@ class NonFreshBatchRelationFacade(FakeBatchRelationFacade):
             payload["refresh_enqueued"] = bool(kwargs.get("require_fresh"))
         return payload
 
+    def list_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
+        payload = super().list_batch_accounting_relations_by_year(year, **kwargs)
+        if self._refresh_enqueued is None:
+            payload["refresh_enqueued"] = bool(kwargs.get("require_fresh"))
+        return payload
+
     def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
         payload = super().get_by_row_ids(row_ids, **kwargs)
         if self._refresh_enqueued is None:
@@ -220,6 +232,18 @@ class RowsBatchRelationFacade:
             "refresh_enqueued": False,
             "stale_reasons": [],
             "submitted_count": submitted_count,
+        }
+
+    def list_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
+        self.calls.append({"list_year": year, **kwargs})
+        return {
+            "status": "fresh",
+            "rows": [],
+            "groups": [dict(group) for group in self._groups],
+            "source_versions": {"schema_version": 52},
+            "read_model_scope_keys": [f"{year}-{month:02d}" for month in range(1, 13)],
+            "refresh_enqueued": False,
+            "stale_reasons": [],
         }
 
     def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
@@ -632,10 +656,23 @@ class BatchAccountingApiTests(unittest.TestCase):
         class SqlReadModel:
             def __init__(self, payload: dict[str, object]) -> None:
                 self.payload = payload
-                self.calls: list[str] = []
+                self.full_calls: list[str] = []
+                self.submit_calls: list[dict[str, object]] = []
 
             def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
-                self.calls.append(bank_year)
+                self.full_calls.append(bank_year)
+                raise AssertionError("submit must use the narrow command read port")
+
+            def load_batch_accounting_submit_workbench_payload(
+                self,
+                *,
+                bank_year: str,
+                bank_row_id: str,
+                oa_row_ids: list[str],
+            ) -> dict[str, object]:
+                self.submit_calls.append(
+                    {"bank_year": bank_year, "bank_row_id": bank_row_id, "oa_row_ids": list(oa_row_ids)}
+                )
                 return self.payload
 
         app = build_application()
@@ -660,7 +697,17 @@ class BatchAccountingApiTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(sql_read_model.calls, ["2026"])
+        self.assertEqual(sql_read_model.full_calls, [])
+        self.assertEqual(
+            sql_read_model.submit_calls,
+            [
+                {
+                    "bank_year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
+                }
+            ],
+        )
         self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
 
     def test_submit_checks_active_relations_only_for_selected_rows_without_relation_read_model_gate(self) -> None:
@@ -1065,7 +1112,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "stale")
         self.assertIs(payload["refresh_enqueued"], True)
         self.assertTrue(
-            any(call.get("month") == "2026-01" and call.get("require_fresh") is True for call in facade.calls),
+            any(call.get("list_year") == "2026" and call.get("require_fresh") is True for call in facade.calls),
             facade.calls,
         )
 
@@ -1721,23 +1768,28 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["submitted_count"], 1)
 
     def test_submitted_list_relation_bucket_uses_workbench_relation_distribution(self) -> None:
-        pair_service = WorkbenchPairRelationService()
-        pair_service.create_active_relation(
-            case_id="CASE-BATCH-txn_imported_202601_batch_001",
-            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001"],
-            row_types=["bank", "oa"],
-            relation_mode="manual_confirmed",
-            created_by="tester",
-            month_scope="2026-01",
-            special_metadata={
+        relation = {
+            "case_id": "CASE-BATCH-txn_imported_202601_batch_001",
+            "row_ids": [
+                "txn_imported_202601_batch_001",
+                "oa-exp-ba-001",
+                "oa-exp-ba-002",
+                "oa-att-inv-oa-exp-ba-001-01",
+                "oa-att-inv-oa-exp-ba-002-01",
+            ],
+            "row_types": ["bank", "oa", "oa", "invoice", "invoice"],
+            "status": "active",
+            "relation_mode": "batch_accounting",
+            "month_scope": "2026-01",
+            "special_metadata": {
                 "source": "batch_accounting",
                 "bank_row_id": "txn_imported_202601_batch_001",
-                "oa_row_ids": ["oa-exp-ba-001"],
-                "invoice_row_ids": [],
+                "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
+                "invoice_row_ids": ["oa-att-inv-oa-exp-ba-001-01", "oa-att-inv-oa-exp-ba-002-01"],
                 "year": "2026",
             },
-        )
-        facade = FakeBatchRelationFacade()
+        }
+        facade = FakeBatchRelationFacade(relation)
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: self._grouped_payload(),
             relation_facade=facade,
@@ -1751,8 +1803,15 @@ class BatchAccountingApiTests(unittest.TestCase):
             [row["id"] for row in relation_payload["invoice_rows"]],
             ["oa-att-inv-oa-exp-ba-001-01", "oa-att-inv-oa-exp-ba-002-01"],
         )
-        month_calls = [call for call in facade.calls if call.get("month") == "2026-01"]
-        self.assertTrue(month_calls)
+        self.assertIn(
+            {
+                "list_year": "2026",
+                "require_fresh": True,
+                "reason": "batch_accounting_submitted_relations",
+            },
+            facade.calls,
+        )
+        self.assertFalse([call for call in facade.calls if "month" in call], facade.calls)
         self.assertIn({"row_ids": ["txn_imported_202601_batch_001"], "require_fresh": True, "reason": "batch_accounting_submitted_relations"}, facade.calls)
 
     def test_submitted_list_exposes_relation_read_model_stale_status(self) -> None:
@@ -1770,7 +1829,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(payload["read_model_status"], "stale")
         self.assertEqual(payload["read_model_stale_reasons"], ["dirty_scope:2026-01"])
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-01"])
+        self.assertEqual(payload["read_model_scope_keys"], [f"2026-{month:02d}" for month in range(1, 13)])
         self.assertIs(payload["refresh_enqueued"], True)
 
     def test_submitted_list_exposes_mismatch_note_and_amount_check(self) -> None:

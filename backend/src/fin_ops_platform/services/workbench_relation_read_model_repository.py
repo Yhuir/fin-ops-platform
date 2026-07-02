@@ -89,6 +89,18 @@ class WorkbenchRelationReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    def list_batch_accounting_relation_groups_by_year(
+        self,
+        *,
+        year: str,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        payload = self._repository.list_batch_accounting_relation_groups_by_year(
+            year=year,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else None
+
     def save_workbench_relation_distribution(
         self,
         *,

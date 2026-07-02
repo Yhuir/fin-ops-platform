@@ -1,5 +1,15 @@
 # 批量账务 实施记录
 
+## 2026-07-02 - submit/已提交读取性能边界收窄
+
+- 目标：修复 1273.06 生产链路中撤回、重新提交和已提交读取耗时过长的问题；避免单次 submit command 和已提交 bucket 继续复用整页候选读取，导致“写入已成功但用户等待很久/误以为失败”。
+- 影响范围：`BatchAccountingService` 的 submit/list context、`Application._batch_accounting_service(...)` 依赖注入、Workbench SQL read repository、`WorkbenchRelationReadFacade` / repository port、批量账务 API 回归测试和模块边界文档；不改变前端 API shape，不新增独立 batch-accounting read model。
+- 关键决策：命令热路径必须有独立 I/O。submit 只读取本次 `bank_row_id`、`oa_row_ids` 和对应 OA 附件发票；已提交 bucket 用年份级 batch-accounting relation DTO 和银行行窄 payload。旧 `load_batch_accounting_workbench_payload(bank_year)` 保留为未提交列表候选读口，不允许继续污染 submit/已提交热路径。
+- 旧链路删除：SQL runtime 下 submit 不再调用全量候选 loader；已提交 bucket 不再按 12 个月循环读取 relation DTO，也不再用整页 Workbench 候选 payload 补齐 OA/发票明细。
+- 测试覆盖：`test_submit_uses_sql_read_model_loader_when_available` 现在断言 submit 使用 narrow command loader 且 full loader 不可被调用；`test_submitted_list_relation_bucket_uses_workbench_relation_distribution` 断言已提交 bucket 使用年份级 relation list，不再出现 month scan。
+- 验证命令：见本轮最终说明。
+- 未测风险：关联台 paired 可见仍依赖 `workbench` active generation worker 发布；本地单测不能替代部署后的 1273.06 撤回->重提->关联台 paired 生产 smoke 和真实 p95 观测。
+
 ## 2026-07-02 - submit/withdraw 写前 relation read model gate 删除
 
 - 目标：修复撤回后立即重新提交时，command 事实源已经可写但 `workbench_relation` read model 仍在 refreshing 导致 `batch_accounting_read_model_not_fresh` 的慢链路/误失败。
