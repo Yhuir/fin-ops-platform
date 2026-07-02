@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
@@ -289,7 +290,7 @@ class RecordingBatchRelationCommandService:
     def __init__(self, pair_relation_service: WorkbenchPairRelationService | None = None) -> None:
         self._pair_relation_service = pair_relation_service
         self.confirm_calls: list[dict[str, object]] = []
-        self.withdraw_calls: list[dict[str, object]] = []
+        self.cancel_calls: list[dict[str, object]] = []
         self.active_relation_calls: list[list[str]] = []
 
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
@@ -342,10 +343,10 @@ class RecordingBatchRelationCommandService:
             "idempotent_replay": False,
         }
 
-    def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
-        self.withdraw_calls.append(dict(kwargs))
+    def cancel_relation(self, **kwargs: object) -> dict[str, object]:
+        self.cancel_calls.append(dict(kwargs))
         return {
-            "status": "withdrawn",
+            "status": "cancelled",
             "relation": {
                 "case_id": str(kwargs["case_id"]),
                 "row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
@@ -2050,12 +2051,86 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
 
         self.assertEqual(result["action"], "withdraw_batch_accounting")
-        self.assertEqual(len(relation_command.withdraw_calls), 1)
-        call = relation_command.withdraw_calls[0]
+        self.assertEqual(len(relation_command.cancel_calls), 1)
+        call = relation_command.cancel_calls[0]
         self.assertEqual(call["case_id"], "CASE-BATCH-txn_imported_202601_batch_001")
         self.assertEqual(call["actor_id"], "finance-user")
         self.assertEqual(call["reason"], "选择错误")
         self.assertEqual(call["history_operation_type"], "withdraw_link")
+
+    def test_postgres_batch_withdraw_uses_durable_relation_repository(self) -> None:
+        active_relation = {
+            "case_id": "CASE-BATCH-txn_imported_202601_batch_001",
+            "row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
+            "row_types": ["bank", "oa"],
+            "status": "active",
+            "relation_mode": "batch_accounting",
+            "month_scope": "2026-01",
+            "created_by": "finance-user",
+            "special_metadata": {
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_202601_batch_001",
+                "oa_row_ids": ["oa-exp-ba-001"],
+                "year": "2026",
+                "bank_year": "2026",
+                "affected_scope_keys": ["2026-01"],
+            },
+            "version": 1,
+        }
+
+        class DurableRelationRepository:
+            instances: list["DurableRelationRepository"] = []
+
+            def __init__(self, connection: object) -> None:
+                self.connection = connection
+                self.saved: list[dict[str, object]] = []
+                self.instances.append(self)
+
+            def load_workbench_pair_relations(self) -> dict[str, object]:
+                return {
+                    "pair_relations": {
+                        "CASE-BATCH-txn_imported_202601_batch_001": dict(active_relation),
+                    },
+                    "pair_relation_history": [],
+                }
+
+            def save_workbench_pair_relations(
+                self,
+                snapshot: dict[str, object],
+                *,
+                changed_case_ids: list[str] | set[str] | None = None,
+            ) -> None:
+                self.saved.append(
+                    {
+                        "snapshot": snapshot,
+                        "changed_case_ids": set(changed_case_ids or []),
+                    }
+                )
+
+        app = build_application()
+        connection = object()
+        app._state_store = SimpleNamespace(storage_backend="postgres", _connection=connection)
+
+        with patch("fin_ops_platform.app.server.PostgresWorkbenchRelationRepository", DurableRelationRepository):
+            result = app._batch_accounting_service(use_sql_read_model=True).withdraw(
+                relation_id="CASE-BATCH-txn_imported_202601_batch_001",
+                actor="finance-user",
+                reason="选择错误",
+            )
+
+        self.assertEqual(result["action"], "withdraw_batch_accounting")
+        self.assertEqual(result["affected_scope_keys"], ["2026-01"])
+        self.assertEqual(len(DurableRelationRepository.instances), 1)
+        repository = DurableRelationRepository.instances[0]
+        self.assertIs(repository.connection, connection)
+        self.assertEqual(repository.saved[-1]["changed_case_ids"], {"CASE-BATCH-txn_imported_202601_batch_001"})
+        saved_relations = repository.saved[-1]["snapshot"]["pair_relations"]
+        self.assertEqual(saved_relations["CASE-BATCH-txn_imported_202601_batch_001"]["status"], "cancelled")
+        self.assertIsNone(
+            app._workbench_pair_relation_service.get_active_relation_by_case_id(
+                "CASE-BATCH-txn_imported_202601_batch_001"
+            )
+        )
 
     def test_withdraw_legacy_relation_derives_scope_keys_from_narrow_context(self) -> None:
         payload = self._grouped_payload()

@@ -11,12 +11,12 @@
 | `stale/conflict` | 前端持有的 bank row 或 relation version 已落后，提交/撤回应失败并要求刷新。 | `expected_version`、active relation version |
 | `mismatch_pending_note` | 银行金额与选中 OA 合计不一致，尚未填写有效差额说明。 | 前端选择状态 + `BatchAccountingService` 金额校验 |
 | `mismatch_closed` | 金额不一致但已填写差额说明，提交后视为人工差额闭环。 | batch relation history / `special_metadata` |
-| `withdrawn` | 批量账务关系撤回，历史保留；只恢复真实 relation snapshot，OA 附件 case_id / `existing_case` 显示归属回到读侧分组，不恢复成 active relation。 | Workbench pair relation history |
+| `withdrawn` | 批量账务关系撤回，当前 batch relation 被 durable command repository 持久化为 `cancelled`，历史保留；不走旧 snapshot restore，OA 附件 case_id / `existing_case` 显示归属只回到读侧分组，不恢复成 active relation。 | Workbench pair relation + relation history |
 
 ### 允许流转
 
 - `unsubmitted -> submitted`：选择一个合法银行流水、至少一个合法 OA 行；金额不一致时必须提供 trim 后非空差额说明；`expected_version` 必须匹配。
-- `submitted -> withdrawn`：只能撤回 active batch accounting relation；必须提供 trim 后非空撤回原因；`expected_version` 必须匹配。
+- `submitted -> withdrawn`：只能撤回 active batch accounting relation；必须提供 trim 后非空撤回原因；`expected_version` 必须匹配；撤回 command 必须使用 durable cancel relation 语义并记录 `withdraw_link` history。
 - `withdrawn -> unsubmitted`：撤回成功并完成 relation read model 刷新后，该银行/OA 行重新按 Workbench/关系事实归类。
 - `stale/conflict -> unsubmitted/submitted`：用户刷新，API 返回 fresh payload 后按事实源重新归桶。
 
@@ -87,3 +87,4 @@ Refresh 触发来源：
 | 2026-06-14 | submit/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `workbench_relation` barrier fresh 并 reload，避免旧 bucket/旧关系暴露给用户 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
 | 2026-07-01 | 右侧 OA 候选口径从“没有任何 active relation”收窄为“没有关联银行流水” | 日常报销 OA 即便已有发票关系或无流水候选关系，也应进入未提交右侧 OA 栏；已有 `linked_bank_transactions` 或 canonical 银行关系的 OA 继续排除/拒绝 | `tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_filters_oa_rows_by_linked_bank_transactions_only`、`test_submit_allows_invoice_only_oa_relation_without_linked_bank_flow` |
 | 2026-07-01 | 未提交读路径模块化瘦身 | 未提交 bucket 只做候选级 relation lookup 和年份级 submitted count；已提交 bucket 保留完整 relation DTO 读取；submit/withdraw 仍只按本次 row ids 做 readiness + canonical command safety | `test_unsubmitted_relation_lookup_is_scoped_to_batch_candidates`、`test_unsubmitted_list_uses_relation_count_instead_of_month_relation_scan`、`test_batch_accounting_count_uses_repository_count_without_loading_rows` |
+| 2026-07-02 | PostgreSQL durable relation command wiring 修复 | submit/withdraw 在生产 runtime 必须注入 durable relation repository；撤回从旧 restore-style withdraw 收敛为取消当前 batch relation，避免 API 成功但 canonical relation/read model 不收敛 | `test_postgres_batch_withdraw_uses_durable_relation_repository`、`tests.test_batch_accounting_api`、route boundary guards、生产 1273.06 smoke |

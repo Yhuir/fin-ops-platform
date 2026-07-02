@@ -35,7 +35,7 @@
 | 关系读请求 | 下游 read facade/service | 只暴露 read facade 或 repository port |
 | 批量账务 submitted count | `BatchAccountingService` | 未提交首屏通过 `WorkbenchRelationReadFacade.count_batch_accounting_relations_by_year(year)` 读取年份级 batch-accounting relation count 和 freshness/status；禁止为了 summary count 读取 12 个月 relation DTO |
 | 批量账务 submitted relation DTO | `BatchAccountingService` | 已提交 bucket 通过 `WorkbenchRelationReadFacade.list_batch_accounting_relations_by_year(year)` 一次读取年份内 active batch-accounting relation groups 和 freshness/status；禁止调用方按 12 个月循环 list 或直接 SQL 读 relation read model 表 |
-| 批量账务 relation metadata | `BatchAccountingService.submit` | `relation_mode=batch_accounting`、`special_metadata.source=batch_accounting`、`bank_row_id`、`oa_row_ids`、`invoice_row_ids`、`bank_year`、`oa_years`、`affected_scope_keys`。关系事实源负责原样保存并投影；`affected_scope_keys` 是调用方写后 lifecycle 的 scope I/O，跨月关系也应是具体月份集合，不应自动变成 `all` |
+| 批量账务 relation metadata | `BatchAccountingService.submit` | `relation_mode=batch_accounting`、`special_metadata.source=batch_accounting`、`bank_row_id`、`oa_row_ids`、`invoice_row_ids`、`bank_year`、`oa_years`、`affected_scope_keys`。关系事实源负责原样保存并投影；`affected_scope_keys` 是调用方写后 lifecycle 的 scope I/O，跨月关系也应是具体月份集合，不应自动变成 `all`。批量账务撤回必须通过 command service 的取消语义把当前 batch relation 持久化为 cancelled，并记录 `withdraw_link` history；不得走调用方旧 snapshot restore 或 in-memory-only fallback。 |
 | Refresh scope | `workbench_relation` manifest | month scope；`all` 只允许明确 fan-out command。批量账务 submit/withdraw route 必须以 `include_all=False` 传入具体月份 scope，不能把 all 当默认后置刷新 |
 
 ## 输出 I/O
@@ -56,7 +56,7 @@
 - Query owner：`WorkbenchRelationReadFacade`
 - 跨月关系合同：一个 active relation 可同时包含 OA、银行流水、进项/销项发票等不同月份对象。每个被重建的 `workbench_relation` month scope 必须保存该 scope 内 relation group 涉及的所有成员 row 索引，而不仅是当前月份原生对象；下游页面按自身 row id 读取时必须能发现跨月 group。
 - 批量账务性能合同：未提交列表只做候选 row-id relation lookup 和年份级 submitted count；已提交列表才读取完整 relation DTO，并且必须使用年份级 `list_batch_accounting_relations_by_year` I/O。`count_batch_accounting_relations_by_year` 和 `list_batch_accounting_relations_by_year` 都是 read facade/repository port 合同的一部分，不能被调用方直接 SQL 替代。
-- 批量账务写入合同：批量账务 submit/withdraw 不能在 command service 保存 relation 后再次调用旧 pair relation persist/snapshot restore。关系事实持久化只通过 command repository；调用方只负责传递 changed scopes 到 lifecycle/read model persist。
+- 批量账务写入合同：批量账务 submit/withdraw 不能在 command service 保存 relation 后再次调用旧 pair relation persist/snapshot restore。关系事实持久化只通过 command repository；调用方只负责传递 changed scopes 到 lifecycle/read model persist。生产 PostgreSQL runtime 的 command service 必须接入 `PostgresWorkbenchRelationRepository`，否则 command 只能改变进程内 snapshot，会导致 API 成功但 `app.workbench_pair_relations`、`workbench_relation` 和关联台 active generation 不收敛。
 - 旧逻辑已废弃：`read_model.workbench_relation_rows` 不允许再使用 `(tenant_id, row_id)` 全局唯一覆盖模型；迁移 `0077_workbench_relation_rows_scope_unique.sql` 建立目标约束，`0078_workbench_relation_rows_scope_unique_repair.sql` 为已应用早期 0077 的环境做幂等 forward repair，`0079_workbench_relation_rows_scope_unique_hardening.sql` 在已接受 0077/0078 checksum drift 的环境中重新断言目标唯一性并清理同 scope 重复投影行，避免最后一次重建的月份覆盖其它月份的关系索引。跨月成员索引属于 projection schema 合同，当前版本为 `2026-06-cross-month-relation-member-index-v1`；发布该版本后必须受控重建 `workbench_relation` 月份 shard，再重建依赖它的 `input_invoice_usage` 等下游 read model。
 
 ## 文件范围

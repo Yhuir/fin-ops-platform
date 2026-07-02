@@ -9439,8 +9439,19 @@ class Application:
                 batch_submitted_workbench_loader if callable(batch_submitted_workbench_loader) else None
             ),
             relation_facade=self._workbench_relation_read_facade(),
-            relation_command_service=self._workbench_relation_command_service(),
+            relation_command_service=self._batch_accounting_relation_command_service(),
         )
+
+    def _batch_accounting_relation_command_service(self) -> WorkbenchRelationCommandService:
+        state_store = getattr(self, "_state_store", None)
+        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
+        connection = getattr(state_store, "_connection", None)
+        repository = (
+            PostgresWorkbenchRelationRepository(connection)
+            if storage_backend == "postgres" and connection is not None
+            else None
+        )
+        return self._workbench_relation_command_service(repository=repository)
 
     def _batch_accounting_routes(self) -> BatchAccountingApiRoutes:
         routes = getattr(self, "_batch_accounting_api_routes", None)

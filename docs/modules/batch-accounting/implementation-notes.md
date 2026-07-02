@@ -1,5 +1,15 @@
 # 批量账务 实施记录
 
+## 2026-07-02 - PostgreSQL durable relation command wiring 修复
+
+- 目标：修复 1273.06 生产 smoke 中撤回 API 返回成功但 `app.workbench_pair_relations`、`workbench_relation` 和关联台 active generation 没有收敛的问题；避免 submit/withdraw 只修改进程内 pair relation snapshot 后让页面出现“几分钟后才像成功”的不确定状态。
+- 影响范围：`Application._batch_accounting_service(...)` relation command wiring、`BatchAccountingService._withdraw_unlocked(...)` 撤回语义、批量账务 API/service 测试、批量账务/关联台关系边界文档；不改变 HTTP endpoint 或 response shape。
+- 关键决策：生产 PostgreSQL runtime 下批量账务 relation command service 必须注入 `PostgresWorkbenchRelationRepository`，让 command service 的 load/save 直接落到 durable canonical relation 表和 history。撤回从旧 restore-style withdraw 收敛为 `cancel_relation(..., history_operation_type="withdraw_link")`，只取消当前 batch relation，不再调用旧 snapshot restore 或 in-memory fallback。
+- 旧链路删除：批量账务写链路不得使用无 repository 的 `WorkbenchRelationCommandRepositoryAdapter` 作为生产成功路径；缺少 durable repository 时应视为 wiring 错误。撤回不再使用 generic snapshot restore 语义，防止 display-only OA invoice 归属或进程内状态污染 canonical relation。
+- 测试覆盖：新增 `test_postgres_batch_withdraw_uses_durable_relation_repository`，断言 PostgreSQL runtime 的 batch service 使用 durable repository 保存 cancelled relation；更新 withdraw delegation fake 为 `cancel_relation`，继续覆盖 command boundary 和无 direct pair fallback。
+- 验证命令：见本轮最终说明。
+- 未测风险：本地单测证明 wiring 和语义；最终闭环必须由部署后的 1273.06 撤回->重新关联->关联台 paired 可见和耗时 smoke 证明。
+
 ## 2026-07-02 - 写后关联台 read model durable refresh 补齐
 
 - 目标：修复 submit/withdraw API 变快后，生产 smoke 中撤回关系事实已成功但未提交 bucket/关联台 active generation 不收敛的问题；避免旧 `_schedule_workbench_read_model_persist` 作为唯一发布链路导致 SQL read model 不刷新。

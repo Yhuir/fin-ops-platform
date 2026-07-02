@@ -626,8 +626,15 @@ class BatchAccountingService:
                 "批量账务关联写入服务不可用，请稍后重试。",
                 payload={"case_id": normalized_relation_id, "row_ids": row_ids},
             )
+        cancel_relation = getattr(self._relation_command_service, "cancel_relation", None)
+        if not callable(cancel_relation):
+            raise BatchAccountingError(
+                "batch_accounting_relation_command_unavailable",
+                "批量账务关联写入服务不可用，请稍后重试。",
+                payload={"case_id": normalized_relation_id, "row_ids": row_ids},
+            )
         try:
-            command_result = self._relation_command_service.withdraw_relation(
+            command_result = cancel_relation(
                 case_id=normalized_relation_id,
                 actor_id=actor,
                 reason=note,
