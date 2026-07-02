@@ -1,0 +1,40 @@
+RUN_META src=/opt/fin-ops/releases/pscip-l4-workbench-insert-5f530d1b5/src active_ts=Thu 2026-07-02 14:57:41 CST since=2026-07-02T20:57:41+00:00
+BACKEND_CWD /opt/fin-ops/releases/pscip-l4-workbench-insert-5f530d1b5/src
+WORKER_ACTIVE_COUNT 21
+WORKER_FAILED_COUNT 0
+HEALTH_READY_SUMMARY {"commit": null, "consistent": null, "queue_backlog": null, "release": null, "status": "ready", "worker_mismatched": 0, "worker_missing": 0, "worker_stale": 0}
+SCOPE_DEFAULT_EXIT 0
+SCOPE_DEFAULT_SUMMARY {}
+SCOPE_DEFAULT_STATUS None failed None missing None
+SCOPE_INVALID_EXIT 0
+SCOPE_INVALID_SUMMARY {"job.outbox_events": 0, "job.read_model_dirty_scopes": 0, "read_model.app_status_readiness": 0}
+SCOPE_INVALID_STATUS None failed None missing None
+SLO_CRITICAL_EXIT 1
+SLO_CRITICAL_SUMMARY {"enqueue_to_fresh_ms": {"max": 5591.378, "p50": 609.204, "p95": 5591.378, "p99": 5591.378}, "failed_count": 2, "handler_duration_ms": {"max": 5233.557, "p50": 270.641, "p95": 5233.557, "p99": 5233.557}, "measured_enqueue_sample_count": 16, "sample_count": 16}
+SLO_CRITICAL_STATUS fail failed 2 missing None
+SLO_CRITICAL_TOP {"enqueue_to_fresh_ms": 5591.378, "error": "enqueue_to_fresh_ms_exceeded_target:5591.378>5000.0", "handler_duration_ms": 5233.557, "operation": null, "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": "turnover_ledger", "sample_count": null, "scope_key": "all", "scope_type": "turnover_ledger", "status": "fail"}
+SLO_CRITICAL_TOP {"enqueue_to_fresh_ms": 5445.482, "error": "enqueue_to_fresh_ms_exceeded_target:5445.482>5000.0", "handler_duration_ms": 5196.77, "operation": null, "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": "bank_flow_rule_batch", "sample_count": null, "scope_key": "2026-02", "scope_type": "bank_flow_rule_batch", "status": "fail"}
+SLO_CRITICAL_TOP {"enqueue_to_fresh_ms": 4183.895, "error": null, "handler_duration_ms": 3492.575, "operation": null, "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": "workbench", "sample_count": null, "scope_key": "2026-02", "scope_type": "workbench", "status": "pass"}
+SLO_CRITICAL_TOP {"enqueue_to_fresh_ms": 1950.677, "error": null, "handler_duration_ms": 1771.219, "operation": null, "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": "no_oa_bank_batch", "sample_count": null, "scope_key": "2026-04", "scope_type": "no_oa_bank_batch", "status": "pass"}
+SLO_CRITICAL_TOP {"enqueue_to_fresh_ms": 1595.928, "error": null, "handler_duration_ms": 199.854, "operation": null, "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": "bank_detail", "sample_count": null, "scope_key": "2026-03", "scope_type": "bank_detail", "status": "pass"}
+SLO_CRITICAL_TOP {"enqueue_to_fresh_ms": 973.667, "error": null, "handler_duration_ms": 682.492, "operation": null, "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": "pending_invoice", "sample_count": null, "scope_key": "expense:all:2026-02", "scope_type": "pending_invoice", "status": "pass"}
+SLO_CRITICAL_TOP {"enqueue_to_fresh_ms": 796.456, "error": null, "handler_duration_ms": 557.818, "operation": null, "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": "search", "sample_count": null, "scope_key": "2026-02", "scope_type": "search", "status": "pass"}
+SLO_CRITICAL_TOP {"enqueue_to_fresh_ms": 632.424, "error": null, "handler_duration_ms": 61.97, "operation": null, "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": "workbench_relation", "sample_count": null, "scope_key": "2026-02", "scope_type": "workbench_relation", "status": "pass"}
+SLO_WORKBENCH_1S_EXIT 1
+SLO_WORKBENCH_1S_SUMMARY {"enqueue_to_fresh_ms": {"max": 1485.007, "p50": 1485.007, "p95": 1485.007, "p99": 1485.007}, "failed_count": 1, "handler_duration_ms": {"max": 1181.262, "p50": 1181.262, "p95": 1181.262, "p99": 1181.262}, "measured_enqueue_sample_count": 1, "sample_count": 1}
+SLO_WORKBENCH_1S_STATUS fail failed 1 missing None
+SLO_WORKBENCH_1S_TOP {"enqueue_to_fresh_ms": 1485.007, "error": "enqueue_to_fresh_ms_exceeded_target:1485.007>1000.0", "handler_duration_ms": 1181.262, "operation": null, "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": "workbench", "sample_count": null, "scope_key": "2026-02", "scope_type": "workbench", "status": "fail"}
+WRITE_OP_SINCE_EXIT 1
+WRITE_OP_SINCE_SUMMARY {}
+WRITE_OP_SINCE_STATUS fail failed None missing 23
+WRITE_OP_SINCE_TOP {"enqueue_to_fresh_ms": null, "error": "no_recent_required_write_refresh_event", "handler_duration_ms": null, "operation": "workbench_relation_confirm_cross_page", "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": null, "sample_count": 0, "scope_key": null, "scope_type": "workbench", "status": "missing"}
+WRITE_OP_SINCE_TOP {"enqueue_to_fresh_ms": null, "error": "no_recent_required_write_refresh_event", "handler_duration_ms": null, "operation": "workbench_relation_confirm_cross_page", "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": null, "sample_count": 0, "scope_key": null, "scope_type": "workbench_relation", "status": "missing"}
+WRITE_OP_SINCE_TOP {"enqueue_to_fresh_ms": null, "error": "no_recent_required_write_refresh_event", "handler_duration_ms": null, "operation": "workbench_relation_confirm_cross_page", "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": null, "sample_count": 0, "scope_key": null, "scope_type": "bank_detail", "status": "missing"}
+WRITE_OP_SINCE_TOP {"enqueue_to_fresh_ms": null, "error": "no_recent_required_write_refresh_event", "handler_duration_ms": null, "operation": "workbench_relation_confirm_cross_page", "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": null, "sample_count": 0, "scope_key": null, "scope_type": "invoice_lifecycle", "status": "missing"}
+WRITE_OP_SINCE_TOP {"enqueue_to_fresh_ms": null, "error": "no_recent_required_write_refresh_event", "handler_duration_ms": null, "operation": "workbench_relation_confirm_cross_page", "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": null, "sample_count": 0, "scope_key": null, "scope_type": "pending_invoice", "status": "missing"}
+WRITE_OP_SINCE_TOP {"enqueue_to_fresh_ms": null, "error": "no_recent_required_write_refresh_event", "handler_duration_ms": null, "operation": "workbench_relation_confirm_cross_page", "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": null, "sample_count": 0, "scope_key": null, "scope_type": "input_invoice_usage", "status": "missing"}
+WRITE_OP_SINCE_TOP {"enqueue_to_fresh_ms": null, "error": "no_recent_required_write_refresh_event", "handler_duration_ms": null, "operation": "workbench_relation_confirm_cross_page", "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": null, "sample_count": 0, "scope_key": null, "scope_type": "cost_statistics", "status": "missing"}
+WRITE_OP_SINCE_TOP {"enqueue_to_fresh_ms": null, "error": "no_recent_required_write_refresh_event", "handler_duration_ms": null, "operation": "workbench_relation_confirm_cross_page", "p95_enqueue_to_done_ms": null, "p99_enqueue_to_done_ms": null, "read_model_key": null, "sample_count": 0, "scope_key": null, "scope_type": "search", "status": "missing"}
+__DONE__:0
+logout
+Connection to 139.155.5.132 closed.

@@ -57,3 +57,15 @@ Added `.planning/refactors/read-model-performance-optimization/GOAL_PROMPT.md` a
 ## Next Step
 
 Deploy/apply the migration in a controlled release, then compare production full `/health` or operations dashboard runtime metric latency before/after. If read model refresh handler p95 remains high after the metrics query is fixed, optimize the specific projection handler with fresh `EXPLAIN` evidence.
+
+## 2026-07-02 Goal Continuation - Current Production Revalidation
+
+- Evidence directory: `.planning/refactors/read-model-performance-optimization/evidence/20260702T070901Z/current-production/`.
+- Active release: `/opt/fin-ops/releases/pscip-l4-workbench-insert-5f530d1b5/src`; backend cwd matches release; 21 worker template units active, 0 failed.
+- `/health/ready`: `status=ready`, worker missing/stale/mismatched `0/0/0`.
+- Scope contract: default check exit `0`; invalid read model scope check exit `0`, invalid counts `0` for `job.outbox_events`, `job.read_model_dirty_scopes`, and `read_model.app_status_readiness`.
+- Critical read model SLO 5s grouped run: `14/16 pass`, max enqueue-to-fresh `5591.378ms`; failures were `turnover_ledger:all` `5591.378ms` and `bank_flow_rule_batch:2026-02` `5445.482ms`.
+- Targeted retry: `turnover_ledger:all` pass `993.910ms`; `bank_flow_rule_batch:2026-02` pass `455.961ms`. Current evidence points to grouped-run tail latency, not a stable handler-specific blocker for those two keys.
+- Workbench 1s targeted: still fail, `enqueue_to_fresh_ms=1485.007`, `handler_duration_ms=1181.262`.
+- Write operation audit since the release activation time (`2026-07-02T06:57:41+00:00`): fail because required confirm/withdraw/no-OA withdraw samples are missing, not because current release samples are slow.
+- Decision: `CONTINUE`. Full PSCIP-L4/high-performance closure is not proven. Next useful step is either authenticated HTTP/page SLO with Admin Token, or a controlled reversible real write sample for confirm/withdraw/no-OA withdraw; without that, only read model worker convergence is evidenced.
