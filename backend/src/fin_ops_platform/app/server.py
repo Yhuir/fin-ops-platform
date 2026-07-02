@@ -9449,11 +9449,22 @@ class Application:
         routes = BatchAccountingApiRoutes(
             lambda **kwargs: self._batch_accounting_service(**kwargs),
             scope_keys_for_row_ids=self._scope_keys_for_row_ids,
-            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
+            execute_derived_data_lifecycle_event=self._execute_batch_accounting_relation_lifecycle_event,
             schedule_read_model_persist=self._schedule_workbench_read_model_persist,
         )
         self._batch_accounting_api_routes = routes
         return routes
+
+    def _execute_batch_accounting_relation_lifecycle_event(
+        self,
+        event: str,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        return self._execute_derived_data_lifecycle_event(
+            event,
+            excluded_domains={"workbench_read_model"},
+            **kwargs,
+        )
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
         status_code, payload = self._batch_accounting_routes().list_payload(query)
@@ -13933,6 +13944,7 @@ class Application:
         include_all: bool = True,
         metadata: dict[str, object] | None = None,
         schedule_cost_warmup: bool = True,
+        excluded_domains: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, object]:
         plan = self._derived_data_lifecycle_service.plan_event(
             event,
@@ -13949,6 +13961,20 @@ class Application:
                 list(plan.get("domains") or []),
                 metadata=metadata,
             )
+        excluded_domain_names = {
+            str(domain).strip()
+            for domain in list(excluded_domains or [])
+            if str(domain).strip()
+        }
+        if excluded_domain_names:
+            plan["domains"] = [
+                domain_plan
+                for domain_plan in list(plan.get("domains") or [])
+                if not (
+                    isinstance(domain_plan, dict)
+                    and str(domain_plan.get("domain") or "").strip() in excluded_domain_names
+                )
+            ]
         for domain_plan in list(plan.get("domains") or []):
             if isinstance(domain_plan, dict):
                 domain_plan["reason"] = reason

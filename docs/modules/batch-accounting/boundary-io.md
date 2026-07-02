@@ -41,7 +41,7 @@
 | submit context | `BatchAccountingService._build_submit_context` | 仅提交使用，禁止读取整页 relation distribution；写前 active relation 冲突只通过 command service 按本次 row ids 查询，不再把 relation read model freshness 作为普通写阻断 |
 | 关系写入请求 | `BatchAccountingService` | 必须委托 workbench relation command boundary |
 | affected scope keys | `BatchAccountingService` | submit 必须基于本次银行/OA/附件发票 row payload 日期输出真实 `affected_scope_keys` 并写入 relation `special_metadata`；withdraw 优先读取 metadata，旧关系缺 metadata 时必须用 SQL 窄 submit context 反查 row 日期；没有窄 loader 时不能退回全量 Workbench loader，只能按 relation month/all fallback；只有完全无法解析具体月份时才允许回退 `all` |
-| lifecycle trigger | derived data lifecycle | route 只使用 service 输出的 `affected_scope_keys` 触发下游 read model scopes，并设置 `include_all=False`；禁止默认把批量账务 relation 变化扩散为 all scope |
+| lifecycle trigger | derived data lifecycle | route 只使用 service 输出的 `affected_scope_keys` 触发下游 read model scopes，并设置 `include_all=False`；同步 lifecycle 排除 `workbench_read_model`，该域交给 `_schedule_workbench_read_model_persist` 异步发布；禁止默认把批量账务 relation 变化扩散为 all scope |
 | OA 候选事实 | Workbench active read model + `workbench_relation` read facade | 不接收 OA 年份；“没有流水”表示 relation distribution 中该 OA 没有 `linked_bank_transactions`，仅发票关系或无流水候选关系仍可进入批量账务右侧 OA 栏 |
 
 ## 输出 I/O
@@ -80,6 +80,7 @@
 - 已提交列表必须走年份级 batch-accounting relation DTO I/O，不能按 12 个月循环读取 relation distribution；银行行上下文只能读批量账务银行行。
 - submit 写操作必须经过 `_build_submit_context`，只按本次选中的银行/OA/发票 row ids 读取命令所需 row payload，并只按本次 row ids 读取 canonical active relation 冲突；不能调用 `_build_list_context`、不能为了校验一次提交扫描整页银行/OA/发票候选或整页 relation distribution，也不能因普通 `workbench_relation` read model refreshing/stale/missing 直接拒绝 command 写入。
 - submit/withdraw 写操作后的 route side effect 只能触发 derived lifecycle 和 read model persist dirty scope；不能再补调用 `_schedule_workbench_pair_relation_persist` 或 snapshot rollback restore。关系事实持久化的唯一写边界是 `WorkbenchRelationCommandService` 及其 repository。withdraw route 必须以 `use_sql_read_model=True` 构造 service，保证旧关系 scope backfill 不会触发整页 Workbench loader。
+- 批量账务写 API 不能同步执行 `workbench_read_model` lifecycle domain；该 domain 会重建关联台 Workbench 视图，生产三个月 scope 可耗时十秒级。写 API 只同步处理轻量下游域并通过 `_schedule_workbench_read_model_persist` 异步发布 Workbench read model。
 - 批量账务 relation 可以跨月，但跨月不等于 `all`。如果 row payload 可解析出 `2026-MM`，派生刷新必须只覆盖这些月份，避免 bank_detail/cost/search/workbench_relation 等下游读模型被 all scope 长耗时刷新拖慢。
 
 ## 测试与验证

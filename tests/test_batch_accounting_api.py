@@ -1285,6 +1285,7 @@ class BatchAccountingApiTests(unittest.TestCase):
                 "scope_keys": ["2026-01"],
                 "include_all": False,
                 "metadata": {"source": "submit_batch_accounting"},
+                "excluded_domains": {"workbench_read_model"},
             }
         ])
 
