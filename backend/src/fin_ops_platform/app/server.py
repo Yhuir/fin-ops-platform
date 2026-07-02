@@ -9459,71 +9459,9 @@ class Application:
             return routes
         routes = BatchAccountingApiRoutes(
             lambda **kwargs: self._batch_accounting_service(**kwargs),
-            scope_keys_for_row_ids=self._scope_keys_for_row_ids,
-            execute_derived_data_lifecycle_event=self._execute_batch_accounting_relation_lifecycle_event,
-            schedule_read_model_persist=self._schedule_workbench_read_model_persist,
         )
         self._batch_accounting_api_routes = routes
         return routes
-
-    def _execute_batch_accounting_relation_lifecycle_event(
-        self,
-        event: str,
-        **kwargs: object,
-    ) -> dict[str, object]:
-        return self._execute_derived_data_lifecycle_event(
-            event,
-            executor_overrides={
-                "workbench_read_model": self._derived_lifecycle_workbench_read_model_refresh_enqueue_executor,
-            },
-            **kwargs,
-        )
-
-    def _derived_lifecycle_workbench_read_model_refresh_enqueue_executor(
-        self,
-        domain_plan: dict[str, object],
-    ) -> dict[str, object]:
-        scope_keys = self._domain_plan_scope_keys(domain_plan) or ["all"]
-        enqueued_scope_keys = self._enqueue_batch_accounting_workbench_read_model_refreshes(
-            scope_keys,
-            include_all=False,
-            reason=str(domain_plan.get("reason") or "batch_accounting_relation_changed"),
-            metadata=self._domain_plan_metadata(domain_plan),
-        )
-        return {
-            "deleted_counts": {"workbench_read_models": 0},
-            "invalidated_scopes": enqueued_scope_keys or scope_keys,
-            "enqueued_jobs": ["workbench.read_model.refresh"] if enqueued_scope_keys else [],
-        }
-
-    def _enqueue_batch_accounting_workbench_read_model_refreshes(
-        self,
-        scope_keys: object,
-        *,
-        include_all: bool,
-        reason: str,
-        metadata: dict[str, object] | None,
-    ) -> list[str]:
-        raw_scope_keys = [scope_keys] if isinstance(scope_keys, str) else list(scope_keys or [])
-        normalized_scope_keys = [
-            self._workbench_read_model_base_scope_key(str(scope_key).strip())
-            for scope_key in raw_scope_keys
-            if str(scope_key).strip()
-        ]
-        if include_all:
-            normalized_scope_keys.append("all")
-        normalized_scope_keys = sorted({scope_key for scope_key in normalized_scope_keys if scope_key})
-        if not normalized_scope_keys:
-            return []
-        refresh_gateway = self._read_model_refresh_gateway()
-        if not refresh_gateway.can_enqueue():
-            return []
-        return refresh_gateway.enqueue_many(
-            "workbench",
-            normalized_scope_keys,
-            reason=str(reason or "").strip() or "batch_accounting_relation_changed",
-            metadata=self._read_model_refresh_metadata({"metadata": metadata or {}}),
-        )
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
         status_code, payload = self._batch_accounting_routes().list_payload(query)

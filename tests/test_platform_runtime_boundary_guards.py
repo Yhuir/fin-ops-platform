@@ -3762,6 +3762,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                     violations.append("BatchAccountingService submit is polluted by list relation distribution context")
             for forbidden in (
                 "repair_legacy_case_id_collisions",
+                "_after_relation_mutation",
+                "_execute_derived_data_lifecycle_event",
+                "_schedule_workbench_pair_relation_persist",
+                "_schedule_workbench_read_model_persist",
                 "confirm_relation(",
                 "withdraw_relation(",
                 "replace_with_confirmed_relation",

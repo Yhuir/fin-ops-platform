@@ -61,7 +61,7 @@
 Refresh 触发来源：
 
 - 批量账务列表读取：通过 `WorkbenchRelationReadFacade` 以 `require_fresh=true` 请求 relation read model；缺失/stale scope 经现有 freshness/gateway 边界去重入队，GET 不同步 rebuild、不直接写 queue。
-- 批量账务提交/撤回：`batch_accounting_relation_changed` -> `workbench_relation_read_model` invalidate/refresh。
+- 批量账务提交/撤回：`WorkbenchRelationCommandService` repository 写入 relation 后，按 relation payload scope 投递 `workbench_relation`、`workbench` 和下游 read model dirty/outbox。
 - 关联台关系确认/撤回：`pair_relation_changed`。
 - 银行流水或发票导入、OA rebuild、标签规则等影响 Workbench relation 的生命周期事件。
 - backfill / runtime worker retry。
@@ -88,3 +88,4 @@ Refresh 触发来源：
 | 2026-07-01 | 右侧 OA 候选口径从“没有任何 active relation”收窄为“没有关联银行流水” | 日常报销 OA 即便已有发票关系或无流水候选关系，也应进入未提交右侧 OA 栏；已有 `linked_bank_transactions` 或 canonical 银行关系的 OA 继续排除/拒绝 | `tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_filters_oa_rows_by_linked_bank_transactions_only`、`test_submit_allows_invoice_only_oa_relation_without_linked_bank_flow` |
 | 2026-07-01 | 未提交读路径模块化瘦身 | 未提交 bucket 只做候选级 relation lookup 和年份级 submitted count；已提交 bucket 保留完整 relation DTO 读取；submit/withdraw 仍只按本次 row ids 做 readiness + canonical command safety | `test_unsubmitted_relation_lookup_is_scoped_to_batch_candidates`、`test_unsubmitted_list_uses_relation_count_instead_of_month_relation_scan`、`test_batch_accounting_count_uses_repository_count_without_loading_rows` |
 | 2026-07-02 | PostgreSQL durable relation command wiring 修复 | submit/withdraw 在生产 runtime 必须注入 durable relation repository；撤回从旧 restore-style withdraw 收敛为取消当前 batch relation，避免 API 成功但 canonical relation/read model 不收敛 | `test_postgres_batch_withdraw_uses_durable_relation_repository`、`tests.test_batch_accounting_api`、route boundary guards、生产 1273.06 smoke |
+| 2026-07-02 | 删除 batch route duplicate lifecycle fan-out | submit/withdraw route 只做 HTTP/session/DTO 与 service 调用；relation command repository 成为 dirty/outbox fan-out owner，避免重复 lifecycle 造成秒级 API 延迟 | `test_submit_does_not_call_legacy_post_command_side_effects`、route boundary guards、生产 1273.06 smoke |
