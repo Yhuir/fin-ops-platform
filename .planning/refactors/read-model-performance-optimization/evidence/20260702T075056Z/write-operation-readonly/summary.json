@@ -1,0 +1,34 @@
+{
+  "scenario_discovery": {
+    "candidate_counts": {
+      "no_oa_bank_batch_withdraw_context": 3,
+      "turnover_manual_closure_or_withdraw": 5,
+      "workbench_pair_withdraw_context": 5
+    },
+    "exit_code": 0,
+    "mutates_data": false,
+    "requires_manual_approval_before_apply": true,
+    "scenario_count": 13,
+    "status": "ready"
+  },
+  "write_audit_24h": {
+    "event_sample_count": 4000,
+    "exit_code": 1,
+    "expectation_count": 51,
+    "failed_expectation_count": 51,
+    "failed_result_count": 51,
+    "missing_expectation_count": 5,
+    "non_missing_result_count": 46,
+    "status": "fail"
+  },
+  "write_audit_since": {
+    "event_sample_count": 97,
+    "exit_code": 1,
+    "expectation_count": 51,
+    "failed_expectation_count": 51,
+    "failed_result_count": 51,
+    "missing_expectation_count": 51,
+    "non_missing_result_count": 0,
+    "status": "fail"
+  }
+}
