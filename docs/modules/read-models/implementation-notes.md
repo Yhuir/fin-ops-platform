@@ -1480,3 +1480,9 @@
 - Workbench SLO：targeted `read_model_slo_smoke --read-model-key workbench --target-ms 1000` 仍 fail，`enqueue_to_fresh_ms=2801.281`、`handler_duration_ms=2559.983`；critical 5s run 中 `workbench:2026-03` pass，`2929.504ms`；critical 1s run 中 `workbench:2026-03` fail，`5030.413ms`。Workbench 仍未达到稳定 1s。
 - 全域 SLO：critical 5s 为 11/16 pass，主要失败为 `no_oa_bank_batch`、`invoice_lifecycle`、`turnover_ledger`、`search`、`pending_invoice`；critical 1s 为 6/16 pass。`turnover_ledger:all` 本轮 1s grouped run 出现 `1165.422ms` fail，说明 SLO 仍有队列/worker 波动，不能用上一轮 targeted pass 关闭全域目标。
 - 写操作 SLO：以 release start `2026-07-02T13:23:27+08:00` 为下界的 audit 只有 read model smoke 样本，90/94 expectation missing/skipped；24h audit 仍显示 Workbench relation confirm/withdraw cross-page fan-out p95 `42.9s-71.3s`。真实写操作和关联撤回仍需受控样本。
+
+## 2026-07-02 - no-OA read model 1s SLO 分层结论
+
+- 生产环境：release `pscip-l4-alignment-d725fdb6d`。
+- 证据：`no_oa_bank_batch:2026-04` source_versions unchanged profile `742.818ms`；强制 rebuild profile `1063.657ms`，其中 read model save `135.423ms`。targeted 1s smoke `handler_duration_ms=886.764ms`，但 enqueue-to-fresh `1644.218ms` fail。
+- 结论：no-OA 业务 handler 已接近或低于 1s，端到端 1s fail 主要来自 durable queue/worker polling/wakeup 开销。继续在 no-OA service/repository 内改代码不是当前最小正确边界；下一轮应审 runtime worker latency 和 App Status SLO 口径。

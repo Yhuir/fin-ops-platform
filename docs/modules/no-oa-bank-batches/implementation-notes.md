@@ -744,3 +744,10 @@ git diff --check
   - `PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_read_model_services_do_not_default_source_version_contract_to_empty tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_direct_source_version_mismatch_calls_require_expected_contract -q`
 - 生产证据：2026-07-02 生产分段 profiling 显示 2026-04 no-OA scope 在 source versions unchanged 时业务阶段均为毫秒级；随后 `read_model_slo_smoke --read-model-key no_oa_bank_batch --target-ms 5000` pass，critical 5s 全量 smoke 16/16 pass。
 - 剩余风险：本地优化尚未部署到生产；1s 高性能目标下 no-OA 单次 enqueue-to-fresh `1216.693ms` 仍超过 1000ms，后续需继续压缩 worker poll/handler/queue 长尾。
+
+## 2026-07-02 - no-OA 生产 1s SLO 再定位
+
+- 生产环境：release `pscip-l4-alignment-d725fdb6d`。
+- profile 结论：`no_oa_bank_batch:2026-04` source_versions unchanged 路径 `742.818ms`，其中 `effective_categories_for_rows=417.841ms`、`no_oa_bank_transaction_rows=181.642ms`、`no_oa_bank_batch_source_versions=86.480ms`；强制 rebuild 路径约 `1063.657ms`，其中 `active_relations_for_bank_rows=227.070ms`、`refresh_batches_from_prepared_rows=250.776ms`、`save_public_snapshot=135.423ms`。
+- targeted SLO：`read_model_slo_smoke --read-model-key no_oa_bank_batch --target-ms 1000` 仍 fail，`enqueue_to_fresh_ms=1644.218`，但 `handler_duration_ms=886.764` 已低于 1s。
+- 决策：当前不继续在 no-OA application service 或 repository 内堆业务代码；1s 端到端失败主要来自 durable queue/worker polling/wakeup 开销。下一步应从 runtime worker latency、poll interval、RabbitMQ wakeup 或 SLO 分层入手。
