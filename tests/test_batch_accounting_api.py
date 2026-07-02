@@ -1988,6 +1988,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: payload,
+            batch_submit_workbench_loader=lambda **_kwargs: payload,
             relation_facade=FakeBatchRelationFacade(),
             relation_command_service=relation_command,
         )
@@ -1999,6 +2000,77 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
 
         self.assertEqual(result["affected_scope_keys"], ["2026-01", "2026-02", "2026-03"])
+
+    def test_withdraw_legacy_relation_uses_sql_narrow_loader_for_scope_backfill(self) -> None:
+        payload = self._grouped_payload()
+        payload["open"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
+        payload["open"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
+
+        class SqlReadModel:
+            def __init__(self, scoped_payload: dict[str, object]) -> None:
+                self.scoped_payload = scoped_payload
+                self.submit_calls: list[dict[str, object]] = []
+
+            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
+                raise AssertionError("withdraw scope backfill must not use the list read port")
+
+            def load_batch_accounting_submit_workbench_payload(
+                self,
+                *,
+                bank_year: str,
+                bank_row_id: str,
+                oa_row_ids: list[str],
+            ) -> dict[str, object]:
+                self.submit_calls.append(
+                    {"bank_year": bank_year, "bank_row_id": bank_row_id, "oa_row_ids": list(oa_row_ids)}
+                )
+                return self.scoped_payload
+
+        app = build_application()
+        sql_read_model = SqlReadModel(payload)
+        app._workbench_sql_read_repository = sql_read_model
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-BATCH-txn_imported_202601_batch_001",
+            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001", "oa-exp-ba-002"],
+            row_types=["bank", "oa", "oa"],
+            relation_mode="batch_accounting",
+            created_by="finance-user",
+            month_scope="all",
+            special_metadata={
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_202601_batch_001",
+                "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
+                "year": "2026",
+                "bank_year": "2026",
+            },
+        )
+        full_loader_patcher = patch.object(
+            app,
+            "_build_api_workbench_payload",
+            side_effect=AssertionError("withdraw scope backfill must use the narrow SQL read port"),
+        )
+        full_loader_patcher.start()
+        self.addCleanup(full_loader_patcher.stop)
+
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/CASE-BATCH-txn_imported_202601_batch_001/withdraw",
+            json.dumps({"reason": "选择错误", "actor": "finance-user"}),
+        )
+        response_payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(response_payload["affected_scope_keys"], ["2026-01", "2026-02", "2026-03"])
+        self.assertEqual(
+            sql_read_model.submit_calls,
+            [
+                {
+                    "bank_year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
+                }
+            ],
+        )
 
     def test_withdraw_requires_relation_command_service_without_direct_pair_fallback(self) -> None:
         pair_service = WriteBlockingPairRelationService()

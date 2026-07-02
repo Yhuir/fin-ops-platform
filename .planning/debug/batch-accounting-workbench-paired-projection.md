@@ -65,6 +65,7 @@ This was a module boundary bug. `BatchAccountingService` already writes the rela
 - Make `BatchAccountingService.submit(...)` compute concrete `affected_scope_keys` from the selected bank/OA/invoice row payload dates and persist them in relation `special_metadata`.
 - Make `BatchAccountingService.withdraw(...)` prefer persisted `affected_scope_keys`; for legacy active relations without the field, use the narrow submit context to derive months from row payloads before withdrawing.
 - Make `BatchAccountingApiRoutes` prefer result `affected_scope_keys` and call derived lifecycle with `include_all=False`.
+- Build withdraw routes with `use_sql_read_model=True`; legacy relation scope backfill must use the SQL narrow submit loader and must not fall back to the full Workbench page loader.
 - Permit `all` only as a fallback when no concrete row month can be derived.
 
 ## Verification Targets

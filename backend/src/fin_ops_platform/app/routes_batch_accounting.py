@@ -79,7 +79,7 @@ class BatchAccountingApiRoutes:
         session: OARequestSession,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
-            result = self._service_factory().withdraw(
+            result = self._service_factory(use_sql_read_model=True).withdraw(
                 relation_id=relation_id,
                 actor=self._actor(payload, session),
                 reason=str(payload.get("reason") or payload.get("note") or ""),

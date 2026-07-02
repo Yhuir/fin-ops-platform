@@ -3741,7 +3741,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 withdraw_source,
                 route_withdraw_source,
                 "_batch_accounting_routes().withdraw",
-                "_service_factory().withdraw",
+                "_service_factory(use_sql_read_model=True).withdraw",
             ),
         )
         for name, handler_source, route_source, route_call, service_call in mutation_handlers:

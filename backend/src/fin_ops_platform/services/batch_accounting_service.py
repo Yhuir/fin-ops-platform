@@ -1347,7 +1347,7 @@ class BatchAccountingService:
         if not bank_year and re.fullmatch(r"20\d{2}-\d{2}", fallback_month_scope):
             bank_year = fallback_month_scope[:4]
 
-        if bank_row_id and re.fullmatch(r"20\d{2}", bank_year):
+        if bank_row_id and re.fullmatch(r"20\d{2}", bank_year) and self._batch_submit_workbench_loader is not None:
             try:
                 context = self._build_submit_context(
                     bank_year=bank_year,
