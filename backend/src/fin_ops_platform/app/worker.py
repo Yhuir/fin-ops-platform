@@ -76,7 +76,11 @@ from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefres
 from fin_ops_platform.services.read_model_readiness import ReadModelReadinessReporter
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
-from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
+from fin_ops_platform.services.runtime_worker import (
+    DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS,
+    RuntimeWorker,
+    RuntimeWorkerConfig,
+)
 from fin_ops_platform.services.runtime_worker_handlers import (
     IMPORT_FACT_CHANGED_EVENT,
     ImportRuntimeProcessorFactory,
@@ -134,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--worker-id", default=None, help="Stable worker id for PostgreSQL locks and heartbeats.")
     parser.add_argument("--worker-kind", default=None, help="Worker heartbeat kind. Defaults to the enabled handler family.")
     parser.add_argument("--event-type", action="append", default=[], help="Outbox event type to claim. Repeatable.")
-    parser.add_argument("--poll-interval-seconds", type=float, default=5.0)
+    parser.add_argument("--poll-interval-seconds", type=float, default=DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS)
     parser.add_argument("--lock-timeout-seconds", type=int, default=300)
     parser.add_argument("--retry-delay-seconds", type=int, default=60)
     parser.add_argument("--dependency-not-fresh-delay-seconds", type=float, default=2.0)

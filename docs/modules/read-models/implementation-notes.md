@@ -1486,3 +1486,11 @@
 - 生产环境：release `pscip-l4-alignment-d725fdb6d`。
 - 证据：`no_oa_bank_batch:2026-04` source_versions unchanged profile `742.818ms`；强制 rebuild profile `1063.657ms`，其中 read model save `135.423ms`。targeted 1s smoke `handler_duration_ms=886.764ms`，但 enqueue-to-fresh `1644.218ms` fail。
 - 结论：no-OA 业务 handler 已接近或低于 1s，端到端 1s fail 主要来自 durable queue/worker polling/wakeup 开销。继续在 no-OA service/repository 内改代码不是当前最小正确边界；下一轮应审 runtime worker latency 和 App Status SLO 口径。
+
+## 2026-07-02 - runtime worker poll latency 切片
+
+- 目标：把 read model 端到端 SLO 中的 worker pickup latency 收敛到 runtime worker 边界，而不是在各业务 projection 内重复加速。
+- 改动：`RuntimeWorkerConfig` 和 worker CLI 的默认 idle poll 改为 `0.25s`；PostgreSQL worker env 模板中历史 `--poll-interval-seconds 2` 改为 `0.25`；deploy helper 对已有生产 env 只迁移精确旧默认值。
+- 合同：PostgreSQL durable queue 仍是 outbox/dirty/readiness 事实源；RabbitMQ 仍是可选 transport/wakeup；read model freshness、scope policy、source_versions、operation barrier 不变。`workbench-matching` 不是 read model outbox pickup worker，继续保留 5s poll。
+- 本地验证：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py tests/test_deploy_runtime_examples.py -q` 通过，`git diff --check` 通过。
+- 剩余：需要发布后复跑 `/health/ready`、scope contract、critical read model SLO 和 write-operation audit；若仍有 1s fail，下一步必须根据 handler profile 或 HTTP probe p95 继续定位，不得把 targeted pass 当作全域高性能闭环。

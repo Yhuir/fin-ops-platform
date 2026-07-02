@@ -8,6 +8,7 @@ from fin_ops_platform.services.runtime_worker_registry import RUNTIME_WORKER_REG
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY_CONTROL = REPO_ROOT / "deploy/oa/bin/finops-deploy-control.sh"
+ENSURE_RUNTIME_WORKERS = REPO_ROOT / "deploy/oa/bin/finops-ensure-runtime-workers.sh"
 WORKER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-worker@.service.example"
 DISPATCHER_SERVICE = REPO_ROOT / "deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example"
 PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.service.example"
@@ -72,6 +73,28 @@ class DeployRuntimeExampleTests(unittest.TestCase):
                 missing_examples.append(registration.env_example)
 
         self.assertEqual([], missing_examples)
+
+    def test_required_worker_env_examples_do_not_pin_legacy_slow_poll_interval(self) -> None:
+        slow_examples: list[str] = []
+        for registration in RUNTIME_WORKER_REGISTRY:
+            if not registration.required or not registration.env_example:
+                continue
+            env_example = WORKER_ENV_DIR / registration.env_example
+            content = env_example.read_text(encoding="utf-8")
+            if "--poll-interval-seconds 2" in content:
+                slow_examples.append(registration.env_example)
+            if registration.instance_name != "workbench-matching" and "--poll-interval-seconds 5" in content:
+                slow_examples.append(registration.env_example)
+
+        self.assertEqual([], slow_examples)
+
+    def test_runtime_worker_env_install_migrates_only_legacy_poll_interval(self) -> None:
+        helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
+
+        self.assertIn("install_if_missing", helper)
+        self.assertIn("migrate_legacy_worker_poll_interval", helper)
+        self.assertIn("--poll-interval-seconds 2([^0-9.]|$)", helper)
+        self.assertIn("--poll-interval-seconds 0.25", helper)
 
     def test_rabbitmq_dispatcher_env_includes_invoice_usage_collection_events(self) -> None:
         env_example = DISPATCHER_ENV.read_text()

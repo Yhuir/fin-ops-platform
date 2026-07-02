@@ -5,6 +5,7 @@ from time import sleep
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.runtime_worker import (
+    DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS,
     RuntimeWorker,
     RuntimeWorkerConfig,
     RuntimeWorkerResult,
@@ -136,6 +137,10 @@ class FakeSequenceQueue(FakeQueue):
 
 
 class RuntimeWorkerTests(unittest.TestCase):
+    def test_default_poll_interval_is_fast_enough_for_read_model_slo(self) -> None:
+        self.assertEqual(DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS, 0.25)
+        self.assertEqual(RuntimeWorkerConfig().poll_interval_seconds, 0.25)
+
     def test_run_once_claims_from_postgres_queue_without_redis_and_completes_event(self) -> None:
         queue = FakeQueue(event())
         worker = RuntimeWorker(

@@ -1,13 +1,13 @@
 # Runtime Worker 模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-02
 
 ## 模块化状态
 
 - 状态：partial
 - 当前边界可信度：high
 - 目标边界：所有后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明。
-- 当前缺口：部分 worker 同时承担多个 read model event，变更时必须同步检查 systemd/env、RabbitMQ dispatch 和 tests。
+- 当前缺口：部分 worker 同时承担多个 read model event，变更时必须同步检查 systemd/env、RabbitMQ dispatch 和 tests；高性能闭环还需要生产 SLO 复测证明所有页面/读写操作 p95 收敛。
 - 旧代码删除条件：旧 worker 启动方式不再被 deploy/systemd/scripts 引用。
 
 ## 职责边界
@@ -29,7 +29,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | Outbox/job event | PostgreSQL durable queue | event type 必须在 registry 中登记 |
-| Worker instance env | deploy/systemd | instance name 必须匹配 registry |
+| Worker instance env | deploy/systemd | instance name 必须匹配 registry；PostgreSQL durable queue worker 的默认 idle poll 为 `0.25s`，历史 `--poll-interval-seconds 2` 只允许由 deploy helper 精确迁移到 `0.25`，不能重新作为 read model worker 默认值 |
 | Handler call | runtime worker | handler 只处理登记 event type |
 
 ## 输出 I/O
@@ -67,6 +67,8 @@
 - `tests/test_runtime_worker_read_model_refresh_scopes.py`
 - `tests/test_runtime_queue.py`
 - `tests/test_deploy_runtime_examples.py`
+- `tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_required_worker_env_examples_do_not_pin_legacy_slow_poll_interval`
+- `tests/test_runtime_worker.py::RuntimeWorkerTests::test_default_poll_interval_is_fast_enough_for_read_model_slo`
 
 ## 当前缺口和删除条件
 

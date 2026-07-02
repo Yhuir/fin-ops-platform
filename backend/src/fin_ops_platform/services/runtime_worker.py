@@ -16,6 +16,7 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 RuntimeEventHandler = Callable[[RuntimeQueueEvent], dict[str, Any] | None]
+DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS = 0.25
 READ_MODEL_NOT_FRESH_RE = re.compile(r"([a-z0-9_]+)_read_model_not_fresh")
 MONTH_SCOPE_RE = re.compile(r"\d{4}-\d{2}")
 PARENT_SCOPE_KEYS_RE = re.compile(r"parent_scope_keys=([0-9]{4}-[0-9]{2}(?:,[0-9]{4}-[0-9]{2})*)")
@@ -46,7 +47,7 @@ class RuntimeWorkerConfig:
     retry_delay_seconds: int = 60
     task_timeout_seconds: int | None = None
     statement_timeout_seconds: int | None = None
-    poll_interval_seconds: float = 5.0
+    poll_interval_seconds: float = DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS
     max_iterations: int | None = None
     max_attempts: int = 5
     max_events_per_iteration: int = 1

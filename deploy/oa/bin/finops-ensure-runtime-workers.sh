@@ -66,6 +66,19 @@ ensure_worker_env() {
     root:fin-ops
 }
 
+migrate_legacy_worker_poll_interval() {
+  local worker="$1"
+  local example_file source_file target_file
+  example_file="$(worker_env_example "$worker")"
+  source_file="$release_src/deploy/oa/env/$example_file"
+  target_file="$env_dir/fin-ops.worker.${worker}.env"
+  [ -f "$target_file" ] || return 0
+  if grep -q -- "--poll-interval-seconds 0.25" "$source_file" \
+    && grep -Eq -- "--poll-interval-seconds 2([^0-9.]|$)" "$target_file"; then
+    sed -i -E "s/--poll-interval-seconds 2([^0-9.]|$)/--poll-interval-seconds 0.25\\1/g" "$target_file"
+  fi
+}
+
 check_worker_registration() {
   local worker="$1"
   local check_args
@@ -114,6 +127,7 @@ fi
 
 for worker in $required_workers $optional_workers; do
   ensure_worker_env "$worker"
+  migrate_legacy_worker_poll_interval "$worker"
 done
 
 if [ ! -f "$env_dir/fin-ops.common.env" ]; then
