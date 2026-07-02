@@ -578,3 +578,10 @@ git diff --check
 - 前端边界：manual closure 点击确认前按所选 flow rows 的交易/借款/还款日期提取月份并等待对应 `turnover_ledger:<month>` fresh；无法提取月份时才退回 `all`。写成功后的 operation barrier 使用后端返回 targets。
 - 测试覆盖：`tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_read_model_write_targets.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`。
 - 未测风险：本条为本地代码和合同修复；仍需要发布后用生产 turnover/workbench/no-OA 写样本重跑 write-operation SLO，并在恢复样本后复核 dirty/outbox/readiness 全 fresh。
+
+## 2026-07-02 - Turnover read model bulk persistence performance slice
+
+- 触发事实：生产 1s read model SLO 仍显示 `turnover_ledger:all` 超过 1s；按 worker 实际依赖注入远端 profile，`rebuild_turnover_ledger_read_model_scope("all")` rebuild+save 约 `1.48s`，主要不再是 Workbench relation context。
+- 决策：不改变外部往来 grouped row shape、不改变 affected-month scope narrowing、不恢复 `all` 默认刷新；先把 `read_model.turnover_ledger_rows` 保存加入 repository multi-values 批量写白名单，降低 projection 持久化成本。
+- 测试覆盖：`tests/test_postgres_repositories_boundaries.py::test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables` 覆盖 turnover rows bulk path；复跑 `tests/test_turnover_ledger_read_model_refresh.py`。
+- 未闭合：Turnover 仍需发布后用生产 `read_model_slo_smoke --read-model-key turnover_ledger --apply --target-ms 1000` 和真实写操作 audit 复测；本 slice 只关闭持久化 I/O 性能改动，不关闭完整高性能目标。

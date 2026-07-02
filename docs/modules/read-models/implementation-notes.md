@@ -1461,3 +1461,11 @@
 - 高性能基线：本轮没有完成 authenticated HTTP SLO；direct read model grouped run 暴露 `invoice_lifecycle` 和 `tax_offset` 长尾，不能用 targeted pass 隐藏。后续若以 1000ms 页面/API 目标推进，应从 authenticated `http_slo_probe` 与 app-health endpoint p95 选慢点，而不是先猜测优化。
 - 本地修复：银行明细 category persistence 由 broad `state_store` 改为显式 `BankTransactionCategoryStorePort`；银行明细 available-month scope provider 在 SQL runtime 下优先读 read model repository，禁止回落 import-service 全量扫描污染生产链路。
 - 未闭合：Admin Token 弹窗输入未返回，已中断；未打印、保存、传输 token。Authenticated HTTP/SSE/browser 和完整真实写操作矩阵仍缺当前 release 证据。不能声明当前 release full external PSCIP-L4 或高性能全域闭环。
+
+## 2026-07-02 - Workbench / Turnover read model bulk persistence optimization
+
+- 目标：基于生产 SLO/profile 缩短 Workbench active generation 和 Turnover ledger read model 的 worker handler 长尾；保持 read model scope、freshness gate、operation barrier 和业务 payload 不变。
+- 生产 profile：`workbench:2026-03` 只读取数+补行+分组约 `2.23s`，但 SLO handler 可到 `9-10s`，热点落在 generation 持久化批量写；按 worker 实际依赖注入重跑 `turnover_ledger:all` rebuild+save 约 `1.48s`，仍超过 1s 目标但不是本轮最大长尾。
+- 改动：`PostgresReadModelRepository._execute_many(...)` 的 multi-values 白名单新增 `read_model.workbench_rows`、`read_model.workbench_groups` 和 `read_model.turnover_ledger_rows`；原有 `workbench_group_rows`、`search_index_rows` 语义保持不变。该改动只调整同一 repository I/O 的批量写方式，不改变 projection 内容、source_versions、dirty scope 或 readiness。
+- 测试覆盖：`tests/test_postgres_repositories_boundaries.py::test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables` 扩展到 Workbench rows/groups/group_rows、Search index 和 Turnover rows；复跑 Workbench generation batching 与 Turnover read model refresh tests。
+- 未闭合：该 slice 仍需标准发布后重跑 `read_model_slo_smoke --critical-only --apply --target-ms 5000/1000` 和 write-operation SLO；不能仅凭本地 repository 测试声明高性能全域闭环。

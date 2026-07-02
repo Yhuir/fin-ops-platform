@@ -357,19 +357,25 @@ def test_no_oa_bank_batch_save_bulk_upserts_app_and_read_model_rows() -> None:
 def test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables() -> None:
     connection = ValuesBulkConnection()
 
-    _execute_many(
-        connection,
+    allowlisted_sql = [
+        "insert into read_model.workbench_rows(row_id, payload) values (%s, %s)",
+        "insert into read_model.workbench_groups(group_id, payload) values (%s, %s)",
+        "insert into read_model.workbench_group_rows(group_id, payload) values (%s, %s)",
         "insert into read_model.search_index_rows(row_id, payload) values (%s, %s)",
-        [("row-1", {"row_id": "row-1"})],
-    )
-
-    insert_calls = [
-        (sql, params)
-        for sql, params in connection.executed_many_values
-        if "insert into read_model.search_index_rows" in sql
+        "insert into read_model.turnover_ledger_rows(relation_id, payload) values (%s, %s)",
     ]
-    assert len(insert_calls) == 1
-    assert len(insert_calls[0][1]) == 1
+    for sql in allowlisted_sql:
+        _execute_many(
+            connection,
+            sql,
+            [("row-1", {"row_id": "row-1"})],
+        )
+
+    assert len(connection.executed_many_values) == len(allowlisted_sql)
+    assert all(len(params) == 1 for _sql, params in connection.executed_many_values)
+    for sql in allowlisted_sql:
+        table_name = sql.split("(")[0]
+        assert any(table_name in recorded_sql for recorded_sql, _params in connection.executed_many_values)
 
 
 def test_read_model_bulk_insert_with_mapping_params_uses_execute_many() -> None:
