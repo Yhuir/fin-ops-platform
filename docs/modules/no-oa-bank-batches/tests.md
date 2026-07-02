@@ -12,9 +12,10 @@
 | Operation overlay | `GlobalOperationOverlayProvider`、`web/src/features/operationBarrier/api.ts` | submit-selection、submit、withdraw、tag-selection 保存后等待 `no_oa_bank_batch` barrier fresh，再 reload；失败不假装同步 |
 | API contract | `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`、`docs/dev/api-contracts.md` | list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit 的 response shape、错误码、version、`rules` / `requirements_by_tag_code`、affected months、relation read model freshness 字段 |
 | Business core | `NoOaBankBatchService`、`NoOaManagedRulePolicy` | draft/submitted/withdrawn/stale/conflict、内部往来配对、active relation 占用排除、提交时 `row_tag_snapshot` 冻结、legacy relation migration/repair/consolidation command 委托 |
-| Application service | `NoOaBankBatchApplicationService` | read model fallback、tag selection rules、submit/withdraw、relation command service 委托、relation metadata、rollback、after_mutation、derived lifecycle、durable queue enqueue |
+| Application service | `NoOaBankBatchApplicationService` | read model fail-closed、tag selection rules、submit/withdraw、relation command service 委托、relation metadata、rollback、after_mutation、derived lifecycle、durable queue enqueue |
 | Write contract | `bankdetail_write_uow.py`、`tests/test_bankdetail_write_uow_contract.py` | stale expected version、batch + Workbench pair relation + audit + dirty/outbox 同事务目标 |
 | Read model / worker | `NoOaBankBatchReadModelRefreshService`、`runtime_worker_registry.py` | missing/stale 不同步重建、source version 保护、worker complete dirty scope、refresh 不执行 relation repair 写入、月度 scope 不全量读取且不删除其它月份批次 |
+| 持久化 I/O | `PostgresWorkbenchRepository.save_no_oa_bank_batches*` | 按 relation mode/scope 删除目标 rows，批量 values upsert no-OA app/read_model rows，不回退逐行 projection 写入；不触碰 bank-flow 物理表 |
 | 跨页面影响 | Bank Details、Workbench、Cost Statistics、Search、App Status | no-OA 提交/撤回影响 Workbench relation、银行明细关系状态、成本统计、搜索候选和 App Status |
 | 前端跨页事件 | `web/src/features/domainEvents.ts` | submit/withdraw 后发 `workbenchRelationUpdated`；分类/规则更新刷新 no-OA list/detail/tag drawer；draft 详情用当前标签，submitted/withdrawn 详情用提交时冻结标签 |
 

@@ -28,6 +28,9 @@ class TransactionRecorder:
     def execute_many(self, sql: str, params_seq: list[tuple]) -> int:
         return self.parent.execute_many(sql, params_seq)
 
+    def execute_many_values(self, sql: str, params_seq: list[tuple], *, chunk_size: int = 200) -> int:
+        return self.parent.execute_many_values(sql, params_seq, chunk_size=chunk_size)
+
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         return self.parent.fetch_all(sql, params)
 
@@ -39,6 +42,7 @@ class RecordingConnection:
     def __init__(self) -> None:
         self.executed: list[tuple[str, tuple]] = []
         self.executed_many: list[tuple[str, list[tuple]]] = []
+        self.executed_many_values: list[tuple[str, list[tuple]]] = []
         self.fetched_all: list[tuple[str, tuple]] = []
         self.fetched_one: list[tuple[str, tuple]] = []
         self.transaction_enters = 0
@@ -55,6 +59,12 @@ class RecordingConnection:
         self.executed_many.append((" ".join(sql.split()), list(params_seq)))
         return len(params_seq)
 
+    def execute_many_values(self, sql: str, params_seq: list[tuple], *, chunk_size: int = 200) -> int:
+        _ = chunk_size
+        rows = list(params_seq)
+        self.executed_many_values.append((" ".join(sql.split()), rows))
+        return len(rows)
+
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         self.fetched_all.append((" ".join(sql.split()), params))
         return []
@@ -62,6 +72,14 @@ class RecordingConnection:
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.fetched_one.append((" ".join(sql.split()), params))
         return None
+
+
+def write_sql(connection: RecordingConnection) -> list[str]:
+    return [
+        *(sql for sql, _params in connection.executed),
+        *(sql for sql, _params in connection.executed_many),
+        *(sql for sql, _params in connection.executed_many_values),
+    ]
 
 
 class ValuesBulkConnection:
@@ -288,6 +306,54 @@ def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -
     assert connection.executed[removed_batches_delete_index][1] == ("no_oa_bank_batch", ["retained-batch"])
 
 
+def test_no_oa_bank_batch_save_bulk_upserts_app_and_read_model_rows() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRepository(connection)
+
+    repository.save_no_oa_bank_batches(
+        {
+            "batches": {
+                "batch-a": {
+                    "batch_id": "batch-a",
+                    "status": "draft",
+                    "status_bucket": "unsubmitted",
+                    "version": 1,
+                    "scope_month": "2026-03",
+                    "account_key": "acct-a",
+                    "row_ids": ["txn-a"],
+                    "total_amount": "10.00",
+                },
+                "batch-b": {
+                    "batch_id": "batch-b",
+                    "status": "submitted",
+                    "status_bucket": "submitted",
+                    "version": 2,
+                    "scope_month": "2026-03",
+                    "account_key": "acct-b",
+                    "row_ids": ["txn-b"],
+                    "total_amount": "20.00",
+                },
+            },
+            "audit_log": [],
+        }
+    )
+
+    app_upserts = [
+        params_seq
+        for sql, params_seq in connection.executed_many_values
+        if sql.startswith("insert into app.no_oa_bank_batches(")
+    ]
+    read_model_upserts = [
+        params_seq
+        for sql, params_seq in connection.executed_many_values
+        if sql.startswith("insert into read_model.no_oa_bank_batch_rows(")
+    ]
+    assert [len(params_seq) for params_seq in app_upserts] == [2]
+    assert [len(params_seq) for params_seq in read_model_upserts] == [2]
+    assert not any(sql.startswith("insert into app.no_oa_bank_batches(") for sql, _params in connection.executed)
+    assert not any(sql.startswith("insert into read_model.no_oa_bank_batch_rows(") for sql, _params in connection.executed)
+
+
 def test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables() -> None:
     connection = ValuesBulkConnection()
 
@@ -441,11 +507,14 @@ def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() 
     )
     upsert_batch_params = [
         params
-        for sql, params in connection.executed
+        for sql, params_seq in connection.executed_many_values
         if sql.startswith("insert into app.no_oa_bank_batches(")
+        for params in params_seq
     ]
     assert len(upsert_batch_params) == 1
     assert upsert_batch_params[0][0] == "march-batch"
+    assert not any(sql.startswith("insert into app.no_oa_bank_batches(") for sql, _params in connection.executed)
+    assert not any(sql.startswith("insert into read_model.no_oa_bank_batch_rows(") for sql, _params in connection.executed)
     replaced_event_params = [
         params
         for sql, params in connection.executed
@@ -477,13 +546,15 @@ def test_bank_flow_rule_batch_save_uses_dedicated_physical_tables() -> None:
         }
     )
 
-    executed_sql = [sql for sql, _ in connection.executed]
+    executed_sql = write_sql(connection)
     assert any("delete from read_model.bank_flow_rule_batch_rows" in sql for sql in executed_sql)
     assert any("delete from app.bank_flow_rule_batch_events" in sql for sql in executed_sql)
     assert any("delete from app.bank_flow_rule_batches" in sql for sql in executed_sql)
     assert any("insert into app.bank_flow_rule_batches(" in sql for sql in executed_sql)
     assert any("insert into read_model.bank_flow_rule_batch_rows(" in sql for sql in executed_sql)
     assert any("insert into app.bank_flow_rule_batch_events(" in sql for sql in executed_sql)
+    assert not any(sql.startswith("insert into app.bank_flow_rule_batches(") for sql, _params in connection.executed)
+    assert not any(sql.startswith("insert into read_model.bank_flow_rule_batch_rows(") for sql, _params in connection.executed)
     forbidden_tables = (
         "app.no_oa_bank_batches",
         "app.no_oa_bank_batch_events",
@@ -514,7 +585,7 @@ def test_no_oa_bank_batch_save_does_not_touch_bank_flow_physical_tables() -> Non
         }
     )
 
-    executed_sql = [sql for sql, _ in connection.executed]
+    executed_sql = write_sql(connection)
     forbidden_tables = (
         "app.bank_flow_rule_batches",
         "app.bank_flow_rule_batch_events",

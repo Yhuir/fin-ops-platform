@@ -347,3 +347,25 @@
 验证：
 
 - `tests/test_bank_flow_rule_batch_application_service.py` 覆盖 detail/withdraw 前刷新 runtime snapshot，以及 submitted 候选 relation mode 边界。
+
+## 2026-07-02 批量持久化 I/O 优化
+
+目标：
+
+- 降低 `bank_flow_rule_batch.read_model.refresh` 在多 batch scope 下的 projection 写入 round-trip，避免逐 batch 两条 upsert 放大 worker handler 时间。
+- 保持 bank-flow 与 legacy no-OA 的物理表、event 表、read model rows 完全隔离。
+
+关键决策：
+
+- `PostgresWorkbenchRepository.save_bank_flow_rule_batches*` 继续作为 bank-flow persistence owner，删除范围和 event 替换顺序不变。
+- `app.bank_flow_rule_batches` 和 `read_model.bank_flow_rule_batch_rows` 改为批量 values upsert；payload 仍强制写入 `relation_mode=bank_flow_rule_batch`。
+- 同步复用该批量 helper 优化 no-OA legacy persistence，但两者仍写各自表，禁止跨表 fallback。
+
+验证：
+
+- `tests/test_postgres_repositories_boundaries.py` 覆盖 bank-flow 专属物理表写入、禁止 no-OA 表污染、no-OA/bank-flow projection insert 不走逐行 `execute`。
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_postgres_repositories_boundaries.py tests/test_no_oa_bank_batch_application_service.py tests/test_no_oa_bank_batch_workbench_integration.py tests/test_bank_flow_rule_batch_application_service.py -q`
+
+剩余风险：
+
+- 本地优化尚未部署到生产；2026-07-02 生产 1s 高性能 baseline 中 `bank_flow_rule_batch` enqueue-to-fresh `5322.643ms`、handler `4543.139ms`，仍需部署后复测，并继续分析非写入阶段长尾。

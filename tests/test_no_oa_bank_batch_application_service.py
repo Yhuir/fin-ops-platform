@@ -323,11 +323,14 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             )
             for index in range(250)
         ]
-        service, _no_oa_service, _relation_command = self._application_service(
+        service, no_oa_service, _relation_command = self._application_service(
             rows=rows,
             selected_tag_codes=["fee"],
         )
         service.refresh_batches()
+        service._no_oa_bank_batch_read_model_repository = SimpleNamespace(
+            list_no_oa_bank_batch_rows=lambda filters: deepcopy(no_oa_service.list_batches(filters))
+        )
 
         first_page = service.list_batches_payload({"bucket": ["unsubmitted"], "page": ["1"], "page_size": ["200"]})
         second_page = service.list_batches_payload({"bucket": ["unsubmitted"], "page": ["2"], "page_size": ["200"]})
@@ -342,6 +345,25 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "page_size must be <= 200") as context:
             service.list_batches_payload({"page": ["1"], "page_size": ["201"]})
         self.assertEqual(getattr(context.exception, "error_code", ""), "invalid_paging")
+
+    def test_list_batches_without_read_model_repository_does_not_read_snapshot_fallback(self) -> None:
+        rows = [no_oa_bank_row("fee-1", category_code="fee", debit_amount="1.00")]
+        service, no_oa_service, _relation_command = self._application_service(
+            rows=rows,
+            selected_tag_codes=["fee"],
+        )
+        service.refresh_batches()
+
+        def fail_if_snapshot_read(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+            raise AssertionError("GET list must not read legacy no-OA snapshot fallback")
+
+        no_oa_service.list_batches = fail_if_snapshot_read  # type: ignore[method-assign]
+
+        payload = service.list_batches_payload({"bucket": ["unsubmitted"], "page": ["1"], "page_size": ["200"]})
+
+        self.assertEqual(payload["read_model_status"], "unavailable")
+        self.assertEqual(payload["batches"], [])
+        self.assertEqual(payload["refresh_reason"], "api_no_oa_read_model_unavailable")
 
     def test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted(self) -> None:
         class ReadRepository:

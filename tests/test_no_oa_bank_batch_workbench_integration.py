@@ -108,7 +108,7 @@ class NoOaReadModelConnection:
             status = self.dirty_by_scope.get(scope_key, self.dirty_status)
             return {"status": status} if status else None
         if "from read_model.app_status_readiness" in normalized:
-            scope_key = str(params[0]) if params else "all"
+            scope_key = str(params[2]) if len(params) > 2 else "all"
             status = self.readiness_by_scope.get(scope_key, self.readiness_status)
             return {"status": status} if status else None
         return None
@@ -490,7 +490,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
         self.assertIn(
-            ("2026-06",),
+            ("no_oa_bank_batch", "no_oa_bank_batch", "2026-06"),
             [
                 tuple(params)
                 for sql, params in connection.fetch_one_calls
