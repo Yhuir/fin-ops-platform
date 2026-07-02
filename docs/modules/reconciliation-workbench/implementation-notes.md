@@ -916,3 +916,11 @@
 - 测试覆盖：`tests/test_postgres_repositories_boundaries.py::test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables`，以及 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_batches_all_scope_generation_rows_when_supported`、`test_repository_batches_workbench_generation_rows_when_supported`。
 - 发布后证据：release `pscip-l4-bulk-persistence-abcca6f78` 的 `workbench:2026-03` 5s run enqueue-to-fresh `5281.538ms`、handler `4946.075ms`；1s run enqueue-to-fresh `3873.533ms`、handler `3633.558ms`。相比部署前 `6.35s-9.64s` handler 有下降，但仍是 5s/1s 失败项。
 - 未闭合：需要继续 profile Workbench active generation 的分组计算与保存阶段，确认 `workbench_rows/groups/group_rows` 写入后的剩余热点；24h write-operation audit 仍显示 Workbench relation confirm/withdraw cross-page fan-out p95 `19.6s-66.0s`，需受控真实写样本验证 UoW target fan-out 是否已缩短。
+
+## 2026-07-02 - relation alignment bounded subset performance slice
+
+- 触发事实：release `pscip-l4-bulk-persistence-abcca6f78` 发布后，`scripts/rehydrate-workbench-read-models.py --scope 2026-03 --profile-internal` 显示 month shard rebuild 约 `4.03s`，保存阶段约 `393ms`，剩余主要在 `_group_payload`；只读细分 profile 显示 `WorkbenchRelationAlignmentService.align_relation` 32 次中有单次约 `870ms`。
+- 根因：`align_relation` 为了判断一个 OA 是否对应唯一 2-6 条银行流水合计，旧逻辑枚举 `itertools.combinations(indexed_bank_rows, size)`。大 active relation 中银行行较多时会出现组合爆炸，污染 Workbench read model handler。
+- 决策：保持 relation alignment 输入/输出 payload 不变，删除全组合枚举，改为按金额的有界动态规划状态表。每个金额只保留唯一组合或 ambiguous 标记，超过最大目标金额直接剪枝，状态超过上限时保守返回 ambiguous，不猜测银行归属。
+- 测试覆盖：`tests/test_workbench_relation_alignment_service.py` 新增大关系唯一合计与 ambiguous 合计不猜测回归；复跑 Workbench generation batching tests。
+- 未闭合：需要发布后重跑 Workbench `2026-03` profile 与 critical read model SLO，确认 `_group_payload` 和 handler 是否降到目标范围；真实 confirm/withdraw 写操作仍需受控样本验证。

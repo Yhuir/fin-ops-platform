@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from itertools import combinations
 from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_parent_oa_id
 
 
 MAX_BANK_SUM_ROWS = 6
+MAX_BANK_SUM_STATES = 20000
+AMBIGUOUS_SUBSET_MATCH: tuple[str, ...] = ("__ambiguous__",)
 
 
 class WorkbenchRelationAlignmentService:
@@ -182,17 +183,74 @@ class WorkbenchRelationAlignmentService:
         bank_amounts: dict[str, Decimal | None],
     ) -> dict[str, list[list[str]]]:
         matches: dict[str, list[list[str]]] = {oa_id: [] for oa_id in oa_ids}
+        target_amounts = {
+            amount
+            for oa_id in oa_ids
+            if (amount := oa_amounts.get(oa_id)) is not None and amount > Decimal("0.00")
+        }
+        if not target_amounts:
+            return matches
+        max_target_amount = max(target_amounts)
         indexed_bank_rows = [
             (self._row_id(row), bank_amounts.get(self._row_id(row)))
             for row in bank_rows
             if self._row_id(row) and bank_amounts.get(self._row_id(row)) is not None
         ]
         max_size = min(MAX_BANK_SUM_ROWS, len(indexed_bank_rows))
-        for size in range(2, max_size + 1):
-            for combo in combinations(indexed_bank_rows, size):
-                bank_ids = [bank_id for bank_id, _amount in combo]
-                total = sum((amount for _bank_id, amount in combo if amount is not None), Decimal("0.00"))
-                for oa_id in oa_ids:
-                    if oa_amounts.get(oa_id) == total:
-                        matches[oa_id].append(bank_ids)
+        states_by_size: list[dict[Decimal, tuple[str, ...]]] = [dict() for _ in range(max_size + 1)]
+        states_by_size[0][Decimal("0.00")] = ()
+        state_count = 1
+        overflowed = False
+
+        for bank_id, amount in indexed_bank_rows:
+            if amount is None or amount <= Decimal("0.00"):
+                continue
+            for size in range(max_size - 1, -1, -1):
+                if not states_by_size[size]:
+                    continue
+                for subtotal, existing_bank_ids in list(states_by_size[size].items()):
+                    new_total = subtotal + amount
+                    if new_total > max_target_amount:
+                        continue
+                    new_bank_ids = (
+                        AMBIGUOUS_SUBSET_MATCH
+                        if existing_bank_ids == AMBIGUOUS_SUBSET_MATCH
+                        else (*existing_bank_ids, bank_id)
+                    )
+                    bucket = states_by_size[size + 1]
+                    previous = bucket.get(new_total)
+                    if previous is None:
+                        bucket[new_total] = new_bank_ids
+                        state_count += 1
+                    elif previous != new_bank_ids:
+                        bucket[new_total] = AMBIGUOUS_SUBSET_MATCH
+                    if state_count > MAX_BANK_SUM_STATES:
+                        overflowed = True
+                        break
+                if overflowed:
+                    break
+            if overflowed:
+                break
+
+        if overflowed:
+            return {oa_id: [[], []] for oa_id in oa_ids}
+
+        for oa_id in oa_ids:
+            target_amount = oa_amounts.get(oa_id)
+            if target_amount is None:
+                continue
+            candidate_matches: list[list[str]] = []
+            ambiguous = False
+            for size in range(2, max_size + 1):
+                bank_ids = states_by_size[size].get(target_amount)
+                if bank_ids is None:
+                    continue
+                if bank_ids == AMBIGUOUS_SUBSET_MATCH:
+                    ambiguous = True
+                    continue
+                candidate_matches.append(list(bank_ids))
+            if ambiguous or len(candidate_matches) > 1:
+                matches[oa_id] = [candidate_matches[0], []] if candidate_matches else [[], []]
+            else:
+                matches[oa_id] = candidate_matches
         return matches

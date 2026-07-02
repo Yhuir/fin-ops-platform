@@ -99,6 +99,53 @@ class WorkbenchRelationAlignmentServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_large_bank_relation_uses_bounded_unique_sum_matching(self) -> None:
+        service = WorkbenchRelationAlignmentService()
+        rows_by_id = {
+            "oa-target": oa_row("oa-target", "300.00"),
+            "bank-100": bank_row("bank-100", debit_amount="100.00"),
+            "bank-200": bank_row("bank-200", debit_amount="200.00"),
+            **{
+                f"bank-large-{index}": bank_row(f"bank-large-{index}", debit_amount=f"{1000 + index}.00")
+                for index in range(40)
+            },
+        }
+
+        alignment = service.align_relation(
+            rows_by_id=rows_by_id,
+            relation={"case_id": "CASE-LARGE-RELATION", "row_ids": list(rows_by_id)},
+        )
+
+        self.assertEqual(alignment["unresolved_row_ids"], [])
+        self.assertEqual(
+            alignment["links"],
+            [
+                {
+                    "oa_row_id": "oa-target",
+                    "bank_row_ids": ["bank-100", "bank-200"],
+                    "invoice_row_ids": [],
+                    "evidence": ["unique_bank_sum", "same_active_relation"],
+                }
+            ],
+        )
+
+    def test_ambiguous_bank_sum_does_not_guess_subset(self) -> None:
+        service = WorkbenchRelationAlignmentService()
+        rows_by_id = {
+            "oa-target": oa_row("oa-target", "300.00"),
+            "bank-100": bank_row("bank-100", debit_amount="100.00"),
+            "bank-200": bank_row("bank-200", debit_amount="200.00"),
+            "bank-120": bank_row("bank-120", debit_amount="120.00"),
+            "bank-180": bank_row("bank-180", debit_amount="180.00"),
+        }
+
+        alignment = service.align_relation(
+            rows_by_id=rows_by_id,
+            relation={"case_id": "CASE-AMBIGUOUS-SUM", "row_ids": list(rows_by_id)},
+        )
+
+        self.assertEqual(alignment["links"], [])
+
 
 def oa_row(row_id: str, amount: str) -> dict[str, object]:
     return {"id": row_id, "type": "oa", "amount": amount}
