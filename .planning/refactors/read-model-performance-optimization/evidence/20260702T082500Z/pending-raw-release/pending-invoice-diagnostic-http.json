@@ -1,0 +1,711 @@
+{
+  "api_prefix": "/fin-ops-api",
+  "auth_configured": true,
+  "base_url": "https://www.yn-sourcing.com/",
+  "generated_at": "2026-07-02T08:26:22.473060+00:00",
+  "iterations": 5,
+  "probes": [
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 177.795,
+        "p95": 261.127,
+        "p99": 261.127
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_1",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "read_model_statuses": {
+        "fresh": 5
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 5,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 5
+      },
+      "success_count": 5,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 1139.908,
+        "p95": 1379.688,
+        "p99": 1379.688
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_50",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_statuses": {
+        "fresh": 5
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 5,
+      "slo_pass": false,
+      "status": "fail",
+      "status_counts": {
+        "200": 5
+      },
+      "success_count": 5,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 4366.598,
+        "p95": 4733.681,
+        "p99": 4733.681
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_200",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "read_model_statuses": {
+        "fresh": 5
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 5,
+      "slo_pass": false,
+      "status": "fail",
+      "status_counts": {
+        "200": 5
+      },
+      "success_count": 5,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 1442.874,
+        "p95": 1760.728,
+        "p99": 1760.728
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "pending_rows_expense_requires_invoice",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_statuses": {
+        "fresh": 5
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 5,
+      "slo_pass": false,
+      "status": "fail",
+      "status_counts": {
+        "200": 5
+      },
+      "success_count": 5,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 1283.272,
+        "p95": 1566.792,
+        "p99": 1566.792
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "pending_rows_income_page_size_50",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_statuses": {
+        "fresh": 5
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 5,
+      "slo_pass": false,
+      "status": "fail",
+      "status_counts": {
+        "200": 5
+      },
+      "success_count": 5,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 284.527,
+        "p95": 297.132,
+        "p99": 297.132
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "pending_filter_options_expense",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/pending-invoices/filter-options?direction=expense",
+      "read_model_statuses": {
+        "fresh": 5
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 5,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 5
+      },
+      "success_count": 5,
+      "target_ms": 1000.0
+    }
+  ],
+  "samples": [
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 217.13,
+      "iteration": 1,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_1",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 4274,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 193.368,
+      "iteration": 2,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_1",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 4274,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 261.127,
+      "iteration": 3,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_1",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 4274,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 175.698,
+      "iteration": 4,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_1",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 4274,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 177.795,
+      "iteration": 5,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_1",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 4274,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 172.259,
+      "iteration": 6,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_1",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 4274,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=1&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1297.17,
+      "iteration": 1,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1210.845,
+      "iteration": 2,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1139.908,
+      "iteration": 3,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1101.458,
+      "iteration": 4,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1128.864,
+      "iteration": 5,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1379.688,
+      "iteration": 6,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 3956.121,
+      "iteration": 1,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_200",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 34287,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 4401.468,
+      "iteration": 2,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_200",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 34287,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 4197.387,
+      "iteration": 3,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_200",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 34287,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 3968.24,
+      "iteration": 4,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_200",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 34287,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 4366.598,
+      "iteration": 5,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_200",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 34287,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 4733.681,
+      "iteration": 6,
+      "kind": "api",
+      "name": "pending_rows_expense_page_size_200",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 34287,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=200&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1206.769,
+      "iteration": 1,
+      "kind": "api",
+      "name": "pending_rows_expense_requires_invoice",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12742,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1257.332,
+      "iteration": 2,
+      "kind": "api",
+      "name": "pending_rows_expense_requires_invoice",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12742,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1760.728,
+      "iteration": 3,
+      "kind": "api",
+      "name": "pending_rows_expense_requires_invoice",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12742,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1568.128,
+      "iteration": 4,
+      "kind": "api",
+      "name": "pending_rows_expense_requires_invoice",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12742,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1167.955,
+      "iteration": 5,
+      "kind": "api",
+      "name": "pending_rows_expense_requires_invoice",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12742,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1442.874,
+      "iteration": 6,
+      "kind": "api",
+      "name": "pending_rows_expense_requires_invoice",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12742,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&filter=requires_invoice&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1377.039,
+      "iteration": 1,
+      "kind": "api",
+      "name": "pending_rows_income_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12434,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1566.792,
+      "iteration": 2,
+      "kind": "api",
+      "name": "pending_rows_income_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12434,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1274.607,
+      "iteration": 3,
+      "kind": "api",
+      "name": "pending_rows_income_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12434,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1157.019,
+      "iteration": 4,
+      "kind": "api",
+      "name": "pending_rows_income_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12434,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1283.272,
+      "iteration": 5,
+      "kind": "api",
+      "name": "pending_rows_income_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12434,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1357.382,
+      "iteration": 6,
+      "kind": "api",
+      "name": "pending_rows_income_page_size_50",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12434,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=income&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 350.347,
+      "iteration": 1,
+      "kind": "api",
+      "name": "pending_filter_options_expense",
+      "ok": true,
+      "path": "/api/pending-invoices/filter-options?direction=expense",
+      "read_model_status": "fresh",
+      "response_bytes": 6059,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/filter-options?direction=expense",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 297.132,
+      "iteration": 2,
+      "kind": "api",
+      "name": "pending_filter_options_expense",
+      "ok": true,
+      "path": "/api/pending-invoices/filter-options?direction=expense",
+      "read_model_status": "fresh",
+      "response_bytes": 6059,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/filter-options?direction=expense",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 284.527,
+      "iteration": 3,
+      "kind": "api",
+      "name": "pending_filter_options_expense",
+      "ok": true,
+      "path": "/api/pending-invoices/filter-options?direction=expense",
+      "read_model_status": "fresh",
+      "response_bytes": 6059,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/filter-options?direction=expense",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 235.237,
+      "iteration": 4,
+      "kind": "api",
+      "name": "pending_filter_options_expense",
+      "ok": true,
+      "path": "/api/pending-invoices/filter-options?direction=expense",
+      "read_model_status": "fresh",
+      "response_bytes": 6059,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/filter-options?direction=expense",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 234.512,
+      "iteration": 5,
+      "kind": "api",
+      "name": "pending_filter_options_expense",
+      "ok": true,
+      "path": "/api/pending-invoices/filter-options?direction=expense",
+      "read_model_status": "fresh",
+      "response_bytes": 6059,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/filter-options?direction=expense",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 291.512,
+      "iteration": 6,
+      "kind": "api",
+      "name": "pending_filter_options_expense",
+      "ok": true,
+      "path": "/api/pending-invoices/filter-options?direction=expense",
+      "read_model_status": "fresh",
+      "response_bytes": 6059,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/filter-options?direction=expense",
+      "warmup": false
+    }
+  ],
+  "status": "fail",
+  "summary": {
+    "failed_probe_count": 4,
+    "max_p95_ms": 4733.681,
+    "probe_count": 6,
+    "sample_count": 30
+  },
+  "timeout_seconds": 5.0,
+  "version": 1,
+  "warmup": 1
+}

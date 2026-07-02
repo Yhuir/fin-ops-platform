@@ -325,13 +325,19 @@ class PendingInvoiceQueryService:
         )
 
     def normalize_row_payloads(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return [self._normalize_row_payload(row) for row in rows]
+        bank_account_mappings = self._bank_account_mappings_by_last4()
+        return [self._normalize_row_payload(row, bank_account_mappings=bank_account_mappings) for row in rows]
 
-    def _normalize_row_payload(self, row: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_row_payload(
+        self,
+        row: dict[str, Any],
+        *,
+        bank_account_mappings: dict[str, dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
         payload = deepcopy(row)
         bank = payload.get("bank_transaction")
         if isinstance(bank, dict):
-            self._apply_bank_identity(bank)
+            self._apply_bank_identity(bank, bank_account_mappings=bank_account_mappings)
         return payload
 
     def _get_transaction(self, transaction_id: str) -> BankTransaction:
@@ -446,9 +452,15 @@ class PendingInvoiceQueryService:
         digits = "".join(ch for ch in str(value or "") if ch.isdigit())
         return digits[-4:] if len(digits) >= 4 else digits
 
-    def _apply_bank_identity(self, bank: dict[str, Any]) -> None:
+    def _apply_bank_identity(
+        self,
+        bank: dict[str, Any],
+        *,
+        bank_account_mappings: dict[str, dict[str, str]] | None = None,
+    ) -> None:
         last4 = self._account_last4(bank.get("account_last4")) or self._account_last4(bank.get("account_no"))
-        mapping = self._bank_account_mappings_by_last4().get(last4)
+        mappings = bank_account_mappings if bank_account_mappings is not None else self._bank_account_mappings_by_last4()
+        mapping = mappings.get(last4)
         raw_bank_name = str(bank.get("bank_name") or "").strip()
         if mapping is not None:
             bank["bank_name"] = mapping["bank_name"]

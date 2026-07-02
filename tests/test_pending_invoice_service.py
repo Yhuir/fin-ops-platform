@@ -360,6 +360,35 @@ class LiveWorkbenchRelationFacade:
 
 
 class PendingInvoiceQueryServiceTests(unittest.TestCase):
+    def test_normalize_row_payloads_loads_bank_mapping_once_per_page(self) -> None:
+        calls = 0
+
+        def settings_provider() -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            return {
+                "bank_account_mappings": [
+                    {"last4": "1234", "bank_name": "中国银行", "short_name": "中行"},
+                ]
+            }
+
+        service = PendingInvoiceQueryService(
+            import_service=ImportNormalizationService(existing_transactions=[], existing_invoices=[]),
+            category_service=BankTransactionCategoryService(),
+            app_settings_provider=settings_provider,
+        )
+
+        rows = [
+            {"id": f"txn-{index}", "bank_transaction": {"account_no": f"622200000000{index:02d}1234"}}
+            for index in range(3)
+        ]
+
+        normalized = service.normalize_row_payloads(rows)
+
+        self.assertEqual(calls, 1)
+        self.assertEqual([row["bank_transaction"]["bank_short_name"] for row in normalized], ["中行", "中行", "中行"])
+        self.assertNotIn("bank_short_name", rows[0]["bank_transaction"])
+
     def test_list_rows_collapses_multi_bank_relation_into_one_grouped_row(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
         txn_1 = self._bank_transaction("txn_group_1", TransactionDirection.OUTFLOW, "Vendor A", "120.00")

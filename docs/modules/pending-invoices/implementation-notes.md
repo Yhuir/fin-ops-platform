@@ -13,6 +13,7 @@
 - filter-options 在 fresh gate 通过后应优先走 SQL 聚合读取选项，不再为生成筛选项拉取全量 rows；这属于页面首屏性能路径，不能回退到伪 fresh。
 - rows 首屏默认排序合同是 `trade_date desc nulls last, row_id`；PostgreSQL 热路径索引必须显式匹配 `nulls last`，不能通过取消 `nulls last` 或回退同步扫描来换取性能。
 - rows 新写入的规范 payload 只写 `payload`；`raw_payload` 不再复制同一 JSON。查询端只在 legacy 行 `payload = '{}'::jsonb` 时读取 `raw_payload` fallback，避免首屏按行重复读取和解码无用 JSONB。
+- rows payload normalization 只能按页读取一次 `bank_account_mappings` 并复用于每行银行身份补全；不得在 `_apply_bank_identity` 中按行重复读取 settings。
 - export-preview 和 export 通过 `PendingInvoiceReadModelService.all_rows()` 收集当前筛选结果时，超过 20,000 行必须 fail-closed，不能继续分页并同步生成大 XLSX。
 - OA/流水/发票 relation 不是待找发票私有事实；当前页面只通过 attach existing 写入选择已有发票关系，且必须委托 `WorkbenchRelationCommandService`；读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
 - 选择已有进项发票候选表的“流水关联”chip 必须使用后端返回的 `bank_relation_status` / `linked_bank_transaction_count`，不能用 `remaining_amount=0` 或候选金额推断；最终补付金额以 preview `payment_impact.remaining_amount_after` 为准。
@@ -42,12 +43,12 @@
 
 - 目标：修复 authenticated core API SLO 中 `/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc` 唯一超过 1s 的首屏读路径。
 - 影响范围：`read_model.pending_invoice_rows` 的 PostgreSQL hot-path index 和 per-row payload I/O、迁移测试、SQL runtime tests、本模块测试矩阵和 read-model-performance GSD 证据；不改变 rows API response shape、freshness gate、worker scope 或业务状态。
-- 关键决策：保持 `PendingInvoiceReadModelService` -> `PendingInvoiceReadModelRepositoryPort` -> PostgreSQL read model repository 的既有边界；不恢复旧同步扫描、不加 Redis 伪缓存、不绕过 source-version 校验。新增索引只匹配现有排序合同 `direction, trade_date desc nulls last, row_id`，避免旧 `DESC` 默认 `NULLS FIRST` 索引与查询顺序不一致。后续 authenticated 诊断证明 page_size=1 p95 200ms、page_size=50 p95 1318ms、page_size=200 p95 4289ms，瓶颈随返回行数线性增长；因此进一步移除新写入 `raw_payload.normalized_payload` 复制，并把查询改为仅对 legacy 空 `payload` 行读取 raw fallback。
+- 关键决策：保持 `PendingInvoiceReadModelService` -> `PendingInvoiceReadModelRepositoryPort` -> PostgreSQL read model repository 的既有边界；不恢复旧同步扫描、不加 Redis 伪缓存、不绕过 source-version 校验。新增索引只匹配现有排序合同 `direction, trade_date desc nulls last, row_id`，避免旧 `DESC` 默认 `NULLS FIRST` 索引与查询顺序不一致。后续 authenticated 诊断证明 page_size=1 p95 200ms、page_size=50 p95 1318ms、page_size=200 p95 4289ms，瓶颈随返回行数线性增长；因此进一步移除新写入 `raw_payload.normalized_payload` 复制，并把查询改为仅对 legacy 空 `payload` 行读取 raw fallback。raw payload release 复测后 50 行仍未闭合，继续定位到 `normalize_row_payloads` 每行重复读取 settings 构建 bank mapping；现改为每页构建一次 mapping 后逐行复用。
 - 文档影响：更新本实施记录和 `tests.md`；产品口径、状态机、API contract 和模块 boundary I/O 未变化。
-- 测试覆盖：`tests/test_postgres_migrations.py` 新增迁移清单和索引顺序断言，固定 `nulls last` 不被后续迁移遗漏；`tests/test_search_pending_sql_runtime.py` 覆盖 rows 查询不再无条件读取 `raw_payload`，以及新写入只保留 canonical `payload`、`raw_payload={}`。
-- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_expected_migration_files_are_present_and_ordered tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_pending_invoice_first_screen_sort_index_matches_query_order -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime -v`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 测试覆盖：`tests/test_postgres_migrations.py` 新增迁移清单和索引顺序断言，固定 `nulls last` 不被后续迁移遗漏；`tests/test_search_pending_sql_runtime.py` 覆盖 rows 查询不再无条件读取 `raw_payload`，以及新写入只保留 canonical `payload`、`raw_payload={}`；`tests/test_pending_invoice_service.py` 覆盖 rows normalization 每页只读取一次 bank mapping。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_expected_migration_files_are_present_and_ordered tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_pending_invoice_first_screen_sort_index_matches_query_order -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service -v`；`bash scripts/verify.sh docs`；`git diff --check`。
 - 未测风险：当前账号不能通过 deploy-control 执行自定义生产 EXPLAIN；authenticated HTTP SLO 已证明 read model fresh 且该 API 为唯一 1s 失败项，发布后仍需重新跑 authenticated HTTP SLO 证明实际 p95 收敛。
-- 后续事项：部署包含索引和 raw payload I/O 改动的 release 后，重新采集 pending invoices rows 和全核心 API SLO；若仍超过 1s，再在新增受控只读诊断入口或 root session 下拆分 PostgreSQL/serialization/auth 成本。
+- 后续事项：部署包含索引、raw payload I/O 和 per-page mapping 改动的 release 后，重新采集 pending invoices rows 和全核心 API SLO；若仍超过 1s，再在新增受控只读诊断入口或 root session 下拆分 PostgreSQL/serialization/auth 成本。
 
 ## 2026-06-25 - route-owner local closure audit
 

@@ -1,0 +1,39 @@
+active
+active
+fin-ops-worker@bank-account-balance.service active
+fin-ops-worker@bank-detail.service active
+fin-ops-worker@bank-flow-rule-batch.service active
+fin-ops-worker@cost-statistics.service active
+fin-ops-worker@cost-tax.service active
+fin-ops-worker@import.service active
+fin-ops-worker@invoice-lifecycle-secondary.service active
+fin-ops-worker@invoice-lifecycle.service active
+fin-ops-worker@invoice-usage-collection.service active
+fin-ops-worker@no-oa-bank-batch.service active
+fin-ops-worker@oa-sync.service active
+fin-ops-worker@pending-invoice.service active
+fin-ops-worker@search-pending.service active
+fin-ops-worker@search-secondary.service active
+fin-ops-worker@search-tertiary.service active
+fin-ops-worker@search.service active
+fin-ops-worker@tax-offset.service active
+fin-ops-worker@turnover-ledger.service active
+fin-ops-worker@workbench-matching.service active
+fin-ops-worker@workbench-relation.service active
+fin-ops-worker@workbench.service active
+ExecStart={ path=/opt/fin-ops/venv/bin/python ; argv[]=/opt/fin-ops/venv/bin/python -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001 ; ignore_errors=no ; start_time=[Thu 2026-07-02 16:24:43 CST] ; stop_time=[n/a] ; pid=1360792 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/etc/fin-ops/fin-ops.common.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.secrets.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.rabbitmq-monitoring.env (ignore_errors=yes)
+WorkingDirectory=/opt/fin-ops/releases/pscip-l4-pending-raw-017fcaeb84/src
+ExecStart={ path=/opt/fin-ops/rabbitmq-runtime/20260522-224452/venv/bin/python ; argv[]=/opt/fin-ops/rabbitmq-runtime/20260522-224452/venv/bin/python -m fin_ops_platform.app.rabbitmq_dispatcher --publisher-id rabbitmq-dispatcher-shadow-1 --batch-size 100 --lock-timeout-seconds 300 --retry-delay-seconds 60 --poll-interval-seconds ${RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS} ; ignore_errors=no ; start_time=[Thu 2026-07-02 16:24:47 CST] ; stop_time=[n/a] ; pid=1361036 ; code=(null) ; status=0/0 }
+EnvironmentFiles=/etc/fin-ops/fin-ops.common.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.secrets.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.rabbitmq-dispatcher.env (ignore_errors=yes)
+WorkingDirectory=/opt/fin-ops/releases/pscip-l4-pending-raw-017fcaeb84/src
+Environment=PYTHONPATH=/opt/fin-ops/releases/pscip-l4-pending-raw-017fcaeb84/src/backend/src FIN_OPS_DATA_DIR=/opt/fin-ops/data FIN_OPS_WORKER_ID=VM-0-6-opencloudos-workbench FIN_OPS_WORKER_INSTANCE=workbench FIN_OPS_WORKER_KIND=workbench FIN_OPS_WORKER_ARGS= FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS=300 FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS=60 FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS=30 FIN_OPS_WORKER_MAX_ATTEMPTS=5 FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS=0.25
+EnvironmentFiles=/etc/fin-ops/fin-ops.common.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.secrets.env (ignore_errors=no)
+EnvironmentFiles=/etc/fin-ops/fin-ops.rabbitmq-worker.env (ignore_errors=yes)
+EnvironmentFiles=/etc/fin-ops/fin-ops.worker.workbench.env (ignore_errors=yes)
+WorkingDirectory=/opt/fin-ops/releases/pscip-l4-pending-raw-017fcaeb84/src
