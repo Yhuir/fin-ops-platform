@@ -1451,3 +1451,13 @@
 - 改动：`RuntimeQueueRepository.enqueue_workbench_all_aggregate_refresh(...)` 使用稳定 dedupe key `workbench.read_model.refresh:workbench:all:aggregate`，合并 `parent_scope_keys`、保留最大 `source_version`、透传 `reason`；`WorkbenchReadModelRefreshService` 优先使用该 coalescing 入口；`PostgresWorkbenchRelationRepository` 的事务内 aggregate helper 改为同一稳定 dedupe 语义。
 - 约束：不取消 `workbench:all` parent aggregate，不把 parent aggregate 标为 fake fresh；只合并 pending aggregate-only wakeups，仍由 worker 基于 active shard 发布真实 parent generation。
 - 测试覆盖：`tests/test_runtime_queue.py`、`tests/test_workbench_relation_repository.py`、`tests/test_workbench_sql_runtime.py` 覆盖稳定 dedupe key、parent scope 合并、专用 enqueue 优先、无 legacy enqueue 方法时仍可排 aggregate，以及原有 aggregate-only fresh gate。
+
+## 2026-07-02 - PSCIP-L4 生产复核与高性能基线
+
+- 目标：按 GSD 主控 prompt 复核生产 PSCIP-L4/read model/性能状态，并据实标注是否满足“耗时短”的高性能目标。
+- 生产环境：验证过程中 active release 从 `HEAD-ef1a13cd-20260702120002` 切换到 `HEAD-0811061c-20260702121133`；当前证据以 `HEAD-0811061c-20260702121133` 为准。`fin-ops.service`、RabbitMQ dispatcher 和 required worker active；scope contract `ok=true`、`violation_count=0`、current uncovered outbox failure count `0`。
+- 5s read model 证据：当前 release grouped `read_model_slo_smoke --json --critical-only --apply --target-ms 5000 --timeout-seconds 120` 14/16 pass，`invoice_lifecycle:2026-01` enqueue-to-fresh `8090.588ms` 超过 5s，`tax_offset:2026-01` 在 grouped run timeout；随后 targeted rerun `invoice_lifecycle`、`tax_offset` 均 pass，max enqueue-to-fresh `2297.862ms`，handler max `1787.145ms`。
+- 收敛证据：targeted rerun 后 `/health/ready` ready，`production_runtime_guard.consistent=true`，failed jobs `0`，stale dirty scope `0`，required worker missing/stale/mismatch `0/0/0`，read model refresh failure rate `0.0`，RabbitMQ publish failed/unpublished backlog `0/0`。
+- 高性能基线：本轮没有完成 authenticated HTTP SLO；direct read model grouped run 暴露 `invoice_lifecycle` 和 `tax_offset` 长尾，不能用 targeted pass 隐藏。后续若以 1000ms 页面/API 目标推进，应从 authenticated `http_slo_probe` 与 app-health endpoint p95 选慢点，而不是先猜测优化。
+- 本地修复：银行明细 category persistence 由 broad `state_store` 改为显式 `BankTransactionCategoryStorePort`；银行明细 available-month scope provider 在 SQL runtime 下优先读 read model repository，禁止回落 import-service 全量扫描污染生产链路。
+- 未闭合：Admin Token 弹窗输入未返回，已中断；未打印、保存、传输 token。Authenticated HTTP/SSE/browser 和完整真实写操作矩阵仍缺当前 release 证据。不能声明当前 release full external PSCIP-L4 或高性能全域闭环。

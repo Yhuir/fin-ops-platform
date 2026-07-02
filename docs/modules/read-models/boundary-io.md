@@ -1,6 +1,6 @@
 # Read Model 模块边界与 I/O
 
-日期：2026-06-29
+日期：2026-07-02
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：所有当前 App Status read model 通过 manifest、scope policy、refresh gateway、runtime worker、freshness/status gate 和 operation barrier 形成可验证闭环。
 - 当前闭环：14 个当前 App Status read model 已完成 Read Model 模块化 PSCIP-L4，`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 以显式例外语义闭环。
-- 当前非阻塞风险：Search 曾有一次生产 grouped-run 高延迟样本，targeted rerun 通过；Workbench groups admin smoke 有一次 probe shape `400`，不是 stale-as-fresh 证据。
+- 当前非阻塞风险：Search 曾有一次生产 grouped-run 高延迟样本，targeted rerun 通过；Workbench groups admin smoke 有一次 probe shape `400`，不是 stale-as-fresh 证据。2026-07-02 生产 5s read model smoke 16/16 pass，但 1s 高性能目标 9/16 fail，性能专项仍 open；authenticated HTTP/SSE 和真实写操作矩阵还需要 Admin Token/受控样本证据。生产 write-operation audit 发现 Workbench relation confirm/withdraw 后 downstream fan-out 最慢 34.844s；本地已关闭 confirm/withdraw UoW 的 repository 隐式 fan-out，待部署后复测生产 SLO。
 - 旧代码删除条件：legacy/local compat path 仍可保留为明确隔离路径；删除前必须证明对应页面 API、worker、测试和生产脚本不再调用该路径。
 
 ## 闭环证据
@@ -17,7 +17,7 @@
 - 生产证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`
 - 远端闭环提交：`c771b894 docs: close read model production evidence`
 - 生产 runtime 证据：`/health/ready` ready，scope contract `ok=true`，`violation_count=0`，current uncovered outbox failure count `0`，dirty/outbox/readiness 收敛。
-- 生产 SLO：`read_model_slo_smoke --apply --critical-only --target-ms 5000` grouped run 14/15 pass；唯一 Search grouped miss targeted rerun `499.357ms` pass。
+- 生产 SLO：2026-06-28 `read_model_slo_smoke --apply --critical-only --target-ms 5000` grouped run 14/15 pass，唯一 Search grouped miss targeted rerun `499.357ms` pass。2026-07-02 release `HEAD-ef1a13cd-20260702120002` 复核 5s target 为 16/16 pass，max enqueue-to-fresh `3915.162ms`；同环境 1s target 为 7/16 pass、9/16 fail，不能声明高性能全域闭环。
 
 ## 职责边界
 
@@ -41,7 +41,9 @@
 | Scope key | manifest/scope policy | 必须符合注册 scope policy |
 | Query freshness request | API/read facade | 必须返回 fresh/stale/refreshing 或等价状态 |
 | Write response target envelope | 页面写 API/service | 会影响 read model 的成功写入必须返回或透出 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets` 和 `operation_barrier_targets`；缺少/未知前端 read model status 必须保持非 fresh |
+| Transactional refresh targets | `WorkbenchWriteUnitOfWork` 等事务 writer | 事务 writer 可以在业务事务内直接写 dirty scope/outbox，但必须使用等价 scope contract。Workbench confirm/withdraw 的 target source 是 `refresh_metadata.downstream_scope_types` 与 `pending_invoice_scope_keys`，并通过 scope policy registry normalize/validate/dedupe；禁止依赖 repository 隐式 SQL 扫描来补 downstream scope |
 | Projection source versions | Worker/projection/upstream read model | 必须包含 own projection schema version 和依赖 source_versions；行为变更必须 bump version |
+| Parent/shard freshness | Repository/API fresh gate | 父 scope 不能在子 scope dirty/missing dependency 时返回 fresh；`pending_invoice` 父 scope 必须聚合子月份 dirty status |
 
 ## 输出 I/O
 
@@ -50,6 +52,7 @@
 | Dirty scope/outbox event | PostgreSQL durable queue | `job.outbox_events` 与 `job.read_model_dirty_scopes` 是事实源 |
 | Fresh payload | 页面 API/Redis | Redis 只能缓存 fresh gate 后 payload |
 | Readiness/status | app status/operation barrier | 页面不能伪装 fresh |
+| Workbench relation fan-out | runtime queue / workers | confirm/withdraw UoW 显式输出 `workbench`、`workbench_relation` 和 metadata 声明的 downstream scopes。`PostgresWorkbenchRelationRepository(..., enqueue_refreshes=False)` 是该主链路的持久化-only adapter，不能写 hidden outbox |
 | Source-version proof | Scope rows / API fresh gate | `source_versions_unchanged` 只能在 own schema version 与依赖版本都匹配时跳过重建 |
 | Queue history retention | Runtime worker ops | 只回收 `done` 历史，不改变 pending/processing/failed/dead-lettered freshness 事实源 |
 
@@ -68,7 +71,7 @@
 | --- | --- |
 | Gateway/manifest | `read_model_query_gateway.py`、`read_model_refresh_gateway.py`、`read_model_manifest.py` |
 | Scope/freshness | `read_model_scope_policy.py`、`read_model_scope_contract.py`、`read_model_freshness.py`、`operation_freshness_barrier.py` |
-| Write target envelope | `read_model_write_targets.py` 与页面/service 本地 target mapper，当前已覆盖 batch/no-OA/OA pending/pending invoice/turnover、bank-detail、input-invoice-usage OA reverse、output-invoice-collections、tax-offset plan/certified import、workbench relation action、general/file import、ETC import job completion、OA manual import/create/refresh/remove |
+| Write target envelope | `read_model_write_targets.py` 与页面/service 本地 target mapper，当前已覆盖 batch/no-OA/OA pending/pending invoice/turnover、bank-detail、input-invoice-usage OA reverse、output-invoice-collections、tax-offset plan/certified import、workbench relation action、general/file import、ETC import job completion、OA manual import/create/refresh/remove；pending_invoice import fan-out 使用 `pending_invoice_scope_planner.py` |
 | Repository | `postgres_repositories/read_models.py`、`postgres_repositories/read_model_scope_contracts.py` |
 | Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py` |
 | Frontend | `web/src/features/operationBarrier/api.ts` |
@@ -88,12 +91,15 @@
 - Manifest/scope：`tests/test_read_model_manifest.py`、`tests/test_read_model_scope_contract.py`。
 - Gateway/freshness：`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_query_gateway.py`、`tests/test_read_model_freshness.py`。
 - Write target envelope：`tests/test_read_model_write_targets.py`，以及 batch/no-OA/OA pending/pending invoice/turnover、bank-detail、input-invoice-usage OA reverse、output-invoice-collections、tax-offset、workbench relation action、general/file import、ETC import job completion、OA manual import/create/refresh/remove 的 API/service/page tests。
+- Transactional writer boundary：`tests/test_workbench_uow_contract.py`、`tests/test_workbench_relation_repository.py::test_relation_repository_can_persist_without_refresh_fanout_for_uow_boundary`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_uow_pair_relation_repository_disables_repository_fanout`。
 
 ## 维护风险和删除条件
 
 - 新增 read model 必须同时更新 manifest、scope policy、registry、tests、docs。
 - 删除旧 read path 前必须证明所有页面 API 和 worker 均通过新 freshness/status 边界。
 - Projection 行为、索引、跨 scope 分发或上游依赖合同变化时必须 bump projection schema version；禁止只改 SQL/service 逻辑却复用旧 `source_versions`。
+- 事务 writer 若直接写 dirty scope/outbox，必须有等价 scope contract 测试。Workbench confirm/withdraw 不能恢复 repository 内部 hidden fan-out；新增 downstream 只能走 UoW target planner 或明确 gateway/lifecycle owner。
+- `pending_invoice` 的 `filter=all` freshness dependency 月份必须来自 canonical `app.bank_transactions`，父 scope refresh_status 必须上卷子月份 dirty scope，防止新导入事实源已增加但页面仍显示旧 rows 且标记 fresh。
 - `workbench_relation` 的 `rows` 索引是 scope 内唯一，不是 row 全局唯一；跨月 relation 必须在每个受影响 scope 写入所有成员 row 索引，禁止恢复旧的 `(tenant_id, row_id)` 覆盖模型。
 - legacy compat path 删除不是当前 PSCIP-L4 blocker；它必须继续保持生产 fail-closed、不能绕过 fresh gate，也不能新增未登记 dirty/outbox/readiness 写入。
 - Search 高行数 refresh latency 仍需在后续生产 evidence sweep 中观察；单次高延迟不是当前 stale-as-fresh 或 readiness blocker。

@@ -85,6 +85,7 @@
 - Operation barrier：直接读取 `bank_flow_rule_batch` readiness/outbox/worker facts，不再映射到 `no_oa_bank_batch`。
 - 新 relation 写入 `relation_mode=bank_flow_rule_batch`，批次 payload/read model row 也必须携带 `relation_mode=bank_flow_rule_batch`。列表 API 查询 submitted/unsubmitted/withdrawn 时必须通过 `list_bank_flow_rule_batch_rows` repository port 过滤，旧 no-OA payload 缺失该字段时只按 `no_oa_bank_batch` 处理。
 - PostgreSQL 运行时批次存储和 read model 查询使用 `app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events`、`read_model.bank_flow_rule_batch_rows`；迁移 `0082_bank_flow_rule_batch_storage.sql` 从历史 no-OA 物理表按 `relation_mode=bank_flow_rule_batch` 回填，但运行时不再把 no-OA 表作为 bank-flow source of truth。no-OA legacy 仍使用 `app.no_oa_bank_batches`、`app.no_oa_bank_batch_events`、`read_model.no_oa_bank_batch_rows`。
+- 持久化 I/O 使用 `PostgresWorkbenchRepository.save_bank_flow_rule_batches*` 命名入口，在同一事务内只删除/写入 bank-flow 物理表，并使用批量 values upsert 写 `app.bank_flow_rule_batches` 与 `read_model.bank_flow_rule_batch_rows`；禁止通过 no-OA persistence port、no-OA 物理表或逐行 projection fallback 写入新模块。
 - Read model refresh 从 active relation 或已提交批次 relation fact 回灌 submitted 批次时必须按调用方目标 relation mode 判定；`bank_flow_rule_batch` 刷新不能复用 no-OA event/scope/producer，也不能把 bank-flow 批次显示到 legacy no-OA 列表。
 - 服务内由 submitted batch 反推 relation fact 时，必须继承该 batch 的 `relation_mode`，并且只为当前 refresh `relation_mode` 生成 fact；禁止再把所有 submitted batch 硬编码为 `no_oa_bank_batch`。旧 no-OA legacy migration/repair 只允许处理 no-OA/明确 legacy relation，不得处理 `bank_flow_rule_batch`。
 - 关联台按 relation metadata 判定 open/paired。
@@ -92,6 +93,7 @@
 ## 性能与刷新 I/O
 
 - 列表 API 优先读取 `BankFlowRuleBatchReadModelRepositoryPort.list_bank_flow_rule_batch_rows(...)`；read model missing/stale 时返回非 fresh 状态并 enqueue `bank_flow_rule_batch` refresh，不能伪装空态。
+- Worker 持久化写入必须保持 scoped incremental I/O；同一 scope 的多个 batch rows 应在 repository 边界批量 upsert，避免逐 batch round-trip 放大 worker handler 时间。
 - `detail_payload(batch_id)` 和 `withdraw_batch(batch_id)` 先读取当前 bank-flow batch storage；只有 batch 缺失时才 fallback `scope_key=all` 重建 runtime snapshot。
 - `reset-submitted` 不做前置 `all` refresh；撤回后只同步刷新受影响月份 scope，没有月份时才 fallback `all`。
 - Worker refresh 使用 `bank_flow_rule_batch_source_versions_summary(...)` 判断 scope source versions 是否 unchanged；能证明 unchanged 时完成 dirty scope 并跳过批次重建和 snapshot 发布。

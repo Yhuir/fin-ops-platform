@@ -185,12 +185,6 @@ class NoOaBankBatchApplicationService:
         }
         refresh_scope_keys = self._refresh_scope_keys_for_filters(filters)
         refresh_metadata = self._read_model_refresh_metadata_for_relation_mode(relation_mode)
-        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE and self._no_oa_bank_batch_read_model_repository is None:
-            self.refresh_batches(
-                apply_relation_repairs=False,
-                scope_key=refresh_scope_keys[0] if len(refresh_scope_keys) == 1 else "all",
-                relation_mode=relation_mode,
-            )
         list_read_model_batches = getattr(
             self._no_oa_bank_batch_read_model_repository,
             self._read_model_list_method_for_relation_mode(relation_mode),
@@ -250,17 +244,6 @@ class NoOaBankBatchApplicationService:
                     **self._pagination_payload(read_model_public_batches, pagination),
                     "read_model_status": "fresh",
                 }
-        summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
-        read_batches = self._no_oa_bank_batch_service.list_batches(filters)
-        if summary_batches or read_batches:
-            summary_public_batches = self._public_batches(summary_batches)
-            read_public_batches = self._public_batches(read_batches)
-            return {
-                "summary": self.summary(summary_public_batches),
-                "batches": self.resolve_labels(self._page_items(read_public_batches, pagination)),
-                **self._pagination_payload(read_public_batches, pagination),
-                "read_model_status": "fresh",
-            }
         refresh_reason = self._read_model_refresh_reason_for_relation_mode(
             relation_mode,
             fallback_reason="api_no_oa_read_model_unavailable",

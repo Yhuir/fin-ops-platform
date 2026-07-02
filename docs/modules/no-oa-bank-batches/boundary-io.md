@@ -7,7 +7,7 @@
 - 状态：legacy partial
 - 当前边界可信度：high
 - 目标边界：本模块只维护历史 no-OA 批次事实和迁移前兼容路径；新通用流水规则批量处理归 `bank-flow-rule-batches`。
-- 当前缺口：旧 no-OA lifecycle repair、legacy relation migration、workbench display policy、legacy API 和 `selected_tag_codes` 写路径仍需迁移或删除；当前 Browser 页面与前端 feature 已迁出本模块。
+- 当前缺口：旧 no-OA lifecycle repair、legacy relation migration、workbench display policy、legacy API 和 `selected_tag_codes` 写路径仍需迁移或删除；当前 Browser 页面与前端 feature 已迁出本模块。列表 GET 主链路已删除旧 snapshot fallback，缺少 SQL read model repository 时只返回 non-fresh/unavailable 并 enqueue。
 - 旧代码删除条件：历史 submitted no-OA rebaseline dry-run/apply 完成并验收，legacy API 与 `selected_tag_codes` 写路径不可达；`bank_flow_rule_batch` 已有独立逻辑 read model/worker，后续只剩物理表拆分和 no-OA legacy 退休。
 
 ## 职责边界
@@ -53,6 +53,8 @@
 - Worker：`no-oa-bank-batch`
 - Query owner：`NoOaBankBatchApplicationService`
 - Repository owner：`NoOaBankBatchReadModelRepositoryPort`
+- 查询 fail-closed：`NoOaBankBatchApplicationService.list_batches_payload(...)` 只能通过 `NoOaBankBatchReadModelRepositoryPort.list_no_oa_bank_batch_rows(...)` 读取列表；missing/stale/unavailable 返回非 fresh 状态并 enqueue，禁止回退 `NoOaBankBatchService` 旧 snapshot 当作 fresh 列表。
+- 持久化 I/O：`PostgresWorkbenchRepository.save_no_oa_bank_batches*` 在同一事务内按 scope 删除目标 rows/events/batches 后，使用批量 values upsert 写 `app.no_oa_bank_batches` 和 `read_model.no_oa_bank_batch_rows`；事件替换保持在 no-OA event 表内。
 - 新通用页面使用独立逻辑 read model `bank_flow_rule_batch`、worker `bank-flow-rule-batch` 和 event `bank_flow_rule_batch.read_model.refresh`；`no_oa_bank_batch` 不再承接新业务。
 - 共享物理表期承载 `no_oa_bank_batch` 与 `bank_flow_rule_batch` 两种 relation mode。no-OA refresh、snapshot merge 和 Postgres 持久化删除必须把 `relation_mode=no_oa_bank_batch` 作为边界；month scope 或 `all` scope rebuild 不得删除或覆盖同 scope 的 `bank_flow_rule_batch` 批次。
 

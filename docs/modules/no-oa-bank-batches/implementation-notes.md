@@ -726,3 +726,21 @@ git diff --check
 - UI 决策：抽屉使用紧凑表格 grid，列为 `收支类型`、`流水主标签`、`流水子标签`、`OA`、`发票`；不提供新增/编辑/删除标签、不提供旧全选/清空按钮。
 - 测试覆盖：`web/src/test/BankFlowRuleBatchApi.test.ts`、`web/src/test/BankFlowRuleBatchPage.test.tsx`、`tests/test_app_settings_service.py`、`tests/test_no_oa_bank_batch_tag_selection_api.py`、`tests/test_workbench_candidate_grouping.py`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_candidate_grouping tests.test_app_settings_service tests.test_no_oa_bank_batch_tag_selection_api -v`、`npm test -- --run BankFlowRuleBatchApi.test.ts BankFlowRuleBatchPage.test.tsx`。
+
+## 2026-07-02 - no-OA 列表旧 fallback 删除与批量持久化
+
+- 目标：收口 `NoOaBankBatchApplicationService.list_batches_payload(...)` 的查询边界，禁止 SQL read model repository 缺失时回退读取 `NoOaBankBatchService` 旧 snapshot 并返回 fresh；同时降低 no-OA projection 持久化 round-trip。
+- 决策：
+  - 列表 GET 只通过 `NoOaBankBatchReadModelRepositoryPort.list_no_oa_bank_batch_rows(...)` 读取 freshness-gated rows。
+  - read model missing/stale/unavailable 时返回非 fresh 状态并 enqueue 对应 scope，不能同步 rebuild 或读取旧 snapshot。
+  - `PostgresWorkbenchRepository.save_no_oa_bank_batches*` 在事务内保留删除顺序和 event 替换，但 app rows 与 read model rows 改为批量 values upsert。
+- 测试覆盖：
+  - `test_list_batches_without_read_model_repository_does_not_read_snapshot_fallback`
+  - `test_no_oa_bank_batch_save_bulk_upserts_app_and_read_model_rows`
+  - no-OA/bank-flow repository boundary 回归和 no-OA workbench integration readiness 回归。
+- 验证命令：
+  - `PYTHONPATH=backend/src python3 -m pytest tests/test_postgres_repositories_boundaries.py tests/test_no_oa_bank_batch_application_service.py tests/test_no_oa_bank_batch_workbench_integration.py tests/test_bank_flow_rule_batch_application_service.py -q`
+  - `PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/postgres_repositories/workbench.py backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py tests/test_postgres_repositories_boundaries.py tests/test_no_oa_bank_batch_application_service.py tests/test_no_oa_bank_batch_workbench_integration.py`
+  - `PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_read_model_services_do_not_default_source_version_contract_to_empty tests/test_read_model_architecture_guards.py::ReadModelArchitectureGuardTests::test_direct_source_version_mismatch_calls_require_expected_contract -q`
+- 生产证据：2026-07-02 生产分段 profiling 显示 2026-04 no-OA scope 在 source versions unchanged 时业务阶段均为毫秒级；随后 `read_model_slo_smoke --read-model-key no_oa_bank_batch --target-ms 5000` pass，critical 5s 全量 smoke 16/16 pass。
+- 剩余风险：本地优化尚未部署到生产；1s 高性能目标下 no-OA 单次 enqueue-to-fresh `1216.693ms` 仍超过 1000ms，后续需继续压缩 worker poll/handler/queue 长尾。

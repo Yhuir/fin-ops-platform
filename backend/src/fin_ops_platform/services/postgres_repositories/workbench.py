@@ -32,6 +32,22 @@ def _no_oa_batch_relation_mode(payload: Any) -> str:
     return text(payload.get("relation_mode")) or NO_OA_BANK_BATCH_RELATION_MODE
 
 
+def _execute_batch_insert_values(connection: Any, sql: str, params_seq: list[tuple[Any, ...]]) -> int:
+    rows = list(params_seq or [])
+    if not rows:
+        return 0
+    execute_many_values = getattr(connection, "execute_many_values", None)
+    if callable(execute_many_values):
+        return int(execute_many_values(sql, rows) or 0)
+    execute_many = getattr(connection, "execute_many", None)
+    if callable(execute_many):
+        return int(execute_many(sql, rows) or 0)
+    affected = 0
+    for params in rows:
+        affected += int(connection.execute(sql, params) or 0)
+    return affected
+
+
 class PostgresWorkbenchRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
@@ -407,181 +423,159 @@ class PostgresWorkbenchRepository:
         connection: Any,
         batch_items: list[tuple[str, dict[str, Any]]],
     ) -> None:
-        for batch_id, payload in batch_items:
-            connection.execute(
-                """
-                insert into app.no_oa_bank_batches(
-                    batch_id, status, status_bucket, version, scope_month, account_key,
-                    total_amount, bank_transaction_ids, source_versions, raw_payload
-                )
-                values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s)
-                on conflict (batch_id) do update set
-                    status = excluded.status,
-                    status_bucket = excluded.status_bucket,
-                    version = excluded.version,
-                    scope_month = excluded.scope_month,
-                    account_key = excluded.account_key,
-                    total_amount = excluded.total_amount,
-                    bank_transaction_ids = excluded.bank_transaction_ids,
-                    source_versions = excluded.source_versions,
-                    raw_payload = excluded.raw_payload,
-                    updated_at = now()
-                """,
-                (
-                    batch_id,
-                    text(payload.get("status") or "draft"),
-                    text(payload.get("status_bucket")),
-                    int_value(payload.get("version"), 1),
-                    month_start(payload.get("scope_month") or payload.get("month")),
-                    text(payload.get("account_key")),
-                    decimal_text(payload.get("total_amount") or payload.get("amount") or 0),
-                    text_list(payload.get("bank_transaction_ids") or payload.get("row_ids")),
-                    jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
-                    jsonb({"normalized_payload": payload}),
-                ),
+        _execute_batch_insert_values(
+            connection,
+            """
+            insert into app.no_oa_bank_batches(
+                batch_id, status, status_bucket, version, scope_month, account_key,
+                total_amount, bank_transaction_ids, source_versions, raw_payload
             )
-            row_ids = text_list(payload.get("bank_transaction_ids") or payload.get("row_ids"))
-            connection.execute(
-                """
-                insert into read_model.no_oa_bank_batch_rows(
-                    batch_id, scope_month, batch_type, status, status_bucket, account_key,
-                    total_amount, row_count, submitted_at, withdrawn_at, source_versions,
-                    generated_at, cache_status, payload, raw_payload
-                )
-                values (
-                    %s, %s::date, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz,
-                    %s, coalesce(%s::timestamptz, now()), %s, %s, %s
-                )
-                on conflict (batch_id) do update set
-                    scope_month = excluded.scope_month,
-                    batch_type = excluded.batch_type,
-                    status = excluded.status,
-                    status_bucket = excluded.status_bucket,
-                    account_key = excluded.account_key,
-                    total_amount = excluded.total_amount,
-                    row_count = excluded.row_count,
-                    submitted_at = excluded.submitted_at,
-                    withdrawn_at = excluded.withdrawn_at,
-                    source_versions = excluded.source_versions,
-                    generated_at = excluded.generated_at,
-                    cache_status = excluded.cache_status,
-                    payload = excluded.payload,
-                    raw_payload = excluded.raw_payload,
-                    updated_at = now()
-                """,
-                (
-                    batch_id,
-                    month_start(payload.get("scope_month") or payload.get("month")),
-                    text(payload.get("batch_type") or payload.get("type")),
-                    text(payload.get("status") or "draft") or "draft",
-                    text(payload.get("status_bucket")),
-                    text(payload.get("account_key")),
-                    decimal_text(payload.get("total_amount") or payload.get("amount") or 0) or "0",
-                    int_value(payload.get("row_count"), len(row_ids)),
-                    text(payload.get("submitted_at")),
-                    text(payload.get("withdrawn_at")),
-                    jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
-                    text(payload.get("updated_at") or payload.get("generated_at")),
-                    text(payload.get("cache_status") or "fresh") or "fresh",
-                    jsonb(serialize_value(payload)),
-                    jsonb({"normalized_payload": serialize_value(payload)}),
-                ),
+            values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s)
+            on conflict (batch_id) do update set
+                status = excluded.status,
+                status_bucket = excluded.status_bucket,
+                version = excluded.version,
+                scope_month = excluded.scope_month,
+                account_key = excluded.account_key,
+                total_amount = excluded.total_amount,
+                bank_transaction_ids = excluded.bank_transaction_ids,
+                source_versions = excluded.source_versions,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            [self._bank_batch_app_row_params(batch_id, payload) for batch_id, payload in batch_items],
+        )
+        _execute_batch_insert_values(
+            connection,
+            """
+            insert into read_model.no_oa_bank_batch_rows(
+                batch_id, scope_month, batch_type, status, status_bucket, account_key,
+                total_amount, row_count, submitted_at, withdrawn_at, source_versions,
+                generated_at, cache_status, payload, raw_payload
             )
+            values (
+                %s, %s::date, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz,
+                %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+            )
+            on conflict (batch_id) do update set
+                scope_month = excluded.scope_month,
+                batch_type = excluded.batch_type,
+                status = excluded.status,
+                status_bucket = excluded.status_bucket,
+                account_key = excluded.account_key,
+                total_amount = excluded.total_amount,
+                row_count = excluded.row_count,
+                submitted_at = excluded.submitted_at,
+                withdrawn_at = excluded.withdrawn_at,
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            [self._bank_batch_read_model_row_params(batch_id, payload) for batch_id, payload in batch_items],
+        )
 
     def _upsert_bank_flow_rule_batch_items(
         self,
         connection: Any,
         batch_items: list[tuple[str, dict[str, Any]]],
     ) -> None:
-        for batch_id, payload in batch_items:
-            normalized_payload = {**payload, "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE}
-            connection.execute(
-                """
-                insert into app.bank_flow_rule_batches(
-                    batch_id, status, status_bucket, version, scope_month, account_key,
-                    total_amount, bank_transaction_ids, source_versions, raw_payload
-                )
-                values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s)
-                on conflict (batch_id) do update set
-                    status = excluded.status,
-                    status_bucket = excluded.status_bucket,
-                    version = excluded.version,
-                    scope_month = excluded.scope_month,
-                    account_key = excluded.account_key,
-                    total_amount = excluded.total_amount,
-                    bank_transaction_ids = excluded.bank_transaction_ids,
-                    source_versions = excluded.source_versions,
-                    raw_payload = excluded.raw_payload,
-                    updated_at = now()
-                """,
-                (
-                    batch_id,
-                    text(normalized_payload.get("status") or "draft"),
-                    text(normalized_payload.get("status_bucket")),
-                    int_value(normalized_payload.get("version"), 1),
-                    month_start(normalized_payload.get("scope_month") or normalized_payload.get("month")),
-                    text(normalized_payload.get("account_key")),
-                    decimal_text(normalized_payload.get("total_amount") or normalized_payload.get("amount") or 0),
-                    text_list(normalized_payload.get("bank_transaction_ids") or normalized_payload.get("row_ids")),
-                    jsonb(
-                        normalized_payload.get("source_versions")
-                        if isinstance(normalized_payload.get("source_versions"), dict)
-                        else {}
-                    ),
-                    jsonb({"normalized_payload": normalized_payload}),
-                ),
+        normalized_items = [
+            (batch_id, {**payload, "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE})
+            for batch_id, payload in batch_items
+        ]
+        _execute_batch_insert_values(
+            connection,
+            """
+            insert into app.bank_flow_rule_batches(
+                batch_id, status, status_bucket, version, scope_month, account_key,
+                total_amount, bank_transaction_ids, source_versions, raw_payload
             )
-            row_ids = text_list(normalized_payload.get("bank_transaction_ids") or normalized_payload.get("row_ids"))
-            connection.execute(
-                """
-                insert into read_model.bank_flow_rule_batch_rows(
-                    batch_id, scope_month, batch_type, status, status_bucket, account_key,
-                    total_amount, row_count, submitted_at, withdrawn_at, source_versions,
-                    generated_at, cache_status, payload, raw_payload
-                )
-                values (
-                    %s, %s::date, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz,
-                    %s, coalesce(%s::timestamptz, now()), %s, %s, %s
-                )
-                on conflict (batch_id) do update set
-                    scope_month = excluded.scope_month,
-                    batch_type = excluded.batch_type,
-                    status = excluded.status,
-                    status_bucket = excluded.status_bucket,
-                    account_key = excluded.account_key,
-                    total_amount = excluded.total_amount,
-                    row_count = excluded.row_count,
-                    submitted_at = excluded.submitted_at,
-                    withdrawn_at = excluded.withdrawn_at,
-                    source_versions = excluded.source_versions,
-                    generated_at = excluded.generated_at,
-                    cache_status = excluded.cache_status,
-                    payload = excluded.payload,
-                    raw_payload = excluded.raw_payload,
-                    updated_at = now()
-                """,
-                (
-                    batch_id,
-                    month_start(normalized_payload.get("scope_month") or normalized_payload.get("month")),
-                    text(normalized_payload.get("batch_type") or normalized_payload.get("type")),
-                    text(normalized_payload.get("status") or "draft") or "draft",
-                    text(normalized_payload.get("status_bucket")),
-                    text(normalized_payload.get("account_key")),
-                    decimal_text(normalized_payload.get("total_amount") or normalized_payload.get("amount") or 0) or "0",
-                    int_value(normalized_payload.get("row_count"), len(row_ids)),
-                    text(normalized_payload.get("submitted_at")),
-                    text(normalized_payload.get("withdrawn_at")),
-                    jsonb(
-                        normalized_payload.get("source_versions")
-                        if isinstance(normalized_payload.get("source_versions"), dict)
-                        else {}
-                    ),
-                    text(normalized_payload.get("updated_at") or normalized_payload.get("generated_at")),
-                    text(normalized_payload.get("cache_status") or "fresh") or "fresh",
-                    jsonb(serialize_value(normalized_payload)),
-                    jsonb({"normalized_payload": serialize_value(normalized_payload)}),
-                ),
+            values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s)
+            on conflict (batch_id) do update set
+                status = excluded.status,
+                status_bucket = excluded.status_bucket,
+                version = excluded.version,
+                scope_month = excluded.scope_month,
+                account_key = excluded.account_key,
+                total_amount = excluded.total_amount,
+                bank_transaction_ids = excluded.bank_transaction_ids,
+                source_versions = excluded.source_versions,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            [self._bank_batch_app_row_params(batch_id, payload) for batch_id, payload in normalized_items],
+        )
+        _execute_batch_insert_values(
+            connection,
+            """
+            insert into read_model.bank_flow_rule_batch_rows(
+                batch_id, scope_month, batch_type, status, status_bucket, account_key,
+                total_amount, row_count, submitted_at, withdrawn_at, source_versions,
+                generated_at, cache_status, payload, raw_payload
             )
+            values (
+                %s, %s::date, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz,
+                %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+            )
+            on conflict (batch_id) do update set
+                scope_month = excluded.scope_month,
+                batch_type = excluded.batch_type,
+                status = excluded.status,
+                status_bucket = excluded.status_bucket,
+                account_key = excluded.account_key,
+                total_amount = excluded.total_amount,
+                row_count = excluded.row_count,
+                submitted_at = excluded.submitted_at,
+                withdrawn_at = excluded.withdrawn_at,
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            [self._bank_batch_read_model_row_params(batch_id, payload) for batch_id, payload in normalized_items],
+        )
+
+    @staticmethod
+    def _bank_batch_app_row_params(batch_id: str, payload: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            batch_id,
+            text(payload.get("status") or "draft"),
+            text(payload.get("status_bucket")),
+            int_value(payload.get("version"), 1),
+            month_start(payload.get("scope_month") or payload.get("month")),
+            text(payload.get("account_key")),
+            decimal_text(payload.get("total_amount") or payload.get("amount") or 0),
+            text_list(payload.get("bank_transaction_ids") or payload.get("row_ids")),
+            jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
+            jsonb({"normalized_payload": payload}),
+        )
+
+    @staticmethod
+    def _bank_batch_read_model_row_params(batch_id: str, payload: dict[str, Any]) -> tuple[Any, ...]:
+        row_ids = text_list(payload.get("bank_transaction_ids") or payload.get("row_ids"))
+        serialized_payload = serialize_value(payload)
+        return (
+            batch_id,
+            month_start(payload.get("scope_month") or payload.get("month")),
+            text(payload.get("batch_type") or payload.get("type")),
+            text(payload.get("status") or "draft") or "draft",
+            text(payload.get("status_bucket")),
+            text(payload.get("account_key")),
+            decimal_text(payload.get("total_amount") or payload.get("amount") or 0) or "0",
+            int_value(payload.get("row_count"), len(row_ids)),
+            text(payload.get("submitted_at")),
+            text(payload.get("withdrawn_at")),
+            jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
+            text(payload.get("updated_at") or payload.get("generated_at")),
+            text(payload.get("cache_status") or "fresh") or "fresh",
+            jsonb(serialized_payload),
+            jsonb({"normalized_payload": serialized_payload}),
+        )
 
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         rows = self._connection.fetch_all(
