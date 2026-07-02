@@ -1,0 +1,140 @@
+{
+  "critical_only": false,
+  "generated_at": "2026-07-02T08:33:54.561345+00:00",
+  "missing_read_model_keys": [],
+  "planned_scope_count": 16,
+  "planned_scopes": [
+    {
+      "read_model_key": "workbench",
+      "row_count": 3,
+      "scope_key": "2025-04",
+      "scope_type": "workbench",
+      "source": "active_generation",
+      "updated_at": "2026-07-02 15:43:47.424838+08"
+    },
+    {
+      "read_model_key": "workbench_relation",
+      "row_count": 254,
+      "scope_key": "2026-02",
+      "scope_type": "workbench_relation",
+      "source": "readiness",
+      "updated_at": "2026-07-02 14:23:50.687476+08"
+    },
+    {
+      "read_model_key": "bank_detail",
+      "row_count": 111,
+      "scope_key": "2026-03",
+      "scope_type": "bank_detail",
+      "source": "readiness",
+      "updated_at": "2026-07-02 14:31:47.876942+08"
+    },
+    {
+      "read_model_key": "bank_account_balance",
+      "row_count": 6,
+      "scope_key": "all",
+      "scope_type": "bank_account_balance",
+      "source": "readiness",
+      "updated_at": "2026-07-02 15:43:20.910373+08"
+    },
+    {
+      "read_model_key": "pending_invoice",
+      "row_count": 10,
+      "scope_key": "income:all:2026-01",
+      "scope_type": "pending_invoice",
+      "source": "readiness",
+      "updated_at": "2026-07-02 16:18:55.449121+08"
+    },
+    {
+      "read_model_key": "pending_invoice",
+      "row_count": null,
+      "scope_key": "expense:all",
+      "scope_type": "pending_invoice",
+      "source": "page_first_screen_scope",
+      "updated_at": null
+    },
+    {
+      "read_model_key": "search",
+      "row_count": 359,
+      "scope_key": "2026-06",
+      "scope_type": "search",
+      "source": "readiness",
+      "updated_at": "2026-07-02 15:44:00.268465+08"
+    },
+    {
+      "read_model_key": "invoice_lifecycle",
+      "row_count": 98,
+      "scope_key": "2026-02",
+      "scope_type": "invoice_lifecycle",
+      "source": "readiness",
+      "updated_at": "2026-07-02 15:43:28.769515+08"
+    },
+    {
+      "read_model_key": "input_invoice_usage",
+      "row_count": 76,
+      "scope_key": "2026-02",
+      "scope_type": "input_invoice_usage",
+      "source": "readiness",
+      "updated_at": "2026-07-02 14:24:11.003177+08"
+    },
+    {
+      "read_model_key": "output_invoice_collection",
+      "row_count": 1,
+      "scope_key": "2026-01",
+      "scope_type": "output_invoice_collection",
+      "source": "readiness",
+      "updated_at": "2026-07-02 14:32:18.569908+08"
+    },
+    {
+      "read_model_key": "oa_pending_payment",
+      "row_count": 38,
+      "scope_key": "2026-06",
+      "scope_type": "oa_pending_payment",
+      "source": "readiness",
+      "updated_at": "2026-07-02 15:18:13.951603+08"
+    },
+    {
+      "read_model_key": "cost_statistics",
+      "row_count": 23,
+      "scope_key": "active:2026-03",
+      "scope_type": "cost_statistics",
+      "source": "readiness",
+      "updated_at": "2026-07-02 14:32:19.925858+08"
+    },
+    {
+      "read_model_key": "tax_offset",
+      "row_count": 121,
+      "scope_key": "2026-01",
+      "scope_type": "tax_offset",
+      "source": "readiness",
+      "updated_at": "2026-07-02 15:43:32.476438+08"
+    },
+    {
+      "read_model_key": "no_oa_bank_batch",
+      "row_count": 197,
+      "scope_key": "2026-04",
+      "scope_type": "no_oa_bank_batch",
+      "source": "readiness",
+      "updated_at": "2026-07-02 15:43:33.379583+08"
+    },
+    {
+      "read_model_key": "bank_flow_rule_batch",
+      "row_count": 100,
+      "scope_key": "2026-02",
+      "scope_type": "bank_flow_rule_batch",
+      "source": "readiness",
+      "updated_at": "2026-07-02 15:43:34.723472+08"
+    },
+    {
+      "read_model_key": "turnover_ledger",
+      "row_count": 20,
+      "scope_key": "all",
+      "scope_type": "turnover_ledger",
+      "source": "readiness",
+      "updated_at": "2026-07-02 15:43:37.669165+08"
+    }
+  ],
+  "status": "dry_run",
+  "target_ms": 1000.0,
+  "tenant_id": "default",
+  "version": 1
+}

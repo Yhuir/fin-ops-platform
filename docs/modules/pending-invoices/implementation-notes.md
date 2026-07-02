@@ -47,8 +47,9 @@
 - 文档影响：更新本实施记录和 `tests.md`；产品口径、状态机、API contract 和模块 boundary I/O 未变化。
 - 测试覆盖：`tests/test_postgres_migrations.py` 新增迁移清单和索引顺序断言，固定 `nulls last` 不被后续迁移遗漏；`tests/test_search_pending_sql_runtime.py` 覆盖 rows 查询不再无条件读取 `raw_payload`，以及新写入只保留 canonical `payload`、`raw_payload={}`；`tests/test_pending_invoice_service.py` 覆盖 rows normalization 每页只读取一次 bank mapping。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_expected_migration_files_are_present_and_ordered tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_pending_invoice_first_screen_sort_index_matches_query_order -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service -v`；`bash scripts/verify.sh docs`；`git diff --check`。
-- 未测风险：当前账号不能通过 deploy-control 执行自定义生产 EXPLAIN；authenticated HTTP SLO 已证明 read model fresh 且该 API 为唯一 1s 失败项，发布后仍需重新跑 authenticated HTTP SLO 证明实际 p95 收敛。
-- 后续事项：部署包含索引、raw payload I/O 和 per-page mapping 改动的 release 后，重新采集 pending invoices rows 和全核心 API SLO；若仍超过 1s，再在新增受控只读诊断入口或 root session 下拆分 PostgreSQL/serialization/auth 成本。
+- 生产验证：release `pscip-l4-pending-normalize-f9220f5bb6` 激活后，authenticated pending diagnostic SLO `6/6` 通过，最高 p95 `420.978ms`，`pending_rows_expense_page_size_50` p95 `339.341ms`，`page_size=200` p95 `420.978ms`，全部 `read_model_status=fresh` 且 `refresh_enqueued_count=0`。全核心 API SLO `12/12` 通过，最高 p95 `876.645ms`，`pending_invoices_rows` p95 `307.310ms`。
+- 未测风险：当前账号不能通过 deploy-control 执行自定义生产 EXPLAIN；本次已用 authenticated HTTP SLO 证明 rows 首屏热路径在生产 fresh read model 下闭合。真实 confirm/withdraw/no-OA withdraw 写操作链路仍需要受控业务样本或明确批准的可回滚演练，不能用只读探针替代。
+- 后续事项：若 rows API 再次超过 1s，优先检查是否违反当前三条热路径合同：`nulls last` 索引、canonical `payload` 单写单读、页级 `bank_account_mappings` 复用；不要回退到同步扫描、伪缓存或绕过 freshness gate。
 
 ## 2026-06-25 - route-owner local closure audit
 

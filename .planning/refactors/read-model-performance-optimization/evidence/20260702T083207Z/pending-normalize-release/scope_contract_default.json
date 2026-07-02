@@ -1,0 +1,27 @@
+{
+  "action": "read_model_scope_contract_check",
+  "covered_historical_outbox_failure_count": 0,
+  "current_uncovered_outbox_failure_count": 0,
+  "ok": true,
+  "repair_manifest": {
+    "items": [],
+    "summary": {
+      "cost_statistics_invalid_dirty_scopes": 0,
+      "cost_statistics_invalid_outbox_events": 0,
+      "cost_statistics_invalid_readiness_rows": 0,
+      "cost_statistics_legacy_dirty_scopes": 0,
+      "cost_statistics_legacy_outbox_events": 0,
+      "cost_statistics_legacy_readiness_rows": 0,
+      "covered_historical_outbox_failures": 0,
+      "current_uncovered_outbox_failures": 0
+    }
+  },
+  "replacement_scope_keys": [],
+  "rollback": {
+    "manifest_item_count": 0,
+    "strategy": "restore deleted rows from repair_manifest.items[].row and inspect replacement enqueue events before replay."
+  },
+  "summary": {},
+  "violation_count": 0,
+  "violations": []
+}
