@@ -1279,17 +1279,58 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         payload = json.loads(response.body)
         self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
-        self.assertEqual(lifecycle_calls, [
-            {
-                "event": "batch_accounting_relation_changed",
-                "scope_keys": ["2026-01"],
-                "include_all": False,
-                "metadata": {"source": "submit_batch_accounting"},
-                "excluded_domains": {"workbench_read_model"},
-            }
-        ])
+        self.assertEqual(lifecycle_calls[0]["event"], "batch_accounting_relation_changed")
+        self.assertEqual(lifecycle_calls[0]["scope_keys"], ["2026-01"])
+        self.assertEqual(lifecycle_calls[0]["include_all"], False)
+        self.assertEqual(lifecycle_calls[0]["metadata"], {"source": "submit_batch_accounting"})
+        executor_overrides = lifecycle_calls[0].get("executor_overrides")
+        self.assertIsInstance(executor_overrides, dict)
+        self.assertEqual(
+            getattr(executor_overrides.get("workbench_read_model"), "__name__", ""),
+            "_derived_lifecycle_workbench_read_model_refresh_enqueue_executor",
+        )
 
-    def test_batch_accounting_lifecycle_enqueues_workbench_refresh_without_synchronous_rebuild(self) -> None:
+    def test_batch_accounting_lifecycle_uses_lightweight_workbench_refresh_executor(self) -> None:
+        app = build_application()
+        lifecycle_calls: list[dict[str, object]] = []
+
+        def record_lifecycle(event: str, **kwargs: object) -> dict[str, object]:
+            lifecycle_calls.append({"event": event, **kwargs})
+            return {
+                "event": event,
+                "deleted_counts": {},
+                "invalidated_scopes": ["2026-03"],
+                "enqueued_jobs": ["workbench_relation.read_model.refresh", "workbench.read_model.refresh"],
+                "errors": [],
+            }
+
+        with patch.object(app, "_execute_derived_data_lifecycle_event", side_effect=record_lifecycle):
+            summary = app._execute_batch_accounting_relation_lifecycle_event(
+                "batch_accounting_relation_changed",
+                scope_keys=["2026-03"],
+                include_all=False,
+                metadata={"source": "submit_batch_accounting", "case_id": "CASE-BATCH-1"},
+            )
+
+        self.assertEqual(lifecycle_calls[0]["event"], "batch_accounting_relation_changed")
+        self.assertEqual(lifecycle_calls[0]["scope_keys"], ["2026-03"])
+        self.assertEqual(lifecycle_calls[0]["include_all"], False)
+        self.assertEqual(
+            lifecycle_calls[0]["metadata"],
+            {"source": "submit_batch_accounting", "case_id": "CASE-BATCH-1"},
+        )
+        executor_overrides = lifecycle_calls[0].get("executor_overrides")
+        self.assertIsInstance(executor_overrides, dict)
+        self.assertEqual(
+            getattr(executor_overrides.get("workbench_read_model"), "__name__", ""),
+            "_derived_lifecycle_workbench_read_model_refresh_enqueue_executor",
+        )
+        self.assertEqual(
+            summary["enqueued_jobs"],
+            ["workbench_relation.read_model.refresh", "workbench.read_model.refresh"],
+        )
+
+    def test_batch_accounting_lightweight_workbench_executor_enqueues_refresh(self) -> None:
         class FakeReadModelRefreshGateway:
             def __init__(self) -> None:
                 self.calls: list[dict[str, object]] = []
@@ -1317,38 +1358,16 @@ class BatchAccountingApiTests(unittest.TestCase):
 
         app = build_application()
         gateway = FakeReadModelRefreshGateway()
-        lifecycle_calls: list[dict[str, object]] = []
-
-        def record_lifecycle(event: str, **kwargs: object) -> dict[str, object]:
-            lifecycle_calls.append({"event": event, **kwargs})
-            return {
-                "event": event,
-                "deleted_counts": {},
-                "invalidated_scopes": ["2026-03"],
-                "enqueued_jobs": ["workbench_relation.read_model.refresh"],
-                "errors": [],
-            }
-
-        with (
-            patch.object(app, "_execute_derived_data_lifecycle_event", side_effect=record_lifecycle),
-            patch.object(app, "_read_model_refresh_gateway", return_value=gateway),
-        ):
-            summary = app._execute_batch_accounting_relation_lifecycle_event(
-                "batch_accounting_relation_changed",
-                scope_keys=["visibility:finance:2026-03", "2026-03"],
-                include_all=False,
-                metadata={"source": "submit_batch_accounting", "case_id": "CASE-BATCH-1"},
+        with patch.object(app, "_read_model_refresh_gateway", return_value=gateway):
+            summary = app._derived_lifecycle_workbench_read_model_refresh_enqueue_executor(
+                {
+                    "domain": "workbench_read_model",
+                    "scope_keys": ["visibility:finance:2026-03", "2026-03"],
+                    "reason": "batch_accounting_relation_changed",
+                    "metadata": {"source": "submit_batch_accounting", "case_id": "CASE-BATCH-1"},
+                }
             )
 
-        self.assertEqual(lifecycle_calls, [
-            {
-                "event": "batch_accounting_relation_changed",
-                "scope_keys": ["visibility:finance:2026-03", "2026-03"],
-                "include_all": False,
-                "metadata": {"source": "submit_batch_accounting", "case_id": "CASE-BATCH-1"},
-                "excluded_domains": {"workbench_read_model"},
-            }
-        ])
         self.assertEqual(gateway.calls, [
             {
                 "scope_type": "workbench",
@@ -1358,10 +1377,8 @@ class BatchAccountingApiTests(unittest.TestCase):
             }
         ])
         self.assertEqual(summary["invalidated_scopes"], ["2026-03"])
-        self.assertEqual(
-            summary["enqueued_jobs"],
-            ["workbench_relation.read_model.refresh", "workbench.read_model.refresh"],
-        )
+        self.assertEqual(summary["deleted_counts"], {"workbench_read_models": 0})
+        self.assertEqual(summary["enqueued_jobs"], ["workbench.read_model.refresh"])
 
     def test_submit_creates_batch_accounting_relation_with_current_invoice_rows(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()

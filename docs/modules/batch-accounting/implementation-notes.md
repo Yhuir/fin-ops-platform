@@ -4,8 +4,8 @@
 
 - 目标：修复 submit/withdraw API 变快后，生产 smoke 中撤回关系事实已成功但未提交 bucket/关联台 active generation 不收敛的问题；避免旧 `_schedule_workbench_read_model_persist` 作为唯一发布链路导致 SQL read model 不刷新。
 - 影响范围：`Application._execute_batch_accounting_relation_lifecycle_event(...)`、批量账务 API 测试、模块边界文档和 GSD 调试记录；不改变前端 API shape，不把 `workbench_read_model` 慢域重新放回请求线程。
-- 关键决策：批量账务写后 lifecycle 仍排除同步 `workbench_read_model` 重建；同时新增显式 durable I/O：通过 `ReadModelRefreshGateway.enqueue_many("workbench", affected_scope_keys, reason="batch_accounting_relation_changed", metadata=...)` 投递 Workbench read model refresh。生产 SQL active generation 收敛依赖 runtime worker；旧 local persist 仅保留 best-effort/compat。
-- 测试覆盖：新增 `test_batch_accounting_lifecycle_enqueues_workbench_refresh_without_synchronous_rebuild`，断言 wrapper 仍向通用 lifecycle 传 `excluded_domains={"workbench_read_model"}`，并把 normalized month scope 投递到 `workbench` refresh gateway。
+- 关键决策：批量账务写后 lifecycle 不再排除整个 `workbench_read_model` domain，而是通过 executor override 把默认同步 rebuild executor 替换成轻量 enqueue executor；该 executor 只通过 `ReadModelRefreshGateway.enqueue_many("workbench", affected_scope_keys, reason="batch_accounting_relation_changed", metadata=...)` 投递 Workbench read model refresh。生产 SQL active generation 收敛依赖 runtime worker；旧 local persist 仅保留 best-effort/compat。
+- 测试覆盖：新增 `test_batch_accounting_lifecycle_uses_lightweight_workbench_refresh_executor` 和 `test_batch_accounting_lightweight_workbench_executor_enqueues_refresh`，断言 wrapper 向通用 lifecycle 传入 `workbench_read_model` executor override，并把 normalized month scope 投递到 `workbench` refresh gateway。
 - 验证命令：见本轮最终说明。
 - 未测风险：本地单测只验证边界 I/O；真实 enqueue-to-fresh、Worker drain 和关联台 paired 可见性必须由部署后的 1273.06 生产 smoke 证明。
 

@@ -9460,27 +9460,30 @@ class Application:
         event: str,
         **kwargs: object,
     ) -> dict[str, object]:
-        summary = self._execute_derived_data_lifecycle_event(
+        return self._execute_derived_data_lifecycle_event(
             event,
-            excluded_domains={"workbench_read_model"},
+            executor_overrides={
+                "workbench_read_model": self._derived_lifecycle_workbench_read_model_refresh_enqueue_executor,
+            },
             **kwargs,
         )
+
+    def _derived_lifecycle_workbench_read_model_refresh_enqueue_executor(
+        self,
+        domain_plan: dict[str, object],
+    ) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan) or ["all"]
         enqueued_scope_keys = self._enqueue_batch_accounting_workbench_read_model_refreshes(
-            kwargs.get("scope_keys"),
-            include_all=bool(kwargs.get("include_all", True)),
-            reason=str((kwargs.get("metadata") if isinstance(kwargs.get("metadata"), dict) else {}).get("reason") or event),
-            metadata=kwargs.get("metadata") if isinstance(kwargs.get("metadata"), dict) else None,
+            scope_keys,
+            include_all=False,
+            reason=str(domain_plan.get("reason") or "batch_accounting_relation_changed"),
+            metadata=self._domain_plan_metadata(domain_plan),
         )
-        if enqueued_scope_keys:
-            invalidated_scopes = summary.setdefault("invalidated_scopes", [])
-            if isinstance(invalidated_scopes, list):
-                for scope_key in enqueued_scope_keys:
-                    if scope_key not in invalidated_scopes:
-                        invalidated_scopes.append(scope_key)
-            enqueued_jobs = summary.setdefault("enqueued_jobs", [])
-            if isinstance(enqueued_jobs, list) and "workbench.read_model.refresh" not in enqueued_jobs:
-                enqueued_jobs.append("workbench.read_model.refresh")
-        return summary
+        return {
+            "deleted_counts": {"workbench_read_models": 0},
+            "invalidated_scopes": enqueued_scope_keys or scope_keys,
+            "enqueued_jobs": ["workbench.read_model.refresh"] if enqueued_scope_keys else [],
+        }
 
     def _enqueue_batch_accounting_workbench_read_model_refreshes(
         self,
@@ -13990,6 +13993,7 @@ class Application:
         metadata: dict[str, object] | None = None,
         schedule_cost_warmup: bool = True,
         excluded_domains: set[str] | list[str] | tuple[str, ...] | None = None,
+        executor_overrides: dict[str, object] | None = None,
     ) -> dict[str, object]:
         plan = self._derived_data_lifecycle_service.plan_event(
             event,
@@ -14028,28 +14032,32 @@ class Application:
                     domain_metadata["action_name"] = action_name
                 if domain_metadata:
                     domain_plan["metadata"] = domain_metadata
+        executors = {
+            "workbench_read_model": self._derived_lifecycle_workbench_read_model_executor,
+            "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
+            "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
+            "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
+            "invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute,
+            "cost_statistics_read_model": lambda domain_plan: self._cost_statistics_derived_lifecycle_executor().execute(
+                domain_plan,
+                schedule_warmup=schedule_cost_warmup,
+            ),
+            "tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model,
+            "tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache,
+            "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
+            "bank_account_balance_read_model": self._bank_account_balance_derived_lifecycle_executor().execute,
+            "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
+            "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
+            "search_cache": self._derived_lifecycle_search_cache_executor,
+            "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
+            "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
+        }
+        for domain_name, executor in dict(executor_overrides or {}).items():
+            if callable(executor):
+                executors[str(domain_name)] = executor
         return self._derived_data_lifecycle_service.execute_plan(
             plan,
-            executors={
-                "workbench_read_model": self._derived_lifecycle_workbench_read_model_executor,
-                "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
-                "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
-                "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
-                "invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute,
-                "cost_statistics_read_model": lambda domain_plan: self._cost_statistics_derived_lifecycle_executor().execute(
-                    domain_plan,
-                    schedule_warmup=schedule_cost_warmup,
-                ),
-                "tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model,
-                "tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache,
-                "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
-                "bank_account_balance_read_model": self._bank_account_balance_derived_lifecycle_executor().execute,
-                "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
-                "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
-                "search_cache": self._derived_lifecycle_search_cache_executor,
-                "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
-                "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
-            },
+            executors=executors,
         )
 
     def _derived_lifecycle_workbench_read_model_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
