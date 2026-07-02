@@ -9439,8 +9439,19 @@ class Application:
                 batch_submitted_workbench_loader if callable(batch_submitted_workbench_loader) else None
             ),
             relation_facade=self._workbench_relation_read_facade(),
-            relation_command_service=self._workbench_relation_command_service(),
+            relation_command_service=self._batch_accounting_relation_command_service(),
         )
+
+    def _batch_accounting_relation_command_service(self) -> WorkbenchRelationCommandService:
+        state_store = getattr(self, "_state_store", None)
+        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
+        connection = getattr(state_store, "_connection", None)
+        repository = (
+            PostgresWorkbenchRelationRepository(connection)
+            if storage_backend == "postgres" and connection is not None
+            else None
+        )
+        return self._workbench_relation_command_service(repository=repository)
 
     def _batch_accounting_routes(self) -> BatchAccountingApiRoutes:
         routes = getattr(self, "_batch_accounting_api_routes", None)
@@ -9448,9 +9459,6 @@ class Application:
             return routes
         routes = BatchAccountingApiRoutes(
             lambda **kwargs: self._batch_accounting_service(**kwargs),
-            scope_keys_for_row_ids=self._scope_keys_for_row_ids,
-            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
-            schedule_read_model_persist=self._schedule_workbench_read_model_persist,
         )
         self._batch_accounting_api_routes = routes
         return routes
@@ -13933,6 +13941,8 @@ class Application:
         include_all: bool = True,
         metadata: dict[str, object] | None = None,
         schedule_cost_warmup: bool = True,
+        excluded_domains: set[str] | list[str] | tuple[str, ...] | None = None,
+        executor_overrides: dict[str, object] | None = None,
     ) -> dict[str, object]:
         plan = self._derived_data_lifecycle_service.plan_event(
             event,
@@ -13949,6 +13959,20 @@ class Application:
                 list(plan.get("domains") or []),
                 metadata=metadata,
             )
+        excluded_domain_names = {
+            str(domain).strip()
+            for domain in list(excluded_domains or [])
+            if str(domain).strip()
+        }
+        if excluded_domain_names:
+            plan["domains"] = [
+                domain_plan
+                for domain_plan in list(plan.get("domains") or [])
+                if not (
+                    isinstance(domain_plan, dict)
+                    and str(domain_plan.get("domain") or "").strip() in excluded_domain_names
+                )
+            ]
         for domain_plan in list(plan.get("domains") or []):
             if isinstance(domain_plan, dict):
                 domain_plan["reason"] = reason
@@ -13957,28 +13981,32 @@ class Application:
                     domain_metadata["action_name"] = action_name
                 if domain_metadata:
                     domain_plan["metadata"] = domain_metadata
+        executors = {
+            "workbench_read_model": self._derived_lifecycle_workbench_read_model_executor,
+            "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
+            "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
+            "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
+            "invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute,
+            "cost_statistics_read_model": lambda domain_plan: self._cost_statistics_derived_lifecycle_executor().execute(
+                domain_plan,
+                schedule_warmup=schedule_cost_warmup,
+            ),
+            "tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model,
+            "tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache,
+            "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
+            "bank_account_balance_read_model": self._bank_account_balance_derived_lifecycle_executor().execute,
+            "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
+            "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
+            "search_cache": self._derived_lifecycle_search_cache_executor,
+            "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
+            "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
+        }
+        for domain_name, executor in dict(executor_overrides or {}).items():
+            if callable(executor):
+                executors[str(domain_name)] = executor
         return self._derived_data_lifecycle_service.execute_plan(
             plan,
-            executors={
-                "workbench_read_model": self._derived_lifecycle_workbench_read_model_executor,
-                "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
-                "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
-                "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
-                "invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute,
-                "cost_statistics_read_model": lambda domain_plan: self._cost_statistics_derived_lifecycle_executor().execute(
-                    domain_plan,
-                    schedule_warmup=schedule_cost_warmup,
-                ),
-                "tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model,
-                "tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache,
-                "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
-                "bank_account_balance_read_model": self._bank_account_balance_derived_lifecycle_executor().execute,
-                "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
-                "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
-                "search_cache": self._derived_lifecycle_search_cache_executor,
-                "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
-                "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
-            },
+            executors=executors,
         )
 
     def _derived_lifecycle_workbench_read_model_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:

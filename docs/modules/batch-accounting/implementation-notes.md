@@ -1,13 +1,41 @@
 # 批量账务 实施记录
 
+## 2026-07-02 - route duplicate lifecycle fan-out 删除
+
+- 目标：修复 1273.06 生产 smoke 中 submit/withdraw command 已成功但 HTTP 请求仍被旧 lifecycle fan-out 拖慢，导致用户看到 load 很久、偶发 timeout/blocked 后误判失败的问题。
+- 影响范围：`BatchAccountingApiRoutes` submit/withdraw route owner、`Application._batch_accounting_routes(...)` wiring、批量账务 API/boundary guard 测试、批量账务/关联台关系/测试矩阵/跨模块依赖文档；不改变 HTTP endpoint 或 response shape。
+- 关键决策：批量账务 route 只负责 HTTP DTO、错误映射和调用 `BatchAccountingService`。关系事实保存、history、dirty/outbox fan-out 和 `workbench_relation` / `workbench` refresh enqueue 由 durable relation command repository 一次完成；route 不再调用 `_execute_derived_data_lifecycle_event(...)`、`_schedule_workbench_pair_relation_persist(...)` 或 `_schedule_workbench_read_model_persist(...)`。
+- 旧链路删除：删除只服务 batch-accounting 的 `_execute_batch_accounting_relation_lifecycle_event(...)`、`_derived_lifecycle_workbench_read_model_refresh_enqueue_executor(...)`、`_enqueue_batch_accounting_workbench_read_model_refreshes(...)` helper，避免 old lifecycle 和 repository fan-out 同时存在造成重复刷新竞争。
+- 测试覆盖：更新 `test_submit_does_not_call_legacy_post_command_side_effects`，把旧 lifecycle、旧 pair persist、旧 workbench persist 全部设为 fail-fast；更新 route boundary guard，禁止 route owner 重新引用这些旧 side effect。
+- 验证命令：见本轮最终说明。
+- 未测风险：本地单测证明边界删除；部署后必须用 1273.06 生产数据跑撤回->重提->submitted bucket->关联台 paired smoke，并记录 command API 和 read model 收敛耗时。
+
+## 2026-07-02 - PostgreSQL durable relation command wiring 修复
+
+- 目标：修复 1273.06 生产 smoke 中撤回 API 返回成功但 `app.workbench_pair_relations`、`workbench_relation` 和关联台 active generation 没有收敛的问题；避免 submit/withdraw 只修改进程内 pair relation snapshot 后让页面出现“几分钟后才像成功”的不确定状态。
+- 影响范围：`Application._batch_accounting_service(...)` relation command wiring、`BatchAccountingService._withdraw_unlocked(...)` 撤回语义、批量账务 API/service 测试、批量账务/关联台关系边界文档；不改变 HTTP endpoint 或 response shape。
+- 关键决策：生产 PostgreSQL runtime 下批量账务 relation command service 必须注入 `PostgresWorkbenchRelationRepository`，让 command service 的 load/save 直接落到 durable canonical relation 表和 history。撤回从旧 restore-style withdraw 收敛为 `cancel_relation(..., history_operation_type="withdraw_link")`，只取消当前 batch relation，不再调用旧 snapshot restore 或 in-memory fallback。
+- 旧链路删除：批量账务写链路不得使用无 repository 的 `WorkbenchRelationCommandRepositoryAdapter` 作为生产成功路径；缺少 durable repository 时应视为 wiring 错误。撤回不再使用 generic snapshot restore 语义，防止 display-only OA invoice 归属或进程内状态污染 canonical relation。
+- 测试覆盖：新增 `test_postgres_batch_withdraw_uses_durable_relation_repository`，断言 PostgreSQL runtime 的 batch service 使用 durable repository 保存 cancelled relation；更新 withdraw delegation fake 为 `cancel_relation`，继续覆盖 command boundary 和无 direct pair fallback。
+- 验证命令：见本轮最终说明。
+- 未测风险：本地单测证明 wiring 和语义；最终闭环必须由部署后的 1273.06 撤回->重新关联->关联台 paired 可见和耗时 smoke 证明。
+
+## 2026-07-02 - 写后关联台 read model durable refresh 补齐（已由 repository fan-out 取代）
+
+- 目标：曾用于修复 submit/withdraw API 变快后，生产 smoke 中撤回关系事实已成功但未提交 bucket/关联台 active generation 不收敛的问题。
+- 当前状态：该中间方案已删除。最终设计不再通过 batch-accounting route 调用专用 lifecycle wrapper 或轻量 executor，避免 route 与 repository 同时发布同一批 read model refresh。
+- 当前决策：`PostgresWorkbenchRelationRepository` 的 relation command save/cancel 是写后 fan-out 边界，负责向 durable dirty/outbox 发布 `workbench_relation`、`workbench` 和下游 scope。route 只返回 command result 和 `affected_scope_keys`。
+- 回归保护：`test_submit_does_not_call_legacy_post_command_side_effects` 和 route boundary guard 禁止重新接回旧 lifecycle、旧 pair persist、旧 workbench persist。
+
 ## 2026-07-02 - submit/withdraw 旧持久化链路删除与 scope 收窄
 
 - 目标：修复 1273.06 生产链路中提交/撤回 command 已完成但 API 长时间等待、偶发 timeout/blocked 后用户误以为失败的问题；避免批量账务关系变化默认触发 all scope 派生刷新。
 - 影响范围：`BatchAccountingApiRoutes` submit/withdraw side effect、`Application._batch_accounting_routes(...)` wiring、`BatchAccountingService` mutation result / relation metadata、批量账务 API 回归测试、模块边界文档和关联台关系边界文档；不改变前端 API endpoint，不新增独立 read model。
-- 关键决策：批量账务 relation 事实持久化只属于 `WorkbenchRelationCommandService` repository。route 不再在 command 成功后再次调用旧 `_schedule_workbench_pair_relation_persist(...)`，也不再保留 snapshot rollback restore；该旧链路既重复写关系事实，又把接口热路径拖慢。写后 lifecycle 只使用 service 输出的 `affected_scope_keys`，并以 `include_all=False` 执行。
-- Scope 设计：submit 从本次银行/OA/附件发票 row payload 日期计算具体月份，并持久化到 relation `special_metadata.affected_scope_keys`；withdraw 优先使用该 metadata，老关系缺字段时用窄 submit context 反查 row 日期。只有无法解析任何具体月份时才允许回退 `all`。
-- 旧链路删除：删除 batch accounting route 构造参数里的 `schedule_pair_relation_persist`、`pair_relation_snapshot`、`restore_pair_relation_snapshot`，删除 `Application` 中仅服务该旧回滚链路的 batch-accounting restore helper；测试改为断言旧 persist 被接回时会失败。
-- 测试覆盖：`test_submit_does_not_call_legacy_pair_relation_persist_and_scopes_lifecycle_to_months`、`test_submit_records_concrete_affected_scope_keys_for_cross_month_relation`、`test_withdraw_legacy_relation_derives_scope_keys_from_narrow_context`，并更新 submit/withdraw API response 的 `affected_scope_keys`/barrier target 断言。
+- 关键决策：批量账务 relation 事实持久化只属于 `WorkbenchRelationCommandService` repository。route 不再在 command 成功后再次调用旧 `_schedule_workbench_pair_relation_persist(...)`，也不再保留 snapshot rollback restore；后续又删除 route 专用 lifecycle 和旧 workbench persist，避免写后 fan-out 在 API 线程重复执行。
+- Scope 设计：submit 从本次银行/OA/附件发票 row payload 日期计算具体月份，并持久化到 relation `special_metadata.affected_scope_keys`；withdraw 优先使用该 metadata，老关系缺字段时用 SQL 窄 submit context 反查 row 日期。没有窄 loader 时不得退回整页 Workbench loader，只能按 relation month/all fallback；只有无法解析任何具体月份时才允许回退 `all`。
+- Fan-out 设计：批量账务 route 不拥有 fan-out。`WorkbenchRelationCommandService` 通过 durable repository 保存/cancel relation 并发布 dirty/outbox；API response 仍返回 service 输出的 `affected_scope_keys`，供前端 barrier/reload 和审计使用。
+- 旧链路删除：删除 batch accounting route 构造参数里的 `schedule_pair_relation_persist`、`pair_relation_snapshot`、`restore_pair_relation_snapshot`，删除 `Application` 中仅服务该旧回滚链路的 batch-accounting restore helper；后续又删除 batch route 专用 lifecycle wrapper 和旧 workbench persist helper，测试改为断言旧 side effect 被接回时会失败。
+- 测试覆盖：`test_submit_does_not_call_legacy_post_command_side_effects`、`test_submit_records_concrete_affected_scope_keys_for_cross_month_relation`、`test_withdraw_legacy_relation_derives_scope_keys_from_narrow_context`、`test_withdraw_legacy_relation_uses_sql_narrow_loader_for_scope_backfill`，并更新 submit/withdraw API response 的 `affected_scope_keys`/barrier target 断言。
 - 验证命令：见本轮最终说明。
 - 未测风险：本地单测不能替代部署后 1273.06 撤回->重提->已提交 bucket->关联台 paired 的真实生产 smoke 和真实 p95；生产上仍受 PostgreSQL cache、worker drain 和并发影响。
 
@@ -99,7 +127,7 @@
 
 - 目标：把 `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 的 DTO/service/error mapping 与写后 scope/lifecycle/read model persist orchestration 从 `server.py` inline handler 抽到 `BatchAccountingApiRoutes`，让 `server.py` 只保留 mutation session、JSON body 和 response mapping。
 - 影响范围：`backend/src/fin_ops_platform/app/routes_batch_accounting.py`、`server.py` 的 submit/withdraw wrapper、`tests/test_platform_runtime_boundary_guards.py` 的 batch-accounting route owner guard。
-- 关键决策：`BatchAccountingService` 仍是 submit/withdraw 业务状态转换和 canonical command service 写入边界；`BatchAccountingApiRoutes` 只通过显式注入的 callback 调用 pair relation persist、derived lifecycle event、Workbench read model persist、submit rollback snapshot restore，不依赖 `Application` 或直接写 relation internals。
+- 关键决策：`BatchAccountingService` 仍是 submit/withdraw 业务状态转换和 canonical command service 写入边界；当时 `BatchAccountingApiRoutes` 只通过显式注入的 callback 编排写后 side effect，不依赖 `Application` 或直接写 relation internals。该 callback side-effect 口后续已删除，当前 route 只委托 service，fan-out 由 durable relation command repository 负责。
 - 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-submit-withdraw-route-side-effect-port.md`；本模块状态机定义不变，只记录 route ownership 变化。
 - 测试覆盖：静态 guard 现在要求 submit/withdraw `server.py` wrapper 委托 `BatchAccountingApiRoutes`，并要求 route owner 委托 `BatchAccountingService` 且不得 direct relation write；API 回归覆盖金额差异错误、合法提交、撤回原因、non-fresh withdraw 和 submit persist failure rollback。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_route_handlers_do_not_bypass_service_boundaries -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_amount_mismatch_requires_difference_note tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_amount_mismatch_rejects_whitespace_note tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_creates_batch_accounting_relation_with_current_invoice_rows tests.test_batch_accounting_api.BatchAccountingApiTests.test_withdraw_requires_reason_and_batch_accounting_relation -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails -v`。

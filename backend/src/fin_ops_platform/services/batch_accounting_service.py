@@ -626,8 +626,15 @@ class BatchAccountingService:
                 "批量账务关联写入服务不可用，请稍后重试。",
                 payload={"case_id": normalized_relation_id, "row_ids": row_ids},
             )
+        cancel_relation = getattr(self._relation_command_service, "cancel_relation", None)
+        if not callable(cancel_relation):
+            raise BatchAccountingError(
+                "batch_accounting_relation_command_unavailable",
+                "批量账务关联写入服务不可用，请稍后重试。",
+                payload={"case_id": normalized_relation_id, "row_ids": row_ids},
+            )
         try:
-            command_result = self._relation_command_service.withdraw_relation(
+            command_result = cancel_relation(
                 case_id=normalized_relation_id,
                 actor_id=actor,
                 reason=note,
@@ -1347,7 +1354,7 @@ class BatchAccountingService:
         if not bank_year and re.fullmatch(r"20\d{2}-\d{2}", fallback_month_scope):
             bank_year = fallback_month_scope[:4]
 
-        if bank_row_id and re.fullmatch(r"20\d{2}", bank_year):
+        if bank_row_id and re.fullmatch(r"20\d{2}", bank_year) and self._batch_submit_workbench_loader is not None:
             try:
                 context = self._build_submit_context(
                     bank_year=bank_year,

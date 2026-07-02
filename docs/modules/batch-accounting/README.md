@@ -29,7 +29,6 @@
 - `backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py`
 - `backend/src/fin_ops_platform/services/workbench_relation_read_model_refresh.py`
 - `backend/src/fin_ops_platform/services/workbench_relation_distribution_mapper.py`
-- `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
 - `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
 - `backend/src/fin_ops_platform/services/app_status_job_registry.py`
 - `backend/src/fin_ops_platform/services/runtime_worker_registry.py`
@@ -43,7 +42,7 @@
 - 未提交 bucket 的 read path 必须把 Workbench 输入先收窄为批量账务银行候选和日常报销 OA 候选，再调用 `workbench_relation` facade；`submitted_count` 通过 relation read facade 的年份轻量统计 I/O 取得，不能为未提交首屏加载 12 个月完整 submitted relation DTO。
 - 前端未提交 bucket 首屏默认以 200 行页大小分别请求银行流水和可关联 OA 项，并提供独立分页控件；切换 bucket 或流水年份会重置页码、选择和差额说明，避免跨页旧选择误提交。右侧 OA 不按年份过滤，只展示没有关联银行流水的日常报销 OA 主单；仅发票关系或无流水候选关系不应把该 OA 排除。已提交 bucket 只分页银行关系列表，OA 明细来自当前可见 relation bucket。
 - `POST /api/batch-accounting/submit` 必须优先通过 Workbench SQL active read model 的窄读口读取本次选中银行流水、OA 主单和对应 OA 附件发票，并通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`，`special_metadata.affected_scope_keys` 必须记录本次关系涉及的具体月份；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
-- `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注；撤回只恢复真实 relation history，OA 附件 case_id / `existing_case` 显示归属不得被恢复成 active relation。
+- `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注；撤回必须通过 durable relation command repository 取消当前 batch relation，记录 `withdraw_link` history。它不走旧 snapshot restore，也不得把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation。
 - `repair_legacy_case_id_collisions(...)` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 恢复历史 batch relation；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - 前端提交/撤回成功后发送 `workbenchRelationUpdated`，作为同浏览器会话刷新提示；事实源仍以后端 dirty scope、read model freshness 和 worker readiness 为准。
 
@@ -52,8 +51,8 @@
 - 必须透出 `workbench_relation` read model 状态，不能把非 fresh 空关系显示为真实未提交。
 - `read_model_status !== "fresh"` 时，页面可以展示当前可用 payload 和 freshness 诊断，但不能仅因普通 read model non-fresh 全局阻止提交和撤回；写操作必须由权限/session、DB/目标写模型可用性、canonical relation version/idempotency/owner 状态决定。
 - `GET /api/batch-accounting` 的 relation 读取必须通过现有 relation read facade/freshness 边界请求 `require_fresh`；缺失或 stale scope 只能经 facade/gateway 入队刷新，不能在页面 GET 路径同步 rebuild 或直接写 durable queue。
-- `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须走 command service，并基于 canonical relation、idempotency、owner 状态、权限/session、DB 可写性和本次操作 row ids 的 active relation 冲突校验；不允许在缺少 command service 时静默写旧 pair service，也不能把整页普通 relation distribution 追赶中作为默认写阻断条件。
-- submit/withdraw route 不再调用旧 `_schedule_workbench_pair_relation_persist` 或 snapshot rollback restore；关系事实保存只属于 `WorkbenchRelationCommandService` repository。写后派生刷新必须使用 service 返回的 `affected_scope_keys`，以 `include_all=False` 触发 lifecycle；跨月关系只刷新实际月份，不能默认把 scope 扩散为 `all`。
+- `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须走 command service，并基于 canonical relation、idempotency、owner 状态、权限/session、DB 可写性和本次操作 row ids 的 active relation 冲突校验；PostgreSQL runtime 必须注入 durable `PostgresWorkbenchRelationRepository`，不允许在缺少 command service 或 durable repository 时静默写旧 pair service/in-memory snapshot，也不能把整页普通 relation distribution 追赶中作为默认写阻断条件。
+- submit/withdraw route 不再调用旧 `_schedule_workbench_pair_relation_persist`、`_schedule_workbench_read_model_persist`、snapshot rollback restore 或 duplicate derived lifecycle；关系事实保存和 dirty/outbox fan-out 只属于 `WorkbenchRelationCommandService` repository。写后刷新 scope 必须来自 relation payload / `affected_scope_keys`，跨月关系只刷新实际月份，不能默认把 scope 扩散为 `all`。
 - 前端 submit/withdraw 必须接入 `GlobalOperationOverlayProvider`。写 API 成功是 command 边界完成；随后只短等 `workbench_relation` operation barrier 并尝试重新加载批量账务 payload。barrier blocked/timeout 或 reload 中断不得把已成功的 command 改写成“操作失败”，页面必须提示关系仍在后台同步，并继续以后端 dirty scope、worker 和后续刷新为事实源。
 - 批量账务关系变化会影响关联台、银行明细、成本统计、搜索、进项/销项/OA 待付款等依赖关系 read model 或 invoice lifecycle 的页面。
 - read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。
@@ -69,7 +68,7 @@
 | API DTO 或错误码 | `tests/test_batch_accounting_api.py`、`web/src/features/batchAccounting/api.ts` mapper |
 | 关系提交/撤回/修复规则 | `BatchAccountingService`、`WorkbenchRelationCommandService`、Workbench relation projection、历史修复回归 |
 | `workbench_relation` freshness | `WorkbenchRelationReadFacade`、`workbench_relation` worker、App Status / App Health |
-| Dirty/outbox/lifecycle event | `DerivedDataLifecycleService`、runtime worker registry、下游页面 stale/fresh 回归 |
+| Dirty/outbox/read model fan-out | `WorkbenchRelationCommandService` repository、runtime worker registry、下游页面 stale/fresh 回归 |
 | Bank/OA identity 字段 | 银行明细、关联台、待找发票、进项/销项/OA 待付款和成本统计关系标签 |
 
 ## 维护触发器

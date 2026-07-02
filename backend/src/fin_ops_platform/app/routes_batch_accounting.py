@@ -12,15 +12,8 @@ class BatchAccountingApiRoutes:
     def __init__(
         self,
         service_factory: Callable[..., BatchAccountingService],
-        *,
-        scope_keys_for_row_ids: Callable[..., set[str]],
-        execute_derived_data_lifecycle_event: Callable[..., Any],
-        schedule_read_model_persist: Callable[..., Any],
     ) -> None:
         self._service_factory = service_factory
-        self._scope_keys_for_row_ids = scope_keys_for_row_ids
-        self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
-        self._schedule_read_model_persist = schedule_read_model_persist
 
     def list_payload(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
         year = (query.get("year") or [""])[0]
@@ -61,10 +54,6 @@ class BatchAccountingApiRoutes:
             return HTTPStatus.BAD_REQUEST, {"error": "invalid_batch_accounting_request", "message": str(exc)}
 
         changed_scope_keys = self._changed_scope_keys(result)
-        self._after_relation_mutation(
-            action_name="submit_batch_accounting",
-            changed_scope_keys=changed_scope_keys,
-        )
         return HTTPStatus.OK, {
             **result,
             "affected_months": changed_scope_keys,
@@ -79,7 +68,7 @@ class BatchAccountingApiRoutes:
         session: OARequestSession,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
-            result = self._service_factory().withdraw(
+            result = self._service_factory(use_sql_read_model=True).withdraw(
                 relation_id=relation_id,
                 actor=self._actor(payload, session),
                 reason=str(payload.get("reason") or payload.get("note") or ""),
@@ -94,10 +83,6 @@ class BatchAccountingApiRoutes:
             }
 
         changed_scope_keys = self._changed_scope_keys(result)
-        self._after_relation_mutation(
-            action_name="withdraw_batch_accounting",
-            changed_scope_keys=changed_scope_keys,
-        )
         return HTTPStatus.OK, {
             **result,
             "affected_months": changed_scope_keys,
@@ -118,13 +103,11 @@ class BatchAccountingApiRoutes:
         explicit_scope_keys = self._normalized_scope_keys(result.get("affected_scope_keys"))
         if explicit_scope_keys:
             return explicit_scope_keys
-        return sorted(
-            self._scope_keys_for_row_ids(
-                month="all",
-                row_ids=list(result.get("affected_row_ids") or []),
-                month_scope=str(result.get("month_scope") or ""),
-            )
-        )
+        affected_months = self._normalized_scope_keys(result.get("affected_months"))
+        if affected_months:
+            return affected_months
+        read_model_scope_keys = self._normalized_scope_keys(result.get("read_model_scope_keys"))
+        return read_model_scope_keys or ["all"]
 
     @staticmethod
     def _normalized_scope_keys(value: Any) -> list[str]:
@@ -145,18 +128,6 @@ class BatchAccountingApiRoutes:
         if concrete:
             return sorted(concrete)
         return ["all"] if has_all else []
-
-    def _after_relation_mutation(self, *, action_name: str, changed_scope_keys: list[str]) -> None:
-        self._execute_derived_data_lifecycle_event(
-            "batch_accounting_relation_changed",
-            scope_keys=changed_scope_keys,
-            include_all=False,
-            metadata={"source": action_name},
-        )
-        self._schedule_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            action_name=action_name,
-        )
 
     @staticmethod
     def _query_value(query: dict[str, list[str]], *names: str) -> str | None:

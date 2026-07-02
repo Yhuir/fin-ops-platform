@@ -424,7 +424,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "load_full_snapshot": 0,
                 "MongoOAAdapter": 0,
                 "WorkbenchPairRelationService": 3,
-                "pair_relation_service": 30,
+                "pair_relation_service": 27,
             },
             "backend/src/fin_ops_platform/app/worker.py": {
                 "GridFSObjectMigrationService": 0,
@@ -3741,7 +3741,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 withdraw_source,
                 route_withdraw_source,
                 "_batch_accounting_routes().withdraw",
-                "_service_factory().withdraw",
+                "_service_factory(use_sql_read_model=True).withdraw",
             ),
         )
         for name, handler_source, route_source, route_call, service_call in mutation_handlers:
@@ -3762,6 +3762,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                     violations.append("BatchAccountingService submit is polluted by list relation distribution context")
             for forbidden in (
                 "repair_legacy_case_id_collisions",
+                "_after_relation_mutation",
+                "_execute_derived_data_lifecycle_event",
+                "_schedule_workbench_pair_relation_persist",
+                "_schedule_workbench_read_model_persist",
                 "confirm_relation(",
                 "withdraw_relation(",
                 "replace_with_confirmed_relation",
@@ -4537,40 +4541,41 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_batch_accounting_pair_relation_restore_uses_explicit_service_boundary(self) -> None:
+    def test_batch_accounting_pair_relation_restore_uses_shared_pair_relation_boundary(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
-        wrapper_source = _function_source(server_tree, server_source, "_restore_batch_accounting_pair_relation_snapshot")
-        factory_source = _function_source(
-            server_tree,
-            server_source,
-            "_batch_accounting_pair_relation_rollback_restore_service",
-        )
+        wrapper_source = _function_source(server_tree, server_source, "_restore_workbench_pair_relation_snapshot")
+        factory_source = _function_source(server_tree, server_source, "_workbench_pair_relation_rollback_restore_service")
+        facade_source = _function_source(server_tree, server_source, "_workbench_write_facade")
         violations: list[str] = []
 
-        if "_batch_accounting_pair_relation_rollback_restore_service().restore(" not in wrapper_source:
-            violations.append("batch accounting pair relation restore wrapper does not delegate to service.restore")
-        if "changed_case_ids=[]" not in wrapper_source:
-            violations.append("batch accounting rollback restore no longer preserves no changed case id behavior")
+        if "_restore_batch_accounting_pair_relation_snapshot" in server_source:
+            violations.append("batch accounting still has a dedicated pair relation restore wrapper")
+        if "_batch_accounting_pair_relation_rollback_restore_service" in server_source:
+            violations.append("batch accounting still has a dedicated pair relation restore service factory")
+        if "restore_pair_relation_snapshot=self._restore_workbench_pair_relation_snapshot" not in facade_source:
+            violations.append("Workbench facade does not inject the shared pair relation restore boundary")
+        if "_workbench_pair_relation_rollback_restore_service().restore(" not in wrapper_source:
+            violations.append("shared pair relation restore wrapper does not delegate to service.restore")
         for forbidden in (
             "WorkbenchPairRelationService.from_snapshot",
             "_configure_workbench_exception_application_service()",
             "save_workbench_pair_relations(",
         ):
             if forbidden in wrapper_source:
-                violations.append(f"batch accounting restore wrapper still owns behavior {forbidden}")
+                violations.append(f"shared pair relation restore wrapper still owns behavior {forbidden}")
         if "WorkbenchPairRelationRollbackRestoreService(" not in factory_source:
-            violations.append("server.py does not build batch accounting rollback restore service")
-        if "state_store=None" not in factory_source:
-            violations.append("batch accounting rollback restore service must stay in-memory and not persist rollback snapshot")
+            violations.append("server.py does not build shared pair relation rollback restore service")
+        if "state_store=self._state_store" not in factory_source:
+            violations.append("shared pair relation rollback restore service no longer uses the canonical state store")
         if "replace_pair_relation_service=self._replace_workbench_pair_relation_service" not in factory_source:
-            violations.append("batch accounting rollback restore service does not use shared pair service replacement")
+            violations.append("shared pair relation rollback restore service does not use shared pair service replacement")
         if (
             "configure_exception_application_service=self._configure_workbench_exception_application_service"
             not in factory_source
         ):
-            violations.append("batch accounting rollback restore service does not reconfigure exception application service")
+            violations.append("shared pair relation rollback restore service does not reconfigure exception application service")
 
         self.assertEqual(violations, [])
 

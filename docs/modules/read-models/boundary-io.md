@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：所有当前 App Status read model 通过 manifest、scope policy、refresh gateway、runtime worker、freshness/status gate 和 operation barrier 形成可验证闭环。
 - 当前闭环：14 个当前 App Status read model 已完成 Read Model 模块化 PSCIP-L4，`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 以显式例外语义闭环。
-- 当前非阻塞风险：Search 曾有一次生产 grouped-run 高延迟样本，targeted rerun 通过；Workbench groups admin smoke 有一次 probe shape `400`，不是 stale-as-fresh 证据。2026-07-02 release `pscip-l4-alignment-d725fdb6d` 发布后，5s critical read model smoke 为 11/16 pass，1s 高性能目标为 6/16 pass；性能专项仍 open。Workbench relation alignment bounded subset 已将 `workbench:2026-03` profile rebuild 降到约 `1.30s`，但 1s targeted smoke 仍为 `2801.281ms`。authenticated HTTP/SSE 和真实写操作矩阵还需要 Admin Token/受控样本证据；24h write-operation audit 仍显示 Workbench relation confirm/withdraw downstream fan-out p95 约 `42.9s-71.3s`，且 turnover withdraw/import/tag 类真实样本缺失。
+- 当前非阻塞风险：Search 曾有一次生产 grouped-run 高延迟样本，targeted rerun 通过；Workbench groups admin smoke 有一次 probe shape `400`，不是 stale-as-fresh 证据。2026-07-02 生产 5s read model smoke 曾达到 16/16 pass，但后续 release `pscip-l4-alignment-d725fdb6d` 复测为 11/16 pass，1s 高性能目标为 6/16 pass；性能专项仍 open。Workbench relation alignment bounded subset 已将 `workbench:2026-03` profile rebuild 降到约 `1.30s`，但 1s targeted smoke 仍为 `2801.281ms`。生产 write-operation audit 发现 Workbench relation confirm/withdraw downstream fan-out 长尾；UOW 隐式 fan-out 已在本地修复并需随当前生产线复测。authenticated HTTP/SSE 和真实写操作矩阵还需要 Admin Token/受控样本证据。
 - 旧代码删除条件：legacy/local compat path 仍可保留为明确隔离路径；删除前必须证明对应页面 API、worker、测试和生产脚本不再调用该路径。
 
 ## 闭环证据
