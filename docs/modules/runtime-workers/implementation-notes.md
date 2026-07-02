@@ -34,9 +34,9 @@
 
 - 目标：解决生产 read model 1s SLO 分层中暴露的 worker pickup latency。No-OA targeted handler 已约 `886.764ms`，但 enqueue-to-fresh `1644.218ms`，继续在业务 service/repository 内堆补丁不是正确边界。
 - 影响范围：`RuntimeWorkerConfig` 默认 idle poll、worker CLI 默认值、PostgreSQL worker env 模板、`finops-ensure-runtime-workers` env 迁移逻辑；不改变 durable queue schema、RabbitMQ transport、read model scope、handler projection 或业务写接口。
-- 关键决策：PostgreSQL durable queue worker 默认 idle poll 收敛到 `0.25s`；模板中历史 `--poll-interval-seconds 2` 改为 `0.25`；deploy helper 仅在已有生产 env 精确命中旧 `2s` 配置且当前 release 模板声明 `0.25s` 时替换该参数，不重装 env 文件，避免覆盖 RabbitMQ 灰度、自定义 event types 或 per-worker throughput。
+- 关键决策：PostgreSQL durable queue worker 默认 idle poll 收敛到 `0.25s`；模板中历史 `--poll-interval-seconds 2` 改为 `0.25`；deploy helper 仅在已有生产 env 精确命中旧 `2s` 配置且当前 release 模板声明 `0.25s` 时替换该参数，不重装 env 文件，避免覆盖 RabbitMQ 灰度、自定义 event types 或 per-worker throughput。Release deploy 必须在 activate 前安装当前 release 的 `finops-ensure-runtime-workers` helper，防止服务器继续调用旧 helper。
 - 保留例外：`workbench-matching` 是独立的脏 scope 批处理 worker，仍保留显式 `--poll-interval-seconds 5`，不纳入 read model outbox pickup latency 默认值。
-- 测试覆盖：`RuntimeWorkerTests.test_default_poll_interval_is_fast_enough_for_read_model_slo`、`DeployRuntimeExampleTests.test_required_worker_env_examples_do_not_pin_legacy_slow_poll_interval`、`DeployRuntimeExampleTests.test_runtime_worker_env_install_migrates_only_legacy_poll_interval`。
+- 测试覆盖：`RuntimeWorkerTests.test_default_poll_interval_is_fast_enough_for_read_model_slo`、`DeployRuntimeExampleTests.test_required_worker_env_examples_do_not_pin_legacy_slow_poll_interval`、`DeployRuntimeExampleTests.test_runtime_worker_env_install_migrates_only_legacy_poll_interval`、`DeployOAScriptTest.test_release_remote_script_uses_versioned_release_and_deploy_control`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py tests/test_deploy_runtime_examples.py -q`；`git diff --check`。
 - 未测风险：该切片降低 pickup latency，但不能证明所有 handler 本身都低于 1s；仍需发布后复跑 critical read model SLO、健康检查、scope contract 和写操作 audit。若 1s 仍失败，应按 SLO profile 定位 handler 热点或 App/API 读路径，而不是恢复慢 poll。
 

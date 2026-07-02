@@ -23,7 +23,9 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   接收 worker heartbeat，并在 `/health` 与 App Health 中暴露 missing/stale/mismatch/backlog。
 - systemd 负责：启动、停止、重启 worker 进程，保持进程常驻。
 - deploy helper 负责：从 registry 生成 required worker 矩阵，安装 env，执行 `--check`，重启
-  systemd unit，并在发布阶段等待 worker readiness 收敛。
+  systemd unit，并在发布阶段等待 worker readiness 收敛。Release deploy 在 activate 前必须先把当前 release 的
+  `deploy/oa/bin/finops-ensure-runtime-workers.sh` 安装到 `/usr/local/sbin/finops-ensure-runtime-workers`，
+  避免生产继续调用旧 helper。
 - PostgreSQL durable queue worker 的 idle poll 基线是 `0.25s`。新增 read model / 写后 fan-out worker 不能把
   `--poll-interval-seconds 2` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，可保留显式
   5s poll。发布 helper 只会把已有 env 中精确命中的历史 `--poll-interval-seconds 2` 迁移到 `0.25`，不会重写

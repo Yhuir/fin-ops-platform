@@ -239,6 +239,8 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
     if config.activate:
         commands.extend(
             [
+                mark_remote_deploy_step("install runtime worker ensure helper"),
+                f'sudo -n install -m 0755 -o root -g root "$RELEASE_DIR/src/deploy/oa/bin/finops-ensure-runtime-workers.sh" {quoted_runtime_worker_ensure}',
                 mark_remote_deploy_step("deploy-control activate"),
                 f"sudo -n {quoted_deploy_control} activate {quoted_release_name}",
                 mark_remote_deploy_step("backend readiness check"),
