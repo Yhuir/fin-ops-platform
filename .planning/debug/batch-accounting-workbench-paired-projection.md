@@ -66,7 +66,8 @@ This was a module boundary bug. `BatchAccountingService` already writes the rela
 - Make `BatchAccountingService.withdraw(...)` prefer persisted `affected_scope_keys`; for legacy active relations without the field, use the narrow submit context to derive months from row payloads before withdrawing.
 - Make `BatchAccountingApiRoutes` prefer result `affected_scope_keys` and call derived lifecycle with `include_all=False`.
 - Build withdraw routes with `use_sql_read_model=True`; legacy relation scope backfill must use the SQL narrow submit loader and must not fall back to the full Workbench page loader.
-- Exclude `workbench_read_model` from the synchronous batch-accounting lifecycle wrapper; it is the dominant 10-20s production domain and is already covered by `_schedule_workbench_read_model_persist` for asynchronous publication.
+- Exclude `workbench_read_model` from the synchronous batch-accounting lifecycle wrapper; it is the dominant 10-20s production domain and must not run in the API request thread.
+- Add a lightweight batch-accounting lifecycle wrapper output that enqueues durable `workbench` read model refresh scopes through `ReadModelRefreshGateway`. `_schedule_workbench_read_model_persist` remains only a local/compat best-effort path; production SQL active generation convergence must not depend on it alone.
 - Permit `all` only as a fallback when no concrete row month can be derived.
 
 ## Verification Targets

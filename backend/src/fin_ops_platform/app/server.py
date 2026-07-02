@@ -9460,10 +9460,55 @@ class Application:
         event: str,
         **kwargs: object,
     ) -> dict[str, object]:
-        return self._execute_derived_data_lifecycle_event(
+        summary = self._execute_derived_data_lifecycle_event(
             event,
             excluded_domains={"workbench_read_model"},
             **kwargs,
+        )
+        enqueued_scope_keys = self._enqueue_batch_accounting_workbench_read_model_refreshes(
+            kwargs.get("scope_keys"),
+            include_all=bool(kwargs.get("include_all", True)),
+            reason=str((kwargs.get("metadata") if isinstance(kwargs.get("metadata"), dict) else {}).get("reason") or event),
+            metadata=kwargs.get("metadata") if isinstance(kwargs.get("metadata"), dict) else None,
+        )
+        if enqueued_scope_keys:
+            invalidated_scopes = summary.setdefault("invalidated_scopes", [])
+            if isinstance(invalidated_scopes, list):
+                for scope_key in enqueued_scope_keys:
+                    if scope_key not in invalidated_scopes:
+                        invalidated_scopes.append(scope_key)
+            enqueued_jobs = summary.setdefault("enqueued_jobs", [])
+            if isinstance(enqueued_jobs, list) and "workbench.read_model.refresh" not in enqueued_jobs:
+                enqueued_jobs.append("workbench.read_model.refresh")
+        return summary
+
+    def _enqueue_batch_accounting_workbench_read_model_refreshes(
+        self,
+        scope_keys: object,
+        *,
+        include_all: bool,
+        reason: str,
+        metadata: dict[str, object] | None,
+    ) -> list[str]:
+        raw_scope_keys = [scope_keys] if isinstance(scope_keys, str) else list(scope_keys or [])
+        normalized_scope_keys = [
+            self._workbench_read_model_base_scope_key(str(scope_key).strip())
+            for scope_key in raw_scope_keys
+            if str(scope_key).strip()
+        ]
+        if include_all:
+            normalized_scope_keys.append("all")
+        normalized_scope_keys = sorted({scope_key for scope_key in normalized_scope_keys if scope_key})
+        if not normalized_scope_keys:
+            return []
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
+            return []
+        return refresh_gateway.enqueue_many(
+            "workbench",
+            normalized_scope_keys,
+            reason=str(reason or "").strip() or "batch_accounting_relation_changed",
+            metadata=self._read_model_refresh_metadata({"metadata": metadata or {}}),
         )
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:

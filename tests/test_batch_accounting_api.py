@@ -1289,6 +1289,80 @@ class BatchAccountingApiTests(unittest.TestCase):
             }
         ])
 
+    def test_batch_accounting_lifecycle_enqueues_workbench_refresh_without_synchronous_rebuild(self) -> None:
+        class FakeReadModelRefreshGateway:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def can_enqueue(self) -> bool:
+                return True
+
+            def enqueue_many(
+                self,
+                scope_type: str,
+                scope_keys: list[str],
+                *,
+                reason: str,
+                metadata: dict[str, object] | None = None,
+            ) -> list[str]:
+                self.calls.append(
+                    {
+                        "scope_type": scope_type,
+                        "scope_keys": list(scope_keys),
+                        "reason": reason,
+                        "metadata": dict(metadata or {}),
+                    }
+                )
+                return list(scope_keys)
+
+        app = build_application()
+        gateway = FakeReadModelRefreshGateway()
+        lifecycle_calls: list[dict[str, object]] = []
+
+        def record_lifecycle(event: str, **kwargs: object) -> dict[str, object]:
+            lifecycle_calls.append({"event": event, **kwargs})
+            return {
+                "event": event,
+                "deleted_counts": {},
+                "invalidated_scopes": ["2026-03"],
+                "enqueued_jobs": ["workbench_relation.read_model.refresh"],
+                "errors": [],
+            }
+
+        with (
+            patch.object(app, "_execute_derived_data_lifecycle_event", side_effect=record_lifecycle),
+            patch.object(app, "_read_model_refresh_gateway", return_value=gateway),
+        ):
+            summary = app._execute_batch_accounting_relation_lifecycle_event(
+                "batch_accounting_relation_changed",
+                scope_keys=["visibility:finance:2026-03", "2026-03"],
+                include_all=False,
+                metadata={"source": "submit_batch_accounting", "case_id": "CASE-BATCH-1"},
+            )
+
+        self.assertEqual(lifecycle_calls, [
+            {
+                "event": "batch_accounting_relation_changed",
+                "scope_keys": ["visibility:finance:2026-03", "2026-03"],
+                "include_all": False,
+                "metadata": {"source": "submit_batch_accounting", "case_id": "CASE-BATCH-1"},
+                "excluded_domains": {"workbench_read_model"},
+            }
+        ])
+        self.assertEqual(gateway.calls, [
+            {
+                "scope_type": "workbench",
+                "scope_keys": ["2026-03"],
+                "reason": "batch_accounting_relation_changed",
+                "metadata": {"source": "submit_batch_accounting", "case_id": "CASE-BATCH-1"},
+            }
+        ])
+        self.assertEqual(summary["invalidated_scopes"], ["2026-03"])
+        self.assertEqual(
+            summary["enqueued_jobs"],
+            ["workbench_relation.read_model.refresh", "workbench.read_model.refresh"],
+        )
+
     def test_submit_creates_batch_accounting_relation_with_current_invoice_rows(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
 
