@@ -914,4 +914,5 @@
 - 触发事实：生产 `read_model_slo_smoke` 1s/5s 重采样显示 `workbench` handler 长尾；远端只读 profile 证明 `workbench:2026-03` 取数、补行、分组约 `2.23s`，但 worker handler 可到 `9-10s`，瓶颈集中在 active generation rows/groups 保存。
 - 决策：不改变 Workbench active generation 模型、不改页面 payload、不恢复 legacy live fallback；只把 `read_model.workbench_rows` 和 `read_model.workbench_groups` 持久化加入 repository multi-values 批量写白名单，保持 `workbench_group_rows` 既有 bulk path。
 - 测试覆盖：`tests/test_postgres_repositories_boundaries.py::test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables`，以及 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_batches_all_scope_generation_rows_when_supported`、`test_repository_batches_workbench_generation_rows_when_supported`。
-- 未闭合：需要发布后用生产 worker 复测 Workbench read model SLO 和写后 operation barrier；本 slice 不声明 Workbench 高性能闭环完成。
+- 发布后证据：release `pscip-l4-bulk-persistence-abcca6f78` 的 `workbench:2026-03` 5s run enqueue-to-fresh `5281.538ms`、handler `4946.075ms`；1s run enqueue-to-fresh `3873.533ms`、handler `3633.558ms`。相比部署前 `6.35s-9.64s` handler 有下降，但仍是 5s/1s 失败项。
+- 未闭合：需要继续 profile Workbench active generation 的分组计算与保存阶段，确认 `workbench_rows/groups/group_rows` 写入后的剩余热点；24h write-operation audit 仍显示 Workbench relation confirm/withdraw cross-page fan-out p95 `19.6s-66.0s`，需受控真实写样本验证 UoW target fan-out 是否已缩短。

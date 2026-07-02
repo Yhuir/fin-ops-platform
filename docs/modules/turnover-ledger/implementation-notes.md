@@ -584,4 +584,5 @@ git diff --check
 - 触发事实：生产 1s read model SLO 仍显示 `turnover_ledger:all` 超过 1s；按 worker 实际依赖注入远端 profile，`rebuild_turnover_ledger_read_model_scope("all")` rebuild+save 约 `1.48s`，主要不再是 Workbench relation context。
 - 决策：不改变外部往来 grouped row shape、不改变 affected-month scope narrowing、不恢复 `all` 默认刷新；先把 `read_model.turnover_ledger_rows` 保存加入 repository multi-values 批量写白名单，降低 projection 持久化成本。
 - 测试覆盖：`tests/test_postgres_repositories_boundaries.py::test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables` 覆盖 turnover rows bulk path；复跑 `tests/test_turnover_ledger_read_model_refresh.py`。
-- 未闭合：Turnover 仍需发布后用生产 `read_model_slo_smoke --read-model-key turnover_ledger --apply --target-ms 1000` 和真实写操作 audit 复测；本 slice 只关闭持久化 I/O 性能改动，不关闭完整高性能目标。
+- 发布后证据：release `pscip-l4-bulk-persistence-abcca6f78` 中 `turnover_ledger:all` 5s run enqueue-to-fresh `849.545ms`、handler `313.264ms`；1s run enqueue-to-fresh `495.031ms`、handler `215.518ms`，已达到当前 read model 1s SLO。
+- 未闭合：真实 turnover manual closure/withdraw 写操作在 24h write-operation audit 中仍为 missing sample；本 slice 只证明 direct read model refresh 性能，不证明真实写操作后的 operation barrier 和 downstream fan-out 闭环。
