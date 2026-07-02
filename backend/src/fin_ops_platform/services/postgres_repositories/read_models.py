@@ -7057,25 +7057,6 @@ class PostgresReadModelRepository:
                         %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, coalesce(%s::timestamptz, now()), %s, %s, %s
                     )
-                    on conflict (generation_id, scope_key, row_id) do update set
-                        scope_month = excluded.scope_month,
-                        scope_key = excluded.scope_key,
-                        source_kind = excluded.source_kind,
-                        status = excluded.status,
-                        project_id = excluded.project_id,
-                        project_name = excluded.project_name,
-                        counterparty_name = excluded.counterparty_name,
-                        amount = excluded.amount,
-                        object_identity_key = excluded.object_identity_key,
-                        object_identity_kind = excluded.object_identity_kind,
-                        object_identity_source = excluded.object_identity_source,
-                        object_identity_confidence = excluded.object_identity_confidence,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
                     """,
                     workbench_row_params,
                 )
@@ -7153,25 +7134,6 @@ class PostgresReadModelRepository:
                         %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, coalesce(%s::timestamptz, now()), %s, %s, %s
                     )
-                    on conflict (generation_id, scope_key, zone, group_id) do update set
-                        scope_month = excluded.scope_month,
-                        status = excluded.status,
-                        group_type = excluded.group_type,
-                        source_kinds = excluded.source_kinds,
-                        row_count = excluded.row_count,
-                        searchable_text = excluded.searchable_text,
-                        oa_sort_min = excluded.oa_sort_min,
-                        oa_sort_max = excluded.oa_sort_max,
-                        bank_sort_min = excluded.bank_sort_min,
-                        bank_sort_max = excluded.bank_sort_max,
-                        invoice_sort_min = excluded.invoice_sort_min,
-                        invoice_sort_max = excluded.invoice_sort_max,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
                     """,
                     workbench_group_params,
                 )
@@ -7188,25 +7150,6 @@ class PostgresReadModelRepository:
                         %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s,
                         %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
                     )
-                    on conflict (generation_id, scope_key, zone, group_id, pane, row_role, row_id) do update set
-                        scope_month = excluded.scope_month,
-                        row_index = excluded.row_index,
-                        source_kind = excluded.source_kind,
-                        status = excluded.status,
-                        time_value = excluded.time_value,
-                        time_date = excluded.time_date,
-                        column_values = excluded.column_values,
-                        searchable_text = excluded.searchable_text,
-                        object_identity_key = excluded.object_identity_key,
-                        object_identity_kind = excluded.object_identity_kind,
-                        object_identity_source = excluded.object_identity_source,
-                        object_identity_confidence = excluded.object_identity_confidence,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
                     """,
                     workbench_group_row_params,
                 )
@@ -7483,24 +7426,6 @@ class PostgresReadModelRepository:
                 %s, %s, %s::date, 'all', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
             )
-            on conflict (generation_id, scope_key, row_id) do update set
-                scope_month = excluded.scope_month,
-                source_kind = excluded.source_kind,
-                status = excluded.status,
-                project_id = excluded.project_id,
-                project_name = excluded.project_name,
-                counterparty_name = excluded.counterparty_name,
-                amount = excluded.amount,
-                object_identity_key = excluded.object_identity_key,
-                object_identity_kind = excluded.object_identity_kind,
-                object_identity_source = excluded.object_identity_source,
-                object_identity_confidence = excluded.object_identity_confidence,
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                payload = excluded.payload,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
             """,
             workbench_row_params,
         )
@@ -7572,25 +7497,6 @@ class PostgresReadModelRepository:
                 %s, %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
             )
-            on conflict (generation_id, scope_key, zone, group_id) do update set
-                scope_month = excluded.scope_month,
-                status = excluded.status,
-                group_type = excluded.group_type,
-                source_kinds = excluded.source_kinds,
-                row_count = excluded.row_count,
-                searchable_text = excluded.searchable_text,
-                oa_sort_min = excluded.oa_sort_min,
-                oa_sort_max = excluded.oa_sort_max,
-                bank_sort_min = excluded.bank_sort_min,
-                bank_sort_max = excluded.bank_sort_max,
-                invoice_sort_min = excluded.invoice_sort_min,
-                invoice_sort_max = excluded.invoice_sort_max,
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                payload = excluded.payload,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
             """,
             workbench_group_params,
         )
@@ -7607,25 +7513,6 @@ class PostgresReadModelRepository:
                 %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s,
                 %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
             )
-            on conflict (generation_id, scope_key, zone, group_id, pane, row_role, row_id) do update set
-                scope_month = excluded.scope_month,
-                row_index = excluded.row_index,
-                source_kind = excluded.source_kind,
-                status = excluded.status,
-                time_value = excluded.time_value,
-                time_date = excluded.time_date,
-                column_values = excluded.column_values,
-                searchable_text = excluded.searchable_text,
-                object_identity_key = excluded.object_identity_key,
-                object_identity_kind = excluded.object_identity_kind,
-                object_identity_source = excluded.object_identity_source,
-                object_identity_confidence = excluded.object_identity_confidence,
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                payload = excluded.payload,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
             """,
             workbench_group_row_params,
         )

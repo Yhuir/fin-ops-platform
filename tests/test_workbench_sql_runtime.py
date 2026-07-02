@@ -3838,7 +3838,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("insert into read_model.workbench_groups", sql)
         self.assertIn("insert into read_model.workbench_group_rows", sql)
         self.assertIn("insert into read_model.workbench_summary", sql)
-        self.assertIn("on conflict (generation_id, scope_key, zone, group_id)", sql)
+        self.assertNotIn("on conflict (generation_id, scope_key, row_id)", sql)
+        self.assertNotIn("on conflict (generation_id, scope_key, zone, group_id)", sql)
+        self.assertNotIn("on conflict (generation_id, scope_key, zone, group_id, pane, row_role, row_id)", sql)
         self.assertIn("status = 'active'", sql)
 
     def test_repository_prunes_old_workbench_generations_after_publish_for_changed_scope(self) -> None:
@@ -6184,7 +6186,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("delete from read_model.workbench_rows", sql)
         self.assertIn("insert into read_model.workbench_generations", sql)
         self.assertIn("insert into read_model.workbench_rows", sql)
-        self.assertIn("on conflict (generation_id, scope_key, row_id)", sql)
+        self.assertNotIn("on conflict (generation_id, scope_key, row_id)", sql)
         row_write = next(params for statement, params in connection.executed if "insert into read_model.workbench_rows" in statement)
         self.assertEqual(row_write[9], "1000.00")
         group_row_write = next(
