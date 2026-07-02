@@ -213,6 +213,6 @@ cd web && npm test -- --run src/test/WorkbenchExceptionModal.test.tsx src/test/W
 
 ## 未测风险
 
-- 本轮不运行真实生产库 active generation 全量回放；需要 staging/生产只读验证。
+- 2026-07-02 release `pscip-l4-alignment-d725fdb6d` 已运行生产 `workbench:2026-03` profile，证明 relation alignment 性能切片有效；但 targeted 1s SLO 仍 fail，`all` parent aggregate 和真实 confirm/withdraw 写操作仍需继续优化和受控样本验证。
 - 前端像素级视觉基线、真实生产大数据性能、真实断网/代理重试、真实 App Health 生产状态源和其他下游页面 fan-out 需要继续补浏览器/真实数据 smoke；Vitest 主要保护交互和 API mapper。关联台自身 withdraw、split candidate、exception apply/cancel/ignore、现金过账/买票/取消处理、read-export 逐入口权限、App Health write-safety blocker、stale/refreshing/false-empty、OA dirty/refreshing、refresh failed/write failure、barrier timeout、fresh refetch failure、deterministic 大数据分页/搜索/三栏滚动、网络失败重试、409 stale preview 和重复点击已有 Browser smoke。
 - 关联台仍有 legacy `server.py` handler 和多条生产相关链路；后续改动应按具体影响选择扩展回归，而不是只跑最小闭环。

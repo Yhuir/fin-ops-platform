@@ -923,4 +923,5 @@
 - 根因：`align_relation` 为了判断一个 OA 是否对应唯一 2-6 条银行流水合计，旧逻辑枚举 `itertools.combinations(indexed_bank_rows, size)`。大 active relation 中银行行较多时会出现组合爆炸，污染 Workbench read model handler。
 - 决策：保持 relation alignment 输入/输出 payload 不变，删除全组合枚举，改为按金额的有界动态规划状态表。每个金额只保留唯一组合或 ambiguous 标记，超过最大目标金额直接剪枝，状态超过上限时保守返回 ambiguous，不猜测银行归属。
 - 测试覆盖：`tests/test_workbench_relation_alignment_service.py` 新增大关系唯一合计与 ambiguous 合计不猜测回归；复跑 Workbench generation batching tests。
-- 未闭合：需要发布后重跑 Workbench `2026-03` profile 与 critical read model SLO，确认 `_group_payload` 和 handler 是否降到目标范围；真实 confirm/withdraw 写操作仍需受控样本验证。
+- 发布后证据：release `pscip-l4-alignment-d725fdb6d` 中 `workbench:2026-03` profile month shard rebuild `1299.692ms`，`builder._group_payload` `334.799ms`，保存阶段 `391.616ms`；targeted 1s SLO 仍 fail，`enqueue_to_fresh_ms=2801.281`、`handler_duration_ms=2559.983`。
+- 未闭合：Workbench 已从 5s 失败项降到 5s pass，但仍不是稳定 1s；`all` parent aggregate profile 仍约 `13.97s`，真实 confirm/withdraw 写操作还缺受控 post-deploy 样本验证。

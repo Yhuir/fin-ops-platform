@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：所有当前 App Status read model 通过 manifest、scope policy、refresh gateway、runtime worker、freshness/status gate 和 operation barrier 形成可验证闭环。
 - 当前闭环：14 个当前 App Status read model 已完成 Read Model 模块化 PSCIP-L4，`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 以显式例外语义闭环。
-- 当前非阻塞风险：Search 曾有一次生产 grouped-run 高延迟样本，targeted rerun 通过；Workbench groups admin smoke 有一次 probe shape `400`，不是 stale-as-fresh 证据。2026-07-02 release `pscip-l4-bulk-persistence-abcca6f78` 发布后，5s critical read model smoke 为 13/16 pass，1s 高性能目标为 9/16 pass；性能专项仍 open。Turnover ledger bulk persistence 已让 `turnover_ledger:all` 1s 通过，但 `workbench`、`invoice_lifecycle`、`search` 等仍有长尾。authenticated HTTP/SSE 和真实写操作矩阵还需要 Admin Token/受控样本证据；24h write-operation audit 仍显示 Workbench relation confirm/withdraw downstream fan-out p95 约 `19.6s-66.0s`，且 turnover withdraw/import/tag 类真实样本缺失。
+- 当前非阻塞风险：Search 曾有一次生产 grouped-run 高延迟样本，targeted rerun 通过；Workbench groups admin smoke 有一次 probe shape `400`，不是 stale-as-fresh 证据。2026-07-02 release `pscip-l4-alignment-d725fdb6d` 发布后，5s critical read model smoke 为 11/16 pass，1s 高性能目标为 6/16 pass；性能专项仍 open。Workbench relation alignment bounded subset 已将 `workbench:2026-03` profile rebuild 降到约 `1.30s`，但 1s targeted smoke 仍为 `2801.281ms`。authenticated HTTP/SSE 和真实写操作矩阵还需要 Admin Token/受控样本证据；24h write-operation audit 仍显示 Workbench relation confirm/withdraw downstream fan-out p95 约 `42.9s-71.3s`，且 turnover withdraw/import/tag 类真实样本缺失。
 - 旧代码删除条件：legacy/local compat path 仍可保留为明确隔离路径；删除前必须证明对应页面 API、worker、测试和生产脚本不再调用该路径。
 
 ## 闭环证据
@@ -17,7 +17,7 @@
 - 生产证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`
 - 远端闭环提交：`c771b894 docs: close read model production evidence`
 - 生产 runtime 证据：`/health/ready` ready，scope contract `ok=true`，`violation_count=0`，current uncovered outbox failure count `0`，dirty/outbox/readiness 收敛。
-- 生产 SLO：2026-06-28 `read_model_slo_smoke --apply --critical-only --target-ms 5000` grouped run 14/15 pass，唯一 Search grouped miss targeted rerun `499.357ms` pass。2026-07-02 release `HEAD-ef1a13cd-20260702120002` 复核 5s target 为 16/16 pass，max enqueue-to-fresh `3915.162ms`；同环境 1s target 为 7/16 pass、9/16 fail。2026-07-02 release `pscip-l4-bulk-persistence-abcca6f78` 复核 5s target 为 13/16 pass，失败项为 `search:2026-03` `7312.749ms`、`invoice_lifecycle:2026-01` `7253.531ms`、`workbench:2026-03` `5281.538ms`；1s target 为 9/16 pass，`turnover_ledger:all` `495.031ms` pass，`workbench:2026-03` `3873.533ms` 仍 fail。不能声明高性能全域闭环。
+- 生产 SLO：2026-06-28 `read_model_slo_smoke --apply --critical-only --target-ms 5000` grouped run 14/15 pass，唯一 Search grouped miss targeted rerun `499.357ms` pass。2026-07-02 release `HEAD-ef1a13cd-20260702120002` 复核 5s target 为 16/16 pass，max enqueue-to-fresh `3915.162ms`；同环境 1s target 为 7/16 pass、9/16 fail。2026-07-02 release `pscip-l4-bulk-persistence-abcca6f78` 复核 5s target 为 13/16 pass，1s target 为 9/16 pass。2026-07-02 release `pscip-l4-alignment-d725fdb6d` `/health/ready` `532.808ms` pass，scope contract `ok=true`；5s critical 为 11/16 pass，失败项为 `no_oa_bank_batch` `12890.546ms`、`invoice_lifecycle` `12098.140ms`、`turnover_ledger` `10900.840ms`、`search` `8350.434ms`、`pending_invoice` `6591.686ms`；1s critical 为 6/16 pass，不能声明高性能全域闭环。
 
 ## 职责边界
 
