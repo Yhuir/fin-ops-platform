@@ -485,8 +485,12 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(writer.calls[0]["transaction"], connection.transaction_obj)
         self.assertEqual(writer.calls[0]["reason"], "workbench_relation_changed")
         self.assertEqual(writer.calls[0]["metadata"], {"action_name": "confirm_link"})
+        self.assertEqual(writer.calls[1]["scope_type"], "workbench_relation")
+        self.assertEqual(writer.calls[1]["scope_key"], "2026-05")
+        self.assertEqual(writer.calls[1]["reason"], "workbench_pair_relation_changed")
         self.assertEqual(result["source_versions"]["2026-05"], 1)
-        self.assertEqual(result["outbox_event_ids"], ["event-1"])
+        self.assertEqual(result["source_versions"]["workbench_relation:2026-05"], 2)
+        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2"])
 
     def test_confirm_link_preserves_relation_refresh_metadata_in_transactional_outbox(self) -> None:
         connection = _RecordingConnection()
@@ -513,7 +517,17 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             handler,
         )
 
-        self.assertEqual(result["outbox_event_ids"], ["event-1"])
+        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2", "event-3", "event-4", "event-5"])
+        self.assertEqual(
+            [(call["scope_type"], call["scope_key"], call["reason"]) for call in writer.calls],
+            [
+                ("workbench", "2026-05", "workbench_relation_changed"),
+                ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
+                ("bank_detail", "2026-05", "workbench_relation_changed"),
+                ("search", "2026-05", "workbench_relation_changed"),
+                ("pending_invoice", "expense:all:2026-05", "workbench_relation_changed"),
+            ],
+        )
         self.assertEqual(writer.calls[0]["reason"], "workbench_relation_changed")
         self.assertEqual(
             writer.calls[0]["metadata"],
@@ -525,6 +539,39 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 "invoice_usage_scope_types": ["input_invoice_usage"],
                 "pending_invoice_scope_keys": ["expense:all:2026-05"],
             },
+        )
+        self.assertEqual(writer.calls[4]["metadata"], writer.calls[0]["metadata"])
+
+    def test_confirm_link_relation_refresh_metadata_normalizes_cost_statistics_targets(self) -> None:
+        writer = _RecordingDirtyOutboxWriter()
+        uow = self._new_uow(read_model_writer=writer)
+
+        def handler(ctx: object) -> dict[str, object]:
+            ctx.pair_relations.record("save_relation", case_id="CASE-COST")
+            return {"case_id": "CASE-COST", "affected_scope_keys": ["2026-05"]}
+
+        self._run_uow(
+            uow,
+            _Command(
+                action_name="confirm_link",
+                scope_keys=["2026-05"],
+                refresh_metadata={
+                    "source": "confirm_link",
+                    "case_id": "CASE-COST",
+                    "downstream_scope_types": ["cost_statistics"],
+                },
+            ),
+            handler,
+        )
+
+        self.assertEqual(
+            [(call["scope_type"], call["scope_key"]) for call in writer.calls],
+            [
+                ("workbench", "2026-05"),
+                ("workbench_relation", "2026-05"),
+                ("cost_statistics", "active:2026-05"),
+                ("cost_statistics", "all:2026-05"),
+            ],
         )
 
     def test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history(self) -> None:

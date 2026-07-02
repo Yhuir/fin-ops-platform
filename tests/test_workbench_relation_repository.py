@@ -125,6 +125,22 @@ def test_relation_change_enqueues_relation_read_model_before_relevant_downstream
     assert workbench_all_outbox_payloads[-1]["aggregate_only"] is True
 
 
+def test_relation_repository_can_persist_without_refresh_fanout_for_uow_boundary() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRelationRepository(connection, enqueue_refreshes=False)
+
+    repository.save_workbench_pair_relations(_snapshot(), changed_case_ids={"CASE-1"})
+
+    normalized_fetch_all_sql = [" ".join(sql.lower().split()) for sql, _params in connection.fetch_all_calls]
+    normalized_fetch_one_sql = [" ".join(sql.lower().split()) for sql, _params in connection.fetch_one_calls]
+    normalized_execute_sql = [" ".join(sql.lower().split()) for sql, _params in connection.execute_calls]
+
+    assert not normalized_fetch_all_sql
+    assert not normalized_fetch_one_sql
+    assert any("insert into app.workbench_pair_relations" in sql for sql in normalized_execute_sql)
+    assert not any("insert into job.outbox_events" in sql for sql in normalized_execute_sql)
+
+
 def test_no_oa_relation_change_keeps_no_oa_read_model_in_downstream_scope() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRelationRepository(connection)

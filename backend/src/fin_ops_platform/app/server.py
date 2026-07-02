@@ -3586,7 +3586,7 @@ class Application:
     @staticmethod
     def _workbench_uow_repository_factory(transaction: object) -> SimpleNamespace:
         workbench_repository = PostgresWorkbenchRepository(transaction)
-        relation_repository = PostgresWorkbenchRelationRepository(transaction)
+        relation_repository = PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)
         return SimpleNamespace(
             pair_relations=relation_repository,
             exception_cases=workbench_repository,

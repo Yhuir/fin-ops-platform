@@ -13,6 +13,7 @@ from fin_ops_platform.services.workbench_idempotency import (
     is_workbench_idempotency_reserved_expired,
     workbench_request_fingerprint,
 )
+from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 
@@ -25,6 +26,14 @@ class WorkbenchWriteUnitOfWorkContext:
     row_overrides: Any
     candidate_matches: Any
     idempotency_store: Any
+
+
+@dataclass(frozen=True)
+class WorkbenchReadModelRefreshTarget:
+    scope_type: str
+    scope_key: str
+    reason: str
+    metadata: dict[str, object] | None = None
 
 
 class WorkbenchWriteUnitOfWork:
@@ -90,18 +99,20 @@ class WorkbenchWriteUnitOfWork:
             result = dict(handler_result)
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
-            action_name = str(getattr(command, "action_name", "") or "")
-            refresh_reason = _refresh_reason_for(command, action_name)
-            metadata = _refresh_metadata_for(command, action_name)
-            for scope_key in _scope_keys_for(command, result):
+            for target in _refresh_targets_for(command, result):
                 event = self._read_model_refresh_writer.enqueue_refresh(
                     transaction=transaction,
-                    scope_type="workbench",
-                    scope_key=scope_key,
-                    reason=refresh_reason,
-                    metadata=dict(metadata) if metadata is not None else None,
+                    scope_type=target.scope_type,
+                    scope_key=target.scope_key,
+                    reason=target.reason,
+                    metadata=dict(target.metadata) if target.metadata is not None else None,
                 )
-                source_versions[scope_key] = _event_value(event, "source_version")
+                source_version_key = (
+                    target.scope_key
+                    if target.scope_type == "workbench"
+                    else f"{target.scope_type}:{target.scope_key}"
+                )
+                source_versions[source_version_key] = _event_value(event, "source_version")
                 outbox_event_ids.append(_event_value(event, "event_id"))
 
             result["source_versions"] = source_versions
@@ -179,6 +190,121 @@ def _scope_keys_for(command: Any, handler_result: dict[str, Any]) -> list[str]:
         seen.add(scope_key)
         scope_keys.append(scope_key)
     return scope_keys
+
+
+def _refresh_targets_for(command: Any, handler_result: dict[str, Any]) -> list[WorkbenchReadModelRefreshTarget]:
+    action_name = str(getattr(command, "action_name", "") or "")
+    reason = _refresh_reason_for(command, action_name)
+    metadata = _refresh_metadata_for(command, action_name)
+    scope_keys = _scope_keys_for(command, handler_result)
+    targets: list[WorkbenchReadModelRefreshTarget] = []
+
+    _extend_refresh_targets(
+        targets,
+        scope_type="workbench",
+        scope_keys=scope_keys,
+        reason=reason,
+        metadata=metadata,
+    )
+    if reason != "workbench_relation_changed":
+        return targets
+
+    _extend_refresh_targets(
+        targets,
+        scope_type="workbench_relation",
+        scope_keys=scope_keys,
+        reason="workbench_pair_relation_changed",
+        metadata=metadata,
+    )
+    downstream_scope_types = _metadata_text_set(metadata, "downstream_scope_types")
+    for scope_type in (
+        "bank_detail",
+        "invoice_lifecycle",
+        "input_invoice_usage",
+        "output_invoice_collection",
+        "oa_pending_payment",
+        "search",
+        "tax_offset",
+        "no_oa_bank_batch",
+        "bank_flow_rule_batch",
+    ):
+        if scope_type in downstream_scope_types:
+            _extend_refresh_targets(
+                targets,
+                scope_type=scope_type,
+                scope_keys=scope_keys,
+                reason=reason,
+                metadata=metadata,
+            )
+    if "cost_statistics" in downstream_scope_types:
+        _extend_refresh_targets(
+            targets,
+            scope_type="cost_statistics",
+            scope_keys=scope_keys,
+            reason=reason,
+            metadata=metadata,
+        )
+    if "pending_invoice" in downstream_scope_types:
+        _extend_refresh_targets(
+            targets,
+            scope_type="pending_invoice",
+            scope_keys=_metadata_text_list(metadata, "pending_invoice_scope_keys"),
+            reason=reason,
+            metadata=metadata,
+        )
+    return _dedupe_refresh_targets(targets)
+
+
+def _extend_refresh_targets(
+    targets: list[WorkbenchReadModelRefreshTarget],
+    *,
+    scope_type: str,
+    scope_keys: list[str],
+    reason: str,
+    metadata: dict[str, object] | None,
+) -> None:
+    for scope_key in _normalize_refresh_scope_keys(scope_type, scope_keys):
+        targets.append(
+            WorkbenchReadModelRefreshTarget(
+                scope_type=scope_type,
+                scope_key=scope_key,
+                reason=reason,
+                metadata=metadata,
+            )
+        )
+
+
+def _normalize_refresh_scope_keys(scope_type: str, scope_keys: list[str]) -> list[str]:
+    return DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(scope_type, scope_keys)
+
+
+def _dedupe_refresh_targets(targets: list[WorkbenchReadModelRefreshTarget]) -> list[WorkbenchReadModelRefreshTarget]:
+    result: list[WorkbenchReadModelRefreshTarget] = []
+    seen: set[tuple[str, str, str]] = set()
+    for target in targets:
+        key = (target.scope_type, target.scope_key, target.reason)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(target)
+    return result
+
+
+def _metadata_text_list(metadata: dict[str, object] | None, name: str) -> list[str]:
+    if not isinstance(metadata, dict):
+        return []
+    raw_value = metadata.get(name)
+    if isinstance(raw_value, str):
+        raw_items: list[object] = [raw_value]
+    elif isinstance(raw_value, (list, tuple, set)):
+        raw_items = list(raw_value)
+    else:
+        return []
+    return [item for item in (str(raw_item or "").strip() for raw_item in raw_items) if item]
+
+
+def _metadata_text_set(metadata: dict[str, object] | None, name: str) -> set[str]:
+    return set(_metadata_text_list(metadata, name))
 
 
 def _refresh_metadata_for(command: Any, action_name: str) -> dict[str, object] | None:

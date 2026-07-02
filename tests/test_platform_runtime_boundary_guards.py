@@ -4397,6 +4397,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_uow_pair_relation_repository_disables_repository_fanout(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_workbench_uow_repository_factory")
+
+        violations: list[str] = []
+        if "PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)" not in method_source:
+            violations.append("Workbench UoW repository factory must disable repository read-model fan-out")
+        if "PostgresWorkbenchRelationRepository(transaction)" in method_source:
+            violations.append("Workbench UoW repository factory still uses default repository fan-out")
+
+        self.assertEqual(violations, [])
+
     def test_broad_persist_state_does_not_serialize_pair_relations(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")

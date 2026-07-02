@@ -54,8 +54,9 @@ _INCOME_PENDING_INVOICE_SCOPE_KEYS = (
 
 
 class PostgresWorkbenchRelationRepository:
-    def __init__(self, connection: Any) -> None:
+    def __init__(self, connection: Any, *, enqueue_refreshes: bool = True) -> None:
         self._connection = connection
+        self._enqueue_refreshes = bool(enqueue_refreshes)
 
     def load_workbench_pair_relations(self) -> dict[str, Any]:
         rows = self._connection.fetch_all("select case_id as key, raw_payload from app.workbench_pair_relations order by case_id")
@@ -93,35 +94,36 @@ class PostgresWorkbenchRelationRepository:
             for case_id, payload in iter_mapping(relations):
                 if changed_ids is not None and case_id not in changed_ids:
                     continue
-                relation_mode = text(payload.get("relation_mode") or payload.get("mode"))
-                domain_scope_keys = _workbench_relation_domain_scope_keys(connection, payload)
-                relation_scope_keys = _workbench_relation_dirty_scope_keys_from_domain_scope_keys(domain_scope_keys)
-                dirty_scope_keys.update(relation_scope_keys)
-                scope_map = _workbench_relation_downstream_scope_map(
-                    connection,
-                    payload,
-                    domain_scope_keys=domain_scope_keys,
-                    dirty_scope_keys=relation_scope_keys,
-                )
-                for scope_key, downstream_scope_types in scope_map.items():
-                    downstream_by_scope_key.setdefault(scope_key, set()).update(downstream_scope_types)
-                    if (
-                        relation_mode in _NO_OA_BATCH_READ_MODEL_RELATION_MODES
-                        and "no_oa_bank_batch" in downstream_scope_types
-                    ):
-                        no_oa_batch_relation_modes_by_scope.setdefault(scope_key, set()).add(relation_mode)
-                    if (
-                        relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
-                        and "bank_flow_rule_batch" in downstream_scope_types
-                    ):
-                        bank_flow_batch_relation_modes_by_scope.setdefault(scope_key, set()).add(relation_mode)
-                pending_invoice_scope_keys.update(
-                    _workbench_relation_pending_invoice_scope_keys(
+                if self._enqueue_refreshes:
+                    relation_mode = text(payload.get("relation_mode") or payload.get("mode"))
+                    domain_scope_keys = _workbench_relation_domain_scope_keys(connection, payload)
+                    relation_scope_keys = _workbench_relation_dirty_scope_keys_from_domain_scope_keys(domain_scope_keys)
+                    dirty_scope_keys.update(relation_scope_keys)
+                    scope_map = _workbench_relation_downstream_scope_map(
                         connection,
                         payload,
                         domain_scope_keys=domain_scope_keys,
+                        dirty_scope_keys=relation_scope_keys,
                     )
-                )
+                    for scope_key, downstream_scope_types in scope_map.items():
+                        downstream_by_scope_key.setdefault(scope_key, set()).update(downstream_scope_types)
+                        if (
+                            relation_mode in _NO_OA_BATCH_READ_MODEL_RELATION_MODES
+                            and "no_oa_bank_batch" in downstream_scope_types
+                        ):
+                            no_oa_batch_relation_modes_by_scope.setdefault(scope_key, set()).add(relation_mode)
+                        if (
+                            relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
+                            and "bank_flow_rule_batch" in downstream_scope_types
+                        ):
+                            bank_flow_batch_relation_modes_by_scope.setdefault(scope_key, set()).add(relation_mode)
+                    pending_invoice_scope_keys.update(
+                        _workbench_relation_pending_invoice_scope_keys(
+                            connection,
+                            payload,
+                            domain_scope_keys=domain_scope_keys,
+                        )
+                    )
                 connection.execute(
                     """
                     insert into app.workbench_pair_relations(
@@ -160,6 +162,8 @@ class PostgresWorkbenchRelationRepository:
                 )
             history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else None
             self._replace_workbench_pair_relation_history(connection, history, changed_case_ids=changed_ids)
+            if not self._enqueue_refreshes:
+                return
             relation_refresh_scope_keys = set(dirty_scope_keys or {"all"})
             downstream_refresh_scope_keys = relation_refresh_scope_keys | set(downstream_by_scope_key.keys())
             for scope_key in sorted(downstream_refresh_scope_keys or {"all"}):
