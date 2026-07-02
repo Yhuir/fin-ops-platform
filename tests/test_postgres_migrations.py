@@ -98,6 +98,7 @@ EXPECTED_MIGRATIONS = [
     "0082_bank_flow_rule_batch_storage.sql",
     "0083_bank_flow_rule_batch_tag_rules.sql",
     "0084_runtime_queue_history_retention.sql",
+    "0085_pending_invoice_trade_date_nulls_last_index.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -245,7 +246,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 85)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 86)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -364,6 +365,16 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("grant delete on job.read_model_dirty_scopes to fin_ops_migrator", normalized_sql)
         self.assertNotIn("grant select, insert, update, delete on job.outbox_events to fin_ops_worker", normalized_sql)
         self.assertNotIn("grant select, insert, update, delete on job.outbox_events to fin_ops_api", normalized_sql)
+
+    def test_pending_invoice_first_screen_sort_index_matches_query_order(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("pending_invoice_rows_direction_trade_date_nulls_last_idx", sql)
+        self.assertIn(
+            "on read_model.pending_invoice_rows ( direction, trade_date desc nulls last, row_id )",
+            normalized_sql,
+        )
 
     def test_discovery_rejects_invalid_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

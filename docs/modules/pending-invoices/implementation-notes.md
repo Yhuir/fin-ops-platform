@@ -11,6 +11,7 @@
 - `requires_invoice` 作为列表 filter 是最终状态桶；支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`，收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只解释规则命中，不能作为 rows/filter-options/export 的父筛选可见性条件。
 - rows、filter-options、export-preview 和 export 必须先经过 `PendingInvoiceReadModelService` 的 freshness gate；非 fresh 时不能把空 rows 当真实结果。
 - filter-options 在 fresh gate 通过后应优先走 SQL 聚合读取选项，不再为生成筛选项拉取全量 rows；这属于页面首屏性能路径，不能回退到伪 fresh。
+- rows 首屏默认排序合同是 `trade_date desc nulls last, row_id`；PostgreSQL 热路径索引必须显式匹配 `nulls last`，不能通过取消 `nulls last` 或回退同步扫描来换取性能。
 - export-preview 和 export 通过 `PendingInvoiceReadModelService.all_rows()` 收集当前筛选结果时，超过 20,000 行必须 fail-closed，不能继续分页并同步生成大 XLSX。
 - OA/流水/发票 relation 不是待找发票私有事实；当前页面只通过 attach existing 写入选择已有发票关系，且必须委托 `WorkbenchRelationCommandService`；读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
 - 选择已有进项发票候选表的“流水关联”chip 必须使用后端返回的 `bank_relation_status` / `linked_bank_transaction_count`，不能用 `remaining_amount=0` 或候选金额推断；最终补付金额以 preview `payment_impact.remaining_amount_after` 为准。
@@ -35,6 +36,17 @@
 ```
 
 ## 历史记录
+
+## 2026-07-02 - pending invoice 首屏排序索引对齐
+
+- 目标：修复 authenticated core API SLO 中 `/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc` 唯一超过 1s 的首屏读路径。
+- 影响范围：`read_model.pending_invoice_rows` 的 PostgreSQL hot-path index、迁移测试、本模块测试矩阵和 read-model-performance GSD 证据；不改变 rows API response shape、freshness gate、worker scope 或业务状态。
+- 关键决策：保持 `PendingInvoiceReadModelService` -> `PendingInvoiceReadModelRepositoryPort` -> PostgreSQL read model repository 的既有边界；不恢复旧同步扫描、不加 Redis 伪缓存、不绕过 source-version 校验。新增索引只匹配现有排序合同 `direction, trade_date desc nulls last, row_id`，避免旧 `DESC` 默认 `NULLS FIRST` 索引与查询顺序不一致。
+- 文档影响：更新本实施记录和 `tests.md`；产品口径、状态机、API contract 和模块 boundary I/O 未变化。
+- 测试覆盖：`tests/test_postgres_migrations.py` 新增迁移清单和索引顺序断言，固定 `nulls last` 不被后续迁移遗漏。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_expected_migration_files_are_present_and_ordered tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_pending_invoice_first_screen_sort_index_matches_query_order -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：当前账号不能通过 deploy-control 执行自定义生产 EXPLAIN；authenticated HTTP SLO 已证明 read model fresh 且该 API 为唯一 1s 失败项，发布后仍需重新跑 authenticated HTTP SLO 证明实际 p95 收敛。
+- 后续事项：部署包含 `0085` 的 release 后，重新采集 pending invoices rows 和全核心 API SLO；若仍超过 1s，再在新增受控只读诊断入口或 root session 下拆分 count/source-version/source-summary 查询成本。
 
 ## 2026-06-25 - route-owner local closure audit
 

@@ -1,0 +1,16 @@
+{
+  "probes": [
+    {"name":"session_me","path":"/api/session/me","expected_statuses":[200]},
+    {"name":"app_health","path":"/api/app-health","expected_statuses":[200]},
+    {"name":"operations_app_health_dashboard","path":"/api/operations/app-health-dashboard","expected_statuses":[200,202],"auth_scope":"admin","target_ms":1500},
+    {"name":"workbench_summary_all","path":"/api/workbench/summary?month=all","expected_statuses":[200,202]},
+    {"name":"workbench_groups_all_paired","path":"/api/workbench/groups?month=all&zone=paired&page=1&page_size=50","expected_statuses":[200,202]},
+    {"name":"bank_details_transactions","path":"/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50","expected_statuses":[200,202]},
+    {"name":"pending_invoices_rows","path":"/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc","expected_statuses":[200,202]},
+    {"name":"input_invoice_usage_rows","path":"/api/input-invoice-usage/rows?page=1&page_size=20","expected_statuses":[200,202]},
+    {"name":"oa_pending_payments_rows","path":"/api/oa-pending-payments/rows?page=1&page_size=20","expected_statuses":[200,202]},
+    {"name":"tax_offset_rows","path":"/api/tax-offset?month=2026-03","expected_statuses":[200,202]},
+    {"name":"no_oa_bank_batches","path":"/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200","expected_statuses":[200,202]},
+    {"name":"turnover_ledger_grouped","path":"/api/turnover-ledger?view=grouped&page=1&page_size=50","expected_statuses":[200,202]}
+  ]
+}

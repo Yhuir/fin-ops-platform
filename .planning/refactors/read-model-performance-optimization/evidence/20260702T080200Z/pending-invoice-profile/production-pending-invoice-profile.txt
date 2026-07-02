@@ -1,0 +1,2 @@
+RUN_META attempted=2026-07-02T08:02:00Z target=finops-prod release=pscip-l4-workbench-raw-51cba11e8
+SECTION {"name":"custom_pending_invoice_explain","status":"blocked","reason":"finops-deploy cannot source root-only /etc/fin-ops runtime env and arbitrary sudo bash requires a password; deploy-control exposes status/read-model-slo-smoke/read-model-scope-contract but not a generic SQL diagnostics command","mutates_data":false}

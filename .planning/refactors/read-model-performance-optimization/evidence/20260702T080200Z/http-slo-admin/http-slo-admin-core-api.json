@@ -1,0 +1,1059 @@
+{
+  "api_prefix": "/fin-ops-api",
+  "auth_configured": true,
+  "base_url": "https://www.yn-sourcing.com/",
+  "generated_at": "2026-07-02T08:03:06.649979+00:00",
+  "iterations": 3,
+  "probes": [
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 109.63,
+        "p95": 127.127,
+        "p99": 127.127
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "session_me",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/session/me",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 317.68,
+        "p95": 341.492,
+        "p99": 341.492
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "app_health",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/app-health",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 121.335,
+        "p95": 124.142,
+        "p99": 124.142
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "operations_app_health_dashboard",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/operations/app-health-dashboard",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1500.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 131.138,
+        "p95": 151.279,
+        "p99": 151.279
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "workbench_summary_all",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/workbench/summary?month=all",
+      "read_model_statuses": {
+        "fresh": 3
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 405.105,
+        "p95": 408.627,
+        "p99": 408.627
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "workbench_groups_all_paired",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50",
+      "read_model_statuses": {
+        "fresh": 3
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {
+        "hit": 3
+      },
+      "duration_ms": {
+        "p50": 164.618,
+        "p95": 170.852,
+        "p99": 170.852
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_details_transactions",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "read_model_statuses": {
+        "fresh": 3
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 1364.911,
+        "p95": 1478.636,
+        "p99": 1478.636
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "pending_invoices_rows",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_statuses": {
+        "fresh": 3
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": false,
+      "status": "fail",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 133.386,
+        "p95": 151.961,
+        "p99": 151.961
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "input_invoice_usage_rows",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/input-invoice-usage/rows?page=1&page_size=20",
+      "read_model_statuses": {
+        "fresh": 3
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 163.286,
+        "p95": 177.959,
+        "p99": 177.959
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "oa_pending_payments_rows",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/oa-pending-payments/rows?page=1&page_size=20",
+      "read_model_statuses": {
+        "fresh": 3
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 173.737,
+        "p95": 182.21,
+        "p99": 182.21
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "tax_offset_rows",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/tax-offset?month=2026-03",
+      "read_model_statuses": {
+        "fresh": 3
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 150.626,
+        "p95": 315.27,
+        "p99": 315.27
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "no_oa_bank_batches",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200",
+      "read_model_statuses": {
+        "fresh": 3
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 241.663,
+        "p95": 247.186,
+        "p99": 247.186
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "turnover_ledger_grouped",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/turnover-ledger?view=grouped&page=1&page_size=50",
+      "read_model_statuses": {
+        "fresh": 3
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 3,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 3
+      },
+      "success_count": 3,
+      "target_ms": 1000.0
+    }
+  ],
+  "samples": [
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 130.091,
+      "iteration": 1,
+      "kind": "api",
+      "name": "session_me",
+      "ok": true,
+      "path": "/api/session/me",
+      "response_bytes": 671,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/session/me",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 109.63,
+      "iteration": 2,
+      "kind": "api",
+      "name": "session_me",
+      "ok": true,
+      "path": "/api/session/me",
+      "response_bytes": 671,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/session/me",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 127.127,
+      "iteration": 3,
+      "kind": "api",
+      "name": "session_me",
+      "ok": true,
+      "path": "/api/session/me",
+      "response_bytes": 671,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/session/me",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 106.116,
+      "iteration": 4,
+      "kind": "api",
+      "name": "session_me",
+      "ok": true,
+      "path": "/api/session/me",
+      "response_bytes": 671,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/session/me",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 313.515,
+      "iteration": 1,
+      "kind": "api",
+      "name": "app_health",
+      "ok": true,
+      "path": "/api/app-health",
+      "response_bytes": 11263,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/app-health",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 317.68,
+      "iteration": 2,
+      "kind": "api",
+      "name": "app_health",
+      "ok": true,
+      "path": "/api/app-health",
+      "response_bytes": 11263,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/app-health",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 341.492,
+      "iteration": 3,
+      "kind": "api",
+      "name": "app_health",
+      "ok": true,
+      "path": "/api/app-health",
+      "response_bytes": 11261,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/app-health",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 314.655,
+      "iteration": 4,
+      "kind": "api",
+      "name": "app_health",
+      "ok": true,
+      "path": "/api/app-health",
+      "response_bytes": 11266,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/app-health",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 2251.627,
+      "iteration": 1,
+      "kind": "api",
+      "name": "operations_app_health_dashboard",
+      "ok": true,
+      "path": "/api/operations/app-health-dashboard",
+      "response_bytes": 7309,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health-dashboard",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 121.335,
+      "iteration": 2,
+      "kind": "api",
+      "name": "operations_app_health_dashboard",
+      "ok": true,
+      "path": "/api/operations/app-health-dashboard",
+      "response_bytes": 7309,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health-dashboard",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 124.142,
+      "iteration": 3,
+      "kind": "api",
+      "name": "operations_app_health_dashboard",
+      "ok": true,
+      "path": "/api/operations/app-health-dashboard",
+      "response_bytes": 7309,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health-dashboard",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 120.87,
+      "iteration": 4,
+      "kind": "api",
+      "name": "operations_app_health_dashboard",
+      "ok": true,
+      "path": "/api/operations/app-health-dashboard",
+      "response_bytes": 7309,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health-dashboard",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 116.504,
+      "iteration": 1,
+      "kind": "api",
+      "name": "workbench_summary_all",
+      "ok": true,
+      "path": "/api/workbench/summary?month=all",
+      "read_model_status": "fresh",
+      "response_bytes": 595,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/workbench/summary?month=all",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 131.138,
+      "iteration": 2,
+      "kind": "api",
+      "name": "workbench_summary_all",
+      "ok": true,
+      "path": "/api/workbench/summary?month=all",
+      "read_model_status": "fresh",
+      "response_bytes": 595,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/workbench/summary?month=all",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 151.279,
+      "iteration": 3,
+      "kind": "api",
+      "name": "workbench_summary_all",
+      "ok": true,
+      "path": "/api/workbench/summary?month=all",
+      "read_model_status": "fresh",
+      "response_bytes": 595,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/workbench/summary?month=all",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 115.717,
+      "iteration": 4,
+      "kind": "api",
+      "name": "workbench_summary_all",
+      "ok": true,
+      "path": "/api/workbench/summary?month=all",
+      "read_model_status": "fresh",
+      "response_bytes": 595,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/workbench/summary?month=all",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 595.302,
+      "iteration": 1,
+      "kind": "api",
+      "name": "workbench_groups_all_paired",
+      "ok": true,
+      "path": "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "response_bytes": 203059,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/workbench/groups?month=all&zone=paired&page=1&page_size=50",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 408.627,
+      "iteration": 2,
+      "kind": "api",
+      "name": "workbench_groups_all_paired",
+      "ok": true,
+      "path": "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "response_bytes": 198641,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/workbench/groups?month=all&zone=paired&page=1&page_size=50",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 349.292,
+      "iteration": 3,
+      "kind": "api",
+      "name": "workbench_groups_all_paired",
+      "ok": true,
+      "path": "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "response_bytes": 198641,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/workbench/groups?month=all&zone=paired&page=1&page_size=50",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 405.105,
+      "iteration": 4,
+      "kind": "api",
+      "name": "workbench_groups_all_paired",
+      "ok": true,
+      "path": "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "response_bytes": 198641,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/workbench/groups?month=all&zone=paired&page=1&page_size=50",
+      "warmup": false
+    },
+    {
+      "cache_status": "miss",
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 208.769,
+      "iteration": 1,
+      "kind": "api",
+      "name": "bank_details_transactions",
+      "ok": true,
+      "path": "/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "response_bytes": 16810,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "warmup": true
+    },
+    {
+      "cache_status": "hit",
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 170.852,
+      "iteration": 2,
+      "kind": "api",
+      "name": "bank_details_transactions",
+      "ok": true,
+      "path": "/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "response_bytes": 16626,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "warmup": false
+    },
+    {
+      "cache_status": "hit",
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 164.618,
+      "iteration": 3,
+      "kind": "api",
+      "name": "bank_details_transactions",
+      "ok": true,
+      "path": "/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "response_bytes": 16626,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "warmup": false
+    },
+    {
+      "cache_status": "hit",
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 155.431,
+      "iteration": 4,
+      "kind": "api",
+      "name": "bank_details_transactions",
+      "ok": true,
+      "path": "/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "response_bytes": 16626,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1131.395,
+      "iteration": 1,
+      "kind": "api",
+      "name": "pending_invoices_rows",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1478.636,
+      "iteration": 2,
+      "kind": "api",
+      "name": "pending_invoices_rows",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1364.911,
+      "iteration": 3,
+      "kind": "api",
+      "name": "pending_invoices_rows",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 1290.102,
+      "iteration": 4,
+      "kind": "api",
+      "name": "pending_invoices_rows",
+      "ok": true,
+      "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "read_model_status": "fresh",
+      "response_bytes": 12240,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 169.979,
+      "iteration": 1,
+      "kind": "api",
+      "name": "input_invoice_usage_rows",
+      "ok": true,
+      "path": "/api/input-invoice-usage/rows?page=1&page_size=20",
+      "read_model_status": "fresh",
+      "response_bytes": 4705,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/input-invoice-usage/rows?page=1&page_size=20",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 133.386,
+      "iteration": 2,
+      "kind": "api",
+      "name": "input_invoice_usage_rows",
+      "ok": true,
+      "path": "/api/input-invoice-usage/rows?page=1&page_size=20",
+      "read_model_status": "fresh",
+      "response_bytes": 4705,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/input-invoice-usage/rows?page=1&page_size=20",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 151.961,
+      "iteration": 3,
+      "kind": "api",
+      "name": "input_invoice_usage_rows",
+      "ok": true,
+      "path": "/api/input-invoice-usage/rows?page=1&page_size=20",
+      "read_model_status": "fresh",
+      "response_bytes": 4705,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/input-invoice-usage/rows?page=1&page_size=20",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 122.478,
+      "iteration": 4,
+      "kind": "api",
+      "name": "input_invoice_usage_rows",
+      "ok": true,
+      "path": "/api/input-invoice-usage/rows?page=1&page_size=20",
+      "read_model_status": "fresh",
+      "response_bytes": 4705,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/input-invoice-usage/rows?page=1&page_size=20",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 219.997,
+      "iteration": 1,
+      "kind": "api",
+      "name": "oa_pending_payments_rows",
+      "ok": true,
+      "path": "/api/oa-pending-payments/rows?page=1&page_size=20",
+      "read_model_status": "fresh",
+      "response_bytes": 14348,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/oa-pending-payments/rows?page=1&page_size=20",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 177.959,
+      "iteration": 2,
+      "kind": "api",
+      "name": "oa_pending_payments_rows",
+      "ok": true,
+      "path": "/api/oa-pending-payments/rows?page=1&page_size=20",
+      "read_model_status": "fresh",
+      "response_bytes": 14348,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/oa-pending-payments/rows?page=1&page_size=20",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 162.135,
+      "iteration": 3,
+      "kind": "api",
+      "name": "oa_pending_payments_rows",
+      "ok": true,
+      "path": "/api/oa-pending-payments/rows?page=1&page_size=20",
+      "read_model_status": "fresh",
+      "response_bytes": 14348,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/oa-pending-payments/rows?page=1&page_size=20",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 163.286,
+      "iteration": 4,
+      "kind": "api",
+      "name": "oa_pending_payments_rows",
+      "ok": true,
+      "path": "/api/oa-pending-payments/rows?page=1&page_size=20",
+      "read_model_status": "fresh",
+      "response_bytes": 14348,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/oa-pending-payments/rows?page=1&page_size=20",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 229.35,
+      "iteration": 1,
+      "kind": "api",
+      "name": "tax_offset_rows",
+      "ok": true,
+      "path": "/api/tax-offset?month=2026-03",
+      "read_model_status": "fresh",
+      "refresh_enqueued": false,
+      "response_bytes": 11120,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/tax-offset?month=2026-03",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 182.21,
+      "iteration": 2,
+      "kind": "api",
+      "name": "tax_offset_rows",
+      "ok": true,
+      "path": "/api/tax-offset?month=2026-03",
+      "read_model_status": "fresh",
+      "refresh_enqueued": false,
+      "response_bytes": 11085,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/tax-offset?month=2026-03",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 173.737,
+      "iteration": 3,
+      "kind": "api",
+      "name": "tax_offset_rows",
+      "ok": true,
+      "path": "/api/tax-offset?month=2026-03",
+      "read_model_status": "fresh",
+      "refresh_enqueued": false,
+      "response_bytes": 11085,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/tax-offset?month=2026-03",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 156.653,
+      "iteration": 4,
+      "kind": "api",
+      "name": "tax_offset_rows",
+      "ok": true,
+      "path": "/api/tax-offset?month=2026-03",
+      "read_model_status": "fresh",
+      "refresh_enqueued": false,
+      "response_bytes": 11085,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/tax-offset?month=2026-03",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 161.08,
+      "iteration": 1,
+      "kind": "api",
+      "name": "no_oa_bank_batches",
+      "ok": true,
+      "path": "/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200",
+      "read_model_status": "fresh",
+      "response_bytes": 556,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 143.272,
+      "iteration": 2,
+      "kind": "api",
+      "name": "no_oa_bank_batches",
+      "ok": true,
+      "path": "/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200",
+      "read_model_status": "fresh",
+      "response_bytes": 556,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 150.626,
+      "iteration": 3,
+      "kind": "api",
+      "name": "no_oa_bank_batches",
+      "ok": true,
+      "path": "/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200",
+      "read_model_status": "fresh",
+      "response_bytes": 556,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 315.27,
+      "iteration": 4,
+      "kind": "api",
+      "name": "no_oa_bank_batches",
+      "ok": true,
+      "path": "/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200",
+      "read_model_status": "fresh",
+      "response_bytes": 556,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/no-oa-bank-batches?month=2026-07&bucket=unsubmitted&page=1&page_size=200",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 263.397,
+      "iteration": 1,
+      "kind": "api",
+      "name": "turnover_ledger_grouped",
+      "ok": true,
+      "path": "/api/turnover-ledger?view=grouped&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "refresh_enqueued": false,
+      "response_bytes": 13310,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/turnover-ledger?view=grouped&page=1&page_size=50",
+      "warmup": true
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 247.186,
+      "iteration": 2,
+      "kind": "api",
+      "name": "turnover_ledger_grouped",
+      "ok": true,
+      "path": "/api/turnover-ledger?view=grouped&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "refresh_enqueued": false,
+      "response_bytes": 13310,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/turnover-ledger?view=grouped&page=1&page_size=50",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 205.236,
+      "iteration": 3,
+      "kind": "api",
+      "name": "turnover_ledger_grouped",
+      "ok": true,
+      "path": "/api/turnover-ledger?view=grouped&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "refresh_enqueued": false,
+      "response_bytes": 13310,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/turnover-ledger?view=grouped&page=1&page_size=50",
+      "warmup": false
+    },
+    {
+      "content_type": "application/json; charset=utf-8",
+      "elapsed_ms": 241.663,
+      "iteration": 4,
+      "kind": "api",
+      "name": "turnover_ledger_grouped",
+      "ok": true,
+      "path": "/api/turnover-ledger?view=grouped&page=1&page_size=50",
+      "read_model_status": "fresh",
+      "refresh_enqueued": false,
+      "response_bytes": 13310,
+      "status_code": 200,
+      "url": "https://www.yn-sourcing.com/fin-ops-api/api/turnover-ledger?view=grouped&page=1&page_size=50",
+      "warmup": false
+    }
+  ],
+  "status": "fail",
+  "summary": {
+    "failed_probe_count": 1,
+    "max_p95_ms": 1478.636,
+    "probe_count": 12,
+    "sample_count": 36
+  },
+  "timeout_seconds": 5.0,
+  "version": 1,
+  "warmup": 1
+}
