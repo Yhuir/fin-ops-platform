@@ -400,12 +400,6 @@ class BatchAccountingService:
         rows = [context.rows_by_id.get(row_id, {"id": row_id, "type": self._row_type_for_row_id(row_id)}) for row_id in row_ids]
         row_types = [self._row_type(row, row_id) for row, row_id in zip(rows, row_ids, strict=False)]
         month_scope = self._month_scope(rows)
-        relation_read_model_status = self._relation_read_model_status_for_row_ids(
-            row_ids,
-            month_scope=month_scope,
-            reason="batch_accounting_submit_relation_readiness",
-        )
-        self._ensure_relation_read_model_fresh(relation_read_model_status)
         before_relations = self._active_relations_for_row_ids(row_ids)
         if any(normalized_bank_row_id in self._relation_row_id_set(relation) for relation in before_relations):
             raise BatchAccountingError("batch_accounting_bank_row_already_linked", "银行流水已有关联关系，请刷新后重试。")
@@ -614,12 +608,6 @@ class BatchAccountingService:
             if relation_version is not None and relation_version != expected_version:
                 raise BatchAccountingError("batch_accounting_version_conflict", "关联版本已变化，请刷新后重试。")
         row_ids = self._normalize_ids(list(active_relation.get("row_ids") or []))
-        relation_read_model_status = self._relation_read_model_status_for_row_ids(
-            row_ids,
-            month_scope=str(active_relation.get("month_scope") or ""),
-            reason="batch_accounting_withdraw_relation_readiness",
-        )
-        self._ensure_relation_read_model_fresh(relation_read_model_status)
         if self._relation_command_service is None:
             raise BatchAccountingError(
                 "batch_accounting_relation_command_unavailable",
@@ -1207,45 +1195,6 @@ class BatchAccountingService:
         for oa_row_id in oa_row_ids:
             invoice_row_ids.extend(context.invoice_ids_by_oa_id.get(oa_row_id, []))
         return self._dedupe(invoice_row_ids)
-
-    def _relation_read_model_status_for_row_ids(
-        self,
-        row_ids: list[str],
-        *,
-        month_scope: str,
-        reason: str,
-    ) -> _RelationReadModelStatus:
-        status = _RelationReadModelStatus()
-        normalized_row_ids = self._normalize_ids(list(row_ids or []))
-        if self._relation_facade is None:
-            return status
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
-        if not callable(reader):
-            return status
-        normalized_month_scope = str(month_scope or "").strip()
-        scope_keys_hint = [normalized_month_scope] if re.fullmatch(r"20\d{2}-\d{2}", normalized_month_scope) else []
-        try:
-            payload = reader(
-                normalized_row_ids,
-                require_fresh=True,
-                reason=reason,
-                month_hint=normalized_month_scope if scope_keys_hint else None,
-                scope_keys_hint=scope_keys_hint,
-            )
-        except TypeError:
-            payload = reader(normalized_row_ids)
-        status.record(payload if isinstance(payload, dict) else None)
-        return status
-
-    @staticmethod
-    def _ensure_relation_read_model_fresh(status: _RelationReadModelStatus) -> None:
-        if status.status == "fresh":
-            return
-        raise BatchAccountingError(
-            "batch_accounting_read_model_not_fresh",
-            f"关联台关系读模型 {status.status}，请刷新后再处理。",
-            payload=status.as_payload(),
-        )
 
     @staticmethod
     def _command_error(exc: WorkbenchRelationCommandError) -> BatchAccountingError:

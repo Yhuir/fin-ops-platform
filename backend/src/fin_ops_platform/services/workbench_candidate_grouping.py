@@ -33,6 +33,7 @@ MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
 OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
 OA_BANK_SETTLEMENT_PAIRED_CODES = {"personal_advance_repayment_settlement"}
 NO_OA_BANK_BATCH_PAIRED_CODES = {NO_OA_BANK_BATCH_RELATION_MODE, BANK_FLOW_RULE_BATCH_RELATION_MODE}
+BATCH_ACCOUNTING_RELATION_MODE = "batch_accounting"
 AUTO_PAIRED_CODES = {
     *SINGLE_BANK_AUTO_PAIRED_CODES,
     *MULTI_BANK_AUTO_PAIRED_CODES,
@@ -1422,7 +1423,10 @@ class WorkbenchCandidateGroupingService:
     @staticmethod
     def _is_batch_accounting_relation_row(row: dict[str, Any]) -> bool:
         metadata = row.get("special_metadata")
-        return isinstance(metadata, dict) and str(metadata.get("source") or "").strip() == "batch_accounting"
+        return (
+            isinstance(metadata, dict)
+            and str(metadata.get("source") or "").strip() == BATCH_ACCOUNTING_RELATION_MODE
+        )
 
     def _group_counterparty(self, group: CandidateGroup) -> str | None:
         attachment_primary_row = self._attachment_group_primary_row(group)
@@ -1502,6 +1506,8 @@ class WorkbenchCandidateGroupingService:
             return True
         if self._is_turnover_manual_closure_row(row):
             return True
+        if self._is_batch_accounting_relation_row(row):
+            return self._relation_code(row) in {BATCH_ACCOUNTING_RELATION_MODE, "fully_linked"}
         return self._relation_code(row) in {"fully_linked", "automatic_match", *AUTO_PAIRED_CODES}
 
     def _is_turnover_manual_closure_row(self, row: dict[str, Any]) -> bool:

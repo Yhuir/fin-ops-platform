@@ -29,6 +29,15 @@
 
 ## 历史记录
 
+## 2026-07-02 - batch-accounting active relation paired 分区修复
+
+- 目标：修复 batch-accounting active relation 已写入 canonical relation 后，关联台 SQL active generation 把 `relation_mode=batch_accounting` 行发布为 open `existing_case_candidate` 的分区错误。
+- 影响范围：`WorkbenchCandidateGroupingService` paired 判定、Workbench SQL projection 多 OA/多发票回归、关联台/批量账务边界文档；不改变 confirm/withdraw API shape。
+- 关键决策：`batch_accounting` 是 relation mode 边界合同，不是 legacy `fully_linked` 展示 code 的别名。Grouping 层必须直接识别 active `special_metadata.source=batch_accounting` + relation code `batch_accounting` 的行作为 paired row。
+- 测试覆盖：`tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_sql_projection_keeps_active_batch_accounting_multi_oa_invoice_relation_paired`。
+- 验证命令：见本轮最终说明。
+- 未测风险：需部署后用生产 1273.06 链路重建/等待 workbench fresh，并验证 `/api/workbench/groups?zone=paired` 可见。
+
 ## 2026-07-02 - matching worker relation read bridge 复核
 
 - 目标：复核此前标记的 matching worker snapshot bridge 是否仍是生产旧链路污染面。

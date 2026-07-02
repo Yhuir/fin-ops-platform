@@ -2050,6 +2050,155 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn_imported_1386"])
         self.assertEqual(group["bank_rows"][0]["special_metadata"]["source"], "batch_accounting")
 
+    def test_sql_projection_keeps_active_batch_accounting_multi_oa_invoice_relation_paired(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "txn_imported_1393": {
+                "id": "txn_imported_1393",
+                "type": "bank",
+                "source_kind": "bank",
+                "status": "open",
+                "debit_amount": "1273.06",
+                "counterparty_name": "批量账务集中处理",
+                "trade_time": "2026-03-19 10:32:00",
+                "summary": "报销",
+            },
+            "oa-exp-1991": {
+                "id": "oa-exp-1991",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "470.40",
+                "applicant": "马涛",
+                "project_name": "昭通卷烟厂 2025-2028年度能源集中监控平台项目",
+                "apply_type": "日常报销",
+            },
+            "oa-exp-2008": {
+                "id": "oa-exp-2008",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "332.44",
+                "applicant": "莫永洪",
+                "project_name": "昭通卷烟厂 2025-2028年度能源集中监控平台项目",
+                "apply_type": "日常报销",
+            },
+            "oa-exp-2003": {
+                "id": "oa-exp-2003",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "150.00",
+                "applicant": "莫永洪",
+                "project_name": "云南溯源科技",
+                "apply_type": "日常报销",
+            },
+            "oa-exp-1980": {
+                "id": "oa-exp-1980",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "280.00",
+                "applicant": "胡珞",
+                "project_name": "玉溪卷烟厂复烤车间技术升级改造项目",
+                "apply_type": "日常报销",
+            },
+            "oa-exp-2012": {
+                "id": "oa-exp-2012",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "50.22",
+                "applicant": "胡珞",
+                "project_name": "玉溪卷烟厂复烤车间技术升级改造项目",
+                "apply_type": "日常报销",
+            },
+            "inv_imported_0167": {
+                "id": "inv_imported_0167",
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "status": "open",
+                "amount": "470.40",
+                "total_with_tax": "470.40",
+                "seller_name": "交通服务商",
+                "invoice_type": "进项发票",
+            },
+            "inv_imported_0171": {
+                "id": "inv_imported_0171",
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "status": "open",
+                "amount": "332.44",
+                "total_with_tax": "332.44",
+                "seller_name": "餐饮服务商",
+                "invoice_type": "进项发票",
+            },
+            "inv_imported_0180": {
+                "id": "inv_imported_0180",
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "status": "open",
+                "amount": "150.00",
+                "total_with_tax": "150.00",
+                "seller_name": "事故处理服务商",
+                "invoice_type": "进项发票",
+            },
+        }
+        relation = {
+            "case_id": "CASE-BATCH-txn_imported_1393",
+            "relation_mode": "batch_accounting",
+            "row_ids": list(rows_by_id),
+            "row_types": [
+                "bank",
+                "oa",
+                "oa",
+                "oa",
+                "oa",
+                "oa",
+                "invoice",
+                "invoice",
+                "invoice",
+            ],
+            "special_metadata": {
+                "source": "batch_accounting",
+                "created_by": "YNSYLP006",
+                "bank_row_id": "txn_imported_1393",
+                "oa_row_ids": ["oa-exp-1991", "oa-exp-2008", "oa-exp-2003", "oa-exp-1980", "oa-exp-2012"],
+            },
+            "amount_check": {
+                "status": "mismatch",
+                "direction": "expense",
+                "bank_amount": "1273.06",
+                "oa_amount": "1283.06",
+                "amount_delta": "-10.00",
+                "requires_note": True,
+            },
+        }
+
+        payload = builder._group_payload("2026-03", rows_by_id, [relation])
+
+        self.assertEqual(payload["open"]["groups"], [])
+        paired_groups = payload["paired"]["groups"]
+        self.assertEqual(len(paired_groups), 1)
+        group = paired_groups[0]
+        self.assertEqual(group["group_id"], "case:CASE-BATCH-txn_imported_1393")
+        self.assertEqual(group["group_type"], "manual_confirmed")
+        self.assertEqual(group["reason"], "existing_case_group")
+        self.assertEqual(group["relation_mode"], "batch_accounting")
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn_imported_1393"])
+        self.assertCountEqual(
+            [row["id"] for row in group["oa_rows"]],
+            ["oa-exp-1991", "oa-exp-2008", "oa-exp-2003", "oa-exp-1980", "oa-exp-2012"],
+        )
+        self.assertCountEqual(
+            [row["id"] for row in group["invoice_rows"]],
+            ["inv_imported_0167", "inv_imported_0171", "inv_imported_0180"],
+        )
+        self.assertEqual(group["bank_rows"][0]["special_metadata"]["source"], "batch_accounting")
+
     def test_sql_projection_attaches_etc_summary_from_relation_metadata_batch_link(self) -> None:
         connection = EtcSummaryProjectionConnection()
         builder = WorkbenchSqlProjectionBuilder(connection=connection)

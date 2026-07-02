@@ -35,7 +35,7 @@
 | list context | `BatchAccountingService._build_list_context` | 仅列表读取使用，先构造 Workbench row context，再通过候选级 relation distribution 产出 eligible bank/OA |
 | unsubmitted relation context | `BatchAccountingService._context_with_candidate_relation_distribution` | 未提交列表只把批量账务银行候选和日常报销 OA 候选传入 `workbench_relation` facade；禁止把 Workbench 全量 open OA 当作 relation lookup 输入 |
 | submitted relation count | `WorkbenchRelationReadFacade.count_batch_accounting_relations_by_year` | 未提交列表 summary 只读取年份级 batch-accounting relation count；不能为了 `submitted_count` 扫描 12 个月完整 relation DTO |
-| submit context | `BatchAccountingService._build_submit_context` | 仅提交使用，禁止读取整页 relation distribution；relation readiness 只按本次 row ids 校验 |
+| submit context | `BatchAccountingService._build_submit_context` | 仅提交使用，禁止读取整页 relation distribution；写前 active relation 冲突只通过 command service 按本次 row ids 查询，不再把 relation read model freshness 作为普通写阻断 |
 | 关系写入请求 | `BatchAccountingService` | 必须委托 workbench relation command boundary |
 | lifecycle trigger | derived data lifecycle | 更新下游 read model scopes |
 | OA 候选事实 | Workbench active read model + `workbench_relation` read facade | 不接收 OA 年份；“没有流水”表示 relation distribution 中该 OA 没有 `linked_bank_transactions`，仅发票关系或无流水候选关系仍可进入批量账务右侧 OA 栏 |
@@ -46,12 +46,13 @@
 | --- | --- | --- |
 | 批量账务操作结果 | 前端页面 | 返回成功/失败、受影响对象、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。提交/撤回 command 成功后，后置 barrier/reload 只影响读侧收敛提示，不能把 command 成功改写成失败。 |
 | Relation dirty scopes | workbench relation/read model | 不直接写下游 payload |
+| 关联台已配对展示 | `workbench` active generation / `WorkbenchCandidateGroupingService` | active `relation_mode=batch_accounting` 且 `special_metadata.source=batch_accounting` 的 row-set 是已确认批量账务关系；即使行级 relation code 是 `batch_accounting` 而不是旧 `fully_linked`，也必须进入 paired 区，不得被 `existing_case_candidate` open 旧候选链路接管 |
 | Audit/result | audit/job status | 重要批量操作可追踪 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- Downstream read model：主要影响 `workbench_relation` 和其下游 fan-out。
+- Downstream read model：主要影响 `workbench_relation` 和其下游 fan-out；`workbench` active generation 必须把 batch-accounting active relation 投影为 paired group。
 - Worker：依赖 runtime worker registry 中的 workbench relation/read model workers。
 
 ## 文件范围
@@ -72,7 +73,7 @@
 - 必须通过：BatchAccountingService then relation boundary。
 - 禁止绕过：直接写 relation/read model 表；在页面批量合成业务状态。
 - 未提交列表 relation lookup 必须以页面可展示/可提交候选行为输入；`submitted_count` 必须走 relation facade 的轻量 count I/O，不能回退到 submitted relation 明细扫描污染首屏读路径。
-- submit 写操作必须经过 `_build_submit_context`，只按本次选中的银行/OA/发票 row ids 请求 relation readiness 和 active relation；不能调用 `_build_list_context` 或为了校验一次提交扫描整页银行/OA relation distribution。
+- submit 写操作必须经过 `_build_submit_context`，只按本次选中的银行/OA/发票 row ids 读取 canonical active relation 冲突；不能调用 `_build_list_context`、不能为了校验一次提交扫描整页银行/OA relation distribution，也不能因普通 `workbench_relation` read model refreshing/stale/missing 直接拒绝 command 写入。
 
 ## 测试与验证
 

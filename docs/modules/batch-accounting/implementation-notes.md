@@ -1,5 +1,25 @@
 # 批量账务 实施记录
 
+## 2026-07-02 - submit/withdraw 写前 relation read model gate 删除
+
+- 目标：修复撤回后立即重新提交时，command 事实源已经可写但 `workbench_relation` read model 仍在 refreshing 导致 `batch_accounting_read_model_not_fresh` 的慢链路/误失败。
+- 影响范围：`BatchAccountingService.submit(...)`、`withdraw(...)`、后端 API 回归测试和本模块测试矩阵；不改变列表 GET freshness 诊断、不改变 relation command service、dirty scope 或前端 API shape。
+- 关键决策：写安全边界属于 canonical `WorkbenchRelationCommandService`，submit/withdraw 在写前只按本次 row ids 查询 active relation 冲突和版本；`workbench_relation` read model freshness 是读侧诊断/刷新边界，不能作为普通写阻断污染命令链路。
+- 旧链路删除：删除 submit/withdraw 热路径里按 row ids 调用 relation facade `get_by_row_ids(require_fresh=True)` 并用 `_ensure_relation_read_model_fresh(...)` 拒绝写入的旧链路；对应 helper 已移除，避免以后被重新接入。
+- 测试覆盖：`test_submit_checks_active_relations_only_for_selected_rows_without_relation_read_model_gate`、`test_submit_uses_canonical_write_safety_when_relation_read_model_is_not_fresh`、`test_withdraw_uses_canonical_write_safety_when_relation_read_model_is_not_fresh`。
+- 验证命令：见本轮最终说明。
+- 未测风险：生产真实耗时仍受 PostgreSQL、worker drain 和 workbench active generation 发布影响；发布后需跑 1273.06 撤回->重提->关联台已配对 smoke。
+
+## 2026-07-02 - active batch relation 进入关联台 paired 投影
+
+- 目标：修复生产 smoke 中 `CASE-BATCH-txn_imported_1393` 已成功写入 active `batch_accounting` relation，但关联台 `workbench_groups` 把它发布为 open `existing_case_candidate`，导致“批量账务已提交但关联台已配对区域不可见”。
+- 影响范围：`WorkbenchCandidateGroupingService` paired 判定、Workbench SQL projection 回归测试、批量账务/关联台边界文档；不改变 batch accounting submit/withdraw API shape，不新增 read model。
+- 关键决策：`relation_mode=batch_accounting` + `special_metadata.source=batch_accounting` 是明确的批量账务 active relation I/O，不能依赖旧 `manual_confirmed -> fully_linked` 展示 code 巧合。Grouping 层把 batch-accounting relation code 作为 paired 判据，再由既有 required row type 规则判断完整性。
+- 旧链路删除：阻断 active batch relation 掉入 open `existing_case_candidate` 候选链路；前端和 API 不做补丁式筛选。
+- 测试覆盖：新增 `tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_sql_projection_keeps_active_batch_accounting_multi_oa_invoice_relation_paired`，覆盖多 OA、多 OA 附件发票、金额不一致的生产形态；保留既有 OA+银行 batch relation paired 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_sql_projection_keeps_active_batch_accounting_oa_bank_relation_paired tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_sql_projection_keeps_active_batch_accounting_multi_oa_invoice_relation_paired -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_candidate_grouping -v`。
+- 未测风险：本地测试不替代部署后的真实 worker drain 和生产 `/api/workbench/groups` paired smoke；仍需发布后验证 1273.06 链路在关联台已配对区可见。
+
 ## 2026-07-02 - 提交成功后后台同步假失败修复
 
 - 目标：修复“日常报销批量账务管理”提交 API 已成功写入 relation，但后置 `workbench_relation` operation barrier blocked/timeout 或列表 reload 中断时，页面把结果显示成“操作失败”的假失败。
@@ -61,7 +81,7 @@
 - 关键决策：`BatchAccountingService` 仍是 submit/withdraw 业务状态转换和 canonical command service 写入边界；`BatchAccountingApiRoutes` 只通过显式注入的 callback 调用 pair relation persist、derived lifecycle event、Workbench read model persist、submit rollback snapshot restore，不依赖 `Application` 或直接写 relation internals。
 - 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-submit-withdraw-route-side-effect-port.md`；本模块状态机定义不变，只记录 route ownership 变化。
 - 测试覆盖：静态 guard 现在要求 submit/withdraw `server.py` wrapper 委托 `BatchAccountingApiRoutes`，并要求 route owner 委托 `BatchAccountingService` 且不得 direct relation write；API 回归覆盖金额差异错误、合法提交、撤回原因、non-fresh withdraw 和 submit persist failure rollback。
-- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_route_handlers_do_not_bypass_service_boundaries -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_amount_mismatch_requires_difference_note tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_amount_mismatch_rejects_whitespace_note tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_creates_batch_accounting_relation_with_current_invoice_rows tests.test_batch_accounting_api.BatchAccountingApiTests.test_withdraw_requires_reason_and_batch_accounting_relation tests.test_batch_accounting_api.BatchAccountingApiTests.test_withdraw_rejects_when_relation_read_model_is_not_fresh -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails -v`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_route_handlers_do_not_bypass_service_boundaries -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_amount_mismatch_requires_difference_note tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_amount_mismatch_rejects_whitespace_note tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_creates_batch_accounting_relation_with_current_invoice_rows tests.test_batch_accounting_api.BatchAccountingApiTests.test_withdraw_requires_reason_and_batch_accounting_relation -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails -v`。
 - 未测风险：真实 PostgreSQL/worker drain、真实大年份和浏览器 overlay flow 未在本 slice 重跑；本次不改变 API shape、worker contract 或前端代码，生产验证不是完成条件。
 - 后续事项：继续推进 `batch-accounting:repair-compat-quarantine`，把 `_repair_batch_accounting_relation_case_ids` 的 owner、调用者、删除条件和防污染 guard 明确化。
 
@@ -253,7 +273,7 @@
 
 - 目标：修复批量账务页面出现 `关联台关系读模型 missing/read_model_missing` 时只能提示刷新、但列表读取和 mutation fresh gate 没有形成完整闭环的问题。
 - 影响范围：`BatchAccountingService` relation facade 调用、`GET /api/batch-accounting` freshness payload、submit/withdraw 错误合同、`BatchAccountingPage` non-fresh warning 和 feedback。
-- 关键决策：GET 列表保持只读，但所有 relation distribution 读取都通过现有 `WorkbenchRelationReadFacade` 的 `require_fresh` 边界入队刷新；submit/withdraw 在后端再次要求 relation read model fresh，非 fresh 返回 `batch_accounting_read_model_not_fresh`；前端只展示后端 status/reason/scope，不把 domain event 当事实源。
+- 关键决策：GET 列表保持只读，但所有 relation distribution 读取都通过现有 `WorkbenchRelationReadFacade` 的 `require_fresh` 边界入队刷新；当时 submit/withdraw 仍要求 relation read model fresh，该写前 gate 已由 2026-07-02 canonical write safety 修复删除；前端只展示后端 status/reason/scope，不把 domain event 当事实源。
 - 文档影响：更新 `README.md`、`state-machine.md`、`tests.md` 和 `docs/dev/api-contracts.md`。
 - 测试覆盖：新增/更新后端 API/service 测试覆盖 missing/stale 入队、submit/withdraw fresh gate；新增前端交互测试覆盖刷新未入队提示和 mutation non-fresh reason/scope feedback。
 - 验证命令：
