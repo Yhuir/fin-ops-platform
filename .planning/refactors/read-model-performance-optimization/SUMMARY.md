@@ -145,3 +145,10 @@ Deploy/apply the migration in a controlled release, then compare production full
 - Read model SLO smoke dry-run planned `16` scopes with `missing_read_model_keys=[]`; no rebuild was triggered by this dry-run evidence.
 - Architecture status: pending invoice rows remain behind `PendingInvoiceApiRoutes` -> `PendingInvoiceReadModelService` -> `PendingInvoiceReadModelRepositoryPort` -> PostgreSQL repository. The final path uses an aligned `nulls last` index, avoids duplicate `raw_payload` I/O for new rows, and reuses `bank_account_mappings` once per page. No old sync scan, stale Redis read, live fallback, or route-owner bypass was added.
 - Decision: `READ PATH CLOSED`. Pending invoice first-screen rows and the broader authenticated core API read path are production-verified under the 1s target. Full write-operation closure is still externally gated by the lack of current-release real confirm/withdraw/no-OA withdraw samples; those must be approved as reversible business-data exercises before they can be claimed.
+
+## 2026-07-02 Current-release write-operation gate check
+
+- Evidence directory: `.planning/refactors/read-model-performance-optimization/evidence/20260702T083207Z/write-operation-current-release/`.
+- Attempted read-only current-release write-operation audit since release activation time `2026-07-02T08:31:55+00:00`.
+- Result: `BLOCKED`, not closed and not a measured performance failure. The deploy user cannot read production DB env files or run arbitrary sudo Python; root SSH credential authentication was rejected; and the mutating `write_operation_e2e_smoke --apply` path still requires explicit business approval/ticket because it withdraws existing production relations or no-OA batches.
+- Decision: `STOP BEFORE MUTATION`. Do not run write-operation apply smoke without an approval reference and reviewed scenario. A production-safe closure requires either a whitelisted read-only deploy-control wrapper for `write_operation_slo_audit`, or explicit approval to run one reversible scenario with authenticated HTTP and DB SLO audit.

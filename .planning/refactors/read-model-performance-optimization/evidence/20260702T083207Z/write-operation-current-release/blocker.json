@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "status": "blocked",
+  "generated_at": "2026-07-02T08:47:00+00:00",
+  "release": "pscip-l4-pending-normalize-f9220f5bb6",
+  "since": "2026-07-02T08:31:55+00:00",
+  "attempted_action": "read-only write_operation_slo_audit for current release",
+  "blocked_by": [
+    {
+      "type": "production_db_env_not_readable_by_deploy_user",
+      "detail": "finops-deploy cannot read /etc/fin-ops runtime env files and arbitrary sudo python requires a password."
+    },
+    {
+      "type": "root_ssh_credential_auth_failed",
+      "detail": "Root SSH credential authentication was rejected; no production DB audit command was run to completion."
+    },
+    {
+      "type": "mutating_write_smoke_requires_explicit_business_approval",
+      "detail": "write_operation_e2e_smoke --apply requires an approval ticket and mutates existing production relations or no-OA batches."
+    }
+  ],
+  "safe_next_steps": [
+    "Expose a deploy-control read-only wrapper for write_operation_slo_audit against the active release.",
+    "Or provide explicit approval ticket/reference for one reviewed reversible write_operation_e2e_smoke scenario, plus authentication, before mutating production data."
+  ],
+  "secret_handling": "No root credential, admin token, cookie, bearer token, or SSH credential value was written to this file."
+}
