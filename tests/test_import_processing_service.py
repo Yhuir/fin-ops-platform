@@ -52,6 +52,21 @@ def test_general_import_confirm_passes_bank_detail_scope_keys_to_persist_state()
     assert {"read_model_key": "workbench_relation", "scope_key": "2026-06"} in result["operation_barrier_targets"]
 
 
+def test_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice() -> None:
+    result = ImportProcessingService._import_write_target_envelope(
+        cost_statistics_scope_keys=[],
+        tax_offset_scope_keys=[],
+        bank_detail_scope_keys=["2026-07"],
+        input_invoice_usage_scope_keys=[],
+        output_invoice_collection_scope_keys=[],
+    )
+
+    assert {"read_model_key": "pending_invoice", "scope_key": "expense:all:2026-07"} in result["operation_barrier_targets"]
+    assert {"read_model_key": "pending_invoice", "scope_key": "income:all:2026-07"} in result["operation_barrier_targets"]
+    assert {"read_model_key": "pending_invoice", "scope_key": "income:cash_income:2026-07"} in result["operation_barrier_targets"]
+    assert {"read_model_key": "pending_invoice", "scope_key": "expense:all"} not in result["operation_barrier_targets"]
+
+
 def test_general_invoice_import_confirm_uses_bulk_read_model_invalidations_once() -> None:
     calls: list[tuple[str, object, str | None]] = []
     preview = SimpleNamespace(

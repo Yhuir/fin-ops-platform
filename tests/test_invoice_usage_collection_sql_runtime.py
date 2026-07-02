@@ -315,7 +315,7 @@ class InvoiceReadModelConnection:
                         }
                     )
                 return rows
-            return self.oa_rows
+            return self._oa_rows_for_sql(normalized)
         if "from read_model.input_invoice_usage_scopes" in normalized:
             return self.input_scope_rows
         if "from read_model.output_invoice_collection_scopes" in normalized:
@@ -399,7 +399,7 @@ class InvoiceReadModelConnection:
             if "completed_count" in normalized or "in_progress_count" in normalized:
                 completed_count = 0
                 in_progress_count = 0
-                for row in self.oa_rows:
+                for row in self._oa_rows_for_sql(normalized):
                     payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
                     oa_payload = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
                     workflow_status = str(oa_payload.get("workflowStatus") or row.get("oa_workflow_status") or "")
@@ -411,12 +411,60 @@ class InvoiceReadModelConnection:
                     "completed_count": completed_count,
                     "in_progress_count": in_progress_count,
                 }
+            rows = self._oa_rows_for_sql(normalized)
             return {
-                "count": len(self.oa_rows),
-                "oa_amount_total": "100.00",
-                "bank_paid_total": "100.00",
+                "count": len(rows),
+                "oa_amount_total": str(sum((self._oa_row_decimal(row, "oa", "amount") for row in rows), Decimal("0"))),
+                "bank_paid_total": str(
+                    sum(
+                        (
+                            self._oa_row_decimal(row, "bankTransaction", "paidTotal")
+                            or self._oa_row_decimal(row, "bankTransaction", "amount")
+                            for row in rows
+                        ),
+                        Decimal("0"),
+                    )
+                ),
             }
         return None
+
+    def _oa_rows_for_sql(self, normalized_sql: str) -> list[dict]:
+        rows = list(self.oa_rows)
+        if "deduped_oa_pending_payment_rows" not in normalized_sql:
+            return rows
+        rows_by_id: dict[str, dict] = {}
+        for row in rows:
+            row_id = self._oa_row_id(row)
+            if row_id:
+                rows_by_id[row_id] = row
+        rows = list(rows_by_id.values())
+        if "completed_count" in normalized_sql or "in_progress_count" in normalized_sql:
+            return rows
+        if "oa_workflow_status = 'in_progress'" in normalized_sql:
+            return [row for row in rows if self._oa_workflow_status(row) == "in_progress"]
+        if "oa_workflow_status is null or oa_workflow_status = '' or oa_workflow_status = 'completed'" in normalized_sql:
+            return [row for row in rows if self._oa_workflow_status(row) != "in_progress"]
+        return rows
+
+    @staticmethod
+    def _oa_row_id(row: dict) -> str:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        return str(row.get("row_id") or payload.get("id") or "").strip()
+
+    @staticmethod
+    def _oa_row_decimal(row: dict, section: str, key: str) -> Decimal:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        section_payload = payload.get(section) if isinstance(payload.get(section), dict) else {}
+        try:
+            return Decimal(str(section_payload.get(key) or "0"))
+        except Exception:
+            return Decimal("0")
+
+    @staticmethod
+    def _oa_workflow_status(row: dict) -> str:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        oa_payload = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+        return str(oa_payload.get("workflowStatus") or row.get("oa_workflow_status") or "")
 
 
 class ProjectionCoreRepository:
@@ -1180,6 +1228,56 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             if "from read_model.oa_pending_payment_scopes" in sql
         ]
         self.assertTrue(executed_scope_fetches)
+
+    def test_oa_repository_all_scope_dedupes_cross_scope_relation_rows(self) -> None:
+        source_versions = oa_pending_payment_source_versions()
+        duplicate_payload = {
+            "id": "oa_pending_payment_relation_cross_month",
+            "oa": {
+                "id": "oa-pay-2073",
+                "applicantName": "樊祖芳",
+                "amount": "270000.00",
+                "workflowStatus": "completed",
+            },
+            "paymentStatus": {"code": "paid", "label": "已支付"},
+            "bankTransaction": {"paidTotal": "270000.00", "tradeTime": "2026-05-25 15:00:03"},
+            "invoice": {"primaryInvoiceId": "inv-0276"},
+        }
+        connection = InvoiceReadModelConnection(
+            oa_rows=[
+                {
+                    "row_id": "oa_pending_payment_relation_cross_month",
+                    "scope_key": "2026-04",
+                    "source_versions": source_versions,
+                    "payload": duplicate_payload,
+                    "raw_payload": {},
+                },
+                {
+                    "row_id": "oa_pending_payment_relation_cross_month",
+                    "scope_key": "2026-05",
+                    "source_versions": source_versions,
+                    "payload": duplicate_payload,
+                    "raw_payload": {},
+                },
+            ],
+            oa_scope_rows=[
+                {"scope_key": "2026-04", "source_versions": source_versions, "cache_status": "fresh"},
+                {"scope_key": "2026-05", "source_versions": source_versions, "cache_status": "fresh"},
+            ],
+            scope_exists=False,
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_oa_pending_payment_rows(month=None, page=1, page_size=50, view_mode="completed")
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["summary"]["rowCount"], 1)
+        self.assertEqual(payload["summary"]["oaAmountTotal"], "270000.00")
+        self.assertEqual(payload["summary"]["bankPaidTotal"], "270000.00")
+        self.assertEqual(payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 0})
+        self.assertEqual([row["id"] for row in payload["rows"]], ["oa_pending_payment_relation_cross_month"])
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("deduped_oa_pending_payment_rows", executed_sql)
 
     def test_oa_repository_save_persists_source_versions_and_bank_total(self) -> None:
         connection = WriteRecordingConnection()

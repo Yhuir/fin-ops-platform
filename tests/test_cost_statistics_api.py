@@ -175,6 +175,11 @@ class CostStatisticsApiTests(unittest.TestCase):
             project_active_checker=self.app._app_settings_service.is_project_active,
         )
 
+    def _prime_cost_statistics_read_model(self, month: str = "2026-03", project_scope: str = "active") -> None:
+        query = f"month={quote(month, safe='')}&project_scope={quote(project_scope, safe='')}"
+        response = self.app.handle_request("GET", f"/api/cost-statistics/explorer?{query}")
+        self.assertEqual(response.status_code, 200)
+
     def test_cost_statistics_explorer_cache_hit_does_not_rebuild(self) -> None:
         cached_payload = {
             "month": "2026-03",
@@ -242,6 +247,85 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(month_response.status_code, 200)
         self.assertEqual(explorer_response.status_code, 200)
         self.assertEqual(calls, [("month", "2026-03", "active"), ("explorer", "2026-04", "all")])
+
+    def test_cost_statistics_secondary_read_routes_delegate_to_query_service_and_fail_closed(self) -> None:
+        from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
+        from fin_ops_platform.app.server import Response
+        from fin_ops_platform.services.cost_statistics_query_service import CostStatisticsReadModelNotFreshError
+
+        calls: list[tuple[str, object]] = []
+
+        class QueryService:
+            def get_project_statistics(self, month: str, project_name: str, *, project_scope: str) -> dict[str, object]:
+                calls.append(("project", (month, project_name, project_scope)))
+                return {"month": month, "project_name": project_name, "summary": {}, "rows": []}
+
+            def get_export_preview(self, **kwargs: object) -> dict[str, object]:
+                calls.append(("preview", kwargs.get("project_scope")))
+                return {"view": kwargs.get("view"), "summary": {}, "rows": []}
+
+            def export_view(self, **kwargs: object) -> tuple[str, bytes]:
+                calls.append(("export", kwargs.get("project_scope")))
+                return "cost.xlsx", b"xlsx"
+
+            def get_transaction_detail(self, _transaction_id: str, *, project_scope: str) -> dict[str, object]:
+                calls.append(("transaction", project_scope))
+                raise CostStatisticsReadModelNotFreshError(
+                    {
+                        "read_model_status": "refreshing",
+                        "read_model_scope_key": f"{project_scope}:all",
+                        "read_model_stale_reasons": ["api_miss"],
+                    },
+                    message="成本统计数据正在刷新，请稍后重试。",
+                )
+
+        class LegacyService:
+            def __getattr__(self, name: str) -> object:
+                raise AssertionError(f"legacy cost statistics service was called: {name}")
+
+        routes = CostStatisticsApiRoutes(
+            query_service=QueryService(),
+            cost_statistics_service=LegacyService(),
+            json_response=lambda status, payload: Response(status_code=int(status), body=json.dumps(payload)),
+            file_response=lambda filename, content: Response(status_code=200, body=content, headers={"X-Filename": filename}),
+        )
+
+        project_response = routes.route(
+            "GET",
+            f"/api/cost-statistics/projects/{quote('云南溯源科技', safe='')}",
+            {"month": ["2026-03"], "project_scope": ["active"]},
+        )
+        preview_response = routes.route(
+            "GET",
+            "/api/cost-statistics/export-preview",
+            {"month": ["2026-03"], "view": ["time"], "project_scope": ["all"]},
+        )
+        export_response = routes.route(
+            "GET",
+            "/api/cost-statistics/export",
+            {"month": ["2026-03"], "view": ["time"], "project_scope": ["all"]},
+        )
+        transaction_response = routes.route(
+            "GET",
+            "/api/cost-statistics/transactions/txn-1",
+            {"project_scope": ["active"]},
+        )
+
+        self.assertEqual(project_response.status_code, 200)
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(transaction_response.status_code, 409)
+        transaction_payload = json.loads(transaction_response.body)
+        self.assertEqual(transaction_payload["error"], "cost_statistics_read_model_not_fresh")
+        self.assertEqual(
+            calls,
+            [
+                ("project", ("2026-03", "云南溯源科技", "active")),
+                ("preview", "all"),
+                ("export", "all"),
+                ("transaction", "active"),
+            ],
+        )
 
     def test_cost_statistics_explorer_miss_writes_cache_and_logs_hit_metrics(self) -> None:
         calls: list[tuple[str, str]] = []
@@ -687,6 +771,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             ],
         )
         self.app._import_service.confirm_import(preview.id)
+        self._prime_cost_statistics_read_model()
 
         payload = json.loads(self.app.handle_request("GET", "/api/cost-statistics?month=2026-03").body)
         self.assertEqual(payload["month"], "2026-03")
@@ -805,6 +890,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             ],
         )
         self.app._import_service.confirm_import(preview.id)
+        self._prime_cost_statistics_read_model()
 
         month_response = self.app.handle_request("GET", "/api/cost-statistics/export?month=2026-03&view=month")
         self.assertEqual(month_response.status_code, 200)
@@ -891,27 +977,36 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(expense_sheet["B2"].value, "云南溯源科技")
 
     def test_cost_statistics_export_limit_returns_structured_error(self) -> None:
+        from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
+        from fin_ops_platform.app.server import Response
         from fin_ops_platform.services.cost_statistics_service import (
             COST_STATISTICS_EXPORT_ROW_LIMIT,
             CostStatisticsExportLimitError,
         )
 
-        class ExportLimitService:
+        class ExportLimitQueryService:
             def get_export_preview(self, **_kwargs: object) -> dict[str, object]:
                 raise CostStatisticsExportLimitError(view="time", total=COST_STATISTICS_EXPORT_ROW_LIMIT + 1)
 
             def export_view(self, **_kwargs: object) -> tuple[str, bytes]:
                 raise CostStatisticsExportLimitError(view="time", total=COST_STATISTICS_EXPORT_ROW_LIMIT + 1)
 
-        self.app._cost_statistics_service = ExportLimitService()
-
-        preview_response = self.app.handle_request(
-            "GET",
-            "/api/cost-statistics/export-preview?month=2026-03&view=time",
+        routes = CostStatisticsApiRoutes(
+            query_service=ExportLimitQueryService(),
+            cost_statistics_service=object(),
+            json_response=lambda status, payload: Response(status_code=int(status), body=json.dumps(payload)),
+            file_response=lambda _filename, _content: Response(status_code=200, body=b""),
         )
-        export_response = self.app.handle_request(
+
+        preview_response = routes.route(
             "GET",
-            "/api/cost-statistics/export?month=2026-03&view=time",
+            "/api/cost-statistics/export-preview",
+            {"month": ["2026-03"], "view": ["time"]},
+        )
+        export_response = routes.route(
+            "GET",
+            "/api/cost-statistics/export",
+            {"month": ["2026-03"], "view": ["time"]},
         )
 
         expected_details = {
@@ -950,6 +1045,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             ],
         )
         self.app._import_service.confirm_import(preview.id)
+        self._prime_cost_statistics_read_model()
 
         project_name = quote("云南溯源科技", safe="")
         response = self.app.handle_request(
@@ -1009,6 +1105,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             ],
         )
         self.app._import_service.confirm_import(preview.id)
+        self._prime_cost_statistics_read_model()
 
         project_name = quote("云南溯源科技", safe="")
         preview_response = self.app.handle_request(
@@ -1067,6 +1164,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             ],
         )
         self.app._import_service.confirm_import(preview.id)
+        self._prime_cost_statistics_read_model()
 
         preview_response = self.app.handle_request(
             "GET",
@@ -1110,6 +1208,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             ],
         )
         self.app._import_service.confirm_import(preview.id)
+        self._prime_cost_statistics_read_model()
 
         project_name = quote("云南溯源科技", safe="")
         expense_type = quote("设备货款及材料费", safe="")

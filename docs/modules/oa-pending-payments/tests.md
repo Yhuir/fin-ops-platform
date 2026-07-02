@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-02 - read model only API 与 all-scope 去重
+
+- 变更类型：生产读路径收口。
+- 新增/更新测试：`tests/test_oa_pending_payment_api.py` rows/filter/detail read-model route 回归、`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_oa_repository_all_scope_dedupes_cross_scope_relation_rows`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_oa_pending_payment_routes_use_route_owner`。
+- 覆盖点：rows/filter-options/detail 不再回退 live query；read model service 缺失 fail closed；all scope 对跨月重复物理行按 `row_id` 去重后再计算 rows、summary 和 viewCounts。
+- 验证命令：见本轮最终说明。
+
 ## 修改前影响面清单
 
 OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relation、invoice lifecycle 和 invoice usage collection read model 的交汇页。任何改动都要先按下表做影响面评估：

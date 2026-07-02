@@ -1,6 +1,6 @@
 # 待找发票模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-02
 
 ## 模块化状态
 
@@ -30,6 +30,7 @@
 | --- | --- | --- |
 | 页面筛选、方向、规则操作 | `PendingInvoicesPage.tsx`、`features/pendingInvoices/api.ts` | scope 必须落到 direction/filter/month |
 | 关联/规则写入 | pending invoice services | 写后触发 pending_invoice/search/invoice_lifecycle 相关 scope |
+| 导入/运行时派生范围 | `PendingInvoiceScopePlanner` | 从 `cost_statistics` 与 `bank_detail` 月份 scope 合并生成 `expense:all:<YYYY-MM>`、`income:all:<YYYY-MM>`、`income:cash_income:<YYYY-MM>`；没有可识别月份时只返回三类父 scope，不写 bare `all` |
 | Refresh scope | `pending_invoice` manifest | `direction:filter_group[:YYYY-MM]`；bare `all` forbidden |
 
 ## 输出 I/O
@@ -57,6 +58,7 @@
 | Frontend feature/components | `web/src/features/pendingInvoices/*`、`web/src/components/pendingInvoices/*` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_pending_invoices.py` |
 | Backend service | `pending_invoice_service.py`、`pending_invoice_read_model_service.py`、`pending_invoice_rules_application_service.py`、`pending_invoice_lifecycle_service.py`、`pending_invoice_status.py` |
+| Scope planning | `backend/src/fin_ops_platform/services/pending_invoice_scope_planner.py` |
 | Repository / SQL | `pending_invoice_read_model_repository.py`、`search_pending_sql_projection.py`、`invoice_lifecycle_sql_projection.py` |
 | Tests | `tests/test_pending_invoice*.py`、`web/src/test/PendingInvoices*.test.*`、`web/e2e/pending-invoices-*.spec.ts` |
 
@@ -70,6 +72,7 @@
 
 - `tests/test_pending_invoice_service.py`
 - `tests/test_pending_invoice_api.py`
+- `tests/test_import_processing_service.py`
 - `web/e2e/pending-invoices-fanout.spec.ts`
 - `web/e2e/pending-invoices-filter-sort-flow.spec.ts`
 

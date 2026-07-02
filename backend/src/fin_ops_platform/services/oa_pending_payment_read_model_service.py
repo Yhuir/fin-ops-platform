@@ -9,7 +9,11 @@ from fin_ops_platform.services.oa_pending_payment_read_model_details import (
     oa_pending_payment_oa_detail_from_row,
     oa_pending_payment_relation_details_from_row,
 )
-from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentError, OaPendingPaymentQueryService
+from fin_ops_platform.services.oa_pending_payment_service import (
+    OaPendingPaymentError,
+    OaPendingPaymentQueryService,
+    _parse_positive_int,
+)
 from fin_ops_platform.services.read_model_freshness import (
     require_expected_source_versions,
     source_version_mismatch_reasons,
@@ -37,6 +41,8 @@ class OaPendingPaymentReadModelService:
     def rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         scope_key = self._scope_key_from_query(query)
         view_mode = OaPendingPaymentQueryService._parse_view_mode(query.get("view_mode", [None])[0])
+        page = _parse_positive_int(query.get("page", [1])[0], "page")
+        page_size = _parse_positive_int(query.get("page_size", [50])[0], "page_size", maximum=200)
         list_rows = getattr(self._repository, "list_oa_pending_payment_rows", None)
         if not callable(list_rows):
             self._enqueue_refresh(scope_key, reason="api_sql_repository_unavailable")
@@ -50,10 +56,12 @@ class OaPendingPaymentReadModelService:
                 filters=query.get("filters", [None])[0],
                 sort_field=query.get("sort_field", ["bank_trade_time"])[0],
                 sort_direction=query.get("sort_direction", ["desc"])[0],
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
+                page=page,
+                page_size=page_size,
                 view_mode=view_mode,
             )
+        except OaPendingPaymentError:
+            raise
         except ValueError as exc:
             raise OaPendingPaymentError("invalid_oa_pending_payment_query", str(exc)) from exc
         if not isinstance(payload, dict):

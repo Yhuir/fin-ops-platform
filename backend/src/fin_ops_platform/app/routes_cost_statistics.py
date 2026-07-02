@@ -6,6 +6,7 @@ from time import monotonic
 from typing import Any, Callable
 from urllib.parse import unquote
 
+from fin_ops_platform.services.cost_statistics_query_service import CostStatisticsReadModelNotFreshError
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsExportLimitError
 
 
@@ -24,7 +25,6 @@ class CostStatisticsApiRoutes:
         optional_bool_parser: Callable[[str | None], bool] | None = None,
     ) -> None:
         self._query_service = query_service
-        self._cost_statistics_service = cost_statistics_service
         self._json_response = json_response
         self._file_response = file_response
         self._metric_emitter = metric_emitter
@@ -122,13 +122,16 @@ class CostStatisticsApiRoutes:
     def handle_project(self, month: str | None, project_name: str, project_scope: str | None) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
         try:
-            payload = self._cost_statistics_service.get_project_statistics(
+            normalized_project_scope = self._normalize_project_scope(project_scope)
+            payload = self._query_service.get_project_statistics(
                 current_month,
                 project_name,
-                project_scope=project_scope or "active",
+                project_scope=normalized_project_scope,
             )
         except ValueError as error:
             return self._project_scope_error_response(error)
+        except CostStatisticsReadModelNotFreshError as error:
+            return self._json_response(HTTPStatus.CONFLICT, error.payload)
         return self._json_response(HTTPStatus.OK, payload)
 
     def handle_export(
@@ -159,7 +162,8 @@ class CostStatisticsApiRoutes:
                 {"error": "invalid_cost_statistics_export_request", "message": "view must be month, time, project, expense_type, or transaction."},
             )
         try:
-            filename, content = self._cost_statistics_service.export_view(
+            normalized_project_scope = self._normalize_project_scope(project_scope)
+            filename, content = self._query_service.export_view(
                 month=current_month,
                 view=view,
                 project_names=project_names,
@@ -176,13 +180,15 @@ class CostStatisticsApiRoutes:
                 include_ignored_rows=include_ignored_rows,
                 include_expense_content_summary=include_expense_content_summary,
                 sort_by=sort_by or "time",
-                project_scope=project_scope or "active",
+                project_scope=normalized_project_scope,
             )
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
             )
+        except CostStatisticsReadModelNotFreshError as error:
+            return self._json_response(HTTPStatus.CONFLICT, error.payload)
         except CostStatisticsExportLimitError as error:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -221,7 +227,8 @@ class CostStatisticsApiRoutes:
                 },
             )
         try:
-            payload = self._cost_statistics_service.get_export_preview(
+            normalized_project_scope = self._normalize_project_scope(project_scope)
+            payload = self._query_service.get_export_preview(
                 month=current_month,
                 view=view,
                 project_names=project_names,
@@ -231,13 +238,15 @@ class CostStatisticsApiRoutes:
                 start_date=start_date,
                 end_date=end_date,
                 aggregate_by=aggregate_by,
-                project_scope=project_scope or "active",
+                project_scope=normalized_project_scope,
             )
         except CostStatisticsExportLimitError as error:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": error.error_code, "message": str(error), "details": dict(error.details)},
             )
+        except CostStatisticsReadModelNotFreshError as error:
+            return self._json_response(HTTPStatus.CONFLICT, error.payload)
         except ValueError as error:
             if str(error) == "project_scope must be active or all":
                 return self._project_scope_error_response(error)
@@ -249,12 +258,15 @@ class CostStatisticsApiRoutes:
 
     def handle_transaction(self, transaction_id: str, project_scope: str | None) -> Any:
         try:
-            payload = self._cost_statistics_service.get_transaction_detail(
+            normalized_project_scope = self._normalize_project_scope(project_scope)
+            payload = self._query_service.get_transaction_detail(
                 transaction_id,
-                project_scope=project_scope or "active",
+                project_scope=normalized_project_scope,
             )
         except ValueError as error:
             return self._project_scope_error_response(error)
+        except CostStatisticsReadModelNotFreshError as error:
+            return self._json_response(HTTPStatus.CONFLICT, error.payload)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,

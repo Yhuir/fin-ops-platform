@@ -436,6 +436,15 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key = _invoice_relation_scope_key(month)
         page_number = max(int_value(page, 1), 1)
         page_limit = min(max(int_value(page_size, 50), 1), 200)
+        rows_source_sql = "read_model.oa_pending_payment_rows"
+        if scope_key == "all":
+            rows_source_sql = """
+                (
+                    select distinct on (row_id) *
+                    from read_model.oa_pending_payment_rows
+                    order by row_id, generated_at desc, scope_key desc
+                ) deduped_oa_pending_payment_rows
+            """
         base_where: list[str] = []
         base_params: list[Any] = []
         view_mode_clause = _oa_pending_payment_view_mode_clause(view_mode)
@@ -466,7 +475,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 count(*) as count,
                 coalesce(sum(oa_amount), 0) as oa_amount_total,
                 coalesce(sum(coalesce(bank_paid_total, bank_amount)), 0) as bank_paid_total
-            from read_model.oa_pending_payment_rows
+            from {rows_source_sql}
             where {where_sql}
             """,
             tuple(params),
@@ -476,7 +485,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             select
                 coalesce(sum(case when oa_workflow_status is null or oa_workflow_status = '' or oa_workflow_status = 'completed' then 1 else 0 end), 0) as completed_count,
                 coalesce(sum(case when oa_workflow_status = 'in_progress' then 1 else 0 end), 0) as in_progress_count
-            from read_model.oa_pending_payment_rows
+            from {rows_source_sql}
             where {base_where_sql}
             """,
             tuple(base_params),
@@ -508,7 +517,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         rows = self._connection.fetch_all(
             f"""
             select payload, raw_payload
-            from read_model.oa_pending_payment_rows
+            from {rows_source_sql}
             where {where_sql}
             order by {order_sql}
             limit %s offset %s

@@ -1,6 +1,6 @@
 # OA待付款核对模块边界与 I/O
 
-日期：2026-06-30
+日期：2026-07-02
 
 ## 模块化状态
 
@@ -28,11 +28,11 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面查询/过滤 | `OaPendingPaymentsPage.tsx`、`features/oaPendingPayments/api.ts` | 进入 read model service/fresh gate |
+| 页面查询/过滤 | `OaPendingPaymentsPage.tsx`、`features/oaPendingPayments/api.ts` | 必须进入 `OaPendingPaymentReadModelService` fresh gate；read model service 未配置或 payload 不 fresh 时 fail closed，不回退 live query |
 | 关联支出流水候选查询 | `GET /api/oa-pending-payments/bank-transaction-candidates` | `oa_row_ids` 只作为后续提交关联的目标 OA 上下文；候选读取全部支出流水，不按 OA 月份收敛 |
 | 确认付款/银行关联 | command service | 写操作必须审计并触发 read model scopes |
 | OA projection sync | OA sync/projection services | 输入必须带 source version |
-| Refresh scope | `oa_pending_payment` manifest | month or `all`；`all` 是 fan-out command |
+| Refresh scope | `oa_pending_payment` manifest | month or `all`；`all` 是 fan-out command；SQL all 读取跨月物理行时必须按 `row_id` 去重后再计算 rows/summary/viewCounts |
 
 ## 输出 I/O
 
@@ -74,12 +74,14 @@
 - `tests/test_oa_pending_payment_api.py`
 - `tests/test_oa_pending_payment_command_service.py`
 - `tests/test_oa_projection_sql_runtime.py`
+- `tests/test_invoice_usage_collection_sql_runtime.py`
+- `tests/test_platform_runtime_boundary_guards.py`
 - `web/e2e/oa-pending-payments-nonfresh-flow.spec.ts`
 
 ## 当前缺口和删除条件
 
 - 确认付款/撤回类变更必须通过业务 API 验证，不直接改数据库。
-- 删除旧 projection 路径前必须验证 nonfresh、银行关联和确认付款恢复。
+- 删除旧 projection/read 路径前必须验证 nonfresh、银行关联、确认付款恢复和 all-scope 去重；当前生产 rows/filter/detail API 不允许直接调用 live query fallback。
 
 ## Canonical facts ownership
 

@@ -135,6 +135,9 @@ from fin_ops_platform.services.invoice_lifecycle_derived_lifecycle_executor impo
 from fin_ops_platform.services.no_oa_bank_batch_derived_lifecycle_executor import (
     NoOaBankBatchDerivedLifecycleExecutor,
 )
+from fin_ops_platform.services.pending_invoice_scope_planner import (
+    pending_invoice_read_model_scope_keys_for_import_state,
+)
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
 from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -9347,7 +9350,7 @@ class Application:
             bank_transaction_category_service=getattr(self, "_bank_transaction_category_service", SimpleNamespace(snapshot=lambda: {})),
             bank_transaction_auto_category_service=getattr(self, "_bank_transaction_auto_category_service", SimpleNamespace(current_rule_version=lambda: 1, suggest_for_rows=lambda _rows: {})),
             audit_service=getattr(self, "_audit_service", SimpleNamespace(record_action=lambda **_kwargs: None)),
-            state_store=self._state_store,
+            bank_transaction_category_store=self._state_store,
             bank_detail_sql_read_repository=getattr(self, "_bank_detail_sql_read_repository", None),
             bank_account_balance_read_model_repository=getattr(self, "_bank_account_balance_sql_read_repository", None),
             runtime_repositories=getattr(self, "_runtime_repositories", None),
@@ -9412,7 +9415,13 @@ class Application:
     def _bank_detail_available_month_scope_provider(self) -> BankDetailAvailableMonthScopeProvider:
         return BankDetailAvailableMonthScopeProvider(
             import_service=self._import_service,
+            read_model_repository=(
+                getattr(self, "_bank_detail_sql_read_repository", None)
+                if self._requires_sql_read_model_runtime()
+                else None
+            ),
             serialize_value=self._serialize_value,
+            fallback_to_import_service=not self._requires_sql_read_model_runtime(),
         )
 
     def _batch_accounting_service(self, *, use_sql_read_model: bool = False) -> BatchAccountingService:
@@ -11716,7 +11725,7 @@ class Application:
             reason="import_state_changed",
         )
         self._invalidate_pending_invoice_read_model_scopes(
-            scope_keys=self._import_state_pending_invoice_scope_keys(cost_statistics_scope_keys),
+            scope_keys=self._import_state_pending_invoice_scope_keys(cost_statistics_scope_keys, bank_detail_scope_keys),
             reason="import_state_changed",
         )
 
@@ -11760,23 +11769,8 @@ class Application:
         return month_scope_keys or ["all"]
 
     @staticmethod
-    def _import_state_pending_invoice_scope_keys(scope_keys: list[str] | None) -> list[str]:
-        month_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in dict.fromkeys(scope_keys or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
-        ]
-        if not month_scope_keys:
-            return ["expense:all", "income:all", "income:cash_income"]
-        return [
-            scoped_key
-            for month in month_scope_keys
-            for scoped_key in (
-                f"expense:all:{month}",
-                f"income:all:{month}",
-                f"income:cash_income:{month}",
-            )
-        ]
+    def _import_state_pending_invoice_scope_keys(*scope_key_groups: object) -> list[str]:
+        return pending_invoice_read_model_scope_keys_for_import_state(*scope_key_groups)
 
     def _persist_workbench_pair_relations(
         self,

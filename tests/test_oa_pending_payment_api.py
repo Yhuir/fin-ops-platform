@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from decimal import Decimal
 from http import HTTPStatus
 import json
 from pathlib import Path
 import tempfile
-from typing import Any
+from typing import Any, Callable
 import unittest
 from urllib.parse import quote
 
@@ -274,34 +275,11 @@ class OaPendingPaymentApiTests(unittest.TestCase):
     def test_rows_filter_options_and_detail_routes_delegate_to_module_route_facade(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            bank = BankTransaction(
-                id="bank-api",
-                account_no="622200001234",
-                txn_direction=TransactionDirection.OUTFLOW,
-                counterparty_name_raw="API供应商",
-                amount=Decimal("100.00"),
-                signed_amount=Decimal("-100.00"),
-                txn_date="2026-05-21",
-                trade_time="2026-05-21 10:00:00",
+            app._oa_pending_payment_api_routes = _read_model_routes(
+                repository=OaRowsRepository([_read_model_row()]),
+                queue=QueueRecorder(),
+                query_service=_empty_query_service(),
             )
-            pair_service = WorkbenchPairRelationService()
-            pair_service.create_active_relation(
-                case_id="case-api",
-                row_ids=["oa-api", "bank-api"],
-                row_types=["oa", "bank"],
-                relation_mode="manual_confirmed",
-                created_by="tester",
-                amount_check={"matched": True},
-            )
-            import_service = ImportNormalizationService(existing_transactions=[bank])
-            service = OaPendingPaymentQueryService(
-                import_service=import_service,
-                relation_facade=FakeRelationFacade(pair_service.list_active_relations()),
-                oa_projection=StaticOAProjection([
-                    self._oa("oa-api", "张三", "100.00", detail_fields={"申请日期": "2026-05-20"}),
-                ]),
-            )
-            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(service)
 
             rows_response = app.handle_request("GET", "/api/oa-pending-payments/rows?page=1&page_size=20")
             filter_response = app.handle_request("GET", "/api/oa-pending-payments/filter-options")
@@ -664,15 +642,17 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(row["bankTransaction"]["paidTotal"], "0.00")
         self.assertNotEqual(row["paymentStatus"]["code"], "paid")
 
-    def test_rows_route_passes_in_progress_view_mode_to_query_service(self) -> None:
-        service = OaPendingPaymentQueryService(
-            import_service=ImportNormalizationService(),
-            oa_projection=StaticOAProjection([
-                self._oa("oa-completed", "张三", "100.00", workflow_status="completed"),
-                self._oa("oa-progress", "李四", "120.00", workflow_status="in_progress"),
-            ]),
+    def test_rows_route_passes_in_progress_view_mode_to_read_model_repository(self) -> None:
+        completed = _read_model_row()
+        progress = deepcopy(_read_model_row())
+        progress["id"] = "oa-payment-row-progress"
+        progress["oa"]["id"] = "oa-progress"  # type: ignore[index]
+        progress["oa"]["workflowStatus"] = "in_progress"  # type: ignore[index]
+        routes = _read_model_routes(
+            repository=OaRowsRepository([completed, progress]),
+            queue=QueueRecorder(),
+            query_service=_empty_query_service(),
         )
-        routes = OaPendingPaymentApiRoutes(service)
 
         status, payload = routes.rows({"view_mode": ["in_progress"], "page": ["1"], "page_size": ["20"]})
         filter_status, filter_payload = routes.filter_options({"view_mode": ["in_progress"]})
@@ -686,11 +666,11 @@ class OaPendingPaymentApiTests(unittest.TestCase):
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            service = OaPendingPaymentQueryService(
-                import_service=ImportNormalizationService(),
-                oa_projection=StaticOAProjection([]),
+            app._oa_pending_payment_api_routes = _read_model_routes(
+                repository=OaRowsRepository([_read_model_row()]),
+                queue=QueueRecorder(),
+                query_service=_empty_query_service(),
             )
-            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(service)
 
             invalid_page = app.handle_request("GET", "/api/oa-pending-payments/rows?page=0")
             invalid_sort = app.handle_request("GET", "/api/oa-pending-payments/rows?sort_field=bad")
@@ -703,59 +683,26 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(missing_oa.status_code, 404)
         self.assertEqual(json.loads(missing_oa.body)["error"]["code"], "oa_not_found")
 
-    def test_live_query_bank_account_and_direction_filter_options_and_and_filters(self) -> None:
+    def test_read_model_bank_account_and_direction_filter_options_and_and_filters(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            matching_bank = BankTransaction(
-                id="bank-account-api",
-                account_no="622200001234",
-                txn_direction=TransactionDirection.OUTFLOW,
-                counterparty_name_raw="API供应商",
-                amount=Decimal("100.00"),
-                signed_amount=Decimal("-100.00"),
-                txn_date="2026-05-21",
-                trade_time="2026-05-21 10:00:00",
-                imported_bank_name="建设银行",
-                imported_bank_last4="1234",
+            matching_row = _read_model_row()
+            matching_row["oa"]["id"] = "oa-account-api"  # type: ignore[index]
+            other_row = deepcopy(_read_model_row())
+            other_row["id"] = "oa-payment-row-other"
+            other_row["oa"]["id"] = "oa-other-api"  # type: ignore[index]
+            other_row["oa"]["applicantName"] = "李四"  # type: ignore[index]
+            other_row["bankTransaction"]["primaryBankTransactionId"] = "bank-other-api"  # type: ignore[index]
+            other_row["bankTransaction"]["bankName"] = "工商银行"  # type: ignore[index]
+            other_row["bankTransaction"]["accountLast4"] = "9999"  # type: ignore[index]
+            other_row["bankTransaction"]["accountNo"] = "622200009999"  # type: ignore[index]
+            other_row["bankTransaction"]["bankAccount"] = "工商银行 9999"  # type: ignore[index]
+            other_row["bankTransaction"]["direction"] = "outflow"  # type: ignore[index]
+            app._oa_pending_payment_api_routes = _read_model_routes(
+                repository=OaRowsRepository([matching_row, other_row]),
+                queue=QueueRecorder(),
+                query_service=_empty_query_service(),
             )
-            other_bank = BankTransaction(
-                id="bank-other-api",
-                account_no="622200009999",
-                txn_direction=TransactionDirection.OUTFLOW,
-                counterparty_name_raw="其他供应商",
-                amount=Decimal("200.00"),
-                signed_amount=Decimal("-200.00"),
-                txn_date="2026-05-22",
-                trade_time="2026-05-22 10:00:00",
-                imported_bank_name="工商银行",
-                imported_bank_last4="9999",
-            )
-            pair_service = WorkbenchPairRelationService()
-            pair_service.create_active_relation(
-                case_id="case-account-api",
-                row_ids=["oa-account-api", "bank-account-api"],
-                row_types=["oa", "bank"],
-                relation_mode="manual_confirmed",
-                created_by="tester",
-                amount_check={"matched": True},
-            )
-            pair_service.create_active_relation(
-                case_id="case-other-api",
-                row_ids=["oa-other-api", "bank-other-api"],
-                row_types=["oa", "bank"],
-                relation_mode="manual_confirmed",
-                created_by="tester",
-                amount_check={"matched": True},
-            )
-            service = OaPendingPaymentQueryService(
-                import_service=ImportNormalizationService(existing_transactions=[matching_bank, other_bank]),
-                relation_facade=FakeRelationFacade(pair_service.list_active_relations()),
-                oa_projection=StaticOAProjection([
-                    self._oa("oa-account-api", "张三", "100.00"),
-                    self._oa("oa-other-api", "李四", "200.00"),
-                ]),
-            )
-            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(service)
             filters = quote(json.dumps([
                 {"field": "bank_account", "operator": "in", "values": ["建设银行 1234"]},
                 {"field": "bank_direction", "operator": "in", "values": ["outflow"]},
@@ -1225,6 +1172,120 @@ class QueueRecorder:
         self.refreshes.append((scope_type, scope_key, reason))
 
 
+class OaRowsRepository:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = [deepcopy(row) for row in rows]
+
+    def list_oa_pending_payment_rows(
+        self,
+        *,
+        filters: str | None = None,
+        page: int | str = 1,
+        page_size: int | str = 50,
+        view_mode: str | None = None,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        filtered_rows = [deepcopy(row) for row in self.rows]
+        if view_mode:
+            filtered_rows = [row for row in filtered_rows if _row_oa(row).get("workflowStatus") == view_mode]
+        for filter_spec in _decode_test_filters(filters):
+            field = str(filter_spec.get("field") or "")
+            values = {str(value) for value in list(filter_spec.get("values") or [])}
+            if not values:
+                continue
+            if field == "bank_account":
+                filtered_rows = [row for row in filtered_rows if _row_bank_account_label(row) in values]
+            elif field == "bank_direction":
+                filtered_rows = [row for row in filtered_rows if _row_bank_direction(row) in values]
+        page_number = int(page)
+        page_limit = int(page_size)
+        start = (page_number - 1) * page_limit
+        page_rows = filtered_rows[start : start + page_limit]
+        return {
+            "rows": page_rows,
+            "pagination": {"page": page_number, "pageSize": page_limit, "total": len(filtered_rows)},
+            "summary": {
+                "rowCount": len(filtered_rows),
+                "viewCounts": {
+                    "completed": sum(1 for row in filtered_rows if _row_oa(row).get("workflowStatus") == "completed"),
+                    "in_progress": sum(1 for row in filtered_rows if _row_oa(row).get("workflowStatus") == "in_progress"),
+                },
+            },
+            "refresh_status": "fresh",
+            "source_versions": oa_pending_payment_source_versions(),
+            "read_model_scope_key": "all",
+        }
+
+    def get_oa_pending_payment_row_by_row_id(self, row_id: str) -> dict[str, object] | None:
+        return self._payload(lambda row: str(row.get("id") or "") == row_id)
+
+    def get_oa_pending_payment_row_by_oa_id(self, oa_id: str) -> dict[str, object] | None:
+        return self._payload(lambda row: str(_row_oa(row).get("id") or "") == oa_id)
+
+    def get_oa_pending_payment_row_by_bank_transaction_id(self, bank_transaction_id: str) -> dict[str, object] | None:
+        return self._payload(lambda row: str(_row_bank(row).get("primaryBankTransactionId") or "") == bank_transaction_id)
+
+    def get_oa_pending_payment_row_by_invoice_id(self, invoice_id: str) -> dict[str, object] | None:
+        return self._payload(lambda row: str(_row_invoice(row).get("primaryInvoiceId") or "") == invoice_id)
+
+    def _payload(self, predicate: Callable[[dict[str, object]], bool]) -> dict[str, object] | None:
+        for row in self.rows:
+            if predicate(row):
+                return {
+                    "row": deepcopy(row),
+                    "refresh_status": "fresh",
+                    "source_versions": oa_pending_payment_source_versions(),
+                    "read_model_scope_key": "all",
+                }
+        return {
+            "row": None,
+            "refresh_status": "fresh",
+            "source_versions": oa_pending_payment_source_versions(),
+            "read_model_scope_key": "all",
+        }
+
+
+def _decode_test_filters(filters: str | None) -> list[dict[str, object]]:
+    if not filters:
+        return []
+    decoded = json.loads(filters)
+    return [dict(item) for item in decoded if isinstance(item, dict)] if isinstance(decoded, list) else []
+
+
+def _row_oa(row: dict[str, object]) -> dict[str, object]:
+    payload = row.get("oa")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _row_bank(row: dict[str, object]) -> dict[str, object]:
+    payload = row.get("bankTransaction")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _row_invoice(row: dict[str, object]) -> dict[str, object]:
+    payload = row.get("invoice")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _row_bank_account_label(row: dict[str, object]) -> str:
+    bank = _row_bank(row)
+    bank_account = str(bank.get("bankAccount") or "").strip()
+    if bank_account:
+        return bank_account
+    bank_name = str(bank.get("bankName") or "").strip()
+    last4 = str(bank.get("accountLast4") or "").strip()
+    return f"{bank_name} {last4}".strip()
+
+
+def _row_bank_direction(row: dict[str, object]) -> str:
+    bank = _row_bank(row)
+    direction = str(bank.get("direction") or "").strip()
+    if direction:
+        return direction
+    direction_label = str(bank.get("directionLabel") or "").strip()
+    return "outflow" if direction_label == "支出" else "inflow" if direction_label == "收入" else direction_label
+
+
 class ExplodingOaPendingPaymentService:
     def list_rows(self, **_kwargs: object) -> dict[str, object]:
         raise AssertionError("OA pending payment production API must not live scan")
@@ -1374,6 +1435,8 @@ def _read_model_row() -> dict[str, object]:
             "bankName": "建设银行",
             "accountNo": "622200001234",
             "accountLast4": "1234",
+            "bankAccount": "建设银行 1234",
+            "direction": "outflow",
             "directionLabel": "支出",
             "accountName": "云南溯源科技有限公司",
             "tradeTime": "2026-05-21 10:00:00",

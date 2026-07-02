@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-02 - import/runtime pending invoice scope planner
+
+- 变更类型：跨模块 read model scope fan-out 收口。
+- 新增/更新测试：`tests/test_import_processing_service.py::test_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice`。
+- 覆盖点：导入确认与 runtime derived lifecycle 统一使用 `pending_invoice_scope_planner`，从 cost/bank_detail 月份 scope 生成 pending_invoice expense/income/cash_income scope；无月份时只返回父 scope，不写 bare `all`。
+- 验证命令：见本轮最终说明。
+
 ## 修改前影响面清单
 
 待找发票是发票生命周期、银行标签规则、Workbench 关系、选择已有发票、收入状态覆盖和搜索 read model 的交汇页。任何改动都要先按下表做影响面评估：

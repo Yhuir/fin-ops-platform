@@ -32,6 +32,9 @@ from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
+from fin_ops_platform.services.pending_invoice_scope_planner import (
+    pending_invoice_read_model_scope_keys_for_import_state,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -427,7 +430,10 @@ class _RuntimeWorkerDerivedLifecycle:
         self._search_read_model_refresh_producer.enqueue(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._enqueue_scopes(
             "pending_invoice",
-            _pending_invoice_read_model_scope_keys_for_import_state(cost_statistics_scope_keys),
+            pending_invoice_read_model_scope_keys_for_import_state(
+                cost_statistics_scope_keys,
+                bank_detail_scope_keys,
+            ),
             reason="import_state_changed",
         )
         if input_invoice_usage_scope_keys is None:
@@ -858,21 +864,6 @@ def _normalized_batch_type(value: Any) -> BatchType | None:
 def _workbench_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
     month_scope_keys = [scope_key for scope_key in _dedupe_text(scope_keys or []) if SEARCH_MONTH_RE.match(scope_key)]
     return month_scope_keys or ["all"]
-
-
-def _pending_invoice_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
-    month_scope_keys = [scope_key for scope_key in _dedupe_text(scope_keys or []) if SEARCH_MONTH_RE.match(scope_key)]
-    if not month_scope_keys:
-        return ["expense:all", "income:all", "income:cash_income"]
-    return [
-        scoped_key
-        for month in month_scope_keys
-        for scoped_key in (
-            f"expense:all:{month}",
-            f"income:all:{month}",
-            f"income:cash_income:{month}",
-        )
-    ]
 
 
 class _WorkbenchSqlMatchingRowProvider:

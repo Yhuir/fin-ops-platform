@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-02 - secondary read/export route read-model closure
+
+- 变更类型：route-owner/query-service 边界收口。
+- 新增/更新测试：`tests/test_cost_statistics_api.py::CostStatisticsApiTests::test_cost_statistics_secondary_read_routes_delegate_to_query_service_and_fail_closed`、导出/preview 用例显式预热 read model、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_cost_statistics_routes_use_route_owner`。
+- 覆盖点：project/detail/export/export-preview 路由只调用 `CostStatisticsQueryService`；read model 未 fresh 返回 `409 cost_statistics_read_model_not_fresh`；导出 row limit 仍返回 `cost_statistics_export_row_limit_exceeded`；静态 guard 禁止 route owner 回调旧 `CostStatisticsService` 二级读方法。
+- 验证命令：见本轮最终说明。
+
 ## 修改前影响面清单
 
 成本统计是跨银行流水、发票、OA、Workbench relation、项目归因和费用分类的派生 read model。任何改动都要先按下表做影响面评估：

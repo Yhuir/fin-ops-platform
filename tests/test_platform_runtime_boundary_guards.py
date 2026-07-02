@@ -2472,10 +2472,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             'route_path == "/api/cost-statistics/export"',
             'route_path.startswith("/api/cost-statistics/projects/")',
             'route_path.startswith("/api/cost-statistics/transactions/")',
+            "CostStatisticsReadModelNotFreshError",
             "self._optional_bool_parser(",
         ):
             if snippet not in route_source:
                 violations.append(f"CostStatisticsApiRoutes is missing route-owner behavior {snippet}")
+        for forbidden_snippet in (
+            "self._cost_statistics_service.get_project_statistics",
+            "self._cost_statistics_service.get_transaction_detail",
+            "self._cost_statistics_service.get_export_preview",
+            "self._cost_statistics_service.export_view",
+        ):
+            if forbidden_snippet in route_source:
+                violations.append(f"CostStatisticsApiRoutes still calls legacy service path {forbidden_snippet}")
         for removed_handler in (
             "_handle_api_cost_statistics",
             "_handle_api_cost_statistics_explorer",
@@ -2768,11 +2777,24 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def _json_read(",
             "def _json_write(",
             "def _command_unavailable(",
+            "def _read_model_service_required(",
         ):
             if required not in route_class:
                 violations.append(f"OA pending payment route owner is missing {required}")
         if "_oa_pending_payment_routes().route(method, route_path, query, body, headers)" not in server_source:
             violations.append("Application does not dispatch OA pending payment routes through route owner")
+        for forbidden_fallback in (
+            "return self._query_service.",
+            "payload = self._query_service.",
+            "self._query_service.list_rows",
+            "self._query_service.filter_options",
+            "self._query_service.oa_detail",
+            "self._query_service.bank_transaction_detail",
+            "self._query_service.invoice_detail",
+            "self._query_service.row_relation_details",
+        ):
+            if forbidden_fallback in route_class:
+                violations.append(f"OA pending payment route owner still has live read fallback {forbidden_fallback}")
         for removed_handler in (
             "_handle_api_oa_pending_payments_rows",
             "_handle_api_oa_pending_payments_filter_options",

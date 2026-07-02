@@ -5,6 +5,9 @@ from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_job_queue import ImportJob
+from fin_ops_platform.services.pending_invoice_scope_planner import (
+    pending_invoice_read_model_scope_keys_for_import_state,
+)
 from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
 from fin_ops_platform.services.read_model_write_targets import normalized_scope_keys
 
@@ -445,7 +448,10 @@ class ImportProcessingService:
         add("workbench_relation", cost_scope_keys)
         add("invoice_lifecycle", cost_scope_keys)
         add("search", cost_scope_keys)
-        add("pending_invoice", _pending_invoice_read_model_scope_keys_for_import_state(cost_scope_keys))
+        add(
+            "pending_invoice",
+            pending_invoice_read_model_scope_keys_for_import_state(cost_scope_keys, bank_detail_scope_keys),
+        )
         add("input_invoice_usage", input_invoice_usage_scope_keys)
         add("output_invoice_collection", output_invoice_collection_scope_keys)
         add("oa_pending_payment", cost_scope_keys)
@@ -483,18 +489,3 @@ class ImportProcessingService:
 def _workbench_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
     month_scope_keys = [scope_key for scope_key in normalized_scope_keys(scope_keys) if MONTH_RE.match(scope_key)]
     return month_scope_keys or ["all"]
-
-
-def _pending_invoice_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
-    month_scope_keys = [scope_key for scope_key in normalized_scope_keys(scope_keys) if MONTH_RE.match(scope_key)]
-    if not month_scope_keys:
-        return ["expense:all", "income:all", "income:cash_income"]
-    return [
-        scoped_key
-        for month in month_scope_keys
-        for scoped_key in (
-            f"expense:all:{month}",
-            f"income:all:{month}",
-            f"income:cash_income:{month}",
-        )
-    ]

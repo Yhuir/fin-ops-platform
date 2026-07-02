@@ -6,7 +6,7 @@ from enum import Enum
 import hashlib
 import json
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
@@ -36,6 +36,11 @@ class BankDetailsReadModelRefreshingError(RuntimeError):
         self.payload = payload
 
 
+class BankTransactionCategoryStorePort(Protocol):
+    def save_bank_transaction_categories(self, snapshot: dict[str, Any]) -> None:
+        ...
+
+
 class BankDetailsApplicationService:
     def __init__(
         self,
@@ -46,7 +51,7 @@ class BankDetailsApplicationService:
         bank_transaction_category_service: BankTransactionCategoryService,
         bank_transaction_auto_category_service: BankTransactionAutoCategoryService,
         audit_service: AuditTrailService,
-        state_store: Any | None,
+        bank_transaction_category_store: BankTransactionCategoryStorePort | None,
         bank_detail_sql_read_repository: Any | None,
         bank_account_balance_read_model_repository: Any | None = None,
         runtime_repositories: Any | None,
@@ -68,7 +73,11 @@ class BankDetailsApplicationService:
         self._bank_transaction_category_service = bank_transaction_category_service
         self._bank_transaction_auto_category_service = bank_transaction_auto_category_service
         self._audit_service = audit_service
-        self._state_store = state_store
+        if bank_transaction_category_store is not None and not callable(
+            getattr(bank_transaction_category_store, "save_bank_transaction_categories", None)
+        ):
+            raise TypeError("bank_transaction_category_store must provide save_bank_transaction_categories")
+        self._bank_transaction_category_store = bank_transaction_category_store
         self._bank_detail_sql_read_repository = bank_detail_sql_read_repository
         self._bank_account_balance_read_model_repository = bank_account_balance_read_model_repository
         self._runtime_repositories = runtime_repositories
@@ -692,8 +701,10 @@ class BankDetailsApplicationService:
         metadata: dict[str, object],
     ) -> list[str]:
         affected_months = self._affected_months_provider(transaction_ids)
-        if self._state_store is not None:
-            self._state_store.save_bank_transaction_categories(self._bank_transaction_category_service.snapshot())
+        if self._bank_transaction_category_store is not None:
+            self._bank_transaction_category_store.save_bank_transaction_categories(
+                self._bank_transaction_category_service.snapshot()
+            )
         if self._category_mutation_side_effects is not None:
             self._category_mutation_side_effects.after_mutation(
                 transaction_id=transaction_id,

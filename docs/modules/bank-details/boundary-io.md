@@ -1,6 +1,6 @@
 # 银行明细模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-02
 
 ## 模块化状态
 
@@ -32,6 +32,7 @@
 | 页面过滤、月份、账号、标签操作 | `BankDetailsPage.tsx`、`features/bankDetails/api.ts` | API 入参必须映射到明确查询/filter contract |
 | 标签/分类写操作 | route/service | 通过 write UoW 触发受影响 month scope |
 | 自动标签规则保存/重跑 | `BankDetailsApplicationService` | 返回 `bank_detail` operation barrier targets；无明确范围时按现有月份 fan-out，不把 `all` 当作页面 fresh 结果 |
+| 可用月份 scope 枚举 | `BankDetailAvailableMonthScopeProvider` | PostgreSQL read-model runtime 下优先从 `BankDetailReadModelRepositoryPort.bank_detail_scope_keys_for_range(...)` 读取 scope；只有非 SQL/local runtime 才允许回退导入服务扫描 |
 | Refresh scope | `bank_detail` manifest | month or `all`；`all` 只允许 fan-out 到 month shards |
 
 ## 输出 I/O
@@ -40,6 +41,7 @@
 | --- | --- | --- |
 | 银行明细列表/账户/标签 payload | 前端页面 | 必须带 freshness/status |
 | 自动标签规则写入结果 | 前端页面 | 前端优先等待服务端返回的 `operation_barrier_targets`；缺少/未知 read model status 默认按 `refreshing` 处理 |
+| 标签/分类事实写入 | canonical store | `BankDetailsApplicationService` 只依赖显式 `BankTransactionCategoryStorePort.save_bank_transaction_categories(...)`；禁止通过宽 `state_store` 在业务 service 内散写 |
 | 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播；`bank-flow-rule-batches` 只能读取 active 标签并维护自身 OA/发票规则 |
 | 导出文件 | 用户下载 | 复用当前查询边界，不绕过权限 |
 
@@ -72,6 +74,7 @@
 ## 测试与验证
 
 - Service/read model：`tests/test_bank_details_sql_runtime.py`、`tests/test_bank_details_service.py`。
+- 可用月份/provider 边界：`tests/test_bank_detail_available_month_scope_provider.py`。
 - API/frontend：`tests/test_bank_details_routes.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx`。
 - E2E：`web/e2e/bank-details-*.spec.ts`。
 - Wave 3 target envelope 回归：`BankDetailSqlRepositoryTests.test_category_mutation_response_returns_bank_detail_operation_barrier_targets`、`web/src/test/BankDetailsApi.test.ts`。

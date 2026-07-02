@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-02 - category store port 与可用月份 read model provider
+
+- 变更类型：模块边界收口。
+- 新增/更新测试：`tests/test_bank_details_sql_runtime.py::BankDetailSqlRepositoryTests::test_category_mutation_persists_via_explicit_category_store_port`、`tests/test_bank_detail_available_month_scope_provider.py`。
+- 覆盖点：`BankDetailsApplicationService` 分类写入只依赖显式 category store port；SQL read-model runtime 下 `BankDetailAvailableMonthScopeProvider` 从 repository scope keys 获取月份，不扫描 import service。
+- 验证命令：见本轮最终说明。
+
 ## 2026-06-30 - auto-tag rule persistence readback retry test note
 
 `bank-details:auto-tag-rule-persistence-readback-retry` 已完成：
