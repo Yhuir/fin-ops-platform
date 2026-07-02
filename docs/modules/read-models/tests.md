@@ -438,6 +438,12 @@ git diff --check
 - 复用覆盖：`tests/test_bank_details_sql_runtime.py`、`tests/test_bank_account_balance_read_model.py`、`tests/test_bank_account_balance_derived_lifecycle_executor.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_operation_freshness_barrier.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_bankdetail_backfill_cli.py`、`tests/test_runtime_bootstrap.py`、`tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py` 和 account-balance static guards。
 - 结论：未发现剩余本地 implementation gap；真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred。
 
+## 2026-07-02 - Workbench / Turnover bulk persistence performance tests
+
+- 新增/更新测试：`tests/test_postgres_repositories_boundaries.py::test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables` 覆盖 `read_model.workbench_rows`、`read_model.workbench_groups`、`read_model.workbench_group_rows`、`read_model.search_index_rows` 和 `read_model.turnover_ledger_rows` 的 multi-values bulk path。
+- 回归测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_batches_all_scope_generation_rows_when_supported`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_batches_workbench_generation_rows_when_supported`、`tests/test_turnover_ledger_read_model_refresh.py`。
+- 覆盖类别：read model/cache/background job tests、service-layer persistence boundary regression、existing feature regression。API contract、frontend interaction、E2E business-flow 本轮不适用，因为没有改变 HTTP response shape、页面行为或业务写入口。
+
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 
 ## Nightly CI 覆盖

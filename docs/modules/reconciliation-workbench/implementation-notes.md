@@ -908,3 +908,10 @@
 - 验证命令：见 `tests.md` 的 Workbench 相关验证命令。
 - 未测风险：未新增前端组件测试；当前变更沿用既有 open candidate group shape。未做真实生产库 worker dry-run。
 - 后续事项：可单独评估 legacy candidate 与 decision/free engine 的规则收敛；不要和本规则混入无关旧逻辑删除。
+
+## 2026-07-02 - active generation bulk persistence performance slice
+
+- 触发事实：生产 `read_model_slo_smoke` 1s/5s 重采样显示 `workbench` handler 长尾；远端只读 profile 证明 `workbench:2026-03` 取数、补行、分组约 `2.23s`，但 worker handler 可到 `9-10s`，瓶颈集中在 active generation rows/groups 保存。
+- 决策：不改变 Workbench active generation 模型、不改页面 payload、不恢复 legacy live fallback；只把 `read_model.workbench_rows` 和 `read_model.workbench_groups` 持久化加入 repository multi-values 批量写白名单，保持 `workbench_group_rows` 既有 bulk path。
+- 测试覆盖：`tests/test_postgres_repositories_boundaries.py::test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables`，以及 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_batches_all_scope_generation_rows_when_supported`、`test_repository_batches_workbench_generation_rows_when_supported`。
+- 未闭合：需要发布后用生产 worker 复测 Workbench read model SLO 和写后 operation barrier；本 slice 不声明 Workbench 高性能闭环完成。
