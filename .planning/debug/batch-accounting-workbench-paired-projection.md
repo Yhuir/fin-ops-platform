@@ -48,6 +48,25 @@ This violates the intended module boundary: command I/O must be bounded by comma
 - Keep `load_batch_accounting_workbench_payload(bank_year)` only for the unsubmitted candidate list.
 - Remove the SQL production path where submit and submitted bucket reuse the full candidate loader or loop through 12 months of relation DTOs.
 
+## Post-command Performance Root Cause
+
+After the narrow read ports landed, production profiling showed the remaining slow stages were not the read ports:
+
+- submit narrow payload reads were sub-second after cache warmup.
+- withdraw still spent about 5.8s in `_schedule_pair_relation_persist(...)`.
+- submit still spent about 2.5s in `_schedule_pair_relation_persist(...)`.
+- derived lifecycle for `batch_accounting_relation_changed` received `scope_keys=["all"]`, so `bank_detail` and other downstream domains ran all-scope invalidation/refresh work in the request path.
+
+This was a module boundary bug. `BatchAccountingService` already writes the relation fact through `WorkbenchRelationCommandService`; the route then called the legacy pair relation persist path again. The route also derived scopes from row ids/month_scope, and production row ids such as `txn_imported_1393` do not encode months, so cross-month relations fell back to `all`.
+
+## Post-command Performance Design
+
+- Remove the batch-accounting route dependency on `schedule_pair_relation_persist`, `pair_relation_snapshot`, and `restore_pair_relation_snapshot`.
+- Make `BatchAccountingService.submit(...)` compute concrete `affected_scope_keys` from the selected bank/OA/invoice row payload dates and persist them in relation `special_metadata`.
+- Make `BatchAccountingService.withdraw(...)` prefer persisted `affected_scope_keys`; for legacy active relations without the field, use the narrow submit context to derive months from row payloads before withdrawing.
+- Make `BatchAccountingApiRoutes` prefer result `affected_scope_keys` and call derived lifecycle with `include_all=False`.
+- Permit `all` only as a fallback when no concrete row month can be derived.
+
 ## Verification Targets
 
 - Local: batch accounting API, candidate grouping, SQL projection, docs verification.

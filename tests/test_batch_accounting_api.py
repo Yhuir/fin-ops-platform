@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import Application, StatePersistenceError
+from fin_ops_platform.app.server import Application
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
@@ -1206,6 +1206,32 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertIs(call["replace_existing"], True)
         self.assertEqual(result["pair_relation"]["relation_mode"], "batch_accounting")
 
+    def test_submit_records_concrete_affected_scope_keys_for_cross_month_relation(self) -> None:
+        payload = self._grouped_payload()
+        payload["open"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
+        payload["open"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
+        pair_service = WorkbenchPairRelationService()
+        relation_command = RecordingBatchRelationCommandService(pair_service)
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: payload,
+            relation_facade=RowsBatchRelationFacade([]),
+            relation_command_service=relation_command,
+        )
+
+        result = service.submit(
+            year="2026",
+            bank_row_id="txn_imported_202601_batch_001",
+            oa_row_ids=["oa-exp-ba-001", "oa-exp-ba-002"],
+            actor="finance-user",
+        )
+
+        self.assertEqual(result["month_scope"], "all")
+        self.assertEqual(result["affected_scope_keys"], ["2026-01", "2026-02", "2026-03"])
+        self.assertEqual(
+            result["pair_relation"]["special_metadata"]["affected_scope_keys"],
+            ["2026-01", "2026-02", "2026-03"],
+        )
+
     def test_submit_requires_relation_command_service_without_direct_pair_fallback(self) -> None:
         pair_service = WriteBlockingPairRelationService()
         service = BatchAccountingService(
@@ -1223,30 +1249,44 @@ class BatchAccountingApiTests(unittest.TestCase):
 
         self.assertEqual(context.exception.code, "batch_accounting_relation_command_unavailable")
 
-    def test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails(self) -> None:
+    def test_submit_does_not_call_legacy_pair_relation_persist_and_scopes_lifecycle_to_months(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
-        previous_snapshot = app._workbench_pair_relation_service.snapshot()
 
         def fail_persist(*_args, **_kwargs):
-            raise StatePersistenceError("persist failed")
+            raise AssertionError("batch accounting route must not call legacy pair relation persist")
+
+        lifecycle_calls: list[dict[str, object]] = []
+
+        def record_lifecycle(event: str, **kwargs: object) -> dict[str, object]:
+            lifecycle_calls.append({"event": event, **kwargs})
+            return {}
 
         app._schedule_workbench_pair_relation_persist = fail_persist
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001"],
-                    "note": "财务确认差额闭环",
-                }
-            ),
-        )
+        with patch.object(app, "_execute_derived_data_lifecycle_event", side_effect=record_lifecycle):
+            response = app.handle_request(
+                "POST",
+                "/api/batch-accounting/submit",
+                json.dumps(
+                    {
+                        "year": "2026",
+                        "bank_row_id": "txn_imported_202601_batch_001",
+                        "oa_row_ids": ["oa-exp-ba-001"],
+                        "note": "财务确认差额闭环",
+                    }
+                ),
+            )
 
-        self.assertEqual(response.status_code, 503, response.body)
-        self.assertEqual(json.loads(response.body)["error"], "workbench_state_persistence_unavailable")
-        self.assertEqual(app._workbench_pair_relation_service.snapshot(), previous_snapshot)
+        self.assertEqual(response.status_code, 200, response.body)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
+        self.assertEqual(lifecycle_calls, [
+            {
+                "event": "batch_accounting_relation_changed",
+                "scope_keys": ["2026-01"],
+                "include_all": False,
+                "metadata": {"source": "submit_batch_accounting"},
+            }
+        ])
 
     def test_submit_creates_batch_accounting_relation_with_current_invoice_rows(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -1290,16 +1330,16 @@ class BatchAccountingApiTests(unittest.TestCase):
                 "year": "2026",
                 "bank_year": "2026",
                 "oa_years": ["2026"],
+                "affected_scope_keys": ["2026-01"],
                 "created_by": "finance-user",
             },
         )
-        self.assertEqual(payload["affected_months"], ["2026-01", "all"])
-        self.assertEqual(payload["affected_scope_keys"], ["2026-01", "all"])
+        self.assertEqual(payload["affected_months"], ["2026-01"])
+        self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
         self.assertEqual(
             payload["operation_barrier_targets"],
             [
                 {"read_model_key": "workbench_relation", "scope_key": "2026-01"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
             ],
         )
 
@@ -1874,12 +1914,11 @@ class BatchAccountingApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(payload["action"], "withdraw_batch_accounting")
-        self.assertEqual(payload["affected_scope_keys"], ["2026-01", "all"])
+        self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
         self.assertEqual(
             payload["operation_barrier_targets"],
             [
                 {"read_model_key": "workbench_relation", "scope_key": "2026-01"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
             ],
         )
         self.assertEqual(payload["restored_relations"], [])
@@ -1925,6 +1964,41 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(call["actor_id"], "finance-user")
         self.assertEqual(call["reason"], "选择错误")
         self.assertEqual(call["history_operation_type"], "withdraw_link")
+
+    def test_withdraw_legacy_relation_derives_scope_keys_from_narrow_context(self) -> None:
+        payload = self._grouped_payload()
+        payload["open"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
+        payload["open"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="CASE-BATCH-txn_imported_202601_batch_001",
+            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001", "oa-exp-ba-002"],
+            row_types=["bank", "oa", "oa"],
+            relation_mode="batch_accounting",
+            created_by="finance-user",
+            month_scope="all",
+            special_metadata={
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_202601_batch_001",
+                "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
+                "year": "2026",
+                "bank_year": "2026",
+            },
+        )
+        relation_command = RecordingBatchRelationCommandService(pair_service)
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: payload,
+            relation_facade=FakeBatchRelationFacade(),
+            relation_command_service=relation_command,
+        )
+
+        result = service.withdraw(
+            relation_id="CASE-BATCH-txn_imported_202601_batch_001",
+            actor="finance-user",
+            reason="选择错误",
+        )
+
+        self.assertEqual(result["affected_scope_keys"], ["2026-01", "2026-02", "2026-03"])
 
     def test_withdraw_requires_relation_command_service_without_direct_pair_fallback(self) -> None:
         pair_service = WriteBlockingPairRelationService()

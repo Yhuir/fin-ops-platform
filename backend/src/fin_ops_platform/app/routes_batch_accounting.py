@@ -14,19 +14,13 @@ class BatchAccountingApiRoutes:
         service_factory: Callable[..., BatchAccountingService],
         *,
         scope_keys_for_row_ids: Callable[..., set[str]],
-        schedule_pair_relation_persist: Callable[..., Any],
         execute_derived_data_lifecycle_event: Callable[..., Any],
         schedule_read_model_persist: Callable[..., Any],
-        pair_relation_snapshot: Callable[[], dict[str, Any]],
-        restore_pair_relation_snapshot: Callable[[dict[str, Any]], None],
     ) -> None:
         self._service_factory = service_factory
         self._scope_keys_for_row_ids = scope_keys_for_row_ids
-        self._schedule_pair_relation_persist = schedule_pair_relation_persist
         self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
         self._schedule_read_model_persist = schedule_read_model_persist
-        self._pair_relation_snapshot = pair_relation_snapshot
-        self._restore_pair_relation_snapshot = restore_pair_relation_snapshot
 
     def list_payload(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
         year = (query.get("year") or [""])[0]
@@ -51,7 +45,6 @@ class BatchAccountingApiRoutes:
     def submit(self, payload: dict[str, Any], *, session: OARequestSession) -> tuple[HTTPStatus, dict[str, Any]]:
         actor = self._actor(payload, session)
         year = str(payload.get("year") or "")
-        previous_pair_snapshot = self._pair_relation_snapshot()
         try:
             result = self._service_factory(use_sql_read_model=True).submit(
                 year=year,
@@ -68,18 +61,6 @@ class BatchAccountingApiRoutes:
             return HTTPStatus.BAD_REQUEST, {"error": "invalid_batch_accounting_request", "message": str(exc)}
 
         changed_scope_keys = self._changed_scope_keys(result)
-        changed_case_ids = self._changed_case_ids(result)
-        try:
-            self._schedule_pair_relation_persist(
-                changed_case_ids=changed_case_ids,
-                action_name="submit_batch_accounting",
-            )
-        except Exception:
-            self._restore_pair_relation_snapshot(previous_pair_snapshot)
-            return HTTPStatus.SERVICE_UNAVAILABLE, {
-                "error": "workbench_state_persistence_unavailable",
-                "message": "工作台关联关系暂时无法保存，请稍后重试。",
-            }
         self._after_relation_mutation(
             action_name="submit_batch_accounting",
             changed_scope_keys=changed_scope_keys,
@@ -113,11 +94,6 @@ class BatchAccountingApiRoutes:
             }
 
         changed_scope_keys = self._changed_scope_keys(result)
-        changed_case_ids = self._changed_case_ids(result)
-        self._schedule_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            action_name="withdraw_batch_accounting",
-        )
         self._after_relation_mutation(
             action_name="withdraw_batch_accounting",
             changed_scope_keys=changed_scope_keys,
@@ -139,6 +115,9 @@ class BatchAccountingApiRoutes:
         return int(value)
 
     def _changed_scope_keys(self, result: dict[str, Any]) -> list[str]:
+        explicit_scope_keys = self._normalized_scope_keys(result.get("affected_scope_keys"))
+        if explicit_scope_keys:
+            return explicit_scope_keys
         return sorted(
             self._scope_keys_for_row_ids(
                 month="all",
@@ -148,13 +127,30 @@ class BatchAccountingApiRoutes:
         )
 
     @staticmethod
-    def _changed_case_ids(result: dict[str, Any]) -> list[str]:
-        return [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
+    def _normalized_scope_keys(value: Any) -> list[str]:
+        values = [value] if isinstance(value, str) else list(value or []) if isinstance(value, list | tuple | set) else []
+        concrete: list[str] = []
+        seen: set[str] = set()
+        has_all = False
+        for item in values:
+            scope_key = str(item or "").strip()
+            if scope_key == "all":
+                has_all = True
+                continue
+            if not scope_key or len(scope_key) != 7 or scope_key[4] != "-":
+                continue
+            if scope_key not in seen:
+                seen.add(scope_key)
+                concrete.append(scope_key)
+        if concrete:
+            return sorted(concrete)
+        return ["all"] if has_all else []
 
     def _after_relation_mutation(self, *, action_name: str, changed_scope_keys: list[str]) -> None:
         self._execute_derived_data_lifecycle_event(
             "batch_accounting_relation_changed",
             scope_keys=changed_scope_keys,
+            include_all=False,
             metadata={"source": action_name},
         )
         self._schedule_read_model_persist(

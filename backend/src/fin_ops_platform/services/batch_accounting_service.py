@@ -408,6 +408,7 @@ class BatchAccountingService:
         rows = [context.rows_by_id.get(row_id, {"id": row_id, "type": self._row_type_for_row_id(row_id)}) for row_id in row_ids]
         row_types = [self._row_type(row, row_id) for row, row_id in zip(rows, row_ids, strict=False)]
         month_scope = self._month_scope(rows)
+        affected_scope_keys = self._affected_scope_keys_for_rows(rows, fallback_month_scope=month_scope)
         before_relations = self._active_relations_for_row_ids(row_ids)
         if any(normalized_bank_row_id in self._relation_row_id_set(relation) for relation in before_relations):
             raise BatchAccountingError("batch_accounting_bank_row_already_linked", "银行流水已有关联关系，请刷新后重试。")
@@ -429,6 +430,7 @@ class BatchAccountingService:
             "year": resolved_bank_year,
             "bank_year": resolved_bank_year,
             "oa_years": selected_oa_years,
+            "affected_scope_keys": affected_scope_keys,
             "created_by": actor,
         }
         case_id = self._case_id_provider(normalized_bank_row_id)
@@ -465,6 +467,7 @@ class BatchAccountingService:
             "affected_row_ids": row_ids,
             "changed_case_ids": changed_case_ids,
             "month_scope": str(relation.get("month_scope") or "all"),
+            "affected_scope_keys": affected_scope_keys,
             "amount_check": amount_check,
             "message": f"已关联批量账务流水与 {len(normalized_oa_row_ids)} 项 OA。",
         }
@@ -616,6 +619,7 @@ class BatchAccountingService:
             if relation_version is not None and relation_version != expected_version:
                 raise BatchAccountingError("batch_accounting_version_conflict", "关联版本已变化，请刷新后重试。")
         row_ids = self._normalize_ids(list(active_relation.get("row_ids") or []))
+        affected_scope_keys = self._affected_scope_keys_for_relation(active_relation)
         if self._relation_command_service is None:
             raise BatchAccountingError(
                 "batch_accounting_relation_command_unavailable",
@@ -644,6 +648,7 @@ class BatchAccountingService:
             "restored_relations": restored_relations,
             "changed_case_ids": changed_case_ids,
             "month_scope": str(active_relation.get("month_scope") or "all"),
+            "affected_scope_keys": affected_scope_keys,
             "message": "已撤回批量账务关联。",
         }
 
@@ -1280,6 +1285,86 @@ class BatchAccountingService:
             for month in [cls._row_month(row)]
             if month is not None
         )
+
+    @classmethod
+    def _affected_scope_keys_for_rows(
+        cls,
+        rows: Iterable[dict[str, Any]],
+        *,
+        fallback_month_scope: str | None = None,
+    ) -> list[str]:
+        months = sorted(
+            {
+                month
+                for row in list(rows or [])
+                if isinstance(row, dict)
+                for month in [cls._row_month(row)]
+                if month is not None
+            }
+        )
+        if months:
+            return months
+        return cls._normalize_scope_keys(fallback_month_scope)
+
+    @classmethod
+    def _normalize_scope_keys(cls, value: Any) -> list[str]:
+        if isinstance(value, str):
+            values: Iterable[Any] = [value]
+        elif isinstance(value, Iterable):
+            values = value
+        else:
+            values = []
+        concrete: list[str] = []
+        has_all = False
+        for item in values:
+            scope_key = str(item or "").strip()
+            if scope_key == "all":
+                has_all = True
+                continue
+            if re.fullmatch(r"20\d{2}-\d{2}", scope_key):
+                concrete.append(scope_key)
+        concrete = sorted(cls._dedupe(concrete))
+        if concrete:
+            return concrete
+        return ["all"] if has_all else []
+
+    def _affected_scope_keys_for_relation(self, relation: dict[str, Any]) -> list[str]:
+        metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
+        metadata_scope_keys = self._normalize_scope_keys(metadata.get("affected_scope_keys"))
+        if metadata_scope_keys:
+            return metadata_scope_keys
+
+        fallback_month_scope = str(relation.get("month_scope") or "").strip()
+        row_ids = self._normalize_ids(list(relation.get("row_ids") or []))
+        bank_row_id = str(metadata.get("bank_row_id") or "").strip()
+        if not bank_row_id:
+            bank_row_id = next((row_id for row_id in row_ids if self._row_type_for_row_id(row_id) == "bank"), "")
+        oa_row_ids = self._normalize_ids(
+            list(metadata.get("oa_row_ids") or [])
+            or [row_id for row_id in row_ids if self._row_type_for_row_id(row_id) == "oa"]
+        )
+        bank_year = str(metadata.get("bank_year") or metadata.get("year") or "").strip()
+        if not bank_year and re.fullmatch(r"20\d{2}-\d{2}", fallback_month_scope):
+            bank_year = fallback_month_scope[:4]
+
+        if bank_row_id and re.fullmatch(r"20\d{2}", bank_year):
+            try:
+                context = self._build_submit_context(
+                    bank_year=bank_year,
+                    bank_row_id=bank_row_id,
+                    oa_row_ids=oa_row_ids,
+                )
+                rows = [
+                    context.rows_by_id.get(row_id, {"id": row_id, "type": self._row_type_for_row_id(row_id)})
+                    for row_id in row_ids
+                ]
+                scope_keys = self._affected_scope_keys_for_rows(rows, fallback_month_scope=fallback_month_scope)
+                if scope_keys:
+                    return scope_keys
+            except BatchAccountingError:
+                pass
+
+        return self._affected_scope_keys_for_rows([], fallback_month_scope=fallback_month_scope)
 
     @staticmethod
     def _is_batch_accounting_relation(relation: dict[str, Any] | None) -> bool:

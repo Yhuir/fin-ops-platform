@@ -1,5 +1,16 @@
 # 批量账务 实施记录
 
+## 2026-07-02 - submit/withdraw 旧持久化链路删除与 scope 收窄
+
+- 目标：修复 1273.06 生产链路中提交/撤回 command 已完成但 API 长时间等待、偶发 timeout/blocked 后用户误以为失败的问题；避免批量账务关系变化默认触发 all scope 派生刷新。
+- 影响范围：`BatchAccountingApiRoutes` submit/withdraw side effect、`Application._batch_accounting_routes(...)` wiring、`BatchAccountingService` mutation result / relation metadata、批量账务 API 回归测试、模块边界文档和关联台关系边界文档；不改变前端 API endpoint，不新增独立 read model。
+- 关键决策：批量账务 relation 事实持久化只属于 `WorkbenchRelationCommandService` repository。route 不再在 command 成功后再次调用旧 `_schedule_workbench_pair_relation_persist(...)`，也不再保留 snapshot rollback restore；该旧链路既重复写关系事实，又把接口热路径拖慢。写后 lifecycle 只使用 service 输出的 `affected_scope_keys`，并以 `include_all=False` 执行。
+- Scope 设计：submit 从本次银行/OA/附件发票 row payload 日期计算具体月份，并持久化到 relation `special_metadata.affected_scope_keys`；withdraw 优先使用该 metadata，老关系缺字段时用窄 submit context 反查 row 日期。只有无法解析任何具体月份时才允许回退 `all`。
+- 旧链路删除：删除 batch accounting route 构造参数里的 `schedule_pair_relation_persist`、`pair_relation_snapshot`、`restore_pair_relation_snapshot`，删除 `Application` 中仅服务该旧回滚链路的 batch-accounting restore helper；测试改为断言旧 persist 被接回时会失败。
+- 测试覆盖：`test_submit_does_not_call_legacy_pair_relation_persist_and_scopes_lifecycle_to_months`、`test_submit_records_concrete_affected_scope_keys_for_cross_month_relation`、`test_withdraw_legacy_relation_derives_scope_keys_from_narrow_context`，并更新 submit/withdraw API response 的 `affected_scope_keys`/barrier target 断言。
+- 验证命令：见本轮最终说明。
+- 未测风险：本地单测不能替代部署后 1273.06 撤回->重提->已提交 bucket->关联台 paired 的真实生产 smoke 和真实 p95；生产上仍受 PostgreSQL cache、worker drain 和并发影响。
+
 ## 2026-07-02 - submit/已提交读取性能边界收窄
 
 - 目标：修复 1273.06 生产链路中撤回、重新提交和已提交读取耗时过长的问题；避免单次 submit command 和已提交 bucket 继续复用整页候选读取，导致“写入已成功但用户等待很久/误以为失败”。

@@ -1,6 +1,6 @@
 # 批量账务模块边界与 I/O
 
-日期：2026-07-01
+日期：2026-07-02
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 当前边界可信度：medium
 - 目标边界：批量账务页面通过 BatchAccounting service 操作批量关系和账务候选，关系事实写入必须走 workbench relation 边界。
 - 当前缺口：批量账务依赖 workbench relation read/write 和 lifecycle，模块本身没有独立 read model manifest。
-- 旧代码删除条件：旧 server.py 批量账务入口不再承载业务逻辑，所有关系写入走 command service。
+- 旧代码删除条件：旧 server.py 批量账务入口不再承载业务逻辑，所有关系写入走 command service；submit/withdraw route 不得再调用旧 pair relation persist/snapshot restore 链路。
 
 ## 职责边界
 
@@ -40,14 +40,15 @@
 | submitted relation DTO | `WorkbenchRelationReadFacade.list_batch_accounting_relations_by_year` | 已提交 bucket 需要关系明细时，必须一次读取年份内 batch-accounting relation groups，并透出 freshness/status；禁止回退到 12 个月循环读取污染已提交页加载 |
 | submit context | `BatchAccountingService._build_submit_context` | 仅提交使用，禁止读取整页 relation distribution；写前 active relation 冲突只通过 command service 按本次 row ids 查询，不再把 relation read model freshness 作为普通写阻断 |
 | 关系写入请求 | `BatchAccountingService` | 必须委托 workbench relation command boundary |
-| lifecycle trigger | derived data lifecycle | 更新下游 read model scopes |
+| affected scope keys | `BatchAccountingService` | submit 必须基于本次银行/OA/附件发票 row payload 日期输出真实 `affected_scope_keys` 并写入 relation `special_metadata`；withdraw 优先读取 metadata，旧关系缺 metadata 时用窄 submit context 反查 row 日期；只有完全无法解析具体月份时才允许回退 `all` |
+| lifecycle trigger | derived data lifecycle | route 只使用 service 输出的 `affected_scope_keys` 触发下游 read model scopes，并设置 `include_all=False`；禁止默认把批量账务 relation 变化扩散为 all scope |
 | OA 候选事实 | Workbench active read model + `workbench_relation` read facade | 不接收 OA 年份；“没有流水”表示 relation distribution 中该 OA 没有 `linked_bank_transactions`，仅发票关系或无流水候选关系仍可进入批量账务右侧 OA 栏 |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 批量账务操作结果 | 前端页面 | 返回成功/失败、受影响对象、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。提交/撤回 command 成功后，后置 barrier/reload 只影响读侧收敛提示，不能把 command 成功改写成失败。 |
+| 批量账务操作结果 | 前端页面 | 返回成功/失败、受影响对象、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。提交/撤回 command 成功后，后置 barrier/reload 只影响读侧收敛提示，不能把 command 成功改写成失败。`affected_months`/`affected_scope_keys` 必须优先是具体月份集合，不得无条件包含 `all`。 |
 | Relation dirty scopes | workbench relation/read model | 不直接写下游 payload |
 | 关联台已配对展示 | `workbench` active generation / `WorkbenchCandidateGroupingService` | active `relation_mode=batch_accounting` 且 `special_metadata.source=batch_accounting` 的 row-set 是已确认批量账务关系；即使行级 relation code 是 `batch_accounting` 而不是旧 `fully_linked`，也必须进入 paired 区，不得被 `existing_case_candidate` open 旧候选链路接管 |
 | Audit/result | audit/job status | 重要批量操作可追踪 |
@@ -78,6 +79,8 @@
 - 未提交列表 relation lookup 必须以页面可展示/可提交候选行为输入；`submitted_count` 必须走 relation facade 的轻量 count I/O，不能回退到 submitted relation 明细扫描污染首屏读路径。
 - 已提交列表必须走年份级 batch-accounting relation DTO I/O，不能按 12 个月循环读取 relation distribution；银行行上下文只能读批量账务银行行。
 - submit 写操作必须经过 `_build_submit_context`，只按本次选中的银行/OA/发票 row ids 读取命令所需 row payload，并只按本次 row ids 读取 canonical active relation 冲突；不能调用 `_build_list_context`、不能为了校验一次提交扫描整页银行/OA/发票候选或整页 relation distribution，也不能因普通 `workbench_relation` read model refreshing/stale/missing 直接拒绝 command 写入。
+- submit/withdraw 写操作后的 route side effect 只能触发 derived lifecycle 和 read model persist dirty scope；不能再补调用 `_schedule_workbench_pair_relation_persist` 或 snapshot rollback restore。关系事实持久化的唯一写边界是 `WorkbenchRelationCommandService` 及其 repository。
+- 批量账务 relation 可以跨月，但跨月不等于 `all`。如果 row payload 可解析出 `2026-MM`，派生刷新必须只覆盖这些月份，避免 bank_detail/cost/search/workbench_relation 等下游读模型被 all scope 长耗时刷新拖慢。
 
 ## 测试与验证
 

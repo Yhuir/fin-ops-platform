@@ -9449,27 +9449,11 @@ class Application:
         routes = BatchAccountingApiRoutes(
             lambda **kwargs: self._batch_accounting_service(**kwargs),
             scope_keys_for_row_ids=self._scope_keys_for_row_ids,
-            schedule_pair_relation_persist=self._schedule_workbench_pair_relation_persist,
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             schedule_read_model_persist=self._schedule_workbench_read_model_persist,
-            pair_relation_snapshot=self._workbench_pair_relation_service.snapshot,
-            restore_pair_relation_snapshot=self._restore_batch_accounting_pair_relation_snapshot,
         )
         self._batch_accounting_api_routes = routes
         return routes
-
-    def _restore_batch_accounting_pair_relation_snapshot(self, snapshot: dict[str, Any]) -> None:
-        self._batch_accounting_pair_relation_rollback_restore_service().restore(
-            snapshot,
-            changed_case_ids=[],
-        )
-
-    def _batch_accounting_pair_relation_rollback_restore_service(self) -> WorkbenchPairRelationRollbackRestoreService:
-        return WorkbenchPairRelationRollbackRestoreService(
-            state_store=None,
-            replace_pair_relation_service=self._replace_workbench_pair_relation_service,
-            configure_exception_application_service=self._configure_workbench_exception_application_service,
-        )
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
         status_code, payload = self._batch_accounting_routes().list_payload(query)
