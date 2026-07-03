@@ -107,12 +107,32 @@ export function mutationEventDetail(result: {
 }
 
 export function mutationBarrierTargets(
-  result: { affectedMonths?: string[]; operationBarrierTargets?: OperationBarrierTarget[] },
+  result: {
+    affectedMonths?: string[];
+    freshnessTargets?: OperationBarrierTarget[];
+    operationBarrierTargets?: OperationBarrierTarget[];
+  },
   fallbackScopeKey: string,
 ) {
-  return result.operationBarrierTargets && result.operationBarrierTargets.length > 0
-    ? result.operationBarrierTargets
+  const selfTargets = [
+    ...(result.operationBarrierTargets ?? []),
+    ...(result.freshnessTargets ?? []),
+  ].filter((target) => target.readModelKey === BANK_FLOW_RULE_BATCH_READ_MODEL_KEY);
+  return selfTargets.length > 0
+    ? dedupeOperationTargets(selfTargets)
     : operationBarrierTargetsFromMonths(BANK_FLOW_RULE_BATCH_READ_MODEL_KEY, result.affectedMonths ?? [], fallbackScopeKey);
+}
+
+function dedupeOperationTargets(targets: OperationBarrierTarget[]) {
+  const seen = new Set<string>();
+  return targets.filter((target) => {
+    const key = `${target.readModelKey}\u0000${target.scopeKey}\u0000${target.scopeType ?? ""}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 export function cleanText(value: unknown) {

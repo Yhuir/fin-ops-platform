@@ -363,6 +363,63 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test("submits internal transfer batches without blocking on workbench visibility refresh", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, {
+      bankFlowRuleBatchScenario: "internalTransferPairs",
+      bankFlowRuleMutationWorkbenchTargets: true,
+      bankFlowRuleWorkbenchBarrierRefreshing: true,
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/bank-flow-rule-batches");
+    await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "未提交 2" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "内部往来款 2批 · 4条" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "主标签本身 2批 · 4条" })).toBeVisible();
+
+    const firstBatch = page.locator(".bank-flow-rule-batches-batch").filter({ hasText: "光大银行8826" });
+    await expect(firstBatch).toBeVisible();
+    await expect(firstBatch.getByText("2 条 · 合计 50,000.00")).toBeVisible();
+    await expect(page.getByRole("table", { name: "光大银行8826流水" })).toBeVisible();
+    const secondBatch = page.locator(".bank-flow-rule-batches-batch").filter({ hasText: "建设银行8106" });
+    await expect(secondBatch.getByText("2 条 · 合计 7,000.00")).toBeVisible();
+
+    const submitRequest = page.waitForRequest((request) =>
+      request.url().endsWith("/api/bank-flow-rule-batches/bank-flow-internal-ceb-8826/submit")
+      && request.method() === "POST",
+    );
+    const submitResponse = page.waitForResponse((response) =>
+      response.url().endsWith("/api/bank-flow-rule-batches/bank-flow-internal-ceb-8826/submit")
+      && response.request().method() === "POST",
+    );
+    const barrierRequest = page.waitForRequest((request) =>
+      request.url().endsWith("/api/operation-barrier/status")
+      && request.method() === "POST",
+    );
+    const startedAt = Date.now();
+    await firstBatch.getByRole("button", { name: "提交内部往来批次" }).click();
+
+    const submitBody = JSON.parse((await submitRequest).postData() ?? "{}") as {
+      expected_version?: number;
+      note?: string;
+    };
+    expect(submitBody).toEqual({ expected_version: 1, note: "" });
+    expect((await submitResponse).status()).toBe(200);
+    const barrierBody = JSON.parse((await barrierRequest).postData() ?? "{}") as {
+      targets?: Array<{ read_model_key?: string; scope_key?: string }>;
+    };
+    expect(barrierBody.targets).toEqual([
+      { read_model_key: "bank_flow_rule_batch", scope_key: "2026-01" },
+    ]);
+    await expect(page.getByText("内部往来批次已提交")).toBeVisible({ timeout: 3_000 });
+    expect(Date.now() - startedAt).toBeLessThan(3_000);
+    expect(api.count("POST /api/bank-flow-rule-batches/bank-flow-internal-ceb-8826/submit")).toBe(1);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(1);
+    await expectNoUnexpectedSuccessUiErrors(page);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("submits a selected bank row, waits for freshness, and withdraws the submitted flow rule batch", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {

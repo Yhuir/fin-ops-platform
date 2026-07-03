@@ -404,7 +404,14 @@ function largeListPayload(total = 205) {
   };
 }
 
-function installFetchMock(payload = listPayload, options: { listFailuresBeforeSuccess?: number; tagSelection?: Record<string, unknown> } = {}) {
+function installFetchMock(
+  payload = listPayload,
+  options: {
+    listFailuresBeforeSuccess?: number;
+    mutationOperationBarrierTargets?: Array<{ read_model_key: string; scope_key: string }>;
+    tagSelection?: Record<string, unknown>;
+  } = {},
+) {
   let listFailuresRemaining = options.listFailuresBeforeSuccess ?? 0;
   const tagSelection = options.tagSelection ?? tagSelectionPayload;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -445,13 +452,37 @@ function installFetchMock(payload = listPayload, options: { listFailuresBeforeSu
       return jsonResponse({ batch: payload.batches[5], tag_counts: { fee: 1 }, direction_counts: { expense: 1 }, rows: [] });
     }
     if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer/submit") {
-      return jsonResponse({ batch: payload.batches[4], affected_months: ["2026-05"], workbench_rebuild_queued: true, results: [] });
+      return jsonResponse({
+        batch: payload.batches[4],
+        affected_months: ["2026-05"],
+        ...(options.mutationOperationBarrierTargets
+          ? { operation_barrier_targets: options.mutationOperationBarrierTargets }
+          : {}),
+        workbench_rebuild_queued: true,
+        results: [],
+      });
     }
     if (url.pathname === "/api/bank-flow-rule-batches/submit-selection") {
-      return jsonResponse({ batch: payload.batches[0], affected_months: ["2026-05"], workbench_rebuild_queued: true, results: [] });
+      return jsonResponse({
+        batch: payload.batches[0],
+        affected_months: ["2026-05"],
+        ...(options.mutationOperationBarrierTargets
+          ? { operation_barrier_targets: options.mutationOperationBarrierTargets }
+          : {}),
+        workbench_rebuild_queued: true,
+        results: [],
+      });
     }
     if (url.pathname === "/api/bank-flow-rule-batches/batch-submitted-salary/withdraw") {
-      return jsonResponse({ batch: payload.batches[2], affected_months: ["2026-05"], workbench_rebuild_queued: true, results: [] });
+      return jsonResponse({
+        batch: payload.batches[2],
+        affected_months: ["2026-05"],
+        ...(options.mutationOperationBarrierTargets
+          ? { operation_barrier_targets: options.mutationOperationBarrierTargets }
+          : {}),
+        workbench_rebuild_queued: true,
+        results: [],
+      });
     }
     if (url.pathname === "/api/bank-flow-rule-batches/reset-submitted") {
       return jsonResponse({
@@ -1275,7 +1306,14 @@ describe("BankFlowRuleBatchPage", () => {
 
   test("submits internal transfer draft batches through the batch endpoint", async () => {
     const user = userEvent.setup();
-    const fetchMock = installFetchMock();
+    const fetchMock = installFetchMock(listPayload, {
+      mutationOperationBarrierTargets: [
+        { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
+        { read_model_key: "workbench_relation", scope_key: "all" },
+        { read_model_key: "workbench", scope_key: "all" },
+        { read_model_key: "workbench", scope_key: "2026-05" },
+      ],
+    });
     const relationListener = vi.fn();
     window.addEventListener("workbenchRelationUpdated", relationListener);
 
@@ -1298,7 +1336,20 @@ describe("BankFlowRuleBatchPage", () => {
         "/api/bank-flow-rule-batches/submit-selection",
         expect.anything(),
       );
-      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-05"] });
+      expect(operationBarrierRequests(fetchMock).at(-1)).toEqual({
+        targets: [
+          { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
+        ],
+      });
+      expectCustomEventDetailContaining(relationListener, {
+        affectedMonths: ["2026-05"],
+        operationBarrierTargets: expect.arrayContaining([
+          { readModelKey: "bank_flow_rule_batch", scopeKey: "2026-05" },
+          { readModelKey: "workbench_relation", scopeKey: "all" },
+          { readModelKey: "workbench", scopeKey: "all" },
+          { readModelKey: "workbench", scopeKey: "2026-05" },
+        ]),
+      });
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
     }

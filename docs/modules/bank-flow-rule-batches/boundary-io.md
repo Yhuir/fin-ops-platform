@@ -50,7 +50,7 @@
 | 批次列表 payload | 页面 | 返回 summary、rows、status bucket、read model status、stale reasons、scope keys 和分页信息。非 fresh 不能展示为真实空态。 |
 | Relation command | `workbench-relations` | 使用 `relation_mode=bank_flow_rule_batch`，行级 relation display code 必须保持 `bank_flow_rule_batch`，不能退回 `fully_linked` 或 `no_oa_bank_batch`。metadata 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；display tags 使用 `流水规则` + 业务标签，不能继承旧 `免OA` 标签。 |
 | 关联台展示 | `reconciliation-workbench` | 银行流水数 `>3` 时默认折叠；是否进入 paired 由 required row type 是否已满足决定。 |
-| Operation barrier | 前端 | 写成功后返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。批量提交、撤回和 reset 的等待目标必须同时包含页面自身 `bank_flow_rule_batch` 受影响 month scope，以及关联台实际读取的 `workbench_relation`、`workbench` 的 `all` + 受影响 month scope；不能由 route 覆盖 service 返回的目标，也不能只返回 `bank_flow_rule_batch` 后让关联台读取旧 `month=all` 空 generation。 |
+| Operation barrier | 前端 | 写成功后返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。批量提交、撤回和 reset 的完整 target envelope 必须同时包含页面自身 `bank_flow_rule_batch` 受影响 month scope，以及关联台实际读取的 `workbench_relation`、`workbench` 的 `all` + 受影响 month scope；不能由 route 覆盖 service 返回的目标，也不能只返回 `bank_flow_rule_batch` 后让关联台读取旧 `month=all` 空 generation。流水规则批量处理页面的提交按钮只把 `bank_flow_rule_batch` 自身 target 作为阻塞等待 I/O；完整跨页 visibility targets 必须继续通过 `workbenchRelationUpdated` 事件传给下游页面和全局刷新链路，禁止把 `workbench/all` 聚合刷新重新接入当前页提交阻塞链路。 |
 | Dirty scope/outbox | runtime/read models | 通过 owner producer 或同事务等价 writer 污染 `bank_flow_rule_batch`、`workbench_relation`、`workbench`、`bank_detail` 以及受影响下游。 |
 | Audit record | permissions/audit | 保存规则、提交、撤回、rebaseline dry-run/apply 都记录 actor、reason、before/after、affected rows/months 和 request id。 |
 
@@ -97,6 +97,7 @@
 - Worker 持久化写入必须保持 scoped incremental I/O；同一 scope 的多个 batch rows 应在 repository 边界批量 upsert，避免逐 batch round-trip 放大 worker handler 时间。
 - `detail_payload(batch_id)` 和 `withdraw_batch(batch_id)` 先读取当前 bank-flow batch storage；只有 batch 缺失时才 fallback `scope_key=all` 重建 runtime snapshot。
 - `reset-submitted` 不做前置 `all` refresh；撤回后只同步刷新受影响月份 scope，没有月份时才 fallback `all`。
+- 页面提交、撤回、reset 的前端阻塞等待只等待 `bank_flow_rule_batch` 自身 target。`workbench_relation` / `workbench` targets 保留在 mutation result 和事件广播中，由关联台或后台 runtime 收敛；不能让 `workbench/all` 聚合刷新拖慢当前页提交完成反馈。
 - Worker refresh 使用 `bank_flow_rule_batch_source_versions_summary(...)` 判断 scope source versions 是否 unchanged；能证明 unchanged 时完成 dirty scope 并跳过批次重建和 snapshot 发布。
 - `tag-rules` 保存仍触发 `all` refresh，因为规则变更可能影响所有 active bank-flow relation requirement metadata；后续若要优化必须先有按 relation/tag 反查受影响 scope 的可靠索引。
 

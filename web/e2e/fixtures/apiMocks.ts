@@ -74,6 +74,8 @@ type ApiMockOptions = {
   bankFlowRuleBatchReadModelStatus?: BankFlowRuleBatchReadModelMockStatus;
   bankFlowRuleBatchReadModelStatuses?: BankFlowRuleBatchReadModelMockStatus[];
   bankFlowRuleBatchScenario?: BankFlowRuleBatchMockScenario;
+  bankFlowRuleMutationWorkbenchTargets?: boolean;
+  bankFlowRuleWorkbenchBarrierRefreshing?: boolean;
   settingsProjectScopeFanout?: boolean;
   turnoverCostFanout?: boolean;
   turnoverLedgerFailOnce?: boolean;
@@ -195,7 +197,7 @@ type ImportScenario = "bank" | "invoice";
 type SettingsDataResetAction = "reset_bank_transactions" | "reset_invoices" | "reset_oa_and_rebuild";
 type EtcBusinessBatchStatus = "imported" | "oa_confirmation_pending" | "manually_marked_submitted" | "not_submitted";
 type BankFlowRuleBrowserBatchStatus = "draft" | "submitted" | "withdrawn";
-type BankFlowRuleBatchMockScenario = "single" | "ordinaryDraftMatrix";
+type BankFlowRuleBatchMockScenario = "single" | "ordinaryDraftMatrix" | "internalTransferPairs";
 type CostBrowserProjectRow = {
   transaction_id: string;
   trade_time: string;
@@ -4798,9 +4800,49 @@ function bankFlowRuleOrdinaryDraftMatrixBatches() {
   }));
 }
 
+function bankFlowRuleInternalTransferPairBatches(status: BankFlowRuleBrowserBatchStatus) {
+  return [
+    bankFlowRuleBatch(status, {
+      batch_id: "bank-flow-internal-ceb-8826",
+      batch_type: "internal_transfer",
+      batch_label: "内部往来款",
+      category_primary_label: "内部往来款",
+      category_sub_label: "",
+      category_label_path: ["内部往来款"],
+      scope_month: "2026-01",
+      account_key: "ceb:8826",
+      bank_name: "光大银行",
+      account_last4: "8826",
+      row_count: 2,
+      total_amount: "50000.00",
+      tag_counts: { internal_transfer: 2 },
+      direction_counts: { income: 1, expense: 1 },
+    }),
+    bankFlowRuleBatch(status, {
+      batch_id: "bank-flow-internal-ccb-8106",
+      batch_type: "internal_transfer",
+      batch_label: "内部往来款",
+      category_primary_label: "内部往来款",
+      category_sub_label: "",
+      category_label_path: ["内部往来款"],
+      scope_month: "2026-01",
+      account_key: "ccb:8106",
+      bank_name: "建设银行",
+      account_last4: "8106",
+      row_count: 2,
+      total_amount: "7000.00",
+      tag_counts: { internal_transfer: 2 },
+      direction_counts: { income: 1, expense: 1 },
+    }),
+  ];
+}
+
 function bankFlowRuleBatchesForScenario(status: BankFlowRuleBrowserBatchStatus, scenario: BankFlowRuleBatchMockScenario = "single") {
   if (scenario === "ordinaryDraftMatrix" && status === "draft") {
     return bankFlowRuleOrdinaryDraftMatrixBatches();
+  }
+  if (scenario === "internalTransferPairs") {
+    return bankFlowRuleInternalTransferPairBatches(status);
   }
   return [bankFlowRuleBatch(status)];
 }
@@ -4917,6 +4959,9 @@ function bankFlowRuleBatchDetailPayload(
   const batch = bankFlowRuleBatchesForScenario(status, scenario)
     .find((candidate) => candidate.batch_id === batchId)
     ?? bankFlowRuleBatch(status);
+  if (scenario === "internalTransferPairs") {
+    return bankFlowRuleInternalTransferDetailPayload(batch, status);
+  }
   const transactionId = String(batch.batch_id ?? "no-oa-batch-e2e-001").replace("no-oa-batch", "no-oa-bank");
   const isDefaultFee = batch.batch_id === "no-oa-batch-e2e-001";
   return {
@@ -4952,18 +4997,98 @@ function bankFlowRuleBatchDetailPayload(
   };
 }
 
-function bankFlowRuleBatchMutationPayload(status: BankFlowRuleBrowserBatchStatus) {
+function bankFlowRuleInternalTransferDetailPayload(batch: Record<string, unknown>, status: BankFlowRuleBrowserBatchStatus) {
+  const batchId = String(batch.batch_id ?? "bank-flow-internal");
+  const amount = String(batch.total_amount ?? "0.00");
+  const isCeb = batchId.includes("ceb");
+  const firstBankName = isCeb ? "光大银行" : "建设银行";
+  const firstAccountLast4 = isCeb ? "8826" : "8106";
+  const secondBankName = isCeb ? "建设银行" : "平安银行";
+  const secondAccountLast4 = isCeb ? "8106" : "0093";
+  return {
+    batch,
+    tag_counts: { internal_transfer: 2 },
+    direction_counts: { expense: 1, income: 1 },
+    rows: [
+      {
+        transaction_id: `${batchId}-out`,
+        trade_time: isCeb ? "2026-01-13 16:59:32" : "2026-01-28 16:31:52",
+        counterparty_name: "云南溯源科技有限公司",
+        direction: "expense",
+        direction_label: "支",
+        amount,
+        bank_name: firstBankName,
+        account_last4: firstAccountLast4,
+        account_key: `${firstBankName}:${firstAccountLast4}`,
+        summary: isCeb ? "本公司账户" : "电子转账",
+        purpose: "",
+        remark: "",
+        category_code: "internal_transfer",
+        category_label: "内部往来款",
+        category_primary_label: "内部往来款",
+        category_sub_label: "",
+        category_label_path: ["内部往来款"],
+        category_source: "auto",
+        relation_status: status === "draft" ? "" : "linked",
+        relation_case_ids: status === "draft" ? [] : [`${batchId}-case`],
+        linked_oa_count: 0,
+        linked_invoice_count: 0,
+      },
+      {
+        transaction_id: `${batchId}-in`,
+        trade_time: isCeb ? "2026-01-13 16:59:37" : "2026-01-28 16:32:03",
+        counterparty_name: "云南溯源科技有限公司",
+        direction: "income",
+        direction_label: "收",
+        amount,
+        bank_name: secondBankName,
+        account_last4: secondAccountLast4,
+        account_key: `${secondBankName}:${secondAccountLast4}`,
+        summary: isCeb ? "电子汇入" : "跨行转账",
+        purpose: "",
+        remark: "",
+        category_code: "internal_transfer",
+        category_label: "内部往来款",
+        category_primary_label: "内部往来款",
+        category_sub_label: "",
+        category_label_path: ["内部往来款"],
+        category_source: "auto",
+        relation_status: status === "draft" ? "" : "linked",
+        relation_case_ids: status === "draft" ? [] : [`${batchId}-case`],
+        linked_oa_count: 0,
+        linked_invoice_count: 0,
+      },
+    ],
+  };
+}
+
+function bankFlowRuleMutationTargets(includeWorkbenchTargets = false, scopeKey = "2026-05") {
+  const targets = [
+    { read_model_key: "bank_flow_rule_batch", scope_key: scopeKey },
+  ];
+  if (includeWorkbenchTargets) {
+    targets.push(
+      { read_model_key: "workbench_relation", scope_key: "all" },
+      { read_model_key: "workbench_relation", scope_key: scopeKey },
+      { read_model_key: "workbench", scope_key: "all" },
+      { read_model_key: "workbench", scope_key: scopeKey },
+    );
+  }
+  return targets;
+}
+
+function bankFlowRuleBatchMutationPayload(
+  status: BankFlowRuleBrowserBatchStatus,
+  includeWorkbenchTargets = false,
+  scopeKey = "2026-05",
+) {
   return {
     batch: bankFlowRuleBatch(status),
-    affected_months: ["2026-05"],
-    affected_scope_keys: ["2026-05"],
-    read_model_scope_keys: ["2026-05"],
-    freshness_targets: [
-      { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
-    ],
-    operation_barrier_targets: [
-      { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
-    ],
+    affected_months: [scopeKey],
+    affected_scope_keys: [scopeKey],
+    read_model_scope_keys: [scopeKey],
+    freshness_targets: bankFlowRuleMutationTargets(includeWorkbenchTargets, scopeKey),
+    operation_barrier_targets: bankFlowRuleMutationTargets(includeWorkbenchTargets, scopeKey),
     workbench_rebuild_queued: true,
     results: [],
   };
@@ -5033,6 +5158,37 @@ function bankFlowRuleBatchTagSelectionPayload(
       },
     ],
     rules,
+  };
+}
+
+function bankFlowRuleBatchTagSelectionPayloadForScenario(
+  rules: Array<{ tag_code?: string; requires_oa?: boolean; requires_invoice?: boolean }>,
+  salarySubLabel: string,
+  scenario: BankFlowRuleBatchMockScenario = "single",
+) {
+  const payload = bankFlowRuleBatchTagSelectionPayload(rules, salarySubLabel);
+  if (scenario !== "internalTransferPairs") {
+    return payload;
+  }
+  const nextRules = payload.rules.some((rule) => rule.tag_code === "internal_transfer")
+    ? payload.rules
+    : [
+      ...payload.rules,
+      { tag_code: "internal_transfer", requires_oa: false, requires_invoice: false },
+    ];
+  return {
+    ...payload,
+    active_tags: [
+      ...payload.active_tags,
+      {
+        code: "internal_transfer",
+        label: "内部往来款",
+        output_primary_label: "内部往来款",
+        output_sub_label: "",
+        status: "active",
+      },
+    ],
+    rules: nextRules,
   };
 }
 
@@ -7680,6 +7836,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let bankFlowRuleBatchFailuresRemaining =
     options.bankFlowRuleBatchFailuresBeforeSuccess ?? (options.bankFlowRuleBatchFailOnce ? 1 : 0);
   let bankFlowRuleBatchesRequestCount = 0;
+  const bankFlowRuleMutationScope = options.bankFlowRuleBatchScenario === "internalTransferPairs" ? "2026-01" : "2026-05";
   let bankFlowRuleTagRules = [...defaultBankFlowRuleBatchTagRules];
   let bankFlowRuleRebaselineApplied = false;
   let turnoverLedgerFailuresRemaining =
@@ -7746,6 +7903,15 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/operation-barrier/status") {
+      if (options.bankFlowRuleWorkbenchBarrierRefreshing) {
+        const body = parseJsonBody(request.postData()) as { targets?: Array<Record<string, unknown>> };
+        const hasWorkbenchTarget = Array.isArray(body.targets)
+          && body.targets.some((target) => {
+            const readModelKey = String(target.read_model_key ?? target.readModelKey ?? "");
+            return readModelKey === "workbench" || readModelKey === "workbench_relation";
+          });
+        return json(route, operationBarrierPayload(hasWorkbenchTarget ? "refreshing" : "fresh"));
+      }
       return json(route, operationBarrierPayload(options.operationBarrierMode));
     }
 
@@ -8602,13 +8768,21 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         bankFlowRuleTagRules = body.rules;
       }
       return json(route, {
-        ...bankFlowRuleBatchTagSelectionPayload(bankFlowRuleTagRules, bankAutoTagRulesSalarySubLabel),
+        ...bankFlowRuleBatchTagSelectionPayloadForScenario(
+          bankFlowRuleTagRules,
+          bankAutoTagRulesSalarySubLabel,
+          options.bankFlowRuleBatchScenario ?? "single",
+        ),
         version: 4,
       });
     }
 
     if (path === "/api/bank-flow-rule-batches/tag-rules") {
-      return json(route, bankFlowRuleBatchTagSelectionPayload(bankFlowRuleTagRules, bankAutoTagRulesSalarySubLabel));
+      return json(route, bankFlowRuleBatchTagSelectionPayloadForScenario(
+        bankFlowRuleTagRules,
+        bankAutoTagRulesSalarySubLabel,
+        options.bankFlowRuleBatchScenario ?? "single",
+      ));
     }
 
     if (path === "/api/bank-flow-rule-batches") {
@@ -8649,7 +8823,21 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/bank-flow-rule-batches/submit-selection") {
       bankFlowRuleBatchStatus = "submitted";
-      return json(route, bankFlowRuleBatchMutationPayload(bankFlowRuleBatchStatus));
+      return json(route, bankFlowRuleBatchMutationPayload(
+        bankFlowRuleBatchStatus,
+        Boolean(options.bankFlowRuleMutationWorkbenchTargets),
+        bankFlowRuleMutationScope,
+      ));
+    }
+
+    const bankFlowRuleBatchSubmitMatch = path.match(/^\/api\/bank-flow-rule-batches\/([^/]+)\/submit$/);
+    if (bankFlowRuleBatchSubmitMatch && request.method() === "POST") {
+      bankFlowRuleBatchStatus = "submitted";
+      return json(route, bankFlowRuleBatchMutationPayload(
+        bankFlowRuleBatchStatus,
+        Boolean(options.bankFlowRuleMutationWorkbenchTargets),
+        bankFlowRuleMutationScope,
+      ));
     }
 
     if (path === "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run") {
@@ -8671,7 +8859,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/bank-flow-rule-batches/no-oa-batch-e2e-001/withdraw") {
       bankFlowRuleBatchStatus = "withdrawn";
-      return json(route, bankFlowRuleBatchMutationPayload(bankFlowRuleBatchStatus));
+      return json(route, bankFlowRuleBatchMutationPayload(
+        bankFlowRuleBatchStatus,
+        Boolean(options.bankFlowRuleMutationWorkbenchTargets),
+        bankFlowRuleMutationScope,
+      ));
     }
 
     if (path === "/api/output-invoice-collections/export-preview") {
