@@ -56,3 +56,10 @@
 - active relation expansion 也必须遵守 confirm-link action I/O：输出只能是 canonical Workbench row id。
 - 对选中的 canonical OA 先建立 source alias 集合；active relation 中命中这些 aliases 的历史 raw OA source id 被视为已由选中 OA 覆盖，不再扩进 action row ids。
 - 当 active relation 存在且 cached read model payload 过轻时，允许通过 row-detail 边界补齐选中 OA 的 alias；无 active relation 的普通 preview 不触发额外 row-detail I/O，避免破坏轻量 read model 路径。
+
+## Final Production Verification
+
+- 部署 release：`main-a27446ac-20260704001651`。
+- API preview：选中 `oa-exp-2156`、`txn_imported_0405`、`oa-att-inv-oa-exp-69fab21659b12d7d42a50a45:item:0:fb2a9c9fab23-b515bf77d490fdfe` 返回 HTTP 200，`can_submit=true`。
+- 浏览器复测：重新选中三条记录后点击选择区 `确认关联`，预览页正常打开，显示 `金额一致`，无 `操作失败`，无 raw id 暴露；点击预览页底部 `确认关联` 后弹窗关闭，未出现失败弹窗。
+- row-detail 复核：三条记录均为 `case_id=CASE-AUTO-0025`、`relation_mode=manual_confirmed`；银行流水发票关系为 `完全关联`。
