@@ -145,10 +145,8 @@ class DeployOAScriptTest(unittest.TestCase):
         remote_script = self.module.build_release_remote_deploy_script(config)
 
         self.assertIn("finops remote deploy failed at step", remote_script)
-        self.assertIn("DEPLOY_STEP='install runtime worker ensure helper'", remote_script)
-        self.assertIn("DEPLOY_STEP='install deploy-control helper'", remote_script)
+        self.assertIn("DEPLOY_STEP='verify runtime worker helper contract'", remote_script)
         self.assertIn("DEPLOY_STEP='deploy-control activate'", remote_script)
-        self.assertIn("DEPLOY_STEP='runtime worker ensure'", remote_script)
         self.assertIn("DEPLOY_STEP='preflight cleanup old releases'", remote_script)
         self.assertIn("DEPLOY_STEP='storage preflight'", remote_script)
         self.assertIn("DEPLOY_STEP='cleanup old releases'", remote_script)
@@ -160,17 +158,14 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('df -Pm -- "$path"', remote_script)
         self.assertIn("tar -xzf - -C \"$RELEASE_DIR\"", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control check-release main-abcdef1-20260524170000", remote_script)
-        self.assertIn(
-            'sudo -n install -m 0755 -o root -g root "$RELEASE_DIR/src/deploy/oa/bin/finops-deploy-control.sh" /usr/local/sbin/finops-deploy-control',
-            remote_script,
-        )
-        self.assertIn(
-            'sudo -n install -m 0755 -o root -g root "$RELEASE_DIR/src/deploy/oa/bin/finops-ensure-runtime-workers.sh" /usr/local/sbin/finops-ensure-runtime-workers',
-            remote_script,
-        )
+        self.assertNotIn("sudo -n install", remote_script)
+        self.assertNotIn("DEPLOY_STEP='install deploy-control helper'", remote_script)
+        self.assertNotIn("DEPLOY_STEP='install runtime worker ensure helper'", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control activate main-abcdef1-20260524170000", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
         self.assertIn("verify_finops_deploy_control_contract", remote_script)
+        self.assertIn("verify_finops_runtime_worker_ensure_contract", remote_script)
+        self.assertIn("deploy-control helper is not readable; cannot verify deploy contract", remote_script)
         self.assertIn("deploy-control helper still loads the retired /root PostgreSQL env", remote_script)
         self.assertIn("deploy-control helper does not load fin-ops.secrets.env", remote_script)
         self.assertIn("deploy-control helper does not reset inherited EnvironmentFile entries", remote_script)
@@ -180,7 +175,13 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("deploy-control helper does not preserve worker dependency-not-fresh delay in release drop-ins", remote_script)
         self.assertIn("deploy-control helper does not install versioned Workbench generation retention", remote_script)
         self.assertIn("deploy-control helper does not install versioned runtime queue history retention", remote_script)
-        self.assertIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
+        self.assertIn("deploy-control helper does not run runtime worker ensure inside activate", remote_script)
+        self.assertIn("runtime worker ensure helper is missing or not executable", remote_script)
+        self.assertIn("runtime worker ensure helper does not use runtime worker manifest", remote_script)
+        self.assertIn("runtime worker ensure helper does not refresh worker unit templates", remote_script)
+        self.assertIn("runtime worker ensure helper does not migrate Workbench scope split", remote_script)
+        self.assertIn("runtime worker ensure helper does not validate worker registrations", remote_script)
+        self.assertNotIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
         self.assertIn("wait_finops_backend_ready", remote_script)
         self.assertIn("check_finops_session_route /fin-ops-api/api/session/me", remote_script)
         self.assertIn("check_finops_session_route /fin-ops/api/session/me", remote_script)
@@ -198,15 +199,11 @@ class DeployOAScriptTest(unittest.TestCase):
             remote_script.index('tar -xzf - -C "$RELEASE_DIR"'),
         )
         self.assertLess(
-            remote_script.index("DEPLOY_STEP='install deploy-control helper'"),
+            remote_script.index("verify_finops_runtime_worker_ensure_contract"),
             remote_script.index("DEPLOY_STEP='deploy-control check-release'"),
         )
         self.assertLess(
-            remote_script.index("DEPLOY_STEP='install deploy-control helper'"),
-            remote_script.index("DEPLOY_STEP='deploy-control activate'"),
-        )
-        self.assertLess(
-            remote_script.index("DEPLOY_STEP='install runtime worker ensure helper'"),
+            remote_script.index("verify_finops_runtime_worker_ensure_contract"),
             remote_script.index("DEPLOY_STEP='deploy-control activate'"),
         )
         self.assertNotIn("sudo -n /bin/bash", remote_script)

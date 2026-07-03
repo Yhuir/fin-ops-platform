@@ -328,7 +328,9 @@ RabbitMQ 生产 env 拆分：
 `/usr/local/sbin/finops-ensure-runtime-workers`，安装/更新 worker systemd 模板，补齐缺失的
 worker env，并启用、重启以下 required worker。仓库内的
 `deploy/oa/bin/finops-ensure-runtime-workers.sh` 是该 helper 的源文件，不能由 `finops-deploy`
-从 release 目录直接 `sudo /bin/bash` 执行：
+从 release 目录直接 `sudo /bin/bash` 执行，也不能在每次 release 发布中用原始 `sudo install`
+覆盖 `/usr/local/sbin`；helper 安装/升级属于一次性 bootstrap 或受控运维动作，release 发布只校验
+已安装 helper 的合同并调用固定 helper：
 
 worker 实例、event types、env 模板和 smoke check 命令均从
 `python -m fin_ops_platform.tools.runtime_worker_manifest` 推导。不要在生产 runbook 中维护第二份
@@ -402,8 +404,8 @@ python -m fin_ops_platform.app.worker \
   不在当前 release 的 `backend/src` 下，健康状态必须是 `not_ready`
 - `/health/ready` 是部署 readiness 边界；`/health/deep` 才执行较重的 workbench API self-test，
   不作为发布脚本的快速就绪检查
-- 自动执行 `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src`，确保常驻 worker 矩阵
-  已安装、开机自启并重启到当前 release
+- `activate` 内部通过 `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src`
+  确保常驻 worker 矩阵已安装、开机自启并重启到当前 release；外层发布脚本不再重复调用该 helper
 - 验证前端 `index.html` 与激活 release 的 `web/dist/index.html` 哈希一致
 - 清理可删除的旧 release，默认保留最近 4 个，并始终保护当前 active release
 - 激活发布会在创建新 release 目录前先执行一次旧 release 清理，并检查 release 所在文件系统至少有
@@ -468,6 +470,8 @@ sudo /usr/local/sbin/finops-deploy-control read-model-slo-smoke <release-name> \
 `/etc/fin-ops/fin-ops.common.env` 和 `/etc/fin-ops/fin-ops.secrets.env`，不要再让 API helper
 引用历史 `/root/fin_ops_stage23_postgres_runtime.env`。否则 API 和 worker 会读取不同 secret 来源，
 release 激活后可能出现 worker 正常但 `fin-ops.service` 因缺少 PostgreSQL DSN 反复退出。
+`scripts/deploy-oa.sh` 不会自动安装或覆盖 `/usr/local/sbin` 下的 root helper；helper 源文件变化后，
+必须先用本段 bootstrap 命令或等价 root 运维流程升级 helper，再执行 release 发布。
 
 ```bash
 sudo install -m 0755 -o root -g root \

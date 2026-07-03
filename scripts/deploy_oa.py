@@ -202,10 +202,19 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
         f"DEPLOY_CONTROL={quoted_deploy_control}",
         f"KEEP_RELEASES={int(config.keep_releases)}",
         f"REMOTE_MIN_FREE_MB={int(config.remote_min_free_mb)}",
+        *([f"RUNTIME_WORKER_ENSURE={quoted_runtime_worker_ensure}"] if config.activate else []),
         mark_remote_deploy_step("validate release name"),
         'case "$RELEASE_NAME" in *[!A-Za-z0-9._-]*|"") echo "invalid release name: $RELEASE_NAME" >&2; exit 64 ;; esac',
         mark_remote_deploy_step("verify deploy-control contract"),
         build_deploy_control_contract_check(),
+        *(
+            [
+                mark_remote_deploy_step("verify runtime worker helper contract"),
+                build_runtime_worker_ensure_contract_check(),
+            ]
+            if config.activate
+            else []
+        ),
         mark_remote_deploy_step("ensure releases directory"),
         'mkdir -p "$RELEASES_DIR"',
     ]
@@ -232,8 +241,6 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
             'test -d "$RELEASE_DIR/src/backend/src"',
             'test -f "$RELEASE_DIR/src/backend/requirements.txt"',
             'test -f "$RELEASE_DIR/src/web/dist/index.html"',
-            mark_remote_deploy_step("install deploy-control helper"),
-            f'sudo -n install -m 0755 -o root -g root "$RELEASE_DIR/src/deploy/oa/bin/finops-deploy-control.sh" {quoted_deploy_control}',
             mark_remote_deploy_step("deploy-control check-release"),
             f"sudo -n {quoted_deploy_control} check-release {quoted_release_name}",
         ]
@@ -241,16 +248,12 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
     if config.activate:
         commands.extend(
             [
-                mark_remote_deploy_step("install runtime worker ensure helper"),
-                f'sudo -n install -m 0755 -o root -g root "$RELEASE_DIR/src/deploy/oa/bin/finops-ensure-runtime-workers.sh" {quoted_runtime_worker_ensure}',
                 mark_remote_deploy_step("deploy-control activate"),
                 f"sudo -n {quoted_deploy_control} activate {quoted_release_name}",
                 mark_remote_deploy_step("backend readiness check"),
                 build_backend_readiness_check(),
                 mark_remote_deploy_step("deploy-control status"),
                 f"sudo -n {quoted_deploy_control} status",
-                mark_remote_deploy_step("runtime worker ensure"),
-                f'sudo -n {quoted_runtime_worker_ensure} "$RELEASE_DIR/src"',
                 mark_remote_deploy_step("frontend hash check"),
                 build_frontend_hash_check(config),
                 mark_remote_deploy_step("public session route check"),
@@ -294,6 +297,10 @@ def build_deploy_control_contract_check() -> str:
             '    printf \'deploy-control helper is missing or not executable: %s\\n\' "$DEPLOY_CONTROL" >&2',
             "    exit 68",
             "  fi",
+            '  if [ ! -r "$DEPLOY_CONTROL" ]; then',
+            "    printf '%s\\n' 'deploy-control helper is not readable; cannot verify deploy contract; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
+            "    exit 68",
+            "  fi",
             '  if [ -r "$DEPLOY_CONTROL" ]; then',
             "    if grep -q '/root/fin_ops_stage23_postgres_runtime.env' \"$DEPLOY_CONTROL\"; then",
             "      printf '%s\\n' 'deploy-control helper still loads the retired /root PostgreSQL env; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
@@ -331,9 +338,55 @@ def build_deploy_control_contract_check() -> str:
             "      printf '%s\\n' 'deploy-control helper does not install versioned runtime queue history retention; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
             "      exit 68",
             "    fi",
+            "    if ! grep -q 'ensure_runtime_workers \"$src\"' \"$DEPLOY_CONTROL\"; then",
+            "      printf '%s\\n' 'deploy-control helper does not run runtime worker ensure inside activate; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
+            "      exit 68",
+            "    fi",
             "  fi",
             "}",
             "verify_finops_deploy_control_contract",
+        ]
+    )
+
+
+def build_runtime_worker_ensure_contract_check() -> str:
+    return "\n".join(
+        [
+            "verify_finops_runtime_worker_ensure_contract() {",
+            '  if [ ! -x "$RUNTIME_WORKER_ENSURE" ]; then',
+            '    printf \'runtime worker ensure helper is missing or not executable: %s\\n\' "$RUNTIME_WORKER_ENSURE" >&2',
+            "    exit 68",
+            "  fi",
+            '  if [ ! -r "$RUNTIME_WORKER_ENSURE" ]; then',
+            "    printf '%s\\n' 'runtime worker ensure helper is not readable; cannot verify deploy contract; install deploy/oa/bin/finops-ensure-runtime-workers.sh before activating releases' >&2",
+            "    exit 68",
+            "  fi",
+            "  if ! grep -q 'runtime_worker_manifest --required-instances' \"$RUNTIME_WORKER_ENSURE\"; then",
+            "    printf '%s\\n' 'runtime worker ensure helper does not use runtime worker manifest; install deploy/oa/bin/finops-ensure-runtime-workers.sh before activating releases' >&2",
+            "    exit 68",
+            "  fi",
+            "  if ! grep -q 'install_if_changed' \"$RUNTIME_WORKER_ENSURE\"; then",
+            "    printf '%s\\n' 'runtime worker ensure helper does not refresh worker unit templates; install deploy/oa/bin/finops-ensure-runtime-workers.sh before activating releases' >&2",
+            "    exit 68",
+            "  fi",
+            "  if ! grep -q 'migrate_workbench_scope_split' \"$RUNTIME_WORKER_ENSURE\"; then",
+            "    printf '%s\\n' 'runtime worker ensure helper does not migrate Workbench scope split; install deploy/oa/bin/finops-ensure-runtime-workers.sh before activating releases' >&2",
+            "    exit 68",
+            "  fi",
+            "  if ! grep -q 'migrate_rabbitmq_worker_drain_interval' \"$RUNTIME_WORKER_ENSURE\"; then",
+            "    printf '%s\\n' 'runtime worker ensure helper does not migrate RabbitMQ worker drain interval; install deploy/oa/bin/finops-ensure-runtime-workers.sh before activating releases' >&2",
+            "    exit 68",
+            "  fi",
+            "  if ! grep -q 'check_worker_registration' \"$RUNTIME_WORKER_ENSURE\"; then",
+            "    printf '%s\\n' 'runtime worker ensure helper does not validate worker registrations; install deploy/oa/bin/finops-ensure-runtime-workers.sh before activating releases' >&2",
+            "    exit 68",
+            "  fi",
+            "  if ! grep -q 'fin-ops.secrets.env' \"$RUNTIME_WORKER_ENSURE\"; then",
+            "    printf '%s\\n' 'runtime worker ensure helper does not enforce fin-ops secrets env; install deploy/oa/bin/finops-ensure-runtime-workers.sh before activating releases' >&2",
+            "    exit 68",
+            "  fi",
+            "}",
+            "verify_finops_runtime_worker_ensure_contract",
         ]
     )
 
