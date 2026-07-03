@@ -97,6 +97,7 @@ class WorkbenchSystemAutoPairModePolicyTests(unittest.TestCase):
     def test_salary_and_internal_transfer_are_not_system_auto_pair_relation_modes(self) -> None:
         self.assertNotIn("salary_personal_auto_match", SYSTEM_AUTO_PAIR_RELATION_MODES)
         self.assertNotIn("internal_transfer_pair", SYSTEM_AUTO_PAIR_RELATION_MODES)
+        self.assertIn("bank_flow_rule_batch", SYSTEM_AUTO_PAIR_RELATION_MODES)
         self.assertIn("oa_invoice_offset_auto_match", SYSTEM_AUTO_PAIR_RELATION_MODES)
 
 

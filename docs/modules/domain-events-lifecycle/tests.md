@@ -31,6 +31,7 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | `pending_invoice_manual_invoice_confirmed` / `pending_invoice_attach_existing_invoice_confirmed` | bank detail、workbench、invoice lifecycle、pending invoice、tax、cost、search | 待找发票、银行明细、税金、成本 | `test_manual_invoice_confirmed_...` |
 | `pending_invoice_income_status_override_confirmed` | pending invoice、search | 待找发票 | `test_income_status_override_...` |
 | `no_oa_bank_batch_changed` | no-OA、workbench | 免 OA、关联台 | `test_no_oa_bank_batch_changed_...` |
+| `bank_flow_rule_batch_changed` | bank-flow rule batch、workbench、relation、cost、search | 流水规则批量处理、关联台 | `test_bank_flow_rule_batch_changed_refreshes_bank_flow_read_model` |
 | `batch_accounting_relation_changed` | bank detail、workbench relation | 批量账务、银行明细、关联台 | `test_batch_accounting_relation_changed_...` |
 | `turnover_relation_changed` | workbench/relation/matching、cost/search | 往来款、关联台、成本 | all-event safe plan guard；页面模块继续补 |
 | `tax_certified_import_confirmed` | invoice lifecycle、tax、search | 税金、进项使用 | lifecycle ordering test；税金模块继续补 |

@@ -22,6 +22,7 @@ DERIVED_DATA_EVENTS = (
     "pending_invoice_attach_existing_invoice_confirmed",
     "pending_invoice_income_status_override_confirmed",
     "no_oa_bank_batch_changed",
+    "bank_flow_rule_batch_changed",
     "batch_accounting_relation_changed",
     "turnover_relation_changed",
     "tax_certified_import_confirmed",
@@ -46,6 +47,7 @@ DERIVED_DATA_DOMAINS = (
     "bank_account_balance_read_model",
     "bank_detail_read_model",
     "no_oa_bank_batch_read_model",
+    "bank_flow_rule_batch_read_model",
     "search_cache",
     "oa_adapter_records_cache",
     "file_import_sessions",
@@ -91,6 +93,7 @@ class DerivedDataLifecycleService:
         "bank_account_balance_read_model": "invalidate",
         "bank_detail_read_model": "invalidate",
         "no_oa_bank_batch_read_model": "invalidate",
+        "bank_flow_rule_batch_read_model": "invalidate",
         "search_cache": "clear",
         "oa_adapter_records_cache": "clear",
         "file_import_sessions": "ttl_cleanup",
@@ -267,6 +270,13 @@ class DerivedDataLifecycleService:
             "cost_statistics_read_model",
             "search_cache",
         ),
+        "bank_flow_rule_batch_changed": (
+            "bank_flow_rule_batch_read_model",
+            "workbench_read_model",
+            "workbench_relation_read_model",
+            "cost_statistics_read_model",
+            "search_cache",
+        ),
         "batch_accounting_relation_changed": (
             "bank_detail_read_model",
             "workbench_read_model",
@@ -386,6 +396,9 @@ class DerivedDataLifecycleService:
             "cost_statistics.read_model.refresh",
         ),
         "no_oa_bank_batch_changed": (
+            "cost_statistics_cache_warmup",
+        ),
+        "bank_flow_rule_batch_changed": (
             "cost_statistics_cache_warmup",
         ),
         "batch_accounting_relation_changed": (

@@ -17,6 +17,7 @@ class WorkbenchPairRelationDisplayPolicyTests(unittest.TestCase):
             },
             bank_transaction_tag_label=lambda code: "工资" if code == "salary" else code,
             no_oa_bank_batch_relation_mode="no_oa_bank_batch",
+            bank_flow_rule_batch_relation_mode="bank_flow_rule_batch",
             personal_advance_repayment_mode="personal_advance_repayment",
             oa_invoice_offset_auto_match_mode="oa_invoice_offset_auto_match",
         )
@@ -43,6 +44,10 @@ class WorkbenchPairRelationDisplayPolicyTests(unittest.TestCase):
         self.assertEqual(
             policy.display_payload(relation_mode="personal_advance_repayment"),
             {"code": "personal_advance_repayment", "label": "已匹配：还清个人暂借款", "tone": "success"},
+        )
+        self.assertEqual(
+            policy.display_payload(relation_mode="bank_flow_rule_batch"),
+            {"code": "bank_flow_rule_batch", "label": "已匹配：流水规则", "tone": "success"},
         )
         self.assertEqual(
             policy.display_payload(relation_mode="turnover_manual_closure"),

@@ -342,6 +342,53 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         with self.assertRaises(BankBatchPersistenceError):
             service.persist_mutation(changed_case_ids=[], changed_scope_keys=["all"])
 
+    def test_after_mutation_emits_bank_flow_lifecycle_event(self) -> None:
+        lifecycle_events: list[dict[str, object]] = []
+        persist_calls: list[dict[str, object]] = []
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._execute_derived_data_lifecycle_event = (  # type: ignore[method-assign]
+            lambda event_type, **kwargs: lifecycle_events.append({"event_type": event_type, **kwargs})
+        )
+        service._expand_workbench_read_model_scope_keys_for_base_scopes = (  # type: ignore[method-assign]
+            lambda scope_keys: [f"expanded:{scope_key}" for scope_key in scope_keys]
+        )
+        service.persist_mutation = (  # type: ignore[method-assign]
+            lambda **kwargs: persist_calls.append(dict(kwargs))
+        )
+
+        changed = service.after_mutation(
+            ["2026-05", "not-a-month"],
+            changed_case_ids=["case-1"],
+            persist=True,
+            action_name="bank_flow_rule_batch_submit",
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(
+            lifecycle_events,
+            [
+                {
+                    "event_type": "bank_flow_rule_batch_changed",
+                    "months": ["2026-05"],
+                    "metadata": {
+                        "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                        "action_name": "bank_flow_rule_batch_submit",
+                    },
+                    "schedule_cost_warmup": False,
+                }
+            ],
+        )
+        self.assertEqual(
+            persist_calls,
+            [
+                {
+                    "changed_case_ids": ["case-1"],
+                    "changed_scope_keys": ["expanded:all", "expanded:2026-05"],
+                }
+            ],
+        )
+
     def test_refresh_persistence_uses_bank_flow_scope_boundary(self) -> None:
         state_store = RecordingStateStore()
         port = BankFlowRuleBatchReadModelPersistencePort(state_store)

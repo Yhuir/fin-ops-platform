@@ -125,6 +125,30 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             actor_id="tester",
         )
 
+    def _set_bank_flow_rule_requirements(
+        self,
+        app: object,
+        tag_code: str,
+        *,
+        requires_oa: bool,
+        requires_invoice: bool,
+    ) -> None:
+        rules_payload = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+        app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+            {
+                "expected_version": rules_payload["version"],
+                "rules": [
+                    {
+                        **rule,
+                        "requires_oa": requires_oa if rule["tag_code"] == tag_code else rule["requires_oa"],
+                        "requires_invoice": requires_invoice if rule["tag_code"] == tag_code else rule["requires_invoice"],
+                    }
+                    for rule in rules_payload["rules"]
+                ],
+            },
+            actor_id="tester",
+        )
+
     def _app_with_balanced_bank_rows(
         self,
         *,
@@ -287,6 +311,60 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(result["batch"]["batch_type"], "internal_transfer")
         self.assertEqual(set(result["batch"]["row_ids"]), set(row_ids))
         self.assertEqual(result["pair_relation"]["relation_mode"], "no_oa_bank_batch")
+
+    def test_bank_flow_internal_transfer_batch_submit_publishes_paired_workbench_group(self) -> None:
+        app, row_ids = self._app_with_balanced_bank_rows(
+            category_codes=["internal_transfer", "internal_transfer"]
+        )
+        self._set_bank_flow_rule_requirements(
+            app,
+            "internal_transfer",
+            requires_oa=False,
+            requires_invoice=False,
+        )
+        application_service = app._bank_flow_rule_batch_application_service()
+        application_service.refresh_batches(relation_mode="bank_flow_rule_batch")
+        draft = next(
+            batch
+            for batch in app._bank_flow_rule_batch_service.list_batches({"bucket": "unsubmitted"})
+            if batch["batch_type"] == "internal_transfer"
+            and set(batch["row_ids"]) == set(row_ids)
+        )
+
+        response = app.handle_request(
+            "POST",
+            f"/api/bank-flow-rule-batches/{draft['batch_id']}/submit",
+            body=json.dumps({"expected_version": draft["version"], "note": "流水规则提交内部往来"}),
+            headers={"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.body)
+        submit_payload = json.loads(response.body)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_ids[0])
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["relation_mode"], "bank_flow_rule_batch")
+        self.assertCountEqual(relation["row_ids"], row_ids)
+        self.assertFalse(relation["special_metadata"]["requires_oa"])
+        self.assertFalse(relation["special_metadata"]["requires_invoice"])
+        self.assertEqual(relation["display_tags"], ["流水规则", "内部往来款"])
+        self.assertEqual(relation["special_metadata"]["display_tags"], ["流水规则", "内部往来款"])
+        self.assertNotIn("免OA", relation["display_tags"])
+        self.assertEqual(
+            submit_payload["operation_barrier_targets"],
+            [{"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-02"}],
+        )
+
+        app._invalidate_workbench_read_models()
+        workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        paired_group = next(
+            group for group in workbench_payload["paired"]["groups"]
+            if group.get("relation_mode") == "bank_flow_rule_batch"
+        )
+        self.assertEqual(workbench_payload["summary"]["paired_count"], 1)
+        self.assertCountEqual([row["id"] for row in paired_group["bank_rows"]], row_ids)
+        self.assertEqual(paired_group["bank_rows"][0]["special_metadata"]["source"], "bank_flow_rule_batch")
+        self.assertEqual(paired_group["bank_rows"][0]["invoice_relation"]["code"], "bank_flow_rule_batch")
 
     def test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(

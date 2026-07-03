@@ -37,6 +37,7 @@
 | --- | --- | --- |
 | Dirty scope/outbox | runtime queue | 经 gateway 或等价事务合同 |
 | Derived job | runtime worker/background job | 可观察、可失败恢复 |
+| `bank_flow_rule_batch_changed` event | `bank-flow-rule-batches` / runtime workers | 只用于流水规则批量处理写入；必须 fan out 到 `bank_flow_rule_batch_read_model` 及 Workbench/relation/cost/search 下游，不能复用 `no_oa_bank_batch_changed` 表示 bank-flow 写入。 |
 | Frontend refresh signal | pages | 不伪装 fresh |
 
 ## 持久化与投影

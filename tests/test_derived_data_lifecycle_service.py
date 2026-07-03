@@ -257,6 +257,16 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertIn("no_oa_bank_batch_read_model", domains)
         self.assertIn("workbench_read_model", domains)
 
+    def test_bank_flow_rule_batch_changed_refreshes_bank_flow_read_model(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("bank_flow_rule_batch_changed", months=["2026-03"])
+
+        domains = [domain["domain"] for domain in plan["domains"]]
+        self.assertIn("bank_flow_rule_batch_read_model", domains)
+        self.assertIn("workbench_read_model", domains)
+        self.assertNotIn("no_oa_bank_batch_read_model", domains)
+
     def test_oa_rebuilt_maps_oa_workbench_candidate_tax_cost_and_historical_reconcile_domains(self) -> None:
         service = DerivedDataLifecycleService()
 
@@ -373,6 +383,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "pending_invoice_attach_existing_invoice_confirmed",
                 "pending_invoice_income_status_override_confirmed",
                 "no_oa_bank_batch_changed",
+                "bank_flow_rule_batch_changed",
                 "batch_accounting_relation_changed",
                 "turnover_relation_changed",
                 "tax_certified_import_confirmed",
@@ -399,6 +410,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "bank_account_balance_read_model",
                 "bank_detail_read_model",
                 "no_oa_bank_batch_read_model",
+                "bank_flow_rule_batch_read_model",
                 "search_cache",
                 "oa_adapter_records_cache",
                 "file_import_sessions",

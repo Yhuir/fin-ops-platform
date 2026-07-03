@@ -48,7 +48,7 @@
 | 标签规则 payload | 前端抽屉 | 返回 `active_tags`、`rules`、`requirements_by_tag_code`、`version`、`bank_auto_tag_rules_version`、`permissions`。不返回可编辑左侧标签字段。 |
 | 标签规则保存副作用 | `workbench-relations` / read models | 保存 `requires_oa` / `requires_invoice` 后，必须同步所有 active `relation_mode=bank_flow_rule_batch` 关系的 `special_metadata.requires_oa`、`requires_invoice`、`flow_rule_version`；同时同步匹配外部往来规则的 active `turnover:*` 关系，把旧 `manual_confirmed` 升级为 `turnover_manual_closure` 并写入 `requires_oa`、`requires_invoice`、`paired_requirement_tag_codes`、`paired_requirement_source`、`paired_requirement_version`。同步只能通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(...)`，且 relation command 的 load/save 必须接入 durable relation repository；不能依赖进程内 snapshot，不能让 Workbench 查询当前 settings 兜底，也不能直接改 relation 表。 |
 | 批次列表 payload | 页面 | 返回 summary、rows、status bucket、read model status、stale reasons、scope keys 和分页信息。非 fresh 不能展示为真实空态。 |
-| Relation command | `workbench-relations` | 使用 `relation_mode=bank_flow_rule_batch`，metadata 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`。 |
+| Relation command | `workbench-relations` | 使用 `relation_mode=bank_flow_rule_batch`，行级 relation display code 必须保持 `bank_flow_rule_batch`，不能退回 `fully_linked` 或 `no_oa_bank_batch`。metadata 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；display tags 使用 `流水规则` + 业务标签，不能继承旧 `免OA` 标签。 |
 | 关联台展示 | `reconciliation-workbench` | 银行流水数 `>3` 时默认折叠；是否进入 paired 由 required row type 是否已满足决定。 |
 | Operation barrier | 前端 | 写成功后返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；新功能对外 target 使用 `read_model_key=bank_flow_rule_batch`。 |
 | Dirty scope/outbox | runtime/read models | 通过 owner producer 或同事务等价 writer 污染 `bank_flow_rule_batch`、`workbench_relation`、`workbench`、`bank_detail` 以及受影响下游。 |
@@ -87,7 +87,8 @@
 - PostgreSQL 运行时批次存储和 read model 查询使用 `app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events`、`read_model.bank_flow_rule_batch_rows`；迁移 `0082_bank_flow_rule_batch_storage.sql` 从历史 no-OA 物理表按 `relation_mode=bank_flow_rule_batch` 回填，但运行时不再把 no-OA 表作为 bank-flow source of truth。no-OA legacy 仍使用 `app.no_oa_bank_batches`、`app.no_oa_bank_batch_events`、`read_model.no_oa_bank_batch_rows`。
 - 持久化 I/O 使用 `PostgresWorkbenchRepository.save_bank_flow_rule_batches*` 命名入口，在同一事务内只删除/写入 bank-flow 物理表，并使用批量 values upsert 写 `app.bank_flow_rule_batches` 与 `read_model.bank_flow_rule_batch_rows`；禁止通过 no-OA persistence port、no-OA 物理表或逐行 projection fallback 写入新模块。
 - Read model refresh 从 active relation 或已提交批次 relation fact 回灌 submitted 批次时必须按调用方目标 relation mode 判定；`bank_flow_rule_batch` 刷新不能复用 no-OA event/scope/producer，也不能把 bank-flow 批次显示到 legacy no-OA 列表。
-- 服务内由 submitted batch 反推 relation fact 时，必须继承该 batch 的 `relation_mode`，并且只为当前 refresh `relation_mode` 生成 fact；禁止再把所有 submitted batch 硬编码为 `no_oa_bank_batch`。旧 no-OA legacy migration/repair 只允许处理 no-OA/明确 legacy relation，不得处理 `bank_flow_rule_batch`。
+- 业务写入后的 derived lifecycle 事件为 `bank_flow_rule_batch_changed`，domain 为 `bank_flow_rule_batch_read_model` + Workbench/relation/cost/search 下游；禁止再以 `no_oa_bank_batch_changed` / `source=no_oa_bank_batch` 表示 bank-flow 写入。
+- 服务内由 submitted batch 反推 relation fact 时，必须继承该 batch 的 `relation_mode`、`source=bank_flow_rule_batch` 和 bank-flow display tags，并且只为当前 refresh `relation_mode` 生成 fact；禁止再把所有 submitted batch 硬编码为 `no_oa_bank_batch`。旧 no-OA legacy migration/repair 只允许处理 no-OA/明确 legacy relation，不得处理 `bank_flow_rule_batch`。
 - 关联台按 relation metadata 判定 open/paired。
 
 ## 性能与刷新 I/O

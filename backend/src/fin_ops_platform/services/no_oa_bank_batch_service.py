@@ -513,9 +513,15 @@ class NoOaBankBatchService:
                     "created_by": str(batch.get("submitted_by") or batch.get("created_by") or ""),
                     "created_at": str(batch.get("submitted_at") or batch.get("created_at") or self._timestamp()),
                     "updated_at": str(batch.get("updated_at") or batch.get("submitted_at") or self._timestamp()),
-                    "special_metadata": self._no_oa_relation_metadata(batch),
+                    "special_metadata": self._relation_metadata_for_relation_mode(
+                        batch,
+                        normalized_relation_mode,
+                    ),
                     "evidence": deepcopy(batch.get("evidence") if isinstance(batch.get("evidence"), dict) else {}),
-                    "display_tags": self._display_tags(str(batch.get("batch_type") or "")),
+                    "display_tags": self._display_tags_for_relation_mode(
+                        str(batch.get("batch_type") or ""),
+                        normalized_relation_mode,
+                    ),
                 }
             )
         return facts
@@ -2116,6 +2122,24 @@ class NoOaBankBatchService:
             },
         }
 
+    def _relation_metadata_for_relation_mode(
+        self,
+        batch: dict[str, Any],
+        relation_mode: str,
+    ) -> dict[str, Any]:
+        metadata = self._no_oa_relation_metadata(batch)
+        if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return metadata
+        batch_type = str(batch.get("batch_type") or "")
+        metadata.update(
+            {
+                "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                "display_tags": self._bank_flow_rule_display_tags(batch_type),
+            }
+        )
+        return metadata
+
     def _build_single_side_batches(
         self,
         rows: list[dict[str, Any]],
@@ -2704,6 +2728,17 @@ class NoOaBankBatchService:
     @staticmethod
     def _display_tags(batch_type: str) -> list[str]:
         return ["免OA", NO_OA_BANK_BATCH_LABELS.get(batch_type, batch_type)]
+
+    @staticmethod
+    def _bank_flow_rule_display_tags(batch_type: str) -> list[str]:
+        batch_label = NO_OA_BANK_BATCH_LABELS.get(batch_type, batch_type)
+        return ["流水规则", batch_label] if batch_label else ["流水规则"]
+
+    @classmethod
+    def _display_tags_for_relation_mode(cls, batch_type: str, relation_mode: str) -> list[str]:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return cls._bank_flow_rule_display_tags(batch_type)
+        return cls._display_tags(batch_type)
 
     @staticmethod
     def _batch_label(batch_type: str) -> str:

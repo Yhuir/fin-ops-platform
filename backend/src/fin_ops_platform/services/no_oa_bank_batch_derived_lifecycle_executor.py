@@ -8,8 +8,16 @@ SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 class NoOaBankBatchDerivedLifecycleExecutor:
-    def __init__(self, *, enqueue_refresh: Callable[..., bool]) -> None:
+    def __init__(
+        self,
+        *,
+        enqueue_refresh: Callable[..., bool],
+        read_model_name: str = "no_oa_bank_batch",
+        default_reason: str = "derived_lifecycle_no_oa_bank_batch",
+    ) -> None:
         self._enqueue_refresh = enqueue_refresh
+        self._read_model_name = str(read_model_name or "no_oa_bank_batch")
+        self._default_reason = str(default_reason or f"derived_lifecycle_{self._read_model_name}")
 
     def execute(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
@@ -17,13 +25,13 @@ class NoOaBankBatchDerivedLifecycleExecutor:
         target_scope_keys = months if months else ["all"]
         enqueued = self._enqueue_refresh(
             target_scope_keys,
-            reason=str(domain_plan.get("reason") or "derived_lifecycle_no_oa_bank_batch"),
+            reason=str(domain_plan.get("reason") or self._default_reason),
             metadata=self._read_model_refresh_metadata(domain_plan),
         )
         return {
-            "deleted_counts": {"no_oa_bank_batch_read_models": 0},
+            "deleted_counts": {f"{self._read_model_name}_read_models": 0},
             "invalidated_scopes": target_scope_keys,
-            "enqueued_jobs": ["no_oa_bank_batch.read_model.refresh"] if enqueued else [],
+            "enqueued_jobs": [f"{self._read_model_name}.read_model.refresh"] if enqueued else [],
         }
 
     @staticmethod

@@ -1020,9 +1020,20 @@ class NoOaBankBatchApplicationService:
         requirement_metadata = self._no_oa_paired_requirement_metadata(str(batch.get("batch_type") or ""))
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             requirement_metadata = self._bank_flow_rule_requirement_metadata(batch, requirement_metadata)
+            display_tags = self._bank_flow_rule_display_tags(batch)
+            payload["display_tags"] = display_tags
+            if not str(note or "").strip():
+                payload["note"] = self._bank_flow_rule_relation_note(batch)
+        else:
+            display_tags = [
+                str(tag).strip()
+                for tag in list(payload.get("display_tags") or [])
+                if str(tag).strip()
+            ]
         payload["special_metadata"] = {
             **special_metadata,
             **requirement_metadata,
+            **({"display_tags": display_tags} if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE else {}),
         }
         case_id = str(payload.get("case_id") or "").strip()
         if not case_id:
@@ -1038,11 +1049,7 @@ class NoOaBankBatchApplicationService:
                 note=str(payload.get("note") or ""),
                 special_metadata=payload.get("special_metadata") if isinstance(payload.get("special_metadata"), dict) else {},
                 evidence=payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {},
-                display_tags=[
-                    str(tag).strip()
-                    for tag in list(payload.get("display_tags") or [])
-                    if str(tag).strip()
-                ],
+                display_tags=display_tags,
                 idempotency_key=self._relation_idempotency_key(batch, operation="submit"),
                 history_operation_type=(
                     "bank_flow_rule_batch_submit"
@@ -1052,6 +1059,21 @@ class NoOaBankBatchApplicationService:
             )
         except WorkbenchRelationCommandError as exc:
             raise self._relation_command_error(exc) from exc
+
+    @staticmethod
+    def _bank_flow_rule_display_tags(batch: dict[str, object]) -> list[str]:
+        batch_type = str(batch.get("batch_type") or "").strip()
+        batch_label = str(batch.get("batch_label") or NO_OA_MANAGED_LABELS.get(batch_type, batch_type)).strip()
+        tags = ["流水规则"]
+        if batch_label and batch_label not in tags:
+            tags.append(batch_label)
+        return tags
+
+    @staticmethod
+    def _bank_flow_rule_relation_note(batch: dict[str, object]) -> str:
+        batch_type = str(batch.get("batch_type") or "").strip()
+        batch_label = str(batch.get("batch_label") or NO_OA_MANAGED_LABELS.get(batch_type, batch_type)).strip()
+        return f"流水规则批量处理：{batch_label or batch_type or '银行流水'}"
 
     def _bank_flow_rule_requirement_metadata(
         self,
@@ -1872,11 +1894,18 @@ class NoOaBankBatchApplicationService:
             if SEARCH_MONTH_RE.match(str(month).strip())
         ]
         scope_keys = ["all", *normalized_months]
+        event_name = self._mutation_lifecycle_event(action_name)
+        lifecycle_source = self._mutation_lifecycle_source(action_name)
         self._execute_derived_data_lifecycle_event(
-            "no_oa_bank_batch_changed",
+            event_name,
             months=normalized_months,
             metadata={
-                "source": "no_oa_bank_batch",
+                "source": lifecycle_source,
+                **(
+                    {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE}
+                    if lifecycle_source == BANK_FLOW_RULE_BATCH_RELATION_MODE
+                    else {}
+                ),
                 **({"action_name": str(action_name).strip()} if str(action_name or "").strip() else {}),
             },
             schedule_cost_warmup=False,
@@ -1887,6 +1916,18 @@ class NoOaBankBatchApplicationService:
                 changed_scope_keys=self._expand_workbench_read_model_scope_keys_for_base_scopes(scope_keys),
             )
         return bool(normalized_months)
+
+    @staticmethod
+    def _mutation_lifecycle_event(action_name: str | None) -> str:
+        if str(action_name or "").strip().startswith("bank_flow_rule_batch"):
+            return "bank_flow_rule_batch_changed"
+        return "no_oa_bank_batch_changed"
+
+    @staticmethod
+    def _mutation_lifecycle_source(action_name: str | None) -> str:
+        if str(action_name or "").strip().startswith("bank_flow_rule_batch"):
+            return BANK_FLOW_RULE_BATCH_RELATION_MODE
+        return NO_OA_BANK_BATCH_RELATION_MODE
 
     def enqueue_background_refresh(
         self,

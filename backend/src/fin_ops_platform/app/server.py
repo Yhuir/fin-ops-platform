@@ -267,7 +267,11 @@ from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.bank_batch_application_service import BankBatchPairRelationSnapshotPort
-from fin_ops_platform.services.bank_batch_service import BankBatchRelationRepairReadPort, BankBatchService
+from fin_ops_platform.services.bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    BankBatchRelationRepairReadPort,
+    BankBatchService,
+)
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
 from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh_producer import (
     BankFlowRuleBatchReadModelRefreshProducer,
@@ -605,6 +609,7 @@ APP_HEALTH_DASHBOARD_STALE_WARNING_CODES = {
     "worker_metrics_unavailable",
 }
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
     OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
 }
 
@@ -14002,6 +14007,7 @@ class Application:
             "bank_account_balance_read_model": self._bank_account_balance_derived_lifecycle_executor().execute,
             "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
             "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
+            "bank_flow_rule_batch_read_model": self._bank_flow_rule_batch_derived_lifecycle_executor().execute,
             "search_cache": self._derived_lifecycle_search_cache_executor,
             "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
             "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
@@ -14175,6 +14181,13 @@ class Application:
     def _no_oa_bank_batch_derived_lifecycle_executor(self) -> NoOaBankBatchDerivedLifecycleExecutor:
         return NoOaBankBatchDerivedLifecycleExecutor(
             enqueue_refresh=self._no_oa_bank_batch_read_model_refresh_producer().enqueue,
+        )
+
+    def _bank_flow_rule_batch_derived_lifecycle_executor(self) -> NoOaBankBatchDerivedLifecycleExecutor:
+        return NoOaBankBatchDerivedLifecycleExecutor(
+            enqueue_refresh=self._bank_flow_rule_batch_read_model_refresh_producer().enqueue,
+            read_model_name=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            default_reason="derived_lifecycle_bank_flow_rule_batch",
         )
 
     def _bank_account_balance_derived_lifecycle_executor(self) -> BankAccountBalanceDerivedLifecycleExecutor:
@@ -15540,6 +15553,7 @@ class Application:
                 no_oa_relation_display_payload=self._no_oa_bank_batch_workbench_display_policy().relation_display_payload,
                 bank_transaction_tag_label=self._bank_transaction_tag_label_current,
                 no_oa_bank_batch_relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
+                bank_flow_rule_batch_relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
                 personal_advance_repayment_mode=PERSONAL_ADVANCE_REPAYMENT_MODE,
                 oa_invoice_offset_auto_match_mode=OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
             )
