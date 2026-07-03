@@ -5479,6 +5479,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "project_name": "大型卷烟厂余热综合利用项目",
                 "amount": "145.00",
                 "reconciliation_amount": "145.00",
+                "detail_fields": {
+                    "Mongo文档ID": "69fab21659b12d7d42a50a45",
+                    "OA单号": "2156",
+                },
             },
             bank_id: {
                 "id": bank_id,
@@ -5492,8 +5496,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "id": invoice_id,
                 "type": "invoice",
                 "source_kind": "oa_attachment_invoice",
-                "derived_from_oa_id": raw_source_oa_id,
-                "source_workbench_row_id": canonical_oa_id,
+                "derived_from_oa_id": f"{raw_source_oa_id}:item:0:fb2a9c9fab23",
+                "source_expense_item_id": f"{raw_source_oa_id}:item:0:fb2a9c9fab23",
+                "source_workbench_row_id": invoice_id,
                 "seller_name": "云南铁路发展有限公司",
                 "buyer_name": "云南溯源科技有限公司",
                 "issue_date": "2026-05-06",

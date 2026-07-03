@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from fin_ops_platform.services.workbench_oa_attachment_source_link_resolver import (
     WorkbenchOaAttachmentSourceLinkResolver,
 )
+from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_ids
 
 
 class WorkbenchOaAttachmentSourceLinkResolverTests(unittest.TestCase):
@@ -68,6 +69,26 @@ class WorkbenchOaAttachmentSourceLinkResolverTests(unittest.TestCase):
                 {"oa-exp-2156"},
             ),
             "oa-exp-2156",
+        )
+
+    def test_oa_row_source_ids_include_mongo_document_alias(self) -> None:
+        row = {
+            "id": "oa-exp-2156",
+            "type": "oa",
+            "detail_fields": {
+                "Mongo文档ID": "69fab21659b12d7d42a50a45",
+                "OA单号": "2156",
+            },
+        }
+
+        self.assertEqual(
+            oa_row_source_ids(row),
+            [
+                "oa-exp-2156",
+                "69fab21659b12d7d42a50a45",
+                "oa-exp-69fab21659b12d7d42a50a45",
+                "2156",
+            ],
         )
 
 

@@ -44,6 +44,31 @@ def oa_attachment_source_ids(row: dict[str, Any]) -> list[str]:
     return _dedupe(source_ids)
 
 
+def oa_row_source_ids(row: dict[str, Any]) -> list[str]:
+    source_ids: list[str] = []
+    for field_name in ("id", "row_id", "oa_row_id", "oa_id", "source_oa_row_id", "object_identity_key"):
+        value = str(row.get(field_name) or "").strip()
+        if value:
+            source_ids.append(value)
+
+    for container_name in ("detail_fields", "summary_fields", "metadata"):
+        container = row.get(container_name)
+        if not isinstance(container, dict):
+            continue
+        for field_name in ("Mongo文档ID", "mongo_document_id", "document_id", "_id"):
+            value = str(container.get(field_name) or "").strip()
+            if value:
+                source_ids.append(value)
+                source_ids.append(f"oa-exp-{value}")
+        for field_name in ("OA单号", "流程请求ID", "oa_number", "request_id", "external_id"):
+            value = str(container.get(field_name) or "").strip()
+            if value:
+                source_ids.append(value)
+                source_ids.append(f"oa-exp-{value}")
+
+    return _dedupe(source_ids)
+
+
 def oa_attachment_matches_oa(row: dict[str, Any], oa_row_id: object) -> bool:
     normalized_oa_row_id = str(oa_row_id or "").strip()
     if not normalized_oa_row_id:

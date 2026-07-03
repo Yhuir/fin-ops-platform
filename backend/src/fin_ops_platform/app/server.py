@@ -220,6 +220,7 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_matches_oa,
     oa_attachment_parent_oa_id,
     oa_attachment_row_id_matches_oa,
+    oa_row_source_ids,
 )
 from fin_ops_platform.services.operation_freshness_barrier import (
     OperationFreshnessBarrierService,
@@ -14632,14 +14633,30 @@ class Application:
             self._row_type_for_row_id(row_id) == "bank"
             for row_id in expanded_row_ids
         )
+        selected_oa_source_ids = self._confirm_link_selected_oa_source_ids(expanded_row_ids, month=month)
         for group in self._cached_existing_context_groups_for_row_ids(expanded_row_ids, month_hint=month):
             for context_row_id in self._confirm_link_context_row_ids_to_preserve(
                 group,
                 selected_row_ids=seen,
+                selected_oa_source_ids=selected_oa_source_ids,
                 has_selected_bank_context=has_selected_bank_context,
             ):
                 add(context_row_id)
         return expanded_row_ids
+
+    def _confirm_link_selected_oa_source_ids(self, row_ids: list[str], *, month: str) -> set[str]:
+        selected_oa_ids = {
+            str(row_id).strip()
+            for row_id in row_ids
+            if str(row_id).strip() and self._row_type_for_row_id(str(row_id).strip()) == "oa"
+        }
+        if not selected_oa_ids:
+            return set()
+        source_ids = set(selected_oa_ids)
+        cached_rows = self._resolve_rows_from_cached_read_models(list(selected_oa_ids), month_hint=month)
+        for row in cached_rows.values():
+            source_ids.update(oa_row_source_ids(row))
+        return source_ids
 
     def _cached_existing_context_groups_for_row_ids(
         self,
@@ -14714,6 +14731,7 @@ class Application:
         group: dict[str, object],
         *,
         selected_row_ids: set[str],
+        selected_oa_source_ids: set[str] | None = None,
         has_selected_bank_context: bool,
     ) -> list[str]:
         if not self._workbench_group_preserves_existing_pair_context(group):
@@ -14733,6 +14751,8 @@ class Application:
             for row_id in selected_row_ids
             if self._row_type_for_row_id(row_id) == "oa"
         }
+        if selected_oa_source_ids:
+            selected_oa_ids.update(selected_oa_source_ids)
         selected_oa_attachment_invoice_rows = [
             row
             for row in group_invoice_rows
