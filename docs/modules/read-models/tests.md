@@ -30,6 +30,33 @@
 
 ## 场景覆盖清单
 
+## 2026-07-03 - Runtime queue available-at SLO boundary
+
+- 变更类型：runtime queue / write-operation SLO timing contract；不改变 HTTP response shape、权限、业务状态机、worker event type、dirty/outbox schema 或 read model payload schema。
+- 覆盖证据：事务内 read model refresh 写入显式使用 `clock_timestamp()` 记录 `available_at` / current update time；write-operation SLO 用 `available_at -> processed_at` 衡量 enqueue-to-done，避免长业务事务的 transaction start `now()` 污染 worker drain 指标。
+- 新增/更新测试：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract`、`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_enqueue_read_model_refreshes_in_transaction_batches_dirty_scope_and_outbox_writes`、`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_enqueue_duration_uses_available_at_instead_of_transaction_created_at`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；business core 不新增，因为业务规则/金额/状态转换不变；API contract 和 frontend interaction 不新增，因为 response shape 与页面行为不变；E2E 仍由生产固定 write scenario/ticket 复测证明。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_workbench_uow_contract.py tests/test_write_operation_slo_audit.py tests/test_write_operation_e2e_smoke.py tests/test_write_operation_scenario_discovery.py -q`。
+- 未测风险：生产发布前无法证明真实 systemd/RabbitMQ/PostgreSQL drain；发布后必须重跑 fixed write-operation apply，并继续单独优化 HTTP write step 本身。
+
+## 2026-07-03 - Workbench relation source-object补读快路径
+
+- 变更类型：read model projection hot-path implementation；不改变 HTTP response shape、权限、业务状态机、worker event type、queue schema 或 read model payload schema。
+- 覆盖证据：`workbench_relation` 月份 changed rebuild 复用第一次读取的本月源对象；跨月 relation 缺失成员只按显式 row-id 和 relation 类型补读，不恢复第二次全月 bank/OA/invoice 扫描。
+- 新增/更新测试：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_writes_linked_and_unlinked_relation_rows`、`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_indexes_cross_month_relation_members_in_current_scope`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；business core 不新增，因为不改 relation 状态机或金额判断；API contract 不新增，因为响应合同不变；frontend interaction 不新增，因为页面可见行为不变；E2E 不新增，本轮生产固定 write-operation apply 作为发布后闭环证据。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_sql_projection.py -q`；`python3 -m py_compile backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py`。
+- 未测风险：本地 fake 不覆盖真实 PostgreSQL planner、RabbitMQ transport 和 worker 并发；生产必须复跑 fixed write-operation scenario。
+
+## 2026-07-03 - Bank batch source-version probe skip fast path
+
+- 变更类型：read model worker hot-path implementation；不改变 HTTP response shape、权限、业务状态机、worker event type 或 queue schema。
+- 覆盖证据：bank-flow/no-OA 月份 scope 的 unchanged skip 在读取完整银行交易行、分类行、关系行之前完成 source_versions 比较；`BankTransactionTagReadFacade.source_versions_for_scope_keys(...)` 是 bank-detail 依赖的 source-version-only I/O；`all` 聚合 scope 不走该月级 precheck，避免额外 snapshot/read 放大。
+- 新增/更新测试：`tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_source_versions_for_scope_keys_uses_scope_summary_without_loading_rows`、`tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_scope_source_versions_use_probe_ports_before_row_loading`、`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save`。
+- 七类测试决策：service-layer、read model/cache/background job、existing feature regression 适用并覆盖；business core 不新增，因为不改金额/分类规则/状态转换；API contract 不新增，因为 response shape 不变；frontend interaction 不新增，因为页面行为不变；E2E 不新增到本地测试矩阵，生产 write-operation apply 与 read model SLO 作为发布后证据。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests tests/test_bank_flow_rule_batch_application_service.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_bank_flow_rule_batch_backend_boundary.py tests/test_read_model_manifest.py -q`。
+- 未测风险：本地 fake repository 不证明真实 PostgreSQL worker 并发下的 p95；生产必须复跑 critical 1s read model smoke 和固定 write-operation scenario。
+
 ## 2026-06-28 - PSCIP-L4 production closure accounting
 
 - 变更类型：documentation/accounting only；不改变 runtime、API shape、worker event、queue schema、权限、审计或前端行为。
@@ -456,12 +483,25 @@ git diff --check
 ## 2026-07-02 - Workbench raw payload write amplification tests
 
 - 新增测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_writes_workbench_payload_without_duplicate_raw_payload`。
-- 更新测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_batches_all_scope_generation_rows_when_supported` 现在断言 all-scope snapshot/summary/rows/groups/group_rows 保留 payload，同时 `raw_payload` 写为空对象。
+- 更新测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_batches_all_scope_generation_rows_when_supported` 现在断言 all-scope snapshot/summary/rows/groups/group_rows 的规范 owner payload 与 `raw_payload={}` 合同：summary 保留 summary payload，rows 保留行详情 payload但裁剪 nested `object_identity`，groups 只保留组级 metadata/count/sort/materialized marker，group_rows 只保留结构化 membership/filter/search/object-identity 列，`payload` / `raw_payload` / `source_versions` 均写 `{}`。
 - 覆盖类别：read model/cache/background job tests、service-layer persistence boundary、existing feature regression。API contract、frontend interaction、business core、E2E 真实业务流本轮未新增，因为 HTTP response shape、页面行为和业务写入口未改变。
 - 本地验证：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py -q` 为 `178 passed`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py tests/test_runtime_worker.py tests/test_read_model_slo_smoke.py tests/test_postgres_connection.py -q` 为 `211 passed`。
 - 生产验证：release `pscip-l4-workbench-raw-51cba11e8` 上 `/health/ready` ready，scope contract default/invalid-scope 均 `ok=true`。critical `read_model_slo_smoke --apply --critical-only --target-ms 5000` 为 `16/16` pass，max enqueue-to-fresh `3581.490ms`；targeted `workbench:all --target-ms 1000` pass，enqueue-to-fresh `397.159ms`、handler `352.381ms`。
 - 生产 raw payload 证明：active `workbench:all` 的 snapshot/summary/`1701` rows/`960` groups/`1941` group_rows 全部 `raw_payload={}`、`raw_has_normalized=0` 且 payload 非空；active `workbench:2026-02` 同样满足该合同。
 - 未测风险：当前 release 之后真实 Workbench relation confirm/withdraw、bank-invoice/bank-turnover confirm/withdraw 和 no-OA withdraw 样本全部缺失，写操作 SLO 仍不能关闭。
+
+## 2026-07-03 - Workbench snapshot/group payload owner tests
+
+- 新增/更新测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_materializes_legacy_workbench_view_from_groups_when_snapshot_is_lightweight`、`test_repository_batches_all_scope_generation_rows_when_supported`、`test_repository_writes_workbench_payload_without_duplicate_raw_payload`；`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts`。
+- 覆盖合同：`workbench_snapshots.payload` 只保存 metadata/summary shell 和 `workbench_groups_materialized=true` marker；`workbench_groups.payload` 只保存组级 metadata/count/sort/`workbench_group_rows_materialized` marker，不再保存 `oa_rows`、`bank_rows`、`invoice_rows`、`collapsed_rows` 或其它 `*_rows` 成员数组；`workbench_group_rows` 保存成员关系和最小审计 metadata；旧 `/api/workbench` 兼容 view、groups page/detail 和成本统计必须从同一 active generation 的 `workbench_group_rows + workbench_rows` materialize 完整组输出。
+- 覆盖类别：service-layer tests、API contract tests、read model/cache/background job tests、existing feature regression。business core 未新增，因为成本归因规则未变；frontend component 未新增，因为页面 response shape 保持 materialized 后兼容；E2E 真实业务流仍等待生产 SLO/write-operation 样本闭环。
+
+## 2026-07-03 - Workbench UoW batch refresh enqueue tests
+
+- 新增测试：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_enqueue_read_model_refreshes_in_transaction_batches_dirty_scope_and_outbox_writes`。
+- 新增测试：`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_read_model_refresh_writer_uses_batch_repository_interface_when_available`、`test_relation_write_uow_uses_batch_read_model_refresh_writer_when_available`。
+- 覆盖合同：事务内多个 read model refresh target 可批量写入 dirty scope/outbox，但必须保持 source_version、dedupe、priority、trace_id、action metadata 和 response source version 映射。
+- 覆盖类别：service-layer tests、read model/cache/background job tests、existing feature regression。API contract、frontend interaction 和 E2E 真实业务流未新增，因为外部响应/页面行为不变，生产 latency 仍需固定 write scenario 证明。
 
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 

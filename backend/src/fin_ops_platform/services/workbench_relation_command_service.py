@@ -483,6 +483,20 @@ class WorkbenchRelationCommandService:
         month_scope: str = "all",
     ) -> dict[str, Any]:
         pair_service = self._pair_service()
+        return self._preview_withdraw_relation_from_pair_service(
+            pair_service,
+            row_ids=list(row_ids or []),
+            month_scope=month_scope,
+        )
+
+    def _preview_withdraw_relation_from_pair_service(
+        self,
+        pair_service: WorkbenchPairRelationService,
+        *,
+        row_ids: list[str],
+        month_scope: str = "all",
+        freshness: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
         if not active_relations:
             raise WorkbenchRelationCommandError(
@@ -508,9 +522,10 @@ class WorkbenchRelationCommandService:
             for row_id in list(active_relation.get("row_ids") or [])
             if str(row_id).strip()
         ]
-        freshness = self._assert_relation_read_model_fresh(
+        resolved_month_scope = str(active_relation.get("month_scope") or month_scope or "all")
+        resolved_freshness = freshness or self._assert_relation_read_model_fresh(
             row_ids=active_row_ids,
-            month_scope=str(active_relation.get("month_scope") or month_scope or "all"),
+            month_scope=resolved_month_scope,
         )
         try:
             preview = pair_service.preview_withdraw_for_row_ids(active_row_ids)
@@ -543,10 +558,10 @@ class WorkbenchRelationCommandService:
             "before_relations": [deepcopy(active_relation)],
             "after_relations": after_relations,
             "submit_expected_versions": expected_versions,
-            "read_model_status": str(freshness.get("status") or freshness.get("read_model_status") or FRESH_WORKBENCH_RELATION_STATUS),
-            "read_model_scope_keys": list(freshness.get("read_model_scope_keys") or self._affected_months(str(active_relation.get("month_scope") or month_scope or "all"))),
-            "read_model_stale_reasons": list(freshness.get("stale_reasons") or freshness.get("read_model_stale_reasons") or []),
-            "refresh_enqueued": bool(freshness.get("refresh_enqueued")),
+            "read_model_status": str(resolved_freshness.get("status") or resolved_freshness.get("read_model_status") or FRESH_WORKBENCH_RELATION_STATUS),
+            "read_model_scope_keys": list(resolved_freshness.get("read_model_scope_keys") or self._affected_months(resolved_month_scope)),
+            "read_model_stale_reasons": list(resolved_freshness.get("stale_reasons") or resolved_freshness.get("read_model_stale_reasons") or []),
+            "refresh_enqueued": bool(resolved_freshness.get("refresh_enqueued")),
         }
 
     def withdraw_relation(
@@ -594,21 +609,29 @@ class WorkbenchRelationCommandService:
                 "Workbench relation is not active or does not exist.",
                 payload={"case_id": resolved_case_id},
             )
-        current_preview = self.preview_withdraw_relation(
-            row_ids=list(before_relation.get("row_ids") or []),
-            month_scope=str(before_relation.get("month_scope") or "all"),
+        before_row_ids = [
+            str(row_id)
+            for row_id in list(before_relation.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        before_month_scope = str(before_relation.get("month_scope") or "all")
+        freshness = self._assert_relation_read_model_fresh(
+            row_ids=before_row_ids,
+            month_scope=before_month_scope,
+        )
+        current_preview = self._preview_withdraw_relation_from_pair_service(
+            pair_service,
+            row_ids=before_row_ids,
+            month_scope=before_month_scope,
+            freshness=freshness,
         )
         self._assert_withdraw_preview_lock(
             preview=current_preview,
             preview_id=preview_id,
             expected_versions=expected_versions,
         )
-        freshness = self._assert_relation_read_model_fresh(
-            row_ids=list(before_relation.get("row_ids") or []),
-            month_scope=str(before_relation.get("month_scope") or "all"),
-        )
         restored_relations, history = pair_service.withdraw_latest_for_row_ids(
-            list(before_relation.get("row_ids") or []),
+            before_row_ids,
             created_by=actor_id,
             note=reason,
             created_at=occurred_at,

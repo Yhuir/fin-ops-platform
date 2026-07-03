@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import sleep
 import unittest
 
+from fin_ops_platform.domain.enums import BatchType, ImportDecision
+from fin_ops_platform.domain.models import ImportedBatchRowResult
+from fin_ops_platform.services.import_file_service import FileImportPreviewItem
 from tests.app_test_support import build_local_state_application as build_application
 
 from tests.mock_import_files import (
@@ -56,6 +61,53 @@ def build_multipart_payload(
 
 
 class ImportFileApiTests(unittest.TestCase):
+    def test_import_fact_files_list_omits_preview_detail_payloads(self) -> None:
+        class FakeImportFactRepository:
+            def list_import_files_page(self, **_kwargs):
+                return [
+                    FileImportPreviewItem(
+                        id="file_1",
+                        file_name="input.xlsx",
+                        template_code="invoice_export",
+                        batch_type=BatchType.INPUT_INVOICE,
+                        status="confirmed",
+                        message="ok",
+                        row_count=1,
+                        success_count=1,
+                        row_results=[
+                            ImportedBatchRowResult(
+                                id="row_1",
+                                batch_id="batch_1",
+                                row_no=1,
+                                source_record_type="invoice",
+                                source_unique_key=None,
+                                data_fingerprint=None,
+                                decision=ImportDecision.CREATED,
+                                decision_reason="created",
+                                linked_object_type="invoice",
+                                linked_object_id="invoice_1",
+                                raw_payload={"large": "payload"},
+                            )
+                        ],
+                        normalized_rows=[{"invoice_no": "INV-001"}],
+                    )
+                ], 1
+
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._state_store.import_fact_repository = FakeImportFactRepository()  # type: ignore[attr-defined]
+
+            response = app.handle_request("GET", "/api/import-facts/files?page=1&page_size=50")
+
+            self.assertEqual(response.status_code, 200)
+            payload = json.loads(response.body)
+            self.assertEqual(payload["pagination"], {"page": 1, "page_size": 50, "total": 1})
+            self.assertEqual(payload["items"][0]["id"], "file_1")
+            self.assertEqual(payload["items"][0]["row_count"], 1)
+            self.assertNotIn("row_results", payload["items"][0])
+            self.assertNotIn("normalized_rows", payload["items"][0])
+            app.shutdown_background_jobs()
+
     def test_preview_files_uses_lightweight_import_preview_persistence(self) -> None:
         app = build_application()
         persist_calls: list[str] = []

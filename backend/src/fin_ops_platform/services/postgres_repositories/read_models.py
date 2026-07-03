@@ -43,6 +43,7 @@ NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
 WORKBENCH_GENERATION_RETENTION_KEEP_RECENT = 1
 WORKBENCH_GENERATION_RETENTION_KEEP_DAYS = 0
 WORKBENCH_GENERATION_RETENTION_LIMIT = 500
+WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS = {"object_identity"}
 LOGGER = logging.getLogger(__name__)
 
 
@@ -3094,8 +3095,6 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
 
         def write(connection: Any) -> None:
-            if scope_month is not None:
-                connection.execute("delete from read_model.search_index_rows where scope_month = %s::date", (scope_month,))
             params_by_row_id: dict[str, tuple[Any, ...]] = {}
             for row in list(rows or []):
                 row_payload = dict(row) if isinstance(row, dict) else {}
@@ -3121,32 +3120,69 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                     jsonb({"normalized_payload": payload}),
                 )
             params_seq = list(params_by_row_id.values())
-            _execute_many(
-                connection,
-                """
-                insert into read_model.search_index_rows(
-                    row_id, source_kind, scope_month, status, title, subtitle, searchable_text,
-                    project_name, counterparty_name, amount, source_versions, generated_at, payload, raw_payload
+            if params_seq:
+                _execute_many(
+                    connection,
+                    """
+                    insert into read_model.search_index_rows(
+                        row_id, source_kind, scope_month, status, title, subtitle, searchable_text,
+                        project_name, counterparty_name, amount, source_versions, generated_at, payload, raw_payload
+                    )
+                    values (%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
+                    on conflict (row_id) do update set
+                        source_kind = excluded.source_kind,
+                        scope_month = excluded.scope_month,
+                        status = excluded.status,
+                        title = excluded.title,
+                        subtitle = excluded.subtitle,
+                        searchable_text = excluded.searchable_text,
+                        project_name = excluded.project_name,
+                        counterparty_name = excluded.counterparty_name,
+                        amount = excluded.amount,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    where (
+                        read_model.search_index_rows.source_kind,
+                        read_model.search_index_rows.scope_month,
+                        read_model.search_index_rows.status,
+                        read_model.search_index_rows.title,
+                        read_model.search_index_rows.subtitle,
+                        read_model.search_index_rows.searchable_text,
+                        read_model.search_index_rows.project_name,
+                        read_model.search_index_rows.counterparty_name,
+                        read_model.search_index_rows.amount,
+                        read_model.search_index_rows.source_versions,
+                        read_model.search_index_rows.generated_at,
+                        read_model.search_index_rows.payload,
+                        read_model.search_index_rows.raw_payload
+                    ) is distinct from (
+                        excluded.source_kind,
+                        excluded.scope_month,
+                        excluded.status,
+                        excluded.title,
+                        excluded.subtitle,
+                        excluded.searchable_text,
+                        excluded.project_name,
+                        excluded.counterparty_name,
+                        excluded.amount,
+                        excluded.source_versions,
+                        excluded.generated_at,
+                        excluded.payload,
+                        excluded.raw_payload
+                    )
+                    """,
+                    params_seq,
                 )
-                values (%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
-                on conflict (row_id) do update set
-                    source_kind = excluded.source_kind,
-                    scope_month = excluded.scope_month,
-                    status = excluded.status,
-                    title = excluded.title,
-                    subtitle = excluded.subtitle,
-                    searchable_text = excluded.searchable_text,
-                    project_name = excluded.project_name,
-                    counterparty_name = excluded.counterparty_name,
-                    amount = excluded.amount,
-                    source_versions = excluded.source_versions,
-                    generated_at = excluded.generated_at,
-                    payload = excluded.payload,
-                    raw_payload = excluded.raw_payload,
-                    updated_at = now()
-                """,
-                params_seq,
-            )
+                if scope_month is not None:
+                    connection.execute(
+                        "delete from read_model.search_index_rows where scope_month = %s::date and not (row_id = any(%s))",
+                        (scope_month, list(params_by_row_id)),
+                    )
+            elif scope_month is not None:
+                connection.execute("delete from read_model.search_index_rows where scope_month = %s::date", (scope_month,))
 
         run_in_transaction(self._connection, write)
 
@@ -5467,15 +5503,29 @@ class PostgresReadModelRepository:
                 source_kind=source_kind,
                 search=search,
             )
-        row = self._connection.fetch_one(
-            """
-            select scope_key, payload, raw_payload, cache_status, generated_at, source_versions, row_count
-            from read_model.workbench_snapshots
-            where scope_key = %s
-            limit 1
-            """,
-            (normalized_scope_key,),
-        )
+        active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+        if active_generation_id:
+            row = self._connection.fetch_one(
+                """
+                select generation_id, scope_key, payload, raw_payload, cache_status, generated_at, source_versions, row_count
+                from read_model.workbench_snapshots
+                where scope_key = %s
+                  and generation_id = %s
+                limit 1
+                """,
+                (normalized_scope_key, active_generation_id),
+            )
+        else:
+            row = self._connection.fetch_one(
+                """
+                select generation_id, scope_key, payload, raw_payload, cache_status, generated_at, source_versions, row_count
+                from read_model.workbench_snapshots
+                where scope_key = %s
+                order by generated_at desc
+                limit 1
+                """,
+                (normalized_scope_key,),
+            )
         if row is None:
             return None
         payload = _read_model_payload(row)
@@ -5499,9 +5549,16 @@ class PostgresReadModelRepository:
             refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
         payload_source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
         row_source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+        view_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+        if isinstance(view_payload, dict) and _workbench_snapshot_payload_requires_group_materialization(view_payload):
+            view_payload = self._load_workbench_legacy_groups_payload(
+                scope_key=normalized_scope_key,
+                generation_id=text(row.get("generation_id")) or active_generation_id,
+                payload=view_payload,
+            )
         result = {
             "scope_key": normalized_scope_key,
-            "payload": payload.get("payload") if isinstance(payload.get("payload"), dict) else payload,
+            "payload": view_payload,
             "cache_status": text(row.get("cache_status") or payload.get("cache_status")) or "fresh",
             "generated_at": text(row.get("generated_at") or payload.get("generated_at")),
             "source_versions": payload_source_versions or row_source_versions,
@@ -5519,6 +5576,145 @@ class PostgresReadModelRepository:
                 search=search,
             )
         return result
+
+    def _load_workbench_legacy_groups_payload(
+        self,
+        *,
+        scope_key: str,
+        generation_id: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = dict(payload)
+        result.setdefault("paired", {"groups": []})
+        result.setdefault("open", {"groups": []})
+        if not generation_id:
+            return result
+        rows = self._connection.fetch_all(
+            """
+            select scope_key, generation_id, zone, group_id, payload, raw_payload
+            from read_model.workbench_groups
+            where scope_key = %s
+              and generation_id = %s
+            order by
+              case when zone = 'paired' then 0 else 1 end,
+              coalesce(oa_sort_max, bank_sort_max, invoice_sort_max) desc nulls last,
+              group_id
+            """,
+            (scope_key, generation_id),
+        )
+        materialized_rows = self._materialize_workbench_group_payloads(rows)
+        grouped: dict[str, list[dict[str, Any]]] = {"paired": [], "open": []}
+        for row, group_payload in zip(rows, materialized_rows, strict=False):
+            zone = text(row.get("zone")) or "open"
+            if zone not in grouped:
+                continue
+            if isinstance(group_payload, dict):
+                grouped[zone].append(group_payload)
+        result["paired"] = {"groups": grouped["paired"]}
+        result["open"] = {"groups": grouped["open"]}
+        return result
+
+    def _materialize_workbench_group_payloads(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        groups: list[dict[str, Any]] = []
+        materialized_keys: list[tuple[str, str, str, str]] = []
+        for row in rows:
+            group = _read_model_payload(row)
+            if not isinstance(group, dict):
+                group = {}
+            group.setdefault("group_id", text(row.get("group_id")))
+            group.setdefault("zone", text(row.get("zone")) or "open")
+            scope_key = text(row.get("scope_key"))
+            generation_id = text(row.get("generation_id"))
+            zone = text(row.get("zone")) or text(group.get("zone")) or "open"
+            group_id = text(row.get("group_id")) or text(group.get("group_id"))
+            if (
+                _workbench_group_payload_requires_row_materialization(group)
+                and scope_key
+                and generation_id
+                and group_id
+            ):
+                materialized_keys.append((scope_key, generation_id, zone, group_id))
+            groups.append(group)
+        if not materialized_keys:
+            return groups
+
+        member_rows = self._connection.fetch_all(
+            """
+            with target_groups as (
+                select *
+                from unnest(%s::text[], %s::text[], %s::text[], %s::text[])
+                  as target(scope_key, generation_id, zone, group_id)
+            )
+            select
+                gr.scope_key,
+                gr.generation_id,
+                gr.zone,
+                gr.group_id,
+                gr.pane,
+                gr.row_id,
+                gr.row_role,
+                gr.row_index,
+                gr.source_kind,
+                gr.status,
+                gr.time_value,
+                gr.time_date::text as time_date,
+                gr.column_values,
+                gr.searchable_text,
+                gr.object_identity_key,
+                gr.object_identity_kind,
+                gr.object_identity_source,
+                gr.object_identity_confidence,
+                wr.payload as row_payload,
+                wr.raw_payload as row_raw_payload,
+                gr.payload as member_payload,
+                gr.raw_payload as member_raw_payload
+            from target_groups target
+            join read_model.workbench_group_rows gr
+              on gr.scope_key = target.scope_key
+             and gr.generation_id = target.generation_id
+             and gr.zone = target.zone
+             and gr.group_id = target.group_id
+            left join read_model.workbench_rows wr
+              on wr.scope_key = gr.scope_key
+             and wr.generation_id = gr.generation_id
+             and wr.row_id = gr.row_id
+            order by
+                gr.scope_key,
+                gr.generation_id,
+                gr.zone,
+                gr.group_id,
+                case gr.pane when 'oa' then 0 when 'bank' then 1 when 'invoice' then 2 else 3 end,
+                gr.row_role,
+                gr.row_index,
+                gr.row_id
+            """,
+            (
+                [key[0] for key in materialized_keys],
+                [key[1] for key in materialized_keys],
+                [key[2] for key in materialized_keys],
+                [key[3] for key in materialized_keys],
+            ),
+        )
+        rows_by_group: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+        for row in member_rows:
+            key = (
+                text(row.get("scope_key")) or "",
+                text(row.get("generation_id")) or "",
+                text(row.get("zone")) or "open",
+                text(row.get("group_id")) or "",
+            )
+            rows_by_group.setdefault(key, []).append(row)
+
+        materialized: list[dict[str, Any]] = []
+        for row, group in zip(rows, groups, strict=False):
+            key = (
+                text(row.get("scope_key")) or "",
+                text(row.get("generation_id")) or "",
+                text(row.get("zone")) or text(group.get("zone")) or "open",
+                text(row.get("group_id")) or text(group.get("group_id")) or "",
+            )
+            materialized.append(_materialize_workbench_group_payload(group, rows_by_group.get(key, [])))
+        return materialized
 
     def get_workbench_summary(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
@@ -6112,7 +6308,7 @@ class PostgresReadModelRepository:
         page_params = [*params, normalized_page_size + 1, offset]
         rows = self._connection.fetch_all(
             f"""
-            select group_id, zone, payload, raw_payload
+            select group_id, zone, payload, raw_payload, scope_key, generation_id
             from read_model.workbench_groups g
             where {where_sql}
             order by {order_by_sql}
@@ -6121,9 +6317,10 @@ class PostgresReadModelRepository:
             tuple(page_params),
         )
         visible_rows = rows[:normalized_page_size]
+        materialized_rows = self._materialize_workbench_group_payloads(visible_rows)
         groups: list[dict[str, Any]] = []
-        for row in visible_rows:
-            group = _read_model_payload(row)
+        for row, materialized_group in zip(visible_rows, materialized_rows, strict=False):
+            group = materialized_group
             if not isinstance(group, dict):
                 group = {"group_id": text(row.get("group_id"))}
             group = _sanitize_workbench_group_invoice_rows(group)
@@ -6177,10 +6374,10 @@ class PostgresReadModelRepository:
             select
               g.group_id,
               g.zone,
-              g.payload,
-              g.raw_payload,
               g.scope_key,
               g.generation_id,
+              g.payload,
+              g.raw_payload,
               gen.source_versions
             from read_model.workbench_groups g
             left join read_model.workbench_generations gen
@@ -6200,7 +6397,8 @@ class PostgresReadModelRepository:
         if not isinstance(row, dict):
             return None
         resolved_scope_key = text(row.get("scope_key")) or normalized_scope_key
-        group = _read_model_payload(row)
+        materialized_groups = self._materialize_workbench_group_payloads([row])
+        group = materialized_groups[0] if materialized_groups else _read_model_payload(row)
         if not isinstance(group, dict):
             group = {"group_id": text(row.get("group_id"))}
         result = _with_workbench_group_counts(_sanitize_workbench_group_invoice_rows(group))
@@ -6950,6 +7148,8 @@ class PostgresReadModelRepository:
                 generation_id = self._new_workbench_generation_id(scope_key)
                 row_count = len(workbench_rows) or int_value(payload.get("row_count"), 0)
                 group_count = len(workbench_groups)
+                source_versions_jsonb = jsonb(source_versions)
+                empty_jsonb = jsonb({})
                 started_generations.append((scope_key, generation_id, source_versions))
                 self._start_workbench_generation(
                     connection,
@@ -6979,12 +7179,21 @@ class PostgresReadModelRepository:
                         generation_id,
                         scope_key,
                         scope_month,
-                        jsonb(source_versions),
+                        source_versions_jsonb,
                         generated_at,
                         cache_status,
                         row_count,
-                        jsonb(payload),
-                        jsonb({}),
+                        jsonb(
+                            _workbench_snapshot_payload_for_write(
+                                scope_key=scope_key,
+                                scope_month=scope_month,
+                                grouped_payload=grouped_payload,
+                                source_versions=source_versions,
+                                generated_at=generated_at,
+                                cache_status=cache_status,
+                            )
+                        ),
+                        empty_jsonb,
                     ),
                 )
                 connection.execute(
@@ -7009,13 +7218,13 @@ class PostgresReadModelRepository:
                         generation_id,
                         scope_key,
                         scope_month,
-                        jsonb(source_versions),
+                        source_versions_jsonb,
                         generated_at,
                         cache_status,
                         jsonb(summary_payload.get("summary") if isinstance(summary_payload.get("summary"), dict) else {}),
                         jsonb(summary_payload.get("invoice_inventory") if isinstance(summary_payload.get("invoice_inventory"), dict) else {}),
                         jsonb(summary_payload),
-                        jsonb({}),
+                        empty_jsonb,
                     ),
                 )
                 self._upsert_workbench_generation_stats(
@@ -7050,11 +7259,11 @@ class PostgresReadModelRepository:
                             text(row.get("object_identity_kind")),
                             text(row.get("object_identity_source")),
                             text(row.get("object_identity_confidence")),
-                            jsonb(source_versions),
+                            source_versions_jsonb,
                             generated_at,
                             cache_status,
-                            jsonb(row),
-                            jsonb({}),
+                            jsonb(_workbench_row_payload_for_write(row)),
+                            empty_jsonb,
                         ),
                     )
                 _execute_many(
@@ -7080,6 +7289,8 @@ class PostgresReadModelRepository:
                     if group_id is None:
                         continue
                     group_scope_month = month_start(group.get("scope_month") or group.get("month") or scope_month)
+                    group_payload = group.get("payload") if isinstance(group.get("payload"), dict) else group
+                    group_payload_for_write = _workbench_group_payload_for_write(group, payload=group_payload)
                     workbench_group_params.append(
                         (
                             generation_id,
@@ -7098,14 +7309,16 @@ class PostgresReadModelRepository:
                             text(group.get("bank_sort_max")),
                             text(group.get("invoice_sort_min")),
                             text(group.get("invoice_sort_max")),
-                            jsonb(source_versions),
+                            source_versions_jsonb,
                             generated_at,
                             cache_status,
-                            jsonb(group.get("payload") if isinstance(group.get("payload"), dict) else group),
-                            jsonb({}),
+                            jsonb(group_payload_for_write),
+                            empty_jsonb,
                         ),
                     )
-                    for group_row in _workbench_group_row_records(_workbench_group_payload_for_rows(group)):
+                    for group_row in _workbench_group_row_records(
+                        _workbench_group_payload_for_rows(group, payload=group_payload)
+                    ):
                         workbench_group_row_params.append(
                             (
                                 generation_id,
@@ -7127,11 +7340,11 @@ class PostgresReadModelRepository:
                                 text(group_row.get("object_identity_kind")),
                                 text(group_row.get("object_identity_source")),
                                 text(group_row.get("object_identity_confidence")),
-                                jsonb(source_versions),
+                                empty_jsonb,
                                 generated_at,
                                 cache_status,
-                                jsonb(group_row.get("payload") if isinstance(group_row.get("payload"), dict) else group_row),
-                                jsonb({}),
+                                empty_jsonb,
+                                empty_jsonb,
                             ),
                         )
                 _execute_many(
@@ -7284,8 +7497,8 @@ class PostgresReadModelRepository:
         has_group_without_bank_auto_tag_rules_version = False
         has_group_without_oa_projection_sync_version = False
         has_group_without_workbench_matching_rules_version = False
-        for row in group_rows:
-            group = _read_model_payload(row)
+        materialized_group_rows = self._materialize_workbench_group_payloads(group_rows)
+        for row, group in zip(group_rows, materialized_group_rows, strict=False):
             if not isinstance(group, dict):
                 continue
             row_source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
@@ -7357,6 +7570,8 @@ class PostgresReadModelRepository:
         workbench_rows = list(self._iter_workbench_rows(aggregate_payload))
         workbench_groups = list(self._iter_workbench_groups(aggregate_payload))
         generation_id = self._new_workbench_generation_id("all")
+        aggregate_source_versions_jsonb = jsonb(aggregate_source_versions)
+        empty_jsonb = jsonb({})
         self._start_workbench_generation(
             connection,
             scope_key="all",
@@ -7384,20 +7599,20 @@ class PostgresReadModelRepository:
             """,
             (
                 generation_id,
-                jsonb(aggregate_source_versions),
+                aggregate_source_versions_jsonb,
                 generated_at,
                 len(workbench_rows),
                 jsonb(
-                    {
-                        "scope_key": "all",
-                        "scope_month": "all",
-                        "generated_at": generated_at,
-                        "cache_status": "fresh",
-                        "payload": aggregate_payload,
-                        "source_versions": aggregate_source_versions,
-                    }
+                    _workbench_snapshot_payload_for_write(
+                        scope_key="all",
+                        scope_month="all",
+                        grouped_payload=aggregate_payload,
+                        source_versions=aggregate_source_versions,
+                        generated_at=generated_at,
+                        cache_status="fresh",
+                    )
                 ),
-                jsonb({}),
+                empty_jsonb,
             ),
         )
         workbench_row_params: list[tuple[Any, ...]] = []
@@ -7420,10 +7635,10 @@ class PostgresReadModelRepository:
                     text(row.get("object_identity_kind")),
                     text(row.get("object_identity_source")),
                     text(row.get("object_identity_confidence")),
-                    jsonb(aggregate_source_versions),
+                    aggregate_source_versions_jsonb,
                     generated_at,
-                    jsonb(row),
-                    jsonb({}),
+                    jsonb(_workbench_row_payload_for_write(row)),
+                    empty_jsonb,
                 ),
             )
         _execute_many(
@@ -7449,6 +7664,8 @@ class PostgresReadModelRepository:
             if group_id is None:
                 continue
             sort_keys = _workbench_group_sort_keys(group)
+            group_payload = group.get("payload") if isinstance(group.get("payload"), dict) else group
+            group_payload_for_write = _workbench_group_payload_for_write(group, payload=group_payload)
             workbench_group_params.append(
                 (
                     generation_id,
@@ -7465,13 +7682,15 @@ class PostgresReadModelRepository:
                     text(group.get("bank_sort_max") or sort_keys.get("bank_sort_max")),
                     text(group.get("invoice_sort_min") or sort_keys.get("invoice_sort_min")),
                     text(group.get("invoice_sort_max") or sort_keys.get("invoice_sort_max")),
-                    jsonb(aggregate_source_versions),
+                    aggregate_source_versions_jsonb,
                     generated_at,
-                    jsonb(group.get("payload") if isinstance(group.get("payload"), dict) else group),
-                    jsonb({}),
+                    jsonb(group_payload_for_write),
+                    empty_jsonb,
                 ),
             )
-            for group_row in _workbench_group_row_records(_workbench_group_payload_for_rows(group)):
+            for group_row in _workbench_group_row_records(
+                _workbench_group_payload_for_rows(group, payload=group_payload)
+            ):
                 workbench_group_row_params.append(
                     (
                         generation_id,
@@ -7491,10 +7710,10 @@ class PostgresReadModelRepository:
                         text(group_row.get("object_identity_kind")),
                         text(group_row.get("object_identity_source")),
                         text(group_row.get("object_identity_confidence")),
-                        jsonb(aggregate_source_versions),
+                        empty_jsonb,
                         generated_at,
-                        jsonb(group_row.get("payload") if isinstance(group_row.get("payload"), dict) else group_row),
-                        jsonb({}),
+                        empty_jsonb,
+                        empty_jsonb,
                     ),
                 )
         _execute_many(
@@ -7558,7 +7777,7 @@ class PostgresReadModelRepository:
             """,
             (
                 generation_id,
-                jsonb(aggregate_source_versions),
+                aggregate_source_versions_jsonb,
                 generated_at,
                 jsonb(final_summary_payload.get("summary") if isinstance(final_summary_payload.get("summary"), dict) else {}),
                 jsonb(
@@ -7567,7 +7786,7 @@ class PostgresReadModelRepository:
                     else {}
                 ),
                 jsonb(final_summary_payload),
-                jsonb({}),
+                empty_jsonb,
             ),
         )
         self._upsert_workbench_generation_stats(
@@ -8910,7 +9129,7 @@ class PostgresReadModelRepository:
             if row_id is None or row_id in seen:
                 return
             seen.add(row_id)
-            row = serialize_value(value)
+            row = dict(value)
             if zone in {"paired", "open"}:
                 row["status"] = zone
             rows.append(row)
@@ -8989,7 +9208,7 @@ class PostgresReadModelRepository:
                         "row_count": _workbench_group_fact_row_counts(normalized_group)["rows"],
                         "searchable_text": _searchable_group_text(normalized_group),
                         **sort_keys,
-                        "payload": serialize_value(normalized_group),
+                        "payload": normalized_group,
                     }
                 )
         return groups
@@ -11346,6 +11565,7 @@ def _workbench_group_row_records(group: dict[str, Any]) -> list[dict[str, Any]]:
         row_id = text(row.get("id") or row.get("row_id"))
         if row_id is None:
             continue
+        source_kind = text(row.get("source_kind") or row.get("type") or pane) or pane
         column_values = _workbench_row_column_values(row, pane)
         time_value = _workbench_row_sort_value(row, pane)
         records.append(
@@ -11356,7 +11576,7 @@ def _workbench_group_row_records(group: dict[str, Any]) -> list[dict[str, Any]]:
                 "row_id": row_id,
                 "row_role": row_role,
                 "row_index": row_index,
-                "source_kind": text(row.get("source_kind") or row.get("type") or pane) or pane,
+                "source_kind": source_kind,
                 "status": text(row.get("status") or zone) or zone,
                 "time_value": time_value,
                 "time_date": _workbench_date_from_text(time_value),
@@ -11366,20 +11586,185 @@ def _workbench_group_row_records(group: dict[str, Any]) -> list[dict[str, Any]]:
                 "object_identity_kind": text(row.get("object_identity_kind")),
                 "object_identity_source": text(row.get("object_identity_source")),
                 "object_identity_confidence": text(row.get("object_identity_confidence")),
-                "payload": serialize_value(row),
             }
         )
     return records
 
 
-def _workbench_group_payload_for_rows(group: dict[str, Any]) -> dict[str, Any]:
-    payload = deepcopy(group.get("payload") if isinstance(group.get("payload"), dict) else group)
+def _workbench_row_payload_for_write(row: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(row)
+    for key in WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS:
+        payload.pop(key, None)
+    return serialize_value(payload)
+
+
+def _workbench_group_payload_for_rows(group: dict[str, Any], *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    source_payload = payload if isinstance(payload, dict) else group.get("payload")
+    payload = dict(source_payload if isinstance(source_payload, dict) else group)
     payload.setdefault("group_id", text(group.get("group_id") or group.get("id")))
     payload.setdefault("zone", text(group.get("zone") or group.get("status")) or "open")
     payload.setdefault("status", text(group.get("status") or group.get("zone")) or "open")
     payload.setdefault("scope_month", group.get("scope_month"))
     payload.setdefault("month", group.get("month"))
     return payload
+
+
+WORKBENCH_GROUP_MEMBER_PAYLOAD_KEYS = {
+    "rows",
+    "oa_rows",
+    "bank_rows",
+    "invoice_rows",
+    "collapsed_rows",
+}
+
+
+def _workbench_group_payload_for_write(group: dict[str, Any], *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    source_payload = payload if isinstance(payload, dict) else group.get("payload")
+    normalized = dict(source_payload if isinstance(source_payload, dict) else group)
+    for key in list(normalized):
+        if str(key).endswith("_rows") or str(key) in WORKBENCH_GROUP_MEMBER_PAYLOAD_KEYS:
+            normalized.pop(key, None)
+    normalized.setdefault("group_id", text(group.get("group_id") or group.get("id")))
+    normalized.setdefault("zone", text(group.get("zone") or group.get("status")) or "open")
+    normalized.setdefault("status", text(group.get("status") or group.get("zone")) or "open")
+    normalized.setdefault("scope_month", group.get("scope_month"))
+    normalized.setdefault("month", group.get("month"))
+    normalized["workbench_group_rows_materialized"] = True
+    return serialize_value(normalized)
+
+
+def _workbench_group_payload_requires_row_materialization(payload: dict[str, Any]) -> bool:
+    return payload.get("workbench_group_rows_materialized") is True
+
+
+def _materialize_workbench_group_payload(group: dict[str, Any], member_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not _workbench_group_payload_requires_row_materialization(group):
+        return group
+    result = dict(group)
+    result.pop("workbench_group_rows_materialized", None)
+    for key in WORKBENCH_GROUP_MEMBER_PAYLOAD_KEYS:
+        result.pop(key, None)
+    collapsed_rows: dict[str, list[dict[str, Any]]] = {}
+    for member in member_rows:
+        pane = text(member.get("pane")) or "rows"
+        row_id = text(member.get("row_id"))
+        row = row_payload(member, "row_payload", "row_raw_payload", "member_payload", "member_raw_payload")
+        if isinstance(row, dict):
+            row_payload_value = dict(row)
+        else:
+            row_payload_value = {}
+        if row_id:
+            row_payload_value.setdefault("id", row_id)
+            row_payload_value.setdefault("row_id", row_id)
+        row_payload_value.setdefault("type", pane)
+        source_kind = text(member.get("source_kind"))
+        if source_kind:
+            row_payload_value.setdefault("source_kind", source_kind)
+        status = text(member.get("status"))
+        if status:
+            row_payload_value.setdefault("status", status)
+        for key in (
+            "object_identity_key",
+            "object_identity_kind",
+            "object_identity_source",
+            "object_identity_confidence",
+        ):
+            value = text(member.get(key))
+            if value is not None:
+                row_payload_value.setdefault(key, value)
+        row_role = text(member.get("row_role")) or "normal"
+        if row_role == "collapsed":
+            collapsed_rows.setdefault(pane, []).append(row_payload_value)
+            continue
+        result.setdefault(f"{pane}_rows", []).append(row_payload_value)
+    if collapsed_rows:
+        result["collapsed_rows"] = collapsed_rows
+    return result
+
+
+def _workbench_group_row_minimal_payload(
+    row_payload: dict[str, Any],
+    *,
+    pane: str,
+    row_id: str | None,
+    source_kind: str | None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "row_id": text(row_id or row_payload.get("row_id") or row_payload.get("id")),
+        "type": text(row_payload.get("type") or row_payload.get("record_type") or pane),
+        "source_kind": text(source_kind or row_payload.get("source_kind")),
+    }
+    for key in (
+        "case_id",
+        "relation_id",
+        "relation_mode",
+        "source_oa_id",
+        "source_oa_row_id",
+        "oa_row_id",
+        "derived_from_oa_id",
+    ):
+        value = text(row_payload.get(key))
+        if value is not None:
+            result[key] = value
+    special_metadata = row_payload.get("special_metadata")
+    if isinstance(special_metadata, dict):
+        for key in ("source_oa_id", "source_oa_row_id", "oa_row_id"):
+            value = text(special_metadata.get(key))
+            if value is not None and key not in result:
+                result[key] = value
+    return {key: value for key, value in serialize_value(result).items() if value not in (None, "")}
+
+
+def _workbench_group_row_payload_for_write(group_row: dict[str, Any]) -> dict[str, Any]:
+    row_payload = group_row.get("payload") if isinstance(group_row.get("payload"), dict) else {}
+    return _workbench_group_row_minimal_payload(
+        row_payload,
+        pane=text(group_row.get("pane")) or "",
+        row_id=text(group_row.get("row_id") or row_payload.get("row_id") or row_payload.get("id")),
+        source_kind=text(group_row.get("source_kind") or row_payload.get("source_kind")),
+    )
+
+
+def _workbench_snapshot_payload_for_write(
+    *,
+    scope_key: str,
+    scope_month: Any,
+    grouped_payload: dict[str, Any],
+    source_versions: dict[str, Any],
+    generated_at: str | None,
+    cache_status: str,
+) -> dict[str, Any]:
+    summary = grouped_payload.get("summary") if isinstance(grouped_payload.get("summary"), dict) else {}
+    payload: dict[str, Any] = {
+        "month": grouped_payload.get("month") or scope_key,
+        "scope_key": scope_key,
+        "scope_month": scope_month,
+        "summary": serialize_value(summary),
+        "paired": {"groups": []},
+        "open": {"groups": []},
+        "workbench_groups_materialized": True,
+    }
+    for key in (
+        "oa_status",
+        "workbench_read_model_schema_version",
+        "oa_attachment_invoice_parser_version",
+        "oa_projection_sync_version",
+        "page_mode",
+    ):
+        if key in grouped_payload:
+            payload[key] = serialize_value(grouped_payload.get(key))
+    return {
+        "scope_key": scope_key,
+        "scope_month": scope_month,
+        "generated_at": generated_at,
+        "cache_status": cache_status,
+        "payload": payload,
+        "source_versions": serialize_value(source_versions),
+    }
+
+
+def _workbench_snapshot_payload_requires_group_materialization(payload: dict[str, Any]) -> bool:
+    return payload.get("workbench_groups_materialized") is True
 
 
 def _iter_typed_group_rows_with_metadata(group: dict[str, Any]) -> list[tuple[str, str, int, dict[str, Any]]]:

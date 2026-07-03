@@ -1782,7 +1782,6 @@ class WorkbenchWriteFacade:
             preview=preview,
             affected_row_ids=affected_row_ids,
         )
-        previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
         relation_refresh_metadata = self._relation_refresh_metadata(
             relation=active_relation,
             row_ids=affected_row_ids,
@@ -1860,10 +1859,6 @@ class WorkbenchWriteFacade:
         except WorkbenchRelationCommandError as exc:
             return self._relation_command_error_result(exc)
         except Exception:
-            self._restore_pair_relation_snapshot(
-                previous_pair_snapshot,
-                changed_case_ids=[case_id],
-            )
             return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
         return WorkbenchWriteResult(HTTPStatus.OK, self._withdraw_link_response_payload(result))
 

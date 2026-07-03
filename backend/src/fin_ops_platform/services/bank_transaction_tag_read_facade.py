@@ -104,6 +104,33 @@ class BankTransactionTagReadFacade:
             scope_keys_hint=_scope_keys_from_rows(bank_rows),
         )
 
+    def source_versions_for_scope_keys(
+        self,
+        scope_keys: list[str],
+        *,
+        require_fresh: bool = True,
+        reason: str = "downstream_bank_tag_source_versions",
+    ) -> dict[str, Any]:
+        normalized_scope_keys = _dedupe_preserve_order(text(value) for value in list(scope_keys or []))
+        reader = getattr(self._read_model_repository, "bank_detail_scope_summary", None)
+        if not callable(reader) or not normalized_scope_keys:
+            return self._non_fresh_result(
+                status="unavailable",
+                scope_keys=normalized_scope_keys,
+                require_fresh=require_fresh,
+                reason=reason,
+                stale_reasons=["repository_method_unavailable" if not callable(reader) else "scope_keys_required"],
+            )
+        payload = reader(scope_keys=normalized_scope_keys, tenant_id=self._tenant_id)
+        result = self._result_from_repository_payload(
+            _source_versions_payload_from_scope_summary(payload),
+            require_fresh=require_fresh,
+            reason=reason,
+            fallback_scope_keys=normalized_scope_keys,
+        )
+        self._last_result = result
+        return result
+
     def category_records_by_transaction_ids(
         self,
         transaction_ids: list[str],
@@ -239,6 +266,44 @@ def _facade_result(
         "read_model_scope_signatures": read_model_scope_signatures if isinstance(read_model_scope_signatures, dict) else {},
         "missing_transaction_ids": list(missing_transaction_ids or []),
     }
+
+
+def _source_versions_payload_from_scope_summary(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    source_versions = _source_versions_from_scope_summary(payload)
+    return {
+        "read_model_status": payload.get("read_model_status"),
+        "rows": [],
+        "source_versions": source_versions,
+        "read_model_scope_keys": text_list(payload.get("read_model_scope_keys")),
+        "read_model_scope_signatures": (
+            payload.get("read_model_scope_signatures")
+            if isinstance(payload.get("read_model_scope_signatures"), dict)
+            else {}
+        ),
+        "dirty_scopes": list(payload.get("dirty_scopes") or []),
+    }
+
+
+def _source_versions_from_scope_summary(scope_summary: dict[str, Any]) -> dict[str, Any]:
+    signatures = (
+        scope_summary.get("read_model_scope_signatures")
+        if isinstance(scope_summary.get("read_model_scope_signatures"), dict)
+        else {}
+    )
+    scope_keys = text_list(scope_summary.get("read_model_scope_keys"))
+    if len(scope_keys) == 1:
+        signature = signatures.get(scope_keys[0]) if isinstance(signatures.get(scope_keys[0]), dict) else {}
+        source_versions = signature.get("source_versions") if isinstance(signature.get("source_versions"), dict) else {}
+        return dict(source_versions)
+    result: dict[str, Any] = {}
+    for scope_key in scope_keys:
+        signature = signatures.get(scope_key) if isinstance(signatures.get(scope_key), dict) else {}
+        source_versions = signature.get("source_versions") if isinstance(signature.get("source_versions"), dict) else {}
+        if source_versions:
+            result[scope_key] = dict(source_versions)
+    return result
 
 
 def _standardize_bank_detail_row(row: dict[str, Any]) -> dict[str, Any]:

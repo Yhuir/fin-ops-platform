@@ -17,6 +17,8 @@ RUNTIME_QUEUE_PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-runtim
 RUNTIME_QUEUE_PRUNE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-prune-runtime-queue-history.timer.example"
 DISPATCHER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example"
 RABBITMQ_WORKER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-worker.env.example"
+COMMON_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.common.env.example"
+LEGACY_ENV = REPO_ROOT / "deploy/oa/fin_ops.env.example"
 WORKER_ENV_DIR = REPO_ROOT / "deploy/oa/env"
 PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh"
 RUNTIME_QUEUE_PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
@@ -37,10 +39,10 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         env_example = DISPATCHER_ENV.read_text()
         deploy_control = DEPLOY_CONTROL.read_text()
 
-        self.assertIn("RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5", env_example)
-        self.assertIn("Environment=RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5", service)
+        self.assertIn("RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.05", env_example)
+        self.assertIn("Environment=RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.05", service)
         self.assertIn("--poll-interval-seconds ${RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS}", service)
-        self.assertIn("Environment=RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5", deploy_control)
+        self.assertIn("Environment=RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.05", deploy_control)
         self.assertIn("--poll-interval-seconds \\${RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS}", deploy_control)
         self.assertNotIn("--poll-interval-seconds 5", service)
         self.assertNotIn("--poll-interval-seconds 5", deploy_control)
@@ -74,6 +76,20 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertEqual([], missing_examples)
 
+    def test_runtime_env_examples_pin_standard_write_operation_smoke_inputs(self) -> None:
+        for env_example in (COMMON_ENV, LEGACY_ENV):
+            content = env_example.read_text(encoding="utf-8")
+            self.assertIn(
+                "FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json",
+                content,
+                env_example.name,
+            )
+            self.assertIn(
+                "FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702",
+                content,
+                env_example.name,
+            )
+
     def test_required_worker_env_examples_do_not_pin_legacy_slow_poll_interval(self) -> None:
         slow_examples: list[str] = []
         for registration in RUNTIME_WORKER_REGISTRY:
@@ -83,6 +99,8 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             content = env_example.read_text(encoding="utf-8")
             if "--poll-interval-seconds 2" in content:
                 slow_examples.append(registration.env_example)
+            if registration.instance_name != "workbench-matching" and "--poll-interval-seconds 0.1" in content:
+                slow_examples.append(registration.env_example)
             if registration.instance_name != "workbench-matching" and "--poll-interval-seconds 5" in content:
                 slow_examples.append(registration.env_example)
 
@@ -90,11 +108,28 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
     def test_runtime_worker_env_install_migrates_only_legacy_poll_interval(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
+        workbench_env = (WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").read_text(encoding="utf-8")
 
         self.assertIn("install_if_missing", helper)
         self.assertIn("migrate_legacy_worker_poll_interval", helper)
-        self.assertIn("--poll-interval-seconds 2([^0-9.]|$)", helper)
-        self.assertIn("--poll-interval-seconds 0.25", helper)
+        self.assertIn('source_poll="$(grep -oE -- "--poll-interval-seconds [0-9.]+"', helper)
+        self.assertIn("--poll-interval-seconds (2|0\\\\.25|0\\\\.1|0\\\\.05)([^0-9.]|$)", helper)
+        self.assertIn("--poll-interval-seconds ${source_poll}", helper)
+        self.assertIn("--poll-interval-seconds 0.01", workbench_env)
+
+    def test_workbench_workers_split_month_shards_from_all_scope_aggregate(self) -> None:
+        helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
+        workbench_env = (WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").read_text(encoding="utf-8")
+        aggregate_env = (WORKER_ENV_DIR / "fin-ops.worker.workbench-aggregate.env.example").read_text(
+            encoding="utf-8"
+        )
+        required = {registration.instance_name: registration for registration in RUNTIME_WORKER_REGISTRY if registration.required}
+
+        self.assertIn("workbench-aggregate", required)
+        self.assertIn("--exclude-claim-scope-key all", workbench_env)
+        self.assertIn("--claim-scope-key all", aggregate_env)
+        self.assertIn("migrate_workbench_scope_split", helper)
+        self.assertIn("--exclude-claim-scope-key all", helper)
 
     def test_rabbitmq_dispatcher_env_includes_invoice_usage_collection_events(self) -> None:
         env_example = DISPATCHER_ENV.read_text()
@@ -109,7 +144,13 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertNotRegex(env_example, r"(?m)^\s*FIN_OPS_QUEUE_BACKEND=", msg=env_example)
         self.assertIn("RABBITMQ_URL=", env_example)
-        self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=1", env_example)
+        self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1", env_example)
+
+    def test_runtime_worker_env_install_migrates_rabbitmq_consumer_drain_interval(self) -> None:
+        helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
+
+        self.assertIn("migrate_rabbitmq_worker_drain_interval", helper)
+        self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1", helper)
 
     def test_search_pending_workers_and_dispatcher_include_pending_invoice_refresh(self) -> None:
         postgres_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending.env.example").read_text()

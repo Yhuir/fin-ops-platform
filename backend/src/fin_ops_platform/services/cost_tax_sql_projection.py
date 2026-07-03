@@ -327,7 +327,7 @@ class CostStatisticsSqlProjectionBuilder:
         }
 
     def _cost_entries_from_workbench(self, month: str, *, project_scope: str) -> list[dict[str, Any]]:
-        group_rows = self._connection.fetch_all(
+        member_rows = self._connection.fetch_all(
             """
             with active_generation as (
                 select generation_id
@@ -338,36 +338,75 @@ class CostStatisticsSqlProjectionBuilder:
                 order by activated_at desc nulls last, completed_at desc nulls last, updated_at desc
                 limit 1
             )
-            select g.group_id, g.zone, g.payload, g.raw_payload
+            select
+                g.group_id,
+                g.zone,
+                g.payload,
+                g.raw_payload,
+                gr.pane,
+                gr.row_id,
+                gr.row_role,
+                gr.row_index,
+                wr.payload as row_payload,
+                wr.raw_payload as row_raw_payload,
+                gr.payload as member_payload,
+                gr.raw_payload as member_raw_payload
             from active_generation active
             join read_model.workbench_groups g
               on g.generation_id = active.generation_id
+            join read_model.workbench_group_rows gr
+              on gr.generation_id = g.generation_id
+             and gr.scope_key = g.scope_key
+             and gr.zone = g.zone
+             and gr.group_id = g.group_id
+            left join read_model.workbench_rows wr
+              on wr.generation_id = gr.generation_id
+             and wr.scope_key = gr.scope_key
+             and wr.row_id = gr.row_id
             where g.scope_key = %s
               and g.zone in ('paired', 'open')
               and g.source_kinds && array['oa', 'bank']::text[]
-              and jsonb_path_exists(
-                  coalesce(g.payload, g.raw_payload),
-                  '$.oa_rows[*] ? ((@.project_name != null || @.detail_fields."项目名称" != null) && (@.expense_type != null || @.detail_fields."费用类型" != null) && (@.expense_content != null || @.reason != null || @.detail_fields."费用内容" != null))'
-              )
-              and (
-                  g.zone = 'paired'
-                  or jsonb_path_exists(coalesce(g.payload, g.raw_payload), '$.bank_rows[*].available_actions[*] ? (@ == "cancel_link")')
-                  or jsonb_path_exists(coalesce(g.payload, g.raw_payload), '$.oa_rows[*].oa_bank_relation.code ? (@ == "fully_linked" || @ == "automatic_match")')
-              )
-            order by g.bank_sort_max desc nulls last, g.group_id
+              and gr.pane in ('oa', 'bank')
+              and coalesce(gr.row_role, '') <> 'collapsed'
+            order by g.bank_sort_max desc nulls last, g.group_id, gr.pane, gr.row_index, gr.row_id
             """,
             (month, month),
         )
+        groups_by_id: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in member_rows:
+            group_id = str(row.get("group_id") or "").strip()
+            zone = str(row.get("zone") or "paired").strip().lower() or "paired"
+            if not group_id:
+                continue
+            group_key = (zone, group_id)
+            group_payload = groups_by_id.get(group_key)
+            if group_payload is None:
+                source_payload = row_payload(row, "payload", "raw_payload")
+                group_payload = dict(source_payload) if isinstance(source_payload, dict) else {"group_id": group_id}
+                group_payload["group_id"] = group_id
+                group_payload["zone"] = zone
+                group_payload.setdefault("oa_rows", [])
+                group_payload.setdefault("bank_rows", [])
+                groups_by_id[group_key] = group_payload
+            pane = str(row.get("pane") or "").strip()
+            if pane not in {"oa", "bank"}:
+                continue
+            payload = row_payload(row, "row_payload", "row_raw_payload", "member_payload", "member_raw_payload")
+            member_payload = dict(payload) if isinstance(payload, dict) else {}
+            row_id = str(row.get("row_id") or "").strip()
+            if row_id:
+                member_payload.setdefault("id", row_id)
+                member_payload.setdefault("row_id", row_id)
+            member_payload.setdefault("type", pane)
+            group_payload.setdefault(f"{pane}_rows", []).append(member_payload)
         groups = []
-        for row in group_rows:
-            group_payload = row_payload(row, "payload", "raw_payload")
-            if isinstance(group_payload, dict):
-                if is_candidate_workbench_group(group_payload):
-                    continue
-                zone = str(row.get("zone") or group_payload.get("zone") or "paired").strip().lower()
-                if zone == "open" and not is_cost_eligible_open_group(group_payload):
-                    continue
-                groups.append(group_payload)
+        for group_payload in groups_by_id.values():
+            if is_candidate_workbench_group(group_payload):
+                continue
+            zone = str(group_payload.get("zone") or "paired").strip().lower()
+            if zone == "open" and not is_cost_eligible_open_group(group_payload):
+                continue
+            groups.append(group_payload)
         active_projects = self._active_project_names() if project_scope == "active" else None
         entries: list[dict[str, Any]] = []
         for group in groups:

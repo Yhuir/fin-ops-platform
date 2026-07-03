@@ -99,6 +99,9 @@ EXPECTED_MIGRATIONS = [
     "0083_bank_flow_rule_batch_tag_rules.sql",
     "0084_runtime_queue_history_retention.sql",
     "0085_pending_invoice_trade_date_nulls_last_index.sql",
+    "0086_runtime_queue_claim_hot_path.sql",
+    "0087_oa_pending_payment_claim_hot_path.sql",
+    "0088_app_health_dashboard_current_effective_hot_path.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -246,7 +249,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 86)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 89)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -315,14 +318,33 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("'dead_lettered'", sql)
         self.assertIn("'done'", sql)
 
+    def test_app_health_dashboard_current_effective_hot_path_indexes_are_declared(self) -> None:
+        sql = (MIGRATIONS_DIR / "0088_app_health_dashboard_current_effective_hot_path.sql").read_text().lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("outbox_events_app_status_current_effective_scope_idx", normalized_sql)
+        self.assertIn("coalesce(scope_type, raw_payload->>'scope_type', payload->>'scope_type', aggregate_type, '')", normalized_sql)
+        self.assertIn("coalesce(scope_key, raw_payload->>'scope_key', payload->>'scope_key', aggregate_id, '')", normalized_sql)
+        self.assertIn("updated_at desc, created_at, id", normalized_sql)
+        self.assertIn("where status in", normalized_sql)
+        self.assertIn("app_status_readiness_fresh_scope_updated_idx", normalized_sql)
+        self.assertIn("where status = 'fresh'", normalized_sql)
+
     def test_oa_pending_payment_bank_relation_schema_and_migration_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
+        normalized_sql = " ".join(sql.split())
 
         self.assertIn("create table if not exists app.oa_pending_payment_bank_relations", sql)
         self.assertIn("create table if not exists app.bank_transaction_relation_claims", sql)
         self.assertIn("bank_transaction_relation_claims_active_bank_uidx", sql)
         self.assertIn("on app.bank_transaction_relation_claims (bank_transaction_id)", sql)
         self.assertIn("where status = 'active'", sql)
+        self.assertIn("bank_transaction_relation_claims_active_oa_scope_bank_idx", sql)
+        self.assertIn(
+            "on app.bank_transaction_relation_claims ( scope_month, bank_transaction_id )",
+            normalized_sql,
+        )
+        self.assertIn("owner_type = 'oa_pending_payment_relation'", sql)
         self.assertIn("oa_pending_payment_bank_relations_oa_gin", sql)
         self.assertIn("oa_pending_payment_bank_relations_bank_gin", sql)
         self.assertIn("special_metadata->>'origin' = 'oa_pending_payment_in_progress'", sql)
@@ -579,6 +601,7 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "outbox_events_max_attempts_chk",
             "read_model_dirty_scopes_priority_chk",
             "outbox_events_claim_priority_idx",
+            "outbox_events_claim_event_type_priority_idx",
             "outbox_events_trace_idx",
             "runtime_outbox_envelope_v1",
             "publish_status text not null default 'unpublished'",
@@ -672,6 +695,22 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update, delete on app.oa_applicant_credentials to fin_ops_app_runtime",
         ):
             self.assertIn(required, sql)
+        normalized_sql = " ".join(sql.split())
+        self.assertIn("on job.outbox_events ( event_type, status,", normalized_sql)
+        self.assertIn("case priority when 'urgent' then 3", normalized_sql)
+        self.assertIn("where status in ('pending', 'processing')", normalized_sql)
+
+    def test_runtime_queue_claim_hot_path_index_is_declared(self) -> None:
+        sql = (MIGRATIONS_DIR / "0086_runtime_queue_claim_hot_path.sql").read_text().lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("create index if not exists outbox_events_claim_event_type_priority_idx", normalized_sql)
+        self.assertIn("on job.outbox_events ( event_type, status,", normalized_sql)
+        self.assertIn("case priority when 'urgent' then 3", normalized_sql)
+        self.assertIn("when 'high' then 2", normalized_sql)
+        self.assertIn("when 'normal' then 1", normalized_sql)
+        self.assertIn("available_at, created_at, id", normalized_sql)
+        self.assertIn("where status in ('pending', 'processing')", normalized_sql)
 
     def test_oa_applicant_credentials_schema_uses_encrypted_password_only(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

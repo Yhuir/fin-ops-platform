@@ -122,64 +122,109 @@ class CostStatisticsProjectionConnection:
                         "group_id": "group-1",
                         "group_type": "manual_confirmed",
                         "relation_status": "linked",
-                        "oa_rows": [
-                            {
-                                "project_name": "项目A",
-                                "project_id": "P-A",
-                                "expense_type": "材料",
-                                "expense_content": "钢材",
-                                "applicant": "张三",
-                            }
-                        ],
-                        "bank_rows": [
-                            {
-                                "id": "bank-1",
-                                "trade_time": "2026-05-02 10:00:00",
-                                "counterparty_name": "供应商A",
-                                "payment_account_label": "建行",
-                                "direction": "支出",
-                                "remark": "采购",
-                                "amount": "10.00",
-                            }
-                        ],
+                        "workbench_group_rows_materialized": True,
                     },
                     "raw_payload": {},
+                    "pane": "oa",
+                    "row_id": "oa-1",
+                    "row_role": "normal",
+                    "row_index": 0,
+                    "row_payload": {
+                        "id": "oa-1",
+                        "type": "oa",
+                        "project_name": "项目A",
+                        "project_id": "P-A",
+                        "expense_type": "材料",
+                        "expense_content": "钢材",
+                        "applicant": "张三",
+                    },
+                    "member_payload": {"row_id": "oa-1", "type": "oa"},
+                },
+                {
+                    "group_id": "group-1",
+                    "zone": "paired",
+                    "payload": {
+                        "group_id": "group-1",
+                        "group_type": "manual_confirmed",
+                        "relation_status": "linked",
+                        "workbench_group_rows_materialized": True,
+                    },
+                    "raw_payload": {},
+                    "pane": "bank",
+                    "row_id": "bank-1",
+                    "row_role": "normal",
+                    "row_index": 1,
+                    "row_payload": {
+                        "id": "bank-1",
+                        "type": "bank",
+                        "trade_time": "2026-05-02 10:00:00",
+                        "counterparty_name": "供应商A",
+                        "payment_account_label": "建行",
+                        "direction": "支出",
+                        "remark": "采购",
+                        "amount": "10.00",
+                    },
+                    "member_payload": {"row_id": "bank-1", "type": "bank"},
                 }
             ]
             if self.include_open_candidate:
-                rows.append(
-                    {
-                        "group_id": "group-candidate",
-                        "zone": "open",
-                        "payload": {
+                rows.extend(
+                    [
+                        {
                             "group_id": "group-candidate",
-                            "group_type": "candidate",
-                            "relation_status": "candidate",
-                            "reason": "attached_unique_candidate",
-                            "oa_rows": [
-                                {
-                                    "project_name": "项目A",
-                                    "project_id": "P-A",
-                                    "expense_type": "材料",
-                                    "expense_content": "候选材料",
-                                    "applicant": "李四",
-                                }
-                            ],
-                            "bank_rows": [
-                                {
-                                    "id": "bank-candidate",
-                                    "trade_time": "2026-05-03 10:00:00",
-                                    "counterparty_name": "候选供应商",
-                                    "payment_account_label": "建行",
-                                    "direction": "支出",
-                                    "remark": "候选采购",
-                                    "amount": "999.00",
-                                    "available_actions": ["detail", "view_relation", "cancel_link"],
-                                }
-                            ],
+                            "zone": "open",
+                            "payload": {
+                                "group_id": "group-candidate",
+                                "group_type": "candidate",
+                                "relation_status": "candidate",
+                                "reason": "attached_unique_candidate",
+                                "workbench_group_rows_materialized": True,
+                            },
+                            "raw_payload": {},
+                            "pane": "oa",
+                            "row_id": "oa-candidate",
+                            "row_role": "normal",
+                            "row_index": 0,
+                            "row_payload": {
+                                "id": "oa-candidate",
+                                "type": "oa",
+                                "project_name": "项目A",
+                                "project_id": "P-A",
+                                "expense_type": "材料",
+                                "expense_content": "候选材料",
+                                "applicant": "李四",
+                            },
+                            "member_payload": {"row_id": "oa-candidate", "type": "oa"},
                         },
-                        "raw_payload": {},
-                    }
+                        {
+                            "group_id": "group-candidate",
+                            "zone": "open",
+                            "payload": {
+                                "group_id": "group-candidate",
+                                "group_type": "candidate",
+                                "relation_status": "candidate",
+                                "reason": "attached_unique_candidate",
+                                "workbench_group_rows_materialized": True,
+                            },
+                            "raw_payload": {},
+                            "pane": "bank",
+                            "row_id": "bank-candidate",
+                            "row_role": "normal",
+                            "row_index": 1,
+                            "row_payload": {
+                                "id": "bank-candidate",
+                                "type": "bank",
+                                "trade_time": "2026-05-03 10:00:00",
+                                "counterparty_name": "候选供应商",
+                                "payment_account_label": "建行",
+                                "direction": "支出",
+                                "remark": "候选采购",
+                                "amount": "999.00",
+                                "available_actions": ["detail", "view_relation", "cancel_link"],
+                            },
+                            "member_payload": {"row_id": "bank-candidate", "type": "bank"},
+                        },
+                    ]
                 )
             return rows
         return []
@@ -874,9 +919,10 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(workbench_params, ("2026-05", "2026-05"))
         self.assertIn("with active_generation as", workbench_sql)
         self.assertIn("join read_model.workbench_groups", workbench_sql)
+        self.assertIn("join read_model.workbench_group_rows", workbench_sql)
+        self.assertIn("left join read_model.workbench_rows", workbench_sql)
         self.assertIn("g.generation_id = active.generation_id", workbench_sql)
-        self.assertIn("jsonb_path_exists", workbench_sql)
-        self.assertIn("available_actions", workbench_sql)
+        self.assertNotIn("jsonb_path_exists", workbench_sql)
 
     def test_cost_statistics_scope_shards_are_listed_from_active_workbench_generations(self) -> None:
         class Connection(CostStatisticsProjectionConnection):

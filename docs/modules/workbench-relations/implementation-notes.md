@@ -1,5 +1,94 @@
 # 关联台关系事实源 实施记录
 
+## 2026-07-03 - Workbench withdraw UoW 移除 legacy snapshot restore
+
+目标：移除 Workbench withdraw UoW 写路径中残留的旧 pair relation snapshot 回滚链路。生产固定 write scenario 显示 HTTP submit 存在约 1s 级事务外慢段；`WorkbenchWriteUnitOfWork` 已经拥有单一事务、幂等、relation command write 和 dirty/outbox enqueue 边界，facade 再无条件读取整张 pair snapshot 属于旧逻辑污染。
+
+变更：
+
+- `_withdraw_link_with_uow(...)` 不再调用 `relation_read_snapshot_port.snapshot()`。
+- UoW 异常时不再调用 `_restore_pair_relation_snapshot(...)`；数据库事务 rollback 由 `WorkbenchWriteUnitOfWork.run(...)` 的 transaction context 承担。
+- 新增回归测试，禁止 UoW withdraw 成功链路读取 legacy pair snapshot。
+
+旧逻辑删除：
+
+- 禁止为了 UoW 写入失败恢复而在请求内读取整张 `WorkbenchPairRelationService` snapshot。
+- 禁止在 UoW 已经控制事务和 dirty/outbox enqueue 时，再接入旧 in-memory restore 作为 fallback。
+
+未改变：
+
+- 业务撤回状态机、preview lock、expected_versions、idempotency、response shape、relation history、dirty/outbox targets、权限和审计均不变。
+- 非 UoW legacy fallback path 仍按既有迁移期逻辑工作，后续删除需逐调用点验证。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_auth_context_idempotency.py -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_uow_contract.py -q
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_write_facade.py tests/test_workbench_auth_context_idempotency.py
+```
+
+未测风险：本地 fake 可证明 UoW 边界不再读旧 snapshot；生产 HTTP wall time 仍需发布后用固定 scenario/ticket 重新执行 write-operation apply 观察。
+
+## 2026-07-03 - Workbench withdraw submit 去重 canonical snapshot
+
+目标：压缩固定 Workbench withdraw 写操作的 HTTP 事务耗时。生产样本显示 write step 约 `3148ms`，outbox `created_at` 早于事务提交，导致 write-operation gate 看起来像 dispatcher publish 延迟；实际旧 submit 路径在事务内二次加载 relation snapshot，并重复执行 relation read model fresh check。
+
+变更：
+
+- `WorkbenchRelationCommandService.preview_withdraw_relation(...)` 抽出 `_preview_withdraw_relation_from_pair_service(...)`，允许 submit 路径复用已经加载的 `WorkbenchPairRelationService`。
+- `withdraw_relation(...)` 在同一个 canonical pair-service snapshot 上完成 active relation 读取、preview lock、fresh precondition 和 `withdraw_latest_for_row_ids(...)`。
+- submit 路径只做一次 `relation_facade.get_by_row_ids(..., require_fresh=True)`；不再先 `get_active_relation_by_case_id` 后调用 public preview API 重新加载 snapshot。
+
+旧逻辑删除：
+
+- 禁止在 submit 事务内调用 public `preview_withdraw_relation(...)` 作为锁校验；该 public API 会重新读取 repository snapshot，适合独立 preview 请求，不适合提交事务内部。
+- 禁止为了“保险”重复执行 relation read model fresh check；一次 fail-closed precondition 足够，重复检查只增加生产写入耗时并扩大事务窗口。
+
+未改变：
+
+- preview_id / expected_versions 冲突语义不变；如果调用方提供 preview lock，仍按当前 snapshot 计算并比较。
+- relation history、changed case 保存、idempotency、dirty/outbox/readiness、API response shape 和权限审计不变。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_preview_and_submit_delegate_to_relation_command_service tests/test_workbench_write_characterization.py::WorkbenchWriteCharacterizationTests::test_withdraw_link_uses_uow_transaction_when_available tests/test_workbench_relation_sql_projection.py -q
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_relation_command_service.py backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/services/workbench_uow.py
+```
+
+未测风险：本地 fake 证明重复 I/O 删除和状态机不变；生产仍需发布后复跑固定 scenario/ticket 的 write-operation apply。
+
+## 2026-07-03 - Workbench relation source-object 补读快路径
+
+目标：压缩固定 write-operation Workbench withdraw 后的 `workbench_relation.read_model.refresh` changed rebuild。生产样本显示撤回写入本身成功，`workbench_relation` handler 约 `956ms`，但旧投影会为了关系成员补齐再次读取同一月的银行/OA/发票源对象，把普通同月撤回推到 1s 边缘。
+
+变更：
+
+- `WorkbenchRelationSqlProjectionBuilder.rebuild_workbench_relation_read_model_scope(...)` 先保存本月源对象集，再读取 active relation；relation 成员已在本月对象集中时直接复用，不再第二次调用全月 source object 查询。
+- 只有跨月 relation 缺少成员时才调用显式 row-id 补读，并通过 relation `row_types` 限定需要查询的源表：bank -> `app.bank_transactions`，OA -> `app.oa_applications`，invoice -> `app.invoices`。
+- `_source_objects_for_month(...)` 增加 `include_month_scope` 和 `source_kinds` 内部参数，用来表达“月分片读取”和“显式成员补读”两个不同输入 I/O；调用方仍只通过 projection builder，不把 SQL 计划暴露给 route 或下游页面。
+
+旧逻辑删除：
+
+- 禁止恢复“先读本月源对象，拿到 relation 后再带全部 relation row ids 重读整月源对象”的旧路径。
+- 禁止在跨月只缺一个 invoice 成员时仍探测 bank/OA 源表；未知 row type 才允许回退到三源表显式 row-id 查询。
+- 不在 repository save、worker loop、HTTP route 或前端 barrier 上补 sleep/cache/retry 来掩盖 projection 重复 I/O。
+
+未改变：
+
+- `app.workbench_pair_relations` canonical fact、withdraw/confirm 状态机、history、dirty/outbox/readiness、`workbench_relation` payload schema、下游 fan-out、权限与审计均不变。
+- 跨月 relation 仍保证当前 scope 写入所有 relation 成员 row 索引。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_sql_projection.py -q
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py
+```
+
+未测风险：本地 fake 只能证明查询计划和 payload 语义；生产仍需发布后用固定 scenario/ticket 重新执行 write-operation apply，验证 changed rebuild 的 enqueue-to-done 收敛。
+
 ## 2026-06-30 - 关系二态化和自动匹配正式化
 
 目标：取消下游页面的 `candidate relation` 业务口径，统一为“正式 active relation / 无 active relation”，并让符合条件的系统自动匹配直接写成正式关系。
@@ -4339,3 +4428,29 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py::Wo
 ```
 
 后续：发布后重跑 critical read model SLO 和 Workbench turnover write-operation 样本；未通过前不能声明完整 PSCIP-L4/global closure。
+
+## 2026-07-03 - Workbench relation UoW batch refresh enqueue
+
+目标：继续收敛 Workbench relation withdraw 的写事务热路径，避免在同一 HTTP 写请求内对 `workbench`、`workbench_relation` 和 downstream targets 逐个执行 dirty/outbox 入队 SQL。
+
+变更：
+
+- `WorkbenchWriteUnitOfWork` 对支持批量的 `RuntimeQueueReadModelRefreshWriter` 调用 `enqueue_refreshes(...)`，一次性提交 target list。
+- `RuntimeQueueRepository.enqueue_read_model_refreshes_in_transaction(...)` 使用单条 CTE 批量写 `job.read_model_dirty_scopes` 与 `job.outbox_events`，并按输入顺序返回 event。
+- `RuntimeQueueReadModelRefreshWriter` 保留旧 queue fallback；生产 `Application._workbench_uow_repository_factory(...)` 继续注入 `PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)`，避免 relation repository hidden fan-out 与 UoW fan-out 重复。
+- API response shape 不变：`source_versions` 和 `outbox_event_ids` 仍由 UoW 从返回 event 中组装。
+
+边界：
+
+- 该改动只优化 UoW 内部 I/O；不改变 `WorkbenchRelationCommandService` 的 canonical relation lifecycle、preview lock、idempotency、audit、history 或 freshness precondition。
+- dirty/outbox 仍是 read model refresh 事实源；RabbitMQ 仍只是 transport/wakeup。
+- 新增 downstream read model 仍必须扩展 UoW target planner/metadata 和测试，不能把旧 repository enqueue 重新接回生产主链路。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_workbench_uow_contract.py -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_write_characterization.py::WorkbenchWriteCharacterizationTests::test_withdraw_link_uses_uow_transaction_when_available tests/test_workbench_relation_command_service.py tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_preview_and_submit_delegate_to_relation_command_service -q
+```
+
+未闭合：本地测试只证明批量入队合同和 UoW wiring；生产 release 后必须使用固定 scenario `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json` 与 standing ticket `FINOPS-WRITE-SMOKE-STANDING-20260702` 重新跑 Workbench withdraw write-operation SLO。

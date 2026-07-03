@@ -27,12 +27,14 @@
 
 ## 当前闭环状态
 
-- 状态：PSCIP-L4 closed。
+- 状态：Read Model 模块化 PSCIP-L4 closed；full external PSCIP-L4 / 高性能全域闭环 open。
 - 适用范围：当前 15 个 App Status read model；`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 按显式例外语义闭环。
 - 最终证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`。
 - 生产证据：`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md`。
 - 远端闭环提交：`c771b894 docs: close read model production evidence`。
 - 结论：生产 scope contract、dirty/outbox/readiness、worker freshness 和 critical read model SLO 已按分层生产目标闭环；当前没有已知 stale-as-fresh 路径。
+- 高性能状态：2026-07-03 release `pscip-l4-workbench-group-row-min-20260703` 后，Workbench warmed targeted 1s direct SLO `10/10` pass，`source_version 3124..3133` p95/max `890.808ms`；成本统计 `active:2026-02` targeted `5/5` pass，p95/max `938.124ms`。但 full critical grouped 1s smoke 仍未闭环，最新一轮为 `15/16` pass，`search:2026-03` handler `3087.035ms` / enqueue `3399.122ms` fail；targeted search `4/5` pass 但仍有一次 `1425.676ms` handler 长尾。因此 full external PSCIP-L4 / “所有页面耗时短”仍 open，不得描述为只剩形式化生产验证。
+- 写操作测试输入：标准 scenario 路径和 standing approval ticket 已在部署 env、`write_operation_scenario_discovery.standard_inputs`、生成的 scenario JSON 和 `docs/operations/monitoring.md` 页面矩阵中固化；主控 workflow 后续不得为标准 production smoke 反复询问 scenario/ticket。
 - 非阻塞风险：Search 曾出现一次 grouped-run 高延迟样本，targeted rerun 通过；Workbench groups admin smoke 的 `400` 是 probe shape 问题，不是 read model freshness 失败。
 
 ## 当前边界

@@ -1,9 +1,100 @@
 import unittest
 
-from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
+from fin_ops_platform.services.workbench_candidate_grouping import CandidateGroup, WorkbenchCandidateGroupingService
 
 
 class WorkbenchCandidateGroupingTests(unittest.TestCase):
+    def test_candidate_group_merge_requires_unique_complementary_match(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        oa_group = candidate_group(
+            "oa-candidate",
+            {
+                "id": "oa-merge-200",
+                "type": "oa",
+                "apply_type": "支付申请",
+                "pay_receive_time": "2026-05-03",
+                "amount": "200.00",
+                "counterparty_name": "唯一性供应商",
+            },
+        )
+        first_bank_group = candidate_group(
+            "bank-candidate-1",
+            {
+                "id": "bank-merge-100-a",
+                "type": "bank",
+                "trade_time": "2026-05-03 10:00",
+                "debit_amount": "100.00",
+                "credit_amount": "",
+                "counterparty_name": "唯一性供应商",
+            },
+            {
+                "id": "bank-merge-100-b",
+                "type": "bank",
+                "trade_time": "2026-05-03 10:30",
+                "debit_amount": "100.00",
+                "credit_amount": "",
+                "counterparty_name": "唯一性供应商",
+            },
+        )
+        second_bank_group = candidate_group(
+            "bank-candidate-2",
+            {
+                "id": "bank-merge-200",
+                "type": "bank",
+                "trade_time": "2026-05-03 11:00",
+                "debit_amount": "200.00",
+                "credit_amount": "",
+                "counterparty_name": "唯一性供应商",
+            },
+        )
+
+        ambiguous_groups = service._merge_candidate_groups(
+            [oa_group, first_bank_group, second_bank_group]
+        )
+
+        self.assertEqual([group.group_id for group in ambiguous_groups], [
+            "oa-candidate",
+            "bank-candidate-1",
+            "bank-candidate-2",
+        ])
+
+        unique_groups = service._merge_candidate_groups([oa_group, first_bank_group])
+
+        self.assertEqual(len(unique_groups), 1)
+        self.assertEqual([row["id"] for row in unique_groups[0].oa_rows], ["oa-merge-200"])
+        self.assertEqual(
+            [row["id"] for row in unique_groups[0].bank_rows],
+            ["bank-merge-100-a", "bank-merge-100-b"],
+        )
+
+    def test_group_row_serialization_does_not_mutate_input_row_top_level(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        row = no_oa_bank_row(
+            "bk-no-oa-no-mutate-001",
+            batch_id="no_oa_no_mutate",
+            debit_amount="50.00",
+            remark="手续费明细 A",
+        )
+
+        service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                row,
+                no_oa_bank_row(
+                    "bk-no-oa-no-mutate-002",
+                    batch_id="no_oa_no_mutate",
+                    debit_amount="38.00",
+                    remark="手续费明细 B",
+                ),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(row["id"], "bk-no-oa-no-mutate-001")
+        self.assertEqual(row["invoice_relation"]["label"], "已匹配：手续费")
+        self.assertNotIn("available_actions", row)
+
     def test_bank_flow_rule_batch_collapses_only_when_more_than_three_bank_rows(self) -> None:
         service = WorkbenchCandidateGroupingService()
         batch_id = "bank_flow_rule_fee_001"
@@ -2640,6 +2731,19 @@ def oa_attachment_evidence_row(
         "invoice_type": "附件凭证",
         "invoice_bank_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
     }
+
+
+def candidate_group(group_id: str, *rows: dict[str, object]) -> CandidateGroup:
+    group = CandidateGroup(
+        group_id=group_id,
+        group_type="candidate",
+        match_confidence="low",
+        reason="test_candidate",
+        temp_key=None,
+    )
+    for row in rows:
+        group.append(row)
+    return group
 
 
 if __name__ == "__main__":

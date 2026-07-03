@@ -29,6 +29,18 @@
 
 ## 历史记录
 
+## 2026-07-03 - Workbench generation payload owner 去重
+
+- 目标：删除 Workbench 月分片 refresh 写路径里的旧 grouped payload 放大，确保 snapshot/group/group_row 三层 owner 边界清晰。
+- 影响范围：`PostgresReadModelRepository.save_workbench_read_models(...)`、旧 `/api/workbench` 兼容 view、groups page/detail、成本统计 Workbench 输入；不改变 Workbench active generation、freshness gate、页面 response shape 或业务 relation 规则。
+- 关键决策：`workbench_rows.payload` 是行详情 owner，但 nested `object_identity` 仲裁对象不属于 row payload；canonical identity 由 `workbench_rows` / `workbench_group_rows` 结构化 `object_identity_*` 列和行 payload 顶层字段承载。`workbench_groups.payload` 只保留组级 metadata/sort/count/`workbench_group_rows_materialized` marker；`workbench_group_rows` 只保留成员关系、过滤、排序、搜索和 object identity 结构化列；`workbench_snapshots.payload` 只保留 metadata/summary shell 和 `workbench_groups_materialized=true` marker。旧 full view、groups page/detail、成本统计需要完整组时，只能从同一 active generation 的 `workbench_group_rows + workbench_rows` 重建。
+- 旧逻辑删除：refresh 写路径不得恢复 snapshot 大 JSON、group payload 成员数组、group_rows 整行 payload、group_rows member payload、nested identity 或 group_rows source_versions；`_workbench_group_row_records(...)` 和 rows/groups 遍历阶段也不再 `serialize_value(row/group)` 整行/整组后再丢弃，grouping serialization 只做顶层浅拷贝并在最终 JSON 写入 helper 才序列化。过滤、排序、搜索和 identity 仍走结构化列，完整行详情只属于 `workbench_rows.payload`。
+- 文档影响：已同步本模块 `boundary-io.md`、`tests.md`，以及 `docs/modules/read-models/`、`docs/architecture/persistence-and-read-models.md`、成本统计模块状态/实施记录。
+- 测试覆盖：`tests/test_workbench_sql_runtime.py` 覆盖 lightweight snapshot 旧 view 从结构化表重建、月分片/all scope payload owner 和 group-row 最小 payload；`tests/test_cost_statistics_sql_runtime.py` 覆盖成本统计从 structured member rows 读取并禁止 `jsonb_path_exists(workbench_groups.payload, ...)`。
+- 生产验证：release `pscip-l4-workbench-group-row-min-20260703` 上 Workbench warmed targeted 1s direct SLO `10/10` pass，p95/max `890.808ms`；active `workbench:2026-02` snapshot/group/group_rows payload 中旧成员数组/整行字段放大计数为 `0`。
+- 验证命令：见本轮最终说明。
+- 未测风险：full critical grouped 1s smoke 最新仍为 `15/16` pass，`search:2026-03` handler `3087.035ms` / enqueue `3399.122ms` fail；真实 Workbench confirm/withdraw/no-OA withdraw 当前 release 写样本仍缺失。
+
 ## 2026-07-02 - batch-accounting active relation paired 分区修复
 
 - 目标：修复 batch-accounting active relation 已写入 canonical relation 后，关联台 SQL active generation 把 `relation_mode=batch_accounting` 行发布为 open `existing_case_candidate` 的分区错误。

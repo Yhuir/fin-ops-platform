@@ -13,6 +13,123 @@ from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_re
 
 
 DEFAULT_LIMIT = 10
+STANDARD_SCENARIOS_PER_OPERATION = 1
+STANDARD_SCENARIO_ENV = "FIN_OPS_WRITE_E2E_SCENARIO"
+STANDARD_SCENARIO_PATH = "/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json"
+STANDARD_APPROVAL_TICKET_ENV = "FIN_OPS_WRITE_E2E_APPROVAL_TICKET"
+STANDARD_APPROVAL_TICKET = "FINOPS-WRITE-SMOKE-STANDING-20260702"
+STANDARD_WRITE_OPERATIONS = (
+    "turnover_manual_closure_or_withdraw",
+    "workbench_relation_withdraw",
+    "no_oa_bank_batch_withdraw",
+)
+STANDARD_PAGE_WRITE_SCENARIO_POLICIES: tuple[dict[str, Any], ...] = (
+    {
+        "page_key": "turnover-ledger",
+        "apply_policy": "standing_apply",
+        "scenario_operations": ("turnover_manual_closure_or_withdraw",),
+    },
+    {
+        "page_key": "reconciliation-workbench",
+        "apply_policy": "standing_apply",
+        "scenario_operations": ("workbench_relation_withdraw",),
+    },
+    {
+        "page_key": "workbench-relations",
+        "apply_policy": "standing_apply",
+        "scenario_operations": ("workbench_relation_withdraw",),
+    },
+    {
+        "page_key": "no-oa-bank-batches",
+        "apply_policy": "standing_apply",
+        "scenario_operations": ("no_oa_bank_batch_withdraw",),
+    },
+    {
+        "page_key": "bank-flow-rule-batches",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": ("no_oa_bank_batch_withdraw",),
+    },
+    {
+        "page_key": "bank-details",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "bank-account-balance",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "pending-invoices",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "input-invoice-usage",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "output-invoice-collections",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "invoice-lifecycle",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "oa-pending-payments",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "tax-offset",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "cost-statistics",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "search",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": STANDARD_WRITE_OPERATIONS,
+    },
+    {
+        "page_key": "batch-accounting",
+        "apply_policy": "fanout_evidence",
+        "scenario_operations": ("workbench_relation_withdraw",),
+    },
+    {
+        "page_key": "imports-bank-transactions",
+        "apply_policy": "no_standing_production_apply",
+        "scenario_operations": (),
+    },
+    {
+        "page_key": "imports-invoices",
+        "apply_policy": "no_standing_production_apply",
+        "scenario_operations": (),
+    },
+    {
+        "page_key": "imports-etc-invoices",
+        "apply_policy": "no_standing_production_apply",
+        "scenario_operations": (),
+    },
+    {
+        "page_key": "settings",
+        "apply_policy": "no_standing_production_apply",
+        "scenario_operations": (),
+    },
+    {
+        "page_key": "data-safety-reset",
+        "apply_policy": "no_standing_production_apply",
+        "scenario_operations": (),
+    },
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,9 +183,18 @@ def discover_write_operation_scenarios(
     workbench_candidates = _workbench_withdraw_candidates(connection, limit=normalized_limit)
     no_oa_candidates = _no_oa_withdraw_candidates(connection, limit=normalized_limit)
     scenarios = [
-        *[_turnover_withdraw_scenario(candidate) for candidate in turnover_candidates],
-        *[_workbench_withdraw_scenario(candidate) for candidate in workbench_candidates],
-        *[_no_oa_withdraw_scenario(candidate) for candidate in no_oa_candidates],
+        *[
+            _turnover_withdraw_scenario(candidate)
+            for candidate in turnover_candidates[:STANDARD_SCENARIOS_PER_OPERATION]
+        ],
+        *[
+            _workbench_withdraw_scenario(candidate)
+            for candidate in workbench_candidates[:STANDARD_SCENARIOS_PER_OPERATION]
+        ],
+        *[
+            _no_oa_withdraw_scenario(candidate)
+            for candidate in no_oa_candidates[:STANDARD_SCENARIOS_PER_OPERATION]
+        ],
     ]
     return {
         "version": 1,
@@ -76,6 +202,8 @@ def discover_write_operation_scenarios(
         "generated_at": datetime.now(UTC).isoformat(),
         "tenant_id": tenant_id,
         "mode": "read_only",
+        "standard_inputs": _standard_inputs_payload(),
+        "page_write_scenario_policy": _page_write_scenario_policy_payload(),
         "candidate_counts": {
             "turnover_manual_closure_or_withdraw": len(turnover_candidates),
             "workbench_pair_withdraw_context": len(workbench_candidates),
@@ -83,7 +211,10 @@ def discover_write_operation_scenarios(
         },
         "scenario_json": {
             "scenarios": scenarios,
-            "warning": "Review every scenario and its rollback path before running write_operation_e2e_smoke --apply.",
+            "warning": (
+                "Use these controlled reversible scenarios with the standard approval ticket from "
+                "standard_inputs; do not request a one-off approval for standing production smoke."
+            ),
         },
         "candidates": {
             "turnover_manual_closure_or_withdraw": turnover_candidates,
@@ -93,11 +224,14 @@ def discover_write_operation_scenarios(
         "safety": {
             "mutates_data": False,
             "requires_real_auth_to_apply": True,
-            "requires_manual_approval_before_apply": True,
+            "requires_approval_ticket_before_apply": True,
+            "approval_ticket_env": STANDARD_APPROVAL_TICKET_ENV,
+            "approval_ticket": STANDARD_APPROVAL_TICKET,
+            "approval_ticket_policy": "standing_ticket_allowed_for_controlled_reversible_smoke",
             "notes": [
                 "Discovery is read-only and does not call mutating HTTP endpoints.",
-                "Generated scenarios withdraw existing turnover, Workbench, or no-OA relations; use only on reviewed test or reversible objects.",
-                "Every generated scenario remains blocked for --apply until real OA/Admin auth and manual approval are supplied.",
+                "Generated scenarios are limited to controlled turnover, Workbench, or no-OA withdraw candidates.",
+                "Apply remains blocked until real OA/Admin auth and the standard approval ticket are supplied.",
             ],
         },
     }
@@ -116,6 +250,8 @@ def _write_scenario_output(report: dict[str, Any], path: Path) -> None:
     scenario_payload = {
         "version": 1,
         "generated_at": report["generated_at"],
+        "standard_inputs": _standard_inputs_payload(),
+        "page_write_scenario_policy": _page_write_scenario_policy_payload(),
         "scenarios": scenarios,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,35 +270,44 @@ def _turnover_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[s
     rows = connection.fetch_all(
         """
         select
-          relation_id,
-          coalesce(status, raw_payload->'normalized_payload'->>'status', raw_payload->>'status', '') as status,
+          turnover.relation_id,
+          coalesce(turnover.status, turnover.raw_payload->'normalized_payload'->>'status', turnover.raw_payload->>'status', '') as status,
           coalesce(
-            relation_type,
-            raw_payload->'normalized_payload'->>'relation_type',
-            raw_payload->>'relation_type',
-            raw_payload->'normalized_payload'->>'family',
-            raw_payload->>'family',
+            turnover.relation_type,
+            turnover.raw_payload->'normalized_payload'->>'relation_type',
+            turnover.raw_payload->>'relation_type',
+            turnover.raw_payload->'normalized_payload'->>'family',
+            turnover.raw_payload->>'family',
             ''
           ) as relation_type,
           coalesce(
-            raw_payload->'normalized_payload'->>'source',
-            raw_payload->>'source',
-            raw_payload->>'relation_source',
+            turnover.raw_payload->'normalized_payload'->>'source',
+            turnover.raw_payload->>'source',
+            turnover.raw_payload->>'relation_source',
             ''
           ) as source,
-          coalesce(scope_month::text, left(coalesce(raw_payload->>'month', raw_payload->>'scope_month', ''), 10), '') as scope_month,
-          version,
-          updated_at
-        from app.turnover_relations
-        where relation_id is not null
-          and coalesce(status, raw_payload->'normalized_payload'->>'status', raw_payload->>'status', '') not in ('withdrawn', 'cancelled')
+          coalesce(workbench.month_scope::text, turnover.scope_month::text, left(coalesce(turnover.raw_payload->>'month', turnover.raw_payload->>'scope_month', ''), 10), '') as scope_month,
+          turnover.version,
+          turnover.updated_at,
+          workbench.case_id,
+          workbench.row_ids,
+          array_length(workbench.row_ids, 1) as row_count,
+          workbench.relation_mode
+        from app.turnover_relations turnover
+        join app.workbench_pair_relations workbench
+          on workbench.case_id = 'turnover:' || turnover.relation_id
+         and workbench.status = 'active'
+         and array_length(workbench.row_ids, 1) between 2 and 6
+         and workbench.month_scope is not null
+        where turnover.relation_id is not null
+          and coalesce(turnover.status, turnover.raw_payload->'normalized_payload'->>'status', turnover.raw_payload->>'status', '') not in ('withdrawn', 'cancelled')
           and coalesce(
-            raw_payload->'normalized_payload'->>'source',
-            raw_payload->>'source',
-            raw_payload->>'relation_source',
+            turnover.raw_payload->'normalized_payload'->>'source',
+            turnover.raw_payload->>'source',
+            turnover.raw_payload->>'relation_source',
             ''
           ) = 'manual'
-        order by updated_at desc nulls last, relation_id
+        order by array_length(workbench.row_ids, 1), turnover.updated_at desc nulls last, turnover.relation_id
         limit %s
         """,
         (limit,),
@@ -177,10 +322,15 @@ def _turnover_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[s
             "scope_month": _month_text(row.get("scope_month")),
             "version": row.get("version"),
             "updated_at": str(row.get("updated_at") or ""),
+            "case_id": _text(row.get("case_id")),
+            "row_ids": [_text(item) for item in list(row.get("row_ids") or []) if _text(item)],
+            "row_count": row.get("row_count"),
+            "relation_mode": _text(row.get("relation_mode")),
+            "candidate_path": "/api/workbench/actions/withdraw-link",
             "risk": "existing_relation_withdraw_requires_manual_business_approval",
         }
         for row in rows
-        if _text(row.get("relation_id"))
+        if _text(row.get("relation_id")) and _text(row.get("case_id"))
     ]
 
 
@@ -193,12 +343,15 @@ def _workbench_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[
           status,
           month_scope::text as month_scope,
           row_ids,
+          array_length(row_ids, 1) as row_count,
           version,
           updated_at
         from app.workbench_pair_relations
         where status = 'active'
-          and array_length(row_ids, 1) > 0
-        order by updated_at desc nulls last, case_id
+          and relation_mode = 'manual_confirmed'
+          and array_length(row_ids, 1) between 2 and 6
+          and month_scope is not null
+        order by array_length(row_ids, 1), updated_at desc nulls last, case_id
         limit %s
         """,
         (limit,),
@@ -211,6 +364,7 @@ def _workbench_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[
             "relation_mode": _text(row.get("relation_mode")),
             "month": _month_text(row.get("month_scope")) or "all",
             "row_ids": [_text(item) for item in list(row.get("row_ids") or []) if _text(item)],
+            "row_count": row.get("row_count"),
             "version": row.get("version"),
             "updated_at": str(row.get("updated_at") or ""),
             "candidate_path": "/api/workbench/actions/withdraw-link",
@@ -225,15 +379,35 @@ def _no_oa_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[str,
     rows = connection.fetch_all(
         """
         select
-          batch_id,
-          status,
-          status_bucket,
-          scope_month::text as scope_month,
-          version,
-          updated_at
-        from app.no_oa_bank_batches
-        where status = 'submitted'
-        order by updated_at desc nulls last, batch_id
+          batch.batch_id,
+          batch.status,
+          batch.status_bucket,
+          batch.scope_month::text as scope_month,
+          coalesce(cardinality(batch.bank_transaction_ids), 0) as row_count,
+          count(*) over (partition by batch.scope_month) as month_batch_count,
+          batch.version,
+          batch.updated_at
+        from app.no_oa_bank_batches batch
+        join app.workbench_pair_relations relation
+          on relation.case_id = coalesce(
+                nullif(batch.raw_payload->'normalized_payload'->>'relation_case_id', ''),
+                nullif(batch.raw_payload->>'relation_case_id', ''),
+                batch.batch_id
+             )
+         and relation.status = 'active'
+         and relation.relation_mode = 'no_oa_bank_batch'
+        where batch.status = 'submitted'
+          and batch.scope_month is not null
+          and coalesce(
+                nullif(batch.raw_payload->'normalized_payload'->>'relation_mode', ''),
+                nullif(batch.raw_payload->>'relation_mode', ''),
+                'no_oa_bank_batch'
+              ) = 'no_oa_bank_batch'
+          and coalesce(cardinality(batch.bank_transaction_ids), 0) between 1 and 6
+        order by coalesce(cardinality(batch.bank_transaction_ids), 0),
+                 count(*) over (partition by batch.scope_month),
+                 batch.updated_at desc nulls last,
+                 batch.batch_id
         limit %s
         """,
         (limit,),
@@ -245,6 +419,8 @@ def _no_oa_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[str,
             "status": _text(row.get("status")),
             "status_bucket": _text(row.get("status_bucket")),
             "month": _month_text(row.get("scope_month")) or "all",
+            "row_count": row.get("row_count"),
+            "month_batch_count": row.get("month_batch_count"),
             "version": row.get("version"),
             "updated_at": str(row.get("updated_at") or ""),
             "candidate_path": f"/api/no-oa-bank-batches/{quote(_text(row.get('batch_id')), safe='')}/withdraw",
@@ -257,6 +433,8 @@ def _no_oa_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[str,
 
 def _turnover_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
     relation_id = _text(candidate.get("relation_id"))
+    row_ids = [_text(item) for item in list(candidate.get("row_ids") or []) if _text(item)]
+    month = _month_text(candidate.get("scope_month")) or "all"
     return {
         "name": f"turnover-withdraw-{relation_id}",
         "operation": "turnover_manual_closure_or_withdraw",
@@ -264,9 +442,11 @@ def _turnover_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
             {
                 "name": "withdraw",
                 "method": "POST",
-                "path": f"/api/turnover-ledger/relations/{quote(relation_id, safe='')}/withdraw",
+                "path": "/api/workbench/actions/withdraw-link",
                 "json": {
-                    "note": "controlled runtime sync SLO smoke withdraw; review rollback before apply",
+                    "month": month,
+                    "row_ids": row_ids,
+                    "note": "controlled runtime sync SLO smoke withdraw under standing ticket",
                     "idempotency_key": f"runtime-sync-slo-withdraw-{relation_id}",
                 },
                 "expected_statuses": [200],
@@ -287,9 +467,12 @@ def _turnover_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
             },
         ],
         "metadata": {
-            "requires_manual_approval_before_apply": True,
+            **_standard_scenario_metadata("turnover-ledger"),
             "candidate_status": candidate.get("status"),
             "candidate_scope_month": candidate.get("scope_month"),
+            "candidate_case_id": candidate.get("case_id"),
+            "candidate_relation_mode": candidate.get("relation_mode"),
+            "candidate_row_count": candidate.get("row_count"),
             "risk": candidate.get("risk"),
         },
     }
@@ -310,7 +493,7 @@ def _workbench_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
                 "json": {
                     "month": month,
                     "row_ids": row_ids,
-                    "note": "controlled runtime sync SLO smoke withdraw; review rollback before apply",
+                    "note": "controlled runtime sync SLO smoke withdraw under standing ticket",
                 },
                 "expected_statuses": [200],
             }
@@ -330,10 +513,11 @@ def _workbench_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
             },
         ],
         "metadata": {
-            "requires_manual_approval_before_apply": True,
+            **_standard_scenario_metadata("reconciliation-workbench"),
             "candidate_case_id": case_id,
             "candidate_relation_mode": candidate.get("relation_mode"),
             "candidate_month": month,
+            "candidate_row_count": candidate.get("row_count"),
             "risk": candidate.get("risk"),
         },
     }
@@ -353,7 +537,7 @@ def _no_oa_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
                 "path": f"/api/no-oa-bank-batches/{quote(batch_id, safe='')}/withdraw",
                 "json": {
                     "expected_version": version,
-                    "reason": "controlled runtime sync SLO smoke withdraw; review rollback before apply",
+                    "reason": "controlled runtime sync SLO smoke withdraw under standing ticket",
                 },
                 "expected_statuses": [200],
             }
@@ -373,12 +557,58 @@ def _no_oa_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
             },
         ],
         "metadata": {
-            "requires_manual_approval_before_apply": True,
+            **_standard_scenario_metadata("no-oa-bank-batches"),
             "candidate_batch_id": batch_id,
             "candidate_month": month,
             "candidate_version": version,
+            "candidate_row_count": candidate.get("row_count"),
+            "candidate_month_batch_count": candidate.get("month_batch_count"),
             "risk": candidate.get("risk"),
         },
+    }
+
+
+def _standard_inputs_payload() -> dict[str, str]:
+    return {
+        "scenario_env": STANDARD_SCENARIO_ENV,
+        "scenario_path": STANDARD_SCENARIO_PATH,
+        "approval_ticket_env": STANDARD_APPROVAL_TICKET_ENV,
+        "approval_ticket": STANDARD_APPROVAL_TICKET,
+    }
+
+
+def _page_write_scenario_policy_payload() -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for policy in STANDARD_PAGE_WRITE_SCENARIO_POLICIES:
+        apply_policy = str(policy["apply_policy"])
+        standard_apply = apply_policy in {"standing_apply", "fanout_evidence"}
+        payload.append(
+            {
+                "page_key": policy["page_key"],
+                "apply_policy": apply_policy,
+                "scenario_operations": list(policy["scenario_operations"]),
+                "scenario_env": STANDARD_SCENARIO_ENV if standard_apply else "",
+                "scenario_path": STANDARD_SCENARIO_PATH if standard_apply else "",
+                "approval_ticket_env": STANDARD_APPROVAL_TICKET_ENV if standard_apply else "",
+                "approval_ticket": STANDARD_APPROVAL_TICKET if standard_apply else "",
+                "approval_ticket_policy": (
+                    "standing_ticket_allowed_for_controlled_reversible_smoke"
+                    if standard_apply
+                    else "standing_ticket_not_allowed_use_staging_or_single_use_approval"
+                ),
+            }
+        )
+    return payload
+
+
+def _standard_scenario_metadata(page_key: str) -> dict[str, str]:
+    return {
+        "page_key": page_key,
+        "scenario_env": STANDARD_SCENARIO_ENV,
+        "scenario_path": STANDARD_SCENARIO_PATH,
+        "approval_ticket_env": STANDARD_APPROVAL_TICKET_ENV,
+        "approval_ticket": STANDARD_APPROVAL_TICKET,
+        "approval_ticket_policy": "standing_ticket_allowed_for_controlled_reversible_smoke",
     }
 
 

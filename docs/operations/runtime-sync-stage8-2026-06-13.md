@@ -1,5 +1,9 @@
 # Runtime 同步 Stage 8 - 写操作 Scenario Discovery
 
+> 当前生产标准输入以 `docs/operations/monitoring.md` 的页面 / 模块 write scenario 矩阵为准：
+> `FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，
+> `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`。历史 discovery 说明只保留阶段背景，不再要求逐次人工填写审批号。
+
 Stage 7 closure gate 证明当前剩余缺口集中在：
 
 - 缺真实 OA 登录态，无法跑登录态 HTTP SLO。
@@ -25,7 +29,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 
 ## 使用边界
 
-生成的 scenario 不是自动批准执行。执行前必须确认：
+当前 standing production smoke 使用标准 scenario 文件和标准 approval ticket；执行边界是：
 
 - 该关系或批次是测试对象，或业务上允许撤回。
 - 操作有明确回滚方式或可接受的审计记录。
@@ -34,7 +38,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 最终仍由 Stage 7 gate 判定闭环：
 
 ```bash
-export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
+export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='FINOPS-WRITE-SMOKE-STANDING-20260702'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_gate \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \

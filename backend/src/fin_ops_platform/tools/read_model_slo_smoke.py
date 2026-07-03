@@ -109,7 +109,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         trace_id=str(args.trace_id or "").strip() or f"read-model-slo-smoke-{uuid4().hex}",
         target_ms=max(1.0, float(args.target_ms)),
         timeout_seconds=max(1.0, float(args.timeout_seconds)),
-        poll_interval_seconds=max(0.1, float(args.poll_interval_seconds)),
+        poll_interval_seconds=max(0.05, float(args.poll_interval_seconds)),
     )
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output is not None:
@@ -414,7 +414,7 @@ def wait_for_event_fresh(
                 source_version=source_version,
                 error=last_error or "timeout_waiting_for_done_and_fresh",
             )
-        sleep(max(0.1, poll_interval_seconds))
+        sleep(max(0.05, poll_interval_seconds))
 
 
 def _fresh_readiness_by_key(connection: Any, *, tenant_id: str) -> dict[str, list[dict[str, Any]]]:

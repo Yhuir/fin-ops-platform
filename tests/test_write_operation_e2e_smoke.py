@@ -28,6 +28,13 @@ class FakeConnection:
         return [dict(row) for row in self.rows]
 
 
+class LimitAwareConnection(FakeConnection):
+    def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+        self.fetch_all_calls.append((sql, params))
+        limit = int(params[-1]) if params else len(self.rows)
+        return [dict(row) for row in self.rows[:limit]]
+
+
 def _event(
     *,
     scope_type: str,
@@ -391,6 +398,61 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(observed[0][0], "https://example.test/fin-ops-api/api/turnover-ledger/relations/REL-1/withdraw")
         self.assertEqual(report["results"][0]["write_slo"]["status"], "pass")
         self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 5)
+
+    def test_write_slo_event_sample_uses_effective_floor_when_scenario_limit_is_one(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="workbench-withdraw",
+            operations=("workbench_relation_withdraw",),
+            steps=(
+                write_operation_e2e_smoke.WriteStep(
+                    name="withdraw",
+                    method="POST",
+                    path="/api/workbench/actions/withdraw-link",
+                    json_body={"month": "2026-06", "row_ids": ["bank-1", "invoice-1"]},
+                    expected_statuses=(200,),
+                ),
+            ),
+            post_api_probes=(),
+        )
+        connection = LimitAwareConnection(
+            [
+                _event(scope_type="workbench", reason="workbench_relation_changed", action_name="withdraw_link"),
+                _event(
+                    scope_type="workbench_relation",
+                    reason="workbench_pair_relation_changed",
+                    action_name="withdraw_link",
+                ),
+            ]
+        )
+
+        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"ok":true}',
+            )
+
+        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+            connection,
+            scenarios=[scenario],
+            apply=True,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            tenant_id="default",
+            headers={"Authorization": "Bearer token"},
+            approval_reference="TEST-APPROVAL",
+            request_fn=request_fn,
+            limit=1,
+        )
+
+        write_slo = report["results"][0]["write_slo"]
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(write_slo["requested_event_sample_limit"], 1)
+        self.assertEqual(
+            write_slo["effective_event_sample_limit"],
+            write_operation_e2e_smoke.MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT,
+        )
+        self.assertEqual(connection.fetch_all_calls[-1][1][-1], write_operation_e2e_smoke.MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT)
 
     def test_write_step_failure_skips_write_slo_claim(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(

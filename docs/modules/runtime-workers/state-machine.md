@@ -18,7 +18,7 @@ Runtime worker 本身不拥有业务实体；它维护后台执行事实和派�
 | Dirty scope | `processing` | `job.read_model_dirty_scopes.status` | refresh handler 执行中；成功变 `done`，失败变 `failed`，超时由 queue/worker 恢复。 |
 | Dirty scope | `done` | `job.read_model_dirty_scopes.status`、source version | projection 完成且 source version guard 通过后进入。 |
 | Dirty scope | `failed` | `job.read_model_dirty_scopes.status`、`last_error` | refresh 失败进入；必须修复后 requeue，不得直接改 fresh。 |
-| Worker heartbeat | `polling` / `processing` / `idle` / `deferred` / `failed` | `job.runtime_worker_heartbeats` | worker loop 上报；App Health 用 heartbeat lag、kind、event types 判定 missing/stale/mismatch。`deferred` 表示依赖 read model 尚未 fresh，事件已短延迟回到 pending，不计为业务成功或普通失败。 |
+| Worker heartbeat | `polling` / `processing` / `idle` / `deferred` / `failed` | `job.runtime_worker_heartbeats` | worker loop 上报；App Health 用 heartbeat lag、kind、event types 判定 missing/stale/mismatch。PostgreSQL runtime worker 的空轮询 `idle` heartbeat 节流写入，禁止每个 0.05s poll 写库；事件态 `processing` / `deferred` / `failed` / `stopping` / `stopped` 即时写入。`deferred` 表示依赖 read model 尚未 fresh，事件已短延迟回到 pending，不计为业务成功或普通失败。 |
 
 禁止流转：
 
@@ -78,6 +78,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-03 | PostgreSQL runtime worker 空轮询 heartbeat 节流 | 移除 0.05s idle poll 下 `polling`/`idle` 高频写放大，保留事件处理、失败、defer 和停止状态的即时 heartbeat；降低 read model enqueue-to-claim 长尾 | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker.RuntimeWorkerTests.test_fast_empty_polls_throttle_idle_heartbeat_writes tests.test_runtime_worker.RuntimeWorkerTests.test_event_processing_heartbeats_bypass_idle_throttle -v` |
 | 2026-06-22 | App Health 聚合 Workbench active repair 时优先 current-effective refreshing/rebuilding，旧 consistency failure 不再写 blocked dependency | 修复“运行摘要显示刷新中但顶部阻断”的矛盾状态；worker/queue 仍按 PostgreSQL durable facts 收敛，不伪造 fresh | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_health_api tests.test_app_status_overview_service tests.test_runtime_monitoring -v` |
 | 2026-06-13 | 依赖 read model 未 fresh 使用短延迟 defer | `*_read_model_not_fresh` 不再走 60s 普通 retry/dead-letter，减少跨 read model fan-out 长尾 | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_defer_event_delays_dependency_retry_without_failure_or_dead_letter -v` |
 | 2026-06-16 | `bank_detail:all` 不再由 downstream all-scope dependency defer 自动推导 | 防止 `turnover_ledger:all` / `no_oa_bank_batch:all` 与 `bank_detail:all` fan-out 互相放大，页面长期 refreshing | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker.RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency tests.test_read_model_refresh_gateway.ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope -v` |

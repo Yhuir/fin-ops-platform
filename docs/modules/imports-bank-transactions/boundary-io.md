@@ -38,6 +38,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认 |
+| 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
 | 导入 job status | background job/app status | 可查询、可失败恢复 |
 | Dirty scope | derived lifecycle/runtime queue | bank_detail/workbench/search 等受影响 scope |
 | Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets，消费 completed job 的页面必须先等待 targets |

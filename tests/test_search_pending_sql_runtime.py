@@ -1179,10 +1179,14 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(connection.transaction_count, 1)
         self.assertEqual(len(connection.execute_calls), 1)
-        self.assertIn("delete from read_model.search_index_rows", connection.execute_calls[0][0])
+        delete_sql, delete_params = connection.execute_calls[0]
+        self.assertIn("delete from read_model.search_index_rows", delete_sql)
+        self.assertIn("not (row_id = any", delete_sql)
+        self.assertEqual(delete_params[1], ["txn-1", "inv-1"])
         self.assertEqual(len(connection.execute_many_values_calls), 1)
         sql, params_seq = connection.execute_many_values_calls[0]
         self.assertIn("insert into read_model.search_index_rows", sql)
+        self.assertIn("is distinct from", sql)
         self.assertEqual(len(params_seq), 2)
         self.assertEqual(params_seq[0][0], "txn-1")
         self.assertEqual(params_seq[1][0], "inv-1")
@@ -1215,6 +1219,18 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(params_seq), 1)
         self.assertEqual(params_seq[0][0], "txn-1")
         self.assertEqual(params_seq[0][4], "新标题")
+
+    def test_search_index_bulk_save_deletes_scope_when_result_is_empty(self) -> None:
+        connection = SearchIndexBulkWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_search_index_rows(scope_key="2026-05", rows=[])
+
+        self.assertEqual(connection.transaction_count, 1)
+        self.assertEqual(connection.execute_many_values_calls, [])
+        self.assertEqual(len(connection.execute_calls), 1)
+        self.assertIn("delete from read_model.search_index_rows", connection.execute_calls[0][0])
+        self.assertNotIn("row_id = any", connection.execute_calls[0][0])
 
     def test_search_repository_reads_index_rows_without_state_fallback(self) -> None:
         connection = SearchPendingConnection(

@@ -9,10 +9,10 @@
 | `READMODEL-E2E-003` | `covered` | Workbench、bank details auto-tag、batch accounting、turnover、no-OA、settings、pending invoices 等 Browser flow 覆盖 write -> barrier/fresh reload；`tests/test_operation_freshness_barrier.py` 保护 barrier contract。 | 真实业务写操作的生产 latency 归 `READMODEL-E2E-006`。 |
 | `READMODEL-E2E-004` | `partial` | 多个 cross-page fan-out Playwright specs 和 `tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` 覆盖主要 fan-out。 | 全部写入口的真实 durable outbox 样本仍未闭合。 |
 | `READMODEL-E2E-005` | `covered` | 2026-06-28 Read Model closure 已执行生产 critical SLO。`read_model_slo_smoke --apply --critical-only --target-ms 5000` grouped run 14/15 pass，唯一 Search miss targeted rerun `499.357ms` pass；scope contract `ok=true`、`violation_count=0`、current uncovered outbox failure count `0`，dirty/outbox/readiness 收敛。`bash scripts/verify.sh infra-smoke` 提供 opt-in apply gate。 | 每个新 release 仍需重新执行；Search 高行数 refresh latency 继续观察；真实业务写操作 latency 归 `READMODEL-E2E-006`。 |
-| `READMODEL-E2E-006` | `partial` | `tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_e2e_smoke.py`、`runtime_sync_closure_gate` 覆盖工具合同和 approval gate。 | 生产真实 write-operation apply 缺审批 ticket 和安全 scenario 样本。 |
+| `READMODEL-E2E-006` | `partial` | `tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_e2e_smoke.py`、`tests/test_write_operation_scenario_discovery.py`、`runtime_sync_closure_gate` 覆盖工具合同、approval gate、标准 scenario 发现规则、页面级 `page_write_scenario_policy` 和 standing ticket 输入。生产标准输入固定为 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json` 与 `FINOPS-WRITE-SMOKE-STANDING-20260702`，discovery 报告和生成的 scenario JSON 均携带该矩阵，主控 workflow 不再为标准 production smoke 逐次询问 scenario/ticket。 | 最新 production full gate 已能运行受控写 apply，但 Workbench/no-OA withdraw 写后同步和 read model/API 1s SLO 仍 fail；不再是缺 ticket，而是性能与真实写后同步未闭合。 |
 | `READMODEL-E2E-007` | `covered` | `tests/test_read_model_scope_contract.py`、`scripts/check-read-model-scope-contracts.py`、runtime gate 只读检查覆盖 legacy/current blocker 分类。 | 真实 repair `--apply` 必须按 runbook 审批。 |
 
-说明：`READMODEL-E2E-002/004/006` 的 `partial` 状态表示浏览器组合覆盖或真实业务写入样本不是 100% 枚举覆盖；它不推翻 read model 模块化 PSCIP-L4 闭环。PSCIP-L4 结论以 manifest/registry/worker/scope policy、freshness fail-closed、operation barrier、生产 scope contract 和 critical SLO 证据为准。
+说明：`READMODEL-E2E-002/004/006` 的 `partial` 状态表示浏览器组合覆盖或真实业务写入样本不是 100% 枚举覆盖；它不推翻 read model 模块化 PSCIP-L4 闭环。full external PSCIP-L4 / 高性能全域闭环必须额外满足 authenticated HTTP/SSE、受控写 apply、写后 outbox/readiness 和页面 API SLO。
 
 ## 当前验证入口
 
@@ -24,6 +24,6 @@ bash scripts/verify.sh infra-smoke
 
 ## 下一步
 
-1. 为一条低风险业务写 scenario 提供真实认证和审批 ticket，执行 write-operation apply，推进 `READMODEL-E2E-006`。
+1. 使用固定 scenario 和 standing ticket 复跑 full gate；优先修复 Workbench/no-OA withdraw 写后同步与 `bank_flow_rule_batch` 等 direct read model 1s 长尾，推进 `READMODEL-E2E-006`。
 2. 后续每次生产 release 后都要重新执行 critical direct apply，防止 `READMODEL-E2E-005` 证据过期。
 3. 页面新增写入口时，必须补对应页面 Browser flow，并映射到 `READMODEL-E2E-003/004/006`。

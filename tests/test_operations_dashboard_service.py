@@ -362,6 +362,35 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         )
         self.assertFalse(any("workbench_generation_consistency" in sql for sql in connection.fetch_one_sql))
 
+    def test_runtime_repository_splits_outbox_dashboard_attention_candidates(self) -> None:
+        class CapturingConnection:
+            def __init__(self) -> None:
+                self.sql = ""
+
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
+                self.sql = sql
+                return {
+                    "pending_count": 0,
+                    "publishing_count": 0,
+                    "failed_count": 0,
+                    "publish_failed_count": 3,
+                    "oldest_pending_age_seconds": None,
+                }
+
+        connection = CapturingConnection()
+        repository = RuntimeMonitoringRepository(connection)
+
+        payload = repository.dashboard_outbox_metric()
+
+        normalized_sql = " ".join(connection.sql.lower().split())
+        self.assertEqual(payload["publish_failed_count"], 3)
+        self.assertIn("dashboard_outbox_attention_events as", normalized_sql)
+        self.assertIn("union all", normalized_sql)
+        self.assertIn("e.status in ('pending', 'failed', 'dead_lettered')", normalized_sql)
+        self.assertIn("e.publish_status = 'publishing'", normalized_sql)
+        self.assertIn("e.publish_status = 'failed'", normalized_sql)
+        self.assertIn("e.status not in ('pending', 'failed', 'dead_lettered')", normalized_sql)
+
     def test_runtime_repository_bounds_read_model_duration_history_query(self) -> None:
         class CapturingConnection:
             def __init__(self) -> None:

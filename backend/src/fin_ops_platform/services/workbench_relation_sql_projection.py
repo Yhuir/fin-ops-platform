@@ -79,11 +79,18 @@ class WorkbenchRelationSqlProjectionBuilder:
             ),
         ]
         relation_row_ids = _dedupe_preserve_order(row_id for relation in relations for row_id in text_list(relation.get("row_ids")))
-        objects = self._source_objects_for_month(
-            normalized_scope,
-            relation_row_ids=relation_row_ids,
-            excluded_bank_transaction_ids=pending_claimed_bank_ids,
-        )
+        objects = dict(monthly_objects)
+        missing_relation_row_ids = [row_id for row_id in relation_row_ids if row_id not in objects]
+        if missing_relation_row_ids:
+            objects.update(
+                self._source_objects_for_month(
+                    normalized_scope,
+                    relation_row_ids=missing_relation_row_ids,
+                    excluded_bank_transaction_ids=pending_claimed_bank_ids,
+                    include_month_scope=False,
+                    source_kinds=_source_kinds_for_relation_row_ids(relations, missing_relation_row_ids),
+                )
+            )
         groups = [_relation_group_payload(relation, objects=objects, month=normalized_scope) for relation in relations]
         relation_groups_by_row_id: dict[str, list[dict[str, Any]]] = {}
         for group in groups:
@@ -152,16 +159,27 @@ class WorkbenchRelationSqlProjectionBuilder:
         *,
         relation_row_ids: list[str],
         excluded_bank_transaction_ids: set[str] | None = None,
+        include_month_scope: bool = True,
+        source_kinds: set[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         ids = _dedupe_preserve_order(text(row_id) for row_id in list(relation_row_ids or []))
         excluded_bank_ids = {text(row_id) for row_id in (excluded_bank_transaction_ids or set()) if text(row_id)}
+        selected_source_kinds = source_kinds or {"bank_transaction", "oa", "invoice"}
         objects: dict[str, dict[str, Any]] = {}
-        for row in self._bank_transaction_rows(month, ids, excluded_bank_transaction_ids=excluded_bank_ids):
-            _put_object(objects, _bank_transaction_object(row, month=month))
-        for row in self._oa_rows(month, ids):
-            _put_object(objects, _oa_object(row, month=month))
-        for row in self._formal_invoice_rows(month, ids):
-            _put_object(objects, _formal_invoice_object(row, month=month))
+        if "bank_transaction" in selected_source_kinds:
+            for row in self._bank_transaction_rows(
+                month,
+                ids,
+                excluded_bank_transaction_ids=excluded_bank_ids,
+                include_month_scope=include_month_scope,
+            ):
+                _put_object(objects, _bank_transaction_object(row, month=month))
+        if "oa" in selected_source_kinds:
+            for row in self._oa_rows(month, ids, include_month_scope=include_month_scope):
+                _put_object(objects, _oa_object(row, month=month))
+        if "invoice" in selected_source_kinds:
+            for row in self._formal_invoice_rows(month, ids, include_month_scope=include_month_scope):
+                _put_object(objects, _formal_invoice_object(row, month=month))
         return objects
 
     def _bank_transaction_rows(
@@ -170,9 +188,24 @@ class WorkbenchRelationSqlProjectionBuilder:
         row_ids: list[str],
         *,
         excluded_bank_transaction_ids: set[str] | None = None,
+        include_month_scope: bool = True,
     ) -> list[dict[str, Any]]:
         explicit_ids = set(row_ids)
         excluded_ids = {text(row_id) for row_id in (excluded_bank_transaction_ids or set()) if text(row_id)}
+        if not include_month_scope:
+            if not row_ids:
+                return []
+            return self._connection.fetch_all(
+                """
+                select coalesce(legacy_mongo_id, id::text) as row_id, counterparty_name_raw, trade_time, txn_date,
+                       amount, txn_direction, summary, remark, bank_serial_no, account_name, account_no, txn_month,
+                       raw_payload
+                from app.bank_transactions
+                where status <> 'deleted'
+                  and coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+                """,
+                (row_ids,),
+            )
         rows = self._connection.fetch_all(
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, counterparty_name_raw, trade_time, txn_date,
@@ -194,7 +227,19 @@ class WorkbenchRelationSqlProjectionBuilder:
             return rows
         return [row for row in rows if text(row.get("row_id")) in explicit_ids or text(row.get("row_id")) not in excluded_ids]
 
-    def _oa_rows(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
+    def _oa_rows(self, month: str, row_ids: list[str], *, include_month_scope: bool = True) -> list[dict[str, Any]]:
+        if not include_month_scope:
+            if not row_ids:
+                return []
+            return self._connection.fetch_all(
+                """
+                select row_id, form_id, form_type, status, applicant, application_date, project_name, amount, raw_payload
+                from app.oa_applications
+                where row_id = any(%s)
+                  and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+                """,
+                (row_ids,),
+            )
         return self._connection.fetch_all(
             """
             select row_id, form_id, form_type, status, applicant, application_date, project_name, amount, raw_payload
@@ -205,7 +250,21 @@ class WorkbenchRelationSqlProjectionBuilder:
             (month_start(month), row_ids),
         )
 
-    def _formal_invoice_rows(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
+    def _formal_invoice_rows(self, month: str, row_ids: list[str], *, include_month_scope: bool = True) -> list[dict[str, Any]]:
+        if not include_month_scope:
+            if not row_ids:
+                return []
+            return self._connection.fetch_all(
+                """
+                select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_code, invoice_no, digital_invoice_no,
+                       invoice_date, invoice_month, seller_name, seller_tax_no, buyer_name, buyer_tax_no,
+                       amount, total_with_tax, raw_payload
+                from app.invoices
+                where status <> 'deleted'
+                  and coalesce(legacy_mongo_id, id::text) = any(%s)
+                """,
+                (row_ids,),
+            )
         return self._connection.fetch_all(
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_code, invoice_no, digital_invoice_no,
@@ -503,6 +562,29 @@ def _relation_typed_row_ids(relation: dict[str, Any], *, objects: dict[str, dict
     deduped["input_invoice"] = _dedupe_invoice_ids_by_identity(deduped["input_invoice"], objects)
     deduped["output_invoice"] = _dedupe_invoice_ids_by_identity(deduped["output_invoice"], objects)
     return deduped
+
+
+def _source_kinds_for_relation_row_ids(relations: list[dict[str, Any]], row_ids: list[str]) -> set[str]:
+    target_row_ids = set(text_list(row_ids))
+    if not target_row_ids:
+        return {"bank_transaction", "oa", "invoice"}
+    source_kinds: set[str] = set()
+    for relation in relations:
+        relation_row_ids = text_list(relation.get("row_ids"))
+        relation_row_types = text_list(relation.get("row_types"))
+        for index, row_id in enumerate(relation_row_ids):
+            if row_id not in target_row_ids:
+                continue
+            row_type = text(relation_row_types[index] if index < len(relation_row_types) else "")
+            if row_type in {"bank", "bank_transaction"}:
+                source_kinds.add("bank_transaction")
+            elif row_type == "oa":
+                source_kinds.add("oa")
+            elif row_type in {"invoice", "input_invoice", "output_invoice"}:
+                source_kinds.add("invoice")
+            else:
+                return {"bank_transaction", "oa", "invoice"}
+    return source_kinds or {"bank_transaction", "oa", "invoice"}
 
 
 def _dedupe_invoice_ids_by_identity(row_ids: list[str], objects: dict[str, dict[str, Any]]) -> list[str]:

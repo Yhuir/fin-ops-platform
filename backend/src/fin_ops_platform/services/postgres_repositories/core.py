@@ -272,8 +272,36 @@ class PostgresCoreRepository:
                    import_files.session_id, import_files.stored_file_path,
                    import_files.original_filename, import_files.template_kind, import_files.status,
                    import_files.uploaded_by, import_files.uploaded_at,
-                   import_files.raw_payload
+                   payload.data->>'id' as payload_id,
+                   payload.data->>'file_name' as payload_file_name,
+                   payload.data->>'template_code' as payload_template_code,
+                   payload.data->>'batch_type' as payload_batch_type,
+                   payload.data->>'override_batch_type' as payload_override_batch_type,
+                   payload.data->>'status' as payload_status,
+                   payload.data->>'message' as payload_message,
+                   payload.data->>'row_count' as payload_row_count,
+                   payload.data->>'success_count' as payload_success_count,
+                   payload.data->>'error_count' as payload_error_count,
+                   payload.data->>'duplicate_count' as payload_duplicate_count,
+                   payload.data->>'suspected_duplicate_count' as payload_suspected_duplicate_count,
+                   payload.data->>'updated_count' as payload_updated_count,
+                   payload.data->>'preview_batch_id' as payload_preview_batch_id,
+                   payload.data->>'batch_id' as payload_batch_id,
+                   payload.data->>'stored_file_path' as payload_stored_file_path,
+                   payload.data->>'override_template_code' as payload_override_template_code,
+                   payload.data->>'selected_bank_mapping_id' as payload_selected_bank_mapping_id,
+                   payload.data->>'selected_bank_name' as payload_selected_bank_name,
+                   payload.data->>'selected_bank_short_name' as payload_selected_bank_short_name,
+                   payload.data->>'selected_bank_last4' as payload_selected_bank_last4,
+                   payload.data->>'detected_bank_name' as payload_detected_bank_name,
+                   payload.data->>'detected_last4' as payload_detected_last4,
+                   payload.data->>'bank_selection_conflict' as payload_bank_selection_conflict,
+                   payload.data->>'conflict_message' as payload_conflict_message,
+                   payload.data->'audit' as payload_audit
             from app.import_files import_files
+            cross join lateral (
+                select coalesce(import_files.raw_payload->'normalized_payload', import_files.raw_payload, '{{}}'::jsonb) as data
+            ) payload
             {where_sql}
             order by import_files.uploaded_at desc, legacy_id desc
             limit %s offset %s
@@ -282,8 +310,7 @@ class PostgresCoreRepository:
         )
         files: list[FileImportPreviewItem] = []
         for row in rows:
-            payload = self._row_payload(row)
-            files.append(self._file_item_from_row(row, payload if isinstance(payload, dict) else {}))
+            files.append(self._file_item_from_summary_row(row))
         return files, self._int((total_row or {}).get("total"), 0)
 
     def find_invoice_identity(
@@ -1435,6 +1462,39 @@ class PostgresCoreRepository:
             row_results=self._file_row_results_from_payload(payload),
             normalized_rows=self._file_normalized_rows_from_payload(payload),
             audit=self._audit_counts_from_payload(payload.get("audit")),
+        )
+
+    def _file_item_from_summary_row(self, row: dict[str, Any]) -> FileImportPreviewItem:
+        batch_type = self._text(row.get("payload_batch_type") or row.get("payload_override_batch_type"))
+        override_batch_type = self._text(row.get("payload_override_batch_type"))
+        return FileImportPreviewItem(
+            id=self._text(row.get("payload_id") or row.get("legacy_id")) or str(row.get("legacy_id")),
+            file_name=self._text(row.get("payload_file_name") or row.get("original_filename")) or "unknown",
+            template_code=self._text(row.get("payload_template_code") or row.get("template_kind")),
+            batch_type=BatchType(batch_type) if batch_type else None,
+            status=self._text(row.get("payload_status") or row.get("status")) or "stored",
+            message=self._text(row.get("payload_message")) or "",
+            row_count=self._int(row.get("payload_row_count"), 0),
+            success_count=self._int(row.get("payload_success_count"), 0),
+            error_count=self._int(row.get("payload_error_count"), 0),
+            duplicate_count=self._int(row.get("payload_duplicate_count"), 0),
+            suspected_duplicate_count=self._int(row.get("payload_suspected_duplicate_count"), 0),
+            updated_count=self._int(row.get("payload_updated_count"), 0),
+            preview_batch_id=self._text(row.get("payload_preview_batch_id")),
+            batch_id=self._text(row.get("payload_batch_id")),
+            stored_file_path=self._text(row.get("payload_stored_file_path") or row.get("stored_file_path")),
+            override_template_code=self._text(row.get("payload_override_template_code")),
+            override_batch_type=BatchType(override_batch_type) if override_batch_type else None,
+            selected_bank_mapping_id=self._text(row.get("payload_selected_bank_mapping_id")),
+            selected_bank_name=self._text(row.get("payload_selected_bank_name")),
+            selected_bank_short_name=self._text(row.get("payload_selected_bank_short_name")),
+            selected_bank_last4=self._text(row.get("payload_selected_bank_last4")),
+            detected_bank_name=self._text(row.get("payload_detected_bank_name")),
+            detected_last4=self._text(row.get("payload_detected_last4")),
+            bank_selection_conflict=str(row.get("payload_bank_selection_conflict") or "").strip().lower()
+            in {"1", "true", "yes", "on"},
+            conflict_message=self._text(row.get("payload_conflict_message")),
+            audit=self._audit_counts_from_payload(row.get("payload_audit")),
         )
 
     def _file_row_results_from_payload(self, payload: dict[str, Any]) -> list[ImportedBatchRowResult]:

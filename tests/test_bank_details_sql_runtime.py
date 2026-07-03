@@ -261,11 +261,14 @@ class FakeBankTaggedReadRepository:
         *,
         by_ids_payload: dict[str, object] | None = None,
         by_month_payload: dict[str, object] | None = None,
+        scope_summary_payload: dict[str, object] | None = None,
     ) -> None:
         self.by_ids_payload = by_ids_payload
         self.by_month_payload = by_month_payload
+        self.scope_summary_payload = scope_summary_payload
         self.id_calls: list[list[str]] = []
         self.month_calls: list[dict[str, object]] = []
+        self.scope_summary_calls: list[dict[str, object]] = []
 
     def get_bank_detail_tagged_rows_by_transaction_ids(
         self,
@@ -293,6 +296,15 @@ class FakeBankTaggedReadRepository:
             }
         )
         return self.by_month_payload
+
+    def bank_detail_scope_summary(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        self.scope_summary_calls.append({"scope_keys": list(scope_keys), "tenant_id": tenant_id})
+        return self.scope_summary_payload
 
 
 class FakeCategoryService:
@@ -454,6 +466,40 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         self.assertEqual(categories["txn-001"]["manual_category_version"], 7)
         self.assertEqual(categories["txn-001"]["version"], 11)
         self.assertEqual(categories["txn-001"]["turnover_action_type"], "purchase")
+
+    def test_source_versions_for_scope_keys_uses_scope_summary_without_loading_rows(self) -> None:
+        repository = FakeBankTaggedReadRepository(
+            scope_summary_payload={
+                "read_model_status": "fresh",
+                "read_model_scope_keys": ["2026-05"],
+                "read_model_scope_signatures": {
+                    "2026-05": {
+                        "source_versions": {
+                            "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                            "row_count": 9,
+                            "bank_detail_source_signature": "sig-v1",
+                        }
+                    }
+                },
+            }
+        )
+        facade = BankTransactionTagReadFacade(read_model_repository=repository)
+
+        payload = facade.source_versions_for_scope_keys(["2026-05"])
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(
+            payload["source_versions"],
+            {
+                "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                "row_count": 9,
+                "bank_detail_source_signature": "sig-v1",
+            },
+        )
+        self.assertEqual(facade.last_source_versions, payload["source_versions"])
+        self.assertEqual(repository.scope_summary_calls, [{"scope_keys": ["2026-05"], "tenant_id": "default"}])
+        self.assertEqual(repository.id_calls, [])
+        self.assertEqual(repository.month_calls, [])
 
     def test_get_by_transaction_ids_requires_fresh_before_returning_publishable_rows(self) -> None:
         queue = CaptureRuntimeQueueRepository()

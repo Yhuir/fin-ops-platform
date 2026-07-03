@@ -1,5 +1,9 @@
 # Runtime 同步 Stage 9 - 写操作闭环 Profile 扩展
 
+> 当前生产标准输入以 `docs/operations/monitoring.md` 的页面 / 模块 write scenario 矩阵为准：
+> `FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，
+> `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`。本阶段早期的逐次审批占位已被 standing ticket gate 替代。
+
 Stage 8 只能为 `turnover_manual_closure_or_withdraw` 生成可执行 scenario；Workbench 关联撤回和免 OA 批次撤回只输出候选上下文。本阶段补齐高影响写操作的 action metadata、审计 profile 和只读 scenario 生成，让最终 closure gate 可以覆盖这些页面的真实写后同步链路。
 
 ## 本阶段目标
@@ -7,7 +11,7 @@ Stage 8 只能为 `turnover_manual_closure_or_withdraw` 生成可执行 scenario
 - 写操作入队时保留 `action_name` metadata，后续审计能区分同一事件类型下的具体动作。
 - `workbench_relation_withdraw` 覆盖关联台、银行明细、关联关系、发票生命周期、待找发票、进项使用、销项回款、OA 待付款、成本统计、搜索和税金抵扣的 refresh expectation。
 - `no_oa_bank_batch_withdraw` 覆盖免 OA 批次、关联台、关联关系、成本统计和搜索的 refresh expectation。
-- scenario discovery 为 Workbench/no-OA 生成可执行 HTTP scenario，但全部带 `requires_manual_approval_before_apply=true`。
+- scenario discovery 为 Workbench/no-OA 生成可执行 HTTP scenario，并携带标准 scenario path、standing approval ticket 和页面级 policy。
 
 ## 数据流
 
@@ -56,7 +60,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
-export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
+export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='FINOPS-WRITE-SMOKE-STANDING-20260702'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_gate \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \

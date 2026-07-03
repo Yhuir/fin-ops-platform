@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from fin_ops_platform.services.invoice_lifecycle_sql_projection import InvoiceLifecycleSqlProjectionBuilder
 
 
@@ -36,6 +38,7 @@ class InvoiceLifecycleSkipConnection:
         self.input_versions = {"input_invoice_usage": "v1"}
         self.output_versions = {"output_invoice_collection": "v1"}
         self.oa_versions = {"oa_pending_payment": "v1"}
+        self.active_dirty_scopes: set[tuple[str, str]] = set()
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
         normalized = " ".join(sql.lower().split())
@@ -43,6 +46,8 @@ class InvoiceLifecycleSkipConnection:
         if "from app.app_settings" in normalized:
             return {"settings_payload": {}}
         if "from job.read_model_dirty_scopes" in normalized:
+            if (str(params[0]), str(params[1])) in self.active_dirty_scopes:
+                return {"status": "pending"}
             return None
         if "from read_model.pending_invoice_scopes" in normalized:
             return {
@@ -164,3 +169,19 @@ def test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild(
         "expense:all:2026-05": {"pending_invoice": "expense-v1"},
         "income:all:2026-05": {"pending_invoice": "income-v1"},
     }
+
+
+def test_invoice_lifecycle_defers_when_dependency_scope_is_dirty() -> None:
+    connection = InvoiceLifecycleSkipConnection()
+    connection.active_dirty_scopes.add(("input_invoice_usage", "2026-05"))
+    builder = InvoiceLifecycleSqlProjectionBuilder(
+        connection=connection,
+        read_model_repository=InvoiceLifecycleSkipReadRepository(),
+        workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+        invoice_lifecycle_read_model_repository=FreshInvoiceLifecycleReadModelRepository(),
+    )
+
+    with pytest.raises(RuntimeError, match="input_invoice_usage_read_model_not_fresh"):
+        builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
+
+    assert not connection.fetch_all_calls

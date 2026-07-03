@@ -56,6 +56,8 @@ test.describe("OA pending payments in-progress auto reconcile browser flow", () 
     await expect(row.getByRole("button", { name: /确认已支付并写回|写回 OA/ })).toHaveCount(0);
 
     const rowsBeforeReconcile = api.count(ROWS_PATH);
+    expect(api.count(AUTO_RECONCILE_PATH)).toBe(0);
+    await page.getByRole("button", { name: "自动匹配并写回 OA 待付款" }).click();
     await expect.poll(() => api.count(AUTO_RECONCILE_PATH)).toBe(1);
     expect(api.lastBody(AUTO_RECONCILE_PATH)).toMatchObject({});
 
@@ -87,6 +89,8 @@ test.describe("OA pending payments in-progress auto reconcile browser flow", () 
     await expect(row.getByRole("button", { name: /确认已支付并写回|写回 OA/ })).toHaveCount(0);
     const rowsBeforeReconcile = api.count(ROWS_PATH);
 
+    expect(api.count(AUTO_RECONCILE_PATH)).toBe(0);
+    await page.getByRole("button", { name: "自动匹配并写回 OA 待付款" }).click();
     await expect.poll(() => api.count(AUTO_RECONCILE_PATH)).toBe(1);
     await expect(page.getByRole("alert")).toContainText("OA 自动匹配和写回校验失败，未写入支付状态。");
     expect(api.lastBody(AUTO_RECONCILE_PATH)).toMatchObject({});

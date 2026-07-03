@@ -1,6 +1,6 @@
 # 关联台关系事实源模块边界与 I/O
 
-日期：2026-07-02
+日期：2026-07-03
 
 ## 模块化状态
 
@@ -29,6 +29,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 关系写命令 | workbench、workbench matching、batch accounting、pending invoice、no-OA、turnover、ETC 修复工具 | 必须包含关系对象、方向、操作上下文和审计身份。跨进程或生产修复场景必须让 command repository 的 load/save 接入 durable repository，不能只读进程内 `WorkbenchPairRelationService` snapshot。自动 paired decision 只有通过 command service 写成 active relation 后，才算业务已配对。 |
+| 撤回提交 preview lock | `WorkbenchRelationCommandService.withdraw_relation(...)` | submit 路径必须在同一个 canonical pair-service snapshot 上完成 active relation 读取、preview lock 和状态转换；只允许一次 relation read model fresh precondition。禁止 submit 内部先按 case 加载 snapshot，又调用 public preview API 重新加载 snapshot/重复 fresh check。 |
 | no-OA relation metadata | `NoOaBankBatchApplicationService` | legacy `special_metadata` 可包含 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code`、`paired_requirement_version`；关系事实源负责原样保存和投影，不拥有标签规则解释 |
 | 流水规则批量处理 relation metadata | `BankFlowRuleBatchApplicationService` submit / tag-rule sync | `relation_mode=bank_flow_rule_batch`；`special_metadata` 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；标签规则保存后也必须通过 command service 更新这些 requirement 字段。关系事实源只保存和分发，不解释银行标签规则 |
 | 外部往来闭环 relation metadata | `TurnoverLedgerWorkbenchPairPort` / 流水规则 tag-rule sync | `relation_mode=turnover_manual_closure`；`special_metadata` 至少包含 `source=turnover_ledger`、`turnover_relation_id`、`requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`。历史 `turnover:* manual_confirmed` 关系只能通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(..., relation_mode=turnover_manual_closure)` 受控升级并记录 before/after history |
@@ -37,6 +38,7 @@
 | 批量账务 submitted relation DTO | `BatchAccountingService` | 已提交 bucket 通过 `WorkbenchRelationReadFacade.list_batch_accounting_relations_by_year(year)` 一次读取年份内 active batch-accounting relation groups 和 freshness/status；禁止调用方按 12 个月循环 list 或直接 SQL 读 relation read model 表 |
 | 批量账务 relation metadata | `BatchAccountingService.submit` | `relation_mode=batch_accounting`、`special_metadata.source=batch_accounting`、`bank_row_id`、`oa_row_ids`、`invoice_row_ids`、`bank_year`、`oa_years`、`affected_scope_keys`。关系事实源负责原样保存并投影；`affected_scope_keys` 是 command repository dirty/outbox fan-out 的 scope I/O，跨月关系也应是具体月份集合，不应自动变成 `all`。批量账务撤回必须通过 command service 的取消语义把当前 batch relation 持久化为 cancelled，并记录 `withdraw_link` history；不得走调用方旧 snapshot restore 或 in-memory-only fallback。 |
 | Refresh scope | `workbench_relation` manifest | month scope；`all` 只允许明确 fan-out command。批量账务 submit/withdraw route 不再直接触发 duplicate lifecycle；repository 必须根据具体月份 scope 投递 dirty/outbox，不能把 all 当默认后置刷新 |
+| Projection source objects | `app.bank_transactions`、`app.oa_applications`、`app.invoices`、`app.workbench_pair_relations` | `workbench_relation` 月分片投影先读取本月源对象，再读取 active relation；关系成员若已存在于本月对象集，禁止第二次全月扫描。只有跨月 relation 的缺失成员可按显式 `row_id` 补读，并且必须根据 relation `row_types` 限定到 bank/OA/invoice 所需源表。 |
 
 ## 输出 I/O
 
@@ -55,8 +57,10 @@
 - Repository owner：`WorkbenchRelationReadModelRepositoryPort`
 - Query owner：`WorkbenchRelationReadFacade`
 - 跨月关系合同：一个 active relation 可同时包含 OA、银行流水、进项/销项发票等不同月份对象。每个被重建的 `workbench_relation` month scope 必须保存该 scope 内 relation group 涉及的所有成员 row 索引，而不仅是当前月份原生对象；下游页面按自身 row id 读取时必须能发现跨月 group。
+- 源对象读取性能合同：月分片对象读取和跨月缺失成员补读是两个不同输入 I/O。普通同月确认/撤回后的 changed rebuild 不得恢复旧逻辑的第二次全月 `bank_transactions` / `oa_applications` / `invoices` 扫描；跨月补读也不得为了一个缺失发票 row 再探测银行和 OA 源表。该规则只改变 projection 读取计划，不改变 relation 状态机、read model payload schema 或下游 fan-out。
 - 批量账务性能合同：未提交列表只做候选 row-id relation lookup 和年份级 submitted count；已提交列表才读取完整 relation DTO，并且必须使用年份级 `list_batch_accounting_relations_by_year` I/O。`count_batch_accounting_relations_by_year` 和 `list_batch_accounting_relations_by_year` 都是 read facade/repository port 合同的一部分，不能被调用方直接 SQL 替代。
 - 批量账务写入合同：批量账务 submit/withdraw 不能在 command service 保存 relation 后再次调用旧 pair relation persist/snapshot restore、duplicate derived lifecycle 或旧 workbench read model persist。关系事实持久化和 read model dirty/outbox fan-out 只通过 command repository；调用方只消费 changed scopes 返回给前端。生产 PostgreSQL runtime 的 command service 必须接入 `PostgresWorkbenchRelationRepository`，否则 command 只能改变进程内 snapshot，会导致 API 成功但 `app.workbench_pair_relations`、`workbench_relation` 和关联台 active generation 不收敛。
+- Workbench withdraw UoW 合同：`WorkbenchWriteFacade._withdraw_link_with_uow(...)` 不得在事务外读取 `WorkbenchPairRelationService.snapshot()`，也不得在异常时走旧 snapshot restore。rollback、idempotency、relation command write 和 read model dirty/outbox enqueue 必须由 `WorkbenchWriteUnitOfWork` 的单一事务边界承担；facade 只组装 command、调用 UoW 和映射 response。
 - 旧逻辑已废弃：`read_model.workbench_relation_rows` 不允许再使用 `(tenant_id, row_id)` 全局唯一覆盖模型；迁移 `0077_workbench_relation_rows_scope_unique.sql` 建立目标约束，`0078_workbench_relation_rows_scope_unique_repair.sql` 为已应用早期 0077 的环境做幂等 forward repair，`0079_workbench_relation_rows_scope_unique_hardening.sql` 在已接受 0077/0078 checksum drift 的环境中重新断言目标唯一性并清理同 scope 重复投影行，避免最后一次重建的月份覆盖其它月份的关系索引。跨月成员索引属于 projection schema 合同，当前版本为 `2026-06-cross-month-relation-member-index-v1`；发布该版本后必须受控重建 `workbench_relation` 月份 shard，再重建依赖它的 `input_invoice_usage` 等下游 read model。
 
 ## 文件范围
@@ -80,7 +84,7 @@
 
 - Core/service：`tests/test_workbench_relation_command_service.py`、`tests/test_workbench_relation_read_facade.py`。
 - Projection：`tests/test_workbench_relation_sql_projection.py`。
-- Cross-month regression：`tests/test_workbench_relation_sql_projection.py::test_rebuild_indexes_cross_month_relation_members_in_current_scope`。
+- Cross-month regression：`tests/test_workbench_relation_sql_projection.py::test_rebuild_indexes_cross_month_relation_members_in_current_scope`。同月撤回热路径还必须覆盖源表各只扫一次；跨月成员补读必须覆盖只按缺失成员类型补读。
 - E2E fan-out：`web/e2e/workbench-relation-fanout.spec.ts`、`workbench-relations-*.spec.ts`。
 
 ## 当前缺口和删除条件

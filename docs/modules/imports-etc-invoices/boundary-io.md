@@ -39,6 +39,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | ETC import preview/result | 前端页面 | 可审计、可失败恢复 |
+| 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走导入 session/preview 边界 |
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
 | Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |
 | Dirty scope | lifecycle/runtime queue | 影响 workbench/invoice/search 等下游 |

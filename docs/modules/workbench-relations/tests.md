@@ -5,6 +5,33 @@ Spec-first Browser e2e 审计入口：
 - `e2e-spec.md`：关系事实源跨页面 Browser e2e 验收合同。
 - `e2e-coverage.md`：Spec ID 到现有 Playwright/Vitest/API/integration 的映射和缺口。
 
+## 2026-07-03 - Workbench withdraw UoW legacy snapshot restore 删除
+
+- 变更类型：Workbench relation write-path boundary cleanup；不改变业务状态机、HTTP/API response shape、权限、审计、dirty/outbox/readiness 或 read model payload。
+- 覆盖证据：UoW withdraw 成功路径不得调用 `WorkbenchPairRelationService.snapshot()`；rollback、idempotency、relation command write 和 dirty/outbox enqueue 由 `WorkbenchWriteUnitOfWork` 单一事务边界承担。
+- 新增/更新测试：`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_uow_path_does_not_read_legacy_pair_snapshot`；同时复跑 `tests/test_workbench_uow_contract.py`。
+- 七类测试决策：service-layer tests、API contract/write-entry regression、existing feature regression 适用并覆盖；read model/cache/background job 通过既有 UoW contract 复跑覆盖 dirty/outbox target shape；business core 不新增，因为不改 relation 状态转换；frontend interaction 不新增，因为页面行为不变；E2E 本地不新增，生产固定 scenario/ticket apply 是发布后证据。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_auth_context_idempotency.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_uow_contract.py -q`；`python3 -m py_compile backend/src/fin_ops_platform/services/workbench_write_facade.py tests/test_workbench_auth_context_idempotency.py`。
+- 未测风险：本地 fake 不证明真实生产 HTTP wall time；发布后必须比较 write step elapsed 和 `workbench_relation` enqueue-to-done。
+
+## 2026-07-03 - Workbench relation source-object 补读快路径
+
+- 变更类型：read model projection hot-path implementation；不改变业务关系状态机、HTTP/API response shape、权限、审计、dirty/outbox/readiness 或 payload schema。
+- 覆盖证据：普通同月 relation rebuild 中 `bank_transactions`、`oa_applications`、`invoices` 各只允许读取一次；跨月 relation 继续索引缺失成员，但第二次只按显式 row id 补读缺失成员所属源表。
+- 新增/更新测试：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_writes_linked_and_unlinked_relation_rows` 新增源表读取次数断言；`test_rebuild_indexes_cross_month_relation_members_in_current_scope` 新增跨月补读限定断言。
+- 七类测试决策：service-layer tests、read model/cache/background job tests、existing feature regression tests 适用并覆盖；business core 不新增，因为不改 confirm/withdraw/状态转换/金额规则；API contract 不新增，因为 response shape 不变；frontend interaction 不新增，因为页面行为不变；E2E 不新增到本地矩阵，生产固定 scenario/ticket write-operation apply 是发布后证据。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_sql_projection.py -q`；`python3 -m py_compile backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py`。
+- 未测风险：本地 fake 不能证明生产 PostgreSQL planner、RabbitMQ pickup 和真实写后 fan-out 的 p95；发布后必须复跑固定 Workbench withdraw scenario。
+
+## 2026-07-03 - Workbench withdraw submit canonical snapshot 去重
+
+- 变更类型：relation command service write-path performance；不改变业务状态机、API response shape、权限、审计、dirty/outbox/readiness 或 relation payload。
+- 覆盖证据：`withdraw_relation(...)` 提交路径复用同一个 loaded pair-service snapshot 做 preview lock 和状态转换，只执行一次 relation read model fresh check；public `preview_withdraw_relation(...)` 仍保留给独立 preview 请求。
+- 新增/更新测试：`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_withdraw_relation_submit_reuses_loaded_snapshot_for_preview_lock`；同时复跑 `test_withdraw_link_preview_and_submit_delegate_to_relation_command_service` 和 `test_withdraw_link_uses_uow_transaction_when_available`。
+- 七类测试决策：business core、service-layer、API contract/写入口回归、existing feature regression 适用并覆盖；read model/cache/background job 不新增，因为 dirty/outbox 目标不变；frontend interaction 不新增，因为页面行为不变；E2E 本地不新增，生产固定 scenario/ticket apply 是发布后证据。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_preview_and_submit_delegate_to_relation_command_service tests/test_workbench_write_characterization.py::WorkbenchWriteCharacterizationTests::test_withdraw_link_uses_uow_transaction_when_available tests/test_workbench_relation_sql_projection.py -q`。
+- 未测风险：本地 fake 不证明真实生产 transaction wall time；发布后必须比较 write step elapsed、`workbench_relation` event created/processed 和 post API probe。
+
 ## 现有可复用测试
 
 - `tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_confirm_link_targets_resolved_row_months_when_row_ids_do_not_encode_month`：confirm 写入使用 row 内容推导 affected month shards，覆盖 `txn_imported_*` 这类 row id 不含月份时不能退回空 scope / `all`。
@@ -182,3 +209,10 @@ cd web && npm run e2e:smoke
 - 本地 deterministic Browser/API relation Spec IDs 已覆盖：confirm -> bank details relation tags、银行明细 relation 字段真实下载、银行明细账户/日期/关键字/分类筛选导出和 `read_export_only` 下载权限、未正式化自动匹配不驱动 linked-only 状态、relation-backed pending invoice non-fresh 诊断、销项收款红蓝票 relation 写入后 rows refresh 和人工依据展示、进项发票使用 linked relation fan-out、税金抵扣 relation 后重新读取 fresh tax offset read model、OA pending linked fan-out、关联台自身 withdraw preview/submit -> open recovery、自动建议取消防误 withdraw 和隐藏、网络失败重试、409 stale preview、confirm/split/withdraw 重复提交防护、confirm -> pending invoice row status、batch accounting submit/withdraw -> bucket recovery、turnover manual closure confirm/withdraw -> grouped recovery、银行明细/待找发票/销项收款/进项使用 relation 字段下载均已覆盖；search API/runtime fan-out 已覆盖但没有独立 Browser route。剩余风险为未来 Browser search UI、新 relation 撤销入口、真实网络抖动、真实 XLSX 完整解析、生产 display audit 和真实 worker drain。
 - 真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、生产历史 relation 半迁移、大数据 active generation 回放和真实导出/滚动性能仍需 staging 或生产只读 smoke。
 - 关联台关系 fan-out 影响银行明细、待找发票、进项/销项、no-OA、turnover、batch accounting、成本、搜索等多个页面；新增 relation mode 或 write contract 时必须同步补目标 API/服务/前端/e2e 回归。
+
+## 2026-07-03 - Workbench relation UoW batch enqueue tests
+
+- 新增测试：`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_relation_write_uow_uses_batch_read_model_refresh_writer_when_available`，覆盖 relation UoW 在 writer 支持批量时只提交一次 target list，并保持 `source_versions` / `outbox_event_ids` response shape。
+- 新增测试：`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_read_model_refresh_writer_uses_batch_repository_interface_when_available`，覆盖 `RuntimeQueueReadModelRefreshWriter` 对生产 repository 批量接口的 wiring。
+- 新增测试：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_enqueue_read_model_refreshes_in_transaction_batches_dirty_scope_and_outbox_writes`，覆盖批量 dirty/outbox SQL 合同。
+- 覆盖类别：service-layer tests、read model/cache/background job tests、existing feature regression。API contract 与 frontend component 未新增，因为外部 HTTP shape 和页面交互不变；E2E business-flow 仍需生产固定 scenario/ticket 复跑。

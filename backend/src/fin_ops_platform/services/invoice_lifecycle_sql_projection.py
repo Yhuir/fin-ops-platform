@@ -422,7 +422,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
 
     def _pending_invoice_scope_source_versions(self, scope_key: str) -> dict[str, object]:
         if self._dirty_scope_is_active(scope_type="pending_invoice", scope_key=scope_key):
-            return {}
+            raise RuntimeError("pending_invoice_read_model_not_fresh")
         try:
             row = self._connection.fetch_one(
                 """
@@ -451,7 +451,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
         scope_key: str,
     ) -> dict[str, object]:
         if self._dirty_scope_is_active(scope_type=scope_type, scope_key=scope_key):
-            return {}
+            raise RuntimeError(f"{scope_type}_read_model_not_fresh")
         try:
             row = self._connection.fetch_one(
                 f"""

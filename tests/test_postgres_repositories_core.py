@@ -290,6 +290,71 @@ class PagedFactConnection:
         return 1
 
 
+class PagedImportFilesConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        return [
+            {
+                "legacy_id": "file_1",
+                "session_id": "session_1",
+                "stored_file_path": "/tmp/input.xlsx",
+                "original_filename": "input.xlsx",
+                "template_kind": "invoice_export",
+                "status": "confirmed",
+                "uploaded_by": "tester",
+                "uploaded_at": datetime(2026, 3, 1, tzinfo=UTC),
+                "payload_id": "file_1",
+                "payload_file_name": "input.xlsx",
+                "payload_template_code": "invoice_export",
+                "payload_batch_type": BatchType.INPUT_INVOICE.value,
+                "payload_status": "confirmed",
+                "payload_message": "ok",
+                "payload_row_count": "8",
+                "payload_success_count": "7",
+                "payload_error_count": "1",
+                "payload_duplicate_count": "0",
+                "payload_suspected_duplicate_count": "0",
+                "payload_updated_count": "2",
+                "payload_preview_batch_id": "batch_preview_1",
+                "payload_batch_id": "batch_1",
+                "payload_audit": {"original_count": 8, "importable_count": 7},
+            }
+        ]
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        return {"total": 1} if "count(*)" in normalized else None
+
+
+def test_list_import_files_page_uses_summary_projection_without_raw_payload_blob() -> None:
+    connection = PagedImportFilesConnection()
+    repository = PostgresCoreRepository(connection)
+
+    files, total = repository.list_import_files_page(page=1, page_size=50, status="confirmed")
+
+    assert total == 1
+    assert files[0].id == "file_1"
+    assert files[0].batch_id == "batch_1"
+    assert files[0].row_count == 8
+    assert files[0].success_count == 7
+    assert files[0].error_count == 1
+    assert files[0].updated_count == 2
+    assert files[0].audit.importable_count == 7
+    assert files[0].row_results == []
+    assert files[0].normalized_rows == []
+    sql, params = connection.fetch_all_calls[0]
+    select_clause = sql.split(" from app.import_files", 1)[0]
+    assert "payload.data->>'row_count'" in sql
+    assert "import_files.raw_payload" not in select_clause
+    assert params == ("confirmed", 50, 0)
+
+
 class BankAutoCategoryContextConnection:
     def __init__(self) -> None:
         self.fetch_all_calls: list[tuple[str, tuple]] = []

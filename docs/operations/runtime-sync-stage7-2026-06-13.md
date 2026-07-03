@@ -1,5 +1,9 @@
 # Runtime 同步 Stage 7 - 全 App 闭环 Gate
 
+> 当前生产标准输入以 `docs/operations/monitoring.md` 的页面 / 模块 write scenario 矩阵为准：
+> `FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，
+> `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`。主控 workflow 不再为 standing production smoke 逐次询问 scenario 或 approval ticket。
+
 本阶段新增 `fin_ops_platform.tools.runtime_sync_closure_gate`，把前几阶段分散的验证合成一个最终 gate。
 
 ## 为什么需要
@@ -84,7 +88,7 @@ read_model_direct_smoke=pass
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
-export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
+export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='FINOPS-WRITE-SMOKE-STANDING-20260702'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_gate \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \

@@ -92,6 +92,15 @@ class CandidateGroup:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _CandidateMergeSignature:
+    counterparty: str
+    direction: str
+    total_amount: Decimal
+    date_buckets: frozenset[str]
+    row_types: frozenset[str]
+
+
 class WorkbenchCandidateGroupingService:
     def __init__(self) -> None:
         self._group_counter = count(1)
@@ -635,19 +644,49 @@ class WorkbenchCandidateGroupingService:
         changed = True
         while changed:
             changed = False
+            signatures = {
+                id(group): signature
+                for group in merged
+                if (signature := self._candidate_merge_signature(group)) is not None
+            }
+            signature_buckets: dict[tuple[str, str, Decimal], list[int]] = defaultdict(list)
+            for index, group in enumerate(merged):
+                signature = signatures.get(id(group))
+                if signature is not None:
+                    signature_buckets[
+                        (signature.counterparty, signature.direction, signature.total_amount)
+                    ].append(index)
             next_groups: list[CandidateGroup] = []
-            while merged:
-                current = merged.pop(0)
-                match_indexes = [
-                    index
-                    for index, candidate in enumerate(merged)
-                    if self._should_merge_candidate_groups(current, candidate)
-                ]
+            consumed_indexes: set[int] = set()
+            for current_index, current in enumerate(merged):
+                if current_index in consumed_indexes:
+                    continue
+                current_signature = signatures.get(id(current))
+                match_indexes: list[int] = []
+                if current_signature is not None:
+                    bucket_key = (
+                        current_signature.counterparty,
+                        current_signature.direction,
+                        current_signature.total_amount,
+                    )
+                    for candidate_index in signature_buckets.get(bucket_key, []):
+                        if candidate_index <= current_index or candidate_index in consumed_indexes:
+                            continue
+                        candidate = merged[candidate_index]
+                        candidate_signature = signatures.get(id(candidate))
+                        if candidate_signature is None:
+                            continue
+                        if self._candidate_merge_signatures_match(current_signature, candidate_signature):
+                            match_indexes.append(candidate_index)
+                            if len(match_indexes) > 1:
+                                break
                 if len(match_indexes) == 1:
-                    match_group = merged.pop(match_indexes[0])
+                    matched_index = match_indexes[0]
+                    match_group = merged[matched_index]
                     self._absorb_group(current, match_group)
                     current.match_confidence = "medium"
                     current.reason = "complementary_candidate_group"
+                    consumed_indexes.add(matched_index)
                     changed = True
                 next_groups.append(current)
             merged = next_groups
@@ -870,29 +909,46 @@ class WorkbenchCandidateGroupingService:
         return self._should_merge_candidate_groups(left, right)
 
     def _should_merge_candidate_groups(self, left: CandidateGroup, right: CandidateGroup) -> bool:
-        if left.group_type == "open" or right.group_type == "open":
+        left_signature = self._candidate_merge_signature(left)
+        right_signature = self._candidate_merge_signature(right)
+        if left_signature is None or right_signature is None:
             return False
-        left_counterparty = self._group_counterparty(left)
-        right_counterparty = self._group_counterparty(right)
-        if left_counterparty is None or right_counterparty is None or left_counterparty != right_counterparty:
-            return False
+        return self._candidate_merge_signatures_match(left_signature, right_signature)
 
-        left_direction = self._group_direction(left)
-        right_direction = self._group_direction(right)
-        if left_direction is None or right_direction is None or left_direction != right_direction:
-            return False
+    def _candidate_merge_signature(self, group: CandidateGroup) -> _CandidateMergeSignature | None:
+        if group.group_type == "open":
+            return None
+        counterparty = self._group_counterparty(group)
+        if counterparty is None:
+            return None
+        direction = self._group_direction(group)
+        if direction is None:
+            return None
+        total_amount = self._group_total_amount(group)
+        if total_amount is None:
+            return None
+        return _CandidateMergeSignature(
+            counterparty=counterparty,
+            direction=direction,
+            total_amount=total_amount,
+            date_buckets=frozenset(self._group_date_buckets(group)),
+            row_types=self._group_row_types(group),
+        )
 
-        if not self._date_buckets_compatible(self._group_date_buckets(left), self._group_date_buckets(right)):
+    def _candidate_merge_signatures_match(
+        self,
+        left: _CandidateMergeSignature,
+        right: _CandidateMergeSignature,
+    ) -> bool:
+        if left.counterparty != right.counterparty:
             return False
-
-        left_total = self._group_total_amount(left)
-        right_total = self._group_total_amount(right)
-        if left_total is None or right_total is None:
+        if left.direction != right.direction:
             return False
-        if left_total != right_total:
+        if left.total_amount != right.total_amount:
             return False
-
-        return not self._same_row_types_only(left, right)
+        if left.date_buckets and right.date_buckets and left.date_buckets.isdisjoint(right.date_buckets):
+            return False
+        return not (len(left.row_types) == 1 and left.row_types == right.row_types)
 
     def _absorb_group(self, target: CandidateGroup, source: CandidateGroup) -> None:
         for row in source.oa_rows:
@@ -1229,7 +1285,7 @@ class WorkbenchCandidateGroupingService:
         return str(amount.quantize(CENT))
 
     def _serialize_row_for_group(self, row: dict[str, Any], group: CandidateGroup, *, section: str) -> dict[str, Any]:
-        payload = deepcopy(row)
+        payload = dict(row)
         if section != "paired":
             return payload
 
@@ -1479,9 +1535,21 @@ class WorkbenchCandidateGroupingService:
 
     @staticmethod
     def _same_row_types_only(left: CandidateGroup, right: CandidateGroup) -> bool:
-        left_types = {row_type for row_type, rows in (("oa", left.oa_rows), ("bank", left.bank_rows), ("invoice", left.invoice_rows)) if rows}
-        right_types = {row_type for row_type, rows in (("oa", right.oa_rows), ("bank", right.bank_rows), ("invoice", right.invoice_rows)) if rows}
+        left_types = WorkbenchCandidateGroupingService._group_row_types(left)
+        right_types = WorkbenchCandidateGroupingService._group_row_types(right)
         return len(left_types) == 1 and len(right_types) == 1 and left_types == right_types
+
+    @staticmethod
+    def _group_row_types(group: CandidateGroup) -> frozenset[str]:
+        return frozenset(
+            row_type
+            for row_type, rows in (
+                ("oa", group.oa_rows),
+                ("bank", group.bank_rows),
+                ("invoice", group.invoice_rows),
+            )
+            if rows
+        )
 
     def _group_type_for_existing_paired_rows(
         self,

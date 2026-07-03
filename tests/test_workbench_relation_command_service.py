@@ -184,6 +184,41 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(facade.calls, [])
         self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
 
+    def test_withdraw_relation_submit_reuses_loaded_snapshot_for_preview_lock(self) -> None:
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "created_by": "finance-user",
+            "created_at": "2026-05-02T10:00:00+00:00",
+            "updated_at": "2026-05-02T10:00:00+00:00",
+            "version": 2,
+        }
+        repository = FakeRelationRepository({"pair_relations": {"case-new": active_relation}})
+        facade = FakeRelationFacade()
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            relation_facade=facade,
+            require_fresh_relations=True,
+        )
+
+        result = service.withdraw_relation(
+            case_id="case-new",
+            actor_id="finance-user",
+            reason="controlled withdraw",
+            operation_type="withdraw_relation",
+        )
+
+        self.assertEqual(result["status"], "withdrawn")
+        self.assertEqual(repository.load_calls, 1)
+        self.assertEqual(len(facade.calls), 1)
+        self.assertEqual(facade.calls[0]["row_ids"], ["bank-1", "invoice-1"])
+        self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-05"])
+        self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
+
     def test_withdraw_relation_rejects_stale_preview_identity(self) -> None:
         active_relation = {
             "case_id": "case-new",

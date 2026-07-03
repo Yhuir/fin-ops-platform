@@ -104,6 +104,7 @@ class FakeConnection:
         self.closed = False
         self.is_open = True
         self.process_data_events_calls = 0
+        self.process_data_events_time_limits: list[float] = []
         self.raise_on_process_data_events: BaseException | None = None
         self.raise_after_process_data_events_calls: int | None = None
 
@@ -112,6 +113,7 @@ class FakeConnection:
 
     def process_data_events(self, *, time_limit):
         self.process_data_events_calls += 1
+        self.process_data_events_time_limits.append(time_limit)
         if (
             self.raise_after_process_data_events_calls is not None
             and self.process_data_events_calls >= self.raise_after_process_data_events_calls
@@ -411,7 +413,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             {
                 "RABBITMQ_URL": "amqp://rabbitmq.internal",
                 "RABBITMQ_HEARTBEAT_SECONDS": "60",
-                "RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS": "1",
+                "RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS": "0.1",
             }
         )
         consumer = RabbitMqConsumer(
@@ -432,7 +434,8 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         ):
             consumer.consume_forever()
 
-        self.assertEqual(worker.run_once_calls, 2)
+        self.assertEqual(worker.run_once_calls, 3)
+        self.assertEqual(connection.process_data_events_time_limits, [0.1, 0.1, 0.1, 0.1])
         idle_heartbeats = [status for status, _payload in worker.heartbeats if status == "idle"]
         self.assertEqual(idle_heartbeats, ["idle"])
 

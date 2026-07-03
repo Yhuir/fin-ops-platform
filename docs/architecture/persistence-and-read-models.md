@@ -71,7 +71,7 @@ PostgreSQL 中的业务唯一真相、owner matrix、允许写入口和跨模块
 
 - `ImportNormalizationService` 去重和确认前重检：按 `source_unique_key` / `data_fingerprint` 查询 SQL，不要求启动时注入完整 `imports.invoices` 或 `imports.transactions`。
 - `/api/bank-details/transactions`：优先使用 `list_bank_transactions_page()` 在 SQL 中分页和过滤，不先加载全量流水。
-- `/api/import-facts/invoices`、`/api/import-facts/batches`、`/api/import-facts/files`：按 SQL repository 分页读取发票、批次状态和导入文件。
+- `/api/import-facts/invoices`、`/api/import-facts/batches`、`/api/import-facts/files`：按 SQL repository 分页读取发票、批次状态和导入文件。`/api/import-facts/files` 是列表摘要边界，只能返回文件名、模板、状态、计数、批次 ID、审计计数等摘要字段；不得 select 或输出完整 `raw_payload`、`row_results`、`normalized_rows` 等预览明细。预览明细仍由 `/imports/files/*` session/preview 边界承担。
 
 production bootstrap 不再调用 full/compat snapshot。`PostgresStateStore` 和 `ApplicationStateStore` 都不暴露 `load_bootstrap_snapshot()`；`LegacySnapshotBootstrap` 只接受显式注入的 test/migration/shadow loader，不能从 state store 恢复 generic `load()`。新迁移模块必须通过 SQL repository/read model 注入，不能读取 `state:imports`、`state:file_imports` 或 `state:full_state` 来构造发票、银行流水、导入文件全量内存索引。
 
@@ -85,8 +85,8 @@ PostgreSQL store 不再读取 legacy GridFS reference；production API 读取文
 
 `/api/workbench` 的生产读取边界是 `PostgresReadModelRepository.get_workbench_view()`：
 
-- `read_model.workbench_snapshots` 提供兼容现有前端的 grouped payload 和 `generated_at` / `source_versions` / `cache_status` 元数据。
-- `read_model.workbench_rows` 提供 `page`、`page_size`、`status`、`source_kind`、`search` 的行级查询 DTO，返回在 `rows_page`。
+- `read_model.workbench_snapshots` 只提供兼容旧 `/api/workbench` 的 metadata/summary shell 和 `generated_at` / `source_versions` / `cache_status` 元数据；`read_model.workbench_groups.payload` 只拥有组级 metadata/sort/count/marker，不再拥有成员行数组；成员关系 owner 是 `read_model.workbench_group_rows` 的结构化 membership/filter/search/object-identity 列，行详情 owner 是 `read_model.workbench_rows.payload`，但 nested `object_identity` 仲裁对象不属于 row payload，canonical identity 由 `workbench_rows` / `workbench_group_rows` 的结构化 `object_identity_*` 列和行 payload 顶层字段承载；`workbench_group_rows.payload` / `raw_payload` / `source_versions` 新写入为空对象。旧 `/api/workbench` 或 groups/detail API 需要完整组 payload 时，从同一 active generation 的 `workbench_group_rows + workbench_rows` 重建，禁止在 refresh 写路径继续复制整页 grouped payload 到 snapshot、把成员行复制到 group payload、把整行详情或 nested identity 复制到 group_rows，或把 member payload/source_versions 写回 group_rows；rows/groups 遍历阶段不得 eager serialize 整行/整组，序列化只发生在最终 JSON 写入 helper。
+- `read_model.workbench_rows` 提供 `page`、`page_size`、`status`、`source_kind`、`search` 的行级查询 DTO，返回在 `rows_page`；新写入的 `payload` 不再保存 nested `object_identity`。
 - `job.read_model_dirty_scopes` 提供 stale/refreshing 状态。API miss 或 dirty scope 未完成时只 enqueue `workbench.read_model.refresh`，不会在请求路径调用旧 `_build_raw_workbench_payload()`。
 - production PostgreSQL runtime 如果未配置 workbench SQL read repository，会返回 `read_model_unavailable` 并尝试 enqueue refresh，不会退回旧同步 builder。local pickle 和显式 legacy bootstrap 仍可用于旧测试/迁移验证。
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-workbench-read-model-refresh` claim PostgreSQL durable queue 后重建对应 scope，并写回 `read_model.workbench_snapshots`、`read_model.workbench_rows` 和 candidate tables。
@@ -124,6 +124,7 @@ OA、银行流水、进项发票、销项发票之间的两两/三栏关系上�
 - PostgreSQL miss 或 dirty scope pending 时只 enqueue `cost_statistics.read_model.refresh`，不会在 API 请求里同步调用 `CostStatisticsService.get_explorer()` 重算大范围统计。
 - production PostgreSQL runtime 未配置成本统计 SQL repository 时同样返回 `read_model_unavailable` / `refreshing`，不回落到内存 read model 或同步计算。
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-cost-statistics-read-model-refresh` claim durable queue 后，从发票、银行流水、关系事实和现有工作台读模型口径构建 explorer payload，并写回 `read_model.cost_statistics_read_models`。
+- 成本统计从 Workbench 月份 active generation 的 `workbench_group_rows + workbench_rows` materialize 成本关系输入，不能再通过 `jsonb_path_exists(read_model.workbench_groups.payload, ...)` 读取旧 group JSON 成员行。
 - 发票、银行流水、pair relation、row override、exception case 等影响成本口径的写路径必须标记 `cost_statistics` dirty scope，并失效 `cost_statistics:explorer:{project_scope}:{month}` 与 `cost_statistics:month:{project_scope}:{month}` Redis key。
 
 旧 `reconcile_cost_statistics_read_model` 工具已删除。成本统计 read model 不再通过 `Application._cost_statistics_service.get_explorer(...)` legacy 对照链路验证；验证应走 cost-statistics 模块测试、worker refresh/fresh gate 和生产只读 SLO evidence。

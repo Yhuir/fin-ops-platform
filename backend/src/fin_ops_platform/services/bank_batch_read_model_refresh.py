@@ -104,6 +104,24 @@ class BankBatchReadModelRefreshService:
             }
 
         relation_mode = self._relation_mode_for_event(event)
+        if _is_month_scope(scope_key):
+            precheck_source_versions = self._application_service.read_model_scope_source_versions(
+                scope_key=scope_key,
+                relation_mode=relation_mode,
+            )
+            unchanged = self._application_service.unchanged_read_model_scope_result(
+                scope_key=scope_key,
+                source_versions=precheck_source_versions,
+                relation_mode=relation_mode,
+                allow_refreshing_read_model_status=True,
+            )
+            if unchanged is not None:
+                self._complete_dirty_scope(event, scope_key=scope_key)
+                return {
+                    **unchanged,
+                    "bank_row_count": self._application_service.bank_row_count_from_source_versions(precheck_source_versions),
+                }
+
         bank_rows = self._application_service.no_oa_bank_transaction_rows(
             month=scope_key,
             include_categories=False,
@@ -113,17 +131,6 @@ class BankBatchReadModelRefreshService:
         source_versions = self._application_service.no_oa_bank_batch_source_versions(
             relation_mode=relation_mode,
         )
-        unchanged = self._application_service.unchanged_read_model_scope_result(
-            scope_key=scope_key,
-            source_versions=source_versions,
-            relation_mode=relation_mode,
-        )
-        if unchanged is not None:
-            self._complete_dirty_scope(event, scope_key=scope_key)
-            return {
-                **unchanged,
-                "bank_row_count": len(bank_rows),
-            }
 
         active_relations = self._application_service.active_relations_for_bank_rows(bank_rows)
         bank_rows, _categories = self._application_service.refresh_batches_from_prepared_rows(
@@ -184,3 +191,7 @@ class BankBatchReadModelRefreshService:
                 source_version=event.source_version or event.payload.get("source_version"),
             )
         )
+
+
+def _is_month_scope(scope_key: str) -> bool:
+    return len(scope_key) == 7 and scope_key[4:5] == "-" and scope_key[:4].isdigit() and scope_key[5:].isdigit()

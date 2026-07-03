@@ -7,6 +7,9 @@ from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefres
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
+WORKBENCH_SHARD_AGGREGATE_DELAY_SECONDS = 3.0
+
+
 class WorkbenchReadModelRefreshService:
     def __init__(
         self,
@@ -160,14 +163,15 @@ class WorkbenchReadModelRefreshService:
         if not callable(enqueue_aggregate) and not callable(enqueue_event):
             return None
         source_version = event.source_version or event.payload.get("source_version")
-        event_priority = str(event.priority or "normal").strip() or "normal"
+        aggregate_priority = "low"
         if callable(enqueue_aggregate):
             enqueue_aggregate(
                 tenant_id=event.tenant_id,
                 parent_scope_keys=[scope_key],
                 source_version=source_version,
                 reason=str(event.payload.get("reason") or "workbench_shard_published"),
-                priority=event_priority,
+                priority=aggregate_priority,
+                delay_seconds=WORKBENCH_SHARD_AGGREGATE_DELAY_SECONDS,
                 trace_id=event.trace_id,
             )
         else:
@@ -187,7 +191,7 @@ class WorkbenchReadModelRefreshService:
                 },
                 tenant_id=event.tenant_id,
                 source_version=source_version,
-                priority=event_priority,
+                priority=aggregate_priority,
                 trace_id=event.trace_id,
             )
         return True

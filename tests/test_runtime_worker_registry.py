@@ -70,6 +70,8 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
                 "--enable-workbench-read-model-refresh",
                 "--event-type",
                 "workbench.read_model.refresh",
+                "--exclude-claim-scope-key",
+                "all",
             ),
         )
         self.assertEqual(
@@ -80,6 +82,24 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
                 "--worker-instance",
                 "workbench",
                 "--check",
+            ),
+        )
+
+    def test_workbench_aggregate_registration_claims_only_all_scope(self) -> None:
+        workbench = registration_by_instance_name()["workbench"]
+        aggregate = registration_by_instance_name()["workbench-aggregate"]
+
+        self.assertEqual(workbench.exclude_claim_scope_keys, ("all",))
+        self.assertEqual(aggregate.claim_scope_keys, ("all",))
+        self.assertEqual(aggregate.event_types, ("workbench.read_model.refresh",))
+        self.assertEqual(
+            worker_command_args(aggregate, transport="postgres"),
+            (
+                "--enable-workbench-read-model-refresh",
+                "--event-type",
+                "workbench.read_model.refresh",
+                "--claim-scope-key",
+                "all",
             ),
         )
 
@@ -211,6 +231,7 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(payload["event_types"], ["workbench.read_model.refresh"])
         self.assertEqual(payload["handlers"], ["workbench.read_model.refresh"])
         self.assertEqual(payload["registration"]["instance_name"], "workbench")
+        self.assertEqual(payload["registration"]["exclude_claim_scope_keys"], ["all"])
 
     def test_unknown_worker_registration_fails_fast(self) -> None:
         with self.assertRaises(SystemExit):

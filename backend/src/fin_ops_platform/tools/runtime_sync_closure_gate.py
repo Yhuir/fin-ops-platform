@@ -126,7 +126,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         health_ready_max_api_performance_endpoints=max(0, int(args.health_ready_max_api_performance_endpoints)),
         write_audit_lookback_hours=max(0.1, float(args.write_audit_lookback_hours)),
         timeout_seconds=max(1.0, float(args.timeout_seconds)),
-        poll_interval_seconds=max(0.1, float(args.poll_interval_seconds)),
+        poll_interval_seconds=max(0.05, float(args.poll_interval_seconds)),
         limit=max(1, int(args.limit)),
     )
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str)

@@ -26,10 +26,23 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   systemd unit，并在发布阶段等待 worker readiness 收敛。Release deploy 在 activate 前必须先把当前 release 的
   `deploy/oa/bin/finops-ensure-runtime-workers.sh` 安装到 `/usr/local/sbin/finops-ensure-runtime-workers`，
   避免生产继续调用旧 helper。
-- PostgreSQL durable queue worker 的 idle poll 基线是 `0.25s`。新增 read model / 写后 fan-out worker 不能把
-  `--poll-interval-seconds 2` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，可保留显式
-  5s poll。发布 helper 只会把已有 env 中精确命中的历史 `--poll-interval-seconds 2` 迁移到 `0.25`，不会重写
-  RabbitMQ 灰度、自定义事件或吞吐参数。
+- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；`workbench` 月分片热 lane 为 `0.01s`，`workbench-aggregate` 仍为 `0.25s`，避免 all-scope 聚合挤占月份 shard pickup。新增 read model / 写后 fan-out worker 不能把
+  `--poll-interval-seconds 2`、`0.25`、`0.1` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，
+  可保留显式 5s poll。发布 helper 会把已有 env 中精确命中的历史 `--poll-interval-seconds 2|0.25|0.1|0.05`
+  迁移到当前 release env 示例声明的 poll 值，不会重写 RabbitMQ 灰度、自定义事件或吞吐参数。
+- PostgreSQL durable queue worker 的空轮询 heartbeat 必须节流。`idle` 只证明 worker 存活和当前无可 claim event，
+  不能每个 0.05s poll 都写 `job.runtime_worker_heartbeats`；`processing`、`deferred`、`failed`、`stopping`、`stopped`
+  必须即时写入，保证 App Health 和故障定位不丢关键状态。
+- 同一 event type 需要拆分性能 lane 时，只允许使用 worker registry / worker env 暴露的 claim scope include/exclude。
+  当前 `workbench.read_model.refresh` 拆成两个 required worker：`workbench` 使用 `--exclude-claim-scope-key all`
+  处理月份 shard，`workbench-aggregate` 使用 `--claim-scope-key all` 处理全局聚合。scope policy 仍是 read model
+  contract 的事实源，queue 层只做 claim 过滤，不承载业务 scope 校验。
+- `job.outbox_events` active queue claim hot path 必须保留 `outbox_events_claim_event_type_priority_idx`。
+  该索引按 `event_type/status/priority rank/available_at/created_at/id` 支撑 worker lane claim，减少 grouped read model smoke
+  扫描无关 event type 的 pickup 尾延迟。它只优化 PostgreSQL I/O，不改变 priority、dedupe、dirty scope、RabbitMQ 或 readiness 语义。
+- read model refresh 的 enqueue-to-done SLO 以 `job.outbox_events.available_at -> processed_at` 为准。
+  事务内 writer 必须用 `clock_timestamp()` 写实际入队可处理时间；`created_at` 不再作为长事务内 worker drain 的判断起点。
+  HTTP 写请求本身的耗时继续由 `workbench_action_timing` / route timing 观测，不能和 worker drain 混算。
 - 用户只看到业务状态：queued、running、refreshing、stale、failed。用户不直接 start/stop worker。
 - read model query service 负责：通过统一 freshness/status gate 判定是否可读 SQL projection；
   missing、dirty、schema mismatch、source version mismatch 都必须返回 refreshing 并入队。
@@ -67,8 +80,44 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - `APP_STATUS_READ_MODEL_REGISTRY` 中的每个 read model 必须有对应 required worker registration、refresh event、RabbitMQ dispatch event 和 SLO smoke 计划。
 - `tests/test_postgres_migrations.py` 的 read model storage contract 必须覆盖每个 App Status read model；新增 SQL projection 表时不能只写 migration 而不更新本地 schema 基线。
 - `read_model_slo_smoke --critical-only` 必须规划所有 critical App Status read model；dry-run 只证明 scope discovery，`--apply` 才证明真实 enqueue-to-fresh worker drain。
-- `fin-ops.rabbitmq-worker.env` 只放共享 RabbitMQ 凭据和 consumer fallback 参数，不设置 `FIN_OPS_QUEUE_BACKEND`；RabbitMQ 灰度切换只能发生在单 worker instance env。
+- `fin-ops.rabbitmq-worker.env` 只放共享 RabbitMQ 凭据和 consumer fallback 参数，不设置 `FIN_OPS_QUEUE_BACKEND`；RabbitMQ 灰度切换只能发生在单 worker instance env。`RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS` 当前基线为 `0.1`，避免 RabbitMQ envelope 丢失或 dispatcher 延迟时让 1s read model SLO 卡在 fallback drain。
 - Redis 生产 env 模板必须和 `RuntimeRedisSettings.from_env()` 保持一致；Redis 只能缓存 fresh gate 后 payload，不能成为 worker/readiness 状态事实源。
+
+## 固定写操作 smoke 输入
+
+生产 write-operation E2E smoke 不再逐次询问 scenario 或 approval ticket。标准输入由
+`fin_ops_platform.tools.write_operation_scenario_discovery` 生成和报告：
+
+- `FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`
+- `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`
+- 每个 operation 最多写入 1 个受控 scenario，避免同一月份连续撤回造成 Workbench/read model 串行刷新长尾。
+- discovery 只读 PostgreSQL 事实并输出候选；真正 apply 仍必须提供真实 OA/Admin auth，但不再需要临时业务 ticket。
+- no-OA withdraw 候选必须同时满足 `app.no_oa_bank_batches.status='submitted'`、`relation.status='active'`
+  和 `relation.relation_mode='no_oa_bank_batch'`，不能把 bank-flow rule batch 关系误送到 no-OA endpoint。
+
+| 页面 | apply policy | 生产 smoke operation | approval ticket |
+| --- | --- | --- | --- |
+| `turnover-ledger` | standing apply | `turnover_manual_closure_or_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `reconciliation-workbench` | standing apply | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `workbench-relations` | standing apply | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `no-oa-bank-batches` | standing apply | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `bank-flow-rule-batches` | fan-out evidence | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `bank-details` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `bank-account-balance` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `pending-invoices` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `input-invoice-usage` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `output-invoice-collections` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `invoice-lifecycle` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `oa-pending-payments` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `tax-offset` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `cost-statistics` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `search` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `batch-accounting` | fan-out evidence | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `imports-bank-transactions` | no standing production apply | staging 或单次审批导入 scenario | 不使用常驻 ticket |
+| `imports-invoices` | no standing production apply | staging 或单次审批导入 scenario | 不使用常驻 ticket |
+| `imports-etc-invoices` | no standing production apply | staging 或单次审批导入 scenario | 不使用常驻 ticket |
+| `settings` | no standing production apply | staging 或单次审批设置变更 scenario | 不使用常驻 ticket |
+| `data-safety-reset` | no standing production apply | staging 或单次审批 reset/restore scenario | 不使用常驻 ticket |
 
 ## Read Model 查询合同
 
@@ -100,7 +149,8 @@ transport/wakeup，不能作为 read model 状态事实源。
 - `ReadModelRefreshGateway` / scope policy registry：在写入 durable queue 前统一做 read model scope normalize、validate 和 dedupe；具体 read model 的 scope contract 不放进 `RuntimeQueueRepository`。
 - `job.read_model_dirty_scopes`：scope 的刷新状态事实源。
 - `job.outbox_events`：worker 可 claim 的事件事实源。
-- `RuntimeQueueRepository.enqueue_read_model_refresh(...)`：gateway 和事务内 writer 委托的 durable queue 写入入口。
+- `RuntimeQueueRepository.enqueue_read_model_refresh(...)`：gateway 和单 scope 事务内 writer 委托的 durable queue 写入入口。
+- `RuntimeQueueRepository.enqueue_read_model_refreshes_in_transaction(...)`：同一业务事务内已有多个规范 target 时使用的批量入口；它只减少 SQL 往返，仍写同一 `job.read_model_dirty_scopes` / `job.outbox_events`，不得改变 source_version、dedupe、priority、trace_id、readiness 或 RabbitMQ 事实源语义。
 - 事务内 writer：写业务数据时需要同事务标记 dirty/outbox 时使用。
 
 业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。refresh service
@@ -444,8 +494,9 @@ PostgreSQL durable queue 和 readiness 为准：
 
 4. 如果 `/health/ready.runtime_infrastructure.rabbitmq_metric_error` 是 queue/DLQ missing，先使用
    `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 执行 topology apply，再重新检查 Management metrics。
-5. 创建或更新 root-only `/etc/fin-ops/fin-ops.rabbitmq-worker.env`，只写共享 `RABBITMQ_URL`。该文件
-   权限必须是 `0600 root root`，且不得设置 `FIN_OPS_QUEUE_BACKEND`。
+5. 创建或更新 root-only `/etc/fin-ops/fin-ops.rabbitmq-worker.env`，只写共享 `RABBITMQ_URL`
+   和 `RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1`。该文件权限必须是
+   `0600 root root`，且不得设置 `FIN_OPS_QUEUE_BACKEND`。
 6. 备份准备切换的 `/etc/fin-ops/fin-ops.worker.<instance>.env` 到带时间戳的目录。
 7. 逐个或按小批量把 required eligible worker 的 per-instance env 改为 `FIN_OPS_QUEUE_BACKEND=rabbitmq`，
    重启对应 `fin-ops-worker@<instance>.service`。
@@ -519,13 +570,15 @@ PostgreSQL done/fresh。
 
 高频 read model 的专用 consumers 是当前 P2/P3 一秒级 closure 的基础；历史 5s SLO 记录只是旧基线，不是当前验收上限。当前 direct refresh / 首屏 API 以 p95 <= 1000ms 为门禁，写操作链路还要求 operation-to-fresh p99 <= 3000ms：
 
+- `workbench`：消费 `workbench.read_model.refresh` 但排除 `scope_key=all`，优先服务页面首屏月份 shard。
+- `workbench-aggregate`：只消费 `workbench.read_model.refresh` 的 `scope_key=all`，维护全局聚合，不阻塞 urgent 月份 shard refresh。
 - `search` / `search-secondary` / `search-tertiary`：只消费 `search.read_model.refresh`，并发处理关系变更中的 bank 月、invoice 月以及快速 confirm/withdraw 连续写入产生的同 scope search 事件。
 - `pending-invoice`：只消费 `pending_invoice.read_model.refresh`。
 - `cost-statistics`：只消费 `cost_statistics.read_model.refresh`。
 - `tax-offset`：只消费 `tax_offset.read_model.refresh`。
 - `invoice-lifecycle-secondary`：作为第二条 `invoice_lifecycle.read_model.refresh` consumer，和 `invoice-lifecycle` 并发 drain 多月份 scope。
 
-这些 worker 不改变 PostgreSQL durable queue / readiness 事实源；它们只是同一 outbox event type 的并发消费者。旧 `search-pending` 不应作为唯一性能 lane 依赖；`cost-tax` 不再消费 `cost_statistics.read_model.refresh`，避免旧成本统计链路与专用 lane 竞争长 SQL。
+这些 worker 不改变 PostgreSQL durable queue / readiness 事实源；它们只是同一 outbox event type 的并发消费者或 scope-filtered lane。旧 `search-pending` 不应作为唯一性能 lane 依赖；`cost-tax` 不再消费 `cost_statistics.read_model.refresh`，避免旧成本统计链路与专用 lane 竞争长 SQL。
 
 成本统计 scope 分为：
 

@@ -26,6 +26,17 @@
 
 ## 历史记录
 
+## 2026-07-03 - 导入文件事实列表摘要化
+
+- 目标：修复生产 HTTP SLO 中 `/api/import-facts/files?page=1&page_size=50` 返回约 15MB 导致导入页探针超时的问题。
+- 影响范围：`/api/import-facts/files`、`PostgresCoreRepository.list_import_files_page()`、默认 HTTP SLO probe；不改变 `/imports/files/*` 上传、预览、确认和 session detail 合同。
+- 关键决策：导入文件事实列表是摘要 read API，只投影文件名、模板、状态、计数、批次 ID 和审计计数；完整 `raw_payload`、`row_results`、`normalized_rows` 只能保留在导入预览/session 边界，禁止旧 full payload 污染列表链路。
+- 文档影响：更新本模块 boundary、共享 persistence/read-model 边界、银行流水导入和 ETC 导入 boundary。
+- 测试覆盖：`tests/test_postgres_repositories_core.py::test_list_import_files_page_uses_summary_projection_without_raw_payload_blob`、`tests/test_import_file_api.py::ImportFileApiTests::test_import_fact_files_list_omits_preview_detail_payloads`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_import_file_api.py tests/test_postgres_repositories_core.py tests/test_http_slo_probe.py -q`。
+- 未测风险：尚需发布后复跑生产 HTTP SLO，确认公网响应体和耗时已降到 1s 目标内。
+- 后续事项：如果未来需要文件明细查看，应新增明确详情/下载 API，不得把预览明细重新放回列表。
+
 ## 2026-06-23 - ETC 批次发票 link table 最小接入
 
 - 目标：把正式发票导入后的 submitted ETC metadata 回挂从单纯 `etc_invoice_id/raw_payload` 扩展为 `app.etc_batch_invoice_links` 批次归属事实，开始收敛“一张真实发票一行 canonical invoice、批次关系进 link table”的长期架构。

@@ -1479,19 +1479,41 @@ class RuntimeMonitoringRepository:
     def dashboard_outbox_metric(self) -> dict[str, Any]:
         row = self._connection.fetch_one(
             f"""
+            with dashboard_outbox_attention_events as (
+              select
+                e.status,
+                e.publish_status,
+                e.created_at
+              from job.outbox_events e
+              where e.status in ('pending', 'failed', 'dead_lettered')
+                and {_current_effective_outbox_attention_predicate_sql("e")}
+              union all
+              select
+                e.status,
+                e.publish_status,
+                e.created_at
+              from job.outbox_events e
+              where e.publish_status = 'publishing'
+                and e.status not in ('pending', 'failed', 'dead_lettered')
+                and {_current_effective_outbox_attention_predicate_sql("e")}
+              union all
+              select
+                e.status,
+                e.publish_status,
+                e.created_at
+              from job.outbox_events e
+              where e.publish_status = 'failed'
+                and e.status not in ('pending', 'failed', 'dead_lettered')
+                and {_current_effective_outbox_attention_predicate_sql("e")}
+            )
             select
-              count(*) filter (where e.status = 'pending')::bigint as pending_count,
-              count(*) filter (where e.publish_status = 'publishing')::bigint as publishing_count,
-              count(*) filter (where e.status in ('failed', 'dead_lettered'))::bigint as failed_count,
-              count(*) filter (where e.publish_status = 'failed')::bigint as publish_failed_count,
-              extract(epoch from max(now() - e.created_at) filter (where e.status = 'pending'))::float
+              count(*) filter (where status = 'pending')::bigint as pending_count,
+              count(*) filter (where publish_status = 'publishing')::bigint as publishing_count,
+              count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count,
+              count(*) filter (where publish_status = 'failed')::bigint as publish_failed_count,
+              extract(epoch from max(now() - created_at) filter (where status = 'pending'))::float
                 as oldest_pending_age_seconds
-            from job.outbox_events e
-            where (
-                e.status in ('pending', 'failed', 'dead_lettered')
-                or e.publish_status in ('publishing', 'failed')
-              )
-              and {_current_effective_outbox_attention_predicate_sql("e")}
+            from dashboard_outbox_attention_events
             """
         ) or {}
         return {

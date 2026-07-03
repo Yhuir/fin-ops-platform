@@ -165,6 +165,66 @@ class _RecordingDirtyOutboxWriter:
         return event
 
 
+class _BatchRecordingDirtyOutboxWriter:
+    def __init__(self) -> None:
+        self.batch_calls: list[dict[str, object]] = []
+        self.single_calls: list[dict[str, object]] = []
+
+    def enqueue_refreshes(
+        self,
+        *,
+        transaction: object,
+        targets: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        self.batch_calls.append({"transaction": transaction, "targets": [dict(target) for target in targets]})
+        return [
+            {
+                "event_id": f"event-{index}",
+                "scope_type": str(target.get("scope_type") or ""),
+                "scope_key": str(target.get("scope_key") or ""),
+                "source_version": index,
+            }
+            for index, target in enumerate(targets, start=1)
+        ]
+
+    def enqueue_refresh(self, **kwargs: object) -> dict[str, object]:
+        self.single_calls.append(dict(kwargs))
+        return {"event_id": "single-event", "source_version": 99}
+
+
+class _BatchQueueRepository:
+    def __init__(self) -> None:
+        self.batch_calls: list[dict[str, object]] = []
+        self.single_calls: list[dict[str, object]] = []
+
+    def enqueue_read_model_refreshes_in_transaction(
+        self,
+        *,
+        transaction: object,
+        refreshes: list[dict[str, object]],
+        tenant_id: str,
+        priority: str,
+        trace_id: str | None,
+    ) -> list[dict[str, object]]:
+        self.batch_calls.append(
+            {
+                "transaction": transaction,
+                "refreshes": [dict(refresh) for refresh in refreshes],
+                "tenant_id": tenant_id,
+                "priority": priority,
+                "trace_id": trace_id,
+            }
+        )
+        return [
+            {"event_id": f"batch-event-{index}", "source_version": index}
+            for index, _refresh in enumerate(refreshes, start=1)
+        ]
+
+    def enqueue_read_model_refresh_in_transaction(self, **kwargs: object) -> dict[str, object]:
+        self.single_calls.append(dict(kwargs))
+        return {"event_id": "single-event", "source_version": 99}
+
+
 class _RecordingIdempotencyStore:
     def __init__(self) -> None:
         self.records: dict[str, object] = {}
@@ -383,7 +443,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self,
         *,
         connection: _RecordingConnection | None = None,
-        read_model_writer: _RecordingDirtyOutboxWriter | None = None,
+        read_model_writer: object | None = None,
         idempotency_store: _RecordingIdempotencyStore | None = None,
         repository_factory: _RecordingRepositoryFactory | None = None,
     ) -> object:
@@ -444,6 +504,49 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(event_payload["scope_type"], "workbench")
         self.assertEqual(event_payload["scope_key"], "2026-05")
 
+    def test_read_model_refresh_writer_uses_batch_repository_interface_when_available(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.workbench_uow")
+        writer_class = getattr(module, "RuntimeQueueReadModelRefreshWriter")
+        queue_repository = _BatchQueueRepository()
+        writer = writer_class(
+            queue_repository,
+            tenant_id="tenant-a",
+            priority="high",
+            trace_id="trace-batch",
+        )
+        transaction = _RecordingTransaction()
+
+        events = writer.enqueue_refreshes(
+            transaction=transaction,
+            targets=[
+                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "workbench_relation_changed"},
+                {
+                    "scope_type": "workbench_relation",
+                    "scope_key": "2026-05",
+                    "reason": "workbench_pair_relation_changed",
+                    "metadata": {"action_name": "withdraw_link"},
+                },
+            ],
+        )
+
+        self.assertEqual([event["event_id"] for event in events], ["batch-event-1", "batch-event-2"])
+        self.assertEqual(queue_repository.single_calls, [])
+        self.assertEqual(len(queue_repository.batch_calls), 1)
+        self.assertIs(queue_repository.batch_calls[0]["transaction"], transaction)
+        self.assertEqual(queue_repository.batch_calls[0]["tenant_id"], "tenant-a")
+        self.assertEqual(queue_repository.batch_calls[0]["priority"], "high")
+        self.assertEqual(queue_repository.batch_calls[0]["trace_id"], "trace-batch")
+        self.assertEqual(
+            [
+                (refresh["scope_type"], refresh["scope_key"], refresh["reason"])
+                for refresh in queue_repository.batch_calls[0]["refreshes"]
+            ],
+            [
+                ("workbench", "2026-05", "workbench_relation_changed"),
+                ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
+            ],
+        )
+
     def test_read_model_refresh_writer_failure_rolls_back_transaction(self) -> None:
         connection = _RecordingConnection(_RecordingTransaction(fail_on_outbox=True))
         enqueue = self._transaction_bound_writer()
@@ -488,6 +591,39 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(writer.calls[1]["scope_type"], "workbench_relation")
         self.assertEqual(writer.calls[1]["scope_key"], "2026-05")
         self.assertEqual(writer.calls[1]["reason"], "workbench_pair_relation_changed")
+        self.assertEqual(result["source_versions"]["2026-05"], 1)
+        self.assertEqual(result["source_versions"]["workbench_relation:2026-05"], 2)
+        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2"])
+
+    def test_relation_write_uow_uses_batch_read_model_refresh_writer_when_available(self) -> None:
+        connection = _RecordingConnection()
+        writer = _BatchRecordingDirtyOutboxWriter()
+        uow = self._new_uow(connection=connection, read_model_writer=writer)
+
+        def handler(ctx: object) -> dict[str, object]:
+            ctx.pair_relations.record("save_relation", case_id="CASE-BATCH")
+            return {"case_id": "CASE-BATCH", "affected_scope_keys": ["2026-05"]}
+
+        result = self._run_uow(
+            uow,
+            _Command(action_name="confirm_link", scope_keys=["2026-05"]),
+            handler,
+        )
+
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(writer.single_calls, [])
+        self.assertEqual(len(writer.batch_calls), 1)
+        self.assertIs(writer.batch_calls[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(
+            [
+                (target["scope_type"], target["scope_key"], target["reason"])
+                for target in writer.batch_calls[0]["targets"]
+            ],
+            [
+                ("workbench", "2026-05", "workbench_relation_changed"),
+                ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
+            ],
+        )
         self.assertEqual(result["source_versions"]["2026-05"], 1)
         self.assertEqual(result["source_versions"]["workbench_relation:2026-05"], 2)
         self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2"])

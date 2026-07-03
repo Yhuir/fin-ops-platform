@@ -232,6 +232,8 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
             'test -d "$RELEASE_DIR/src/backend/src"',
             'test -f "$RELEASE_DIR/src/backend/requirements.txt"',
             'test -f "$RELEASE_DIR/src/web/dist/index.html"',
+            mark_remote_deploy_step("install deploy-control helper"),
+            f'sudo -n install -m 0755 -o root -g root "$RELEASE_DIR/src/deploy/oa/bin/finops-deploy-control.sh" {quoted_deploy_control}',
             mark_remote_deploy_step("deploy-control check-release"),
             f"sudo -n {quoted_deploy_control} check-release {quoted_release_name}",
         ]

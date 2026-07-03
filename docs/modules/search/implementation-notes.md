@@ -80,3 +80,11 @@
 - 保留兼容：`Application._handle_api_search(...)` 只在非 production SQL read model runtime 下保留 `SearchService.search(...)` legacy/local fallback；生产 SQL runtime 缺 repository 时必须 fail closed。`search-pending` 仍是兼容 worker lane，不能成为新的 Search owner。
 - 状态：`search` 转为 `production-evidence-deferred`，但不是全局模块闭环。真实 PostgreSQL read repository、dirty/outbox drain、App Status readiness、high-row performance 和 browser/user-flow evidence 仍不可由本地环境证明。
 - 下一步：执行 `read-models:next-pilot-selection-after-search`，从当前代码和文档确认下一个非 Go read model pilot；Go/Fiber/Go Worker admission 继续 blocked。
+
+## 2026-07-03 - Search index row-level no-op persistence
+
+- 触发事实：生产 grouped 1s smoke 中 `search:2026-03` handler 曾达到约 `3087ms`，而只读 `EXPLAIN ANALYZE` 显示 Search build SELECT 约 `16ms`；瓶颈不在查询或 ranking，而在保存阶段整月删除再重写 `read_model.search_index_rows`。
+- 决策：保持 Search API、scope、source_versions、worker event、ranking 和 refresh producer 边界不变；`save_search_index_rows(...)` 改为按 `row_id` bulk upsert，只有目标列 `is distinct from` 时才更新，同 scope 只删除本次结果之外的 stale rows。空结果仍删除整个 `scope_month`，保持空投影合同。
+- 旧逻辑删除：生产主链路不得恢复 `delete where scope_month = ...` 后重写全部行的旧保存方式；该方式会重新引入索引/锁写放大并污染 grouped SLO。
+- 本地保护：`tests/test_search_pending_sql_runtime.py` 锁定 no-op upsert、stale-row delete 和空结果 scope delete。
+- 生产证据：release `pscip-l4-search-index-noop-20260703` 上 `search:2026-03` targeted 1s direct SLO `10/10` pass，最大 enqueue-to-fresh `666.731ms`，最大 handler `231.055ms`。Search 已不再是最新 grouped blocker；剩余全域 1s blocker 在 Workbench/invoice lifecycle 总耗时和 runtime queue pickup。

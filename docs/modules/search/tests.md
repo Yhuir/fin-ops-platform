@@ -122,6 +122,18 @@ bash scripts/verify.sh docs
 git diff --check
 ```
 
+## 2026-07-03 - row-level no-op persistence
+
+- 更新：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_index_rows_are_saved_with_bulk_values`。
+- 新增：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_index_bulk_save_deletes_scope_when_result_is_empty`。
+- 覆盖：Search index 保存路径按 `row_id` bulk upsert，no-op 行通过 `is distinct from` 跳过更新；同 scope stale rows 单独删除；空结果仍按 `scope_month` 删除，避免保留旧搜索结果。
+- 回归目标：禁止恢复整月 delete + 全量 rewrite 的旧持久化逻辑。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py -q
+```
+
 ## 下一 slice 必跑建议
 
 ```bash

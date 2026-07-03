@@ -325,11 +325,14 @@ class RabbitMqConsumer:
             return "rejected_invalid_envelope"
 
         event_id = str(envelope["event_id"])
+        claim_scope_filters = getattr(self._worker, "claim_scope_filters", None)
+        scope_filters = claim_scope_filters() if callable(claim_scope_filters) else {}
         event = self._queue.claim_event_by_id(
             event_id=event_id,
             worker_id=self._worker_id,
             event_types=self._event_types,
             lock_timeout_seconds=self._lock_timeout_seconds,
+            **scope_filters,
         )
         if event is None:
             current = self._queue.get_event(event_id)
@@ -363,14 +366,14 @@ class RabbitMqConsumer:
                 channel.basic_consume(queue=queue_name, on_message_callback=on_message)
             heartbeat_interval_seconds = min(30.0, max(5.0, float(self._settings.rabbitmq_heartbeat_seconds) / 2.0))
             postgres_drain_interval_seconds = max(
-                0.1,
+                0.05,
                 float(self._settings.rabbitmq_consumer_postgres_drain_interval_seconds),
             )
             next_heartbeat_at = 0.0
             next_postgres_drain_at = 0.0
             while True:
                 try:
-                    connection.process_data_events(time_limit=1.0)
+                    connection.process_data_events(time_limit=min(1.0, postgres_drain_interval_seconds))
                     now = monotonic()
                     if now >= next_postgres_drain_at:
                         drain_result = self.drain_postgres_queue_once()

@@ -33,6 +33,7 @@ class FakeQueue:
     def __init__(self, claimed: RuntimeQueueEvent | None) -> None:
         self.claimed = claimed
         self.claim_calls: list[tuple[str, list[str] | None, int]] = []
+        self.claim_filter_calls: list[dict[str, object]] = []
         self.completed: list[tuple[str, str, dict[str, object] | None]] = []
         self.acked: list[tuple[str, str, dict[str, object] | None]] = []
         self.failed: list[tuple[str, str, str, bool, int]] = []
@@ -47,8 +48,15 @@ class FakeQueue:
         self.heartbeats: list[tuple[str, str, str, object]] = []
         self.statement_timeouts: list[int | None] = []
 
-    def claim_next(self, worker_id: str, event_types=None, lock_timeout_seconds: int = 300):
+    def claim_next(
+        self,
+        worker_id: str,
+        event_types=None,
+        lock_timeout_seconds: int = 300,
+        **filters,
+    ):
         self.claim_calls.append((worker_id, list(event_types) if event_types is not None else None, lock_timeout_seconds))
+        self.claim_filter_calls.append(dict(filters))
         return self.claimed
 
     def complete(self, event_id: str, worker_id: str, result_payload=None) -> bool:
@@ -131,15 +139,17 @@ class FakeSequenceQueue(FakeQueue):
         super().__init__(None)
         self.claimed_events = list(claimed_events)
 
-    def claim_next(self, worker_id: str, event_types=None, lock_timeout_seconds: int = 300):
+    def claim_next(self, worker_id: str, event_types=None, lock_timeout_seconds: int = 300, **filters):
         self.claim_calls.append((worker_id, list(event_types) if event_types is not None else None, lock_timeout_seconds))
+        self.claim_filter_calls.append(dict(filters))
         return self.claimed_events.pop(0) if self.claimed_events else None
 
 
 class RuntimeWorkerTests(unittest.TestCase):
     def test_default_poll_interval_is_fast_enough_for_read_model_slo(self) -> None:
-        self.assertEqual(DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS, 0.25)
-        self.assertEqual(RuntimeWorkerConfig().poll_interval_seconds, 0.25)
+        self.assertEqual(DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS, 0.05)
+        self.assertEqual(RuntimeWorkerConfig().poll_interval_seconds, 0.05)
+        self.assertEqual(RuntimeWorkerConfig().heartbeat_min_interval_seconds, 1.0)
 
     def test_run_once_claims_from_postgres_queue_without_redis_and_completes_event(self) -> None:
         queue = FakeQueue(event())
@@ -452,6 +462,68 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertTrue(queue.heartbeats)
         for _worker_id, _kind, _status, payload in queue.heartbeats:
             self.assertEqual(payload["worker_instance"], "workbench")
+
+    def test_fast_empty_polls_throttle_idle_heartbeat_writes(self) -> None:
+        queue = FakeQueue(None)
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["runtime.test"],
+                poll_interval_seconds=0.05,
+                heartbeat_min_interval_seconds=1.0,
+            ),
+            handlers={"runtime.test": lambda claimed: {"handled": claimed.event_id}},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.IDLE)
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.IDLE)
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.IDLE)
+
+        self.assertEqual(len(queue.claim_calls), 3)
+        self.assertEqual([status for _worker_id, _kind, status, _payload in queue.heartbeats], ["idle"])
+
+    def test_run_once_passes_claim_scope_filters_to_queue(self) -> None:
+        queue = FakeQueue(None)
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["workbench.read_model.refresh"],
+                claim_scope_keys=["all"],
+                exclude_claim_scope_keys=["2026-02"],
+            ),
+            handlers={"workbench.read_model.refresh": lambda claimed: {"handled": claimed.event_id}},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.IDLE)
+
+        self.assertEqual(
+            queue.claim_filter_calls[0],
+            {"scope_keys": ["all"], "exclude_scope_keys": ["2026-02"]},
+        )
+
+    def test_event_processing_heartbeats_bypass_idle_throttle(self) -> None:
+        queue = FakeQueue(None)
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["runtime.test"],
+                heartbeat_min_interval_seconds=60.0,
+            ),
+            handlers={"runtime.test": lambda claimed: {"handled": claimed.event_id}},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.IDLE)
+        queue.claimed = event()
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.PROCESSED)
+
+        self.assertEqual(
+            [status for _worker_id, _kind, status, _payload in queue.heartbeats],
+            ["idle", "processing", "idle"],
+        )
+        self.assertEqual(queue.acked[0][0:2], ("event-1", "worker-1"))
 
     def test_run_once_retries_when_handler_exceeds_task_timeout(self) -> None:
         queue = FakeQueue(event())

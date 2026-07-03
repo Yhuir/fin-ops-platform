@@ -204,6 +204,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             source_version=8,
             reason="workbench_relation_changed",
             priority="low",
+            delay_seconds=3.0,
             trace_id="trace-a",
         )
 
@@ -211,11 +212,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         method, sql, params = transaction.calls[0]
         self.assertEqual(method, "fetch_one")
         self.assertIn("jsonb_array_elements_text", sql)
+        self.assertIn("available_at = case", sql)
         self.assertEqual(params[1], "workbench.read_model.refresh:workbench:all:aggregate")
         payload = getattr(params[2], "obj", params[2])
         self.assertEqual(payload["parent_scope_keys"], ["2026-04", "2026-05"])
         self.assertEqual(payload["aggregate_only"], True)
         self.assertEqual(payload["reason"], "workbench_relation_changed")
+        self.assertEqual(params[4], 3.0)
 
     def test_enqueue_inserts_runtime_event_fields_and_returns_event(self) -> None:
         available_at = datetime(2026, 5, 21, 12, 0, tzinfo=timezone.utc)
@@ -291,6 +294,25 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("locked_by = %s", normalized_sql)
         self.assertEqual(params, ("worker-1", 120, ["invoice.imported", "invoice.updated"]))
 
+    def test_claim_next_can_filter_scope_keys_for_split_worker_lanes(self) -> None:
+        transaction = FakeTransaction(rows=[event_row(status="processing", attempts=1, scope_key="all")])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.claim_next(
+            worker_id="worker-1",
+            event_types=["workbench.read_model.refresh"],
+            lock_timeout_seconds=120,
+            scope_keys=["all"],
+            exclude_scope_keys=["2026-02"],
+        )
+
+        self.assertIsNotNone(event)
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("scope_key = any(%s)", normalized_sql)
+        self.assertIn("not (scope_key = any(%s))", normalized_sql)
+        self.assertEqual(params, ("worker-1", 120, ["workbench.read_model.refresh"], ["all"], ["2026-02"]))
+
     def test_claim_events_is_batch_interface_over_postgres_claims(self) -> None:
         transaction = FakeTransaction(
             rows=[
@@ -330,6 +352,23 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("available_at <= now()", normalized_sql)
         self.assertIn("event_type = any(%s)", normalized_sql)
         self.assertEqual(params, ("worker-1", "event-1", 300, ["invoice.imported"]))
+
+    def test_claim_event_by_id_honors_scope_filters_for_rabbitmq_consumers(self) -> None:
+        transaction = FakeTransaction(rows=[event_row(status="processing", attempts=1, scope_key="all")])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.claim_event_by_id(
+            event_id="event-1",
+            worker_id="worker-1",
+            event_types=["workbench.read_model.refresh"],
+            scope_keys=["all"],
+        )
+
+        self.assertIsNotNone(event)
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("scope_key = any(%s)", normalized_sql)
+        self.assertEqual(params, ("worker-1", "event-1", 300, ["workbench.read_model.refresh"], ["all"]))
 
     def test_claim_event_by_id_can_reclaim_stale_processing_event(self) -> None:
         transaction = FakeTransaction(rows=[event_row(status="processing", attempts=2)])
@@ -543,6 +582,9 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("schema_version", normalized_outbox_sql)
         self.assertIn("status = 'pending'", normalized_outbox_sql)
         self.assertIn("payload = job.outbox_events.payload || excluded.payload", normalized_outbox_sql)
+        self.assertIn("clock_timestamp()", normalized_dirty_sql)
+        self.assertIn("clock_timestamp()", normalized_outbox_sql)
+        self.assertIn("available_at = least(job.outbox_events.available_at, excluded.available_at)", normalized_outbox_sql)
         self.assertEqual(
             outbox_params[6:10],
             (3, "high", "trace-read-model", {"scope_type": "workbench", "scope_key": "2026-05", "reason": "test", "source_version": 3}),
@@ -576,6 +618,89 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         self.assertEqual(event.source_version, 5)
         self.assertEqual(len(transaction.calls), 2)
+
+    def test_enqueue_read_model_refreshes_in_transaction_batches_dirty_scope_and_outbox_writes(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                [
+                    event_row(
+                        event_id="event-1",
+                        event_type="workbench.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="2026-05",
+                        scope_type="workbench",
+                        scope_key="2026-05",
+                        dedupe_key="workbench.read_model.refresh:workbench:2026-05",
+                        payload={
+                            "scope_type": "workbench",
+                            "scope_key": "2026-05",
+                            "reason": "workbench_relation_changed",
+                            "source_version": 11,
+                        },
+                        source_version=11,
+                        priority="high",
+                    ),
+                    event_row(
+                        event_id="event-2",
+                        event_type="workbench_relation.read_model.refresh",
+                        aggregate_type="read_model",
+                        aggregate_id="2026-05",
+                        scope_type="workbench_relation",
+                        scope_key="2026-05",
+                        dedupe_key="workbench_relation.read_model.refresh:workbench_relation:2026-05",
+                        payload={
+                            "scope_type": "workbench_relation",
+                            "scope_key": "2026-05",
+                            "reason": "workbench_pair_relation_changed",
+                            "source_version": 12,
+                        },
+                        source_version=12,
+                        priority="high",
+                    ),
+                ],
+            ]
+        )
+        repository = RuntimeQueueRepository(FailingTransactionConnection())  # type: ignore[arg-type]
+
+        events = repository.enqueue_read_model_refreshes_in_transaction(
+            transaction=transaction,
+            refreshes=[
+                {
+                    "scope_type": "workbench",
+                    "scope_key": "2026-05",
+                    "reason": "workbench_relation_changed",
+                    "metadata": {"action_name": "withdraw_link", "ignored": "not persisted"},
+                },
+                {
+                    "scope_type": "workbench_relation",
+                    "scope_key": "2026-05",
+                    "reason": "workbench_pair_relation_changed",
+                    "metadata": {"action_name": "withdraw_link"},
+                },
+            ],
+            priority="high",
+            trace_id="trace-batch",
+        )
+
+        self.assertEqual([event.event_id for event in events], ["event-1", "event-2"])
+        self.assertEqual([event.source_version for event in events], [11, 12])
+        self.assertEqual(len(transaction.calls), 1)
+        method, sql, params = transaction.calls[0]
+        self.assertEqual(method, "fetch_all")
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("with input(", normalized_sql)
+        self.assertIn("insert into job.read_model_dirty_scopes", normalized_sql)
+        self.assertIn("insert into job.outbox_events", normalized_sql)
+        self.assertIn("source_version = job.read_model_dirty_scopes.source_version + 1", normalized_sql)
+        self.assertIn("payload = job.outbox_events.payload || excluded.payload", normalized_sql)
+        self.assertIn("clock_timestamp()", normalized_sql)
+        self.assertIn("available_at = least(job.outbox_events.available_at, excluded.available_at)", normalized_sql)
+        self.assertEqual(params[0:7], (0, "default", "workbench", "2026-05", "workbench_relation_changed", "high", "trace-batch"))
+        first_payload = getattr(params[7], "obj", params[7])
+        self.assertEqual(first_payload["action_name"], "withdraw_link")
+        self.assertEqual(first_payload["metadata"], {"action_name": "withdraw_link"})
+        self.assertNotIn("ignored", first_payload["metadata"])
+        self.assertEqual(params[8:10], ("workbench.read_model.refresh", "workbench.read_model.refresh:workbench:2026-05"))
 
     def test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract(self) -> None:
         transaction = FakeTransaction(
@@ -619,6 +744,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("source_version = job.read_model_dirty_scopes.source_version + 1", normalized_dirty_sql)
         self.assertIn("insert into job.outbox_events", normalized_outbox_sql)
         self.assertIn("payload = job.outbox_events.payload || excluded.payload", normalized_outbox_sql)
+        self.assertIn("clock_timestamp()", normalized_dirty_sql)
+        self.assertIn("clock_timestamp()", normalized_outbox_sql)
         self.assertEqual(
             dirty_params,
             (

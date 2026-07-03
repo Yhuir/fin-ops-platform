@@ -1260,7 +1260,9 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
     const rowsBeforeMutation = rowsRequests(fetchMock).length;
+    expect(autoReconcileRequests(fetchMock)).toHaveLength(0);
 
+    await userEvent.click(within(page).getByRole("button", { name: "自动匹配并写回 OA 待付款" }));
     await waitFor(() => expect(autoReconcileRequests(fetchMock)).toHaveLength(1));
     await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
     const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
@@ -1304,10 +1306,14 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
+    expect(autoReconcileRequests(fetchMock)).toHaveLength(0);
+
+    await user.click(within(page).getByRole("button", { name: "自动匹配并写回 OA 待付款" }));
     await waitFor(() => expect(autoReconcileRequests(fetchMock)).toHaveLength(1));
     expect(await within(page).findByText("自动匹配和写回暂不可用。")).toBeInTheDocument();
 
     await user.click(within(page).getByRole("button", { name: "刷新 OA 待付款核对" }));
+    await user.click(within(page).getByRole("button", { name: "自动匹配并写回 OA 待付款" }));
 
     await waitFor(() => expect(autoReconcileRequests(fetchMock)).toHaveLength(2));
     await waitFor(() => expect(within(page).queryByText("自动匹配和写回暂不可用。")).not.toBeInTheDocument());

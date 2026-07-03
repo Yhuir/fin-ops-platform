@@ -99,14 +99,11 @@ class WorkbenchWriteUnitOfWork:
             result = dict(handler_result)
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
-            for target in _refresh_targets_for(command, result):
-                event = self._read_model_refresh_writer.enqueue_refresh(
-                    transaction=transaction,
-                    scope_type=target.scope_type,
-                    scope_key=target.scope_key,
-                    reason=target.reason,
-                    metadata=dict(target.metadata) if target.metadata is not None else None,
-                )
+            refresh_targets = _refresh_targets_for(command, result)
+            refresh_events = self._enqueue_refresh_targets(transaction=transaction, targets=refresh_targets)
+            if len(refresh_events) != len(refresh_targets):
+                raise RuntimeError("read model refresh writer returned a different number of events than targets.")
+            for target, event in zip(refresh_targets, refresh_events, strict=True):
                 source_version_key = (
                     target.scope_key
                     if target.scope_type == "workbench"
@@ -126,6 +123,41 @@ class WorkbenchWriteUnitOfWork:
                     outbox_event_ids=outbox_event_ids,
                 )
             return result
+
+    def _enqueue_refresh_targets(
+        self,
+        *,
+        transaction: Any,
+        targets: list[WorkbenchReadModelRefreshTarget],
+    ) -> list[Any]:
+        enqueue_many = getattr(self._read_model_refresh_writer, "enqueue_refreshes", None)
+        if callable(enqueue_many):
+            return list(
+                enqueue_many(
+                    transaction=transaction,
+                    targets=[
+                        {
+                            "scope_type": target.scope_type,
+                            "scope_key": target.scope_key,
+                            "reason": target.reason,
+                            "metadata": dict(target.metadata) if target.metadata is not None else None,
+                        }
+                        for target in targets
+                    ],
+                )
+            )
+        events: list[Any] = []
+        for target in targets:
+            events.append(
+                self._read_model_refresh_writer.enqueue_refresh(
+                    transaction=transaction,
+                    scope_type=target.scope_type,
+                    scope_key=target.scope_key,
+                    reason=target.reason,
+                    metadata=dict(target.metadata) if target.metadata is not None else None,
+                )
+            )
+        return events
 
     def replay_committed(self, command: Any) -> dict[str, Any] | None:
         idempotency = _idempotency_request_for(command)
@@ -177,6 +209,35 @@ class RuntimeQueueReadModelRefreshWriter:
             trace_id=self._trace_id,
             metadata=metadata,
         )
+
+    def enqueue_refreshes(
+        self,
+        *,
+        transaction: Any,
+        targets: list[dict[str, object]],
+    ) -> list[Any]:
+        enqueue_many = getattr(self._queue_repository, "enqueue_read_model_refreshes_in_transaction", None)
+        if callable(enqueue_many):
+            return list(
+                enqueue_many(
+                    transaction=transaction,
+                    refreshes=list(targets or []),
+                    tenant_id=self._tenant_id,
+                    priority=self._priority,
+                    trace_id=self._trace_id,
+                )
+            )
+        return [
+            self.enqueue_refresh(
+                transaction=transaction,
+                scope_type=str(target.get("scope_type") or ""),
+                scope_key=str(target.get("scope_key") or ""),
+                reason=str(target.get("reason") or ""),
+                metadata=dict(target.get("metadata") or {}) if isinstance(target.get("metadata"), dict) else None,
+            )
+            for target in list(targets or [])
+            if isinstance(target, dict)
+        ]
 
 
 def _scope_keys_for(command: Any, handler_result: dict[str, Any]) -> list[str]:

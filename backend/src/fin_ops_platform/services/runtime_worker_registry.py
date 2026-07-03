@@ -14,6 +14,8 @@ class RuntimeWorkerRegistration:
     handler_flags: tuple[str, ...] = ()
     event_types: tuple[str, ...] = ()
     postgres_claim_event_types: tuple[str, ...] = ()
+    claim_scope_keys: tuple[str, ...] = ()
+    exclude_claim_scope_keys: tuple[str, ...] = ()
     required: bool = False
     rabbitmq_eligible: bool = False
     env_example: str = ""
@@ -46,10 +48,25 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         worker_kind="workbench-read-model",
         handler_flags=("--enable-workbench-read-model-refresh",),
         event_types=("workbench.read_model.refresh",),
+        exclude_claim_scope_keys=("all",),
         required=True,
         rabbitmq_eligible=True,
         env_example="fin-ops.worker.workbench.env.example",
         rabbitmq_env_example="fin-ops.worker.workbench-rabbitmq.env.example",
+        read_model_key="workbench",
+        read_model_scope_type="workbench",
+    ),
+    RuntimeWorkerRegistration(
+        instance_name="workbench-aggregate",
+        worker_kind="workbench-aggregate-read-model",
+        handler_flags=("--enable-workbench-read-model-refresh",),
+        event_types=("workbench.read_model.refresh",),
+        claim_scope_keys=("all",),
+        required=True,
+        rabbitmq_eligible=False,
+        env_example="fin-ops.worker.workbench-aggregate.env.example",
+        heartbeat_stale_after_seconds=900,
+        dependencies=("postgres", "workbench"),
         read_model_key="workbench",
         read_model_scope_type="workbench",
     ),
@@ -353,6 +370,10 @@ def worker_command_args(
     args: list[str] = list(registration.handler_flags)
     for event_type in worker_claim_event_types(registration, transport=transport):
         args.extend(["--event-type", event_type])
+    for scope_key in registration.claim_scope_keys:
+        args.extend(["--claim-scope-key", scope_key])
+    for scope_key in registration.exclude_claim_scope_keys:
+        args.extend(["--exclude-claim-scope-key", scope_key])
     return tuple(args)
 
 

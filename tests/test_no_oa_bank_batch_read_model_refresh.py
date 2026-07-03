@@ -471,6 +471,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.last_source_versions: dict[str, object] = {}
                 self.calls: list[list[str]] = []
+                self.source_version_calls: list[list[str]] = []
 
             def bulk_get_for_rows(self, rows):
                 self.calls.append([str(row.get("id") or "") for row in rows])
@@ -478,6 +479,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                     "bank_detail": {
                         "scope_key": "2026-04",
                         "source_version": 11,
+                        "row_count": 1,
                         "bank_detail_source_signature": "bank-detail-v1",
                     }
                 }
@@ -488,6 +490,22 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                         "category_label": "手续费",
                         "category_source": "auto",
                     }
+                }
+
+            def source_versions_for_scope_keys(self, scope_keys, **_kwargs):
+                self.source_version_calls.append(list(scope_keys))
+                self.last_source_versions = {
+                    "bank_detail": {
+                        "scope_key": "2026-04",
+                        "source_version": 11,
+                        "row_count": 1,
+                        "bank_detail_source_signature": "bank-detail-v1",
+                    }
+                }
+                return {
+                    "status": "fresh",
+                    "source_versions": dict(self.last_source_versions),
+                    "scope_keys": list(scope_keys),
                 }
 
         class RelationFacade:
@@ -527,7 +545,7 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             ) -> dict[str, object]:
                 self.calls.append(dict(filters or {}))
                 return {
-                    "read_model_status": "fresh",
+                    "read_model_status": "refreshing",
                     "row_count": len(self.rows),
                     "source_versions": dict(self.rows[0]["source_versions"]) if self.rows else {},
                 }
@@ -586,20 +604,15 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
             workbench_matching_source_versions_provider=lambda: {"workbench_read_model_schema_version": 77},
             relation_facade=relation_facade,
         )
-        bank_rows = service._application_service.no_oa_bank_transaction_rows(
-            month="2026-04",
-            include_categories=False,
-        )
-        service._application_service.effective_categories_for_rows(bank_rows)
-        service._application_service.load_relation_source_versions_for_bank_rows(bank_rows)
         repository.rows = [
             {
                 "batch_id": "existing-batch",
                 "scope_month": "2026-04",
-                "source_versions": service._application_service.no_oa_bank_batch_source_versions(),
+                "source_versions": service._application_service.read_model_scope_source_versions(scope_key="2026-04"),
             }
         ]
         provider.calls = []
+        provider.source_version_calls = []
         relation_facade.calls = []
         relation_facade.source_version_calls = []
 
@@ -625,7 +638,8 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
         self.assertEqual(result["skip_reason"], "source_versions_unchanged")
         self.assertEqual(result["bank_row_count"], 1)
         self.assertEqual(result["batch_count"], 1)
-        self.assertEqual(provider.calls, [["txn-skip"]])
+        self.assertEqual(provider.calls, [])
+        self.assertEqual(provider.source_version_calls, [["2026-04"]])
         self.assertEqual(relation_facade.source_version_calls, ["2026-04"])
         self.assertEqual(relation_facade.calls, [])
         self.assertEqual(repository.calls, [{"month": "2026-04"}])

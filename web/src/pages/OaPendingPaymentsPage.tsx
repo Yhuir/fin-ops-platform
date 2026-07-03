@@ -239,16 +239,16 @@ export default function OaPendingPaymentsPage() {
     return () => controller.abort();
   }, [loadRows]);
 
-  useEffect(() => {
+  const runAutoReconcileForVisibleScope = useCallback(async () => {
     if (!canMutateData) {
-      return undefined;
+      return;
     }
     if (loading || refreshing || error || !isReadModelFresh(readModelStatus)) {
-      return undefined;
+      return;
     }
     const scopeKey = query.month || "all";
     if (autoReconcileCompletedKeysRef.has(scopeKey) || autoReconcileFailedKeysRef.has(scopeKey)) {
-      return undefined;
+      return;
     }
     let reconcilePromise = autoReconcilePromisesRef.get(scopeKey);
     if (!reconcilePromise) {
@@ -260,38 +260,24 @@ export default function OaPendingPaymentsPage() {
       });
       autoReconcilePromisesRef.set(scopeKey, reconcilePromise);
     }
-    let active = true;
-    void (async () => {
-      try {
-        const result = await reconcilePromise;
-        if (!active) {
-          return;
-        }
-        autoReconcileCompletedKeysRef.add(scopeKey);
-        setActionError(null);
-        if (!autoReconcileChanged(result)) {
-          return;
-        }
-        const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, scopeKey);
-        if (!active) {
-          return;
-        }
-        if (synced) {
-          setFeedback(autoReconcileFeedback(result));
-          loadRowsRef.current("refresh");
-        } else {
-          setFeedback("自动匹配和写回已提交，后台同步尚未完成，请稍后刷新。");
-        }
-      } catch (caught: unknown) {
-        if (active) {
-          autoReconcileFailedKeysRef.add(scopeKey);
-          setActionError(caught instanceof Error ? caught.message : "自动匹配和写回失败。");
-        }
+    try {
+      const result = await reconcilePromise;
+      autoReconcileCompletedKeysRef.add(scopeKey);
+      setActionError(null);
+      if (!autoReconcileChanged(result)) {
+        return;
       }
-    })();
-    return () => {
-      active = false;
-    };
+      const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, scopeKey);
+      if (synced) {
+        setFeedback(autoReconcileFeedback(result));
+        loadRowsRef.current("refresh");
+      } else {
+        setFeedback("自动匹配和写回已提交，后台同步尚未完成，请稍后刷新。");
+      }
+    } catch (caught: unknown) {
+      autoReconcileFailedKeysRef.add(scopeKey);
+      setActionError(caught instanceof Error ? caught.message : "自动匹配和写回失败。");
+    }
   }, [
     autoReconcileCompletedKeysRef,
     autoReconcileFailedKeysRef,
@@ -398,6 +384,17 @@ export default function OaPendingPaymentsPage() {
       >
         刷新
       </button>
+      {canMutateData ? (
+        <button
+          aria-label="自动匹配并写回 OA 待付款"
+          className="oa-pending-payments-button"
+          disabled={loading || refreshing || !!error || !isReadModelFresh(readModelStatus)}
+          onClick={() => void runAutoReconcileForVisibleScope()}
+          type="button"
+        >
+          自动匹配/写回
+        </button>
+      ) : null}
       {query.viewMode === "in_progress" ? (
         <button
           aria-label="关联支出流水"
@@ -421,7 +418,7 @@ export default function OaPendingPaymentsPage() {
         支出流水无需开票规则设置
       </button>
     </div>
-  ), [canMutateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
+  ), [canMutateData, error, loadRows, loading, query.viewMode, readModelStatus, refreshing, runAutoReconcileForVisibleScope, selectedOaRowIds.size]);
   const visibleError = error ?? actionError;
   const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
   const showReadModelState = isEmpty && !isReadModelFresh(readModelStatus);

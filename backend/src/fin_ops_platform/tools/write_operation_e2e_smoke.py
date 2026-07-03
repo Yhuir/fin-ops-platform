@@ -20,6 +20,7 @@ DEFAULT_HTTP_TARGET_MS = 1_000.0
 DEFAULT_TIMEOUT_SECONDS = 90.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
 DEFAULT_LIMIT = 2_000
+MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT = 200
 
 RequestFn = Callable[[str, str, Mapping[str, str], bytes | None, float], http_slo_probe.HttpProbeResponse]
 
@@ -147,7 +148,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         approval_reference=approval_ticket,
         write_target_ms=write_target_ms,
         timeout_seconds=max(1.0, float(args.timeout_seconds)),
-        poll_interval_seconds=max(0.1, float(args.poll_interval_seconds)),
+        poll_interval_seconds=max(0.05, float(args.poll_interval_seconds)),
         limit=max(1, int(args.limit)),
     )
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str)
@@ -452,6 +453,7 @@ def _wait_for_write_slo(
 ) -> dict[str, Any]:
     expectations = write_operation_slo_audit.selected_expectations_for_operations(operations)
     p99_target_ms = write_operation_slo_audit.effective_p99_target_ms_for(target_ms, None)
+    effective_limit = _effective_write_slo_event_sample_limit(limit, expectation_count=len(expectations))
     deadline = monotonic() + max(1.0, timeout_seconds)
     last_results: list[Any] = []
     last_rows: list[dict[str, Any]] = []
@@ -460,7 +462,8 @@ def _wait_for_write_slo(
             connection,
             tenant_id=tenant_id,
             started_at=started_at,
-            limit=limit,
+            limit=effective_limit,
+            expectations=expectations,
         )
         results = write_operation_slo_audit.evaluate_operation_expectations(
             rows,
@@ -475,6 +478,8 @@ def _wait_for_write_slo(
                 "status": "pass",
                 "target_ms": target_ms,
                 "p99_target_ms": p99_target_ms,
+                "requested_event_sample_limit": max(1, int(limit)),
+                "effective_event_sample_limit": effective_limit,
                 "event_sample_count": len(rows),
                 "results": [asdict(result) for result in results],
             }
@@ -483,11 +488,13 @@ def _wait_for_write_slo(
                 "status": "fail",
                 "target_ms": target_ms,
                 "p99_target_ms": p99_target_ms,
+                "requested_event_sample_limit": max(1, int(limit)),
+                "effective_event_sample_limit": effective_limit,
                 "event_sample_count": len(last_rows),
                 "error": "timeout_waiting_for_write_operation_refresh_slo",
                 "results": [asdict(result) for result in last_results],
             }
-        sleep(max(0.1, poll_interval_seconds))
+        sleep(max(0.05, poll_interval_seconds))
 
 
 def _collect_post_api_slo(
@@ -509,6 +516,15 @@ def _collect_post_api_slo(
         warmup=0,
         timeout_seconds=timeout_seconds,
         require_auth=True,
+    )
+
+
+def _effective_write_slo_event_sample_limit(limit: int, *, expectation_count: int) -> int:
+    return max(
+        1,
+        int(limit),
+        MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT,
+        int(expectation_count) * 4,
     )
 
 

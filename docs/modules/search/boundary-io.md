@@ -1,6 +1,6 @@
 # Search 模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-03
 
 ## 模块化状态
 
@@ -37,7 +37,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 搜索结果 | 调用页面 | 必须来自 fresh index 或暴露 nonfresh |
-| Search index rows | repository | partitioned scoped index |
+| Search index rows | repository | partitioned scoped index；保存时按 `row_id` 做 no-op aware bulk upsert，只删除同 scope 不再存在的 stale rows；空结果 scope 才允许整月删除 |
 | Dirty scope | runtime queue | `search.read_model.refresh` |
 
 ## 持久化与投影
@@ -47,6 +47,7 @@
 - Worker：`search`，辅助 `search-pending`、`search-secondary`、`search-tertiary`
 - Query owner：Search read API
 - Repository owner：`SearchReadModelRepositoryPort`
+- Persistence contract：`save_search_index_rows(...)` 不允许恢复整月 delete + 全量 rewrite 的旧逻辑；更新必须通过 `row_id` upsert 和 `is distinct from` 跳过 no-op 行，避免 grouped SLO 写放大。
 
 ## 文件范围
 
@@ -70,6 +71,8 @@
 - `tests/test_search_service.py`
 - `tests/test_search_pending_sql_runtime.py`
 - `tests/test_read_model_manifest.py`
+- `tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_index_rows_are_saved_with_bulk_values`
+- `tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_index_bulk_save_deletes_scope_when_result_is_empty`
 
 ## 当前缺口和删除条件
 

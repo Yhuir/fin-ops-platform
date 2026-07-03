@@ -17,6 +17,13 @@ DEFAULT_TARGET_MS = 1_000.0
 DEFAULT_P99_TARGET_MS = 3_000.0
 DEFAULT_LOOKBACK_HOURS = 24.0
 DEFAULT_LIMIT = 2_000
+_REASON_SQL = "coalesce(e.payload->>'reason', e.raw_payload->>'reason', d.reason)"
+_ACTION_NAME_SQL = """coalesce(
+            e.payload->>'action_name',
+            e.payload->'metadata'->>'action_name',
+            e.raw_payload->>'action_name',
+            e.raw_payload->'metadata'->>'action_name'
+          )"""
 
 
 @dataclass(frozen=True)
@@ -340,25 +347,23 @@ def recent_read_model_refresh_events_since(
     tenant_id: str,
     started_at: Any,
     limit: int,
+    expectations: Sequence[OperationExpectation] | None = None,
 ) -> list[dict[str, Any]]:
+    expectation_filter_sql, expectation_params = _expectation_filter_sql(expectations)
     rows = connection.fetch_all(
-        """
+        f"""
         select
           e.id::text as event_id,
           e.tenant_id,
           e.event_type,
           e.scope_type,
           e.scope_key,
-          coalesce(e.payload->>'reason', e.raw_payload->>'reason', d.reason) as reason,
-          coalesce(
-            e.payload->>'action_name',
-            e.payload->'metadata'->>'action_name',
-            e.raw_payload->>'action_name',
-            e.raw_payload->'metadata'->>'action_name'
-          ) as action_name,
+          {_REASON_SQL} as reason,
+          {_ACTION_NAME_SQL} as action_name,
           e.status as event_status,
           e.source_version,
           e.created_at,
+          e.available_at,
           e.processed_at,
           e.updated_at,
           e.last_error as event_last_error,
@@ -374,10 +379,11 @@ def recent_read_model_refresh_events_since(
         where e.tenant_id = %s
           and (e.event_type like '%%.read_model.refresh' or e.event_type = 'import.fact.changed')
           and e.created_at >= %s
+          {expectation_filter_sql}
         order by e.created_at desc, e.id desc
         limit %s
         """,
-        (tenant_id, started_at, limit),
+        (tenant_id, started_at, *expectation_params, limit),
     )
     return [dict(row) for row in rows]
 
@@ -420,6 +426,7 @@ def _recent_read_model_refresh_events(
           e.status as event_status,
           e.source_version,
           e.created_at,
+          e.available_at,
           e.processed_at,
           e.updated_at,
           e.last_error as event_last_error,
@@ -441,6 +448,24 @@ def _recent_read_model_refresh_events(
         (tenant_id, lookback_hours, limit),
     )
     return [dict(row) for row in rows]
+
+
+def _expectation_filter_sql(expectations: Sequence[OperationExpectation] | None) -> tuple[str, tuple[Any, ...]]:
+    if not expectations:
+        return "", ()
+    clauses: list[str] = []
+    params: list[Any] = []
+    for expectation in expectations:
+        expected_event_type = expectation.event_type or f"{expectation.scope_type}.read_model.refresh"
+        clause = f"(e.event_type = %s and e.scope_type = %s and {_REASON_SQL} = %s"
+        params.extend([expected_event_type, expectation.scope_type, expectation.reason])
+        action_names = [name for name in expectation.action_names if str(name or "").strip()]
+        if action_names:
+            clause += f" and {_ACTION_NAME_SQL} = any(%s)"
+            params.append(action_names)
+        clause += ")"
+        clauses.append(clause)
+    return f"and ({' or '.join(clauses)})", tuple(params)
 
 
 def _evaluate_expectation(
@@ -486,7 +511,10 @@ def _evaluate_expectation(
         )
     durations = [
         duration
-        for duration in (_duration_ms(row.get("created_at"), row.get("processed_at")) for row in samples)
+        for duration in (
+            _duration_ms(row.get("available_at") or row.get("created_at"), row.get("processed_at"))
+            for row in samples
+        )
         if duration is not None
     ]
     failed_samples = [

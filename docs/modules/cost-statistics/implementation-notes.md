@@ -10,6 +10,7 @@
 - 生产库中已有的成本统计 legacy/invalid runtime scope 通过 `scripts/check-read-model-scope-contracts.py` 检查；`--apply` 删除旧状态，并补投可归一化的规范 replacement scope。
 - 成本税务 projection 中的发票输入必须来自 canonical invoice facts；OA 附件正式发票先 promotion 到 Invoice repository / `app.invoices`，不能从 `app.oa_attachment_invoice_cache` 直接拼计划或成本税务输入项。
 - 成本统计 export-preview/export 是同步生成路径；time、month、project、expense_type 导出超过 20,000 行时必须返回 `cost_statistics_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
+- 成本统计月份 shard 的 Workbench 输入来自 active generation 的 `workbench_group_rows + workbench_rows` 结构化成员，不再读取 `workbench_groups.payload` 里的 `oa_rows/bank_rows` 旧 JSON 成员数组。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖成本归因、API/导出、SQL read model、parent/shard readiness、scope gateway、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
 
 ## 记录模板
@@ -28,6 +29,16 @@
 ```
 
 ## 历史记录
+
+## 2026-07-03 - Workbench group payload 去重后的成本输入迁移
+
+- 目标：配合 Workbench active generation payload owner 边界迁移，避免成本统计继续依赖 `workbench_groups.payload` 的旧成员数组。
+- 影响范围：`CostStatisticsSqlProjectionBuilder._cost_entries_from_workbench(...)`、Workbench read model generation payload 合同、成本统计状态机/实施记录、read-models 持久化文档；不改变成本归因业务规则、scope contract、API response 或前端页面行为。
+- 关键决策：成本统计 worker 先从 Workbench 月份 active generation 的 `workbench_group_rows + workbench_rows` materialize 成本关系输入，再复用既有 `is_candidate_workbench_group`、`is_cost_eligible_open_group` 和 `_cost_context_from_oa_rows` 业务判断；禁止恢复 `jsonb_path_exists(workbench_groups.payload, ...)` 读取旧 JSON 成员。
+- 文档影响：更新成本统计状态机/实施记录、read-models boundary、关联台 boundary 和持久化架构文档。
+- 测试覆盖：`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts` 锁定 SQL 必须 join `workbench_group_rows` 与 `workbench_rows`，且不再使用 `jsonb_path_exists`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_cost_statistics_sql_runtime.py tests/test_workbench_sql_runtime.py -q`。
+- 未测风险：真实生产成本统计 worker drain 和高行数 SLO 仍需要随本轮生产 release 复测。
 
 ## 2026-06-25 - cost statistics route-owner local closure audit
 

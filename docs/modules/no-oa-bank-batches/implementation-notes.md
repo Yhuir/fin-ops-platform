@@ -23,6 +23,16 @@
 - 右侧流水栏展示每条流水的银行明细有效标签，使用 detail row 的 `category_label_path`，为空时回退 `category_primary_label/category_sub_label/category_label/category_code`；标签显示为摘要单元格内紧凑 chip，不新增表格列。
 - 2026-06-24 起，本模块是 modular IO read model 主线的第十一个非 Go pilot。下一步先审计 read model repository/state-store/public-snapshot/refresh-worker ownership，再决定首个实现抽取边界；不直接跳 Go/Fiber/Go Worker。
 
+## 2026-07-03 - unchanged scope source-version probe
+
+- 目标：让 no-OA 月份 read model refresh 在 source_versions 未变化时先跳过，避免为了证明 unchanged 仍读取完整银行交易行、分类行和 Workbench relation 行。
+- 影响范围：`NoOaBankBatchApplicationService.read_model_scope_source_versions(...)`、`NoOaBankBatchReadModelRefreshService`、`BankTransactionTagReadFacade.source_versions_for_scope_keys(...)`；不改变 no-OA API shape、业务状态机、read model schema、dirty/outbox schema、权限、审计或前端行为。
+- 关键决策：月份 scope 先读取 bank-detail scope summary 与 Workbench relation source_versions，并与 `no_oa_bank_batch_source_versions_summary(...)` 比较；一致时 complete dirty scope 并返回 `skipped/source_versions_unchanged`。`all` scope 仍走完整刷新，不做月级 probe。
+- 旧逻辑清理：unchanged path 不再调用 `bulk_get_for_rows(...)`、relation `list_by_month(...)` 或 snapshot save；无法证明 source_versions 一致时才 rebuild。
+- 测试覆盖：`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save`、`tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_source_versions_for_scope_keys_uses_scope_summary_without_loading_rows`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests tests/test_bank_flow_rule_batch_application_service.py tests/test_no_oa_bank_batch_read_model_refresh.py -q`。
+- 未测风险：真实生产 worker 并发耗时需发布后用 read model SLO smoke 验证。
+
 ## 2026-06-26 - submitted/cancelled relation lifecycle repair
 
 - 目标：修复生产历史 no-OA 批次中 `submitted` 状态与已取消 no-OA Workbench relation 不一致的问题，避免页面把已取消关系误显示为可撤回的已提交批次。

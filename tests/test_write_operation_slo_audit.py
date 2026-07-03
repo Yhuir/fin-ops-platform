@@ -161,6 +161,28 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertIn("p95_enqueue_to_done_ms_exceeded_target", report["results"][0]["latest_error"])
 
+    def test_enqueue_duration_uses_available_at_instead_of_transaction_created_at(self) -> None:
+        created_at = datetime(2026, 6, 13, 10, 0, 0, tzinfo=timezone.utc)
+        row = _event(
+            scope_type="turnover_ledger",
+            reason="turnover_relation_extra_changed",
+            action_name="relation_extra_update",
+            seconds=5.0,
+        )
+        row["created_at"] = created_at
+        row["available_at"] = created_at + timedelta(seconds=4.5)
+        row["processed_at"] = created_at + timedelta(seconds=5.0)
+        row["updated_at"] = created_at + timedelta(seconds=5.0)
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection([row]),
+            operations=["turnover_relation_extra"],
+            target_ms=1_000,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["results"][0]["p95_enqueue_to_done_ms"], 500.0)
+
     def test_p99_long_tail_fails_even_when_p95_meets_one_second_target(self) -> None:
         rows = [
             _event(
@@ -232,6 +254,37 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["results"][0]["status"], "missing")
+
+    def test_recent_events_since_can_filter_by_operation_expectations_in_sql(self) -> None:
+        connection = FakeConnection([])
+        expectations = write_operation_slo_audit.selected_expectations_for_operations(
+            ["turnover_manual_closure_or_withdraw"]
+        )
+
+        write_operation_slo_audit.recent_read_model_refresh_events_since(
+            connection,
+            tenant_id="default",
+            started_at=datetime(2026, 6, 13, 10, 0, 0, tzinfo=timezone.utc),
+            limit=50,
+            expectations=expectations,
+        )
+
+        sql, params = connection.fetch_all_calls[-1]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("e.event_type = %s", normalized_sql)
+        self.assertIn("e.scope_type = %s", normalized_sql)
+        self.assertIn("= any(%s)", normalized_sql)
+        self.assertIn("turnover_ledger.read_model.refresh", params)
+        self.assertIn("turnover_relation_changed", params)
+        self.assertIn(
+            [
+                "turnover_relation_zero_difference_closure",
+                "withdraw_relation",
+                "turnover_relation_withdraw",
+            ],
+            params,
+        )
+        self.assertEqual(params[-1], 50)
 
     def test_workbench_relation_withdraw_profile_requires_only_operation_blocking_relation_scope(self) -> None:
         rows = [

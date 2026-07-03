@@ -402,6 +402,81 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertIn("bank_flow_rule_batch_schema_version", versions)
         self.assertNotIn("no_oa_bank_batch_tag_selection_version", versions)
 
+    def test_bank_flow_scope_source_versions_use_probe_ports_before_row_loading(self) -> None:
+        settings = RecordingBankFlowRuleSettings()
+
+        class EffectiveCategoryProvider:
+            last_source_versions: dict[str, object] = {}
+
+            def __init__(self) -> None:
+                self.source_version_calls: list[list[str]] = []
+
+            def bulk_get_for_rows(self, _rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+                raise AssertionError("source-version precheck must not load bank detail rows")
+
+            def source_versions_for_scope_keys(self, scope_keys: list[str], **_kwargs: object) -> dict[str, object]:
+                self.source_version_calls.append(list(scope_keys))
+                return {
+                    "status": "fresh",
+                    "source_versions": {
+                        "bank_detail_schema_version": 8,
+                        "row_count": 100,
+                        "source_version": 12,
+                    },
+                }
+
+        class RelationFacade:
+            last_source_versions: dict[str, object] = {}
+
+            def __init__(self) -> None:
+                self.source_version_calls: list[str] = []
+
+            def list_by_month(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("source-version precheck must not load relation rows")
+
+            def source_versions_for_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+                self.source_version_calls.append(month)
+                return {
+                    "status": "fresh",
+                    "source_versions": {
+                        "scope_key": month,
+                        "relation_signature": "relation-v1",
+                    },
+                }
+
+        provider = EffectiveCategoryProvider()
+        relation_facade = RelationFacade()
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._app_settings_service = settings
+        service._workbench_matching_source_versions_provider = lambda: {"workbench_matching_rules_version": "rules-v1"}
+        service._bank_transaction_category_service = SimpleNamespace(snapshot=lambda: {"version": 3})
+        service._effective_category_provider = provider
+        service._relation_facade = relation_facade
+
+        versions = service.read_model_scope_source_versions(
+            scope_key="2026-02",
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        self.assertEqual(provider.source_version_calls, [["2026-02"]])
+        self.assertEqual(relation_facade.source_version_calls, ["2026-02"])
+        self.assertEqual(versions["bank_flow_rule_batch_tag_rules_version"], 7)
+        self.assertEqual(
+            versions["bank_detail_source_versions"],
+            {
+                "bank_detail_schema_version": 8,
+                "row_count": 100,
+            },
+        )
+        self.assertEqual(
+            versions["workbench_relation_source_versions"],
+            {
+                "scope_key": "2026-02",
+                "relation_signature": "relation-v1",
+            },
+        )
+        self.assertEqual(service.bank_row_count_from_source_versions(versions), 100)
+
     def test_unchanged_read_model_scope_uses_bank_flow_source_version_summary(self) -> None:
         class Repository:
             def __init__(self) -> None:
@@ -445,6 +520,36 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             },
         )
         self.assertEqual(repository.filters, [{"month": "2026-05"}])
+
+    def test_unchanged_read_model_scope_requires_fresh_status_by_default(self) -> None:
+        class Repository:
+            def bank_flow_rule_batch_source_versions_summary(
+                self,
+                filters: dict[str, object],
+            ) -> dict[str, object]:
+                return {
+                    "read_model_status": "refreshing",
+                    "row_count": 4,
+                    "source_versions": {"bank_flow_rule_batch_tag_rules_version": 7},
+                }
+
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._bank_batch_read_model_repository = Repository()
+
+        default_result = service.unchanged_read_model_scope_result(
+            scope_key="2026-05",
+            source_versions={"bank_flow_rule_batch_tag_rules_version": 7},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        worker_result = service.unchanged_read_model_scope_result(
+            scope_key="2026-05",
+            source_versions={"bank_flow_rule_batch_tag_rules_version": 7},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            allow_refreshing_read_model_status=True,
+        )
+
+        self.assertIsNone(default_result)
+        self.assertEqual(worker_result["skip_reason"], "source_versions_unchanged")
 
 
 if __name__ == "__main__":

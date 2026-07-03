@@ -117,6 +117,11 @@ class _PairRelationService:
         raise AssertionError("WorkbenchWriteFacade must delegate cancel relation writes to WorkbenchRelationCommandService.")
 
 
+class _SnapshotForbiddenPairRelationService(_PairRelationService):
+    def snapshot(self) -> dict[str, object]:
+        raise AssertionError("UoW withdraw path must not read or restore the legacy pair relation snapshot.")
+
+
 class _RecordingRelationCommandService:
     def __init__(self) -> None:
         self.confirm_calls: list[dict[str, object]] = []
@@ -328,11 +333,14 @@ def _new_facade(
     scope_keys_for_rows: object | None = None,
     resolve_rows_for_amount_check: object | None = None,
     resolved_row_types_for_row_ids: object | None = None,
+    pair_relation_service: object | None = None,
 ) -> WorkbenchWriteFacade:
-    pair_relation_service = _PairRelationService()
+    resolved_pair_relation_service = pair_relation_service or _PairRelationService()
     return WorkbenchWriteFacade(
-        relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(pair_relation_service),
-        relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(pair_relation_service),
+        relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(resolved_pair_relation_service),
+        relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(
+            resolved_pair_relation_service
+        ),
         exception_service=object(),
         exception_case_service=exception_case_service or object(),
         override_service=object(),
@@ -625,6 +633,27 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         for command in [*uow.replay_commands, *uow.run_commands]:
             self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
             self.assertEqual(getattr(command, "tenant_id"), "default")
+
+    def test_withdraw_link_uow_path_does_not_read_legacy_pair_snapshot(self) -> None:
+        facade = _new_facade(
+            withdraw_uow=_RecordingUoW(),
+            relation_command_service=_RecordingRelationCommandService(),
+            pair_relation_service=_SnapshotForbiddenPairRelationService(),
+        )
+
+        result = facade.withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "withdraw:no-legacy-snapshot",
+            },
+            request_id="req-withdraw-no-snapshot",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
 
     def test_withdraw_link_response_returns_operation_freshness_targets_for_affected_scopes(self) -> None:
         facade = _new_facade(

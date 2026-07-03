@@ -9207,6 +9207,14 @@ class Application:
             {"items": self._serialize_value(rows), "pagination": {"page": page, "page_size": page_size, "total": total}},
         )
 
+    def _serialize_import_fact_file_list_item(self, item: object) -> dict[str, object]:
+        payload = self._serialize_value(item)
+        if not isinstance(payload, dict):
+            return {}
+        payload.pop("row_results", None)
+        payload.pop("normalized_rows", None)
+        return payload
+
     def _handle_api_import_fact_files(self, query: dict[str, list[str]]) -> Response:
         repository = getattr(self._state_store, "import_fact_repository", None)
         page_loader = getattr(repository, "list_import_files_page", None)
@@ -9230,7 +9238,10 @@ class Application:
             )
         return self._json_response(
             HTTPStatus.OK,
-            {"items": self._serialize_value(rows), "pagination": {"page": page, "page_size": page_size, "total": total}},
+            {
+                "items": [self._serialize_import_fact_file_list_item(row) for row in rows],
+                "pagination": {"page": page, "page_size": page_size, "total": total},
+            },
         )
 
     @staticmethod

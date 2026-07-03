@@ -30,6 +30,50 @@
 
 ## 历史记录
 
+## 2026-07-03 - Workbench relation source-object补读快路径
+
+- 目标：压缩真实 Workbench withdraw 后 `workbench_relation.read_model.refresh` changed rebuild，避免固定 write-operation apply 成功后 read model enqueue-to-done 被 projection 重复源对象读取拖过 1s。
+- 影响范围：`WorkbenchRelationSqlProjectionBuilder` 的 source object 输入读取计划；不改变 `workbench_relation` read model schema、scope、source_versions、dirty/outbox/readiness、API response shape、权限或审计。
+- 关键决策：月分片投影先读取本月 bank/OA/invoice 源对象，再读取 active relation；普通同月 relation 的成员直接复用本月对象集。只有跨月 relation 的缺失成员才走显式 row-id 补读，并按 relation `row_types` 限定到必要源表。
+- 旧逻辑删除：禁止在 relation rows 已知后再带全部 relation row ids 触发第二次全月 source object 查询；禁止用 worker sleep、HTTP cache、前端 barrier retry 掩盖 projection 重复 I/O。
+- 文档影响：同步 `workbench-relations/boundary-io.md`、implementation notes 和测试矩阵，并在 runtime worker 矩阵登记写后刷新热路径回归。
+- 测试覆盖：`tests/test_workbench_relation_sql_projection.py` 锁定同月各源表只扫一次、跨月只补读缺失成员源表。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_sql_projection.py -q`；`python3 -m py_compile backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py`。
+- 未测风险：本地测试不证明生产队列 pickup 或真实 changed rebuild p95；发布后必须复跑 fixed write-operation apply 和 write-operation SLO gate。
+
+## 2026-07-03 - Bank batch source-version probe skip fast path
+
+- 目标：关闭生产 full critical 1s smoke 中 `bank_flow_rule_batch:2026-02` 虽已 `source_versions_unchanged` 但仍在 skip 前耗时约 1.4s 的问题。
+- 影响范围：`BankTransactionTagReadFacade`、`BankBatchApplicationService`、`NoOaBankBatchApplicationService`、bank-flow/no-OA read model refresh worker；不改变 HTTP response shape、read model payload schema、dirty/outbox/readiness 事实源、权限或审计。
+- 关键决策：月份 scope 的 unchanged 判定先通过 source-version-only probes 读取 bank-detail scope summary 与 Workbench relation source versions，再和已持久化 read model source_versions summary 比较；只有版本变化或无法证明 unchanged 时才读取银行交易行、分类行、关系行并重建 projection。
+- 旧逻辑删除：禁止在 unchanged skip 前先调用 `bulk_get_for_rows(...)` 或 `list_by_month(...)` 构造完整分类/关系行；这类旧顺序会把“跳过重建”变成“先花完整读成本再跳过”，污染 worker 热路径。
+- 文档影响：同步 bank-flow、no-OA、runtime-workers 和 read-model 测试矩阵。
+- 测试覆盖：`tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_source_versions_for_scope_keys_uses_scope_summary_without_loading_rows`、`tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_scope_source_versions_use_probe_ports_before_row_loading`、`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests tests/test_bank_flow_rule_batch_application_service.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_bank_flow_rule_batch_backend_boundary.py tests/test_read_model_manifest.py -q`。
+- 未测风险：本地测试不证明生产 optimizer 和 worker concurrency；发布后必须复跑 direct critical read model 1s smoke、fixed write-operation apply 和 write-operation SLO audit。
+
+## 2026-07-03 - Workbench pending OA claim hot path index
+
+- 目标：压缩 Workbench 月份 read model refresh 的生产 handler 长尾。生产 profiling 显示 `workbench:2026-06` 中 `_pending_claimed_bank_transaction_ids_for_month(...)` 约 `210ms`，加上 group payload 和 generation 保存后偶发超过 1s。
+- 影响范围：新增 migration `0087_oa_pending_payment_claim_hot_path.sql`，补充 `app.bank_transaction_relation_claims` 的 active OA 认领月份读取索引；不改变 Workbench projection payload、关系状态机、readiness、dirty/outbox、API response shape 或前端行为。
+- 关键决策：问题位于投影读取 I/O，不应在 worker loop、HTTP route 或页面层堆 retry/sleep/缓存分支。索引 `bank_transaction_relation_claims_active_oa_scope_bank_idx(scope_month, bank_transaction_id) where status='active' and owner_type='oa_pending_payment_relation'` 精确匹配当前查询的 filter 与 order by。
+- 文档影响：同步 read-models `boundary-io.md`，保持该索引作为 Workbench pending claim lookup 的持久化合同。
+- 测试覆盖：`tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_expected_migration_files_are_present_and_ordered` 和 `test_oa_pending_payment_bank_relation_schema_and_migration_are_declared`；Workbench claim exclusion 回归继续由 `tests/test_workbench_sql_runtime.py -k claimed_by_in_progress_oa_relation` 保护。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_postgres_migrations.py tests/test_workbench_sql_runtime.py -k "oa_pending_payment_bank_relation_schema_and_migration_are_declared or expected_migration_files_are_present_and_ordered or claimed_by_in_progress_oa_relation" -q`。
+- 未测风险：本地 migration guard 不能证明生产 optimizer 实际选择该索引；生产发布在 SSH 密码提示处中止，必须完成 release deploy 后复跑 critical 1s read model smoke 和 fixed write-operation apply。
+- 后续事项：发布后比较 `workbench:2026-06` 的 handler duration 和 `_pending_claimed_bank_transaction_ids_for_month` 分段耗时；若仍超过 1s，再按 profiling 处理 `_group_payload` 或 generation save，而不是扩大旧逻辑。
+
+## 2026-07-03 - Workbench projection no-op copy removal
+
+- 目标：继续压缩 `workbench:<month>` handler 热路径，解决 0087 后生产 profile 中 `_group_payload` 仍约数百毫秒、无 override/exception 时仍全量 deepcopy 的旧逻辑成本。
+- 影响范围：`WorkbenchSqlProjectionBuilder._apply_workbench_overrides_and_exceptions(...)` 和 `_group_payload(...)` 的内部 I/O；不改变 Workbench API response shape、candidate grouping 语义、active generation 发布、freshness/readiness、worker event 或页面行为。
+- 关键决策：projection builder 仍先创建自己的 working row 顶层副本，relation/decision/override 只写内部工作集；override/exception 输入先由 repository 查询，若两者均为空则直接返回，不再调用 `WorkbenchOverrideService.apply_to_row(...)` 对每行做 no-op deepcopy；grouping 前按 `type` 一次分桶并传递 working rows，不再对每行额外 `deepcopy`。完整输出隔离仍由 `WorkbenchCandidateGroupingService._serialize_row_for_group(...)` 的 payload deepcopy 承担。
+- 旧逻辑删除：禁止恢复“无 override 也整批 apply_to_row”或“grouping 前整批 deepcopy”作为保守修复；这两条路径只制造 CPU/JSON 拷贝放大，不是模块边界所需的 I/O。
+- 持久化收口：`workbench_group_rows` 只拥有成员关系、过滤、排序、搜索和 object identity 结构化列；新写入不再复制 member payload 或 source_versions，`payload` / `raw_payload` / `source_versions` 均写 `{}`。完整行详情继续由 `workbench_rows.payload` 拥有，但 nested `object_identity` 仲裁对象不再写入 row payload，canonical identity 由结构化 `object_identity_*` 列和行 payload 顶层字段承载；repository 遍历 rows/groups 时不再 eager `serialize_value(...)` 整行/整组，grouping serialization 只做顶层浅拷贝，序列化只发生在 JSON 写入 helper 的最终 I/O 边界；组级版本证明继续由 generation/snapshot/summary/groups 拥有。
+- 测试覆盖：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_groups_hot_path_working_rows_without_redundant_deepcopy` 锁定无 override/exception 时不走旧深拷贝链路、调用方输入顶层不被污染、grouping 接收按类型分桶的 working rows；完整 Workbench SQL runtime 和 candidate grouping 测试继续保护输出语义。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_candidate_grouping.py tests/test_workbench_group_row_payload_helper.py -q`。
+- 未测风险：本地测试证明语义不变和旧拷贝链路删除，但生产 1s gate 仍需发布后复跑；若仍超时，应继续以 production profile 分解 save SQL 或 grouping 算法，不在 worker/API/page 层补 sleep/cache。
+
 ## 2026-06-30 - bank_flow_rule_batch storage contract 补齐
 
 - 目标：修复 App Status registry 与 migration storage contract 不一致，确保 `bank_flow_rule_batch` 作为当前 App Status read model 之一可被迁移测试证明。
@@ -1522,3 +1566,72 @@
 - 生产验证：release `pscip-l4-workbench-raw-51cba11e8` 已发布；scope contract default/invalid-scope 均 `ok=true`。critical 5s SLO `16/16` pass，max enqueue-to-fresh `3581.490ms`；targeted `workbench:all` 1s SLO pass，enqueue-to-fresh `397.159ms`、handler `352.381ms`。
 - 生产 raw payload 证明：active `workbench:all` generation 有 `1701` rows、`960` groups、`1941` group_rows；snapshot、summary、rows、groups、group_rows 均 `raw_payload={}` 且 `raw_has_normalized=0`，canonical `payload` 非空。active `workbench:2026-02` generation 同样满足该合同。
 - 未闭合：按 release 激活时间之后过滤，Workbench relation confirm/withdraw、bank-invoice/bank-turnover confirm/withdraw、no-OA withdraw 写操作 audit 全部 `missing`。read model 性能已生产验证，但真实写操作 fan-out/关联撤回仍需 Admin Token 或受控数据变更样本闭合。
+
+## 2026-07-02 - 标准 write-operation E2E scenario 与 standing approval
+
+- 目标：固定生产受控写操作 smoke 的 scenario 路径和审批引用，后续 gate 不再临时询问 scenario/ticket。
+- 生产配置：在 `139.155.5.132` 生成 root-only scenario 文件 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，并在 `/opt/fin-ops/fin-ops.env` 设置 `FIN_OPS_WRITE_E2E_SCENARIO` 和 `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`。
+- scenario 来源：复用现有只读 `write_operation_scenario_discovery --limit 1 --scenario-output ...`，最多生成 turnover `1`、Workbench relation withdraw `1`、no-OA withdraw `1` 三类最小候选；业务 ID 不写入仓库。此前 `--limit 10` 会生成过多 scenario，full gate 串行执行时过慢，不作为标准闭合输入。
+- 页面级策略：`write_operation_scenario_discovery` 输出 `standard_inputs` 和 `page_write_scenario_policy`，生成的 scenario JSON 也带同一矩阵。`standing_apply` 页面直接使用三类可逆 withdraw smoke 与 `FINOPS-WRITE-SMOKE-STANDING-20260702`；`fanout_evidence` 页面复用这些上游写场景、direct read model smoke、authenticated HTTP/SSE 和 audit 证明；导入、设置、data reset 标记为 `no_standing_production_apply`，不得使用 standing ticket 自动执行 production mutation。
+- 旧审批语义删除：标准 scenario JSON 不再输出逐次人工审批 flag，也不再生成“逐次 review/人工审批”的旧文案；安全 gate 统一为 `requires_approval_ticket_before_apply=true`、`approval_ticket_policy=standing_ticket_allowed_for_controlled_reversible_smoke` 和固定 `FIN_OPS_WRITE_E2E_APPROVAL_TICKET`。
+- 生产再生成：release `pscip-l4-scenario-boundary-20260702` 已发布并重新生成 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，文件权限 `0600 root:root`。当前生产可用候选为 Workbench relation withdraw `1`、no-OA withdraw `1`；turnover 因没有满足 active Workbench-backed、bounded rows、明确月份的安全候选而未生成，工具不会回退到旧 turnover 直连撤回路径。
+- 规则固化：turnover 标准场景只选择 active Workbench relation 支撑的手工往来闭环，成员行数必须在 `2..6` 且有明确月份，并通过 `/api/workbench/actions/withdraw-link` 撤回；禁止继续把旧 `/api/turnover-ledger/relations/{id}/withdraw` 直连路径作为 standing smoke。Workbench 标准场景只选择 `manual_confirmed` active relation，成员行数 `2..6` 且有明确月份。no-OA 标准场景只选择 submitted 批次，`scope_month` 非空且 `bank_transaction_ids` 数量在 `1..6`，优先选择月份内批次数少的候选。
+- 范围限制：standing approval 只覆盖这些可逆 withdraw smoke。导入、设置、data reset 或没有可逆测试对象的页面不自动执行生产写入，仍需 staging 或单次可回滚审批。
+- 本地保护：`tests/test_write_operation_scenario_discovery.py` 覆盖 turnover 场景必须走 Workbench withdraw-link、必须携带 `row_ids/month`，并覆盖候选 SQL 从 `app.workbench_pair_relations` 找 active relation，不再污染旧 turnover 直连撤回链路；同一测试锁定页面级策略、标准 scenario 路径和 standing approval ticket。`tests/test_deploy_runtime_examples.py` 锁定部署 env 示例必须包含标准 scenario/ticket。
+- 生产 gate 结果：固定 scenario/ticket 后已能运行完整 gate，但最新 full gate 仍为 `fail`。失败面包括 direct read model 1s SLO（最慢为 `bank_flow_rule_batch`，另有 `workbench`/invoice/no-OA 长尾）、authenticated HTTP tail、Workbench/no-OA withdraw 写后 outbox/readiness 超过 20s，以及旧 turnover 直连 scenario 的 409。场景发现规则已消除旧 turnover 409 来源，但性能和写后同步 SLO 仍需继续优化。
+- 当前结论：scenario path 和 approval ticket 已标准化，不再需要每次向用户询问；full external PSCIP-L4 和“所有页面耗时短”的生产闭环仍 open，不能把当前状态描述为只剩形式化验证。
+
+## 2026-07-02 - runtime worker 0.1s poll latency 切片
+
+- 触发事实：release `pscip-l4-scenario-boundary-20260702` 的 direct read model 1s smoke 为 12/16 pass；`bank_detail:2026-02` handler 仅 `58.644ms`，但 enqueue-to-fresh `1308.325ms`，说明至少一部分 fail 来自 worker pickup/poll 抖动，而不是页面模块投影逻辑。
+- 改动：PostgreSQL read model worker 默认 idle poll 从 `0.25s` 降到 `0.1s`，并同步 worker env examples 与 `finops-ensure-runtime-workers` 的旧 `2s/0.25s` 迁移规则。`dependency_not_fresh_delay_seconds` 仍保持现有 `0.25s`，不改变依赖未 fresh 的重试语义。
+- 剩余：Workbench 本轮 handler `1071.39ms`，单靠 poll 降低不一定足够；发布后必须复跑 direct read model 1s smoke，再决定是否继续优化 Workbench projection/save 路径。
+
+## 2026-07-03 - runtime worker 0.05s pickup latency 切片
+
+- 触发事实：release `pscip-l4-workbench-debounce-20260702` 的 full direct 1s smoke 失败项持续漂移；`bank_detail:2026-02` 出现 handler `28.051ms` 但 enqueue-to-fresh `1333.655ms`，`pending_invoice`/`no_oa_bank_batch`/`bank_flow_rule_batch` targeted 或 warm profile 可在 1s 内完成，说明主要 blocker 是 worker pickup/测量轮询抖动和 Workbench aggregate 干扰，而非单一页面投影稳定慢。
+- 改动：PostgreSQL durable queue worker 默认 idle poll 降到 `0.05s`，required read model worker env 示例从 `0.1s` 降到 `0.05s`；`read_model_slo_smoke`、`runtime_sync_closure_gate` 和 `write_operation_e2e_smoke` 的 poll 下限同步降到 `0.05s`，减少 1s gate 的测量误差。`workbench-matching` 保留显式 `5s` 批处理例外；`dependency_not_fresh_delay_seconds` 仍为 `0.25s`。
+- 本地保护：`tests/test_runtime_worker.py` 锁定默认 `0.05s`，`tests/test_deploy_runtime_examples.py` 禁止 required worker env 固定 `2s/0.25s/0.1s/5s` 慢轮询并保留 deploy helper 精确迁移规则。
+
+## 2026-07-03 - Workbench snapshot grouped payload 去重
+
+- 触发事实：production profile 显示 `workbench:2026-02` 月分片 handler 约 `795ms`，其中 `save_workbench_read_models` 约 `485ms`，SQL 写入约 `330ms`；`read_model.workbench_snapshots` 仍写入整页 grouped payload，和同 generation 的 `workbench_groups.payload` 重复。
+- 决策：保持 active generation、scope/source_versions、freshness gate、summary/groups 当前页面读路径不变；删除 refresh 写路径中的 snapshot 整页 grouped payload 复制。`workbench_snapshots.payload` 改为 metadata/summary shell，并带 `workbench_groups_materialized=true` marker；旧 `/api/workbench` 兼容读遇到该 marker 时，从同一 active generation 的结构化表重建 `paired/open.groups`。
+- 边界：`workbench_rows.payload` 是行详情 owner；`workbench_groups.payload` 只保留组级 metadata/sort/count 和 `workbench_group_rows_materialized` marker，不再复制 `oa_rows/bank_rows/invoice_rows/collapsed_rows`；`workbench_group_rows` 是成员关系 owner，`workbench_group_rows.payload` 只保留 relation 审计所需的最小 row identity / relation metadata，不再复制整行 detail fields；`workbench_snapshots` 只承载 metadata/summary/source_versions/cache_status。不得通过恢复 snapshot 大 JSON、group payload 成员数组或 group_rows 整行 payload 来修复旧 API；如旧 API、groups page/detail 或下游 read model 需要整组输出，应继续从 `workbench_group_rows + workbench_rows` 重建。
+- 旧逻辑删除补充：`_workbench_group_row_records(...)` 在内存 record 构造阶段也只生成最小 group-row payload，不再先 `serialize_value(row)` 整行详情后由写入函数丢弃；过滤、排序和搜索列仍由结构化列 `column_values/searchable_text/object_identity*` 承载，完整行详情只属于 `workbench_rows.payload`。
+- 下游迁移：成本统计 SQL projection 不再用 `jsonb_path_exists(read_model.workbench_groups.payload, ...)` 读取旧 group JSON 成员行，改为从 Workbench 月份 active generation 的 `workbench_group_rows + workbench_rows` materialize 成本关系输入，再复用原成本归因业务判断。
+- 本地保护：`tests/test_workbench_sql_runtime.py` 新增轻量 snapshot 旧 view 重建覆盖，并断言月分片/all scope snapshot 写入不再带 group 明细、group payload 不再带成员数组、group-row payload 不再带整行 `detail_fields` / `summary_fields`；`tests/test_cost_statistics_sql_runtime.py` 锁定成本统计从结构化成员行读取；`tests/test_audit_workbench_relation_display_tool.py`、`tests/test_workbench_legacy_api_sql_read_provider.py` 与 runtime worker/queue/registry/RabbitMQ 回归通过。
+- 生产验证：release `pscip-l4-workbench-group-row-min-20260703` 上 `/health/ready` ready，required worker missing/stale/mismatch `0/0/0`，Workbench worker 排除 `all` 且 aggregate worker 只 claim `all`。active `workbench:2026-02` snapshot/group/group_rows payload 中旧成员数组/整行字段放大计数为 `0`；Workbench warmed targeted 1s direct SLO `10/10` pass，p95/max `890.808ms`；成本统计 `active:2026-02` targeted `5/5` pass，p95/max `938.124ms`。
+- 未闭合：本 release 后续发现 Search grouped 长尾，已在后续 `Search index row-level no-op persistence` 切片修复；真实 Workbench confirm/withdraw/no-OA withdraw 当前 release 写样本仍缺失，不能声明 full external PSCIP-L4 或“所有页面耗时短”闭环。
+
+## 2026-07-03 - Search index row-level no-op persistence
+
+- 触发事实：release `pscip-l4-workbench-group-row-min-20260703` 的 full critical grouped 1s smoke 为 `15/16` pass，失败项为 `search:2026-03` handler `3087.035ms` / enqueue `3399.122ms`；只读 `EXPLAIN ANALYZE` 证明 Search build SELECT 对 `2026-03` 约 `16.543ms`，真实瓶颈在 `read_model.search_index_rows` 重复删除整月再重写引发的索引/锁写放大。
+- 决策：保持 Search API、scope、source_versions、ranking 和 worker event 不变；`save_search_index_rows(...)` 改为按 `row_id` bulk upsert，只有目标列 `is distinct from` 时才更新；同 scope 只删除不在本次结果集中的 stale rows。结果为空时仍删除整个 `scope_month`，保持空结果合同。
+- 旧逻辑删除：生产主链路不再先 `delete from read_model.search_index_rows where scope_month = ...` 再重写全部行；不能用恢复整月 delete 作为简单修复，否则会重新引入 grouped SLO 写放大。
+- 本地保护：`tests/test_search_pending_sql_runtime.py` 更新 bulk save 断言，锁定 stale-row delete、no-op upsert 和空结果 scope delete。
+- 生产验证：release `pscip-l4-search-index-noop-20260703` 上 `search:2026-03` targeted 1s direct SLO `10/10` pass，最大 enqueue-to-fresh `666.731ms`，最大 handler `231.055ms`。后续 grouped run 中 Search 通过，剩余 fail 转移到 Workbench / invoice lifecycle 总耗时。
+
+## 2026-07-03 - Invoice lifecycle dependency dirty defer
+
+- 触发事实：grouped 1s smoke 中 `invoice_lifecycle:2026-02` 曾出现 handler 约 `1939.958ms`。该 event 在 upstream dependency read model 仍 dirty 时构造 lifecycle source_versions，旧逻辑返回 `{}`，导致 unchanged-scope skip 无法成立并进入完整 rows rebuild。
+- 决策：保持 `invoice_lifecycle` scoped incremental 和 dependency source_versions 合同；当 `pending_invoice`、`input_invoice_usage`、`output_invoice_collection` 或 `oa_pending_payment` 对应 scope dirty/active 时，projection builder 抛 `*_read_model_not_fresh`，交给 `RuntimeWorker` 现有 dependency defer 边界处理，而不是用空 source_versions 继续重建。
+- 旧逻辑删除：禁止把 dependency dirty 解释为 `{}` source_versions 或 “可继续 rebuild”。缺 upstream version 应 fail/defer closed，不能污染 unchanged-scope skip 链路。
+- 本地保护：`tests/test_invoice_lifecycle_sql_projection.py::test_invoice_lifecycle_defers_when_dependency_scope_is_dirty` 覆盖 dependency dirty 时不扫描 lifecycle source rows、不保存 projection。
+- 生产验证：release `pscip-l4-invoice-defer-20260703` grouped run 中 `invoice_lifecycle:2026-02` handler 降到 `300.036ms`，但 enqueue-to-fresh 仍 `1067.206ms`，说明剩余为 worker pickup/defer/queue 总耗时而非 lifecycle handler 重建。
+
+## 2026-07-03 - Runtime queue claim hot path index
+
+- 触发事实：Search 和 invoice lifecycle handler 已收敛后，full critical grouped 1s 仍出现 `bank_detail`、`bank_account_balance`、`invoice_lifecycle` 等 handler 很短但 enqueue-to-fresh 超过 1s 的漂移，说明 grouped run 的 worker pickup/claim 竞争仍是尾延迟来源之一。
+- 决策：不改变 durable queue 语义、priority 排序、scope policy 或 worker handler；新增 migration `0086_runtime_queue_claim_hot_path.sql`，在 active outbox 队列上增加 `outbox_events_claim_event_type_priority_idx`，覆盖 worker lane 常用的 `event_type` filter、`status`、priority rank、`available_at`、`created_at` 和 `id`。该索引用于减少各 worker 在 grouped smoke 中扫描无关 event type 的 pending/processing 行。
+- 边界：该索引只优化 `job.outbox_events` claim I/O，不替代 `ReadModelRefreshGateway`、不改变 `job.read_model_dirty_scopes` 事实源、不把 delayed/failed/pending 状态伪装为 fresh。
+- 本地保护：`tests/test_postgres_migrations.py` 锁定 migration 顺序、索引名、priority rank 表达式和 active queue partial predicate；`tests/test_runtime_queue.py`、`tests/test_runtime_worker.py`、Workbench refresh handler tests 证明 queue/worker 语义不变。
+- 未闭合：该索引尚未发布到生产并复跑 grouped 1s；不能据此声明 full external PSCIP-L4 closed。
+
+## 2026-07-03 - Workbench UoW read model refresh batch enqueue
+
+- 触发事实：固定 Workbench withdraw smoke 中 `workbench_relation` refresh handler 已收敛到约 663ms，但 POST 写入到 required outbox event processed 仍约 2.8s；生产 `job.outbox_events` / `job.read_model_dirty_scopes` 均已有 19-21 万级历史 done 行，逐 target 两条 SQL 入队会放大写事务耗时。
+- 决策：保留 dirty scope/outbox 事实源和 UoW 事务边界；新增 `RuntimeQueueRepository.enqueue_read_model_refreshes_in_transaction(...)` 批量写多个 refresh target，`RuntimeQueueReadModelRefreshWriter` 和 `WorkbenchWriteUnitOfWork` 优先使用批量接口。单条接口继续保留给 gateway、旧 writer 和非批量场景。
+- 旧逻辑删除：Workbench relation UoW 主链路不再对每个 target 逐个调用 `enqueue_refresh(...)`；禁止为了恢复生产性能把 repository `enqueue_refreshes=True` 接回 UoW repository factory 形成双 fan-out。
+- 本地保护：RuntimeQueue/UoW 合同测试覆盖批量 CTE、writer wiring 和 UoW response shape。
+- 未闭合：生产仍需发布后复跑固定 scenario/ticket 的 write-operation E2E；本地合同测试不等同于真实 POST latency 通过。

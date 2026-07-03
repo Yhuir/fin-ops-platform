@@ -12,6 +12,7 @@
 - Same-scope parent dependency 的当前 event 必须使用 retry 级别退避，而不是全局 `dependency_not_fresh_delay_seconds` 的快速 retry；否则 RabbitMQ transport 下 `all` 聚合事件会被快速重新发布并抢占父月 shard，形成 backlog/refreshing 风暴。
 - App Status read model registry、runtime worker registry、RabbitMQ dispatch、SLO smoke、migration storage contract 和 Redis/deploy env 模板必须保持本地 parity；生产 worker/read model 不允许新增第二套手写清单。
 - `cost-tax` worker 只保留 `tax_offset.read_model.refresh` 兼容职责；`cost_statistics.read_model.refresh` 的唯一 worker owner 是 `cost-statistics`。
+- `job.outbox_events` worker claim hot path 是 runtime worker I/O 边界的一部分；active queue 必须保留 event-type-first priority index，不能靠业务 handler 内部 sleep/retry 或页面补丁掩盖 pickup 尾延迟。
 
 ## 记录模板
 
@@ -29,6 +30,84 @@
 ```
 
 ## 历史记录
+
+## 2026-07-03 - Runtime queue enqueue timestamp boundary
+
+- 目标：修复事务内 read model refresh 使用 PostgreSQL transaction-level `now()` 作为 outbox `available_at/created_at` 时，长业务事务会被错误计入 worker enqueue-to-done SLO 的问题。
+- 影响范围：`RuntimeQueueRepository.enqueue_read_model_refresh_in_transaction(...)`、批量 `enqueue_read_model_refreshes_in_transaction(...)` 和 `write_operation_slo_audit`；不改变 dirty scope/outbox schema、event type、scope policy、worker handler、priority、dedupe 或 readiness 状态机。
+- 关键决策：read model refresh outbox/dirty scope 写入使用 `clock_timestamp()` 表示实际语句执行时间；write-operation SLO 以 `available_at -> processed_at` 计算 enqueue-to-done，`created_at` 仅作为旧数据兼容回退和历史排序字段。
+- 旧逻辑清理：禁止继续用事务开始时间解释 worker drain；如果 HTTP write step 本身慢，仍由 request timing 暴露，不混入 durable queue worker SLO。
+- 文档影响：同步 read model 合同、runtime worker boundary 和测试矩阵。
+- 测试覆盖：`tests/test_runtime_queue.py` 覆盖单条/批量 read model refresh 入队 SQL 保留 `clock_timestamp()` 和 `excluded.available_at`；`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_enqueue_duration_uses_available_at_instead_of_transaction_created_at` 覆盖 SLO 读取 available_at。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_workbench_uow_contract.py tests/test_write_operation_slo_audit.py tests/test_write_operation_e2e_smoke.py tests/test_write_operation_scenario_discovery.py -q`。
+- 未测风险：生产需要发布后重新执行固定 write scenario，确认 outbox event 的 `available_at` 与 `processed_at` 已反映真实 worker drain；HTTP write step 2s+ 仍需继续按 Workbench facade/UoW timing 优化。
+
+## 2026-07-03 - Write-operation E2E expectation-filtered SLO sampling
+
+- 目标：固定各页面 write scenario / approval ticket 后，修复最小生产 smoke 使用 `--limit 1` 时把写后 outbox 事件采样也压到 1 条，导致真实必需 refresh 已完成却被报告为 missing 的问题。
+- 影响范围：`write_operation_e2e_smoke`、`write_operation_slo_audit` 和生产运维说明；不改变业务写 API、scenario schema、approval ticket、read model refresh scope、worker handler 或页面行为。
+- 关键决策：E2E smoke 的 write SLO 读取使用当前 scenario operation 的 expectation 作为 SQL 过滤条件，只读取相关 `event_type/scope_type/reason/action_name` outbox 事件；同时对事件采样设置有效下限。`write_operation_scenario_discovery --limit 1` 仍用于最小闭环 scenario 生成，但不再影响写后 SLO 事件窗口。
+- 旧逻辑清理：禁止把全局 outbox since-started-at 的第一条事件当作完整写后同步证据；不再让 caller 通过人工记忆额外参数规避采样过小。
+- 文档影响：同步 `docs/operations/monitoring.md` 和 runtime worker 测试矩阵。
+- 测试覆盖：`tests/test_write_operation_e2e_smoke.py::WriteOperationE2ESmokeTests::test_write_slo_event_sample_uses_effective_floor_when_scenario_limit_is_one` 覆盖最小 limit 不漏必需事件；`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_recent_events_since_can_filter_by_operation_expectations_in_sql` 锁定 expectation-filtered SQL。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_write_operation_e2e_smoke.py tests/test_write_operation_slo_audit.py tests/test_write_operation_scenario_discovery.py -q`；`bash scripts/verify.sh docs`。
+- 未测风险：本地测试不证明生产 1s SLO 达标；仍需发布后用标准 scenario 文件和 `FINOPS-WRITE-SMOKE-STANDING-20260702` 复跑 production write apply。
+
+## 2026-07-03 - Workbench withdraw transaction duplicate I/O removal
+
+- 目标：固定 Workbench withdraw write-operation gate 中，`workbench_relation` outbox 事件看似 publish 延迟约 2.9s，但进一步对比 HTTP step 与 event visibility 后确认主要窗口来自 withdraw HTTP 事务耗时；需要从写事务内移除重复 relation snapshot/freshness I/O。
+- 影响范围：`WorkbenchRelationCommandService.withdraw_relation(...)` submit 路径；不改变 runtime queue、RabbitMQ dispatcher/consumer、event type、scope policy、dirty scope 或 worker handler。
+- 关键决策：dispatcher poll 已是 `0.05s`，不能继续在 worker/dispatcher 层堆补丁。submit 路径复用同一个 canonical pair-service snapshot 计算 preview lock 和执行 withdraw，只做一次 relation read model fresh precondition。
+- 旧逻辑清理：禁止在 submit 事务内部调用 public preview API 重新加载 relation snapshot；禁止重复 fresh check 扩大 transaction window。
+- 文档影响：同步 workbench-relations boundary、implementation notes 和测试矩阵。
+- 测试覆盖：`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_withdraw_relation_submit_reuses_loaded_snapshot_for_preview_lock`，并复跑 Workbench withdraw UoW/API delegation 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_preview_and_submit_delegate_to_relation_command_service tests/test_workbench_write_characterization.py::WorkbenchWriteCharacterizationTests::test_withdraw_link_uses_uow_transaction_when_available tests/test_workbench_relation_sql_projection.py -q`。
+- 未测风险：需发布后复跑固定 scenario/ticket，确认 HTTP write step 和 outbox enqueue-to-done 均收敛。
+
+## 2026-07-03 - Workbench relation changed rebuild source-object补读快路径
+
+- 目标：固定 write-operation Workbench withdraw 场景中，撤回写入成功但 `workbench_relation.read_model.refresh` enqueue-to-done 超过 1s；生产 runtime result 显示 changed rebuild handler 接近 1s，需先移除 handler 内重复源对象读取。
+- 影响范围：`workbench-relation` worker 调用的 SQL projection builder；不改变 durable queue claim/complete/defer 状态机、event type、scope policy、dirty scope、readiness 或 RabbitMQ envelope。
+- 关键决策：worker handler 不做 sleep/retry/cache 补丁；把慢点收敛到 projection 输入 I/O。普通同月 relation rebuild 只读取一次月分片源对象；跨月 relation 缺失成员只按 row_id 和 row type 补读必要源表。
+- 旧逻辑清理：禁止让 changed rebuild 在 skip 不成立时无条件执行第二次全月 bank/OA/invoice 读取；这会污染 fixed write-operation SLO 链路。
+- 文档影响：同步 workbench-relations、read-models 和 runtime-workers 测试矩阵。
+- 测试覆盖：`tests/test_workbench_relation_sql_projection.py` 新增同月源表读取次数和跨月显式补读断言。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_sql_projection.py -q`；`python3 -m py_compile backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py`。
+- 未测风险：需要生产发布后复跑 fixed write-operation apply；如果 handler 已收敛但 enqueue-to-done 仍超 1s，再按 queue pickup/lane 证据处理，不在 projection 里扩大缓存。
+
+## 2026-07-03 - Bank batch unchanged skip source-version probe
+
+- 目标：让 bank-flow/no-OA 月份 read model worker 在 source_versions 未变化时先跳过，再决定是否读取交易行、分类行和关系行，压缩 full critical read model smoke 的 handler 长尾。
+- 影响范围：bank-flow/no-OA read model refresh handler、BankTransactionTagReadFacade source-version-only I/O、BankBatch/NoOaBankBatch application service source-version precheck；不改变 queue schema、event type、dirty scope/readiness 状态机或 API payload。
+- 关键决策：worker 内部可在当前 dirty scope 为 `processing` 时读取持久化 summary 并接受 `refreshing` 状态做 unchanged 比较；页面/API 读路径仍必须保持 fresh gate，不允许返回旧 projection 并伪装 fresh。`all` scope 不走月份 precheck，避免额外 snapshot 成本。
+- 旧逻辑清理：unchanged scope 不再先执行 `bulk_get_for_rows(...)`、relation `list_by_month(...)` 或 snapshot save；无法证明 source_versions 一致时才进入完整 rebuild。
+- 文档影响：同步 read-models、bank-flow、no-OA 实施记录和测试矩阵。
+- 测试覆盖：`tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_source_versions_for_scope_keys_uses_scope_summary_without_loading_rows`、`tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_scope_source_versions_use_probe_ports_before_row_loading`、`tests/test_no_oa_bank_batch_read_model_refresh.py::NoOaBankBatchReadModelRefreshTests::test_unchanged_scope_skips_rebuild_and_snapshot_save`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests tests/test_bank_flow_rule_batch_application_service.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_bank_flow_rule_batch_backend_boundary.py tests/test_read_model_manifest.py -q`。
+- 未测风险：需发布后用生产 read model SLO 和 write-operation apply 证明真实 worker 并发下的耗时收敛。
+
+## 2026-07-03 - 固定 write-operation scenario 与常驻审批 ticket
+
+- 目标：把各页面生产写入 smoke 的 scenario 与 approval ticket 固定为可执行合同，避免每轮生产验证都临时询问、临时选候选或重复放大同一月份写入。
+- 影响范围：`write_operation_scenario_discovery`、write-operation E2E/SLO 工具输入、deploy env 示例、runtime worker 测试矩阵和运维治理文档；不改变业务 API、权限、审计或 read model payload shape。
+- 关键决策：标准 scenario path 是 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，标准 ticket 是 `FINOPS-WRITE-SMOKE-STANDING-20260702`。`turnover-ledger`、`reconciliation-workbench`、`workbench-relations`、`no-oa-bank-batches` 使用 standing apply；银行明细、账户余额、待找发票、发票生命周期、税金、成本、搜索等页面使用 fan-out evidence；导入、设置、数据重置页面不允许常驻生产 apply，只能用 staging 或单次审批 scenario。
+- 旧逻辑清理：scenario discovery 不再输出 `requires_manual_approval_before_apply` 口径；每个 operation 每轮最多生成 1 个受控 scenario；no-OA withdraw 候选必须匹配 active `no_oa_bank_batch` relation，不能把 `bank_flow_rule_batch` relation-mode 候选送入 no-OA withdraw endpoint。
+- 文档影响：同步 `docs/operations/runtime-worker-governance.md` 和本测试矩阵。
+- 测试覆盖：`tests/test_write_operation_scenario_discovery.py` 覆盖页面策略、常驻 ticket、scenario cap 和 no-OA active relation contract；`tests/test_write_operation_e2e_smoke.py` 与 `tests/test_write_operation_slo_audit.py` 继续保护 apply/audit 合同；`tests/test_deploy_runtime_examples.py` 保护 env 示例固定输入。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_write_operation_scenario_discovery.py tests/test_write_operation_e2e_smoke.py tests/test_write_operation_slo_audit.py -q`。
+- 未测风险：生产 apply 仍需要真实 OA/Admin auth 和可连接的生产 release；本轮发布在 SSH 密码提示处中止，尚未用新 release 复跑 write-operation apply。
+- 后续事项：生产发布后先运行 discovery 写入标准 scenario file，再用标准 ticket 执行 apply，并把 operation-to-fresh 结果记录到 read model/runtime closure evidence。
+
+## 2026-07-03 - Runtime queue claim hot path index
+
+- 目标：收敛 grouped 1s read model smoke 中的 worker pickup/claim 尾延迟。Search 和 invoice lifecycle handler 已分别降到约 `231ms` / `300ms` 后，仍存在 handler 很短但 enqueue-to-fresh 超 1s 的漂移，说明部分长尾落在 durable queue claim I/O。
+- 影响范围：新增 PostgreSQL migration `0086_runtime_queue_claim_hot_path.sql`；不改变 `RuntimeQueueRepository.claim_next(...)` 的状态机、priority 排序、scope filter、RabbitMQ envelope、dirty scope、readiness 或任何业务 projection。
+- 关键决策：在 `job.outbox_events` active queue 上新增 `outbox_events_claim_event_type_priority_idx`，索引列覆盖 `event_type`、`status`、priority rank、`available_at`、`created_at`、`id`，并限制 `where status in ('pending', 'processing')`。索引用于让不同 worker lane 先按 event type 收窄候选，避免 grouped smoke 扫描无关 event type。
+- 文档影响：同步 runtime worker `boundary-io.md`、`tests.md`、read model implementation notes 和 operations runbook。
+- 测试覆盖：`tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_runtime_queue_claim_hot_path_index_is_declared`；复跑 `tests/test_runtime_queue.py`、`tests/test_runtime_worker.py` 与 Workbench refresh handler tests，证明 queue/worker 语义不变。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_postgres_migrations.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_runtime_worker.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done -q`。
+- 未测风险：本地 SQL 合同不能证明生产 optimizer 选择和 grouped 1s 收益；必须发布 migration 后复跑 critical grouped read model smoke、scope contract 和 write-operation gate。
+- 后续事项：生产发布前确认 migration 窗口；发布后重点比较 `workbench:2026-02`、`invoice_lifecycle:2026-02` 和其它短 handler scope 的 enqueue-to-fresh 与 handler delta。
 
 ## 2026-07-02 - Runtime worker durable queue poll latency baseline
 
@@ -348,7 +427,7 @@
 
 - 目标：修复生产 read model SLO smoke 中 `workbench` handler 仅约 0.8s，但 RabbitMQ dispatcher publish 瞬时断连后 consumer 依赖 heartbeat 才 fallback drain PostgreSQL，导致 enqueue-to-fresh 约 17s 的问题。
 - 影响范围：`RuntimeQueueSettings`、`RabbitMqConsumer.consume_forever(...)`、`deploy/oa/env/fin-ops.rabbitmq-worker.env.example`；不改变 outbox/dirty/readiness 事实源，也不改变 RabbitMQ envelope 合约。
-- 关键决策：新增 `RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS`，默认 1s。RabbitMQ consumer 独立按该间隔调用 `RuntimeWorker.run_once()` 扫 PostgreSQL durable queue；heartbeat 仍低频记录，避免把 idle heartbeat 写成 1s 噪声。这样 RabbitMQ publish 失败或 envelope 丢失时，PostgreSQL fallback 仍能满足 5s SLO。
+- 关键决策：新增 `RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS`，当前默认 `0.1s`。RabbitMQ consumer 独立按该间隔调用 `RuntimeWorker.run_once()` 扫 PostgreSQL durable queue；`process_data_events(...)` 的 time limit 也不得高于该 fallback 间隔，否则无消息时仍会硬等 1s。heartbeat 仍低频记录，避免把 idle heartbeat 写成高频噪声。这样 RabbitMQ publish 失败或 envelope 丢失时，PostgreSQL fallback 仍能满足 1s SLO。
 - 测试覆盖：`RabbitMqRuntimeTests.test_consumer_drains_postgres_queue_on_short_interval_independent_of_heartbeat`、`RabbitMqRuntimeTests.test_runtime_queue_settings_parses_consumer_postgres_drain_interval`。
 - 生产验证：该历史阶段发布后重启 RabbitMQ worker，并以当时的 `read_model_slo_smoke --apply --target-ms 5000` 验证 RabbitMQ publish 重试场景；当前 P2/P3 closure 复跑必须使用 `--target-ms 1000`，不能沿用历史 5 秒阈值作为通过标准。
 
@@ -414,3 +493,12 @@
 - 测试覆盖：`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_bump_dependency_refresh_when_scope_already_fresh`，并保留 `already_active` 回归。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py tests/test_write_operation_slo_audit.py -q`；`python3 -m py_compile backend/src/fin_ops_platform/services/runtime_worker.py tests/test_runtime_worker.py`。
 - 未测风险：该修复尚未发布到生产，也未在真实 Workbench withdraw 场景重跑；`workbench:all` aggregate 约 `20.8s` 和 `cost_statistics` 2026-03 约 `7.2s` 仍需后续独立优化或重新归类为后台追赶 SLO。
+
+## 2026-07-03 - Workbench UoW read model refresh batch enqueue
+
+- 目标：压缩 Workbench relation withdraw/confirm 写事务内的 dirty scope/outbox 写入耗时。生产样本显示 `workbench_relation` handler 已低于 1s，但 POST 到 outbox 可见仍接近 2.8s；瓶颈集中在同一业务事务内对多个 read model target 逐个执行入队 SQL。
+- 影响范围：`RuntimeQueueRepository`、`RuntimeQueueReadModelRefreshWriter`、`WorkbenchWriteUnitOfWork`。不改变 runtime worker claim、handler、readiness、RabbitMQ envelope 或页面 API response shape。
+- 关键决策：新增 `RuntimeQueueRepository.enqueue_read_model_refreshes_in_transaction(...)`，用一个 CTE 批量写 `job.read_model_dirty_scopes` 与 `job.outbox_events` 并按输入顺序返回 event；`RuntimeQueueReadModelRefreshWriter.enqueue_refreshes(...)` 优先调用批量接口，旧 queue 实现仍 fallback 单条入队；`WorkbenchWriteUnitOfWork` 对支持批量 writer 的生产链路一次性提交 targets，并校验返回 event 数量。
+- 边界：批量入队仍使用相同 source_version bump、pending dedupe key、priority、trace_id 和 JSON payload 合同；它不是新的状态事实源，也不允许绕过 scope policy/target planner。`Application._workbench_uow_repository_factory(...)` 继续注入 `PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)`，避免 repository hidden fan-out 回到生产主链路。
+- 本地保护：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_enqueue_read_model_refreshes_in_transaction_batches_dirty_scope_and_outbox_writes`、`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_read_model_refresh_writer_uses_batch_repository_interface_when_available`、`test_relation_write_uow_uses_batch_read_model_refresh_writer_when_available`。
+- 未闭合：本地测试证明 I/O 合同与 UoW wiring；必须发布后用固定 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json` 与 `FINOPS-WRITE-SMOKE-STANDING-20260702` 复跑 Workbench withdraw 写操作 SLO，才能确认生产 POST/outbox 可见耗时降到目标内。

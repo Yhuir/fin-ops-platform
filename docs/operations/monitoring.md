@@ -472,9 +472,12 @@ scenario 文件示例：
         {
           "name": "withdraw",
           "method": "POST",
-          "path": "/api/turnover-ledger/relations/<relation_id>/withdraw",
+          "path": "/api/workbench/actions/withdraw-link",
           "json": {
-            "note": "controlled SLO smoke"
+            "month": "2026-02",
+            "row_ids": ["<bank_row_id>", "<oa_or_turnover_row_id>"],
+            "idempotency_key": "write-smoke-turnover-<case_id>",
+            "reason": "controlled SLO smoke"
           },
           "expected_statuses": [200]
         }
@@ -492,11 +495,59 @@ scenario 文件示例：
 }
 ```
 
+生产标准输入：
+
+- 标准 scenario 文件：`/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`
+- 标准审批引用：`FINOPS-WRITE-SMOKE-STANDING-20260702`
+- 标准 env：
+  - `FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`
+  - `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`
+
+标准 scenario 文件由只读 discovery 生成，不把生产业务 ID 写入仓库：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenario_discovery \
+  --limit 1 \
+  --scenario-output "$FIN_OPS_WRITE_E2E_SCENARIO" \
+  --output /tmp/finops-write-scenario-discovery-$(date +%Y%m%d%H%M%S).json
+chmod 600 "$FIN_OPS_WRITE_E2E_SCENARIO"
+```
+
+如果某一类没有满足安全边界的候选，标准文件可以少于 3 个 scenario；主控 workflow 应记录该类候选缺失并准备可回滚测试对象，
+不得为了凑齐数量回退到旧 API 路径、宽泛 SQL 选择或真实待处理业务对象。
+
+页面 / 模块 write scenario 与 approval ticket 矩阵：
+
+该矩阵同时写入 `write_operation_scenario_discovery` 的 `page_write_scenario_policy` 和生成的 scenario JSON；
+主控 workflow 必须读取该矩阵，不再为标准 production smoke 逐次询问 scenario 或 approval ticket。若某类没有安全候选，记录为候选缺失并准备可回滚测试对象，
+禁止回退旧 API、宽泛 SQL 或真实待处理业务对象。
+
+| 页面 / 模块 | Apply policy | 标准写场景 | Approval ticket | 说明 |
+| --- | --- | --- | --- | --- |
+| 往来款 | `standing_apply` | `turnover_manual_closure_or_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 只选择已有 active Workbench relation 承载的手工往来闭环，并通过 `/api/workbench/actions/withdraw-link` 撤回；不走旧的 turnover relation 直连撤回路径。 |
+| 关联台 / Workbench relation | `standing_apply` | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 只选择 `manual_confirmed` active relation，要求有明确月份且成员行数 bounded，覆盖 workbench/workbench_relation 及跨页 fan-out。 |
+| 免 OA 流水批次 | `standing_apply` | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 只选择 submitted 且有明确 scope month 的批次，要求银行流水成员 bounded，覆盖 no-OA、workbench、cost/search fan-out。 |
+| 流水规则批量处理 | `fanout_evidence` | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 不新增独立生产写入；通过 no-OA/bank-flow fan-out、direct read model smoke 和页面 API SLO 证明。 |
+| 银行明细 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用上游可逆 withdraw 的 affected scopes、direct read model smoke、authenticated HTTP/SSE 和 audit 证明；不伪造银行明细独立生产 mutation。 |
+| 银行账户余额 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用银行事实源 fan-out 与 all-only read model smoke 证明。 |
+| 待找发票 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用上游关联撤回影响的 pending scope 和 read model/API SLO 证明。 |
+| 进项发票使用情况 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 workbench/no-OA/turnover fan-out 和 invoice usage worker 证明。 |
+| 销项发票收款情况 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 fan-out、direct read model smoke 和 post API probe 证明。 |
+| 发票生命周期 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用关联撤回后的 lifecycle affected scope 证明。 |
+| OA 待付款 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 生产 smoke 不自动写 OA 付款状态；页面显式写回必须由 OA 写回配置和单独业务流程控制。 |
+| 税金抵扣 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用成本/发票 fan-out、read model smoke 和页面 API SLO 证明。 |
+| 成本统计 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 Workbench active generation fan-out、成本统计 read model smoke 和页面 API SLO 证明。 |
+| 搜索 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用各写入链路的 search refresh fan-out、direct read model smoke 和 search API SLO 证明。 |
+| 批量账务 | `fanout_evidence` | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 Workbench relation fan-out 与批量账务查询 read model 证明，不新增独立 production apply。 |
+| 导入：银行流水 / 发票 / ETC | `no_standing_production_apply` | 无 | 无 standing ticket | 只能 staging 或单次审批的可回滚 scenario；不得用 standing approval 自动执行导入写入。 |
+| 设置 | `no_standing_production_apply` | 无 | 无 standing ticket | 设置写入会改变系统口径或权限，只能 staging 或单次审批。 |
+| 数据重置 | `no_standing_production_apply` | 无 | 无 standing ticket | destructive/reset 操作禁止使用 standing production smoke。 |
+
 dry-run：
 
 ```bash
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smoke \
-  --scenario /tmp/finops-write-e2e-scenarios.json \
+  --scenario "$FIN_OPS_WRITE_E2E_SCENARIO" \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api
 ```
@@ -505,9 +556,8 @@ apply：
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
-export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smoke \
-  --scenario /tmp/finops-write-e2e-scenarios.json \
+  --scenario "$FIN_OPS_WRITE_E2E_SCENARIO" \
   --apply \
   --approval-ticket "$FIN_OPS_WRITE_E2E_APPROVAL_TICKET" \
   --base-url https://www.yn-sourcing.com \
@@ -516,6 +566,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
   --http-target-ms 1000 \
   --output /tmp/finops-write-e2e-slo-$(date +%Y%m%d%H%M%S).json
 ```
+
+说明：`write_operation_scenario_discovery --limit 1` 用来生成每类 operation 最多 1 条最小闭环 scenario；
+`write_operation_e2e_smoke` 的写后 SLO 事件读取会按当前 scenario 的 operation expectation 过滤 outbox，并保持有效采样窗口下限。
+因此主控 workflow 可以继续使用最小 scenario 输入，不会因为 `--limit 1` 漏掉同一写事务内稍晚完成的必需 read model refresh。
 
 执行前要求：
 
@@ -534,12 +588,13 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
-export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
+export FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json
+export FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_gate \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \
   --apply-read-model-smoke \
-  --write-scenario /tmp/finops-write-e2e-scenarios.json \
+  --write-scenario "$FIN_OPS_WRITE_E2E_SCENARIO" \
   --apply-write-scenarios \
   --write-approval-ticket "$FIN_OPS_WRITE_E2E_APPROVAL_TICKET" \
   --http-target-ms 1000 \
@@ -604,6 +659,13 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 - 工具只读，不发 mutating HTTP，也不写数据库。
 - 默认把已被 write-operation audit profile 覆盖的 `turnover_manual_closure_or_withdraw`、`workbench_relation_withdraw`
   和 `no_oa_bank_batch_withdraw` 候选写入 scenario。
+- 生产标准使用 `--limit 1` 生成最小闭环输入，避免 full gate 串行执行过多生产写步骤。
+- `turnover_manual_closure_or_withdraw` 只选择 active Workbench relation 支撑的手工往来闭环，要求成员行数在 `2..6`
+  且有明确月份；scenario 必须调用 `/api/workbench/actions/withdraw-link`，禁止把旧
+  `/api/turnover-ledger/relations/{id}/withdraw` 直连路径作为 standing smoke。
+- `workbench_relation_withdraw` 只选择 `manual_confirmed` active relation，要求成员行数在 `2..6` 且有明确月份。
+- `no_oa_bank_batch_withdraw` 只选择 submitted 批次，要求 `scope_month` 非空且 `bank_transaction_ids` 数量在
+  `1..6`，优先选择月份内批次数少的候选。
 - 如果没有发现候选，报告返回 `status=no_candidates`，即使传了 `--scenario-output` 也不会写空 scenario 文件；主控
   workflow 应先准备已审批、可回滚的测试对象，再重新 discovery。
 - 生成的 scenario 仍需要人工确认测试对象、业务影响和回滚路径；不能直接对真实待处理业务盲目 `--apply`。

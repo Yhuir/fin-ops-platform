@@ -79,7 +79,7 @@ class RuntimeQueueSettings:
     rabbitmq_prefetch: int = 10
     rabbitmq_publish_confirm: bool = True
     rabbitmq_heartbeat_seconds: int = 60
-    rabbitmq_consumer_postgres_drain_interval_seconds: float = 1.0
+    rabbitmq_consumer_postgres_drain_interval_seconds: float = 0.1
     rabbitmq_blocked_connection_timeout_seconds: int = 300
     rabbitmq_management_url: str | None = None
     rabbitmq_management_username: str | None = None
@@ -265,6 +265,183 @@ class RuntimeQueueRepository:
                 metadata=metadata,
             )
 
+    def enqueue_read_model_refreshes_in_transaction(
+        self,
+        *,
+        transaction: Any,
+        refreshes: Iterable[dict[str, object]],
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+    ) -> list[RuntimeQueueEvent]:
+        normalized_tenant_id = str(tenant_id or "default").strip() or "default"
+        normalized_priority = _normalize_priority(priority)
+        normalized_trace_id = str(trace_id or "").strip() or None
+        rows: list[tuple[object, ...]] = []
+        seen_dedupe_keys: set[str] = set()
+        for item in list(refreshes or []):
+            if not isinstance(item, dict):
+                continue
+            normalized_scope_type = str(item.get("scope_type") or "").strip()
+            normalized_scope_key = str(item.get("scope_key") or "").strip()
+            normalized_reason = str(item.get("reason") or "").strip() or "read_model_refresh"
+            if not normalized_scope_type or not normalized_scope_key:
+                raise RuntimeQueueDataError("scope_type and scope_key are required for read model refresh.")
+            metadata_payload = _safe_read_model_refresh_metadata(
+                item.get("metadata") if isinstance(item.get("metadata"), dict) else None
+            )
+            payload = {
+                "scope_type": normalized_scope_type,
+                "scope_key": normalized_scope_key,
+                "reason": normalized_reason,
+                **({"metadata": metadata_payload} if metadata_payload else {}),
+                **({"action_name": metadata_payload["action_name"]} if metadata_payload.get("action_name") else {}),
+            }
+            event_type = f"{normalized_scope_type}.read_model.refresh"
+            dedupe_key = f"{event_type}:{normalized_scope_type}:{normalized_scope_key}"
+            if dedupe_key in seen_dedupe_keys:
+                continue
+            seen_dedupe_keys.add(dedupe_key)
+            rows.append(
+                (
+                    len(rows),
+                    normalized_tenant_id,
+                    normalized_scope_type,
+                    normalized_scope_key,
+                    normalized_reason,
+                    normalized_priority,
+                    normalized_trace_id,
+                    self._json_param(payload),
+                    event_type,
+                    dedupe_key,
+                )
+            )
+        if not rows:
+            return []
+
+        value_sql = ", ".join(["(%s::integer, %s::text, %s::text, %s::text, %s::text, %s::text, %s::text, %s::jsonb, %s::text, %s::text)"] * len(rows))
+        params = tuple(value for row in rows for value in row)
+        event_rows = transaction.fetch_all(
+            f"""
+            with input(
+                ord, tenant_id, scope_type, scope_key, reason, priority, trace_id,
+                payload, event_type, dedupe_key
+            ) as (
+                values {value_sql}
+            ),
+            dirty as (
+                insert into job.read_model_dirty_scopes(
+                    tenant_id, scope_type, scope_key, reason, payload, raw_payload,
+                    source_version, status, next_run_at, priority, trace_id
+                )
+                select
+                    input.tenant_id,
+                    input.scope_type,
+                    input.scope_key,
+                    input.reason,
+                    input.payload,
+                    input.payload,
+                    coalesce((
+                        select max(existing.source_version) + 1
+                        from job.read_model_dirty_scopes existing
+                        where existing.tenant_id = input.tenant_id
+                          and existing.scope_type = input.scope_type
+                          and existing.scope_key = input.scope_key
+                    ), 0),
+                    'pending',
+                    clock_timestamp(),
+                    input.priority,
+                    input.trace_id
+                from input
+                on conflict (tenant_id, scope_type, scope_key)
+                where status in ('pending', 'processing')
+                do update set
+                    reason = excluded.reason,
+                    payload = job.read_model_dirty_scopes.payload || excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    source_version = job.read_model_dirty_scopes.source_version + 1,
+                    status = 'pending',
+                    next_run_at = clock_timestamp(),
+                    priority = excluded.priority,
+                    trace_id = coalesce(excluded.trace_id, job.read_model_dirty_scopes.trace_id),
+                    updated_at = clock_timestamp()
+                returning tenant_id, scope_type, scope_key, source_version
+            ),
+            event_rows as (
+                insert into job.outbox_events (
+                    tenant_id, event_type, aggregate_type, aggregate_id,
+                    scope_type, scope_key, dedupe_key, schema_version,
+                    source_version, priority, trace_id, payload, raw_payload,
+                    available_at, created_at, updated_at, next_publish_at
+                )
+                select
+                    input.tenant_id,
+                    input.event_type,
+                    'read_model',
+                    input.scope_key,
+                    input.scope_type,
+                    input.scope_key,
+                    input.dedupe_key,
+                    1,
+                    dirty.source_version,
+                    input.priority,
+                    input.trace_id,
+                    input.payload || jsonb_build_object('source_version', dirty.source_version),
+                    input.payload || jsonb_build_object('source_version', dirty.source_version),
+                    clock_timestamp(),
+                    clock_timestamp(),
+                    clock_timestamp(),
+                    clock_timestamp()
+                from input
+                join dirty
+                  on dirty.tenant_id = input.tenant_id
+                 and dirty.scope_type = input.scope_type
+                 and dirty.scope_key = input.scope_key
+                on conflict (tenant_id, dedupe_key)
+                where dedupe_key is not null and status = 'pending'
+                do update set
+                    payload = job.outbox_events.payload || excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    source_version = excluded.source_version,
+                    priority = excluded.priority,
+                    available_at = least(job.outbox_events.available_at, excluded.available_at),
+                    trace_id = coalesce(excluded.trace_id, job.outbox_events.trace_id),
+                    publish_status = 'unpublished',
+                    published_at = null,
+                    publish_last_error = null,
+                    next_publish_at = clock_timestamp(),
+                    publish_locked_by = null,
+                    publish_locked_at = null,
+                    publish_confirmed_at = null,
+                    updated_at = clock_timestamp()
+                returning
+                    id::text as event_id,
+                    tenant_id,
+                    event_type,
+                    aggregate_type,
+                    aggregate_id,
+                    scope_type,
+                    scope_key,
+                    dedupe_key,
+                    payload,
+                    attempts,
+                    status,
+                    schema_version,
+                    source_version,
+                    priority,
+                    trace_id
+            )
+            select event_rows.*
+            from event_rows
+            join input
+              on input.tenant_id = event_rows.tenant_id
+             and input.dedupe_key = event_rows.dedupe_key
+            order by input.ord
+            """,
+            params,
+        )
+        return [_event_from_row(row) for row in event_rows]
+
     def enqueue_workbench_all_aggregate_refresh(
         self,
         *,
@@ -273,6 +450,7 @@ class RuntimeQueueRepository:
         source_version: int | str | None = None,
         reason: str = "workbench_aggregate_changed",
         priority: str = "low",
+        delay_seconds: float = 0.0,
         trace_id: str | None = None,
     ) -> RuntimeQueueEvent:
         normalized_source_version = _optional_int(source_version)
@@ -280,6 +458,7 @@ class RuntimeQueueRepository:
         normalized_priority = _normalize_priority(priority)
         normalized_trace_id = str(trace_id or "").strip() or None
         normalized_parent_scope_keys = _normalized_scope_key_list(parent_scope_keys)
+        normalized_delay_seconds = max(0.0, float(delay_seconds or 0.0))
         payload = {
             "scope_type": "workbench",
             "scope_key": "all",
@@ -302,6 +481,7 @@ class RuntimeQueueRepository:
                     dedupe_key,
                     payload,
                     raw_payload,
+                    available_at,
                     schema_version,
                     source_version,
                     priority,
@@ -317,6 +497,7 @@ class RuntimeQueueRepository:
                     %s,
                     %s,
                     %s,
+                    now() + (%s * interval '1 second'),
                     1,
                     %s,
                     %s,
@@ -358,6 +539,11 @@ class RuntimeQueueRepository:
                         coalesce(excluded.source_version, 0)
                     ),
                     priority = excluded.priority,
+                    available_at = case
+                        when excluded.priority in ('urgent', 'high')
+                            then least(job.outbox_events.available_at, excluded.available_at)
+                        else greatest(job.outbox_events.available_at, excluded.available_at)
+                    end,
                     trace_id = coalesce(excluded.trace_id, job.outbox_events.trace_id),
                     publish_status = 'unpublished',
                     published_at = null,
@@ -389,6 +575,7 @@ class RuntimeQueueRepository:
                     dedupe_key,
                     self._json_param(payload),
                     self._json_param(payload),
+                    normalized_delay_seconds,
                     normalized_source_version,
                     normalized_priority,
                     normalized_trace_id,
@@ -442,7 +629,7 @@ class RuntimeQueueRepository:
                       and existing.scope_key = %s
                 ), 0),
                 'pending',
-                now(),
+                clock_timestamp(),
                 %s,
                 %s
             )
@@ -454,10 +641,10 @@ class RuntimeQueueRepository:
                 raw_payload = excluded.raw_payload,
                 source_version = job.read_model_dirty_scopes.source_version + 1,
                 status = 'pending',
-                next_run_at = now(),
+                next_run_at = clock_timestamp(),
                 priority = excluded.priority,
                 trace_id = coalesce(excluded.trace_id, job.read_model_dirty_scopes.trace_id),
-                updated_at = now()
+                updated_at = clock_timestamp()
             returning source_version
             """,
             (
@@ -481,9 +668,13 @@ class RuntimeQueueRepository:
             insert into job.outbox_events (
                 tenant_id, event_type, aggregate_type, aggregate_id,
                 scope_type, scope_key, dedupe_key, schema_version,
-                source_version, priority, trace_id, payload, raw_payload
+                source_version, priority, trace_id, payload, raw_payload,
+                available_at, created_at, updated_at, next_publish_at
             )
-            values (%s, %s, 'read_model', %s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
+            values (
+                %s, %s, 'read_model', %s, %s, %s, %s, 1, %s, %s, %s, %s, %s,
+                clock_timestamp(), clock_timestamp(), clock_timestamp(), clock_timestamp()
+            )
             on conflict (tenant_id, dedupe_key)
             where dedupe_key is not null and status = 'pending'
             do update set
@@ -491,15 +682,16 @@ class RuntimeQueueRepository:
                 raw_payload = excluded.raw_payload,
                 source_version = excluded.source_version,
                 priority = excluded.priority,
+                available_at = least(job.outbox_events.available_at, excluded.available_at),
                 trace_id = coalesce(excluded.trace_id, job.outbox_events.trace_id),
                 publish_status = 'unpublished',
                 published_at = null,
                 publish_last_error = null,
-                next_publish_at = now(),
+                next_publish_at = clock_timestamp(),
                 publish_locked_by = null,
                 publish_locked_at = null,
                 publish_confirmed_at = null,
-                updated_at = now()
+                updated_at = clock_timestamp()
             returning
                 id::text as event_id,
                 tenant_id,
@@ -540,15 +732,26 @@ class RuntimeQueueRepository:
         worker_id: str,
         event_types: Iterable[str] | None = None,
         lock_timeout_seconds: int = 300,
+        scope_keys: Iterable[str] | None = None,
+        exclude_scope_keys: Iterable[str] | None = None,
     ) -> RuntimeQueueEvent | None:
         event_type_list = list(event_types or [])
         event_type_filter = ""
-        params: tuple[Any, ...]
+        scope_key_list = _normalized_scope_key_list(scope_keys)
+        excluded_scope_key_list = _normalized_scope_key_list(exclude_scope_keys)
+        scope_key_filter = ""
+        excluded_scope_key_filter = ""
+        params_list: list[Any] = [worker_id, lock_timeout_seconds]
         if event_type_list:
             event_type_filter = "and event_type = any(%s)"
-            params = (worker_id, lock_timeout_seconds, event_type_list)
-        else:
-            params = (worker_id, lock_timeout_seconds)
+            params_list.append(event_type_list)
+        if scope_key_list:
+            scope_key_filter = "and scope_key = any(%s)"
+            params_list.append(scope_key_list)
+        if excluded_scope_key_list:
+            excluded_scope_key_filter = "and not (scope_key = any(%s))"
+            params_list.append(excluded_scope_key_list)
+        params = tuple(params_list)
 
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one(
@@ -572,6 +775,8 @@ class RuntimeQueueRepository:
                         )
                     )
                       {event_type_filter}
+                      {scope_key_filter}
+                      {excluded_scope_key_filter}
                     order by
                         case priority
                             when 'urgent' then 3
@@ -614,6 +819,8 @@ class RuntimeQueueRepository:
         event_types: Iterable[str] | None = None,
         lock_timeout_seconds: int = 300,
         limit: int = 1,
+        scope_keys: Iterable[str] | None = None,
+        exclude_scope_keys: Iterable[str] | None = None,
     ) -> list[RuntimeQueueEvent]:
         normalized_limit = max(1, int(limit))
         claimed: list[RuntimeQueueEvent] = []
@@ -622,6 +829,8 @@ class RuntimeQueueRepository:
                 worker_id,
                 event_types=event_types,
                 lock_timeout_seconds=lock_timeout_seconds,
+                scope_keys=scope_keys,
+                exclude_scope_keys=exclude_scope_keys,
             )
             if event is None:
                 break
@@ -667,15 +876,26 @@ class RuntimeQueueRepository:
         worker_id: str,
         event_types: Iterable[str] | None = None,
         lock_timeout_seconds: int = 300,
+        scope_keys: Iterable[str] | None = None,
+        exclude_scope_keys: Iterable[str] | None = None,
     ) -> RuntimeQueueEvent | None:
         event_type_list = list(event_types or [])
         event_type_filter = ""
-        params: tuple[Any, ...]
+        scope_key_list = _normalized_scope_key_list(scope_keys)
+        excluded_scope_key_list = _normalized_scope_key_list(exclude_scope_keys)
+        scope_key_filter = ""
+        excluded_scope_key_filter = ""
+        params_list: list[Any] = [worker_id, event_id, lock_timeout_seconds]
         if event_type_list:
             event_type_filter = "and event_type = any(%s)"
-            params = (worker_id, event_id, lock_timeout_seconds, event_type_list)
-        else:
-            params = (worker_id, event_id, lock_timeout_seconds)
+            params_list.append(event_type_list)
+        if scope_key_list:
+            scope_key_filter = "and scope_key = any(%s)"
+            params_list.append(scope_key_list)
+        if excluded_scope_key_list:
+            excluded_scope_key_filter = "and not (scope_key = any(%s))"
+            params_list.append(excluded_scope_key_list)
+        params = tuple(params_list)
 
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one(
@@ -697,6 +917,8 @@ class RuntimeQueueRepository:
                       )
                   )
                   {event_type_filter}
+                  {scope_key_filter}
+                  {excluded_scope_key_filter}
                 returning
                     id::text as event_id,
                     tenant_id,

@@ -1,5 +1,26 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-03 Read model unchanged source-version probe
+
+目标：修复生产 full critical 1s smoke 中 `bank_flow_rule_batch:2026-02` 即使 `source_versions_unchanged` 也可能在 skip 前耗时约 1.4s 的问题。
+
+关键决策：
+
+- `bank_flow_rule_batch.read_model.refresh` 的月份 scope 先通过 bank-detail scope summary 和 Workbench relation source-version port 构造当前 source_versions，再对比 `read_model.bank_flow_rule_batch_rows` 的 source-version summary。
+- source_versions 一致时直接 complete dirty scope，不再读取完整银行交易行、分类行、关系行，也不保存 snapshot。
+- 无法证明 source_versions 一致时才进入完整 rebuild；`all` scope 不走月级 probe，避免无效 precheck。
+- 该改动只调整 worker 内部 I/O 顺序，不改变 bank-flow API、页面 DTO、规则设置、关系状态机、readiness/outbox 事实源或审批/审计边界。
+
+测试覆盖：
+
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_scope_source_versions_use_probe_ports_before_row_loading`
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_unchanged_read_model_scope_uses_bank_flow_source_version_summary`
+- `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_source_versions_for_scope_keys_uses_scope_summary_without_loading_rows`
+
+验证命令：
+
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests tests/test_bank_flow_rule_batch_application_service.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_bank_flow_rule_batch_backend_boundary.py tests/test_read_model_manifest.py -q`
+
 ## 2026-07-01 最终校验闭环
 
 目标：关闭收口检查发现的 validation drift，确保 bank-flow tag-rule 边界即使被服务层直接调用，也不会接受旧 no-OA selected-tag 语义或重复规则覆盖。

@@ -16,10 +16,12 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 RuntimeEventHandler = Callable[[RuntimeQueueEvent], dict[str, Any] | None]
-DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS = 0.25
+DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS = 0.05
+DEFAULT_RUNTIME_WORKER_HEARTBEAT_MIN_INTERVAL_SECONDS = 1.0
 READ_MODEL_NOT_FRESH_RE = re.compile(r"([a-z0-9_]+)_read_model_not_fresh")
 MONTH_SCOPE_RE = re.compile(r"\d{4}-\d{2}")
 PARENT_SCOPE_KEYS_RE = re.compile(r"parent_scope_keys=([0-9]{4}-[0-9]{2}(?:,[0-9]{4}-[0-9]{2})*)")
+FORCED_HEARTBEAT_STATUSES = frozenset({"processing", "deferred", "failed", "stopping", "stopped"})
 
 
 class RuntimeWorkerResult(str, Enum):
@@ -52,6 +54,9 @@ class RuntimeWorkerConfig:
     max_attempts: int = 5
     max_events_per_iteration: int = 1
     dependency_not_fresh_delay_seconds: float = 2.0
+    heartbeat_min_interval_seconds: float = DEFAULT_RUNTIME_WORKER_HEARTBEAT_MIN_INTERVAL_SECONDS
+    claim_scope_keys: list[str] = field(default_factory=list)
+    exclude_claim_scope_keys: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.lock_timeout_seconds <= 0:
@@ -70,6 +75,8 @@ class RuntimeWorkerConfig:
             raise ValueError("max_events_per_iteration must be positive.")
         if self.dependency_not_fresh_delay_seconds <= 0:
             raise ValueError("dependency_not_fresh_delay_seconds must be positive.")
+        if self.heartbeat_min_interval_seconds <= 0:
+            raise ValueError("heartbeat_min_interval_seconds must be positive.")
 
 
 class RuntimeWorker:
@@ -87,6 +94,7 @@ class RuntimeWorker:
         self._handlers = dict(handlers or {})
         self._redis_helper = redis_helper
         self._read_model_refresh_gateway = read_model_refresh_gateway or ReadModelRefreshGateway(queue_repository=queue_repository)
+        self._last_heartbeat_at: float | None = None
 
     def run_once(self) -> RuntimeWorkerResult:
         event_types = self._claim_event_types()
@@ -94,11 +102,11 @@ class RuntimeWorker:
             self._record_heartbeat("idle", {"reason": "no_registered_event_types"})
             return RuntimeWorkerResult.IDLE
 
-        self._record_heartbeat("polling", {"event_types": event_types})
         event = self._queue.claim_next(
             self._config.worker_id,
             event_types=event_types,
             lock_timeout_seconds=self._config.lock_timeout_seconds,
+            **self._claim_scope_filters(),
         )
         if event is None:
             self._record_heartbeat("idle", {"event_types": event_types})
@@ -166,7 +174,7 @@ class RuntimeWorker:
         ack_payload = dict(result_payload) if isinstance(result_payload, dict) else {}
         ack_payload.setdefault("duration_ms", round((monotonic() - started_at) * 1000, 3))
         self._ack_event(event, ack_payload)
-        self._record_heartbeat("idle", {"event_id": event.event_id, "processed": True})
+        self._record_heartbeat("idle", {"event_id": event.event_id, "processed": True}, force=True)
         self._log("runtime_worker.event_processed", event=event)
         return RuntimeWorkerResult.PROCESSED
 
@@ -192,18 +200,46 @@ class RuntimeWorker:
             return configured
         return sorted(self._handlers)
 
-    def record_heartbeat(self, status: str, payload: dict[str, Any]) -> None:
-        self._record_heartbeat(status, payload)
+    def claim_scope_filters(self) -> dict[str, list[str]]:
+        return self._claim_scope_filters()
 
-    def _record_heartbeat(self, status: str, payload: dict[str, Any]) -> None:
+    def _claim_scope_filters(self) -> dict[str, list[str]]:
+        filters: dict[str, list[str]] = {}
+        claim_scope_keys = [scope_key for scope_key in self._config.claim_scope_keys if str(scope_key).strip()]
+        exclude_scope_keys = [
+            scope_key for scope_key in self._config.exclude_claim_scope_keys if str(scope_key).strip()
+        ]
+        if claim_scope_keys:
+            filters["scope_keys"] = claim_scope_keys
+        if exclude_scope_keys:
+            filters["exclude_scope_keys"] = exclude_scope_keys
+        return filters
+
+    def record_heartbeat(self, status: str, payload: dict[str, Any]) -> None:
+        self._record_heartbeat(status, payload, force=True)
+
+    def _record_heartbeat(self, status: str, payload: dict[str, Any], *, force: bool = False) -> None:
         record = getattr(self._queue, "record_worker_heartbeat", None)
         if callable(record):
+            now = monotonic()
+            if not force and status not in FORCED_HEARTBEAT_STATUSES:
+                last_heartbeat_at = self._last_heartbeat_at
+                if (
+                    last_heartbeat_at is not None
+                    and now - last_heartbeat_at < self._config.heartbeat_min_interval_seconds
+                ):
+                    return
             heartbeat_payload = dict(payload)
             if self._config.worker_instance:
                 heartbeat_payload.setdefault("worker_instance", self._config.worker_instance)
             if self._config.event_types:
                 heartbeat_payload.setdefault("configured_event_types", list(self._config.event_types))
+            if self._config.claim_scope_keys:
+                heartbeat_payload.setdefault("claim_scope_keys", list(self._config.claim_scope_keys))
+            if self._config.exclude_claim_scope_keys:
+                heartbeat_payload.setdefault("exclude_claim_scope_keys", list(self._config.exclude_claim_scope_keys))
             record(self._config.worker_id, self._config.worker_kind, status, payload=heartbeat_payload)
+            self._last_heartbeat_at = now
 
     def _set_statement_timeout(self, seconds: int | None) -> None:
         setter = getattr(self._queue, "set_statement_timeout_seconds", None)

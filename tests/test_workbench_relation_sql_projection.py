@@ -181,7 +181,13 @@ class CrossMonthRelationProjectionConnection(WorkbenchRelationProjectionConnecti
             return []
         if "from app.oa_applications" in normalized:
             self.sql_statements.append(sql)
-            explicit_ids = set(params[1]) if len(params) > 1 and isinstance(params[1], list) else set()
+            explicit_ids = (
+                set(params[1])
+                if len(params) > 1 and isinstance(params[1], list)
+                else set(params[0])
+                if params and isinstance(params[0], list)
+                else set()
+            )
             month = str(params[0])[:7] if params else ""
             if month == "2026-04" or "oa-yang" in explicit_ids:
                 return [
@@ -199,7 +205,13 @@ class CrossMonthRelationProjectionConnection(WorkbenchRelationProjectionConnecti
             return []
         if "from app.invoices" in normalized:
             self.sql_statements.append(sql)
-            explicit_ids = set(params[1]) if len(params) > 1 and isinstance(params[1], list) else set()
+            explicit_ids = (
+                set(params[1])
+                if len(params) > 1 and isinstance(params[1], list)
+                else set(params[0])
+                if params and isinstance(params[0], list)
+                else set()
+            )
             month = str(params[0])[:7] if params else ""
             if month == "2026-05" or "input-invoice-nanjing" in explicit_ids:
                 return [
@@ -350,6 +362,9 @@ class PendingClaimedCandidateDecisionProjectionConnection(CandidateDecisionRelat
 
 
 class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
+    def _statement_count(self, connection: WorkbenchRelationProjectionConnection, fragment: str) -> int:
+        return sum(fragment in " ".join(sql.lower().split()) for sql in connection.sql_statements)
+
     def test_rebuild_writes_linked_and_unlinked_relation_rows(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
         connection = WorkbenchRelationProjectionConnection()
@@ -382,6 +397,9 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
         self.assertEqual(rows_by_id["txn-unlinked"]["group_ids"], [])
         self.assertFalse(any("from read_model.workbench_rows" in sql for sql in connection.sql_statements))
+        self.assertEqual(self._statement_count(connection, "from app.bank_transactions"), 1)
+        self.assertEqual(self._statement_count(connection, "from app.oa_applications"), 1)
+        self.assertEqual(self._statement_count(connection, "from app.invoices"), 1)
 
     def test_rebuild_excludes_unlinked_bank_rows_claimed_by_in_progress_oa(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -444,6 +462,16 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(invoice_row["group_ids"], ["case-nanjing-cross-month"])
         self.assertEqual([row["id"] for row in invoice_row["linked_oa"]], ["oa-yang"])
         self.assertEqual([row["id"] for row in invoice_row["linked_bank_transactions"]], ["bank-nanjing"])
+        self.assertEqual(self._statement_count(connection, "from app.bank_transactions"), 1)
+        self.assertEqual(self._statement_count(connection, "from app.oa_applications"), 1)
+        self.assertEqual(self._statement_count(connection, "from app.invoices"), 2)
+        invoice_queries = [
+            " ".join(sql.lower().split())
+            for sql in connection.sql_statements
+            if "from app.invoices" in " ".join(sql.lower().split())
+        ]
+        self.assertTrue(any("invoice_month =" in sql for sql in invoice_queries))
+        self.assertTrue(any("invoice_month =" not in sql for sql in invoice_queries))
 
     def test_cross_month_member_index_schema_change_invalidates_old_scope(self) -> None:
         repository = CaptureWorkbenchRelationRepository()

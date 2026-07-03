@@ -158,6 +158,109 @@ class WorkbenchSqlReadConnection:
         return []
 
 
+class LightweightWorkbenchSnapshotConnection(WorkbenchSqlReadConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from read_model.workbench_generations" in normalized and "status = 'active'" in normalized:
+            return {"generation_id": "gen-lightweight"}
+        if "from read_model.workbench_snapshots" in normalized:
+            return {
+                "generation_id": "gen-lightweight",
+                "scope_key": "2026-05",
+                "payload": {
+                    "scope_key": "2026-05",
+                    "payload": {
+                        "month": "2026-05",
+                        "summary": {
+                            "oa_count": 1,
+                            "bank_count": 1,
+                            "invoice_count": 0,
+                            "paired_count": 0,
+                            "open_count": 1,
+                            "exception_count": 0,
+                        },
+                        "paired": {"groups": []},
+                        "open": {"groups": []},
+                        "workbench_groups_materialized": True,
+                    },
+                    "source_versions": {"source_version": 12},
+                },
+                "cache_status": "fresh",
+                "generated_at": "2026-05-22T10:00:00+00:00",
+                "source_versions": {"source_version": 12},
+                "row_count": 1,
+            }
+        if "from job.read_model_dirty_scopes" in normalized:
+            return None
+        return None
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.workbench_groups" in normalized:
+            return [
+                {
+                    "scope_key": "2026-05",
+                    "generation_id": "gen-lightweight",
+                    "zone": "open",
+                    "group_id": "case:LIGHT-1",
+                    "payload": {
+                        "group_id": "case:LIGHT-1",
+                        "group_type": "candidate",
+                        "row_count": 2,
+                        "workbench_group_rows_materialized": True,
+                    },
+                }
+            ]
+        if "join read_model.workbench_group_rows" in normalized:
+            return [
+                {
+                    "scope_key": "2026-05",
+                    "generation_id": "gen-lightweight",
+                    "zone": "open",
+                    "group_id": "case:LIGHT-1",
+                    "pane": "oa",
+                    "row_id": "oa-light-1",
+                    "row_role": "normal",
+                    "row_index": 0,
+                    "source_kind": "oa_payment",
+                    "status": "open",
+                    "row_payload": {
+                        "id": "oa-light-1",
+                        "type": "oa",
+                        "detail_fields": {"项目名称": "轻量项目"},
+                    },
+                    "member_payload": {
+                        "row_id": "oa-light-1",
+                        "type": "oa",
+                    },
+                },
+                {
+                    "scope_key": "2026-05",
+                    "generation_id": "gen-lightweight",
+                    "zone": "open",
+                    "group_id": "case:LIGHT-1",
+                    "pane": "bank",
+                    "row_id": "bank-light-1",
+                    "row_role": "normal",
+                    "row_index": 1,
+                    "source_kind": "bank_transaction",
+                    "status": "open",
+                    "row_payload": {
+                        "id": "bank-light-1",
+                        "type": "bank",
+                        "available_actions": ["cancel_link"],
+                    },
+                    "member_payload": {
+                        "row_id": "bank-light-1",
+                        "type": "bank",
+                    },
+                },
+            ]
+        return []
+
+
 class InvoiceRowsSqlCaptureConnection:
     def __init__(self) -> None:
         self.fetch_all_calls: list[tuple[str, tuple]] = []
@@ -987,6 +1090,18 @@ class WorkbenchWriteConnection:
     def execute(self, sql: str, params: tuple = ()) -> int:
         self.executed.append((" ".join(sql.lower().split()), params))
         return 1
+
+
+def all_scope_group_row_ids(connection: WorkbenchWriteConnection, group_id: str, pane: str) -> list[str]:
+    return [
+        str(params[4])
+        for sql, params in connection.executed
+        if "insert into read_model.workbench_group_rows" in sql
+        and "values ( %s, 'all', null" in sql
+        and params[2] == group_id
+        and params[3] == pane
+        and params[5] != "collapsed"
+    ]
 
 
 class BulkWorkbenchWriteConnection(WorkbenchWriteConnection):
@@ -1873,6 +1988,73 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary_row["total_with_tax"], "144.50")
         self.assertEqual(summary_row["etc_invoice_detail_count"], 2)
 
+    def test_sql_projection_groups_hot_path_working_rows_without_redundant_deepcopy(self) -> None:
+        class CapturingGroupingService:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def group_payload(
+                self,
+                month: str,
+                *,
+                oa_rows: list[dict[str, object]],
+                bank_rows: list[dict[str, object]],
+                invoice_rows: list[dict[str, object]],
+            ) -> dict[str, object]:
+                self.calls.append(
+                    {
+                        "month": month,
+                        "oa_rows": oa_rows,
+                        "bank_rows": bank_rows,
+                        "invoice_rows": invoice_rows,
+                    }
+                )
+                return {"month": month, "summary": {}, "paired": {"groups": []}, "open": {"groups": []}}
+
+        builder = WorkbenchSqlProjectionBuilder(connection=WorkbenchProjectionSettingsConnection())
+        summary_fields = {"供应商": "云南溯源科技"}
+        rows_by_id = {
+            "oa-fast": {
+                "id": "oa-fast",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "summary_fields": summary_fields,
+            },
+            "bank-fast": {
+                "id": "bank-fast",
+                "type": "bank",
+                "source_kind": "bank",
+                "status": "open",
+                "counterparty_name": "云南溯源科技",
+            },
+            "invoice-fast": {
+                "id": "invoice-fast",
+                "type": "invoice",
+                "source_kind": "input_invoice",
+                "status": "open",
+            },
+        }
+        original_rows = json.loads(json.dumps(rows_by_id, ensure_ascii=False))
+        grouping_service = CapturingGroupingService()
+
+        with patch(
+            "fin_ops_platform.services.workbench_sql_projection.WorkbenchCandidateGroupingService",
+            return_value=grouping_service,
+        ):
+            builder._group_payload("2026-02", rows_by_id, [])
+
+        call = grouping_service.calls[0]
+        oa_rows = call["oa_rows"]
+        bank_rows = call["bank_rows"]
+        invoice_rows = call["invoice_rows"]
+        self.assertEqual([row["id"] for row in oa_rows], ["oa-fast"])
+        self.assertEqual([row["id"] for row in bank_rows], ["bank-fast"])
+        self.assertEqual([row["id"] for row in invoice_rows], ["invoice-fast"])
+        self.assertIsNot(oa_rows[0], rows_by_id["oa-fast"])
+        self.assertIs(oa_rows[0]["summary_fields"], summary_fields)
+        self.assertEqual(rows_by_id, original_rows)
+
     def test_sql_projection_keeps_active_manual_oa_bank_relation_open_until_invoice_exists(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(
             connection=WorkbenchProjectionSettingsConnection(),
@@ -2619,6 +2801,28 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 for sql, _params in connection.fetch_all_calls
             )
         )
+
+    def test_repository_materializes_legacy_workbench_view_from_groups_when_snapshot_is_lightweight(self) -> None:
+        connection = LightweightWorkbenchSnapshotConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        view = repository.get_workbench_view(scope_key="2026-05")
+
+        self.assertEqual(view["source_versions"]["source_version"], 12)
+        self.assertEqual(view["payload"]["summary"]["oa_count"], 1)
+        self.assertEqual(view["payload"]["open"]["groups"][0]["group_id"], "case:LIGHT-1")
+        self.assertEqual(view["payload"]["open"]["groups"][0]["oa_rows"][0]["id"], "oa-light-1")
+        self.assertEqual(view["payload"]["open"]["groups"][0]["bank_rows"][0]["id"], "bank-light-1")
+        self.assertNotIn("workbench_group_rows_materialized", view["payload"]["open"]["groups"][0])
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        self.assertTrue(
+            any(
+                "from read_model.workbench_groups" in sql
+                and params == ("2026-05", "gen-lightweight")
+                for sql, params in all_queries
+            )
+        )
+        self.assertTrue(any("join read_model.workbench_group_rows" in sql for sql, _params in all_queries))
 
     def test_repository_reads_workbench_summary_without_full_snapshot_payloads(self) -> None:
         connection = MaterializedWorkbenchSummaryConnection()
@@ -3944,7 +4148,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "payload": {
                             "group_id": "case:CASE-1",
                             "zone": "paired",
-                            "oa_rows": [{"id": "oa-1", "type": "oa", "source_kind": "oa"}],
+                            "oa_rows": [
+                                {
+                                    "id": "oa-1",
+                                    "type": "oa",
+                                    "source_kind": "oa",
+                                    "object_identity": {
+                                        "key": "oa-identity-1",
+                                        "kind": "oa_row_id",
+                                    },
+                                    "object_identity_key": "oa-identity-1",
+                                    "object_identity_kind": "oa_row_id",
+                                }
+                            ],
                             "bank_rows": [{"id": "bank-1", "type": "bank", "source_kind": "bank"}],
                             "invoice_rows": [
                                 {"id": "oa-att-inv-1", "type": "invoice", "source_kind": "oa_attachment_invoice"}
@@ -3964,7 +4180,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "payload": {
                             "group_id": "case:CASE-1",
                             "zone": "paired",
-                            "oa_rows": [{"id": "oa-1", "type": "oa", "source_kind": "oa"}],
+                            "oa_rows": [
+                                {
+                                    "id": "oa-1",
+                                    "type": "oa",
+                                    "source_kind": "oa",
+                                    "object_identity": {
+                                        "key": "oa-identity-1",
+                                        "kind": "oa_row_id",
+                                    },
+                                    "object_identity_key": "oa-identity-1",
+                                    "object_identity_kind": "oa_row_id",
+                                }
+                            ],
                             "bank_rows": [],
                             "invoice_rows": [
                                 {"id": "oa-att-inv-1", "type": "invoice", "source_kind": "oa_attachment_invoice"},
@@ -3997,10 +4225,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         group_payload = aggregate_group_insert[16].obj
         self.assertEqual(group_payload["row_count"], 4)
-        self.assertEqual([row["id"] for row in group_payload["oa_rows"]], ["oa-1"])
-        self.assertEqual([row["id"] for row in group_payload["bank_rows"]], ["bank-1"])
+        self.assertNotIn("oa_rows", group_payload)
+        self.assertNotIn("bank_rows", group_payload)
+        self.assertNotIn("invoice_rows", group_payload)
+        self.assertTrue(group_payload["workbench_group_rows_materialized"])
+        self.assertEqual(all_scope_group_row_ids(connection, group_payload["group_id"], "oa"), ["oa-1"])
+        self.assertEqual(all_scope_group_row_ids(connection, group_payload["group_id"], "bank"), ["bank-1"])
         self.assertEqual(
-            [row["id"] for row in group_payload["invoice_rows"]],
+            all_scope_group_row_ids(connection, group_payload["group_id"], "invoice"),
             ["oa-att-inv-1", "oa-att-inv-2"],
         )
         self.assertEqual(group_payload["row_counts"], {"oa": 1, "bank": 1, "invoice": 2, "rows": 4})
@@ -4035,7 +4267,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "payload": {
                             "group_id": "case:BULK-ALL",
                             "zone": "paired",
-                            "oa_rows": [{"id": "oa-1", "type": "oa", "source_kind": "oa"}],
+                            "oa_rows": [
+                                {
+                                    "id": "oa-1",
+                                    "type": "oa",
+                                    "source_kind": "oa",
+                                    "object_identity": {
+                                        "key": "oa-identity-1",
+                                        "kind": "oa_row_id",
+                                    },
+                                    "object_identity_key": "oa-identity-1",
+                                    "object_identity_kind": "oa_row_id",
+                                }
+                            ],
                             "bank_rows": [{"id": "bank-1", "type": "bank", "source_kind": "bank"}],
                             "invoice_rows": [{"id": "inv-1", "type": "invoice", "source_kind": "invoice"}],
                         },
@@ -4087,14 +4331,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             for statement, params in connection.executed
             if "insert into read_model.workbench_summary" in statement and "values (%s, 'all', null" in statement
         )
+        self.assertEqual(all_snapshot_params[4].obj["payload"]["open"]["groups"], [])
+        self.assertTrue(all_snapshot_params[4].obj["payload"]["workbench_groups_materialized"])
         self.assertEqual(all_snapshot_params[5].obj, {})
         self.assertEqual(all_summary_params[6].obj, {})
         self.assertEqual(all_row_batches[0][0][16].obj, {})
         self.assertEqual(all_group_batches[0][0][17].obj, {})
+        self.assertEqual(all_group_row_batches[0][0][17].obj, {})
+        self.assertEqual(all_group_row_batches[0][0][19].obj, {})
         self.assertEqual(all_group_row_batches[0][0][20].obj, {})
         self.assertEqual(all_row_batches[0][0][15].obj["id"], "oa-1")
+        self.assertNotIn("object_identity", all_row_batches[0][0][15].obj)
+        self.assertEqual(all_row_batches[0][0][15].obj["object_identity_key"], "oa-identity-1")
         self.assertEqual(all_group_batches[0][0][16].obj["group_id"], "case:BULK-ALL")
-        self.assertTrue(all_group_row_batches[0][0][19].obj)
 
     def test_repository_all_scope_suppresses_open_rows_claimed_by_paired_shards(self) -> None:
         class AggregateAllCrossZoneDuplicateConnection(WorkbenchWriteConnection):
@@ -4157,9 +4406,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         ]
         paired_group = next(group for group in aggregate_group_payloads if group["zone"] == "paired")
         open_group = next(group for group in aggregate_group_payloads if group["zone"] == "open")
-        self.assertEqual([row["id"] for row in paired_group["invoice_rows"]], ["inv_imported_1609"])
-        self.assertEqual(open_group["invoice_rows"], [])
-        self.assertEqual([row["id"] for row in open_group["oa_rows"]], ["oa-open-context"])
+        self.assertEqual(all_scope_group_row_ids(connection, paired_group["group_id"], "invoice"), ["inv_imported_1609"])
+        self.assertEqual(all_scope_group_row_ids(connection, open_group["group_id"], "invoice"), [])
+        self.assertEqual(all_scope_group_row_ids(connection, open_group["group_id"], "oa"), ["oa-open-context"])
 
     def test_repository_all_scope_suppresses_open_rows_claimed_by_canonical_active_relation(self) -> None:
         class AggregateAllCanonicalActiveRelationConnection(WorkbenchWriteConnection):
@@ -4335,8 +4584,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group_ids = [group["group_id"] for group in aggregate_group_payloads]
         self.assertEqual(group_ids, ["case:CASE-AUTO-0013"])
         canonical_group = aggregate_group_payloads[0]
-        self.assertEqual([row["id"] for row in canonical_group["bank_rows"]], ["txn_imported_1284"])
-        self.assertEqual([row["id"] for row in canonical_group["invoice_rows"]], ["inv_imported_1643"])
+        self.assertEqual(all_scope_group_row_ids(connection, canonical_group["group_id"], "bank"), ["txn_imported_1284"])
+        self.assertEqual(all_scope_group_row_ids(connection, canonical_group["group_id"], "invoice"), ["inv_imported_1643"])
 
     def test_repository_all_scope_visible_paired_group_wins_over_same_case_open_candidate(self) -> None:
         class AggregateAllSameCasePairedAndOpenConnection(WorkbenchWriteConnection):
@@ -4419,8 +4668,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         open_groups = [group for group in aggregate_group_payloads if group["zone"] == "open"]
         self.assertEqual(len(paired_groups), 1)
         self.assertEqual(open_groups, [])
-        self.assertEqual([row["id"] for row in paired_groups[0]["oa_rows"]], ["oa-exp-2004"])
-        self.assertEqual([row["id"] for row in paired_groups[0]["bank_rows"]], ["txn_imported_0025"])
+        self.assertEqual(all_scope_group_row_ids(connection, paired_groups[0]["group_id"], "oa"), ["oa-exp-2004"])
+        self.assertEqual(all_scope_group_row_ids(connection, paired_groups[0]["group_id"], "bank"), ["txn_imported_0025"])
 
     def test_repository_all_scope_drops_partial_automatic_decision_groups_claimed_by_paired_shards(self) -> None:
         class AggregateAllPartialAutomaticDecisionConnection(WorkbenchWriteConnection):
@@ -4588,10 +4837,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         payloads_by_id = {group["group_id"]: group for group in aggregate_group_payloads}
         self.assertIn("scope:2026-03:temp:0001", payloads_by_id)
         self.assertIn("case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419", payloads_by_id)
-        self.assertEqual(payloads_by_id["scope:2026-03:temp:0001"]["oa_rows"][0]["id"], "oa-pay-2068")
+        self.assertEqual(all_scope_group_row_ids(connection, "scope:2026-03:temp:0001", "oa"), ["oa-pay-2068"])
         decision_group = payloads_by_id["case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419"]
-        self.assertEqual(decision_group["oa_rows"], [])
-        self.assertEqual([row["id"] for row in decision_group["bank_rows"]], ["txn_imported_1419"])
+        self.assertEqual(all_scope_group_row_ids(connection, decision_group["group_id"], "oa"), [])
+        self.assertEqual(all_scope_group_row_ids(connection, decision_group["group_id"], "bank"), ["txn_imported_1419"])
 
     def test_repository_all_scope_suppresses_open_invoice_rows_claimed_by_stronger_open_group(self) -> None:
         class AggregateAllOpenInvoiceDuplicateConnection(WorkbenchWriteConnection):
@@ -4662,8 +4911,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         ]
         self.assertEqual(len(aggregate_group_payloads), 1)
         self.assertEqual(aggregate_group_payloads[0]["group_id"], "scope:2026-02:candidate:bank-invoice-500")
-        self.assertEqual([row["id"] for row in aggregate_group_payloads[0]["invoice_rows"]], ["inv-imported-500"])
-        self.assertEqual([row["id"] for row in aggregate_group_payloads[0]["bank_rows"]], ["bank-500"])
+        self.assertEqual(all_scope_group_row_ids(connection, aggregate_group_payloads[0]["group_id"], "invoice"), ["inv-imported-500"])
+        self.assertEqual(all_scope_group_row_ids(connection, aggregate_group_payloads[0]["group_id"], "bank"), ["bank-500"])
 
     def test_repository_all_scope_suppresses_open_bank_rows_claimed_by_stronger_open_group(self) -> None:
         class AggregateAllOpenBankDuplicateConnection(WorkbenchWriteConnection):
@@ -4734,8 +4983,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         ]
         self.assertEqual(len(aggregate_group_payloads), 1)
         self.assertEqual(aggregate_group_payloads[0]["group_id"], "scope:2026-02:candidate:bank-invoice-500")
-        self.assertEqual([row["id"] for row in aggregate_group_payloads[0]["bank_rows"]], ["bank-row-500"])
-        self.assertEqual([row["id"] for row in aggregate_group_payloads[0]["invoice_rows"]], ["inv-500"])
+        self.assertEqual(all_scope_group_row_ids(connection, aggregate_group_payloads[0]["group_id"], "bank"), ["bank-row-500"])
+        self.assertEqual(all_scope_group_row_ids(connection, aggregate_group_payloads[0]["group_id"], "invoice"), ["inv-500"])
 
     def test_repository_persists_no_oa_collapsed_group_fact_and_display_counts(self) -> None:
         connection = WorkbenchWriteConnection()
@@ -4944,8 +5193,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         rows_by_group_id = {
             group["group_id"]: (
-                [row["id"] for row in group["oa_rows"]],
-                [row["id"] for row in group["invoice_rows"]],
+                all_scope_group_row_ids(connection, group["group_id"], "oa"),
+                all_scope_group_row_ids(connection, group["group_id"], "invoice"),
             )
             for group in aggregate_group_payloads
         }
@@ -5018,8 +5267,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(aggregate_group_payloads), 1)
         group = aggregate_group_payloads[0]
         self.assertEqual(group["group_id"], "source:oa_attachment:oa-exp-952")
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-exp-952"])
-        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["inv-oa-attachment-952"])
+        self.assertEqual(all_scope_group_row_ids(connection, group["group_id"], "oa"), ["oa-exp-952"])
+        self.assertEqual(all_scope_group_row_ids(connection, group["group_id"], "invoice"), ["inv-oa-attachment-952"])
 
     def test_workbench_api_returns_sql_read_model_without_sync_build(self) -> None:
         app = object.__new__(Application)
@@ -6296,6 +6545,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                                                 "status": "open",
                                                 "counterparty_name": "供应商A",
                                                 "amount_value": "1000.00",
+                                                "object_identity": {
+                                                    "key": "bank-business-fields-1",
+                                                    "kind": "business_fields",
+                                                    "source": "bank_transaction",
+                                                },
+                                                "object_identity_key": "bank-business-fields-1",
+                                                "object_identity_kind": "business_fields",
+                                                "object_identity_source": "bank_transaction",
+                                                "object_identity_confidence": "stable",
                                             }
                                         ],
                                     }
@@ -6322,9 +6580,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(row_batch[0][18].obj, {})
         self.assertEqual(group_batch[0][20].obj, {})
         self.assertEqual(group_row_batch[0][23].obj, {})
+        self.assertEqual(snapshot_params[7].obj["payload"]["open"]["groups"], [])
+        self.assertTrue(snapshot_params[7].obj["payload"]["workbench_groups_materialized"])
         self.assertEqual(row_batch[0][17].obj["id"], "bank-row-1")
+        self.assertNotIn("object_identity", row_batch[0][17].obj)
+        self.assertEqual(row_batch[0][17].obj["object_identity_key"], "bank-business-fields-1")
         self.assertEqual(group_batch[0][19].obj["group_id"], "case:RAW-1")
-        self.assertTrue(group_row_batch[0][22].obj)
+        self.assertEqual(group_row_batch[0][19].obj, {})
+        self.assertEqual(group_row_batch[0][22].obj, {})
 
     def test_repository_reads_workbench_row_detail_from_active_generation_rows(self) -> None:
         class RowDetailConnection(WorkbenchWriteConnection):
@@ -6987,7 +7250,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.fresh_checks, [("tenant-a", "workbench", "2026-02")])
         self.assertEqual(queue.completed, [])
 
-    def test_workbench_refresh_handler_enqueues_all_aggregate_with_event_priority_after_month_publish(self) -> None:
+    def test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(
                 self,
@@ -7040,7 +7303,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(queue.enqueued), 1)
         aggregate = queue.enqueued[0]
         self.assertEqual(aggregate["scope_key"], "all")
-        self.assertEqual(aggregate["priority"], "high")
+        self.assertEqual(aggregate["priority"], "low")
         self.assertEqual(aggregate["trace_id"], "trace-workbench-month")
         self.assertEqual(aggregate["dedupe_key"], "workbench.read_model.refresh:workbench:all:aggregate:19")
         self.assertEqual(aggregate["payload"]["aggregate_only"], True)
@@ -7109,7 +7372,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "parent_scope_keys": ["2026-05"],
                     "source_version": 19,
                     "reason": "workbench_shard_published",
-                    "priority": "high",
+                    "priority": "low",
+                    "delay_seconds": 3.0,
                     "trace_id": "trace-workbench-month",
                 }
             ],

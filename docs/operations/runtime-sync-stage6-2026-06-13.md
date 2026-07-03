@@ -1,5 +1,9 @@
 # Runtime 同步 Stage 6 - 受控写操作 E2E Smoke 入口
 
+> 当前生产标准输入以 `docs/operations/monitoring.md` 的页面 / 模块 write scenario 矩阵为准：
+> `FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，
+> `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`。历史占位审批号不得作为主控 workflow 的询问点。
+
 Stage 5 的生产 audit 已证明当前缺口不是“worker 不能跑”，而是“缺少真实高影响写操作样本”。本阶段新增受控
 `write_operation_e2e_smoke` 工具，用于在真实登录态下执行指定 mutating HTTP step，并等待该 step 之后的 durable
 outbox/dirty scope 满足写操作 SLO。
@@ -61,7 +65,7 @@ apply：
 
 ```bash
 export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
-export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='审批单号或人工批准记录'
+export FIN_OPS_WRITE_E2E_APPROVAL_TICKET='FINOPS-WRITE-SMOKE-STANDING-20260702'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smoke \
   --scenario /tmp/finops-write-e2e-scenarios.json \
   --apply \

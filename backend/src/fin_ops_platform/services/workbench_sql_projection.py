@@ -813,23 +813,23 @@ class WorkbenchSqlProjectionBuilder:
             working_rows_by_id
         )
 
+        oa_rows: list[dict[str, Any]] = []
+        bank_rows: list[dict[str, Any]] = []
+        invoice_rows: list[dict[str, Any]] = []
+        for row in working_rows_by_id.values():
+            row_type = str(row.get("type") or "")
+            if row_type == "oa":
+                oa_rows.append(row)
+            elif row_type == "bank":
+                bank_rows.append(row)
+            elif row_type == "invoice":
+                invoice_rows.append(row)
+
         grouped = WorkbenchCandidateGroupingService().group_payload(
             month,
-            oa_rows=[
-                deepcopy(row)
-                for row in working_rows_by_id.values()
-                if str(row.get("type") or "") == "oa"
-            ],
-            bank_rows=[
-                deepcopy(row)
-                for row in working_rows_by_id.values()
-                if str(row.get("type") or "") == "bank"
-            ],
-            invoice_rows=[
-                deepcopy(row)
-                for row in working_rows_by_id.values()
-                if str(row.get("type") or "") == "invoice"
-            ],
+            oa_rows=oa_rows,
+            bank_rows=bank_rows,
+            invoice_rows=invoice_rows,
         )
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
         grouped["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
@@ -1005,12 +1005,20 @@ class WorkbenchSqlProjectionBuilder:
     def _apply_workbench_overrides_and_exceptions(self, rows_by_id: dict[str, dict[str, Any]]) -> None:
         if not rows_by_id:
             return
+        row_ids = set(rows_by_id)
+        row_overrides = self._row_overrides_for_rows(row_ids)
+        exception_cases = self._active_exception_cases_for_rows(row_ids)
+        if not row_overrides and not exception_cases:
+            return
         override_service = WorkbenchOverrideService.from_snapshot(
-            {"row_overrides": self._row_overrides_for_rows(set(rows_by_id))}
+            {"row_overrides": row_overrides}
         )
-        for row_id, row in list(rows_by_id.items()):
+        for row_id in row_overrides:
+            row = rows_by_id.get(row_id)
+            if row is None:
+                continue
             rows_by_id[row_id] = override_service.apply_to_row(row)
-        for case_payload in self._active_exception_cases_for_rows(set(rows_by_id)):
+        for case_payload in exception_cases:
             case_row_ids = [
                 str(row_id).strip()
                 for row_id in list(case_payload.get("row_ids") or [])

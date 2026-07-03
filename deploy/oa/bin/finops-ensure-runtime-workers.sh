@@ -68,14 +68,36 @@ ensure_worker_env() {
 
 migrate_legacy_worker_poll_interval() {
   local worker="$1"
-  local example_file source_file target_file
+  local example_file source_file target_file source_poll
   example_file="$(worker_env_example "$worker")"
   source_file="$release_src/deploy/oa/env/$example_file"
   target_file="$env_dir/fin-ops.worker.${worker}.env"
   [ -f "$target_file" ] || return 0
-  if grep -q -- "--poll-interval-seconds 0.25" "$source_file" \
-    && grep -Eq -- "--poll-interval-seconds 2([^0-9.]|$)" "$target_file"; then
-    sed -i -E "s/--poll-interval-seconds 2([^0-9.]|$)/--poll-interval-seconds 0.25\\1/g" "$target_file"
+  source_poll="$(grep -oE -- "--poll-interval-seconds [0-9.]+" "$source_file" | awk '{print $2}' | tail -1 || true)"
+  [ -n "$source_poll" ] || return 0
+  if grep -Eq -- "--poll-interval-seconds (2|0\\.25|0\\.1|0\\.05)([^0-9.]|$)" "$target_file"; then
+    sed -i -E "s/--poll-interval-seconds (2|0\\.25|0\\.1|0\\.05)([^0-9.]|$)/--poll-interval-seconds ${source_poll}\\2/g" "$target_file"
+  fi
+}
+
+migrate_workbench_scope_split() {
+  local worker="$1"
+  local target_file="$env_dir/fin-ops.worker.${worker}.env"
+  [ "$worker" = "workbench" ] || return 0
+  [ -f "$target_file" ] || return 0
+  if grep -q '^FIN_OPS_WORKER_ARGS=' "$target_file" \
+    && ! grep -q -- "--exclude-claim-scope-key all" "$target_file"; then
+    sed -i -E '/^FIN_OPS_WORKER_ARGS=/ s/"$/ --exclude-claim-scope-key all"/' "$target_file"
+  fi
+}
+
+migrate_rabbitmq_worker_drain_interval() {
+  local target_file="$env_dir/fin-ops.rabbitmq-worker.env"
+  [ -f "$target_file" ] || return 0
+  if grep -q '^RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=' "$target_file"; then
+    sed -i -E 's/^RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=.*/RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1/' "$target_file"
+  else
+    printf '\nRABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1\n' >> "$target_file"
   fi
 }
 
@@ -120,6 +142,7 @@ fi
 install -d -m 0755 "$systemd_dir"
 install -d -m 0750 -o root -g fin-ops "$env_dir"
 install_if_changed "$worker_template" "$worker_unit" 0644 root:root
+migrate_rabbitmq_worker_drain_interval
 
 if [ -z "$required_workers" ]; then
   required_workers="$(runtime_worker_manifest --required-instances)"
@@ -128,6 +151,7 @@ fi
 for worker in $required_workers $optional_workers; do
   ensure_worker_env "$worker"
   migrate_legacy_worker_poll_interval "$worker"
+  migrate_workbench_scope_split "$worker"
 done
 
 if [ ! -f "$env_dir/fin-ops.common.env" ]; then

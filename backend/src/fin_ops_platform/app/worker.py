@@ -138,6 +138,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--worker-id", default=None, help="Stable worker id for PostgreSQL locks and heartbeats.")
     parser.add_argument("--worker-kind", default=None, help="Worker heartbeat kind. Defaults to the enabled handler family.")
     parser.add_argument("--event-type", action="append", default=[], help="Outbox event type to claim. Repeatable.")
+    parser.add_argument("--claim-scope-key", action="append", default=[], help="Only claim matching outbox scope_key values. Repeatable.")
+    parser.add_argument(
+        "--exclude-claim-scope-key",
+        action="append",
+        default=[],
+        help="Do not claim matching outbox scope_key values. Repeatable.",
+    )
     parser.add_argument("--poll-interval-seconds", type=float, default=DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS)
     parser.add_argument("--lock-timeout-seconds", type=int, default=300)
     parser.add_argument("--retry-delay-seconds", type=int, default=60)
@@ -218,6 +225,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_events_per_iteration=args.max_events_per_iteration,
         max_attempts=args.max_attempts,
         worker_kind=args.worker_kind or _infer_worker_kind(args),
+        claim_scope_keys=list(args.claim_scope_key or []),
+        exclude_claim_scope_keys=list(args.exclude_claim_scope_key or []),
     )
     readiness_reporter = (
         ReadModelReadinessReporter(readiness_repository=RuntimeMonitoringRepository(connection))
@@ -712,6 +721,8 @@ def _apply_registration_args(
         setattr(args, _argparse_attr_name(flag), True)
     transport = "rabbitmq" if queue_settings.backend == "rabbitmq" else "postgres"
     args.event_type = list(worker_claim_event_types(registration, transport=transport))
+    args.claim_scope_key = list(registration.claim_scope_keys)
+    args.exclude_claim_scope_key = list(registration.exclude_claim_scope_keys)
     return registration
 
 
@@ -726,6 +737,8 @@ def _registration_check_payload(registration: RuntimeWorkerRegistration | None) 
         "event_types": list(registration.event_types),
         "postgres_claim_event_types": list(registration.claim_event_types(transport="postgres")),
         "rabbitmq_claim_event_types": list(registration.claim_event_types(transport="rabbitmq")),
+        "claim_scope_keys": list(registration.claim_scope_keys),
+        "exclude_claim_scope_keys": list(registration.exclude_claim_scope_keys),
         "handler_flags": list(registration.handler_flags),
     }
 
