@@ -4303,6 +4303,96 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             WORKBENCH_MATCHING_RULES_VERSION,
         )
 
+    def test_repository_rebuilds_all_scope_from_materialized_month_group_rows(self) -> None:
+        class MaterializedAggregateAllWorkbenchConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "actual_group_count" in normalized and "from read_model.workbench_generations" in normalized:
+                    return []
+                if "join read_model.workbench_group_rows gr" in normalized:
+                    assert params[1] == ["gen-2026-03"]
+                    return [
+                        {
+                            "scope_key": "2026-03",
+                            "generation_id": "gen-2026-03",
+                            "zone": "paired",
+                            "group_id": "case:MATERIALIZED",
+                            "pane": "bank",
+                            "row_id": "bank-materialized-1",
+                            "row_role": "normal",
+                            "row_index": 0,
+                            "source_kind": "bank",
+                            "status": "paired",
+                            "row_payload": {
+                                "id": "bank-materialized-1",
+                                "type": "bank",
+                                "source_kind": "bank",
+                            },
+                        },
+                        {
+                            "scope_key": "2026-03",
+                            "generation_id": "gen-2026-03",
+                            "zone": "paired",
+                            "group_id": "case:MATERIALIZED",
+                            "pane": "invoice",
+                            "row_id": "invoice-materialized-1",
+                            "row_role": "normal",
+                            "row_index": 0,
+                            "source_kind": "invoice",
+                            "status": "paired",
+                            "row_payload": {
+                                "id": "invoice-materialized-1",
+                                "type": "invoice",
+                                "source_kind": "invoice",
+                            },
+                        },
+                    ]
+                if "from read_model.workbench_groups" in normalized and "scope_key <> 'all'" in normalized:
+                    return [
+                        {
+                            "scope_key": "2026-03",
+                            "generation_id": "gen-2026-03",
+                            "scope_month": "2026-03-01",
+                            "zone": "paired",
+                            "group_id": "case:MATERIALIZED",
+                            "generated_at": "2026-07-03T10:00:00+08:00",
+                            "source_versions": {
+                                "source_version": 3163,
+                                "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+                            },
+                            "payload": {
+                                "group_id": "case:MATERIALIZED",
+                                "zone": "paired",
+                                "status": "paired",
+                                "workbench_group_rows_materialized": True,
+                            },
+                        }
+                    ]
+                return []
+
+        connection = MaterializedAggregateAllWorkbenchConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {"read_models": {}},
+            changed_scope_keys={"all"},
+            raise_on_all_scope_parent_inconsistent=True,
+        )
+
+        aggregate_group_insert = next(
+            params
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        )
+        group_payload = aggregate_group_insert[16].obj
+        self.assertEqual(group_payload["row_count"], 2)
+        self.assertEqual(all_scope_group_row_ids(connection, group_payload["group_id"], "bank"), ["bank-materialized-1"])
+        self.assertEqual(
+            all_scope_group_row_ids(connection, group_payload["group_id"], "invoice"),
+            ["invoice-materialized-1"],
+        )
+
     def test_repository_batches_all_scope_generation_rows_when_supported(self) -> None:
         class BulkAggregateAllWorkbenchConnection(BulkWorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:

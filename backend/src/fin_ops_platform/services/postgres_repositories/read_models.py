@@ -7596,7 +7596,15 @@ class PostgresReadModelRepository:
             return False
         group_rows = connection.fetch_all(
             """
-            select g.scope_key, g.scope_month, g.zone, g.group_id, g.payload, g.source_versions, g.generated_at::text as generated_at
+            select
+                g.scope_key,
+                g.generation_id,
+                g.scope_month,
+                g.zone,
+                g.group_id,
+                g.payload,
+                g.source_versions,
+                g.generated_at::text as generated_at
             from read_model.workbench_groups g
             join read_model.workbench_generations gen
               on gen.generation_id = g.generation_id
