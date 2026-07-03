@@ -1093,12 +1093,27 @@ class WorkbenchWriteFacade:
             return changed_scope_keys
 
         try:
+            alias_map = self._withdraw_selected_row_alias_map(affected_row_ids, month=month)
+            before_relations = [
+                self._canonicalize_withdraw_relation(dict(relation), alias_map=alias_map)
+                for relation in list(preview.get("before_relations") or [])
+                if isinstance(relation, dict)
+            ]
+            canonical_active_relation = before_relations[0] if before_relations else self._canonicalize_withdraw_relation(
+                active_relation,
+                alias_map=alias_map,
+            )
+            canonical_after_relations = [
+                self._canonicalize_withdraw_relation(dict(relation), alias_map=alias_map)
+                for relation in list(preview.get("after_relations") or [])
+                if isinstance(relation, dict)
+            ]
             rows, _synthetic_after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
-                active_relation=active_relation,
-                after_relations=list(preview.get("after_relations") or []),
+                active_relation=canonical_active_relation,
+                after_relations=canonical_after_relations,
                 month=month,
             )
-        except (TypeError, ValueError, IndexError):
+        except (TypeError, ValueError, IndexError, KeyError):
             return []
         return self._operation_scope_keys_for_rows_and_row_ids(
             month=month,

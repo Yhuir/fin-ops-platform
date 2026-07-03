@@ -963,6 +963,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         facade = _new_facade(
             relation_command_service=relation_command,
             live_rows=live_rows,
+            scope_keys_for_row_ids=lambda **_: {"all"},
             withdraw_rows_and_after_relations=withdraw_rows_and_after_relations,
         )
 
@@ -986,7 +987,8 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(preview.status_code, HTTPStatus.OK)
         self.assertEqual(submit.status_code, HTTPStatus.OK)
-        self.assertEqual(resolved_active_row_ids[0], selected_row_ids)
+        self.assertTrue(resolved_active_row_ids)
+        self.assertTrue(all(row_ids == selected_row_ids for row_ids in resolved_active_row_ids))
         self.assertEqual(submit.payload["affected_row_ids"], selected_row_ids)
         self.assertEqual(submit.payload["restored_relations"][0]["row_ids"], selected_row_ids)
         self.assertNotIn(relation_command.raw_oa_row_id, submit.payload["affected_row_ids"])

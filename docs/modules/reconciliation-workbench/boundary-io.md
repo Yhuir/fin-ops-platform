@@ -7,7 +7,7 @@
 - 状态：partial
 - 当前边界可信度：medium
 - 目标边界：页面查询走 `workbench` read model active generation；首屏 summary 只读物化 `read_model.workbench_summary`，groups summary 页只输出 UI 必需字段；写操作通过 workbench action/relation service 进入关系事实源和 dirty scope。
-- 当前缺口：`server.py` 与历史 workbench service 仍保留部分入口，`GET /api/workbench` full payload 仍是兼容迁移面；confirm-link context expansion 仍在 `Application` adapter 内，但输出合同已收紧为 canonical Workbench row id，禁止把上游 source id 注入 action row_ids；withdraw-link action boundary 会用已选 canonical OA row 的 source aliases 识别历史 active relation 中残留的 OA source id，并在 preview、submit response、restored relations 和刷新目标前统一收敛为 canonical Workbench row id；row detail legacy fallback 已在生产 SQL read model runtime 完全关闭，只保留非 SQL/legacy 模式兼容入口。`workbench-matching` worker 已走 PostgreSQL dirty scope 和 `WorkbenchMatchingRelationReadPort`，运行时本地 pair service 只作为 canonical relation command/read 支撑，不再作为页面或 read model fallback。
+- 当前缺口：`server.py` 与历史 workbench service 仍保留部分入口，`GET /api/workbench` full payload 仍是兼容迁移面；confirm-link context expansion 仍在 `Application` adapter 内，但输出合同已收紧为 canonical Workbench row id，禁止把上游 source id 注入 action row_ids；withdraw-link action boundary 会用已选 canonical OA row 的 source aliases 识别历史 active relation 中残留的 OA source id，并在 preview、submit response、restored relations、scope fallback 和刷新目标前统一收敛为 canonical Workbench row id；row detail legacy fallback 已在生产 SQL read model runtime 完全关闭，只保留非 SQL/legacy 模式兼容入口。`workbench-matching` worker 已走 PostgreSQL dirty scope 和 `WorkbenchMatchingRelationReadPort`，运行时本地 pair service 只作为 canonical relation command/read 支撑，不再作为页面或 read model fallback。
 - 旧代码删除条件：没有 API、前端、worker、测试继续读取 legacy live/pickle 路径，并且 active generation freshness 与回归测试覆盖写后刷新。
 
 ## 职责边界
