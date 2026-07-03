@@ -81,7 +81,7 @@ class BankBatchPairRelationSnapshotPort:
         normalized_case_id = str(case_id or "").strip()
         if not normalized_case_id:
             return None
-        pair_relations = self.snapshot().get("pair_relations", {})
+        pair_relations = self.snapshot_case_ids([normalized_case_id]).get("pair_relations", {})
         relation = pair_relations.get(normalized_case_id) if isinstance(pair_relations, dict) else None
         return dict(relation) if isinstance(relation, dict) else None
 

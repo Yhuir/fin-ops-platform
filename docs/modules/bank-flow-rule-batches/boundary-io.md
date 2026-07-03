@@ -97,6 +97,8 @@
 - Worker 持久化写入必须保持 scoped incremental I/O；同一 scope 的多个 batch rows 应在 repository 边界批量 upsert，避免逐 batch round-trip 放大 worker handler 时间。
 - `detail_payload(batch_id)`、`submit_batch(batch_id)` 和 `withdraw_batch(batch_id)` 先读取当前 bank-flow batch runtime；runtime 缺失时先通过 `state_store.load_bank_flow_rule_batches()` 恢复持久化批次快照，只有持久化快照也缺目标 batch 时才 fallback `scope_key=all` 重建 runtime snapshot。已知 batch id 的提交热路径不得为了单批提交前置全量候选 refresh。
 - `submit_batch(batch_id)` mutation 保存不得同步 `WorkbenchReadModelService.snapshot()` 或 `save_workbench_read_models(...)`；Workbench visibility 通过 dirty scope/outbox/worker 收敛。单月批次提交必须调用 `save_bank_flow_rule_batches_scope(..., scope_key=YYYY-MM)`，不得重写全部 bank-flow batch rows。
+- `submit_batch(batch_id)` 热路径不得为了 rollback 或响应组装读取完整 Workbench relation snapshot；只能保存当前 bank-flow batch runtime snapshot，并通过 `snapshot_case_ids([case_id])` 读取变更 case 的 relation payload。`after_mutation(...)` 只允许把 month scope 规范化为 `["all", YYYY-MM...]` 后交给 bank-flow mutation persistence，不得调用 Workbench read model scope 枚举或把 `workbench/all` 聚合刷新重新放回当前页阻塞等待。
+- `workbench-relations` owner 在保存 relation facts 后仍负责输出下游 dirty scope/outbox，但该事务内 fan-out 必须先计算 refresh intents，再一次性批量写 `job.read_model_dirty_scopes` 和 `job.outbox_events`。禁止恢复旧的 per-scope `fetch_one + execute` 入队函数；新增下游 scope 必须扩展批量 intent 合同和测试，而不是在 bank-flow service 内补同步刷新。
 - `reset-submitted` 不做前置 `all` refresh；撤回后只同步刷新受影响月份 scope，没有月份时才 fallback `all`。
 - 页面提交、撤回、reset 的前端阻塞等待只等待 `bank_flow_rule_batch` 自身 target。`workbench_relation` / `workbench` targets 保留在 mutation result 和事件广播中，由关联台或后台 runtime 收敛；不能让 `workbench/all` 聚合刷新拖慢当前页提交完成反馈。
 - Worker refresh 使用 `bank_flow_rule_batch_source_versions_summary(...)` 判断 scope source versions 是否 unchanged；能证明 unchanged 时完成 dirty scope 并跳过批次重建和 snapshot 发布。

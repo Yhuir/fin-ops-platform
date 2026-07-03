@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fin_ops_platform.services.bank_batch_application_service import BankBatchApplicationService, BankBatchPersistenceError
+from fin_ops_platform.services.bank_batch_application_service import (
+    SEARCH_MONTH_RE,
+    BankBatchApplicationService,
+    BankBatchPersistenceError,
+)
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 
 
@@ -47,6 +51,48 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             return
         super()._prepare_batch_for_submit(batch_id, relation_mode=relation_mode)
 
+    def submit_batch(
+        self,
+        batch_id: str,
+        *,
+        actor: str,
+        expected_version: int | None,
+        note: str | None,
+        relation_mode: str = BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        persist: bool = True,
+    ) -> dict[str, object]:
+        if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return super().submit_batch(
+                batch_id,
+                actor=actor,
+                expected_version=expected_version,
+                note=note,
+                relation_mode=relation_mode,
+                persist=persist,
+            )
+        previous_batch_snapshot = self._bank_batch_service.snapshot()
+        try:
+            self._prepare_batch_for_submit(batch_id, relation_mode=relation_mode)
+            before_batch = self._bank_batch_service.get_batch(batch_id)
+            already_submitted = str(before_batch.get("status") or "") == "submitted"
+            batch = self._bank_batch_service.submit_batch(
+                batch_id,
+                actor=actor,
+                expected_version=expected_version,
+                note=note,
+            )
+            if not already_submitted:
+                self._confirm_relation_for_batch(batch, actor=actor, note=note, relation_mode=relation_mode)
+            return self._mutation_result(
+                batch,
+                status="submitted",
+                persist=persist,
+                read_model_key=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            )
+        except Exception:
+            self._restore_batch_service_snapshot(self._bank_batch_service, previous_batch_snapshot)
+            raise
+
     def detail_payload(self, batch_id: str) -> dict[str, object]:
         self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)
         return super().detail_payload(batch_id)
@@ -75,6 +121,44 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         reason: str | None,
     ) -> dict[str, object]:
         return super().reset_submitted_bank_flow_rule_batches(actor=actor, reason=reason)
+
+    def after_mutation(
+        self,
+        affected_months: list[str],
+        *,
+        changed_case_ids: list[str],
+        persist: bool,
+        action_name: str | None = None,
+    ) -> bool:
+        normalized_action_name = str(action_name or "").strip()
+        if not normalized_action_name.startswith("bank_flow_rule_batch"):
+            return super().after_mutation(
+                affected_months,
+                changed_case_ids=changed_case_ids,
+                persist=persist,
+                action_name=action_name,
+            )
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if SEARCH_MONTH_RE.match(str(month).strip())
+        ]
+        self._execute_derived_data_lifecycle_event(
+            "bank_flow_rule_batch_changed",
+            months=normalized_months,
+            metadata={
+                "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                **({"action_name": normalized_action_name} if normalized_action_name else {}),
+            },
+            schedule_cost_warmup=False,
+        )
+        if persist:
+            self.persist_mutation(
+                changed_case_ids=changed_case_ids,
+                changed_scope_keys=["all", *normalized_months],
+            )
+        return bool(normalized_months)
 
     def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
         if self._state_store is None:

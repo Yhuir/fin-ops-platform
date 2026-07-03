@@ -164,12 +164,13 @@ class PostgresWorkbenchRelationRepository:
             self._replace_workbench_pair_relation_history(connection, history, changed_case_ids=changed_ids)
             if not self._enqueue_refreshes:
                 return
+            refreshes: list[dict[str, Any]] = []
             relation_refresh_scope_keys = set(dirty_scope_keys or {"all"})
             downstream_refresh_scope_keys = relation_refresh_scope_keys | set(downstream_by_scope_key.keys())
             for scope_key in sorted(downstream_refresh_scope_keys or {"all"}):
                 if scope_key in relation_refresh_scope_keys:
-                    _enqueue_read_model_refresh_in_transaction(
-                        connection,
+                    _append_read_model_refresh(
+                        refreshes,
                         scope_type="workbench_relation",
                         scope_key=scope_key,
                         reason="workbench_pair_relation_changed",
@@ -183,8 +184,8 @@ class PostgresWorkbenchRelationRepository:
                         relation_modes = sorted(no_oa_batch_relation_modes_by_scope.get(scope_key) or [])
                         if relation_modes:
                             for relation_mode in relation_modes:
-                                _enqueue_read_model_refresh_in_transaction(
-                                    connection,
+                                _append_read_model_refresh(
+                                    refreshes,
                                     scope_type=downstream_scope_type,
                                     scope_key=scope_key,
                                     reason="workbench_relation_changed",
@@ -197,8 +198,8 @@ class PostgresWorkbenchRelationRepository:
                         relation_modes = sorted(bank_flow_batch_relation_modes_by_scope.get(scope_key) or [])
                         if relation_modes:
                             for relation_mode in relation_modes:
-                                _enqueue_read_model_refresh_in_transaction(
-                                    connection,
+                                _append_read_model_refresh(
+                                    refreshes,
                                     scope_type=downstream_scope_type,
                                     scope_key=scope_key,
                                     reason="workbench_relation_changed",
@@ -207,8 +208,8 @@ class PostgresWorkbenchRelationRepository:
                                     dedupe_kind=relation_mode,
                                 )
                             continue
-                    _enqueue_read_model_refresh_in_transaction(
-                        connection,
+                    _append_read_model_refresh(
+                        refreshes,
                         scope_type=downstream_scope_type,
                         scope_key=scope_key,
                         reason="workbench_relation_changed",
@@ -217,8 +218,8 @@ class PostgresWorkbenchRelationRepository:
             workbench_scope_keys = _workbench_relation_workbench_refresh_scope_keys(dirty_scope_keys)
             workbench_month_scope_keys = sorted(scope_key for scope_key in workbench_scope_keys if scope_key != "all")
             for scope_key in workbench_month_scope_keys:
-                _enqueue_read_model_refresh_in_transaction(
-                    connection,
+                _append_read_model_refresh(
+                    refreshes,
                     scope_type="workbench",
                     scope_key=scope_key,
                     reason="workbench_relation_changed",
@@ -226,15 +227,21 @@ class PostgresWorkbenchRelationRepository:
                 )
             if "all" in workbench_scope_keys:
                 if workbench_month_scope_keys:
-                    _enqueue_workbench_all_aggregate_refresh_in_transaction(
-                        connection,
+                    _append_read_model_refresh(
+                        refreshes,
+                        scope_type="workbench",
+                        scope_key="all",
                         reason="workbench_relation_changed",
                         priority="high",
-                        parent_scope_keys=workbench_month_scope_keys,
+                        payload_extra={
+                            "aggregate_only": True,
+                            "parent_scope_keys": workbench_month_scope_keys,
+                        },
+                        dedupe_kind="aggregate",
                     )
                 else:
-                    _enqueue_read_model_refresh_in_transaction(
-                        connection,
+                    _append_read_model_refresh(
+                        refreshes,
                         scope_type="workbench",
                         scope_key="all",
                         reason="workbench_relation_changed",
@@ -242,13 +249,14 @@ class PostgresWorkbenchRelationRepository:
                     )
             if dirty_scope_keys and pending_invoice_scope_keys:
                 for pending_scope_key in sorted(pending_invoice_scope_keys):
-                    _enqueue_read_model_refresh_in_transaction(
-                        connection,
+                    _append_read_model_refresh(
+                        refreshes,
                         scope_type="pending_invoice",
                         scope_key=pending_scope_key,
                         reason="workbench_relation_changed",
                         priority="high",
                     )
+            _enqueue_read_model_refreshes_in_transaction(connection, refreshes)
 
         run_in_transaction(self._connection, write)
 
@@ -606,8 +614,8 @@ def _workbench_relation_bank_directions(connection: Any, row_ids: list[str]) -> 
     return directions
 
 
-def _enqueue_read_model_refresh_in_transaction(
-    connection: Any,
+def _append_read_model_refresh(
+    refreshes: list[dict[str, Any]],
     *,
     scope_type: str,
     scope_key: str,
@@ -619,8 +627,8 @@ def _enqueue_read_model_refresh_in_transaction(
 ) -> None:
     if scope_type == "cost_statistics":
         for target_scope_key in CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys([scope_key]):
-            _enqueue_single_read_model_refresh_in_transaction(
-                connection,
+            _append_single_read_model_refresh(
+                refreshes,
                 scope_type=scope_type,
                 scope_key=target_scope_key,
                 reason=reason,
@@ -630,8 +638,8 @@ def _enqueue_read_model_refresh_in_transaction(
                 dedupe_kind=dedupe_kind,
             )
         return
-    _enqueue_single_read_model_refresh_in_transaction(
-        connection,
+    _append_single_read_model_refresh(
+        refreshes,
         scope_type=scope_type,
         scope_key=scope_key,
         reason=reason,
@@ -642,8 +650,8 @@ def _enqueue_read_model_refresh_in_transaction(
     )
 
 
-def _enqueue_single_read_model_refresh_in_transaction(
-    connection: Any,
+def _append_single_read_model_refresh(
+    refreshes: list[dict[str, Any]],
     *,
     scope_type: str,
     scope_key: str,
@@ -653,156 +661,245 @@ def _enqueue_single_read_model_refresh_in_transaction(
     payload_extra: dict[str, Any] | None = None,
     dedupe_kind: str | None = None,
 ) -> None:
+    normalized_scope_type = text(scope_type)
+    normalized_scope_key = text(scope_key)
+    normalized_reason = text(reason) or "workbench_relation_changed"
+    normalized_tenant_id = text(tenant_id) or "default"
+    normalized_priority = text(priority) or "normal"
+    if not normalized_scope_type or not normalized_scope_key:
+        return
+    event_type = f"{normalized_scope_type}.read_model.refresh"
+    normalized_dedupe_kind = text(dedupe_kind)
+    dedupe_key = f"{event_type}:{normalized_scope_type}:{normalized_scope_key}"
+    if normalized_dedupe_kind:
+        dedupe_key = f"{event_type}:{normalized_scope_type}:{normalized_scope_key}:{normalized_dedupe_kind}"
     payload = {
-        "scope_type": scope_type,
-        "scope_key": scope_key,
-        "reason": reason,
+        "scope_type": normalized_scope_type,
+        "scope_key": normalized_scope_key,
+        "reason": normalized_reason,
         **(payload_extra or {}),
     }
-    dirty_row = connection.fetch_one(
-        """
-        insert into job.read_model_dirty_scopes(
-            tenant_id, scope_type, scope_key, reason, payload, raw_payload,
-            source_version, status, next_run_at, priority
-        )
-        values (
-            %s, %s, %s, %s, %s, %s,
-            coalesce((
-                select max(existing.source_version) + 1
-                from job.read_model_dirty_scopes existing
-                where existing.tenant_id = %s
-                  and existing.scope_type = %s
-                  and existing.scope_key = %s
-            ), 0),
-            'pending',
-            now(),
-            %s
-        )
-        on conflict (tenant_id, scope_type, scope_key)
-        where status in ('pending', 'processing')
-        do update set
-            reason = excluded.reason,
-            payload = job.read_model_dirty_scopes.payload || excluded.payload,
-            raw_payload = excluded.raw_payload,
-            source_version = job.read_model_dirty_scopes.source_version + 1,
-            status = 'pending',
-            next_run_at = now(),
-            priority = excluded.priority,
-            updated_at = now()
-        returning source_version
-        """,
-        (
-            tenant_id,
-            scope_type,
-            scope_key,
-            reason,
-            jsonb(payload),
-            jsonb(payload),
-            tenant_id,
-            scope_type,
-            scope_key,
-            priority,
-        ),
-    )
-    source_version = int_value((dirty_row or {}).get("source_version"), 0)
-    event_type = f"{scope_type}.read_model.refresh"
-    event_payload = {**payload, "source_version": source_version}
-    dedupe_key = f"{event_type}:{scope_type}:{scope_key}"
-    normalized_dedupe_kind = text(dedupe_kind)
-    if normalized_dedupe_kind:
-        dedupe_key = f"{event_type}:{scope_type}:{scope_key}:{normalized_dedupe_kind}"
-    connection.execute(
-        """
-        insert into job.outbox_events (
-            tenant_id, event_type, aggregate_type, aggregate_id,
-            scope_type, scope_key, dedupe_key, schema_version,
-            source_version, priority, payload, raw_payload
-        )
-        values (%s, %s, 'read_model', %s, %s, %s, %s, 1, %s, %s, %s, %s)
-        on conflict (tenant_id, dedupe_key)
-        where dedupe_key is not null and status = 'pending'
-        do update set
-            payload = (
-                job.outbox_events.payload
-                || excluded.payload
-                || case
-                    when excluded.payload ? 'parent_scope_keys' then jsonb_build_object(
-                        'parent_scope_keys',
-                        (
-                            select coalesce(jsonb_agg(distinct merged.value order by merged.value), '[]'::jsonb)
-                            from jsonb_array_elements_text(
-                                coalesce(job.outbox_events.payload->'parent_scope_keys', '[]'::jsonb)
-                                || coalesce(excluded.payload->'parent_scope_keys', '[]'::jsonb)
-                            ) as merged(value)
-                        )
-                    )
-                    else '{}'::jsonb
-                end
-            ),
-            raw_payload = (
-                job.outbox_events.raw_payload
-                || excluded.raw_payload
-                || case
-                    when excluded.raw_payload ? 'parent_scope_keys' then jsonb_build_object(
-                        'parent_scope_keys',
-                        (
-                            select coalesce(jsonb_agg(distinct merged.value order by merged.value), '[]'::jsonb)
-                            from jsonb_array_elements_text(
-                                coalesce(job.outbox_events.raw_payload->'parent_scope_keys', '[]'::jsonb)
-                                || coalesce(excluded.raw_payload->'parent_scope_keys', '[]'::jsonb)
-                            ) as merged(value)
-                        )
-                    )
-                    else '{}'::jsonb
-                end
-            ),
-            source_version = greatest(
-                coalesce(job.outbox_events.source_version, 0),
-                coalesce(excluded.source_version, 0)
-            ),
-            priority = excluded.priority,
-            publish_status = 'unpublished',
-            published_at = null,
-            publish_last_error = null,
-            next_publish_at = now(),
-            publish_locked_by = null,
-            publish_locked_at = null,
-            publish_confirmed_at = null,
-            updated_at = now()
-        """,
-        (
-            tenant_id,
-            event_type,
-            scope_key,
-            scope_type,
-            scope_key,
-            dedupe_key,
-            source_version,
-            priority,
-            jsonb(event_payload),
-            jsonb(event_payload),
-        ),
+    refreshes.append(
+        {
+            "tenant_id": normalized_tenant_id,
+            "scope_type": normalized_scope_type,
+            "scope_key": normalized_scope_key,
+            "reason": normalized_reason,
+            "priority": normalized_priority,
+            "payload": payload,
+            "event_type": event_type,
+            "dedupe_key": dedupe_key,
+        }
     )
 
 
-def _enqueue_workbench_all_aggregate_refresh_in_transaction(
-    connection: Any,
-    *,
-    reason: str,
-    tenant_id: str = "default",
-    priority: str = "normal",
-    parent_scope_keys: list[str] | None = None,
-) -> None:
-    _enqueue_single_read_model_refresh_in_transaction(
-        connection,
-        scope_type="workbench",
-        scope_key="all",
-        reason=reason,
-        tenant_id=tenant_id,
-        priority=priority,
-        payload_extra={
-            "aggregate_only": True,
-            "parent_scope_keys": [scope_key for scope_key in list(parent_scope_keys or []) if scope_key],
-        },
-        dedupe_kind="aggregate",
+def _enqueue_read_model_refreshes_in_transaction(connection: Any, refreshes: list[dict[str, Any]]) -> None:
+    rows = _deduped_read_model_refresh_rows(refreshes)
+    if not rows:
+        return
+    value_sql = ", ".join(
+        [
+            "(%s::integer, %s::text, %s::text, %s::text, %s::text, %s::text, %s::jsonb, %s::text, %s::text)"
+        ]
+        * len(rows)
     )
+    params = tuple(value for row in rows for value in row)
+    connection.fetch_all(
+        f"""
+        with input(
+            ord, tenant_id, scope_type, scope_key, reason, priority,
+            payload, event_type, dedupe_key
+        ) as (
+            values {value_sql}
+        ),
+        dirty_input as (
+            select distinct on (tenant_id, scope_type, scope_key)
+                tenant_id,
+                scope_type,
+                scope_key,
+                reason,
+                priority,
+                payload
+            from input
+            order by tenant_id, scope_type, scope_key, ord desc
+        ),
+        dirty as (
+            insert into job.read_model_dirty_scopes(
+                tenant_id, scope_type, scope_key, reason, payload, raw_payload,
+                source_version, status, next_run_at, priority
+            )
+            select
+                dirty_input.tenant_id,
+                dirty_input.scope_type,
+                dirty_input.scope_key,
+                dirty_input.reason,
+                dirty_input.payload,
+                dirty_input.payload,
+                coalesce((
+                    select max(existing.source_version) + 1
+                    from job.read_model_dirty_scopes existing
+                    where existing.tenant_id = dirty_input.tenant_id
+                      and existing.scope_type = dirty_input.scope_type
+                      and existing.scope_key = dirty_input.scope_key
+                ), 0),
+                'pending',
+                clock_timestamp(),
+                dirty_input.priority
+            from dirty_input
+            on conflict (tenant_id, scope_type, scope_key)
+            where status in ('pending', 'processing')
+            do update set
+                reason = excluded.reason,
+                payload = job.read_model_dirty_scopes.payload || excluded.payload,
+                raw_payload = excluded.raw_payload,
+                source_version = job.read_model_dirty_scopes.source_version + 1,
+                status = 'pending',
+                next_run_at = clock_timestamp(),
+                priority = excluded.priority,
+                updated_at = clock_timestamp()
+            returning tenant_id, scope_type, scope_key, source_version
+        ),
+        event_rows as (
+            insert into job.outbox_events (
+                tenant_id, event_type, aggregate_type, aggregate_id,
+                scope_type, scope_key, dedupe_key, schema_version,
+                source_version, priority, payload, raw_payload,
+                available_at, created_at, updated_at, next_publish_at
+            )
+            select
+                input.tenant_id,
+                input.event_type,
+                'read_model',
+                input.scope_key,
+                input.scope_type,
+                input.scope_key,
+                input.dedupe_key,
+                1,
+                dirty.source_version,
+                input.priority,
+                input.payload || jsonb_build_object('source_version', dirty.source_version),
+                input.payload || jsonb_build_object('source_version', dirty.source_version),
+                clock_timestamp(),
+                clock_timestamp(),
+                clock_timestamp(),
+                clock_timestamp()
+            from input
+            join dirty
+              on dirty.tenant_id = input.tenant_id
+             and dirty.scope_type = input.scope_type
+             and dirty.scope_key = input.scope_key
+            on conflict (tenant_id, dedupe_key)
+            where dedupe_key is not null and status = 'pending'
+            do update set
+                payload = (
+                    job.outbox_events.payload
+                    || excluded.payload
+                    || case
+                        when excluded.payload ? 'parent_scope_keys' then jsonb_build_object(
+                            'parent_scope_keys',
+                            (
+                                select coalesce(jsonb_agg(distinct merged.value order by merged.value), '[]'::jsonb)
+                                from jsonb_array_elements_text(
+                                    coalesce(job.outbox_events.payload->'parent_scope_keys', '[]'::jsonb)
+                                    || coalesce(excluded.payload->'parent_scope_keys', '[]'::jsonb)
+                                ) as merged(value)
+                            )
+                        )
+                        else '{{}}'::jsonb
+                    end
+                ),
+                raw_payload = (
+                    job.outbox_events.raw_payload
+                    || excluded.raw_payload
+                    || case
+                        when excluded.raw_payload ? 'parent_scope_keys' then jsonb_build_object(
+                            'parent_scope_keys',
+                            (
+                                select coalesce(jsonb_agg(distinct merged.value order by merged.value), '[]'::jsonb)
+                                from jsonb_array_elements_text(
+                                    coalesce(job.outbox_events.raw_payload->'parent_scope_keys', '[]'::jsonb)
+                                    || coalesce(excluded.raw_payload->'parent_scope_keys', '[]'::jsonb)
+                                ) as merged(value)
+                            )
+                        )
+                        else '{{}}'::jsonb
+                    end
+                ),
+                source_version = greatest(
+                    coalesce(job.outbox_events.source_version, 0),
+                    coalesce(excluded.source_version, 0)
+                ),
+                priority = excluded.priority,
+                publish_status = 'unpublished',
+                published_at = null,
+                publish_last_error = null,
+                next_publish_at = clock_timestamp(),
+                publish_locked_by = null,
+                publish_locked_at = null,
+                publish_confirmed_at = null,
+                updated_at = clock_timestamp()
+            returning
+                tenant_id,
+                dedupe_key
+        )
+        select event_rows.*
+        from event_rows
+        join input
+          on input.tenant_id = event_rows.tenant_id
+         and input.dedupe_key = event_rows.dedupe_key
+        order by input.ord
+        """,
+        params,
+    )
+
+
+def _deduped_read_model_refresh_rows(refreshes: list[dict[str, Any]]) -> list[tuple[object, ...]]:
+    deduped: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for refresh in refreshes:
+        dedupe_key = text(refresh.get("dedupe_key"))
+        if not dedupe_key:
+            continue
+        payload = dict(refresh.get("payload") if isinstance(refresh.get("payload"), dict) else {})
+        existing = deduped.get(dedupe_key)
+        if existing is None:
+            deduped[dedupe_key] = {**refresh, "payload": payload}
+            order.append(dedupe_key)
+            continue
+        merged_payload = {**dict(existing.get("payload") or {}), **payload}
+        parent_scope_keys = _merged_parent_scope_keys(existing.get("payload"), payload)
+        if parent_scope_keys:
+            merged_payload["parent_scope_keys"] = parent_scope_keys
+        existing["payload"] = merged_payload
+        existing["reason"] = refresh.get("reason") or existing.get("reason")
+        existing["priority"] = refresh.get("priority") or existing.get("priority")
+
+    rows: list[tuple[object, ...]] = []
+    for index, dedupe_key in enumerate(order):
+        refresh = deduped[dedupe_key]
+        rows.append(
+            (
+                index,
+                text(refresh.get("tenant_id")) or "default",
+                text(refresh.get("scope_type")) or "",
+                text(refresh.get("scope_key")) or "",
+                text(refresh.get("reason")) or "workbench_relation_changed",
+                text(refresh.get("priority")) or "normal",
+                jsonb(refresh.get("payload") if isinstance(refresh.get("payload"), dict) else {}),
+                text(refresh.get("event_type")) or "",
+                dedupe_key,
+            )
+        )
+    return rows
+
+
+def _merged_parent_scope_keys(left: Any, right: Any) -> list[str]:
+    values: list[str] = []
+    for payload in (left, right):
+        if not isinstance(payload, dict):
+            continue
+        for value in list(payload.get("parent_scope_keys") or []):
+            normalized = text(value)
+            if normalized and normalized not in values:
+                values.append(normalized)
+    return sorted(values)

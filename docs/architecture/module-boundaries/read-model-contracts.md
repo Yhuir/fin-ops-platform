@@ -71,7 +71,7 @@
 - 删除旧 read model 代码前，必须证明没有页面、API、worker、测试或生产脚本继续读取旧路径。
 - `workbench` 的 active generation 原子发布模型是明确例外，不允许机械迁移成普通 gateway 模型。
 - 所有非事务 refresh 请求必须通过 `ReadModelRefreshGateway` / scope policy registry normalize、validate、dedupe 后进入 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。
-- 事务内 writer 可以在同一业务事务内写 dirty scope/outbox，但必须承担等价 scope contract，并有测试覆盖。
+- 事务内 writer 可以在同一业务事务内写 dirty scope/outbox，但必须承担等价 scope contract，并有测试覆盖；当一次业务写入会污染多个 target 时，必须先收集 refresh intents，再批量写 `job.read_model_dirty_scopes` 和 `job.outbox_events`，避免 per-target `fetch_one + execute` 放大提交耗时。
 - Workbench confirm/withdraw 的事务内 writer owner 是 `WorkbenchWriteUnitOfWork`；`Application._workbench_uow_repository_factory(...)` 必须注入 `PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)`。新增 downstream read model 必须扩展 `refresh_metadata.downstream_scope_types` / target planner 和测试，禁止把旧 repository hidden fan-out 放回生产主链路。UoW 可通过 `RuntimeQueueReadModelRefreshWriter.enqueue_refreshes(...)` 批量写 dirty scope/outbox，以减少同一业务事务内多 target 写入的 SQL 往返；批量接口不得改变 `job.read_model_dirty_scopes` / `job.outbox_events` 的 source_version、dedupe、priority、trace_id 和 readiness 事实源语义，并必须保持 `available_at` 表示实际入队可处理时间。
 
 ## 验收要求

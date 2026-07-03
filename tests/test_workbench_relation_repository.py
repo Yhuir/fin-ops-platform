@@ -79,6 +79,80 @@ def _json_payload(value: object) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _dirty_refresh_rows(connection: RecordingConnection) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for sql, params in connection.fetch_one_calls:
+        if "insert into job.read_model_dirty_scopes" not in " ".join(sql.lower().split()):
+            continue
+        rows.append(
+            {
+                "scope_type": str(params[1]),
+                "scope_key": str(params[2]),
+                "reason": str(params[3]),
+                "payload": _json_payload(params[4]),
+                "priority": str(params[-1]),
+            }
+        )
+    rows.extend(_batch_refresh_rows(connection))
+    return rows
+
+
+def _outbox_refresh_rows(connection: RecordingConnection) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for sql, params in connection.execute_calls:
+        if "insert into job.outbox_events" not in " ".join(sql.lower().split()):
+            continue
+        rows.append(
+            {
+                "event_type": str(params[1]),
+                "scope_type": str(params[3]),
+                "scope_key": str(params[4]),
+                "dedupe_key": str(params[5]),
+                "priority": str(params[7]),
+                "payload": _json_payload(params[8]),
+            }
+        )
+    rows.extend(_batch_refresh_rows(connection))
+    return rows
+
+
+def _batch_refresh_rows(connection: RecordingConnection) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for sql, params in connection.fetch_all_calls:
+        normalized_sql = " ".join(sql.lower().split())
+        if "with input(" not in normalized_sql or "insert into job.read_model_dirty_scopes" not in normalized_sql:
+            continue
+        for start in range(0, len(params), 9):
+            row = params[start : start + 9]
+            if len(row) != 9:
+                continue
+            rows.append(
+                {
+                    "scope_type": str(row[2]),
+                    "scope_key": str(row[3]),
+                    "reason": str(row[4]),
+                    "priority": str(row[5]),
+                    "payload": _json_payload(row[6]),
+                    "event_type": str(row[7]),
+                    "dedupe_key": str(row[8]),
+                }
+            )
+    return rows
+
+
+def _refresh_by_scope_type(rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    return {str(row["scope_type"]): row for row in rows}
+
+
+def _batch_queue_write_calls(connection: RecordingConnection) -> list[tuple[str, tuple[Any, ...]]]:
+    return [
+        (sql, params)
+        for sql, params in connection.fetch_all_calls
+        if "with input(" in " ".join(sql.lower().split())
+        and "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
+    ]
+
+
 def test_relation_change_enqueues_relation_read_model_before_relevant_downstream_by_priority() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
@@ -87,39 +161,29 @@ def test_relation_change_enqueues_relation_read_model_before_relevant_downstream
 
     assert all("read_model.workbench_rows" not in sql for sql, _params in connection.fetch_all_calls)
 
-    dirty_by_scope_type = {
-        str(params[1]): params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    }
-    outbox_by_scope_type = {
-        str(params[3]): params
-        for sql, params in connection.execute_calls
-        if "insert into job.outbox_events" in " ".join(sql.lower().split())
-    }
+    dirty_by_scope_type = _refresh_by_scope_type(_dirty_refresh_rows(connection))
+    outbox_by_scope_type = _refresh_by_scope_type(_outbox_refresh_rows(connection))
 
-    assert dirty_by_scope_type["workbench_relation"][-1] == "high"
-    assert dirty_by_scope_type["workbench"][-1] == "high"
-    assert dirty_by_scope_type["bank_detail"][-1] == "high"
-    assert dirty_by_scope_type["invoice_lifecycle"][-1] == "high"
-    assert dirty_by_scope_type["input_invoice_usage"][-1] == "high"
-    assert dirty_by_scope_type["output_invoice_collection"][-1] == "high"
-    assert dirty_by_scope_type["search"][-1] == "high"
-    assert dirty_by_scope_type["tax_offset"][-1] == "high"
+    assert dirty_by_scope_type["workbench_relation"]["priority"] == "high"
+    assert dirty_by_scope_type["workbench"]["priority"] == "high"
+    assert dirty_by_scope_type["bank_detail"]["priority"] == "high"
+    assert dirty_by_scope_type["invoice_lifecycle"]["priority"] == "high"
+    assert dirty_by_scope_type["input_invoice_usage"]["priority"] == "high"
+    assert dirty_by_scope_type["output_invoice_collection"]["priority"] == "high"
+    assert dirty_by_scope_type["search"]["priority"] == "high"
+    assert dirty_by_scope_type["tax_offset"]["priority"] == "high"
     assert "cost_statistics" not in dirty_by_scope_type
     assert "oa_pending_payment" not in dirty_by_scope_type
     assert "no_oa_bank_batch" not in dirty_by_scope_type
-    assert outbox_by_scope_type["workbench_relation"][-3] == "high"
-    assert outbox_by_scope_type["workbench"][-3] == "high"
-    assert outbox_by_scope_type["bank_detail"][-3] == "high"
-    assert outbox_by_scope_type["invoice_lifecycle"][-3] == "high"
-    assert outbox_by_scope_type["search"][-3] == "high"
+    assert outbox_by_scope_type["workbench_relation"]["priority"] == "high"
+    assert outbox_by_scope_type["workbench"]["priority"] == "high"
+    assert outbox_by_scope_type["bank_detail"]["priority"] == "high"
+    assert outbox_by_scope_type["invoice_lifecycle"]["priority"] == "high"
+    assert outbox_by_scope_type["search"]["priority"] == "high"
     workbench_all_outbox_payloads = [
-        _json_payload(params[8])
-        for sql, params in connection.execute_calls
-        if "insert into job.outbox_events" in " ".join(sql.lower().split())
-        and str(params[3]) == "workbench"
-        and str(params[4]) == "all"
+        dict(row["payload"])
+        for row in _outbox_refresh_rows(connection)
+        if str(row["scope_type"]) == "workbench" and str(row["scope_key"]) == "all"
     ]
     assert workbench_all_outbox_payloads
     assert workbench_all_outbox_payloads[-1]["aggregate_only"] is True
@@ -150,28 +214,21 @@ def test_no_oa_relation_change_keeps_no_oa_read_model_in_downstream_scope() -> N
         changed_case_ids={"CASE-1"},
     )
 
-    dirty_by_scope_type = {
-        str(params[1]): params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    }
+    dirty_by_scope_type = _refresh_by_scope_type(_dirty_refresh_rows(connection))
 
-    assert dirty_by_scope_type["workbench_relation"][-1] == "high"
-    assert dirty_by_scope_type["bank_detail"][-1] == "high"
-    assert dirty_by_scope_type["cost_statistics"][-1] == "high"
-    assert dirty_by_scope_type["search"][-1] == "high"
-    assert dirty_by_scope_type["no_oa_bank_batch"][-1] == "high"
-    assert _json_payload(dirty_by_scope_type["no_oa_bank_batch"][4])["relation_mode"] == "no_oa_bank_batch"
-    no_oa_outbox_params = [
-        params
-        for sql, params in connection.execute_calls
-        if "insert into job.outbox_events" in " ".join(sql.lower().split())
-        and str(params[3]) == "no_oa_bank_batch"
+    assert dirty_by_scope_type["workbench_relation"]["priority"] == "high"
+    assert dirty_by_scope_type["bank_detail"]["priority"] == "high"
+    assert dirty_by_scope_type["cost_statistics"]["priority"] == "high"
+    assert dirty_by_scope_type["search"]["priority"] == "high"
+    assert dirty_by_scope_type["no_oa_bank_batch"]["priority"] == "high"
+    assert dirty_by_scope_type["no_oa_bank_batch"]["payload"]["relation_mode"] == "no_oa_bank_batch"
+    no_oa_outbox_rows = [
+        row for row in _outbox_refresh_rows(connection) if str(row["scope_type"]) == "no_oa_bank_batch"
     ]
-    assert no_oa_outbox_params[-1][5] == (
+    assert no_oa_outbox_rows[-1]["dedupe_key"] == (
         "no_oa_bank_batch.read_model.refresh:no_oa_bank_batch:2026-05:no_oa_bank_batch"
     )
-    assert _json_payload(no_oa_outbox_params[-1][8])["relation_mode"] == "no_oa_bank_batch"
+    assert no_oa_outbox_rows[-1]["payload"]["relation_mode"] == "no_oa_bank_batch"
     assert "input_invoice_usage" not in dirty_by_scope_type
     assert "output_invoice_collection" not in dirty_by_scope_type
     assert "tax_offset" not in dirty_by_scope_type
@@ -187,26 +244,40 @@ def test_bank_flow_relation_change_enqueues_bank_flow_read_model_refresh() -> No
         changed_case_ids={"CASE-1"},
     )
 
-    dirty_by_scope_type = {
-        str(params[1]): params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    }
-    bank_flow_outbox_params = [
-        params
-        for sql, params in connection.execute_calls
-        if "insert into job.outbox_events" in " ".join(sql.lower().split())
-        and str(params[3]) == "bank_flow_rule_batch"
+    dirty_by_scope_type = _refresh_by_scope_type(_dirty_refresh_rows(connection))
+    bank_flow_outbox_rows = [
+        row for row in _outbox_refresh_rows(connection) if str(row["scope_type"]) == "bank_flow_rule_batch"
     ]
 
     assert "no_oa_bank_batch" not in dirty_by_scope_type
-    assert dirty_by_scope_type["bank_flow_rule_batch"][-1] == "high"
-    assert _json_payload(dirty_by_scope_type["bank_flow_rule_batch"][4])["relation_mode"] == "bank_flow_rule_batch"
-    assert bank_flow_outbox_params[-1][5] == (
+    assert dirty_by_scope_type["bank_flow_rule_batch"]["priority"] == "high"
+    assert dirty_by_scope_type["bank_flow_rule_batch"]["payload"]["relation_mode"] == "bank_flow_rule_batch"
+    assert bank_flow_outbox_rows[-1]["dedupe_key"] == (
         "bank_flow_rule_batch.read_model.refresh:bank_flow_rule_batch:2026-05:bank_flow_rule_batch"
     )
-    assert _json_payload(bank_flow_outbox_params[-1][8])["relation_mode"] == "bank_flow_rule_batch"
-    assert dirty_by_scope_type["cost_statistics"][-1] == "high"
+    assert bank_flow_outbox_rows[-1]["payload"]["relation_mode"] == "bank_flow_rule_batch"
+    assert dirty_by_scope_type["cost_statistics"]["priority"] == "high"
+
+
+def test_relation_refresh_fanout_uses_one_batch_queue_write() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relations(
+        _snapshot(relation_mode="bank_flow_rule_batch", row_types=["bank"]),
+        changed_case_ids={"CASE-1"},
+    )
+
+    assert len(_batch_queue_write_calls(connection)) == 1
+    assert "dirty_input as" in " ".join(_batch_queue_write_calls(connection)[0][0].lower().split())
+    assert not any(
+        "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
+        for sql, _params in connection.fetch_one_calls
+    )
+    assert not any(
+        "insert into job.outbox_events" in " ".join(sql.lower().split())
+        for sql, _params in connection.execute_calls
+    )
 
 
 def test_input_expense_relation_change_skips_output_and_income_downstream_scopes() -> None:
@@ -215,16 +286,12 @@ def test_input_expense_relation_change_skips_output_and_income_downstream_scopes
 
     repository.save_workbench_pair_relations(_snapshot(), changed_case_ids={"CASE-1"})
 
-    dirty_params = [
-        params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    ]
-    dirty_by_scope_type = {str(params[1]): params for params in dirty_params}
+    dirty_rows = _dirty_refresh_rows(connection)
+    dirty_by_scope_type = _refresh_by_scope_type(dirty_rows)
     pending_scope_keys = {
-        str(params[2])
-        for params in dirty_params
-        if str(params[1]) == "pending_invoice"
+        str(row["scope_key"])
+        for row in dirty_rows
+        if str(row["scope_type"]) == "pending_invoice"
     }
 
     assert "input_invoice_usage" in dirty_by_scope_type
@@ -251,15 +318,11 @@ def test_pending_invoice_relation_refresh_uses_bank_month_not_invoice_month() ->
         changed_case_ids={"CASE-1"},
     )
 
-    dirty_params = [
-        params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    ]
+    dirty_rows = _dirty_refresh_rows(connection)
     pending_scope_keys = {
-        str(params[2])
-        for params in dirty_params
-        if str(params[1]) == "pending_invoice"
+        str(row["scope_key"])
+        for row in dirty_rows
+        if str(row["scope_type"]) == "pending_invoice"
     }
 
     assert pending_scope_keys == {
@@ -285,14 +348,10 @@ def test_relation_downstream_refresh_routes_scope_keys_by_row_domain() -> None:
         changed_case_ids={"CASE-1"},
     )
 
-    dirty_params = [
-        params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    ]
+    dirty_rows = _dirty_refresh_rows(connection)
     scope_keys_by_type: dict[str, set[str]] = {}
-    for params in dirty_params:
-        scope_keys_by_type.setdefault(str(params[1]), set()).add(str(params[2]))
+    for row in dirty_rows:
+        scope_keys_by_type.setdefault(str(row["scope_type"]), set()).add(str(row["scope_key"]))
 
     assert scope_keys_by_type["workbench_relation"] == {"2026-01", "2026-02"}
     assert scope_keys_by_type["workbench"] == {"2026-01", "2026-02", "all"}
@@ -309,22 +368,18 @@ def test_relation_downstream_refresh_routes_scope_keys_by_row_domain() -> None:
         "expense:no_invoice_required:2026-02",
     }
     workbench_all_outbox_payloads = [
-        _json_payload(params[8])
-        for sql, params in connection.execute_calls
-        if "insert into job.outbox_events" in " ".join(sql.lower().split())
-        and str(params[3]) == "workbench"
-        and str(params[4]) == "all"
+        dict(row["payload"])
+        for row in _outbox_refresh_rows(connection)
+        if str(row["scope_type"]) == "workbench" and str(row["scope_key"]) == "all"
     ]
     assert workbench_all_outbox_payloads[-1]["aggregate_only"] is True
     assert workbench_all_outbox_payloads[-1]["parent_scope_keys"] == ["2026-01", "2026-02"]
-    workbench_all_outbox_params = [
-        params
-        for sql, params in connection.execute_calls
-        if "insert into job.outbox_events" in " ".join(sql.lower().split())
-        and str(params[3]) == "workbench"
-        and str(params[4]) == "all"
+    workbench_all_outbox_rows = [
+        row
+        for row in _outbox_refresh_rows(connection)
+        if str(row["scope_type"]) == "workbench" and str(row["scope_key"]) == "all"
     ]
-    assert workbench_all_outbox_params[-1][5] == "workbench.read_model.refresh:workbench:all:aggregate"
+    assert workbench_all_outbox_rows[-1]["dedupe_key"] == "workbench.read_model.refresh:workbench:all:aggregate"
 
 
 def test_relation_refresh_uses_full_workbench_all_only_when_scope_is_unknown() -> None:
@@ -343,22 +398,16 @@ def test_relation_refresh_uses_full_workbench_all_only_when_scope_is_unknown() -
         changed_case_ids={"CASE-1"},
     )
 
-    dirty_params = [
-        params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    ]
+    dirty_rows = _dirty_refresh_rows(connection)
     scope_keys_by_type: dict[str, set[str]] = {}
-    for params in dirty_params:
-        scope_keys_by_type.setdefault(str(params[1]), set()).add(str(params[2]))
+    for row in dirty_rows:
+        scope_keys_by_type.setdefault(str(row["scope_type"]), set()).add(str(row["scope_key"]))
 
     assert scope_keys_by_type["workbench"] == {"all"}
     workbench_all_outbox_payloads = [
-        _json_payload(params[8])
-        for sql, params in connection.execute_calls
-        if "insert into job.outbox_events" in " ".join(sql.lower().split())
-        and str(params[3]) == "workbench"
-        and str(params[4]) == "all"
+        dict(row["payload"])
+        for row in _outbox_refresh_rows(connection)
+        if str(row["scope_type"]) == "workbench" and str(row["scope_key"]) == "all"
     ]
     assert workbench_all_outbox_payloads
     assert "aggregate_only" not in workbench_all_outbox_payloads[-1]
@@ -377,14 +426,10 @@ def test_relation_downstream_refresh_enqueues_all_scope_when_oa_month_is_unresol
         changed_case_ids={"CASE-1"},
     )
 
-    dirty_params = [
-        params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    ]
+    dirty_rows = _dirty_refresh_rows(connection)
     scope_keys_by_type: dict[str, set[str]] = {}
-    for params in dirty_params:
-        scope_keys_by_type.setdefault(str(params[1]), set()).add(str(params[2]))
+    for row in dirty_rows:
+        scope_keys_by_type.setdefault(str(row["scope_type"]), set()).add(str(row["scope_key"]))
 
     assert scope_keys_by_type["workbench_relation"] == {"2026-04"}
     assert scope_keys_by_type["oa_pending_payment"] == {"all"}
@@ -404,14 +449,10 @@ def test_relation_downstream_refresh_enqueues_all_scope_when_invoice_month_is_un
         changed_case_ids={"CASE-1"},
     )
 
-    dirty_params = [
-        params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    ]
+    dirty_rows = _dirty_refresh_rows(connection)
     scope_keys_by_type: dict[str, set[str]] = {}
-    for params in dirty_params:
-        scope_keys_by_type.setdefault(str(params[1]), set()).add(str(params[2]))
+    for row in dirty_rows:
+        scope_keys_by_type.setdefault(str(row["scope_type"]), set()).add(str(row["scope_key"]))
 
     assert scope_keys_by_type["workbench_relation"] == {"2026-04"}
     assert scope_keys_by_type["input_invoice_usage"] == {"all"}
@@ -431,15 +472,11 @@ def test_relation_downstream_refresh_routes_cost_statistics_by_bank_month_for_co
         changed_case_ids={"CASE-1"},
     )
 
-    dirty_params = [
-        params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    ]
+    dirty_rows = _dirty_refresh_rows(connection)
     cost_scope_keys = {
-        str(params[2])
-        for params in dirty_params
-        if str(params[1]) == "cost_statistics"
+        str(row["scope_key"])
+        for row in dirty_rows
+        if str(row["scope_type"]) == "cost_statistics"
     }
 
     assert cost_scope_keys == {"active:2026-02", "all:2026-02"}
@@ -460,14 +497,10 @@ def test_relation_downstream_refresh_preserves_workbench_scope_fallback_for_lega
         changed_case_ids={"CASE-1"},
     )
 
-    dirty_params = [
-        params
-        for sql, params in connection.fetch_one_calls
-        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
-    ]
+    dirty_rows = _dirty_refresh_rows(connection)
     scope_keys_by_type: dict[str, set[str]] = {}
-    for params in dirty_params:
-        scope_keys_by_type.setdefault(str(params[1]), set()).add(str(params[2]))
+    for row in dirty_rows:
+        scope_keys_by_type.setdefault(str(row["scope_type"]), set()).add(str(row["scope_key"]))
 
     assert scope_keys_by_type["workbench_relation"] == {"2026-04"}
     assert scope_keys_by_type["bank_detail"] == {"2026-04"}

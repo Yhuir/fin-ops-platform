@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 
-from fin_ops_platform.services.bank_batch_application_service import BankBatchPersistenceError
+from fin_ops_platform.services.bank_batch_application_service import BankBatchPairRelationSnapshotPort, BankBatchPersistenceError
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
 from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh import BankFlowRuleBatchReadModelPersistencePort
@@ -41,10 +41,16 @@ class RecordingStateStore:
 
 
 class RecordingPairSnapshotPort:
+    def __init__(self) -> None:
+        self.snapshot_calls = 0
+        self.snapshot_case_id_calls: list[list[str]] = []
+
     def snapshot_case_ids(self, case_ids: list[str]) -> dict[str, object]:
-        return {"case_ids": list(case_ids)}
+        self.snapshot_case_id_calls.append(list(case_ids))
+        return {"case_ids": list(case_ids), "pair_relations": {case_id: {"case_id": case_id} for case_id in case_ids}}
 
     def snapshot(self) -> dict[str, object]:
+        self.snapshot_calls += 1
         return {"all": True}
 
 
@@ -251,6 +257,10 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
     def test_submit_uses_current_bank_flow_batch_without_all_scope_refresh(self) -> None:
         service, batch_service, refresh_calls = self._service_with_refresh_aware_batch(status="draft")
+        service._pair_relation_snapshot_port = SimpleNamespace(
+            snapshot=lambda: (_ for _ in ()).throw(AssertionError("bank-flow submit must not snapshot all relations")),
+            restore=lambda _snapshot: (_ for _ in ()).throw(AssertionError("bank-flow submit must not restore all relations")),
+        )
 
         result = service.submit_batch(
             "batch-1",
@@ -483,7 +493,10 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         self.assertEqual(len(state_store.bank_flow_mutations), 1)
         mutation = state_store.bank_flow_mutations[0]
-        self.assertEqual(mutation["pair_relation_snapshot"], {"case_ids": ["case-1"]})
+        self.assertEqual(
+            mutation["pair_relation_snapshot"],
+            {"case_ids": ["case-1"], "pair_relations": {"case-1": {"case_id": "case-1"}}},
+        )
         self.assertEqual(mutation["bank_flow_rule_batch_snapshot"], {"batches": {"batch-1": {"batch_id": "batch-1"}}})
         self.assertNotIn("workbench_read_model_snapshot", mutation)
         self.assertEqual(mutation["changed_case_ids"], ["case-1"])
@@ -542,10 +555,38 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             [
                 {
                     "changed_case_ids": ["case-1"],
-                    "changed_scope_keys": ["expanded:all", "expanded:2026-05"],
+                    "changed_scope_keys": ["all", "2026-05"],
                 }
             ],
         )
+
+    def test_after_mutation_does_not_expand_workbench_scope_keys(self) -> None:
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        persist_calls: list[dict[str, object]] = []
+        service._execute_derived_data_lifecycle_event = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+        service._expand_workbench_read_model_scope_keys_for_base_scopes = (  # type: ignore[method-assign]
+            lambda _scope_keys: (_ for _ in ()).throw(AssertionError("bank-flow mutation must not list workbench scopes"))
+        )
+        service.persist_mutation = lambda **kwargs: persist_calls.append(dict(kwargs))  # type: ignore[method-assign]
+
+        service.after_mutation(
+            ["2026-05"],
+            changed_case_ids=["case-1"],
+            persist=True,
+            action_name="bank_flow_rule_batch_submit",
+        )
+
+        self.assertEqual(persist_calls, [{"changed_case_ids": ["case-1"], "changed_scope_keys": ["all", "2026-05"]}])
+
+    def test_pair_relation_snapshot_by_case_id_uses_scoped_snapshot(self) -> None:
+        pair_service = RecordingPairSnapshotPort()
+        port = BankBatchPairRelationSnapshotPort(pair_service)
+
+        relation = port.snapshot_by_case_id("case-1")
+
+        self.assertEqual(relation, {"case_id": "case-1"})
+        self.assertEqual(pair_service.snapshot_case_id_calls, [["case-1"]])
+        self.assertEqual(pair_service.snapshot_calls, 0)
 
     def test_refresh_persistence_uses_bank_flow_scope_boundary(self) -> None:
         state_store = RecordingStateStore()
