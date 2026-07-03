@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.postgres_repositories.oa_projection import is_completed_workflow_status
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
@@ -302,5 +303,4 @@ def _is_invoice_attachment_payload(value: Any) -> bool:
 
 
 def _is_completed_workflow(record: OAApplicationRecord) -> bool:
-    workflow_status = str(getattr(record, "workflow_status", "") or "").strip()
-    return workflow_status in {"", "completed"}
+    return is_completed_workflow_status(getattr(record, "workflow_status", ""))

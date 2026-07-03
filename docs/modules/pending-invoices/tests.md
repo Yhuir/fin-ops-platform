@@ -167,3 +167,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 - 本地测试不连接真实生产 Postgres 大数据量，不验证真实搜索/待找发票 SQL projection 的 EXPLAIN、锁等待或长尾分页性能。
 - 本地测试不跑真实 RabbitMQ/Redis/systemd `pending-invoice`、`search` 与 invoice-lifecycle worker drain；dirty/outbox 到 projection 的最终收敛需要 staging 或夜间 CI/生产前 smoke。
 - 本地已覆盖待找发票超过 20,000 行导出 fail-closed；当前 Browser e2e 覆盖 Workbench confirm fan-out、默认状态过滤、列筛选/排序、rows 首屏暂时加载失败后手动刷新恢复、规则保存 pending read model barrier/rows refresh、规则保存暂时失败草稿重试恢复、选择已有发票成功/冲突/confirm 暂时失败重试流、收入批量状态成功/拒绝/暂时失败重试流、candidate/linked 负面语义、relation-backed read model 非 fresh 诊断、真实 download event 和 row-limit 下载失败反馈，但不覆盖 attach existing / income status / rules save 后真实 worker drain、withdraw、真实 XLSX workbook 打开、大文件下载耗时和 withdraw 等其它 mutation 真实网络中断恢复。
+
+## 2026-07-03 - relation distribution legacy OA completed aliases
+
+- 根因：待找发票的 OA 列只消费 `workbench_relation` distribution 的 `linked_oa`，而 `workbench_relation` 生成 OA summary 时旧完成态 predicate 只接受 `completed`/空值。历史 OA projection 行若保留 `已完成`、`approved` 或 `2` 等完成态别名，canonical relation 仍可包含 OA row id，但 distribution 的 `linked_oa` 为空，导致 145 类已配对行在待找发票 OA 列为空。
+- 修复：完成态识别收敛到 OA projection 边界并 bump `OA_PROJECTION_SYNC_VERSION`，让 relation/pending read model 重新生成；待找发票不新增附件/OA raw payload fallback。
+- 新增测试：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_keeps_oa_summary_for_legacy_completed_workflow_status`、`tests/test_oa_projection_sync_service.py::OaProjectionSyncServiceTests::test_oa_sync_treats_legacy_completed_workflow_aliases_as_completed`。

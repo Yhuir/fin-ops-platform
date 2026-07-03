@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-07-03 - OA 完成态别名统一
+
+- 目标：修复历史 OA projection 行的 `workflow_status` 使用 `已完成`、`approved` 或 `2` 等完成态别名时，`workbench_relation` projection 无法读出 OA 源对象，导致待找发票 relation distribution 的 `linked_oa` 为空。
+- 影响范围：`postgres_repositories/oa_projection.py` 的完成态 SQL/helper、`OAProjectionSyncService` 完成态过滤、`OA_PROJECTION_SYNC_VERSION`、`workbench_relation` distribution 和待找发票 read model freshness。
+- 关键决策：完成态判断属于 OA projection/source-object 边界；下游 relation/pending invoice 只消费统一后的 projection 和 source version，不新增页面级 fallback。
+- 文档影响：更新 OA 集成、Workbench relation、待找发票边界和测试记录。
+- 测试覆盖：`tests/test_oa_projection_sync_service.py::OaProjectionSyncServiceTests::test_oa_sync_treats_legacy_completed_workflow_aliases_as_completed`、`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_keeps_oa_summary_for_legacy_completed_workflow_status`。
+- 验证命令：见本轮交付说明。
+- 未测风险：未连接真实生产 Postgres/RabbitMQ worker drain；发布后需要重建受影响月份的 `workbench_relation` 与 `pending_invoice` read model，确认历史别名行重新生成 OA summary。
+
 ## 2026-06-30 - OA source alias 表与附件票审计归一化
 
 - 目标：治理生产发现的 6 组历史 OA 附件发票跨 OA duplicate blocker，避免把同一 OA 生命周期中的进行中文档与已完成流程文档误判为不同 OA 报销。

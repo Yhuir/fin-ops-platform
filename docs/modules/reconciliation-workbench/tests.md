@@ -226,3 +226,9 @@ cd web && npm test -- --run src/test/WorkbenchExceptionModal.test.tsx src/test/W
 - 2026-07-02 release `pscip-l4-workbench-raw-51cba11e8` 已验证 raw payload write amplification 切片：critical 5s SLO `16/16` pass，targeted `workbench:all` 1s pass `397.159ms`，active all generation 的 snapshot/summary/rows/groups/group_rows 均 `raw_payload={}` 且 payload 非空。真实关联 confirm/withdraw、bank-invoice/bank-turnover confirm/withdraw、no-OA withdraw 当前 release 样本仍缺失，不能声明写操作性能闭环。
 - 前端像素级视觉基线、真实生产大数据性能、真实断网/代理重试、真实 App Health 生产状态源和其他下游页面 fan-out 需要继续补浏览器/真实数据 smoke；Vitest 主要保护交互和 API mapper。关联台自身 withdraw、split candidate、exception apply/cancel/ignore、现金过账/买票/取消处理、read-export 逐入口权限、App Health write-safety blocker、stale/refreshing/false-empty、OA dirty/refreshing、refresh failed/write failure、barrier timeout、fresh refetch failure、deterministic 大数据分页/搜索/三栏滚动、网络失败重试、409 stale preview 和重复点击已有 Browser smoke。
 - 关联台仍有 legacy `server.py` handler 和多条生产相关链路；后续改动应按具体影响选择扩展回归，而不是只跑最小闭环。
+
+## 2026-07-03 - OA summary loss in downstream relation distribution
+
+- 根因：关联台 active relation 可见 OA，但 `workbench_relation` distribution 生成 `linked_oa` summary 时依赖 `app.oa_applications` 完成态 predicate。历史完成态别名未被 predicate 接受时，待找发票按 relation distribution 读取银行行只得到发票和流水，OA summary 缺失。
+- 修复：完成态别名统一到 OA projection 边界，bump `OA_PROJECTION_SYNC_VERSION` 让 relation/pending read model 重建；不在关联台或待找发票加入第二套推断链路。
+- 新增测试：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_keeps_oa_summary_for_legacy_completed_workflow_status`、`tests/test_oa_projection_sync_service.py::OaProjectionSyncServiceTests::test_oa_sync_treats_legacy_completed_workflow_aliases_as_completed`。

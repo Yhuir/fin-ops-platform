@@ -17,8 +17,26 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 
 
-OA_PROJECTION_SYNC_VERSION = "2026-06-22-application-date-v1"
-COMPLETED_WORKFLOW_STATUS_SQL = "(workflow_status is null or workflow_status = '' or workflow_status = 'completed')"
+OA_PROJECTION_SYNC_VERSION = "2026-07-03-completed-workflow-status-aliases-v1"
+COMPLETED_WORKFLOW_STATUS_ALIASES = frozenset(
+    {
+        "completed",
+        "已完成",
+        "approved",
+        "APPROVED",
+        "Approved",
+        "2",
+    }
+)
+COMPLETED_WORKFLOW_STATUS_SQL = (
+    "(workflow_status is null or workflow_status = '' "
+    "or workflow_status in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'))"
+)
+
+
+def is_completed_workflow_status(value: Any) -> bool:
+    normalized = text(value)
+    return not normalized or normalized in COMPLETED_WORKFLOW_STATUS_ALIASES
 
 
 def _int_or_none(value: Any) -> int | None:

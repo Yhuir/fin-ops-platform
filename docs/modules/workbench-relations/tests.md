@@ -225,3 +225,10 @@ cd web && npm run e2e:smoke
 - 新增测试：`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_read_model_refresh_writer_uses_batch_repository_interface_when_available`，覆盖 `RuntimeQueueReadModelRefreshWriter` 对生产 repository 批量接口的 wiring。
 - 新增测试：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_enqueue_read_model_refreshes_in_transaction_batches_dirty_scope_and_outbox_writes`，覆盖批量 dirty/outbox SQL 合同。
 - 覆盖类别：service-layer tests、read model/cache/background job tests、existing feature regression。API contract 与 frontend component 未新增，因为外部 HTTP shape 和页面交互不变；E2E business-flow 仍需生产固定 scenario/ticket 复跑。
+
+## 2026-07-03 - OA completed status aliases in relation distribution
+
+- 根因：`workbench_relation` projection 从 `app.oa_applications` 生成 `linked_oa` summary 时复用 OA 完成态 SQL；旧 SQL 只接受空值或 `completed`，历史数据中 `workflow_status=已完成/approved/2` 时，canonical relation 虽包含 OA row id，但 `_summaries_by_id` 没有 OA 源对象，下游待找发票按银行 row id 读取 relation distribution 时 OA 列为空。
+- 修复：完成态别名集中在 OA projection 边界，`OA_PROJECTION_SYNC_VERSION=2026-07-03-completed-workflow-status-aliases-v1` 触发 `workbench_relation` 与依赖它的下游 read model 重建；待找发票不新增 fallback 推断。
+- 新增测试：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_keeps_oa_summary_for_legacy_completed_workflow_status`、`tests/test_oa_projection_sync_service.py::OaProjectionSyncServiceTests::test_oa_sync_treats_legacy_completed_workflow_aliases_as_completed`。
+- 覆盖类别：business core unit tests、read model/cache/background job tests、existing feature regression。API contract/frontend/E2E 未新增，因为 HTTP shape 和页面交互不变，既有 pending invoice relation distribution 测试继续覆盖消费边界。

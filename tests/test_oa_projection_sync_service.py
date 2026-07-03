@@ -56,6 +56,35 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
         self.assertIn(("oa_pending_payment", "all", "oa_projection_sync"), queue_repository.refreshes)
 
+    def test_oa_sync_treats_legacy_completed_workflow_aliases_as_completed(self) -> None:
+        records = [
+            _oa("oa-pay-legacy-cn", "2026-06", workflow_status="已完成"),
+            _oa("oa-pay-legacy-approved", "2026-06", workflow_status="approved"),
+            _oa("oa-pay-progress", "2026-06", workflow_status="in_progress"),
+        ]
+        source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
+        projection_repository = FakeProjectionRepository()
+        queue_repository = FakeQueueRepository()
+        service = OAProjectionSyncService(
+            source_adapter=source_adapter,
+            projection_repository=projection_repository,
+            queue_repository=queue_repository,
+            retention_cutoff_date_provider=lambda: "2026-01-01",
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(result["scanned_count"], 3)
+        self.assertEqual(result["upserted_count"], 2)
+        self.assertEqual(
+            [record.id for record in projection_repository.saved_records],
+            ["oa-pay-legacy-cn", "oa-pay-legacy-approved"],
+        )
+        self.assertEqual(
+            [record.id for record in projection_repository.deleted_non_completed_records],
+            ["oa-pay-legacy-cn", "oa-pay-legacy-approved", "oa-pay-progress"],
+        )
+
     def test_oa_sync_search_refresh_uses_search_producer_boundary(self) -> None:
         records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
         source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})

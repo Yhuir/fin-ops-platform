@@ -36,7 +36,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| OA projection rows | repositories/read models | 带 source version |
+| OA projection rows | repositories/read models | 带 source version；完成态 workflow status 由 OA projection 边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。 |
 | OA session/permission payload | frontend session | 不泄露 secret |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
 | OA source alias canonicalization | object identity audit / downstream duplicate classifier | 只读消费 `active` alias，未批准 alias 仍按原 OA row/source 判定 |

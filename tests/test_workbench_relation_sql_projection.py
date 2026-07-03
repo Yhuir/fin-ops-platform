@@ -361,6 +361,28 @@ class PendingClaimedCandidateDecisionProjectionConnection(CandidateDecisionRelat
         return super().fetch_all(sql, params)
 
 
+class LegacyCompletedOaRelationProjectionConnection(CrossMonthRelationProjectionConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.oa_applications" in normalized:
+            self.sql_statements.append(sql)
+            if "已完成" not in sql:
+                return []
+            return [
+                {
+                    "row_id": "oa-yang",
+                    "form_id": "OA-YANG",
+                    "form_type": "支付申请",
+                    "status": "已完成",
+                    "applicant": "杨丽萍",
+                    "application_date": "2026-04-21",
+                    "project_name": "大理卷烟厂余热综合利用项目",
+                    "amount": "584.50",
+                }
+            ]
+        return super().fetch_all(sql, params)
+
+
 class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
     def _statement_count(self, connection: WorkbenchRelationProjectionConnection, fragment: str) -> int:
         return sum(fragment in " ".join(sql.lower().split()) for sql in connection.sql_statements)
@@ -510,6 +532,27 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         )
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
         self.assertIn("input-invoice-nanjing", rows_by_id)
+
+    def test_rebuild_keeps_oa_summary_for_legacy_completed_workflow_status(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = LegacyCompletedOaRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        builder.rebuild_workbench_relation_read_model_scope("2026-04")
+
+        rows_by_id = {row["row_id"]: row for row in repository.saved[0]["rows"]}
+        bank_row = rows_by_id["bank-nanjing"]
+        self.assertEqual([row["id"] for row in bank_row["linked_oa"]], ["oa-yang"])
+        self.assertEqual(bank_row["linked_oa"][0]["status"], "已完成")
+        oa_queries = [
+            sql
+            for sql in connection.sql_statements
+            if "from app.oa_applications" in " ".join(sql.lower().split())
+        ]
+        self.assertTrue(any("已完成" in sql for sql in oa_queries))
 
     def test_rebuild_keeps_open_reconciliation_decision_unlinked(self) -> None:
         repository = CaptureWorkbenchRelationRepository()

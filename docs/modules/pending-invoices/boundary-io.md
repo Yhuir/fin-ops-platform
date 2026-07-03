@@ -30,6 +30,7 @@
 | --- | --- | --- |
 | 页面筛选、方向、规则操作 | `PendingInvoicesPage.tsx`、`features/pendingInvoices/api.ts` | scope 必须落到 direction/filter/month |
 | 关联/规则写入 | pending invoice services | 写后触发 pending_invoice/search/invoice_lifecycle 相关 scope |
+| 关联台关系分发 | `WorkbenchRelationReadFacade` / `workbench_relation` read model | 待找发票只按银行流水 row id 读取 `linked_oa`、`linked_input_invoices`、`linked_output_invoices`、`group_ids` 等 relation distribution；不得自行从发票附件、OA payload 或关联台 raw payload 反推 OA。若 `workbench_relation` non-fresh，必须保持 refreshing/stale 状态而不是伪装 fresh。 |
 | 导入/运行时派生范围 | `PendingInvoiceScopePlanner` | 从 `cost_statistics` 与 `bank_detail` 月份 scope 合并生成 `expense:all:<YYYY-MM>`、`income:all:<YYYY-MM>`、`income:cash_income:<YYYY-MM>`；没有可识别月份时只返回三类父 scope，不写 bare `all` |
 | Refresh scope | `pending_invoice` manifest | `direction:filter_group[:YYYY-MM]`；bare `all` forbidden |
 
