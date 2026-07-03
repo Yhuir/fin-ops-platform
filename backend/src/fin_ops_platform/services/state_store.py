@@ -16,6 +16,27 @@ from fin_ops_platform.services.runtime_paths import default_data_dir as _default
 
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 GRIDFS_REF_PREFIX = "gridfs://"
+BANK_FLOW_RULE_BATCH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
+def _base_read_model_scope_key(scope_key: object) -> str:
+    normalized = str(scope_key or "").strip()
+    if normalized.startswith("visibility:"):
+        return normalized.rsplit(":", 1)[-1].strip() or "all"
+    return normalized or "all"
+
+
+def _bank_flow_rule_batch_month_scopes(scope_keys: object) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    iterable = sorted(scope_keys) if isinstance(scope_keys, set) else scope_keys
+    for scope_key in iterable if isinstance(iterable, (list, tuple, set)) else []:
+        base_scope_key = _base_read_model_scope_key(scope_key)
+        if not BANK_FLOW_RULE_BATCH_SCOPE_RE.match(base_scope_key) or base_scope_key in seen:
+            continue
+        ordered.append(base_scope_key)
+        seen.add(base_scope_key)
+    return ordered
 
 
 class ApplicationStateStore:
@@ -714,22 +735,22 @@ class ApplicationStateStore:
         *,
         pair_relation_snapshot: dict[str, Any],
         bank_flow_rule_batch_snapshot: dict[str, Any],
-        workbench_read_model_snapshot: dict[str, Any],
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
     ) -> None:
         normalized_case_ids = [str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()]
         normalized_scope_keys = [str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()]
+        batch_scope_keys = _bank_flow_rule_batch_month_scopes(normalized_scope_keys)
         if normalized_case_ids:
             self.save_workbench_pair_relations(
                 pair_relation_snapshot,
                 changed_case_ids=normalized_case_ids,
             )
-        self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
-        self.save_workbench_read_models(
-            workbench_read_model_snapshot,
-            changed_scope_keys=normalized_scope_keys,
-        )
+        if batch_scope_keys:
+            for scope_key in batch_scope_keys:
+                self.save_bank_flow_rule_batches_scope(bank_flow_rule_batch_snapshot, scope_key=scope_key)
+        else:
+            self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
 
     def load_workbench_candidate_matches(self) -> dict[str, Any]:
         current_payload = self._load_local_pickle()

@@ -100,7 +100,6 @@ class ApplicationStateStoreProtocol(Protocol):
         *,
         pair_relation_snapshot: dict[str, Any],
         bank_flow_rule_batch_snapshot: dict[str, Any],
-        workbench_read_model_snapshot: dict[str, Any],
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
     ) -> None: ...

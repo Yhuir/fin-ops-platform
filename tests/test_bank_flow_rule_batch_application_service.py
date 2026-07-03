@@ -474,7 +474,9 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service._state_store = state_store
         service._search_cache_clearer = lambda: None
         service._pair_relation_snapshot_port = RecordingPairSnapshotPort()
-        service._workbench_read_model_service = RecordingWorkbenchReadModelService()
+        service._workbench_read_model_service = SimpleNamespace(
+            snapshot=lambda: (_ for _ in ()).throw(AssertionError("bank-flow persist must not snapshot workbench read model"))
+        )
         service._bank_batch_public_snapshot = lambda: {"batches": {"batch-1": {"batch_id": "batch-1"}}}
 
         service.persist_mutation(changed_case_ids=["case-1"], changed_scope_keys=["2026-05"])
@@ -483,7 +485,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         mutation = state_store.bank_flow_mutations[0]
         self.assertEqual(mutation["pair_relation_snapshot"], {"case_ids": ["case-1"]})
         self.assertEqual(mutation["bank_flow_rule_batch_snapshot"], {"batches": {"batch-1": {"batch_id": "batch-1"}}})
-        self.assertEqual(mutation["workbench_read_model_snapshot"], {"workbench": True})
+        self.assertNotIn("workbench_read_model_snapshot", mutation)
         self.assertEqual(mutation["changed_case_ids"], ["case-1"])
         self.assertEqual(mutation["changed_scope_keys"], ["2026-05"])
 

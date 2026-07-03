@@ -89,7 +89,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 if changed_case_ids
                 else self._pair_relation_snapshot_port.snapshot(),
                 bank_flow_rule_batch_snapshot=self._bank_batch_public_snapshot(),
-                workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
                 changed_case_ids=changed_case_ids,
                 changed_scope_keys=changed_scope_keys,
             )

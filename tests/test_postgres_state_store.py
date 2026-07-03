@@ -329,6 +329,49 @@ class PostgresStateStoreTests(unittest.TestCase):
         self.assertNotIn("slow_refresh_event_samples", executed_sql)
         self.assertNotIn("workbench_generation_status_counts", executed_sql)
 
+    def test_bank_flow_rule_batch_mutation_uses_scoped_batch_write_only(self) -> None:
+        store = object.__new__(PostgresStateStore)
+        store._connection = object()
+        calls: list[tuple[str, object]] = []
+
+        store.save_workbench_pair_relations = lambda snapshot, *, changed_case_ids=None: calls.append(  # type: ignore[method-assign]
+            ("pair_relations", {"snapshot": snapshot, "changed_case_ids": changed_case_ids})
+        )
+        store.save_bank_flow_rule_batches_scope = lambda snapshot, *, scope_key: calls.append(  # type: ignore[method-assign]
+            ("bank_flow_scope", {"snapshot": snapshot, "scope_key": scope_key})
+        )
+        store.save_bank_flow_rule_batches = lambda _snapshot: calls.append(("bank_flow_all", {}))  # type: ignore[method-assign]
+        store.save_workbench_read_models = lambda *_args, **_kwargs: (_ for _ in ()).throw(  # type: ignore[method-assign]
+            AssertionError("bank-flow mutation must not write workbench read model synchronously")
+        )
+
+        store.save_bank_flow_rule_batch_mutation(
+            pair_relation_snapshot={"pair_relations": {"CASE-1": {"case_id": "CASE-1"}}},
+            bank_flow_rule_batch_snapshot={"batches": {"batch-1": {"batch_id": "batch-1"}}},
+            changed_case_ids=["CASE-1"],
+            changed_scope_keys=["all", "visibility:paired:2026-02", "2026-02"],
+        )
+
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "pair_relations",
+                    {
+                        "snapshot": {"pair_relations": {"CASE-1": {"case_id": "CASE-1"}}},
+                        "changed_case_ids": {"CASE-1"},
+                    },
+                ),
+                (
+                    "bank_flow_scope",
+                    {
+                        "snapshot": {"batches": {"batch-1": {"batch_id": "batch-1"}}},
+                        "scope_key": "2026-02",
+                    },
+                ),
+            ],
+        )
+
     def test_postgres_store_settings_and_cache_round_trip_through_parameterized_sql(self) -> None:
         with TemporaryDirectory() as temp_dir:
             connection = FakePostgresConnection()

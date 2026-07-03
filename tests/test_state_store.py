@@ -505,6 +505,35 @@ class StateStoreTests(unittest.TestCase):
         self.assertEqual(no_oa_snapshot["batches"]["batch-1"]["status"], "submitted")
         self.assertEqual(workbench_snapshot["read_models"]["2026-05"]["scope_key"], "2026-05")
 
+    def test_save_bank_flow_rule_batch_mutation_uses_local_bank_flow_boundary_only(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = ApplicationStateStore(data_dir)
+
+            store.save_bank_flow_rule_batch_mutation(
+                pair_relation_snapshot={
+                    "pair_relations": {
+                        "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1"]},
+                    }
+                },
+                bank_flow_rule_batch_snapshot={
+                    "batches": {
+                        "batch-1": {"batch_id": "batch-1", "status": "submitted"},
+                    }
+                },
+                changed_case_ids=["CASE-1"],
+                changed_scope_keys=["all", "visibility:paired:2026-05"],
+            )
+
+            reloaded = ApplicationStateStore(data_dir)
+            pair_snapshot = reloaded.load_workbench_pair_relations()
+            bank_flow_snapshot = reloaded.load_bank_flow_rule_batches()
+            workbench_snapshot = reloaded.load_workbench_read_models()
+
+        self.assertEqual(pair_snapshot["pair_relations"]["CASE-1"]["row_ids"], ["bank-1"])
+        self.assertEqual(bank_flow_snapshot["batches"]["batch-1"]["status"], "submitted")
+        self.assertEqual(workbench_snapshot, {})
+
     def test_local_snapshot_persists_and_loads_workbench_candidate_matches(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
