@@ -5515,6 +5515,14 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             "bank_rows": [],
             "invoice_rows": [rows_by_id[invoice_id]],
         }
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-LEGACY-RAW-OA-SOURCE",
+            row_ids=[raw_source_oa_id, bank_id, invoice_id],
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="all",
+        )
 
         def resolve_cached(row_ids: list[str], **_kwargs: object) -> dict[str, dict[str, object]]:
             return {

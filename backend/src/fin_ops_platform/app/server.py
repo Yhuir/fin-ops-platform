@@ -14616,6 +14616,13 @@ class Application:
     def _expand_confirm_link_row_ids_for_existing_context(self, row_ids: list[str], *, month: str) -> list[str]:
         expanded_row_ids = self._normalize_row_ids(row_ids)
         seen = set(expanded_row_ids)
+        relation_read_port = self._workbench_confirm_link_context_relation_read_port()
+        active_relations = relation_read_port.active_relations_for_row_ids(expanded_row_ids)
+        selected_oa_source_ids = self._confirm_link_selected_oa_source_ids(
+            expanded_row_ids,
+            month=month,
+            allow_row_detail=bool(active_relations),
+        )
 
         def add(row_id: object) -> None:
             normalized_row_id = str(row_id or "").strip()
@@ -14624,16 +14631,16 @@ class Application:
             seen.add(normalized_row_id)
             expanded_row_ids.append(normalized_row_id)
 
-        relation_read_port = self._workbench_confirm_link_context_relation_read_port()
-        for relation in relation_read_port.active_relations_for_row_ids(expanded_row_ids):
+        for relation in active_relations:
             for relation_row_id in list(relation.get("row_ids") or []):
+                if str(relation_row_id or "").strip() in selected_oa_source_ids:
+                    continue
                 add(relation_row_id)
 
         has_selected_bank_context = any(
             self._row_type_for_row_id(row_id) == "bank"
             for row_id in expanded_row_ids
         )
-        selected_oa_source_ids = self._confirm_link_selected_oa_source_ids(expanded_row_ids, month=month)
         for group in self._cached_existing_context_groups_for_row_ids(expanded_row_ids, month_hint=month):
             for context_row_id in self._confirm_link_context_row_ids_to_preserve(
                 group,
@@ -14644,7 +14651,13 @@ class Application:
                 add(context_row_id)
         return expanded_row_ids
 
-    def _confirm_link_selected_oa_source_ids(self, row_ids: list[str], *, month: str) -> set[str]:
+    def _confirm_link_selected_oa_source_ids(
+        self,
+        row_ids: list[str],
+        *,
+        month: str,
+        allow_row_detail: bool,
+    ) -> set[str]:
         selected_oa_ids = {
             str(row_id).strip()
             for row_id in row_ids
@@ -14656,6 +14669,15 @@ class Application:
         cached_rows = self._resolve_rows_from_cached_read_models(list(selected_oa_ids), month_hint=month)
         for row in cached_rows.values():
             source_ids.update(oa_row_source_ids(row))
+        if not allow_row_detail:
+            return source_ids
+        for row_id in selected_oa_ids.difference(cached_rows):
+            try:
+                row = self._get_api_workbench_row_detail_payload(row_id, month=month).get("row")
+            except KeyError:
+                continue
+            if isinstance(row, dict):
+                source_ids.update(oa_row_source_ids(row))
         return source_ids
 
     def _cached_existing_context_groups_for_row_ids(

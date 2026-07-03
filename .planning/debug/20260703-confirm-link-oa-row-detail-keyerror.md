@@ -42,3 +42,17 @@
 
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_oa_attachment_source_link_resolver.WorkbenchOaAttachmentSourceLinkResolverTests.test_source_oa_id_for_attachment_link_matches_canonical_workbench_oa_id tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_does_not_expand_raw_oa_source_when_canonical_oa_is_selected tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_maps_missing_row_to_row_not_found_error -v`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_includes_existing_oa_attachment_context_rows tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_includes_existing_oa_attachment_context_when_bank_and_invoice_selected tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_expands_oa_attachment_context_from_all_scope_read_model_when_month_filter_hides_invoice tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_includes_active_relation_rows_for_selected_oa_context tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_uses_row_detail_boundary_when_read_model_payload_is_lightweight tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_resolves_selected_flat_read_model_rows_without_live_detail tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_row_detail_resolves_flat_cached_read_model_before_live_detail tests.test_workbench_oa_attachment_source_link_resolver -v`
+
+## Final Production Evidence
+
+第二轮生产复测仍返回 `workbench_row_not_found`，row id 仍为 `oa-exp-69fab21659b12d7d42a50a45`。进一步检查确认：
+
+- 用户选中的是 canonical OA `oa-exp-2156`。
+- 生产 active relation `CASE-AUTO-0025` 保存了历史 raw OA source id `oa-exp-69fab21659b12d7d42a50a45`。
+- `_expand_confirm_link_row_ids_for_existing_context(...)` 在读取 existing source groups 前，先从 active relation 中把全部 `row_ids` 补回 action row ids，导致 raw source id 绕过了 source group alias 判断并进入 row-detail/写入链路。
+
+## Final Fix
+
+- active relation expansion 也必须遵守 confirm-link action I/O：输出只能是 canonical Workbench row id。
+- 对选中的 canonical OA 先建立 source alias 集合；active relation 中命中这些 aliases 的历史 raw OA source id 被视为已由选中 OA 覆盖，不再扩进 action row ids。
+- 当 active relation 存在且 cached read model payload 过轻时，允许通过 row-detail 边界补齐选中 OA 的 alias；无 active relation 的普通 preview 不触发额外 row-detail I/O，避免破坏轻量 read model 路径。
