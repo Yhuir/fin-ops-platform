@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 
 class WorkbenchOaAttachmentRepairContextExecutor:
-    """Repairs active relations that are missing OA attachment invoice context rows."""
+    """Repairs active relations that are missing OA attachment context rows."""
 
     def __init__(
         self,
@@ -124,20 +124,28 @@ class WorkbenchOaAttachmentRepairContextExecutor:
             for index, row_id in enumerate(row_ids)
             if self._relation_row_type(row_types, index, row_id) == "oa"
         ]
+        missing_oa_row_ids = [
+            oa_row_id
+            for oa_row_id, attachment_row_ids in attachment_row_ids_by_oa_id.items()
+            if oa_row_id not in relation_row_ids
+            and oa_row_id in rows_by_id
+            and any(attachment_row_id in relation_row_ids for attachment_row_id in attachment_row_ids)
+        ]
         missing_attachment_row_ids: list[str] = []
         for oa_row_id in oa_row_ids:
             for attachment_row_id in attachment_row_ids_by_oa_id.get(oa_row_id, []):
                 if attachment_row_id not in relation_row_ids and attachment_row_id in rows_by_id:
                     missing_attachment_row_ids.append(attachment_row_id)
-        if not missing_attachment_row_ids:
+        if not missing_oa_row_ids and not missing_attachment_row_ids:
             return None
 
-        repaired_row_ids = [*row_ids, *missing_attachment_row_ids]
+        repaired_row_ids = [*row_ids, *missing_oa_row_ids, *missing_attachment_row_ids]
         repaired_row_types = [
             *[
                 self._relation_row_type(row_types, index, row_id)
                 for index, row_id in enumerate(row_ids)
             ],
+            *(["oa"] * len(missing_oa_row_ids)),
             *(["invoice"] * len(missing_attachment_row_ids)),
         ]
         repaired_rows = [rows_by_id[row_id] for row_id in repaired_row_ids if row_id in rows_by_id]

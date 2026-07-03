@@ -14829,29 +14829,56 @@ class Application:
                 if isinstance(row, dict) and str(row.get("id") or "").strip()
             ]
 
+        group_oa_rows = [row for row in list(group.get("oa_rows") or []) if isinstance(row, dict)]
+        group_invoice_rows = [row for row in list(group.get("invoice_rows") or []) if isinstance(row, dict)]
         selected_oa_ids = {
             row_id
-            for row in list(group.get("oa_rows") or [])
-            if isinstance(row, dict)
-            and (row_id := str(row.get("id") or "").strip())
+            for row in group_oa_rows
+            if (row_id := str(row.get("id") or "").strip())
             and row_id in selected_row_ids
         }
+        selected_oa_attachment_invoice_rows = [
+            row
+            for row in group_invoice_rows
+            if str(row.get("id") or "").strip() in selected_row_ids
+            and str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
+        ]
         has_selected_bank = any(
             isinstance(row, dict) and str(row.get("id") or "").strip() in selected_row_ids
             for row in list(group.get("bank_rows") or [])
         )
-        if not selected_oa_ids or not (has_selected_bank or has_selected_bank_context):
+        if not (selected_oa_ids or selected_oa_attachment_invoice_rows) or not (
+            has_selected_bank or has_selected_bank_context
+        ):
             return []
 
         preserved_row_ids: list[str] = []
-        for row in list(group.get("invoice_rows") or []):
-            if not isinstance(row, dict):
-                continue
+
+        def preserve(row_id: object) -> None:
+            normalized_row_id = str(row_id or "").strip()
+            if (
+                not normalized_row_id
+                or normalized_row_id in selected_row_ids
+                or normalized_row_id in preserved_row_ids
+            ):
+                return
+            preserved_row_ids.append(normalized_row_id)
+
+        for row in group_invoice_rows:
             row_id = str(row.get("id") or "").strip()
             if not row_id or row_id in selected_row_ids:
                 continue
             if self._invoice_row_belongs_to_selected_oa_attachment(row, selected_oa_ids):
-                preserved_row_ids.append(row_id)
+                preserve(row_id)
+        for row in group_oa_rows:
+            oa_row_id = str(row.get("id") or "").strip()
+            if not oa_row_id or oa_row_id in selected_row_ids:
+                continue
+            if any(
+                self._invoice_row_belongs_to_selected_oa_attachment(invoice_row, {oa_row_id})
+                for invoice_row in selected_oa_attachment_invoice_rows
+            ):
+                preserve(oa_row_id)
         return preserved_row_ids
 
     @staticmethod

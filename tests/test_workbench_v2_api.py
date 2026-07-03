@@ -5236,6 +5236,91 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ],
         )
 
+    def test_confirm_link_includes_existing_oa_attachment_context_when_bank_and_invoice_selected(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="145.00")
+        raw_payload["open"]["oa"][0]["id"] = "oa-exp-202605-invoice-first"
+        raw_payload["open"]["oa"][0]["case_id"] = "CASE-OA-ATT-oa-exp-202605-invoice-first"
+        raw_payload["open"]["oa"][0]["applicant"] = "陈佳玉"
+        raw_payload["open"]["oa"][0]["amount"] = "145.00"
+        raw_payload["open"]["bank"][0]["id"] = "bk-o-202605-invoice-first"
+        raw_payload["open"]["bank"][0]["debit_amount"] = "145.00"
+        raw_payload["open"]["invoice"][0]["id"] = "oa-att-inv-oa-exp-202605-invoice-first-01"
+        raw_payload["open"]["invoice"][0]["case_id"] = "CASE-OA-ATT-oa-exp-202605-invoice-first"
+        raw_payload["open"]["invoice"][0]["source_kind"] = "oa_attachment_invoice"
+        raw_payload["open"]["invoice"][0]["derived_from_oa_id"] = "oa-exp-202605-invoice-first"
+        raw_payload["open"]["invoice"][0]["total_with_tax"] = "145.00"
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-05").body)
+
+        source_group = next(
+            group
+            for group in initial_payload["paired"]["groups"]
+            if group["group_id"] == "case:CASE-OA-ATT-oa-exp-202605-invoice-first"
+        )
+        self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-exp-202605-invoice-first"])
+        self.assertEqual(
+            [row["id"] for row in source_group["invoice_rows"]],
+            ["oa-att-inv-oa-exp-202605-invoice-first-01"],
+        )
+
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "row_ids": ["bk-o-202605-invoice-first", "oa-att-inv-oa-exp-202605-invoice-first-01"],
+                    "case_id": "CASE-FULL-WITH-OA-CONTEXT",
+                }
+            ),
+        )
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        after_group = preview_payload["after"]["groups"][0]
+        self.assertCountEqual(
+            [row["id"] for row in after_group["oa_rows"]],
+            ["oa-exp-202605-invoice-first"],
+        )
+
+        confirm_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "row_ids": ["bk-o-202605-invoice-first", "oa-att-inv-oa-exp-202605-invoice-first-01"],
+                    "case_id": "CASE-FULL-WITH-OA-CONTEXT",
+                }
+            ),
+        )
+
+        self.assertEqual(confirm_response.status_code, 200)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertCountEqual(
+            confirm_payload["affected_row_ids"],
+            [
+                "oa-exp-202605-invoice-first",
+                "bk-o-202605-invoice-first",
+                "oa-att-inv-oa-exp-202605-invoice-first-01",
+            ],
+        )
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-FULL-WITH-OA-CONTEXT")
+        assert relation is not None
+        self.assertCountEqual(
+            relation["row_ids"],
+            [
+                "oa-exp-202605-invoice-first",
+                "bk-o-202605-invoice-first",
+                "oa-att-inv-oa-exp-202605-invoice-first-01",
+            ],
+        )
+        row_type_by_id = dict(zip(relation["row_ids"], relation["row_types"], strict=True))
+        self.assertEqual(row_type_by_id["oa-exp-202605-invoice-first"], "oa")
+        self.assertEqual(row_type_by_id["bk-o-202605-invoice-first"], "bank")
+        self.assertEqual(row_type_by_id["oa-att-inv-oa-exp-202605-invoice-first-01"], "invoice")
+
     def test_confirm_link_expands_oa_attachment_context_from_all_scope_read_model_when_month_filter_hides_invoice(self) -> None:
         app = build_application()
         oa_row = {
@@ -5576,6 +5661,60 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(
             [row["id"] for row in repaired_group["invoice_rows"]],
             ["oa-att-inv-oa-exp-202605-repair-01"],
+        )
+
+    def test_read_model_repairs_active_relation_missing_parent_oa_for_attachment_invoice(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="145.00")
+        raw_payload["open"]["oa"][0]["id"] = "oa-exp-202605-repair-parent"
+        raw_payload["open"]["oa"][0]["amount"] = "145.00"
+        raw_payload["open"]["bank"][0]["id"] = "bk-o-202605-repair-parent"
+        raw_payload["open"]["bank"][0]["debit_amount"] = "145.00"
+        raw_payload["open"]["invoice"][0]["id"] = "oa-att-inv-oa-exp-202605-repair-parent-01"
+        raw_payload["open"]["invoice"][0]["source_kind"] = "oa_attachment_invoice"
+        raw_payload["open"]["invoice"][0]["derived_from_oa_id"] = "oa-exp-202605-repair-parent"
+        raw_payload["open"]["invoice"][0]["total_with_tax"] = "145.00"
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-REPAIR-MISSING-PARENT-OA",
+            row_ids=["bk-o-202605-repair-parent", "oa-att-inv-oa-exp-202605-repair-parent-01"],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="2026-05",
+        )
+
+        with (
+            patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False),
+            patch.object(app, "_build_oa_workbench_row_payload", return_value=raw_payload),
+        ):
+            payload = app._build_api_workbench_payload("2026-05")
+
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(
+            "CASE-REPAIR-MISSING-PARENT-OA"
+        )
+        assert relation is not None
+        self.assertCountEqual(
+            relation["row_ids"],
+            [
+                "oa-exp-202605-repair-parent",
+                "bk-o-202605-repair-parent",
+                "oa-att-inv-oa-exp-202605-repair-parent-01",
+            ],
+        )
+        self.assertEqual(
+            app._workbench_pair_relation_service.list_history()[-1]["operation_type"],
+            "repair_missing_oa_attachment_context",
+        )
+        repaired_group = next(
+            group
+            for group in payload["paired"]["groups"]
+            if group["group_id"] == "case:CASE-REPAIR-MISSING-PARENT-OA"
+        )
+        self.assertEqual([row["id"] for row in repaired_group["oa_rows"]], ["oa-exp-202605-repair-parent"])
+        self.assertEqual([row["id"] for row in repaired_group["bank_rows"]], ["bk-o-202605-repair-parent"])
+        self.assertEqual(
+            [row["id"] for row in repaired_group["invoice_rows"]],
+            ["oa-att-inv-oa-exp-202605-repair-parent-01"],
         )
 
     def test_confirm_and_cancel_link_defer_read_model_persistence_to_background(self) -> None:

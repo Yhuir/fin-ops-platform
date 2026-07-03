@@ -462,6 +462,10 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(invoice_row["group_ids"], ["case-nanjing-cross-month"])
         self.assertEqual([row["id"] for row in invoice_row["linked_oa"]], ["oa-yang"])
         self.assertEqual([row["id"] for row in invoice_row["linked_bank_transactions"]], ["bank-nanjing"])
+        bank_row = rows_by_id["bank-nanjing"]
+        self.assertEqual(bank_row["relation_status"], "linked")
+        self.assertEqual([row["id"] for row in bank_row["linked_oa"]], ["oa-yang"])
+        self.assertEqual([row["id"] for row in bank_row["linked_input_invoices"]], ["input-invoice-nanjing"])
         self.assertEqual(self._statement_count(connection, "from app.bank_transactions"), 1)
         self.assertEqual(self._statement_count(connection, "from app.oa_applications"), 1)
         self.assertEqual(self._statement_count(connection, "from app.invoices"), 2)

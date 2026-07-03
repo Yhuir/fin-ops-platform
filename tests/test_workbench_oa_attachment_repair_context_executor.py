@@ -131,6 +131,39 @@ class WorkbenchOaAttachmentRepairContextExecutorTests(unittest.TestCase):
         self.assertEqual(set(lifecycle_calls[0]["scope_keys"]), {"all", "2026-05"})
         self.assertEqual(lifecycle_calls[0]["metadata"], {"source": "repair_active_relations_with_oa_attachment_context"})
 
+    def test_repair_adds_missing_parent_oa_when_relation_has_bank_and_attachment_invoice(self) -> None:
+        rows_by_id = {
+            "oa-1": {"id": "oa-1", "type": "oa"},
+            "bk-1": {"id": "bk-1", "type": "bank"},
+            "inv-1": {"id": "inv-1", "type": "invoice"},
+        }
+        active_relation = {
+            "case_id": "CASE-INVOICE-FIRST",
+            "row_ids": ["bk-1", "inv-1"],
+            "row_types": ["bank", "invoice"],
+            "relation_mode": "manual_confirmed",
+            "created_by": "tester",
+            "month_scope": "2026-05",
+        }
+        executor, command_service, persist_calls, lifecycle_calls = self._executor(
+            rows_by_id=rows_by_id,
+            attachment_row_ids_by_oa_id={"oa-1": ["inv-1"]},
+            active_relations=[active_relation],
+        )
+
+        changed = executor.repair({"month": "2026-05"})
+
+        self.assertTrue(changed)
+        call = command_service.confirm_calls[0]
+        self.assertEqual(call["case_id"], "CASE-INVOICE-FIRST")
+        self.assertEqual(call["row_ids"], ["bk-1", "inv-1", "oa-1"])
+        self.assertEqual(call["row_types"], ["bank", "invoice", "oa"])
+        self.assertEqual(call["before_relations"], [active_relation])
+        self.assertEqual(call["amount_check"], {"status": "matched", "row_counts": {"oa": 1, "bank": 1, "invoice": 1}})
+        self.assertEqual(persist_calls, [{"changed_case_ids": ["CASE-INVOICE-FIRST"]}])
+        self.assertEqual(lifecycle_calls[0]["event_name"], "pair_relation_changed")
+        self.assertEqual(set(lifecycle_calls[0]["scope_keys"]), {"all", "2026-05"})
+
     def test_repair_skips_relations_without_bank_or_dedicated_withdraw_mode(self) -> None:
         rows_by_id = {
             "oa-1": {"id": "oa-1", "type": "oa"},

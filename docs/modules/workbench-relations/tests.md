@@ -5,6 +5,15 @@ Spec-first Browser e2e 审计入口：
 - `e2e-spec.md`：关系事实源跨页面 Browser e2e 验收合同。
 - `e2e-coverage.md`：Spec ID 到现有 Playwright/Vitest/API/integration 的映射和缺口。
 
+## 2026-07-03 - confirm link OA 附件上下文对称补齐
+
+- 变更类型：Workbench confirm 写入边界修复；不改变 HTTP response shape、权限、审计字段、relation payload schema 或 read model freshness 合同。
+- 根因：确认写入前只支持“选中 OA+银行时补齐 OA 附件发票”，没有支持对称的“选中银行+OA 附件发票时补齐对应 OA”。Workbench 旧分组可显示 OA，但 canonical active relation 只落银行+发票，导致下游 `workbench_relation` distribution 和待找发票 OA 栏缺成员。
+- 新增/更新测试：`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_includes_existing_oa_attachment_context_when_bank_and_invoice_selected`；`tests/test_workbench_oa_attachment_repair_context_executor.py::WorkbenchOaAttachmentRepairContextExecutorTests::test_repair_adds_missing_parent_oa_when_relation_has_bank_and_attachment_invoice`；`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_read_model_repairs_active_relation_missing_parent_oa_for_attachment_invoice`；`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_indexes_cross_month_relation_members_in_current_scope` 新增银行行 `linked_oa` / `linked_input_invoices` 断言。
+- 七类测试决策：service-layer tests、API/write-entry integration tests、read model/cache/background job tests、existing feature regression tests 适用并覆盖；business core 不新增，因为金额/status 规则不变；frontend component 不新增，因为 API payload shape 和 UI 显示合同不变；Browser E2E 不新增，本地后端 integration 覆盖本次缺口，真实 worker drain 仍走 nightly/staging。
+- 验证命令：见本轮最终说明。
+- 未测风险：本地 fake 不证明真实生产 `workbench_relation` / `pending_invoice` worker drain 时延；发布后仍需用固定 145 类样本触发 Workbench payload repair，并确认 pending invoice fresh rows 显示 OA。
+
 ## 2026-07-03 - Workbench withdraw UoW legacy snapshot restore 删除
 
 - 变更类型：Workbench relation write-path boundary cleanup；不改变业务状态机、HTTP/API response shape、权限、审计、dirty/outbox/readiness 或 read model payload。
