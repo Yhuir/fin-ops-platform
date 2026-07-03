@@ -7233,6 +7233,78 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         self.assertIn("金额不一致", paired_invoice["tags"])
 
+    def test_confirm_link_preview_uses_row_detail_boundary_when_read_model_payload_is_lightweight(self) -> None:
+        app = build_application()
+        row_payloads = {
+            "oa-o-202605-001": {
+                "id": "oa-o-202605-001",
+                "type": "oa",
+                "case_id": "",
+                "applicant": "陈佳玉",
+                "project_name": "大型卷烟厂余热综合利用项目",
+                "amount": "145.00",
+                "reconciliation_amount": "145.00",
+                "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+            },
+            "bk-o-202605-001": {
+                "id": "bk-o-202605-001",
+                "type": "bank",
+                "case_id": "",
+                "trade_time": "2026-05-06 09:45:00",
+                "debit_amount": "145.00",
+                "credit_amount": "",
+                "counterparty_name": "陈佳玉",
+                "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+            },
+            "iv-o-202605-001": {
+                "id": "iv-o-202605-001",
+                "type": "invoice",
+                "case_id": "",
+                "seller_name": "云南铁路发展有限公司",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-05-06",
+                "amount": "145.00",
+                "total_with_tax": "145.00",
+                "invoice_type": "进项专票",
+                "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
+            },
+        }
+        facade_calls: list[tuple[str | None, str]] = []
+
+        class Facade:
+            def row_detail(self, month: str | None, *, row_id: str):
+                facade_calls.append((month, row_id))
+                return SimpleNamespace(
+                    status_code=200,
+                    payload={"row": row_payloads[row_id], "read_model_status": "fresh"},
+                )
+
+        app._workbench_row_detail_api_routes = None
+        app._live_workbench_service = SimpleNamespace(
+            get_row_detail=lambda row_id: (_ for _ in ()).throw(KeyError(row_id))
+        )
+        app._resolve_rows_from_cached_read_models = lambda _row_ids, **_kwargs: {}
+        app._workbench_query_facade = lambda: Facade()
+
+        row_ids = ["oa-o-202605-001", "bk-o-202605-001", "iv-o-202605-001"]
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            json.dumps({"month": "all", "row_ids": row_ids, "case_id": "CASE-PREVIEW-DETAIL"}),
+        )
+
+        self.assertEqual(preview_response.status_code, 200, preview_response.body)
+        preview_payload = json.loads(preview_response.body)
+        after_group = preview_payload["after"]["groups"][0]
+        self.assertEqual(after_group["oa_rows"][0]["applicant"], "陈佳玉")
+        self.assertEqual(after_group["bank_rows"][0]["counterparty_name"], "陈佳玉")
+        self.assertEqual(after_group["invoice_rows"][0]["seller_name"], "云南铁路发展有限公司")
+        self.assertEqual(preview_payload["amount_summary"]["status"], "matched")
+        self.assertEqual(preview_payload["amount_summary"]["after"]["oa_total"], "145.00")
+        self.assertEqual(preview_payload["amount_summary"]["after"]["bank_total"], "145.00")
+        self.assertEqual(preview_payload["amount_summary"]["after"]["invoice_total"], "145.00")
+        self.assertEqual(facade_calls, [("all", row_id) for row_id in row_ids])
+
     def test_confirm_link_preview_uses_directional_bank_total_for_mixed_bank_directions(self) -> None:
         app = build_application()
         raw_payload = build_personal_advance_repayment_raw_payload()

@@ -458,7 +458,18 @@ class WorkbenchWriteFacade:
                 {"error": "invalid_confirm_link_request", "message": str(exc)},
             )
 
-        requested_row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+        try:
+            requested_row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+        except KeyError as exc:
+            row_id = str(exc.args[0] if exc.args else "").strip()
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "workbench_row_not_found",
+                    "message": f"所选关联台记录不可用，请刷新后重试。{f' row_id={row_id}' if row_id else ''}",
+                    "row_id": row_id,
+                },
+            )
         if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=requested_row_types, month=month):
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
@@ -467,9 +478,20 @@ class WorkbenchWriteFacade:
                     "message": "confirm link requires rows from at least two panes.",
                 },
             )
-        row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
-        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        amount_check = self._amount_check_for_row_ids(row_ids, month=month, allow_direct=False)
+        try:
+            row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
+            row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+            amount_check = self._amount_check_for_row_ids(row_ids, month=month, allow_direct=False)
+        except KeyError as exc:
+            row_id = str(exc.args[0] if exc.args else "").strip()
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "workbench_row_not_found",
+                    "message": f"所选关联台记录不可用，请刷新后重试。{f' row_id={row_id}' if row_id else ''}",
+                    "row_id": row_id,
+                },
+            )
         if amount_check.get("requires_note") and not note:
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
@@ -491,7 +513,18 @@ class WorkbenchWriteFacade:
 
         resolved_case_id = case_id or self._next_case_id()
         before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
-        selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=False)
+        try:
+            selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=False)
+        except KeyError as exc:
+            row_id = str(exc.args[0] if exc.args else "").strip()
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "workbench_row_not_found",
+                    "message": f"所选关联台记录不可用，请刷新后重试。{f' row_id={row_id}' if row_id else ''}",
+                    "row_id": row_id,
+                },
+            )
         internal_transfer_status = self._bank_only_internal_transfer_confirm_status(
             row_ids=row_ids,
             row_types=row_types,

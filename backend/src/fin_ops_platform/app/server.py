@@ -14701,23 +14701,19 @@ class Application:
         allow_direct: bool,
     ) -> list[dict[str, object]]:
         resolved = self._resolve_rows_from_cached_read_models(row_ids, month_hint=month)
-        rows: list[dict[str, object]] = []
         missing: list[str] = []
         for row_id in row_ids:
-            row = resolved.get(row_id)
-            if row is None:
+            if row_id not in resolved:
                 missing.append(row_id)
-            else:
-                rows.append(row)
-        if missing and allow_direct:
-            try:
-                rows.extend(self._resolve_live_rows_direct(missing, month_hint=month))
-            except KeyError:
-                rows.extend({"id": row_id, "type": self._row_type_for_row_id(row_id)} for row_id in missing)
-            missing = []
         for row_id in missing:
-            rows.append({"id": row_id, "type": self._row_type_for_row_id(row_id)})
-        return rows
+            # Row detail owns the live/cache/SQL-facade fallback. Do not synthesize
+            # placeholder rows here; previews must fail instead of rendering "--".
+            payload = self._get_api_workbench_row_detail_payload(row_id, month=month)
+            row = payload.get("row")
+            if not isinstance(row, dict):
+                raise KeyError(row_id)
+            resolved[row_id] = self._serialize_value(row)
+        return [resolved[row_id] for row_id in row_ids]
 
     def _expand_confirm_link_row_ids_for_existing_context(self, row_ids: list[str], *, month: str) -> list[str]:
         expanded_row_ids = self._normalize_row_ids(row_ids)
