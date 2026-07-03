@@ -205,8 +205,8 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
         *([f"RUNTIME_WORKER_ENSURE={quoted_runtime_worker_ensure}"] if config.activate else []),
         mark_remote_deploy_step("validate release name"),
         'case "$RELEASE_NAME" in *[!A-Za-z0-9._-]*|"") echo "invalid release name: $RELEASE_NAME" >&2; exit 64 ;; esac',
-        mark_remote_deploy_step("verify deploy-control contract"),
-        build_deploy_control_contract_check(),
+        mark_remote_deploy_step("verify deploy-control bootstrap"),
+        build_deploy_control_bootstrap_check(),
         *(
             [
                 mark_remote_deploy_step("verify runtime worker helper contract"),
@@ -241,6 +241,20 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
             'test -d "$RELEASE_DIR/src/backend/src"',
             'test -f "$RELEASE_DIR/src/backend/requirements.txt"',
             'test -f "$RELEASE_DIR/src/web/dist/index.html"',
+            'test -f "$RELEASE_DIR/src/deploy/oa/bin/finops-deploy-control.sh"',
+        ]
+    )
+    if config.activate:
+        commands.extend(
+            [
+                mark_remote_deploy_step("install deploy-control helper"),
+                'sudo -n install -m 0755 -o root -g root "$RELEASE_DIR/src/deploy/oa/bin/finops-deploy-control.sh" "$DEPLOY_CONTROL"',
+                mark_remote_deploy_step("verify deploy-control contract"),
+                build_deploy_control_contract_check(),
+            ]
+        )
+    commands.extend(
+        [
             mark_remote_deploy_step("deploy-control check-release"),
             f"sudo -n {quoted_deploy_control} check-release {quoted_release_name}",
         ]
@@ -349,6 +363,24 @@ def build_deploy_control_contract_check() -> str:
             "  fi",
             "}",
             "verify_finops_deploy_control_contract",
+        ]
+    )
+
+
+def build_deploy_control_bootstrap_check() -> str:
+    return "\n".join(
+        [
+            "verify_finops_deploy_control_bootstrap() {",
+            '  if [ ! -x "$DEPLOY_CONTROL" ]; then',
+            '    printf \'deploy-control helper is missing or not executable: %s\\n\' "$DEPLOY_CONTROL" >&2',
+            "    exit 68",
+            "  fi",
+            '  if [ ! -r "$DEPLOY_CONTROL" ]; then',
+            "    printf '%s\\n' 'deploy-control helper is not readable; cannot bootstrap release deploy' >&2",
+            "    exit 68",
+            "  fi",
+            "}",
+            "verify_finops_deploy_control_bootstrap",
         ]
     )
 

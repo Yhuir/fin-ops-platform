@@ -392,6 +392,8 @@ python -m fin_ops_platform.app.worker \
 - 生成 `src/RELEASE.json`，记录 release 名称、Git commit、分支和构建信息
 - 通过 `finops-prod` 免密 SSH 推送到：
   - `/opt/fin-ops/releases/<release-name>/src`
+- 解包 release 后先用 release 内的 `deploy/oa/bin/finops-deploy-control.sh` 更新服务器
+  `/usr/local/sbin/finops-deploy-control`，再执行完整 helper contract 和后续发布动作
 - 调用服务器 root-owned helper：
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
   - `/usr/local/sbin/finops-deploy-control activate <release-name>`
@@ -470,12 +472,14 @@ sudo /usr/local/sbin/finops-deploy-control read-model-slo-smoke <release-name> \
 - `git push main` 只更新远端仓库，不会自动改变服务器；服务器生效必须执行发布脚本并激活 release
 - 默认拒绝从 dirty worktree 发布；确需发布未提交代码时必须显式加 `--allow-dirty`，但生产发布不建议这样做
 
-历史服务器首次接入 release 自动化时，需要 root 一次性安装固定 helper。API 与 worker 必须共用
+历史服务器首次接入 release 自动化时，需要 root 一次性安装固定 helper。后续正常激活发布会从 release
+自动更新 `/usr/local/sbin/finops-deploy-control`，但 `/usr/local/sbin/finops-ensure-runtime-workers`
+仍按固定 root helper 管理。API 与 worker 必须共用
 `/etc/fin-ops/fin-ops.common.env` 和 `/etc/fin-ops/fin-ops.secrets.env`，不要再让 API helper
 引用历史 `/root/fin_ops_stage23_postgres_runtime.env`。否则 API 和 worker 会读取不同 secret 来源，
 release 激活后可能出现 worker 正常但 `fin-ops.service` 因缺少 PostgreSQL DSN 反复退出。
-`scripts/deploy-oa.sh` 不会自动安装或覆盖 `/usr/local/sbin` 下的 root helper；helper 源文件变化后，
-必须先用本段 bootstrap 命令或等价 root 运维流程升级 helper，再执行 release 发布。
+`scripts/deploy-oa.sh --no-activate` 只上传并运行 release 校验，不会覆盖 `/usr/local/sbin` helper；
+需要真正更新 deploy-control 时必须执行激活发布，或使用本段 bootstrap 命令做首次接入/应急升级。
 
 ```bash
 sudo install -m 0755 -o root -g root \
@@ -491,7 +495,7 @@ printf '%s\n' \
 sudo visudo -cf /etc/sudoers.d/finops-release-helpers
 ```
 
-安装后先验证 helper 合同，再发布：
+首次安装后先验证 helper 合同，再发布：
 
 ```bash
 grep -q '/etc/fin-ops/fin-ops.secrets.env' /usr/local/sbin/finops-deploy-control
@@ -499,8 +503,8 @@ grep -q '/etc/fin-ops/fin-ops.secrets.env' /usr/local/sbin/finops-deploy-control
 sudo /usr/local/sbin/finops-deploy-control check-release <已上传的-release-name>
 ```
 
-`scripts/deploy-oa.sh` 会在激活前检查服务器 helper 是否仍引用历史 root env；如果检查失败，会在
-`activate` 之前中止，避免前端已发布但后端无法监听 `127.0.0.1:18001`。helper 的 `activate`
+`scripts/deploy-oa.sh` 会在 release 解包后先安装 release 内的 deploy-control，再检查 helper 是否仍引用历史 root env；
+如果检查失败，会在 `activate` 之前中止，避免前端已发布但后端无法监听 `127.0.0.1:18001`。helper 的 `activate`
 还必须先执行 schema migration、reset 旧 `EnvironmentFile` 并归档 legacy `/opt/fin-ops/current`；不要手工创建业务表、
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。

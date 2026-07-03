@@ -145,7 +145,10 @@ class DeployOAScriptTest(unittest.TestCase):
         remote_script = self.module.build_release_remote_deploy_script(config)
 
         self.assertIn("finops remote deploy failed at step", remote_script)
+        self.assertIn("DEPLOY_STEP='verify deploy-control bootstrap'", remote_script)
         self.assertIn("DEPLOY_STEP='verify runtime worker helper contract'", remote_script)
+        self.assertIn("DEPLOY_STEP='install deploy-control helper'", remote_script)
+        self.assertIn("DEPLOY_STEP='verify deploy-control contract'", remote_script)
         self.assertIn("DEPLOY_STEP='deploy-control activate'", remote_script)
         self.assertIn("DEPLOY_STEP='preflight cleanup old releases'", remote_script)
         self.assertIn("DEPLOY_STEP='storage preflight'", remote_script)
@@ -157,9 +160,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("insufficient storage for release deploy", remote_script)
         self.assertIn('df -Pm -- "$path"', remote_script)
         self.assertIn("tar -xzf - -C \"$RELEASE_DIR\"", remote_script)
+        self.assertIn("sudo -n install -m 0755 -o root -g root \"$RELEASE_DIR/src/deploy/oa/bin/finops-deploy-control.sh\" \"$DEPLOY_CONTROL\"", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control check-release main-abcdef1-20260524170000", remote_script)
-        self.assertNotIn("sudo -n install", remote_script)
-        self.assertNotIn("DEPLOY_STEP='install deploy-control helper'", remote_script)
         self.assertNotIn("DEPLOY_STEP='install runtime worker ensure helper'", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control activate main-abcdef1-20260524170000", remote_script)
         self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
@@ -192,12 +194,20 @@ class DeployOAScriptTest(unittest.TestCase):
             remote_script.index("check_finops_session_route /fin-ops-api/api/session/me"),
         )
         self.assertLess(
-            remote_script.index("verify_finops_deploy_control_contract"),
+            remote_script.index("verify_finops_deploy_control_bootstrap"),
             remote_script.index('mkdir -p "$RELEASE_DIR"'),
         )
         self.assertLess(
-            remote_script.index("verify_finops_deploy_control_contract"),
             remote_script.index('tar -xzf - -C "$RELEASE_DIR"'),
+            remote_script.index("DEPLOY_STEP='install deploy-control helper'"),
+        )
+        self.assertLess(
+            remote_script.index("DEPLOY_STEP='install deploy-control helper'"),
+            remote_script.index("verify_finops_deploy_control_contract"),
+        )
+        self.assertLess(
+            remote_script.index("verify_finops_deploy_control_contract"),
+            remote_script.index("DEPLOY_STEP='deploy-control check-release'"),
         )
         self.assertLess(
             remote_script.index("verify_finops_runtime_worker_ensure_contract"),
@@ -286,6 +296,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("activate main-abcdef1-20260524170000", remote_script)
         self.assertNotIn("finops-ensure-runtime-workers.sh", remote_script)
         self.assertNotIn("cleanup-releases", remote_script)
+        self.assertNotIn("DEPLOY_STEP='install deploy-control helper'", remote_script)
+        self.assertNotIn("verify_finops_deploy_control_contract", remote_script)
         self.assertIn("assert_finops_release_storage", remote_script)
 
     def test_remote_command_quotes_multiline_script_for_ssh(self) -> None:
