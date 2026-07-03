@@ -7,12 +7,8 @@ from typing import Callable
 SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
-class NoOaBankBatchDerivedLifecycleExecutor:
-    def __init__(
-        self,
-        *,
-        enqueue_refresh: Callable[..., bool],
-    ) -> None:
+class BankFlowRuleBatchDerivedLifecycleExecutor:
+    def __init__(self, *, enqueue_refresh: Callable[..., bool]) -> None:
         self._enqueue_refresh = enqueue_refresh
 
     def execute(self, domain_plan: dict[str, object]) -> dict[str, object]:
@@ -21,13 +17,13 @@ class NoOaBankBatchDerivedLifecycleExecutor:
         target_scope_keys = months if months else ["all"]
         enqueued = self._enqueue_refresh(
             target_scope_keys,
-            reason=str(domain_plan.get("reason") or "derived_lifecycle_no_oa_bank_batch"),
+            reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_flow_rule_batch"),
             metadata=self._read_model_refresh_metadata(domain_plan),
         )
         return {
-            "deleted_counts": {"no_oa_bank_batch_read_models": 0},
+            "deleted_counts": {"bank_flow_rule_batch_read_models": 0},
             "invalidated_scopes": target_scope_keys,
-            "enqueued_jobs": ["no_oa_bank_batch.read_model.refresh"] if enqueued else [],
+            "enqueued_jobs": ["bank_flow_rule_batch.read_model.refresh"] if enqueued else [],
         }
 
     @staticmethod

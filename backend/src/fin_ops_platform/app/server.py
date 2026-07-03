@@ -117,6 +117,9 @@ from fin_ops_platform.services.background_job_service import (
     BackgroundJobNotFoundError,
     BackgroundJobService,
 )
+from fin_ops_platform.services.bank_flow_rule_batch_derived_lifecycle_executor import (
+    BankFlowRuleBatchDerivedLifecycleExecutor,
+)
 from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
     CostStatisticsReadModelService,
@@ -14072,11 +14075,9 @@ class Application:
             enqueue_refresh=self._no_oa_bank_batch_read_model_refresh_producer().enqueue,
         )
 
-    def _bank_flow_rule_batch_derived_lifecycle_executor(self) -> NoOaBankBatchDerivedLifecycleExecutor:
-        return NoOaBankBatchDerivedLifecycleExecutor(
+    def _bank_flow_rule_batch_derived_lifecycle_executor(self) -> BankFlowRuleBatchDerivedLifecycleExecutor:
+        return BankFlowRuleBatchDerivedLifecycleExecutor(
             enqueue_refresh=self._bank_flow_rule_batch_read_model_refresh_producer().enqueue,
-            read_model_name=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-            default_reason="derived_lifecycle_bank_flow_rule_batch",
         )
 
     def _bank_account_balance_derived_lifecycle_executor(self) -> BankAccountBalanceDerivedLifecycleExecutor:

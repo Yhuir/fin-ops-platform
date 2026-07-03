@@ -9,7 +9,7 @@
 - 本 slice 范围：生产入口、API、规则抽屉、批量提交、关联台判定、历史 no-OA rebaseline API、文档和自动化测试。
 - 当前边界：新模块接管“按银行流水标签配置 OA/发票闭环要求并批量提交银行流水 relation”的业务；HTTP route、application service、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次存储、read model row 表和 tag-rule settings family 已独立为 `bank_flow_rule_batch`。旧 no-OA 模块只保留自身 legacy API 与历史批次功能，不再承接 bank-flow 新链路。
 - 当前缺口：无已知生产链路模块边界缺口。页面级 state/effect 编排仍保留在 `BankFlowRuleBatchPage.tsx`，纯 I/O、DTO、策略、view model、operation barrier helper 和通用组件位于 `web/src/features/bankFlowRuleBatches/`。新功能生产路径不接收 `selected_tag_codes`；旧 no-OA `selected_tag_codes` 写路径只属于 legacy no-OA 域。
-- 旧代码删除条件：bank-flow 新链路不得 import/继承 no-OA route、application service、read model refresh、persistence port、no-OA worker 或 no-OA physical batch/read-model 表；no-OA 主入口、`selected_tag_codes` 写路径和 no-OA 常驻 worker 只属于 no-OA legacy 业务，不得重新接入 bank-flow。
+- 旧代码删除条件：bank-flow 新链路不得 import/继承 no-OA route、application service、derived lifecycle executor、read model refresh、persistence port、no-OA worker 或 no-OA physical batch/read-model 表；no-OA 主入口、`selected_tag_codes` 写路径和 no-OA 常驻 worker 只属于 no-OA legacy 业务，不得重新接入 bank-flow。
 
 ## 职责边界
 
@@ -118,7 +118,7 @@ Workbench relation facts 仍归 `workbench-relations`：
 | Frontend tests | `web/src/test/BankFlowRuleBatch*.test.*`、`web/e2e/bank-flow-rule-batches-flow.spec.ts` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py` |
 | Backend service | `bank_flow_rule_batch_application_service.py`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py` |
-| Repository/read model | `bank_flow_rule_batch_read_model_repository.py`、`bank_flow_rule_batch_read_model_refresh.py`、`bank_flow_rule_batch_read_model_refresh_producer.py`、`postgres_repositories/workbench.py`、`postgres_repositories/read_models.py`、`postgres_state_store.py`；refresh/mutation 保存走 `save_bank_flow_rule_batch*` 命名 IO |
+| Repository/read model | `bank_flow_rule_batch_read_model_repository.py`、`bank_flow_rule_batch_read_model_refresh.py`、`bank_flow_rule_batch_read_model_refresh_producer.py`、`bank_flow_rule_batch_derived_lifecycle_executor.py`、`postgres_repositories/workbench.py`、`postgres_repositories/read_models.py`、`postgres_state_store.py`；refresh/mutation 保存走 `save_bank_flow_rule_batch*` 命名 IO |
 | PostgreSQL migration | `0082_bank_flow_rule_batch_storage.sql`、`0083_bank_flow_rule_batch_tag_rules.sql` |
 | Runtime registry | `read_model_manifest.py`、`runtime_worker_registry.py`、`app_status_domain_registry.py`、`app_status_read_model_registry.py` |
 | Integration | `workbench_candidate_grouping.py`、Workbench display policy/decorator、relation command metadata mapping |

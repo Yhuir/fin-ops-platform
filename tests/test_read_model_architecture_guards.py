@@ -131,7 +131,7 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py",
         "NoOaBankBatchApplicationService.list_batches_payload",
         "dict read_model_status=fresh",
-    ): (2, "read-model rows are source-version checked; legacy live fallback is not a read-model projection."),
+    ): (1, "read-model rows are source-version checked before marking the payload fresh."),
     (
         "backend/src/fin_ops_platform/services/bank_batch_application_service.py",
         "BankBatchApplicationService.list_batches_payload",

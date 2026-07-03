@@ -66,7 +66,7 @@
 | Frontend feature | 无当前 no-OA feature；当前 API facade 归 `web/src/features/bankFlowRuleBatches/*` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py` |
 | Backend service | `no_oa_bank_batch_application_service.py`、`no_oa_bank_batch_service.py`、`no_oa_bank_batch_tag_selection_service.py`、`no_oa_bank_batch_lifecycle_repair.py`、`no_oa_legacy_relation_migration_service.py` |
-| Read model | `no_oa_bank_batch_read_model_repository.py`、`no_oa_bank_batch_read_model_refresh.py`、`no_oa_bank_batch_read_model_refresh_producer.py` |
+| Read model | `no_oa_bank_batch_read_model_repository.py`、`no_oa_bank_batch_read_model_refresh.py`、`no_oa_bank_batch_read_model_refresh_producer.py`、`no_oa_bank_batch_derived_lifecycle_executor.py` |
 | Workbench integration | `no_oa_bank_batch_workbench_display_policy.py`、`no_oa_bank_batch_workbench_payload_decorator.py` |
 | Tests | `tests/test_no_oa_bank_batch*.py`；bank-flow 前端和 E2E 测试归 `bank-flow-rule-batches` 模块 |
 

@@ -2635,6 +2635,34 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_bank_flow_rule_batch_derived_lifecycle_uses_own_executor_boundary(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        app_factory_source = _function_source(server_tree, server_source, "_bank_flow_rule_batch_derived_lifecycle_executor")
+        executor_path = SERVICES_ROOT / "bank_flow_rule_batch_derived_lifecycle_executor.py"
+        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
+        violations: list[str] = []
+
+        if "BankFlowRuleBatchDerivedLifecycleExecutor(" not in app_factory_source:
+            violations.append("bank-flow rule batch lifecycle executor is not wired through its own executor")
+        if "NoOaBankBatchDerivedLifecycleExecutor(" in app_factory_source:
+            violations.append("bank-flow rule batch lifecycle executor still reuses the no-OA executor")
+        for forbidden in ("read_model_name=", "default_reason="):
+            if forbidden in app_factory_source:
+                violations.append(f"bank-flow lifecycle executor still uses configurable no-OA identity {forbidden}")
+        for snippet in (
+            "class BankFlowRuleBatchDerivedLifecycleExecutor",
+            "def execute(",
+            'reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_flow_rule_batch")',
+            '"deleted_counts": {"bank_flow_rule_batch_read_models": 0}',
+            '"enqueued_jobs": ["bank_flow_rule_batch.read_model.refresh"] if enqueued else []',
+        ):
+            if snippet not in executor_source:
+                violations.append(f"bank-flow lifecycle executor is missing behavior {snippet}")
+
+        self.assertEqual(violations, [])
+
     def test_output_invoice_collection_boundary_does_not_depend_on_redis_or_rabbitmq_clients(self) -> None:
         output_invoice_collection_paths = {
             APP_ROOT / "routes_output_invoice_collections.py",
