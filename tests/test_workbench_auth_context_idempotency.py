@@ -294,6 +294,66 @@ class _BankInvoiceWithdrawRelationCommandService(_RecordingRelationCommandServic
         }
 
 
+class _RawOaAliasWithdrawRelationCommandService(_RecordingRelationCommandService):
+    raw_oa_row_id = "oa-exp-69fab21659b12d7d42a50a45"
+    canonical_oa_row_id = "oa-exp-2156"
+    bank_row_id = "txn_imported_0405"
+    invoice_row_id = "oa-att-inv-oa-exp-69fab21659b12d7d42a50a45:item:0:fb2a9c9fab23-b515bf77d490fdfe"
+
+    def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+        self.preview_withdraw_calls.append(dict(kwargs))
+        active_relation = {
+            "case_id": "CASE-RAW-OA",
+            "row_ids": [self.raw_oa_row_id, self.bank_row_id, self.invoice_row_id],
+            "row_types": ["oa", "bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 9,
+        }
+        return {
+            "operation": "withdraw_link",
+            "operation_type": "withdraw_relation",
+            "preview_id": "withdraw_relation:CASE-RAW-OA:9",
+            "active_relation": {"case_id": "CASE-RAW-OA", "version": 9},
+            "before_relations": [active_relation],
+            "after_relations": [],
+            "submit_expected_versions": {"relation:CASE-RAW-OA": 9},
+        }
+
+    def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+        self.withdraw_calls.append(dict(kwargs))
+        restored_relation = {
+            "case_id": "CASE-RESTORED",
+            "row_ids": [self.raw_oa_row_id, self.bank_row_id, self.invoice_row_id],
+            "row_types": ["oa", "bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 4,
+        }
+        return {
+            "status": "withdrawn",
+            "relation": {
+                "case_id": "CASE-RAW-OA",
+                "row_ids": [self.raw_oa_row_id, self.bank_row_id, self.invoice_row_id],
+                "status": "cancelled",
+                "version": 10,
+            },
+            "history": {"operation_type": "withdraw_link"},
+            "changed_case_ids": ["CASE-RAW-OA", "CASE-RESTORED"],
+            "affected_months": ["2026-05"],
+            "affected_row_ids": [self.raw_oa_row_id, self.bank_row_id, self.invoice_row_id],
+            "restored_relations": [restored_relation],
+            "version": 10,
+            "read_model_status": "fresh",
+            "read_model_stale_reasons": [],
+            "read_model_scope_keys": ["2026-05"],
+            "refresh_enqueued": False,
+            "idempotent_replay": False,
+        }
+
+
 class _RecordingExceptionCaseService:
     def __init__(self) -> None:
         self.created_cases: list[dict[str, object]] = []
@@ -872,6 +932,64 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(relation_command.withdraw_calls[0]["operation_type"], "withdraw_relation")
         self.assertEqual(relation_command.withdraw_calls[0]["expected_versions"], {"relation:CASE-1": 3})
         self.assertEqual(relation_command.withdraw_calls[0]["idempotency_key"], "withdraw:1")
+
+    def test_withdraw_link_canonicalizes_legacy_oa_source_ids_from_active_relation(self) -> None:
+        relation_command = _RawOaAliasWithdrawRelationCommandService()
+        selected_row_ids = [
+            relation_command.canonical_oa_row_id,
+            relation_command.bank_row_id,
+            relation_command.invoice_row_id,
+        ]
+        live_rows = [
+            {
+                "id": relation_command.canonical_oa_row_id,
+                "type": "oa",
+                "amount": "145.00",
+                "detail_fields": {
+                    "Mongo文档ID": "69fab21659b12d7d42a50a45",
+                    "OA单号": "2156",
+                },
+            },
+            {"id": relation_command.bank_row_id, "type": "bank", "amount": "145.00"},
+            {"id": relation_command.invoice_row_id, "type": "invoice", "amount": "145.00"},
+        ]
+        resolved_active_row_ids: list[list[str]] = []
+
+        def withdraw_rows_and_after_relations(**kwargs: object) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
+            active_relation = dict(kwargs["active_relation"])
+            resolved_active_row_ids.append(list(active_relation.get("row_ids") or []))
+            return live_rows, list(kwargs.get("after_relations") or []), list(active_relation.get("row_ids") or [])
+
+        facade = _new_facade(
+            relation_command_service=relation_command,
+            live_rows=live_rows,
+            withdraw_rows_and_after_relations=withdraw_rows_and_after_relations,
+        )
+
+        preview = facade.preview_withdraw_link(
+            {
+                "month": "all",
+                "row_ids": selected_row_ids,
+            }
+        )
+        submit = facade.withdraw_link(
+            {
+                "month": "all",
+                "row_ids": selected_row_ids,
+                "operation_type": "withdraw_relation",
+                "preview_id": preview.payload["preview_id"],
+                "expected_versions": preview.payload["submit_expected_versions"],
+                "idempotency_key": "withdraw:raw-oa-alias",
+            },
+            request_id="req-withdraw-raw-oa-alias",
+        )
+
+        self.assertEqual(preview.status_code, HTTPStatus.OK)
+        self.assertEqual(submit.status_code, HTTPStatus.OK)
+        self.assertEqual(resolved_active_row_ids[0], selected_row_ids)
+        self.assertEqual(submit.payload["affected_row_ids"], selected_row_ids)
+        self.assertEqual(submit.payload["restored_relations"][0]["row_ids"], selected_row_ids)
+        self.assertNotIn(relation_command.raw_oa_row_id, submit.payload["affected_row_ids"])
 
     def test_withdraw_preview_after_groups_unrestored_bank_invoice_rows_individually(self) -> None:
         relation_command = _BankInvoiceWithdrawRelationCommandService()
