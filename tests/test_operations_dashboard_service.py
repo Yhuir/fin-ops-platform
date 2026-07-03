@@ -43,7 +43,8 @@ class FakeDashboardConnection:
                 "oa_records_count": 7,
                 "oa_items_count": 30,
                 "oa_records_latest_synced_at": datetime(2026, 5, 19, 11, 0, tzinfo=UTC),
-                "oa_latest_synced_at": datetime(2026, 5, 19, 11, 0, tzinfo=UTC),
+                "latest_successful_sync_at": datetime(2026, 5, 20, 10, 5, tzinfo=UTC),
+                "oa_latest_synced_at": datetime(2026, 5, 20, 10, 5, tzinfo=UTC),
             }
         raise AssertionError(f"Unexpected fetch_one SQL: {sql}")
 
@@ -176,12 +177,16 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertIn("generated_at", payload)
         self.assertEqual(payload["data_inventory"]["bank"]["total_count"], 12)
         self.assertEqual(payload["data_inventory"]["invoice"]["total_count"], 20)
+        self.assertEqual(payload["data_inventory"]["oa"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
         invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
         self.assertEqual(set(invoice_sources), {"manual", "oa_attachment"})
         self.assertEqual(invoice_sources["manual"]["count"], 14)
         self.assertEqual(invoice_sources["oa_attachment"]["count"], 6)
         self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 2)
-        self.assertEqual(payload["data_inventory"]["oa"]["sources"][1]["count"], 30)
+        oa_sources = {row["key"]: row for row in payload["data_inventory"]["oa"]["sources"]}
+        self.assertEqual(oa_sources["oa_records"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
+        self.assertEqual(oa_sources["oa_items"]["count"], 30)
+        self.assertEqual(oa_sources["oa_items"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
         import_events = payload["data_inventory"]["import_events"]
         self.assertEqual([row["source_key"] for row in import_events], ["bank_transactions", "manual", "oa_attachment", "oa_records"])
         self.assertEqual(import_events[2]["count"], 4)

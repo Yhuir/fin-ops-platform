@@ -1,6 +1,6 @@
 # 系统状态模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-03
 
 ## 模块化状态
 
@@ -31,21 +31,22 @@
 | 页面读取 | `AppHealthOperationsPage.tsx`、`features/appHealth/api.ts` | 只读 API |
 | Health probe | app health endpoints | 返回 readiness/status |
 | Runtime registry | app status services | 聚合 worker/read model/job/dependency 状态 |
-| Dashboard inventory facts | `app.bank_transactions`、`app.invoices.source_links`、`app.import_batches`、`app.oa_*` | 发票来源只按 canonical invoice source link 统计；导入历史只读真实成功导入/同步数量 |
+| Dashboard inventory facts | `app.bank_transactions`、`app.invoices.source_links`、`app.import_batches`、`app.oa_*`、`app.oa_sync_runs` | 发票来源只按 canonical invoice source link 统计；OA 上次读取时间优先使用 `app.oa_sync_runs(sync_type='oa_projection')` 的成功 run；导入历史只读真实成功导入/同步数量 |
+| OA sync runtime facts | `job.outbox_events(event_type='oa.sync')`、`runtime_worker_heartbeats`、`app.oa_sync_runs` | `/api/oa-sync/status` 和 AppHealth `oa_sync` 只读 durable queue、worker 和 projection run facts；不得依赖 HTTP 进程内内存状态 |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| App health payload | 页面/indicator | 不伪装 readiness |
+| App health payload | 页面/indicator | 不伪装 readiness；OA pending/processing outbox 必须显示 refreshing，OA failed outbox/worker/run 必须显示 blocked/error |
 | Alert/status | shell/status page | 明确 stale/failed/degraded |
-| Dashboard payload | operations page | 只读聚合；`data_inventory.invoice.sources` 固定为 `manual`、`oa_attachment`，`oa_attachment.supplementary_count` 表示 OA 解析进入发票池但不在手工导入中的数量；`data_inventory.import_events` 输出全量导入历史，前端主页面截取最新 5 条并用抽屉展示全量 |
+| Dashboard payload | operations page | 只读聚合；`data_inventory.invoice.sources` 固定为 `manual`、`oa_attachment`，`oa_attachment.supplementary_count` 表示 OA 解析进入发票池但不在手工导入中的数量；`data_inventory.oa.latest_synced_at` 使用最近成功 OA projection run；`data_inventory.import_events` 输出全量导入历史，前端主页面截取最新 5 条并用抽屉展示全量 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
 - Reads readiness of：all app status/read model/job registries。
-- Reads facts of：`app.bank_transactions`、`app.invoices`、`app.import_batches`、`app.oa_applications`、`app.oa_application_items`、`app.oa_sync_runs`。
+- Reads facts of：`app.bank_transactions`、`app.invoices`、`app.import_batches`、`app.oa_applications`、`app.oa_application_items`、`app.oa_sync_runs`、`job.outbox_events`、`job.runtime_worker_heartbeats`。
 - Service owner：`AppHealthService`、`AppStatusOverviewService`、`RuntimeMonitoring`。
 
 ## 文件范围
@@ -64,7 +65,7 @@
 
 - 允许依赖：status registries, runtime monitoring, app health services。
 - 必须通过：read-only service APIs。
-- 禁止绕过：系统状态页面触发业务写操作；隐藏 failed/stale worker。
+- 禁止绕过：系统状态页面触发业务写操作；隐藏 failed/stale worker；用行级 projection `synced_at` 或内存状态覆盖 durable OA sync run/outbox/worker facts。
 
 ## 测试与验证
 

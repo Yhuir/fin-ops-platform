@@ -175,6 +175,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("deploy-control helper does not preserve worker dependency-not-fresh delay in release drop-ins", remote_script)
         self.assertIn("deploy-control helper does not install versioned Workbench generation retention", remote_script)
         self.assertIn("deploy-control helper does not install versioned runtime queue history retention", remote_script)
+        self.assertIn("deploy-control helper does not install versioned OA sync enqueue timer", remote_script)
         self.assertIn("deploy-control helper does not run runtime worker ensure inside activate", remote_script)
         self.assertIn("runtime worker ensure helper is missing or not executable", remote_script)
         self.assertIn("runtime worker ensure helper does not use runtime worker manifest", remote_script)

@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic fin-ops OA Mongo projection sync enqueue
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5m
+RandomizedDelaySec=30s
+Persistent=true
+Unit=finops-enqueue-oa-sync.service
+
+[Install]
+WantedBy=timers.target

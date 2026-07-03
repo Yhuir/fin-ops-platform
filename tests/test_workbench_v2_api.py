@@ -6885,14 +6885,39 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             app._workbench_read_model_service.upsert_read_model(scope_key="all", payload={"month": "all"})
             app._workbench_read_model_service.upsert_read_model(scope_key="2026-03", payload={"month": "2026-03"})
+            enqueued: list[dict[str, object]] = []
+            app._runtime_repositories = SimpleNamespace(
+                queue_repository=SimpleNamespace(enqueue=lambda **kwargs: enqueued.append(kwargs))
+            )
 
-            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild") as schedule_rebuild:
-                app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
+            app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
+            app._app_status_runtime_statuses = lambda: {
+                "read_model_statuses": None,
+                "outbox_statuses": {
+                    "oa.sync": {
+                        "status": "pending",
+                        "count": len(enqueued),
+                        "scopes": [
+                            {
+                                "event_type": event["event_type"],
+                                "scope_type": event["scope_type"],
+                                "scope_key": event["scope_key"],
+                                "status": "pending",
+                                "count": 1,
+                            }
+                            for event in enqueued
+                        ],
+                    }
+                },
+                "worker_statuses": {"oa-sync": {"status": "ready"}},
+            }
+            app._postgres_oa_projection_latest_sync_run = lambda: None
             status_payload = json.loads(app.handle_request("GET", "/api/oa-sync/status").body)
 
         self.assertIsNotNone(app._workbench_read_model_service.get_read_model("all"))
         self.assertIsNotNone(app._workbench_read_model_service.get_read_model("2026-03"))
-        schedule_rebuild.assert_called_once()
+        self.assertEqual([event["event_type"] for event in enqueued], ["oa.sync", "oa.sync"])
+        self.assertCountEqual([event["scope_key"] for event in enqueued], ["2026-03", "all"])
         self.assertEqual(status_payload["status"], "refreshing")
         self.assertCountEqual(status_payload["dirty_scopes"], ["2026-03", "all"])
 
@@ -6929,7 +6954,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             app._workbench_query_service._oa_adapter = InMemoryOAAdapter({"2026-03": [oa_record]})
 
-            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild"):
+            with patch.object(app, "_enqueue_oa_projection_sync_refresh"):
                 app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
 
             invoices = app._import_service.list_invoices()
@@ -6980,7 +7005,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
             with (
                 patch.object(app._import_service, "upsert_oa_attachment_invoice") as upsert_invoice,
-                patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild"),
+                patch.object(app, "_enqueue_oa_projection_sync_refresh"),
             ):
                 app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
 
@@ -7047,7 +7072,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             )
             app._workbench_query_service._oa_adapter = InMemoryOAAdapter({"2026-03": [oa_record]})
 
-            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild"):
+            with patch.object(app, "_enqueue_oa_projection_sync_refresh"):
                 app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
 
             invoices = app._import_service.list_invoices()
@@ -7095,80 +7120,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             app._workbench_query_service._oa_adapter = InMemoryOAAdapter({"2026-03": [oa_record]})
 
-            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild"):
+            with patch.object(app, "_enqueue_oa_projection_sync_refresh"):
                 app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
 
             invoices = app._import_service.list_invoices()
 
         self.assertEqual(invoices, [])
-
-    def test_oa_sync_change_marks_dirty_without_evicting_hot_read_model(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._workbench_read_model_service.upsert_read_model(
-                scope_key="2026-03",
-                payload={
-                    "month": "2026-03",
-                    "oa_status": {"code": "ready", "message": "OA 已同步"},
-                    "summary": {"oa_count": 9, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "open_count": 9, "exception_count": 0},
-                    "paired": {"groups": []},
-                    "open": {"groups": []},
-                },
-            )
-
-            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild") as schedule_rebuild:
-                app._handle_oa_source_changed(["2026-03"], reason="oa_polling")
-
-            cached = app._workbench_read_model_service.get_read_model("2026-03")
-            status_response = app.handle_request("GET", "/api/oa-sync/status")
-            status_payload = json.loads(status_response.body)
-
-        self.assertIsNotNone(cached)
-        self.assertEqual(cached["payload"]["summary"]["oa_count"], 9)
-        schedule_rebuild.assert_called_once()
-        self.assertEqual(status_response.status_code, 200)
-        self.assertEqual(status_payload["status"], "refreshing")
-        self.assertCountEqual(status_payload["dirty_scopes"], ["2026-03", "all"])
-
-    def test_oa_sync_dirty_scope_rebuild_atomically_overwrites_cached_read_model(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._workbench_read_model_service.upsert_read_model(
-                scope_key="2026-03",
-                payload={
-                    "month": "2026-03",
-                    "oa_status": {"code": "ready", "message": "OA 已同步"},
-                    "summary": {"oa_count": 1, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "open_count": 1, "exception_count": 0},
-                    "paired": {"groups": []},
-                    "open": {"groups": []},
-                },
-            )
-            raw_payload = {
-                "month": "2026-03",
-                "oa_status": {"code": "ready", "message": "OA 已同步"},
-                "summary": {"oa_count": 2, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "open_count": 2, "exception_count": 0},
-                "paired": {"oa": [], "bank": [], "invoice": []},
-                "open": {
-                    "oa": [
-                        {"id": "oa-new-1", "type": "oa", "case_id": None, "applicant": "A", "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"}},
-                        {"id": "oa-new-2", "type": "oa", "case_id": None, "applicant": "B", "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"}},
-                    ],
-                    "bank": [],
-                    "invoice": [],
-                },
-            }
-
-            app._handle_oa_source_changed(["2026-03"], reason="oa_polling", schedule_rebuild=False)
-            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw:
-                app._rebuild_oa_sync_dirty_scopes_once()
-            cached = app._workbench_read_model_service.get_read_model("2026-03")
-            status_payload = json.loads(app.handle_request("GET", "/api/oa-sync/status").body)
-
-        build_raw.assert_any_call("2026-03")
-        self.assertIsNotNone(cached)
-        self.assertEqual(cached["payload"]["summary"]["oa_count"], 2)
-        self.assertEqual(status_payload["status"], "synced")
-        self.assertEqual(status_payload["dirty_scopes"], [])
 
     def test_workbench_read_models_can_be_isolated_by_visibility_key(self) -> None:
         app = build_application()
@@ -7203,44 +7160,34 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         global_cached = app._workbench_read_model_service.get_read_model("2026-03")
         self.assertEqual(global_cached["payload"]["summary"]["oa_count"], 99)
 
-    def test_hot_rebuild_refreshes_existing_visibility_scoped_read_models(self) -> None:
+    def test_oa_sync_status_endpoint_reads_durable_queue_status(self) -> None:
         app = build_application()
-        app._workbench_read_model_service.upsert_read_model(
-            scope_key="visibility:user:test-user-id:2026-03",
-            payload={
-                "month": "2026-03",
-                "oa_status": {"code": "ready", "message": "OA 已同步"},
-                "summary": {"oa_count": 1, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "open_count": 1, "exception_count": 0},
-                "paired": {"groups": []},
-                "open": {"groups": []},
+        app._app_status_runtime_statuses = lambda: {
+            "read_model_statuses": None,
+            "outbox_statuses": {
+                "oa.sync": {
+                    "status": "pending",
+                    "count": 1,
+                    "scopes": [
+                        {
+                            "event_type": "oa.sync",
+                            "scope_type": "oa",
+                            "scope_key": "2026-03",
+                            "status": "pending",
+                            "count": 1,
+                        }
+                    ],
+                }
             },
-        )
-        raw_payload = {
-            "month": "2026-03",
-            "oa_status": {"code": "ready", "message": "OA 已同步"},
-            "summary": {"oa_count": 2, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "open_count": 2, "exception_count": 0},
-            "paired": {"oa": [], "bank": [], "invoice": []},
-            "open": {
-                "oa": [
-                    {"id": "oa-hot-rebuild-1", "type": "oa", "case_id": None, "applicant": "测试用户", "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"}},
-                    {"id": "oa-hot-rebuild-2", "type": "oa", "case_id": None, "applicant": "测试用户", "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"}},
-                ],
-                "bank": [],
-                "invoice": [],
-            },
+            "worker_statuses": {"oa-sync": {"status": "ready"}},
         }
-
-        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw:
-            app._hot_rebuild_workbench_read_model_scopes(["2026-03"])
-
-        build_raw.assert_any_call("2026-03")
-        cached = app._workbench_read_model_service.get_read_model("visibility:user:test-user-id:2026-03")
-        self.assertIsNotNone(cached)
-        self.assertEqual(cached["payload"]["summary"]["oa_count"], 2)
-
-    def test_oa_sync_status_endpoint_returns_current_polling_status(self) -> None:
-        app = build_application()
-        app._handle_oa_source_changed(["2026-03"], reason="oa_polling", schedule_rebuild=False)
+        app._postgres_oa_projection_latest_sync_run = lambda: {
+            "id": "oa-run-1",
+            "status": "succeeded",
+            "finished_at": "2026-07-03T08:10:00+00:00",
+            "upserted_count": 334,
+            "scanned_count": 334,
+        }
 
         response = app.handle_request("GET", "/api/oa-sync/status")
         payload = json.loads(response.body)
@@ -7248,61 +7195,45 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "refreshing")
         self.assertCountEqual(payload["dirty_scopes"], ["2026-03", "all"])
+        self.assertEqual(payload["outbox_status"], "pending")
+        self.assertEqual(payload["worker_status"], "ready")
+        self.assertEqual(payload["last_synced_at"], "2026-07-03T08:10:00+00:00")
+        self.assertEqual(payload["last_upserted_count"], 334)
 
-    def test_oa_polling_change_marks_scope_dirty_and_persists_fingerprints(self) -> None:
-        class PollingAdapter:
-            def poll_sync_fingerprints(self) -> dict[str, str]:
-                return {"2026-04": "new-month", "all": "new-all"}
+    def test_oa_sync_status_endpoint_does_not_treat_failed_run_as_synced(self) -> None:
+        app = build_application()
+        app._app_status_runtime_statuses = lambda: {
+            "read_model_statuses": None,
+            "outbox_statuses": {},
+            "worker_statuses": {"oa-sync": {"status": "ready"}},
+        }
+        app._postgres_oa_projection_latest_sync_run = lambda: {
+            "id": "oa-run-failed",
+            "status": "failed",
+            "finished_at": "2026-07-03T08:20:00+00:00",
+            "last_error": "mongo timeout",
+        }
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._oa_sync_poll_fingerprints = {"2026-04": "old-month", "all": "old-all"}
-            app._workbench_query_service._oa_adapter = PollingAdapter()
-            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild") as schedule_rebuild:
-                changed_scopes = app._poll_oa_source_once()
-            status_payload = json.loads(app.handle_request("GET", "/api/oa-sync/status").body)
-            persisted_state = app._state_store.load_oa_sync_state()
+        response = app.handle_request("GET", "/api/oa-sync/status")
+        payload = json.loads(response.body)
 
-        self.assertEqual(status_payload["status"], "refreshing")
-        self.assertCountEqual(status_payload["dirty_scopes"], ["2026-04", "all"])
-        self.assertCountEqual(changed_scopes, ["2026-04", "all"])
-        self.assertEqual(persisted_state["poll_fingerprints"], {"2026-04": "new-month", "all": "new-all"})
-        schedule_rebuild.assert_called_once()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["message"], "mongo timeout")
+        self.assertIsNone(payload["last_synced_at"])
 
-    def test_first_oa_polling_snapshot_does_not_trigger_full_rebuild(self) -> None:
-        class PollingAdapter:
-            def poll_sync_fingerprints(self) -> dict[str, str]:
-                return {"2026-04": "baseline-month", "all": "baseline-all"}
+    def test_in_process_oa_polling_and_hot_rebuild_entrypoints_are_removed(self) -> None:
+        app = build_application()
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._workbench_query_service._oa_adapter = PollingAdapter()
-            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild") as schedule_rebuild:
-                changed_scopes = app._poll_oa_source_once()
-            status_payload = json.loads(app.handle_request("GET", "/api/oa-sync/status").body)
-            persisted_state = app._state_store.load_oa_sync_state()
-
-        self.assertEqual(changed_scopes, [])
-        self.assertEqual(status_payload["status"], "synced")
-        self.assertEqual(persisted_state["poll_fingerprints"], {"2026-04": "baseline-month", "all": "baseline-all"})
-        schedule_rebuild.assert_not_called()
-
-    def test_oa_polling_ignores_changes_before_retention_cutoff(self) -> None:
-        class PollingAdapter:
-            def poll_sync_fingerprints(self) -> dict[str, str]:
-                return {"2025-12": "new-old-month", "all": "new-all"}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._oa_sync_poll_fingerprints = {"2025-12": "old-month", "all": "old-all"}
-            app._workbench_query_service._oa_adapter = PollingAdapter()
-            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild") as schedule_rebuild:
-                changed_scopes = app._poll_oa_source_once()
-            status_payload = json.loads(app.handle_request("GET", "/api/oa-sync/status").body)
-
-        self.assertEqual(changed_scopes, [])
-        self.assertEqual(status_payload["status"], "synced")
-        schedule_rebuild.assert_not_called()
+        for method_name in [
+            "start_oa_sync_polling_worker",
+            "_poll_oa_source_once",
+            "_handle_oa_source_changed",
+            "_schedule_oa_sync_dirty_scope_rebuild",
+            "_rebuild_oa_sync_dirty_scopes_once",
+            "_hot_rebuild_workbench_read_model_scopes",
+        ]:
+            self.assertFalse(hasattr(app, method_name), method_name)
 
     def test_oa_sync_events_endpoint_is_removed_for_polling_mode(self) -> None:
         app = build_application()

@@ -95,6 +95,38 @@ class FakeOperationsDashboardConnection:
         raise AssertionError(sql)
 
 
+def inject_oa_sync_runtime_status(
+    app,
+    *,
+    outbox_status: str = "ready",
+    scope_key: str = "all",
+    last_error: str | None = None,
+    worker_status: str = "ready",
+    latest_run: dict[str, object] | None = None,
+) -> None:
+    scope_payload = {
+        "event_type": "oa.sync",
+        "scope_type": "oa",
+        "scope_key": scope_key,
+        "status": outbox_status,
+        "count": 1,
+    }
+    outbox_payload = {
+        "status": outbox_status,
+        "count": 1,
+        "scopes": [scope_payload],
+    }
+    if last_error:
+        outbox_payload["last_error"] = last_error
+        scope_payload["last_error"] = last_error
+    app._app_status_runtime_statuses = lambda: {
+        "read_model_statuses": None,
+        "outbox_statuses": {"oa.sync": outbox_payload},
+        "worker_statuses": {"oa-sync": {"status": worker_status}},
+    }
+    app._postgres_oa_projection_latest_sync_run = lambda: latest_run
+
+
 class AppHealthApiTests(unittest.TestCase):
     @contextmanager
     def _temporary_env(self, **updates: str | None):
@@ -195,7 +227,7 @@ class AppHealthApiTests(unittest.TestCase):
 
     def test_app_health_reports_dirty_oa_scopes_as_busy_and_stale(self) -> None:
         app = build_application()
-        app._oa_sync_service.mark_changed(["all"], reason="OA Mongo changed")
+        inject_oa_sync_runtime_status(app, outbox_status="pending", scope_key="all")
 
         response = app.handle_request("GET", "/api/app-health")
         payload = json.loads(response.body)
@@ -293,7 +325,7 @@ class AppHealthApiTests(unittest.TestCase):
 
     def test_dirty_oa_scopes_block_workbench_write_actions(self) -> None:
         app = build_application()
-        app._oa_sync_service.mark_changed(["all"], reason="OA Mongo changed")
+        inject_oa_sync_runtime_status(app, outbox_status="pending", scope_key="all")
 
         response = app.handle_request(
             "POST",
@@ -497,7 +529,7 @@ class AppHealthApiTests(unittest.TestCase):
 
     def test_app_health_reports_dependency_error_as_blocked(self) -> None:
         app = build_application()
-        app._oa_sync_service.mark_error("OA 同步失败")
+        inject_oa_sync_runtime_status(app, outbox_status="failed", scope_key="all", last_error="OA 同步失败")
 
         response = app.handle_request("GET", "/api/app-health")
         payload = json.loads(response.body)

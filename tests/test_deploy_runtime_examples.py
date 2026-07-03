@@ -15,6 +15,8 @@ PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generation
 PRUNE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.timer.example"
 RUNTIME_QUEUE_PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-runtime-queue-history.service.example"
 RUNTIME_QUEUE_PRUNE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-prune-runtime-queue-history.timer.example"
+OA_SYNC_ENQUEUE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-enqueue-oa-sync.service.example"
+OA_SYNC_ENQUEUE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-enqueue-oa-sync.timer.example"
 DISPATCHER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example"
 RABBITMQ_WORKER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-worker.env.example"
 COMMON_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.common.env.example"
@@ -22,6 +24,7 @@ LEGACY_ENV = REPO_ROOT / "deploy/oa/fin_ops.env.example"
 WORKER_ENV_DIR = REPO_ROOT / "deploy/oa/env"
 PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh"
 RUNTIME_QUEUE_PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
+OA_SYNC_ENQUEUE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-enqueue-oa-sync.sh"
 
 
 class DeployRuntimeExampleTests(unittest.TestCase):
@@ -203,6 +206,21 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("install_runtime_queue_history_retention", deploy_control)
         self.assertIn("finops-prune-runtime-queue-history.sh", deploy_control)
         self.assertIn("systemctl enable --now \"$timer_unit\"", deploy_control)
+
+    def test_oa_sync_enqueue_timer_uses_durable_queue_cli(self) -> None:
+        helper = OA_SYNC_ENQUEUE_HELPER.read_text(encoding="utf-8")
+        service = OA_SYNC_ENQUEUE_SERVICE.read_text(encoding="utf-8")
+        timer = OA_SYNC_ENQUEUE_TIMER.read_text(encoding="utf-8")
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+
+        self.assertIn("SCOPE=\"${FINOPS_OA_SYNC_SCOPE:-all}\"", helper)
+        self.assertIn("REASON=\"${FINOPS_OA_SYNC_REASON:-scheduled_oa_sync}\"", helper)
+        self.assertIn("-m fin_ops_platform.tools.runtime_queue_ops enqueue-oa-sync", helper)
+        self.assertIn("--scope \"$SCOPE\"", helper)
+        self.assertIn("ExecStart=/usr/local/sbin/finops-enqueue-oa-sync", service)
+        self.assertIn("OnUnitActiveSec=5m", timer)
+        self.assertIn("install_oa_sync_enqueue_timer", deploy_control)
+        self.assertIn("finops-enqueue-oa-sync.sh", deploy_control)
 
 
 if __name__ == "__main__":

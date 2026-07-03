@@ -21,7 +21,6 @@ def postgres_app_env(database_url: str):
         "FIN_OPS_POSTGRES_DATABASE_URL": database_url,
         "FIN_OPS_TEST_DEFAULT_AUTH": "1",
         "FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR": "1",
-        "FIN_OPS_OA_POLLING_ENABLED": "0",
         "FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED": "0",
     }
     removed = {

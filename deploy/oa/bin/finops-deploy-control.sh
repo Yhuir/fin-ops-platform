@@ -24,6 +24,9 @@ PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_TIM
 PRUNE_RUNTIME_QUEUE_HISTORY_HELPER="${FINOPS_PRUNE_RUNTIME_QUEUE_HISTORY_HELPER:-/usr/local/sbin/finops-prune-runtime-queue-history}"
 PRUNE_RUNTIME_QUEUE_HISTORY_SERVICE_UNIT="${FINOPS_PRUNE_RUNTIME_QUEUE_HISTORY_SERVICE_UNIT:-/etc/systemd/system/finops-prune-runtime-queue-history.service}"
 PRUNE_RUNTIME_QUEUE_HISTORY_TIMER_UNIT="${FINOPS_PRUNE_RUNTIME_QUEUE_HISTORY_TIMER_UNIT:-/etc/systemd/system/finops-prune-runtime-queue-history.timer}"
+OA_SYNC_ENQUEUE_HELPER="${FINOPS_OA_SYNC_ENQUEUE_HELPER:-/usr/local/sbin/finops-enqueue-oa-sync}"
+OA_SYNC_ENQUEUE_SERVICE_UNIT="${FINOPS_OA_SYNC_ENQUEUE_SERVICE_UNIT:-/etc/systemd/system/finops-enqueue-oa-sync.service}"
+OA_SYNC_ENQUEUE_TIMER_UNIT="${FINOPS_OA_SYNC_ENQUEUE_TIMER_UNIT:-/etc/systemd/system/finops-enqueue-oa-sync.timer}"
 
 usage() {
   cat <<'USAGE'
@@ -228,6 +231,25 @@ install_runtime_queue_history_retention() {
   install -m 0755 -o root -g root "$helper_src" "$PRUNE_RUNTIME_QUEUE_HISTORY_HELPER"
   install -m 0644 -o root -g root "$service_src" "$PRUNE_RUNTIME_QUEUE_HISTORY_SERVICE_UNIT"
   install -m 0644 -o root -g root "$timer_src" "$PRUNE_RUNTIME_QUEUE_HISTORY_TIMER_UNIT"
+  systemctl daemon-reload
+  systemctl enable --now "$timer_unit"
+}
+
+install_oa_sync_enqueue_timer() {
+  local src="$1"
+  local helper_src service_src timer_src timer_unit
+  helper_src="$src/deploy/oa/bin/finops-enqueue-oa-sync.sh"
+  service_src="$src/deploy/oa/systemd/finops-enqueue-oa-sync.service.example"
+  timer_src="$src/deploy/oa/systemd/finops-enqueue-oa-sync.timer.example"
+  timer_unit="$(basename "$OA_SYNC_ENQUEUE_TIMER_UNIT")"
+
+  [[ -f "$helper_src" ]] || die "missing OA sync enqueue helper in release: $helper_src"
+  [[ -f "$service_src" ]] || die "missing OA sync enqueue service unit in release: $service_src"
+  [[ -f "$timer_src" ]] || die "missing OA sync enqueue timer unit in release: $timer_src"
+
+  install -m 0755 -o root -g root "$helper_src" "$OA_SYNC_ENQUEUE_HELPER"
+  install -m 0644 -o root -g root "$service_src" "$OA_SYNC_ENQUEUE_SERVICE_UNIT"
+  install -m 0644 -o root -g root "$timer_src" "$OA_SYNC_ENQUEUE_TIMER_UNIT"
   systemctl daemon-reload
   systemctl enable --now "$timer_unit"
 }
@@ -465,6 +487,7 @@ case "$cmd" in
     ensure_runtime_workers "$src"
     install_workbench_generation_retention "$src"
     install_runtime_queue_history_retention "$src"
+    install_oa_sync_enqueue_timer "$src"
     publish_frontend "$src"
     restart_services
     wait_required_workers_ready

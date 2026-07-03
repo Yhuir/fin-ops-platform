@@ -463,12 +463,7 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         class FakeApplication:
             def __init__(self) -> None:
-                self.oa_started = False
                 self.workbench_dirty_started = False
-
-            def start_oa_sync_polling_worker(self) -> bool:
-                self.oa_started = True
-                return True
 
             def start_workbench_matching_dirty_scope_worker(self) -> bool:
                 self.workbench_dirty_started = True
@@ -480,14 +475,13 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             for key, value in os.environ.items()
             if key
             not in {
-                "FIN_OPS_OA_POLLING_ENABLED",
                 "FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED",
             }
         }
+        env["FIN_OPS_OA_POLLING_ENABLED"] = "1"
         with patch.dict(os.environ, env, clear=True), patch.object(server_module, "ThreadingHTTPServer", FakeServer):
             server_module.run_http_server("127.0.0.1", 0, app)
 
-        self.assertFalse(app.oa_started)
         self.assertFalse(app.workbench_dirty_started)
 
     def test_matching_row_provider_does_not_supplement_historical_pair_relation_rows(self) -> None:

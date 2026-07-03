@@ -84,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
     prune_history_mode.add_argument("--dry-run", action="store_true")
     prune_history_mode.add_argument("--execute", action="store_true")
 
+    enqueue_oa_sync = subparsers.add_parser("enqueue-oa-sync", help="Enqueue a durable OA Mongo projection sync event.")
+    enqueue_oa_sync.add_argument("--scope", default="all")
+    enqueue_oa_sync.add_argument("--reason", default="scheduled_oa_sync")
+    enqueue_oa_sync.add_argument("--triggered-by", default="system")
+
     for command in ("pause-dispatcher", "resume-dispatcher", "pause-consumer", "resume-consumer"):
         subparsers.add_parser(command, help=f"{command.replace('-', ' ')} via app.app_settings control flag.")
 
@@ -165,6 +170,35 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None, std
                 limit=args.limit,
             )
         print(json.dumps(result, default=str, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+        return 0
+    if args.command == "enqueue-oa-sync":
+        scope_key = str(args.scope or "all").strip() or "all"
+        event = repository.enqueue(
+            event_type="oa.sync",
+            aggregate_type="oa",
+            aggregate_id=scope_key,
+            scope_type="oa",
+            scope_key=scope_key,
+            dedupe_key=f"oa.sync:{scope_key}",
+            payload={
+                "scope_key": scope_key,
+                "triggered_by": str(args.triggered_by or "system"),
+                "reason": str(args.reason or "scheduled_oa_sync"),
+            },
+        )
+        print(
+            json.dumps(
+                {
+                    "event_id": getattr(event, "event_id", None),
+                    "event_type": "oa.sync",
+                    "scope_key": scope_key,
+                    "status": getattr(event, "status", None),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            file=stdout,
+        )
         return 0
     if args.command in {"pause-dispatcher", "resume-dispatcher", "pause-consumer", "resume-consumer"}:
         component = "dispatcher" if "dispatcher" in args.command else "consumer"

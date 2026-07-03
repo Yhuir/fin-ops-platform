@@ -163,10 +163,17 @@ class OperationsDashboardService:
               (select count(*)::bigint from app.oa_applications) as oa_records_count,
               (select count(*)::bigint from app.oa_application_items) as oa_items_count,
               (select max(synced_at) from app.oa_applications) as oa_records_latest_synced_at,
+              (select max(coalesce(finished_at, started_at))
+                 from app.oa_sync_runs
+                where sync_type = 'oa_projection'
+                  and status in ('success', 'succeeded', 'done')) as latest_successful_sync_at,
               coalesce(
-                (select max(synced_at) from app.oa_applications),
+                (select max(coalesce(finished_at, started_at))
+                   from app.oa_sync_runs
+                  where sync_type = 'oa_projection'
+                    and status in ('success', 'succeeded', 'done')),
                 (select max(last_success_at) from app.oa_sync_watermarks),
-                (select max(finished_at) from app.oa_sync_runs where status in ('success', 'succeeded', 'done'))
+                (select max(synced_at) from app.oa_applications)
               ) as oa_latest_synced_at
             """
         ) or {}
@@ -178,7 +185,7 @@ class OperationsDashboardService:
                     key="oa_records",
                     label="单据",
                     count=_optional_int(row.get("oa_records_count")),
-                    latest_synced_at=_isoformat(row.get("oa_records_latest_synced_at") or row.get("oa_latest_synced_at")),
+                    latest_synced_at=_isoformat(row.get("oa_latest_synced_at")),
                 ),
                 _inventory_source(
                     key="oa_items",

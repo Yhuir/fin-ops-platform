@@ -176,7 +176,9 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([record.id for record in records], ["oa-pay-001"])
         self.assertEqual(records[0].project_name, "玉烟维护项目")
         self.assertEqual(records[0].workflow_status, "completed")
-        self.assertIn("workflow_status = 'completed'", connection.executed[0][0])
+        self.assertIn("workflow_status in", connection.executed[0][0])
+        self.assertIn("'completed'", connection.executed[0][0])
+        self.assertIn("'已完成'", connection.executed[0][0])
 
     def test_postgres_oa_projection_repository_writes_structured_items_and_attachments(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
@@ -575,7 +577,22 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(enqueued[0]["event_type"], "oa.sync")
         self.assertEqual(enqueued[0]["scope_key"], "2026-05")
 
-    def test_http_server_does_not_start_in_process_oa_polling_by_default(self) -> None:
+    def test_manual_oa_sync_api_fails_closed_when_queue_is_unavailable(self) -> None:
+        app = object.__new__(server_module.Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": None})()
+        app._integration_service = type(
+            "IntegrationService",
+            (),
+            {"sync": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("OA sync API must not run sync inline"))},
+        )()
+
+        response = app._handle_oa_sync(json.dumps({"actor_id": "tester", "scope": "2026-05"}))
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
+        self.assertEqual(payload["error"], "oa_sync_queue_unavailable")
+
+    def test_http_server_does_not_support_in_process_oa_polling(self) -> None:
         class FakeServer:
             def __init__(self, *_args, **_kwargs) -> None:
                 pass
@@ -588,18 +605,20 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         class FakeApplication:
             def __init__(self) -> None:
-                self.started = False
-
-            def start_oa_sync_polling_worker(self) -> bool:
-                self.started = True
-                return True
+                self.workbench_dirty_started = False
 
             def start_workbench_matching_dirty_scope_worker(self) -> bool:
+                self.workbench_dirty_started = True
                 return True
 
         app = FakeApplication()
-        env = {key: value for key, value in os.environ.items() if key != "FIN_OPS_OA_POLLING_ENABLED"}
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED"}
+        }
+        env["FIN_OPS_OA_POLLING_ENABLED"] = "1"
         with patch.dict(os.environ, env, clear=True), patch.object(server_module, "ThreadingHTTPServer", FakeServer):
             server_module.run_http_server("127.0.0.1", 0, app)
 
-        self.assertFalse(app.started)
+        self.assertFalse(app.workbench_dirty_started)

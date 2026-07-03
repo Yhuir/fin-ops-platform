@@ -321,7 +321,6 @@ from fin_ops_platform.services.oa_identity_service import (
 )
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
-from fin_ops_platform.services.oa_sync_service import OASyncService
 from fin_ops_platform.services.target_oa_applicant_token_provider import (
     OaLoginClient,
     TargetOaApplicantTokenProvider,
@@ -726,18 +725,6 @@ class Application:
         self._data_reset_jobs_lock = Lock()
         self._app_health_dashboard_cache_lock = Lock()
         self._app_health_dashboard_cache: tuple[float, dict[str, object]] | None = None
-        persisted_oa_sync_state = self._state_store.load_oa_sync_state() if self._state_store is not None else {}
-        self._oa_sync_service = OASyncService()
-        persisted_poll_fingerprints = persisted_oa_sync_state.get("poll_fingerprints", {})
-        self._oa_sync_poll_fingerprints = (
-            dict(persisted_poll_fingerprints)
-            if isinstance(persisted_poll_fingerprints, dict)
-            else {}
-        )
-        self._oa_sync_rebuild_lock = Lock()
-        self._oa_sync_rebuild_scheduled = False
-        self._oa_sync_polling_lock = Lock()
-        self._oa_sync_polling_started = False
         self._workbench_matching_dirty_worker_lock = Lock()
         self._workbench_matching_dirty_worker_started = False
         self._workbench_matching_run_lock = Lock()
@@ -3912,7 +3899,7 @@ class Application:
         refresh_gateway.enqueue_one("workbench", scope_key, reason=reason, metadata=metadata)
 
     def _handle_api_oa_sync_status(self) -> Response:
-        return self._json_response(HTTPStatus.OK, self._oa_sync_service.status_payload())
+        return self._json_response(HTTPStatus.OK, self._oa_sync_status_payload())
 
     def _handle_api_app_health(self, headers: dict[str, str] | None) -> Response:
         started_at = monotonic()
@@ -4269,8 +4256,94 @@ class Application:
         }
         print(json.dumps(log_payload, ensure_ascii=False))
 
+    def _oa_sync_status_payload(self) -> dict[str, object]:
+        runtime_statuses = self._app_status_runtime_statuses()
+        outbox_statuses = runtime_statuses.get("outbox_statuses")
+        worker_statuses = runtime_statuses.get("worker_statuses")
+        outbox_payload = (
+            outbox_statuses.get("oa.sync")
+            if isinstance(outbox_statuses, dict) and isinstance(outbox_statuses.get("oa.sync"), dict)
+            else {}
+        )
+        worker_payload = (
+            worker_statuses.get("oa-sync")
+            if isinstance(worker_statuses, dict) and isinstance(worker_statuses.get("oa-sync"), dict)
+            else {}
+        )
+        successful_run_statuses = {"success", "succeeded", "done"}
+        latest_run = self._postgres_oa_projection_latest_sync_run() or {}
+        outbox_status = str(outbox_payload.get("status") or "").strip().lower()
+        worker_status = str(worker_payload.get("status") or "").strip().lower()
+        run_status = str(latest_run.get("status") or "").strip().lower()
+        dirty_scopes = self._oa_sync_dirty_scopes_from_outbox(outbox_payload)
+        last_synced_at = (
+            str(latest_run.get("finished_at") or latest_run.get("started_at") or "").strip()
+            if run_status in successful_run_statuses
+            else ""
+        ) or None
+
+        if outbox_status in {"pending", "processing", "publishing"}:
+            status = "refreshing"
+            message = "OA 同步任务已入队或正在执行。"
+        elif outbox_status in {"failed", "dead_lettered", "publish_failed"}:
+            status = "error"
+            message = str(outbox_payload.get("last_error") or "OA 同步任务失败。")
+        elif worker_status in {"missing", "mismatch", "unavailable", "stale"}:
+            status = "error"
+            warning = str(worker_payload.get("warning_code") or worker_status).strip()
+            message = f"OA 同步 worker 不可用：{warning}"
+        elif run_status in {"failed", "error"}:
+            status = "error"
+            message = str(latest_run.get("last_error") or "最近一次 OA 同步失败。")
+        elif run_status in successful_run_statuses:
+            status = "synced"
+            message = "OA 已同步。"
+        elif latest_run:
+            status = "unknown"
+            message = "最近一次 OA 同步状态未知。"
+        else:
+            status = "unknown"
+            message = "尚无 OA 同步运行记录。"
+
+        payload: dict[str, object] = {
+            "status": status,
+            "message": message,
+            "dirty_scopes": dirty_scopes,
+            "last_synced_at": last_synced_at,
+        }
+        if outbox_status:
+            payload["outbox_status"] = outbox_status
+        if worker_status:
+            payload["worker_status"] = worker_status
+        if latest_run.get("id"):
+            payload["last_run_id"] = latest_run.get("id")
+        if latest_run.get("upserted_count") is not None:
+            payload["last_upserted_count"] = latest_run.get("upserted_count")
+        if latest_run.get("scanned_count") is not None:
+            payload["last_scanned_count"] = latest_run.get("scanned_count")
+        return payload
+
+    @staticmethod
+    def _oa_sync_dirty_scopes_from_outbox(outbox_payload: object) -> list[str]:
+        if not isinstance(outbox_payload, dict):
+            return []
+        scopes: list[str] = []
+        for entry in list(outbox_payload.get("scopes") or []):
+            if not isinstance(entry, dict):
+                continue
+            scope_key = str(entry.get("scope_key") or "").strip()
+            if scope_key:
+                scopes.append(scope_key)
+        if not scopes:
+            scope_key = str(outbox_payload.get("scope_key") or "").strip()
+            if scope_key:
+                scopes.append(scope_key)
+        if any(scope != "all" for scope in scopes):
+            scopes.append("all")
+        return sorted(dict.fromkeys(scopes))
+
     def _app_health_oa_sync_payload(self) -> dict[str, object]:
-        payload = self._serialize_value(self._oa_sync_service.status_payload())
+        payload = self._serialize_value(self._oa_sync_status_payload())
         if not isinstance(payload, dict):
             payload = {}
         matching_dirty_scopes = self._workbench_matching_dirty_scope_service.list_dirty_scopes()
@@ -4306,15 +4379,14 @@ class Application:
         return payload
 
     def _is_oa_sync_rebuild_scheduled(self) -> bool:
-        with self._oa_sync_rebuild_lock:
-            return self._oa_sync_rebuild_scheduled
+        return False
 
     @staticmethod
     def _is_workbench_read_model_rebuild_job(job: object) -> bool:
         return AppHealthService.is_workbench_read_model_rebuild_job(job)
 
     def _workbench_write_freshness_guard(self) -> Response | None:
-        oa_sync_payload = self._oa_sync_service.status_payload()
+        oa_sync_payload = self._oa_sync_status_payload()
         dirty_scopes = [
             str(scope)
             for scope in list(oa_sync_payload.get("dirty_scopes", []) or [])
@@ -4326,7 +4398,7 @@ class Application:
             HTTPStatus.CONFLICT,
             {
                 "error": "workbench_stale",
-                "message": "关联台正在同步，请刷新完成后再操作。",
+                "message": "OA 正在同步，请刷新完成后再操作。",
                 "dirty_scopes": dirty_scopes,
             },
         )
@@ -5853,7 +5925,8 @@ class Application:
                 ],
                 invalidate_cost_statistics=True,
             )
-        self._handle_oa_source_changed(normalized_scope_keys, reason="oa_attachment_invoice_cache")
+        for scope_key in normalized_scope_keys:
+            self._enqueue_oa_projection_sync_refresh(scope_key, reason="oa_attachment_invoice_cache")
         self._invalidate_tax_offset_read_model_scopes(
             [scope_key for scope_key in normalized_scope_keys if SEARCH_MONTH_RE.match(scope_key)],
             reason="oa_attachment_invoice_cache",
@@ -5912,42 +5985,6 @@ class Application:
             for evidence in list(getattr(record, "attachment_evidences", []) or [])
             if isinstance(evidence, dict)
         ]
-
-    def _handle_oa_source_changed(
-        self,
-        scope_keys: list[str],
-        *,
-        reason: str = "oa_changed",
-        schedule_rebuild: bool = True,
-    ) -> None:
-        normalized_scope_keys = self._normalize_oa_sync_scope_keys(scope_keys)
-        if not normalized_scope_keys:
-            return
-        self._oa_sync_service.mark_changed(normalized_scope_keys, reason=reason)
-        if schedule_rebuild:
-            self._schedule_oa_sync_dirty_scope_rebuild()
-
-    def start_oa_sync_polling_worker(self, *, interval_seconds: float | None = None) -> bool:
-        adapter = self._workbench_query_service._oa_adapter
-        poll_sync_fingerprints = getattr(adapter, "poll_sync_fingerprints", None)
-        if not callable(poll_sync_fingerprints):
-            return False
-        with self._oa_sync_polling_lock:
-            if self._oa_sync_polling_started:
-                return True
-            self._oa_sync_polling_started = True
-        resolved_interval = interval_seconds
-        if resolved_interval is None:
-            try:
-                resolved_interval = float(os.getenv("FIN_OPS_OA_POLL_INTERVAL_SECONDS", "5"))
-            except ValueError:
-                resolved_interval = 5
-        Thread(
-            target=self._run_oa_sync_polling_worker,
-            kwargs={"interval_seconds": max(2.0, float(resolved_interval))},
-            daemon=True,
-        ).start()
-        return True
 
     def start_workbench_matching_dirty_scope_worker(self, *, interval_seconds: float | None = None) -> bool:
         resolved_interval = interval_seconds
@@ -6071,146 +6108,6 @@ class Application:
         if not summary.get("scope_months"):
             return None
         return summary
-
-    def _run_oa_sync_polling_worker(self, *, interval_seconds: float) -> None:
-        while True:
-            self._poll_oa_source_once()
-            sleep(interval_seconds)
-
-    def _poll_oa_source_once(self) -> list[str]:
-        adapter = self._workbench_query_service._oa_adapter
-        poll_sync_fingerprints = getattr(adapter, "poll_sync_fingerprints", None)
-        if not callable(poll_sync_fingerprints):
-            return []
-        try:
-            current_fingerprints = poll_sync_fingerprints()
-        except Exception as exc:
-            self._oa_sync_service.mark_error(f"OA 轮询失败：{exc}")
-            return []
-        if not isinstance(current_fingerprints, dict):
-            self._oa_sync_service.mark_error("OA 轮询失败：返回值无效")
-            return []
-
-        normalized_current = {
-            str(scope_key).strip(): str(fingerprint)
-            for scope_key, fingerprint in current_fingerprints.items()
-            if str(scope_key).strip() and str(fingerprint)
-        }
-        previous_fingerprints = {
-            str(scope_key).strip(): str(fingerprint)
-            for scope_key, fingerprint in self._oa_sync_poll_fingerprints.items()
-            if str(scope_key).strip() and str(fingerprint)
-        }
-        is_initial_snapshot = not previous_fingerprints
-        changed_scopes = [] if is_initial_snapshot else sorted(
-            scope_key
-            for scope_key in set(normalized_current).union(previous_fingerprints)
-            if normalized_current.get(scope_key) != previous_fingerprints.get(scope_key)
-        )
-        changed_scopes = self._filter_oa_poll_changed_scopes_for_retention(changed_scopes)
-        self._oa_sync_poll_fingerprints = dict(normalized_current)
-        if self._state_store is not None:
-            self._state_store.save_oa_sync_state(
-                {
-                    "poll_fingerprints": dict(normalized_current),
-                    "last_polled_at": datetime.now().isoformat(),
-                }
-            )
-        if changed_scopes:
-            self._handle_oa_source_changed(changed_scopes, reason="oa_polling")
-        return changed_scopes
-
-    def _filter_oa_poll_changed_scopes_for_retention(self, changed_scopes: list[str]) -> list[str]:
-        normalized_scopes = {
-            str(scope).strip()
-            for scope in list(changed_scopes or [])
-            if str(scope).strip()
-        }
-        if not normalized_scopes:
-            return []
-        cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
-        if cutoff_date is None:
-            return sorted(normalized_scopes)
-        cutoff_month = cutoff_date.strftime("%Y-%m")
-        retained_months = {
-            scope
-            for scope in normalized_scopes
-            if SEARCH_MONTH_RE.match(scope) and scope >= cutoff_month
-        }
-        if retained_months:
-            return sorted({*retained_months, "all"})
-        if any(scope != "all" and SEARCH_MONTH_RE.match(scope) for scope in normalized_scopes):
-            return []
-        return sorted(normalized_scopes)
-
-    def _schedule_oa_sync_dirty_scope_rebuild(self) -> None:
-        with self._oa_sync_rebuild_lock:
-            if self._oa_sync_rebuild_scheduled:
-                return
-            self._oa_sync_rebuild_scheduled = True
-        Thread(target=self._run_scheduled_oa_sync_dirty_scope_rebuild, daemon=True).start()
-
-    def _run_scheduled_oa_sync_dirty_scope_rebuild(self) -> None:
-        try:
-            self._rebuild_oa_sync_dirty_scopes_once()
-        finally:
-            with self._oa_sync_rebuild_lock:
-                self._oa_sync_rebuild_scheduled = False
-            if self._oa_sync_service.status_payload().get("dirty_scopes"):
-                self._schedule_oa_sync_dirty_scope_rebuild()
-
-    def _rebuild_oa_sync_dirty_scopes_once(self) -> None:
-        scope_keys = self._oa_sync_service.take_dirty_scopes()
-        if not scope_keys:
-            return
-        try:
-            self._hot_rebuild_workbench_read_model_scopes(scope_keys)
-        except Exception as exc:
-            self._oa_sync_service.mark_error(f"OA 同步刷新失败：{exc}", scopes=scope_keys)
-            return
-        self._oa_sync_service.mark_synced(scope_keys)
-
-    def _hot_rebuild_workbench_read_model_scopes(self, scope_keys: list[str]) -> None:
-        normalized_scope_keys = self._normalize_oa_sync_scope_keys(scope_keys)
-        if not normalized_scope_keys:
-            return
-        read_model_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(normalized_scope_keys)
-        self._schedule_or_run_workbench_auto_matching_for_scopes(
-            normalized_scope_keys,
-            reason="oa_sync_hot_rebuild",
-        )
-        self._search_service.clear_cache()
-        invalidate_records_cache = getattr(self._workbench_query_service._oa_adapter, "invalidate_records_cache", None)
-        if callable(invalidate_records_cache):
-            invalidate_records_cache([scope_key for scope_key in normalized_scope_keys if scope_key != "all"])
-        for scope_key in read_model_scope_keys:
-            base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
-            raw_payload = self._build_raw_workbench_payload(base_scope_key)
-            candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
-            grouped_payload = self._group_row_payload(
-                candidate_payload,
-                turnover_relations=self._active_turnover_relations_for_workbench(),
-            )
-            self._apply_workbench_runtime_metadata(grouped_payload, base_scope_key)
-            ignored_rows = self._extract_ignored_rows(candidate_payload)
-            if not self._can_persist_workbench_payload(grouped_payload):
-                raise RuntimeError(str(grouped_payload.get("oa_status", {}).get("message") or "OA read model is not ready"))
-            self._workbench_read_model_service.upsert_read_model(
-                scope_key=scope_key,
-                payload=grouped_payload,
-                ignored_rows=ignored_rows,
-                source_versions=self._workbench_read_model_source_versions(),
-            )
-        if self._state_store is not None:
-            self._persist_workbench_read_models_best_effort(
-                snapshot=self._workbench_read_model_service.snapshot_scope_keys(read_model_scope_keys),
-                changed_scope_keys=read_model_scope_keys,
-                operation="oa_sync_hot_rebuild_read_models",
-            )
-        self._invalidate_cost_statistics_read_model_scopes(
-            normalized_scope_keys,
-            reason="oa_sync_hot_rebuild",
-        )
 
     def _expand_workbench_read_model_scope_keys_for_base_scopes(self, base_scope_keys: list[str]) -> list[str]:
         normalized_base_scope_keys = {
@@ -9961,29 +9858,12 @@ class Application:
                     "scope_key": scope_key,
                 },
             )
-        try:
-            run = self._integration_service.sync(
-                scope=str(payload.get("scope", "all")),
-                triggered_by=str(actor_id),
-                retry_run_id=payload.get("retry_run_id"),
-            )
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "oa_sync_run_not_found", "run_id": payload.get("retry_run_id")},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_sync_request", "message": str(exc)},
-            )
-        self._schedule_or_run_workbench_auto_matching_for_scopes(
-            self._expand_workbench_matching_months(self._workbench_query_service.list_available_months()),
-            reason="oa_integration_sync",
-        )
         return self._json_response(
-            HTTPStatus.OK,
-            {"run": self._serialize_sync_run(run), "dashboard": self._integration_service.build_dashboard()},
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            {
+                "error": "oa_sync_queue_unavailable",
+                "message": "OA 同步必须通过 durable queue 入队；当前运行时未配置 queue repository。",
+            },
         )
 
     def _handle_oa_sync_runs(self) -> Response:
@@ -10030,6 +9910,14 @@ class Application:
         if not callable(list_runs):
             return None
         return list_runs()
+
+    def _postgres_oa_projection_latest_sync_run(self) -> dict[str, object] | None:
+        repository = self._postgres_oa_projection_repository()
+        list_runs = getattr(repository, "list_sync_runs", None)
+        if not callable(list_runs):
+            return None
+        runs = list_runs(limit=1)
+        return runs[0] if runs else None
 
     def _postgres_oa_projection_sync_run(self, run_id: str) -> dict[str, object] | None:
         repository = self._postgres_oa_projection_repository()
@@ -15857,8 +15745,6 @@ def build_application(*, data_dir: Path | None = None, bootstrap_mode: str | Non
 
 def run_http_server(host: str, port: int, app: Application | None = None) -> None:
     application = app or build_application()
-    if os.getenv("FIN_OPS_OA_POLLING_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}:
-        application.start_oa_sync_polling_worker()
     if os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}:
         application.start_workbench_matching_dirty_scope_worker()
     handler_factory = _build_handler_factory(application)

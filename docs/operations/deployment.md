@@ -112,6 +112,8 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 - `deploy/oa/systemd/fin-ops-worker@.service.example`
 - `deploy/oa/systemd/fin-ops-rabbitmq-topology.service.example`
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
+- `deploy/oa/systemd/finops-enqueue-oa-sync.service.example`
+- `deploy/oa/systemd/finops-enqueue-oa-sync.timer.example`
 - `deploy/oa/env/fin-ops.common.env.example`
 - `deploy/oa/env/fin-ops.secrets.env.example`
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`

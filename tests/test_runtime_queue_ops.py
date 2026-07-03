@@ -52,6 +52,18 @@ class FakeRuntimeQueueRepository:
         self.resolve_superseded_calls: list[dict[str, object]] = []
         self.preview_retention_calls: list[dict[str, object]] = []
         self.prune_retention_calls: list[dict[str, object]] = []
+        self.enqueue_calls: list[dict[str, object]] = []
+
+    def enqueue(self, **kwargs):
+        self.enqueue_calls.append(dict(kwargs))
+        return type(
+            "Event",
+            (),
+            {
+                "event_id": "00000000-0000-0000-0000-000000000099",
+                "status": "pending",
+            },
+        )()
 
     def resolve_dead_letter_event(self, event_id: str, *, reason: str = "operator_resolved") -> bool:
         self.resolve_calls.append((event_id, reason))
@@ -262,6 +274,50 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         payload = stdout.getvalue()
         self.assertIn('"mode": "execute"', payload)
         self.assertIn('"deleted_count": 2', payload)
+
+    def test_enqueue_oa_sync_cli_writes_durable_event(self) -> None:
+        connection = FakeConnection()
+        repository = FakeRuntimeQueueRepository()
+        stdout = StringIO()
+
+        with (
+            patch.object(runtime_queue_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(runtime_queue_ops, "PostgresConnection", return_value=connection),
+            patch.object(runtime_queue_ops, "RuntimeQueueRepository", return_value=repository),
+        ):
+            exit_code = runtime_queue_ops.main(
+                [
+                    "enqueue-oa-sync",
+                    "--scope",
+                    "all",
+                    "--reason",
+                    "scheduled_oa_sync",
+                    "--triggered-by",
+                    "system",
+                ],
+                stdout=stdout,
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            repository.enqueue_calls,
+            [
+                {
+                    "event_type": "oa.sync",
+                    "aggregate_type": "oa",
+                    "aggregate_id": "all",
+                    "scope_type": "oa",
+                    "scope_key": "all",
+                    "dedupe_key": "oa.sync:all",
+                    "payload": {
+                        "scope_key": "all",
+                        "triggered_by": "system",
+                        "reason": "scheduled_oa_sync",
+                    },
+                }
+            ],
+        )
+        self.assertIn('"event_type": "oa.sync"', stdout.getvalue())
 
     def test_release_stale_processing_dry_run_lists_candidates_without_update(self) -> None:
         connection = FakeConnection(

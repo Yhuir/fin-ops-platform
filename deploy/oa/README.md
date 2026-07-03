@@ -276,6 +276,8 @@ systemd 模板位于：
 - `deploy/oa/systemd/finops-prune-workbench-generations.timer.example`
 - `deploy/oa/systemd/finops-prune-runtime-queue-history.service.example`
 - `deploy/oa/systemd/finops-prune-runtime-queue-history.timer.example`
+- `deploy/oa/systemd/finops-enqueue-oa-sync.service.example`
+- `deploy/oa/systemd/finops-enqueue-oa-sync.timer.example`
 
 关联台自动配对必须单独启用 `workbench-matching` worker。它消费
 `job.workbench_matching_dirty_scopes`，生成 `read_model.workbench_reconciliation_decisions`；
@@ -286,7 +288,7 @@ systemd 模板位于：
 
 生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。migrator DSN 只能用于手动/受控 migration，不要加载到 API 或 worker unit。
 
-发布激活会安装两个版本化 retention timer：
+发布激活会安装两个版本化 retention timer 和一个 OA sync enqueue timer：
 
 - `finops-prune-workbench-generations.timer`：清理非 active Workbench generation。
 - `finops-prune-runtime-queue-history.timer`：清理 `job.outbox_events` /
@@ -294,6 +296,8 @@ systemd 模板位于：
   `keep_recent_per_type=512`、`limit=20000`，只删除 `status='done'`，并为每个 exact
   dirty scope 保留最新 done source_version；helper 读取
   `/etc/fin-ops/fin-ops.postgres-migrator.env`，不扩大 API/worker delete 权限。
+- `finops-enqueue-oa-sync.timer`：默认每 5 分钟 enqueue 一条 durable
+  `oa.sync` / `scope=all` 事件；实际 Mongo 读取仍由 `worker-oa-sync` 执行。
 
 PostgreSQL migration 示例：
 
