@@ -41,7 +41,14 @@ class WorkbenchActionApiRoutes:
     def confirm_link_preview(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
             preview = self._write_facade_provider().preview_confirm_link(payload)
-        except (KeyError, TypeError, ValueError) as exc:
+        except KeyError as exc:
+            row_id = str(exc.args[0]).strip() if exc.args else ""
+            return HTTPStatus.BAD_REQUEST, {
+                "error": "workbench_row_not_found",
+                "message": "所选关联台记录不可用，请刷新后重试。",
+                "row_id": row_id,
+            }
+        except (TypeError, ValueError) as exc:
             return HTTPStatus.BAD_REQUEST, {
                 "error": "invalid_confirm_link_preview_request",
                 "message": str(exc),

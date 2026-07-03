@@ -16,6 +16,7 @@ def oa_attachment_parent_oa_id(source_id: object) -> str:
 def oa_attachment_source_ids(row: dict[str, Any]) -> list[str]:
     source_ids: list[str] = []
     for field_name in (
+        "source_workbench_row_id",
         "derived_from_oa_id",
         "source_expense_item_id",
         "oa_row_id",
@@ -29,7 +30,14 @@ def oa_attachment_source_ids(row: dict[str, Any]) -> list[str]:
             source_ids.append(value)
     metadata = row.get("metadata")
     if isinstance(metadata, dict):
-        for field_name in ("derived_from_oa_id", "source_expense_item_id", "source_oa_row_id", "oa_row_id", "oa_id"):
+        for field_name in (
+            "source_workbench_row_id",
+            "derived_from_oa_id",
+            "source_expense_item_id",
+            "source_oa_row_id",
+            "oa_row_id",
+            "oa_id",
+        ):
             value = str(metadata.get(field_name) or "").strip()
             if value:
                 source_ids.append(value)
@@ -76,6 +84,7 @@ def oa_attachment_best_source_link(
         for source_link in matching_links:
             link_row = {
                 "id": source_link.get("source_workbench_row_id"),
+                "source_workbench_row_id": source_link.get("source_workbench_row_id"),
                 "derived_from_oa_id": source_link.get("derived_from_oa_id"),
                 "source_expense_item_id": source_link.get("source_expense_item_id"),
             }

@@ -30,6 +30,7 @@ class WorkbenchOaAttachmentSourceLinkResolver:
     def source_oa_id_for_attachment_link(source_link: dict[str, str], oa_row_ids: set[str]) -> str | None:
         link_row: dict[str, Any] = {
             "id": source_link.get("source_workbench_row_id"),
+            "source_workbench_row_id": source_link.get("source_workbench_row_id"),
             "derived_from_oa_id": source_link.get("derived_from_oa_id"),
             "source_expense_item_id": source_link.get("source_expense_item_id"),
         }

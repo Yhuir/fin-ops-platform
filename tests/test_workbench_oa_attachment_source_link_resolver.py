@@ -55,6 +55,21 @@ class WorkbenchOaAttachmentSourceLinkResolverTests(unittest.TestCase):
             "oa-form-2",
         )
 
+    def test_source_oa_id_for_attachment_link_matches_canonical_workbench_oa_id(self) -> None:
+        source_link = {
+            "source_workbench_row_id": "oa-exp-2156",
+            "derived_from_oa_id": "oa-exp-69fab21659b12d7d42a50a45",
+            "source_expense_item_id": "item-0",
+        }
+
+        self.assertEqual(
+            WorkbenchOaAttachmentSourceLinkResolver.source_oa_id_for_attachment_link(
+                source_link,
+                {"oa-exp-2156"},
+            ),
+            "oa-exp-2156",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

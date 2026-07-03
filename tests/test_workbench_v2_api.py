@@ -5465,6 +5465,121 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(row_type_by_id["bk-o-202605-invoice-first"], "bank")
         self.assertEqual(row_type_by_id["oa-att-inv-oa-exp-202605-invoice-first-01"], "invoice")
 
+    def test_confirm_link_preview_does_not_expand_raw_oa_source_when_canonical_oa_is_selected(self) -> None:
+        app = build_application()
+        canonical_oa_id = "oa-exp-2156"
+        raw_source_oa_id = "oa-exp-69fab21659b12d7d42a50a45"
+        bank_id = "txn_imported_0405"
+        invoice_id = f"oa-att-inv-{raw_source_oa_id}:item:0:fb2a9c9fab23-b515bf77d490fdfe"
+        rows_by_id = {
+            canonical_oa_id: {
+                "id": canonical_oa_id,
+                "type": "oa",
+                "applicant": "陈佳玉",
+                "project_name": "大型卷烟厂余热综合利用项目",
+                "amount": "145.00",
+                "reconciliation_amount": "145.00",
+            },
+            bank_id: {
+                "id": bank_id,
+                "type": "bank",
+                "counterparty_name": "陈佳玉",
+                "trade_time": "2026-06-23 09:45:03",
+                "debit_amount": "145.00",
+                "credit_amount": "",
+            },
+            invoice_id: {
+                "id": invoice_id,
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "derived_from_oa_id": raw_source_oa_id,
+                "source_workbench_row_id": canonical_oa_id,
+                "seller_name": "云南铁路发展有限公司",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-05-06",
+                "amount": "145.00",
+                "total_with_tax": "145.00",
+            },
+        }
+        source_group = {
+            "group_id": f"source:oa_attachment:{raw_source_oa_id}",
+            "group_type": "candidate",
+            "match_confidence": "high",
+            "reason": "oa_attachment_source_relation",
+            "oa_rows": [{"id": raw_source_oa_id, "type": "oa", "amount": "145.00"}],
+            "bank_rows": [],
+            "invoice_rows": [rows_by_id[invoice_id]],
+        }
+
+        def resolve_cached(row_ids: list[str], **_kwargs: object) -> dict[str, dict[str, object]]:
+            return {
+                row_id: dict(rows_by_id[row_id])
+                for row_id in row_ids
+                if row_id in rows_by_id
+            }
+
+        def row_detail(row_id: str, **_kwargs: object) -> dict[str, object]:
+            if row_id not in rows_by_id:
+                raise KeyError(row_id)
+            return {"row": dict(rows_by_id[row_id])}
+
+        with (
+            patch.object(app, "_cached_existing_context_groups_for_row_ids", return_value=[source_group]),
+            patch.object(app, "_resolve_rows_from_cached_read_models", side_effect=resolve_cached),
+            patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail),
+        ):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link/preview",
+                json.dumps(
+                    {
+                        "month": "all",
+                        "row_ids": [canonical_oa_id, bank_id, invoice_id],
+                        "case_id": "CASE-CANONICAL-OA-ATTACHMENT-PREVIEW",
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200, response.body)
+        payload = json.loads(response.body)
+        after_group = payload["after"]["groups"][0]
+        self.assertEqual([row["id"] for row in after_group["oa_rows"]], [canonical_oa_id])
+        self.assertEqual([row["id"] for row in after_group["bank_rows"]], [bank_id])
+        self.assertEqual([row["id"] for row in after_group["invoice_rows"]], [invoice_id])
+        after_row_ids = [
+            row["id"]
+            for row_key in ("oa_rows", "bank_rows", "invoice_rows")
+            for row in after_group[row_key]
+        ]
+        self.assertNotIn(raw_source_oa_id, after_row_ids)
+
+    def test_confirm_link_preview_maps_missing_row_to_row_not_found_error(self) -> None:
+        app = build_application()
+
+        def missing_row_detail(row_id: str, **_kwargs: object) -> dict[str, object]:
+            raise KeyError(row_id)
+
+        with (
+            patch.object(app, "_resolve_rows_from_cached_read_models", return_value={}),
+            patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=missing_row_detail),
+        ):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link/preview",
+                json.dumps(
+                    {
+                        "month": "all",
+                        "row_ids": ["oa-exp-missing", "txn_imported_missing"],
+                        "case_id": "CASE-MISSING-ROW",
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 400)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "workbench_row_not_found")
+        self.assertEqual(payload["row_id"], "oa-exp-missing")
+
     def test_confirm_link_expands_oa_attachment_context_from_all_scope_read_model_when_month_filter_hides_invoice(self) -> None:
         app = build_application()
         oa_row = {

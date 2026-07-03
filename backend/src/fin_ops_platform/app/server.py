@@ -14730,9 +14730,8 @@ class Application:
         group_invoice_rows = [row for row in list(group.get("invoice_rows") or []) if isinstance(row, dict)]
         selected_oa_ids = {
             row_id
-            for row in group_oa_rows
-            if (row_id := str(row.get("id") or "").strip())
-            and row_id in selected_row_ids
+            for row_id in selected_row_ids
+            if self._row_type_for_row_id(row_id) == "oa"
         }
         selected_oa_attachment_invoice_rows = [
             row
@@ -14767,13 +14766,18 @@ class Application:
                 continue
             if self._invoice_row_belongs_to_selected_oa_attachment(row, selected_oa_ids):
                 preserve(row_id)
+        selected_oa_attachment_invoice_rows_without_selected_oa = [
+            row
+            for row in selected_oa_attachment_invoice_rows
+            if not self._invoice_row_belongs_to_selected_oa_attachment(row, selected_oa_ids)
+        ]
         for row in group_oa_rows:
             oa_row_id = str(row.get("id") or "").strip()
             if not oa_row_id or oa_row_id in selected_row_ids:
                 continue
             if any(
                 self._invoice_row_belongs_to_selected_oa_attachment(invoice_row, {oa_row_id})
-                for invoice_row in selected_oa_attachment_invoice_rows
+                for invoice_row in selected_oa_attachment_invoice_rows_without_selected_oa
             ):
                 preserve(oa_row_id)
         return preserved_row_ids

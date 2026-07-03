@@ -7,7 +7,7 @@
 - 状态：partial
 - 当前边界可信度：medium
 - 目标边界：页面查询走 `workbench` read model active generation；首屏 summary 只读物化 `read_model.workbench_summary`，groups summary 页只输出 UI 必需字段；写操作通过 workbench action/relation service 进入关系事实源和 dirty scope。
-- 当前缺口：`server.py` 与历史 workbench service 仍保留部分入口，`GET /api/workbench` full payload 仍是兼容迁移面；row detail legacy fallback 已在生产 SQL read model runtime 完全关闭，只保留非 SQL/legacy 模式兼容入口。`workbench-matching` worker 已走 PostgreSQL dirty scope 和 `WorkbenchMatchingRelationReadPort`，运行时本地 pair service 只作为 canonical relation command/read 支撑，不再作为页面或 read model fallback。
+- 当前缺口：`server.py` 与历史 workbench service 仍保留部分入口，`GET /api/workbench` full payload 仍是兼容迁移面；confirm-link context expansion 仍在 `Application` adapter 内，但输出合同已收紧为 canonical Workbench row id，禁止把上游 source id 注入 action row_ids；row detail legacy fallback 已在生产 SQL read model runtime 完全关闭，只保留非 SQL/legacy 模式兼容入口。`workbench-matching` worker 已走 PostgreSQL dirty scope 和 `WorkbenchMatchingRelationReadPort`，运行时本地 pair service 只作为 canonical relation command/read 支撑，不再作为页面或 read model fallback。
 - 旧代码删除条件：没有 API、前端、worker、测试继续读取 legacy live/pickle 路径，并且 active generation freshness 与回归测试覆盖写后刷新。
 
 ## 职责边界
@@ -32,7 +32,7 @@
 | 页面过滤、月份、分页、候选分组操作 | `web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/*` | 前端状态只进入 workbench API，不直接拼持久化查询 |
 | 查询请求 | `backend/src/fin_ops_platform/app/routes_workbench.py`、历史 `server.py` 入口 | 必须返回 read model freshness/status |
 | 首屏读取 | `fetchWorkbenchInitialPage(...)` -> `/api/workbench/summary` + `/api/workbench/groups` | summary 缺失时返回 refreshing/stale 并入队，不允许在请求线程从 `workbench_group_rows` 或 `app.invoices` 重算；groups `detail_level=summary` 不输出 search/debug/raw payload |
-| Row detail / confirm row 解析 | `GET /api/workbench/rows/{row_id}`、`WorkbenchRowDetailApiRoutes`、`Application._resolve_rows_from_cached_read_models(...)` | row id 输入必须先通过 workbench read model / row-detail 边界解析为标准 OA/流水/发票行。cached resolver 必须同时索引 `paired/open.{oa,bank,invoice}` 平铺行和 `paired/open.groups[*].{oa_rows,bank_rows,invoice_rows}` 成员行，group 成员可覆盖同 id 平铺行。生产 SQL read model runtime 下禁止 live-first 或 legacy query service fallback；缓存/query facade 失败时 fail closed，不能合成 `{id,type}` 占位或把 `KeyError(row_id)` 原样透出。 |
+| Row detail / confirm row 解析 | `GET /api/workbench/rows/{row_id}`、`WorkbenchRowDetailApiRoutes`、`Application._resolve_rows_from_cached_read_models(...)` | row id 输入必须先通过 workbench read model / row-detail 边界解析为标准 OA/流水/发票行。cached resolver 必须同时索引 `paired/open.{oa,bank,invoice}` 平铺行和 `paired/open.groups[*].{oa_rows,bank_rows,invoice_rows}` 成员行，group 成员可覆盖同 id 平铺行。confirm-link preview/submit 的上下文扩展只允许补充 canonical Workbench row id；OA 附件发票的 `source_workbench_row_id` 是回连 canonical OA 的合同字段，`derived_from_oa_id`、`source_expense_item_id`、row id 前缀中的原始来源 id 只能作为 source metadata，不得进入 action row_ids。生产 SQL read model runtime 下禁止 live-first 或 legacy query service fallback；缓存/query facade 失败时 fail closed，不能合成 `{id,type}` 占位或把 `KeyError(row_id)` 原样透出。 |
 | 写操作 | workbench action/relation services | 写后污染受影响 workbench/workbench_relation/downstream scopes |
 | 流水规则批量处理 relation metadata | `workbench_relation` / bank-flow-rule-batch submit and tag-rule sync | `special_metadata.requires_oa`、`requires_invoice` 决定 `relation_mode=bank_flow_rule_batch` 是否具备进入 paired 区的 row type；行级 relation display code 必须保留 `bank_flow_rule_batch`，不能被旧 `fully_linked` 人工关联语义覆盖；`source_row_count>3` 时默认折叠。Workbench 不读取当前标签设置作为 fallback；规则 owner 必须在保存设置后同步 active relation metadata。bank-flow submit/withdraw/reset 不是 `WorkbenchWriteFacade` 入口，但其 API 返回的 operation barrier 必须包含 `workbench_relation` 与 `workbench` 的 `all` + 受影响 month scope，因为关联台首屏读取 `month=all` active generation。 |
 | 外部往来闭环 relation metadata | `workbench_relation` / turnover manual closure and tag-rule sync | `relation_mode=turnover_manual_closure` 且 metadata 显式声明 `requires_oa` / `requires_invoice` 时，按 required row type 判定 open/paired；metadata 缺失的旧关系 fail closed。旧 `turnover:* manual_confirmed` 必须由规则 owner 通过 relation command 升级，Workbench 不回读当前标签设置。 |
@@ -52,7 +52,7 @@
 | paired/open 分区 | 前端 workbench components | 已确认 `bank_flow_rule_batch`、`turnover_manual_closure` 或 legacy no-OA relation 若缺少 metadata 声明要求的 OA 或发票 row，必须留在 open 区；不要求 OA/发票的 `bank_flow_rule_batch` 银行组应直接进入 paired 区。补齐 required row type 后才进入 paired 区。 |
 | batch-accounting paired 分区 | 前端 workbench components | active `relation_mode=batch_accounting` 且 `special_metadata.source=batch_accounting` 是批量账务模块的 confirmed relation I/O；行级 relation code 为 `batch_accounting` 时也必须作为 paired row 参与分组，不得落入 open `existing_case_candidate` |
 | 折叠批次展示 | `CandidateGroupGrid` | `collapsed_summary` 默认只展示摘要 row 和“展开 N 条/张明细”按钮；不得再渲染“当前显示 1 条摘要 / 实际 N 条流水”等绝对定位计数文案，避免与流水标签和日期重叠。 |
-| 配对/撤回结果 | 调用方和页面刷新 | 返回业务结果并触发 dirty scope |
+| 配对/撤回结果 | 调用方和页面刷新 | 返回业务结果并触发 dirty scope；confirm/cancel/withdraw 输入输出的 `row_ids`、`affected_row_ids`、operation barrier targets 均使用 canonical Workbench row id，撤回读取 active relation facts，不从 source metadata 反推行集合。 |
 | Operation barrier targets | 前端页面 | 写成功后等待 `workbench_relation` targets 以及可见性依赖的 `workbench` targets，再刷新 workbench/相关页面；跨模块写入若会影响关联台 `month=all`，必须把 `all` scope 纳入 targets，不能只等待业务页面自身 read model。 |
 | Dirty scope/outbox | runtime queue | 通过 gateway 或等价事务合同进入 durable queue |
 | 下游影响 | workbench relation、tax offset、pending invoice、bank-flow-rule-batches、no-OA、turnover 等 | 由关系事实源和 lifecycle/worker 扇出 |
