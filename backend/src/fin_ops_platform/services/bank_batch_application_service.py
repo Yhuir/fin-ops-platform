@@ -30,7 +30,7 @@ from fin_ops_platform.services.read_model_freshness import (
     source_version_mismatch_reasons,
 )
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+from fin_ops_platform.services.read_model_write_targets import freshness_targets, write_target_envelope
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
@@ -762,6 +762,7 @@ class BankBatchApplicationService:
         actor: str,
         expected_version: int | None,
         reason: str | None,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> dict[str, object]:
         previous_batch_snapshot = self._bank_batch_service.snapshot()
         previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
@@ -775,8 +776,27 @@ class BankBatchApplicationService:
                 reason=reason,
             )
             if not already_withdrawn:
-                self._cancel_relation_for_batch(batch, actor=actor, reason=reason)
-            result = self._mutation_result(batch, status="withdrawn", persist=True)
+                self._cancel_relation_for_batch(
+                    batch,
+                    actor=actor,
+                    reason=reason,
+                    history_operation_type=(
+                        "bank_flow_rule_batch_withdraw"
+                        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
+                        else "no_oa_bank_batch_withdraw"
+                    ),
+                    idempotency_operation=(
+                        "bank_flow_rule_batch_withdraw"
+                        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
+                        else "withdraw"
+                    ),
+                )
+            result = self._mutation_result(
+                batch,
+                status="withdrawn",
+                persist=True,
+                read_model_key=self._read_model_key_for_relation_mode(relation_mode),
+            )
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
             raise
@@ -849,7 +869,10 @@ class BankBatchApplicationService:
             },
             "affected_months": sorted(affected_months),
             **write_target_envelope(
-                read_model_key=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                targets=self._mutation_barrier_targets(
+                    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                    sorted(affected_months),
+                ),
                 scope_keys=sorted(affected_months),
                 fallback_scope_key="all",
             ),
@@ -2181,13 +2204,31 @@ class BankBatchApplicationService:
             "pair_relation": relation or {},
             "affected_months": affected_months,
             **write_target_envelope(
-                read_model_key=read_model_key,
+                targets=self._mutation_barrier_targets(read_model_key, affected_months),
                 scope_keys=affected_months,
                 fallback_scope_key="all",
             ),
             "workbench_rebuild_queued": workbench_rebuild_queued,
             "results": [{"batch_id": batch.get("batch_id"), "status": status}],
         }
+
+    @staticmethod
+    def _mutation_barrier_targets(
+        read_model_key: str,
+        affected_months: list[str],
+    ) -> list[dict[str, str]]:
+        month_scopes = [
+            month
+            for month in affected_months
+            if SEARCH_MONTH_RE.match(str(month or ""))
+        ]
+        primary_scopes = month_scopes or ["all"]
+        workbench_scopes = ["all", *month_scopes]
+        return [
+            *freshness_targets(read_model_key, primary_scopes),
+            *freshness_targets("workbench_relation", workbench_scopes),
+            *freshness_targets("workbench", workbench_scopes),
+        ]
 
     def affected_months(self, batch: dict[str, object]) -> list[str]:
         months = {

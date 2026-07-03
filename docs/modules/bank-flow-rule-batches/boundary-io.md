@@ -50,7 +50,7 @@
 | 批次列表 payload | 页面 | 返回 summary、rows、status bucket、read model status、stale reasons、scope keys 和分页信息。非 fresh 不能展示为真实空态。 |
 | Relation command | `workbench-relations` | 使用 `relation_mode=bank_flow_rule_batch`，行级 relation display code 必须保持 `bank_flow_rule_batch`，不能退回 `fully_linked` 或 `no_oa_bank_batch`。metadata 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；display tags 使用 `流水规则` + 业务标签，不能继承旧 `免OA` 标签。 |
 | 关联台展示 | `reconciliation-workbench` | 银行流水数 `>3` 时默认折叠；是否进入 paired 由 required row type 是否已满足决定。 |
-| Operation barrier | 前端 | 写成功后返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；新功能对外 target 使用 `read_model_key=bank_flow_rule_batch`。 |
+| Operation barrier | 前端 | 写成功后返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。批量提交、撤回和 reset 的等待目标必须同时包含页面自身 `bank_flow_rule_batch` 受影响 month scope，以及关联台实际读取的 `workbench_relation`、`workbench` 的 `all` + 受影响 month scope；不能由 route 覆盖 service 返回的目标，也不能只返回 `bank_flow_rule_batch` 后让关联台读取旧 `month=all` 空 generation。 |
 | Dirty scope/outbox | runtime/read models | 通过 owner producer 或同事务等价 writer 污染 `bank_flow_rule_batch`、`workbench_relation`、`workbench`、`bank_detail` 以及受影响下游。 |
 | Audit record | permissions/audit | 保存规则、提交、撤回、rebaseline dry-run/apply 都记录 actor、reason、before/after、affected rows/months 和 request id。 |
 
@@ -82,7 +82,7 @@
 - Event：`bank_flow_rule_batch.read_model.refresh`
 - Query owner：`BankFlowRuleBatchApplicationService`
 - Repository owner：`BankFlowRuleBatchReadModelRepositoryPort`
-- Operation barrier：直接读取 `bank_flow_rule_batch` readiness/outbox/worker facts，不再映射到 `no_oa_bank_batch`。
+- Operation barrier：`bank_flow_rule_batch` 自身目标直接读取 `bank_flow_rule_batch` readiness/outbox/worker facts，不再映射到 `no_oa_bank_batch`；同一次 mutation 返回的 `workbench_relation` / `workbench` visibility targets 必须覆盖关联台 `month=all` 首屏和受影响月份，确保批量提交后关联台不会在 relation 已写入但 active generation 未刷新时显示真实空态。
 - 新 relation 写入 `relation_mode=bank_flow_rule_batch`，批次 payload/read model row 也必须携带 `relation_mode=bank_flow_rule_batch`。列表 API 查询 submitted/unsubmitted/withdrawn 时必须通过 `list_bank_flow_rule_batch_rows` repository port 过滤，旧 no-OA payload 缺失该字段时只按 `no_oa_bank_batch` 处理。
 - PostgreSQL 运行时批次存储和 read model 查询使用 `app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events`、`read_model.bank_flow_rule_batch_rows`；迁移 `0082_bank_flow_rule_batch_storage.sql` 从历史 no-OA 物理表按 `relation_mode=bank_flow_rule_batch` 回填，但运行时不再把 no-OA 表作为 bank-flow source of truth。no-OA legacy 仍使用 `app.no_oa_bank_batches`、`app.no_oa_bank_batch_events`、`read_model.no_oa_bank_batch_rows`。
 - 持久化 I/O 使用 `PostgresWorkbenchRepository.save_bank_flow_rule_batches*` 命名入口，在同一事务内只删除/写入 bank-flow 物理表，并使用批量 values upsert 写 `app.bank_flow_rule_batches` 与 `read_model.bank_flow_rule_batch_rows`；禁止通过 no-OA persistence port、no-OA 物理表或逐行 projection fallback 写入新模块。

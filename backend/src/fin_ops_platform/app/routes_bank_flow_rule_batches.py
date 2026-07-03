@@ -9,7 +9,6 @@ from fin_ops_platform.services.app_settings_service import AppSettingsValidation
 from fin_ops_platform.services.bank_batch_application_service import BankBatchPersistenceError
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 MutationSessionResolver = Callable[[dict[str, str] | None], OARequestSession | Any]
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
@@ -180,13 +179,6 @@ class BankFlowRuleBatchApiRoutes:
             return self._persistence_error_response(exc)
         except ValueError as exc:
             return self._value_error_response(exc)
-        result.update(
-            write_target_envelope(
-                read_model_key=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                scope_keys=result.get("affected_months"),
-                fallback_scope_key="all",
-            )
-        )
         return HTTPStatus.OK, result
 
     def submit_selection(

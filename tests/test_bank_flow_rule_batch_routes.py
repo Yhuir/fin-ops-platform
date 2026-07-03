@@ -58,7 +58,26 @@ class FakeBankFlowRuleBatchApplicationService:
                 },
             )
         )
-        return {"batch": {"batch_id": batch_id}, "affected_months": ["2026-05"]}
+        return {
+            "batch": {"batch_id": batch_id},
+            "affected_months": ["2026-05"],
+            "affected_scope_keys": ["2026-05"],
+            "read_model_scope_keys": ["2026-05"],
+            "freshness_targets": [
+                {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"},
+                {"read_model_key": "workbench_relation", "scope_key": "all"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
+                {"read_model_key": "workbench", "scope_key": "all"},
+                {"read_model_key": "workbench", "scope_key": "2026-05"},
+            ],
+            "operation_barrier_targets": [
+                {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"},
+                {"read_model_key": "workbench_relation", "scope_key": "all"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
+                {"read_model_key": "workbench", "scope_key": "all"},
+                {"read_model_key": "workbench", "scope_key": "2026-05"},
+            ],
+        }
 
     def submit_selected_rows(self, *, row_ids, actor, note, relation_mode):  # type: ignore[no-untyped-def]
         self.calls.append(
@@ -149,9 +168,17 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
 
         self.assertEqual(submit_status, HTTPStatus.OK)
         self.assertEqual(withdraw_status, HTTPStatus.OK)
-        expected_target = {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}
-        self.assertEqual(withdraw_payload["freshness_targets"], [expected_target])
-        self.assertEqual(withdraw_payload["operation_barrier_targets"], [expected_target])
+        self.assertEqual(
+            withdraw_payload["operation_barrier_targets"],
+            [
+                {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"},
+                {"read_model_key": "workbench_relation", "scope_key": "all"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
+                {"read_model_key": "workbench", "scope_key": "all"},
+                {"read_model_key": "workbench", "scope_key": "2026-05"},
+            ],
+        )
+        self.assertEqual(withdraw_payload["freshness_targets"], withdraw_payload["operation_barrier_targets"])
         self.assertEqual(withdraw_payload["read_model_scope_keys"], ["2026-05"])
         self.assertEqual(
             service.calls,

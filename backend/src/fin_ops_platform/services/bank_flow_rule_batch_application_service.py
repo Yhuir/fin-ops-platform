@@ -41,6 +41,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             actor=actor,
             expected_version=expected_version,
             reason=reason,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
 
     def reset_submitted_bank_flow_rule_batches(

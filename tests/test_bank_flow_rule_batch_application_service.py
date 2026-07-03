@@ -200,6 +200,31 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(batch_service.withdraw_calls[0]["batch_id"], "batch-1")
         self.assertEqual(refresh_calls, [])
 
+    def test_withdraw_uses_bank_flow_relation_mode_for_shared_mutation_boundary(self) -> None:
+        service, _batch_service, _refresh_calls = self._service_with_refresh_aware_batch()
+        cancel_calls: list[dict[str, object]] = []
+        mutation_calls: list[dict[str, object]] = []
+
+        def capture_cancel(*_args: object, **kwargs: object) -> None:
+            cancel_calls.append(dict(kwargs))
+
+        def capture_mutation(batch: dict[str, object], **kwargs: object) -> dict[str, object]:
+            mutation_calls.append(dict(kwargs))
+            return {"batch": dict(batch)}
+
+        service._cancel_relation_for_batch = capture_cancel  # type: ignore[method-assign]
+        service._mutation_result = capture_mutation  # type: ignore[method-assign]
+
+        service.withdraw_batch(
+            "batch-1",
+            actor="finance-user",
+            expected_version=2,
+            reason="误提交",
+        )
+
+        self.assertEqual(cancel_calls[0]["history_operation_type"], "bank_flow_rule_batch_withdraw")
+        self.assertEqual(mutation_calls[0]["read_model_key"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+
     def test_withdraw_falls_back_to_all_scope_refresh_when_batch_is_missing(self) -> None:
         service, batch_service, refresh_calls = self._service_with_refresh_aware_batch(
             requires_refresh_before_lookup=True,
