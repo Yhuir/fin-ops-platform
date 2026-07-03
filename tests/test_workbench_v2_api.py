@@ -4129,6 +4129,56 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_row_detail_resolves_flat_cached_read_model_before_live_detail(self) -> None:
+        app = build_application()
+        row_id = "oa-exp-69fab21659b12d7d42a50a45"
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-05",
+            payload={
+                "month": "2026-05",
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 0,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 1,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": [], "oa": [], "bank": [], "invoice": []},
+                "open": {
+                    "groups": [],
+                    "oa": [
+                        {
+                            "id": row_id,
+                            "type": "oa",
+                            "applicant": "陈佳玉",
+                            "project_name": "大型卷烟厂余热综合利用项目",
+                            "amount": "145.00",
+                            "reconciliation_amount": "145.00",
+                            "available_actions": ["detail", "confirm_link", "mark_exception"],
+                        }
+                    ],
+                    "bank": [],
+                    "invoice": [],
+                },
+                "exceptions": {"groups": []},
+            },
+            ignored_rows=[],
+        )
+        app._live_workbench_service = SimpleNamespace(
+            get_row_detail=lambda _row_id: (_ for _ in ()).throw(
+                AssertionError("row detail must not read live rows before cached read model rows")
+            )
+        )
+        app._workbench_row_detail_api_routes = None
+
+        response = app.handle_request("GET", f"/api/workbench/rows/{row_id}?month=2026-05")
+
+        self.assertEqual(response.status_code, 200, response.body)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["row"]["id"], row_id)
+        self.assertEqual(payload["row"]["applicant"], "陈佳玉")
+
     def test_get_api_workbench_supports_two_seed_months(self) -> None:
         app = build_application()
 
@@ -5139,6 +5189,100 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
         )
         self.assertNotIn("updated_rows", confirm_payload)
+
+    def test_confirm_link_resolves_selected_flat_read_model_rows_without_live_detail(self) -> None:
+        app = build_application()
+        oa_id = "oa-exp-69fab21659b12d7d42a50a45"
+        bank_id = "bk-o-202605-flat-145"
+        invoice_id = "iv-o-202605-flat-145"
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-05",
+            payload={
+                "month": "2026-05",
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 1,
+                    "invoice_count": 1,
+                    "paired_count": 0,
+                    "open_count": 3,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": [], "oa": [], "bank": [], "invoice": []},
+                "open": {
+                    "groups": [],
+                    "oa": [
+                        {
+                            "id": oa_id,
+                            "type": "oa",
+                            "case_id": "",
+                            "applicant": "陈佳玉",
+                            "project_name": "大型卷烟厂余热综合利用项目",
+                            "amount": "145.00",
+                            "reconciliation_amount": "145.00",
+                            "available_actions": ["detail", "confirm_link", "mark_exception"],
+                        }
+                    ],
+                    "bank": [
+                        {
+                            "id": bank_id,
+                            "type": "bank",
+                            "case_id": "",
+                            "trade_time": "2026-06-23 09:45:03",
+                            "counterparty_name": "陈佳玉",
+                            "debit_amount": "145.00",
+                            "credit_amount": "",
+                            "memo": "报销",
+                            "bank_account": "建行 8106",
+                            "available_actions": ["detail", "confirm_link", "mark_exception"],
+                        }
+                    ],
+                    "invoice": [
+                        {
+                            "id": invoice_id,
+                            "type": "invoice",
+                            "case_id": "",
+                            "seller_name": "云南铁路发展有限公司",
+                            "buyer_name": "云南溯源科技有限公司",
+                            "issue_date": "2026-05-06",
+                            "invoice_type": "进项专票",
+                            "amount": "145.00",
+                            "total_with_tax": "145.00",
+                            "available_actions": ["detail", "confirm_link", "mark_exception"],
+                        }
+                    ],
+                },
+                "exceptions": {"groups": []},
+            },
+            ignored_rows=[],
+        )
+        app._live_workbench_service = SimpleNamespace(
+            get_row_detail=lambda row_id: (_ for _ in ()).throw(
+                AssertionError(f"confirm link must resolve {row_id} from the workbench row-detail boundary")
+            )
+        )
+        app._workbench_row_detail_api_routes = None
+
+        confirm_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "row_ids": [oa_id, bank_id, invoice_id],
+                    "case_id": "CASE-FLAT-READ-MODEL-CONFIRM",
+                }
+            ),
+        )
+
+        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertTrue(confirm_payload["success"])
+        self.assertCountEqual(confirm_payload["affected_row_ids"], [oa_id, bank_id, invoice_id])
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(
+            "CASE-FLAT-READ-MODEL-CONFIRM"
+        )
+        assert relation is not None
+        self.assertCountEqual(relation["row_ids"], [oa_id, bank_id, invoice_id])
 
     def test_confirm_link_ignores_empty_row_ids_in_minimal_hot_path(self) -> None:
         app = build_application()

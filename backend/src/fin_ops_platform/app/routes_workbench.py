@@ -44,21 +44,21 @@ class WorkbenchRowDetailApiRoutes:
         if etc_summary_row is not None:
             return {"row": self._apply_row_override(etc_summary_row)}
 
-        try:
-            payload = {"row": self._live_row_detail(row_id)}
-        except KeyError:
-            month_hint = str(month).strip() if month not in (None, "") else self._row_month_scope_from_row_id(row_id)
-            cached_rows = self._cached_rows_resolver([row_id], month_hint=month_hint)
-            if row_id in cached_rows:
-                payload = {"row": cached_rows[row_id]}
-            elif query_facade_row := self._row_detail_from_query_facade(row_id, month_hint=month_hint):
-                payload = {"row": query_facade_row}
-            elif month_hint is None and self._looks_like_oa_row_id(row_id):
-                raise KeyError(row_id)
-            elif self._legacy_route_fallback_allowed(row_id):
+        month_hint = str(month).strip() if month not in (None, "") else self._row_month_scope_from_row_id(row_id)
+        cached_rows = self._cached_rows_resolver([row_id], month_hint=month_hint)
+        if row_id in cached_rows:
+            payload = {"row": cached_rows[row_id]}
+        elif query_facade_row := self._row_detail_from_query_facade(row_id, month_hint=month_hint):
+            payload = {"row": query_facade_row}
+        elif month_hint is None and self._looks_like_oa_row_id(row_id):
+            raise KeyError(row_id)
+        elif self._legacy_route_fallback_allowed(row_id):
+            try:
+                payload = {"row": self._live_row_detail(row_id)}
+            except KeyError:
                 payload = self._legacy_row_detail(row_id)
-            else:
-                raise KeyError(row_id)
+        else:
+            raise KeyError(row_id)
         row = payload.get("row")
         if not isinstance(row, dict):
             raise KeyError(row_id)

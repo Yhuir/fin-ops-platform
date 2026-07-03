@@ -14575,10 +14575,19 @@ class Application:
         rows_by_id: dict[str, dict[str, object]] = {}
         for section in ("paired", "open"):
             section_payload = payload.get(section, {})
-            for group in section_payload.get("groups", []):
-                for key in ("oa_rows", "bank_rows", "invoice_rows"):
-                    for row in group.get(key, []):
+            if not isinstance(section_payload, dict):
+                continue
+            for key in ("oa", "bank", "invoice"):
+                for row in list(section_payload.get(key) or []):
+                    if isinstance(row, dict) and str(row.get("id") or "").strip():
                         rows_by_id[str(row["id"])] = row
+            for group in list(section_payload.get("groups") or []):
+                if not isinstance(group, dict):
+                    continue
+                for key in ("oa_rows", "bank_rows", "invoice_rows"):
+                    for row in list(group.get(key) or []):
+                        if isinstance(row, dict) and str(row.get("id") or "").strip():
+                            rows_by_id[str(row["id"])] = row
         return rows_by_id
 
     def _resolve_rows_for_amount_check(
