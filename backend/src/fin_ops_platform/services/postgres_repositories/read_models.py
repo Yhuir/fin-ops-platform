@@ -5353,6 +5353,113 @@ class PostgresReadModelRepository:
         return "generation_metadata_actual_mismatch: " + "; ".join(parts) + suffix
 
     @staticmethod
+    def _workbench_all_scope_parent_stale_failures(
+        executor: Any,
+        *,
+        scope_key: str,
+    ) -> list[dict[str, Any]]:
+        if str(scope_key or "").strip() != "all":
+            return []
+        row = executor.fetch_one(
+            """
+            with all_generation as (
+                select
+                    generation_id,
+                    row_count,
+                    group_count,
+                    case
+                        when coalesce(source_versions->>'source_version', '') ~ '^[0-9]+$'
+                            then (source_versions->>'source_version')::bigint
+                        else 0
+                    end as source_version
+                from read_model.workbench_generations
+                where tenant_id = 'default'
+                  and scope_key = 'all'
+                  and status = 'active'
+                order by activated_at desc nulls last, updated_at desc
+                limit 1
+            ),
+            parent_generation_summary as (
+                select
+                    count(*)::bigint as parent_scope_count,
+                    coalesce(sum(row_count), 0)::bigint as parent_row_count,
+                    coalesce(sum(group_count), 0)::bigint as parent_group_count,
+                    coalesce(
+                        max(
+                            case
+                                when coalesce(source_versions->>'source_version', '') ~ '^[0-9]+$'
+                                    then (source_versions->>'source_version')::bigint
+                                else 0
+                            end
+                        ),
+                        0
+                    )::bigint as parent_source_version,
+                    coalesce(array_agg(scope_key order by scope_key desc), array[]::text[]) as parent_scope_keys
+                from read_model.workbench_generations
+                where tenant_id = 'default'
+                  and status = 'active'
+                  and scope_key <> 'all'
+                  and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            )
+            select
+                all_generation.generation_id as all_generation_id,
+                coalesce(all_generation.row_count, 0)::bigint as all_row_count,
+                coalesce(all_generation.group_count, 0)::bigint as all_group_count,
+                coalesce(all_generation.source_version, 0)::bigint as all_source_version,
+                parent_generation_summary.parent_scope_count,
+                parent_generation_summary.parent_row_count,
+                parent_generation_summary.parent_group_count,
+                parent_generation_summary.parent_source_version,
+                parent_generation_summary.parent_scope_keys
+            from parent_generation_summary
+            left join all_generation on true
+            """,
+        )
+        if not isinstance(row, dict):
+            return []
+        parent_scope_count = int_value(row.get("parent_scope_count"), 0)
+        parent_row_count = int_value(row.get("parent_row_count"), 0)
+        parent_group_count = int_value(row.get("parent_group_count"), 0)
+        parent_source_version = int_value(row.get("parent_source_version"), 0)
+        if parent_scope_count == 0:
+            return []
+        all_generation_id = text(row.get("all_generation_id"))
+        all_row_count = int_value(row.get("all_row_count"), 0)
+        all_group_count = int_value(row.get("all_group_count"), 0)
+        all_source_version = int_value(row.get("all_source_version"), 0)
+        reasons: list[str] = []
+        if not all_generation_id:
+            reasons.append("all_scope_active_generation_missing")
+        if parent_group_count > 0 and all_group_count == 0:
+            reasons.append(f"all_scope_empty_with_parent_groups parent_group_count={parent_group_count}")
+        if parent_row_count > 0 and all_row_count == 0:
+            reasons.append(f"all_scope_empty_with_parent_rows parent_row_count={parent_row_count}")
+        if parent_source_version > all_source_version:
+            reasons.append(
+                "all_scope_source_version_behind_parent "
+                f"all_source_version={all_source_version} parent_source_version={parent_source_version}"
+            )
+        if not reasons:
+            return []
+        parent_scope_keys = row.get("parent_scope_keys")
+        if not isinstance(parent_scope_keys, list):
+            parent_scope_keys = []
+        return [
+            {
+                "scope_key": "all",
+                "generation_id": all_generation_id,
+                "parent_scope_keys": [str(item) for item in parent_scope_keys if str(item or "").strip()],
+                "all_row_count": all_row_count,
+                "all_group_count": all_group_count,
+                "parent_row_count": parent_row_count,
+                "parent_group_count": parent_group_count,
+                "all_source_version": all_source_version,
+                "parent_source_version": parent_source_version,
+                "reasons": reasons,
+            }
+        ]
+
+    @staticmethod
     def _lock_workbench_generation_scope(connection: Any, *, scope_key: str) -> None:
         connection.execute(
             "select pg_advisory_xact_lock(hashtext(%s))",
@@ -5942,6 +6049,11 @@ class PostgresReadModelRepository:
         if "failed" in statuses:
             return "stale"
         if self._workbench_groups_schema_status(scope_key=normalized_scope_key) != "fresh":
+            return "stale"
+        if self._workbench_all_scope_parent_stale_failures(
+            self._connection,
+            scope_key=normalized_scope_key,
+        ):
             return "stale"
         return "fresh"
 
@@ -6567,6 +6679,10 @@ class PostgresReadModelRepository:
             if include_consistency
             else []
         )
+        all_scope_parent_failures = self._workbench_all_scope_parent_stale_failures(
+            self._connection,
+            scope_key=normalized_scope_key,
+        )
         groups_schema_status = self._workbench_groups_schema_status(scope_key=normalized_scope_key)
         active_refresh_in_progress = bool(
             dirty_statuses.intersection({"pending", "processing"})
@@ -6582,6 +6698,8 @@ class PostgresReadModelRepository:
         elif generation_metadata.get("failed_generation_is_relevant"):
             read_model_status = "stale"
         elif groups_schema_status != "fresh":
+            read_model_status = "stale"
+        elif all_scope_parent_failures:
             read_model_status = "stale"
         last_error = None
         if read_model_status != "refreshing":
@@ -6604,11 +6722,14 @@ class PostgresReadModelRepository:
             stale_reasons.append("builder_schema_mismatch")
         if consistency_failures:
             stale_reasons.append("generation_metadata_actual_mismatch")
+        if all_scope_parent_failures:
+            stale_reasons.append("all_scope_parent_generation_out_of_sync")
         return {
             "scope_key": normalized_scope_key,
             "read_model_status": read_model_status,
             "consistency_status": "failed" if consistency_failures else "fresh",
             "consistency_failures": consistency_failures,
+            "all_scope_parent_failures": all_scope_parent_failures,
             "active_generation_id": generation_metadata.get("active_generation_id"),
             "building_generation_id": generation_metadata.get("building_generation_id"),
             "failed_generation_id": generation_metadata.get("failed_generation_id"),

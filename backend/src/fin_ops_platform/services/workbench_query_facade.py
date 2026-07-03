@@ -118,6 +118,7 @@ class WorkbenchQueryFacade:
             )
         payload = dict(payload)
         stale_reasons = self._stale_reasons(payload.get("source_versions"), scope_key=scope_key)
+        refresh_enqueued = False
         if stale_reasons:
             payload["read_model_status"] = "stale"
             payload["read_model_stale_reasons"] = [
@@ -125,10 +126,13 @@ class WorkbenchQueryFacade:
                 *stale_reasons,
             ]
             self._enqueue_refresh(scope_key, reason="api_summary_source_versions_stale")
+            refresh_enqueued = True
         if "oa_status" not in payload and callable(self._oa_status_provider):
             payload["oa_status"] = self._serialize_value(self._oa_status_provider())
         summary_status = str(payload.get("read_model_status") or "fresh")
         if summary_status != "fresh":
+            if summary_status == "stale" and not refresh_enqueued:
+                self._enqueue_refresh(scope_key, reason="api_summary_stale")
             self._emit_status_metric(
                 endpoint="/api/workbench/summary",
                 scope_key=scope_key,
@@ -290,6 +294,20 @@ class WorkbenchQueryFacade:
             )
         payload = dict(payload)
         payload["read_model_scope_key"] = scope_key
+        refresh_status_value = (
+            str(refresh_status_payload.get("read_model_status") or "")
+            if isinstance(refresh_status_payload, dict)
+            else ""
+        )
+        refresh_status_enqueued = bool(refresh_status_value and refresh_status_value != "fresh")
+        if refresh_status_value and refresh_status_value != "fresh":
+            payload["read_model_status"] = refresh_status_value
+            refresh_stale_reasons = refresh_status_payload.get("read_model_stale_reasons")
+            if isinstance(refresh_stale_reasons, list) and refresh_stale_reasons:
+                payload["read_model_stale_reasons"] = [
+                    *list(payload.get("read_model_stale_reasons") if isinstance(payload.get("read_model_stale_reasons"), list) else []),
+                    *refresh_stale_reasons,
+                ]
         stale_reasons = self._stale_reasons(payload.get("source_versions"), scope_key=scope_key)
         if stale_reasons:
             payload["read_model_status"] = "stale"
@@ -299,7 +317,8 @@ class WorkbenchQueryFacade:
             ]
         groups_status = str(payload.get("read_model_status") or "fresh")
         if groups_status != "fresh":
-            self._enqueue_refresh(scope_key, reason="api_groups_stale")
+            if not refresh_status_enqueued:
+                self._enqueue_refresh(scope_key, reason="api_groups_stale")
             self._emit_status_metric(
                 endpoint="/api/workbench/groups",
                 scope_key=scope_key,

@@ -193,6 +193,43 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(queue.refreshes, [("all", "api_summary_miss")])
         self.assertEqual(metrics.calls[0]["reason"], "api_summary_miss")
 
+    def test_summary_stale_payload_enqueues_refresh(self) -> None:
+        class Repository:
+            def get_workbench_summary(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "month": "all",
+                    "scope_key": "all",
+                    "summary": {
+                        "oa_count": 0,
+                        "bank_count": 0,
+                        "invoice_count": 0,
+                        "paired_count": 0,
+                        "open_count": 0,
+                        "exception_count": 0,
+                    },
+                    "read_model_status": "stale",
+                    "source_versions": {"source_version": 0},
+                }
+
+        queue = QueueRecorder()
+        metrics = MetricRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=metrics.emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.summary("all")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["read_model_status"], "stale")
+        self.assertEqual(queue.refreshes, [("all", "api_summary_stale")])
+        self.assertEqual(metrics.calls[0]["reason"], "sql_status")
+
     def test_groups_cache_hit_uses_granular_redis_dependency_without_page_query(self) -> None:
         class Repository:
             def get_workbench_groups_page(self, **_kwargs: object) -> object:

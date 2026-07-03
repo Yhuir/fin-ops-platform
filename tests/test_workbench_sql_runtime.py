@@ -1403,7 +1403,7 @@ class WorkbenchScopeShardEtcConnection:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
         if "from app.etc_business_batches" in normalized and "from app.etc_invoices" in normalized:
-            return [{"scope_key": "2026-05"}]
+            return [{"scope_key": "2026-06"}, {"scope_key": "2026-05"}]
         return []
 
 
@@ -2467,16 +2467,17 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("month_scope is null or month_scope =", connection.active_relation_query)
         self.assertEqual(connection.active_relation_params, (["inv_imported_0481"],))
 
-    def test_sql_projection_scope_shards_include_etc_business_sources(self) -> None:
+    def test_sql_projection_scope_shards_include_etc_business_sources_and_active_month_generations(self) -> None:
         connection = WorkbenchScopeShardEtcConnection()
         builder = WorkbenchSqlProjectionBuilder(connection=connection)
 
         shards = builder.list_workbench_scope_shards("all")
 
-        self.assertEqual(shards, ["2026-05"])
+        self.assertEqual(shards, ["2026-06", "2026-05"])
         query = connection.fetch_all_calls[0][0]
         self.assertIn("from app.etc_business_batches", query)
         self.assertIn("from app.etc_invoices", query)
+        self.assertIn("from read_model.workbench_generations", query)
 
     def test_sql_projection_month_rebuild_defers_all_scope_aggregation(self) -> None:
         class SaveRecorder:
@@ -3995,6 +3996,59 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 for _sql, params in connection.fetch_one_calls
             )
         )
+
+    def test_repository_marks_all_scope_stale_when_parent_generations_have_groups_but_all_is_empty(self) -> None:
+        class EmptyAllWithParentGenerationConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "parent_generation_summary" in normalized:
+                    return {
+                        "all_generation_id": "gen-all-empty",
+                        "all_row_count": 0,
+                        "all_group_count": 0,
+                        "all_source_version": 0,
+                        "parent_scope_count": 2,
+                        "parent_row_count": 41,
+                        "parent_group_count": 9,
+                        "parent_source_version": 19,
+                        "parent_scope_keys": ["2026-03", "2026-02"],
+                    }
+                if "as group_count" in normalized and "as current_group_count" in normalized:
+                    return {"group_count": 0, "current_group_count": 0}
+                return super().fetch_one(sql, params)
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "actual_group_count" in normalized and "from read_model.workbench_generations" in normalized:
+                    return []
+                if "from read_model.workbench_generations" in normalized:
+                    return [
+                        {
+                            "generation_id": "gen-all-empty",
+                            "status": "active",
+                            "activated_at": "2026-07-03T10:00:00+08:00",
+                            "source_versions": {"source_version": 0},
+                            "row_count": 0,
+                            "group_count": 0,
+                            "build_metadata": {},
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        connection = EmptyAllWithParentGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        status = repository.get_workbench_refresh_status(scope_key="all")
+        groups_status = repository.get_workbench_groups_freshness_status(scope_key="all")
+
+        self.assertEqual(status["read_model_status"], "stale")
+        self.assertEqual(groups_status["read_model_status"], "stale")
+        self.assertIn("all_scope_parent_generation_out_of_sync", status["read_model_stale_reasons"])
+        self.assertEqual(status["all_scope_parent_failures"][0]["parent_group_count"], 9)
+        self.assertEqual(status["all_scope_parent_failures"][0]["parent_scope_keys"], ["2026-03", "2026-02"])
+        self.assertTrue(any("parent_generation_summary" in sql for sql, _params in connection.fetch_one_calls))
 
     def test_repository_persists_workbench_groups_alongside_rows_and_snapshot(self) -> None:
         connection = WorkbenchWriteConnection()

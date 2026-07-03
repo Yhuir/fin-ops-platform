@@ -64,6 +64,7 @@
   作为 strict claim；同一个 `case:<case_id>` 在部分月份为 paired、部分月份仍残留 open candidate 时，paired 可见 owner
   必须赢，open 重复行不得发布。只有“没有可见 paired group、仅 canonical active relation 额外 claim”的 same-case open group
   才允许保留为 partial/open 展示。
+- `all` 聚合输入 shard 的事实源必须包含 canonical 业务源月份和已发布的 active 月度 generation；query freshness/status 必须校验 active 父 generation 与 `all` active generation 的 source_version/row/group 基本一致性。父 generation 有内容而 `all` 缺失或为空时，`summary`/`groups` 必须返回 stale 并入队刷新，不能把空结果标记为 fresh。
 - Worker：`workbench`
 - 特殊例外：保留 active generation 原子发布模型，不机械改成普通 read model gateway。
 - Summary 物化合同：`read_model.workbench_summary` 是 summary 读路径唯一事实源；repository 不再用 groups/group_rows/app.invoices 在 API 请求内补算 summary。
