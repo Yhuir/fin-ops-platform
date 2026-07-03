@@ -542,19 +542,33 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
                         "created_at": "2026-04-08T10:00:00+00:00",
                         "updated_at": "2026-04-08T10:00:00+00:00",
                     },
-                }
+                },
+                "pair_relation_history": [
+                    {
+                        "case_id": "CASE-PAIR-001",
+                        "operation_type": "old-case",
+                        "after_relations": [{"case_id": "CASE-PAIR-001"}],
+                    },
+                    {
+                        "case_id": "CASE-PAIR-002",
+                        "operation_type": "selected-case",
+                        "after_relations": [{"case_id": "CASE-PAIR-002"}],
+                    },
+                ],
             }
         )
 
         snapshot = service.snapshot_case_ids(["CASE-PAIR-002"])
 
         self.assertEqual(
-            snapshot,
+            snapshot["pair_relations"],
             {
-                "pair_relations": {
-                    "CASE-PAIR-002": service.snapshot()["pair_relations"]["CASE-PAIR-002"],
-                }
+                "CASE-PAIR-002": service.snapshot()["pair_relations"]["CASE-PAIR-002"],
             },
+        )
+        self.assertEqual(
+            [history["operation_type"] for history in snapshot["pair_relation_history"]],
+            ["selected-case"],
         )
 
 

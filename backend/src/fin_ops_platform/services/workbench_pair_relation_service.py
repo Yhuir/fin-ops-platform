@@ -66,8 +66,51 @@ class WorkbenchPairRelationService:
                 if case_id in normalized_case_ids
             }
         }
-        if self._pair_relation_history:
-            payload["pair_relation_history"] = deepcopy(self._pair_relation_history)
+        if self._pair_relation_history and normalized_case_ids:
+            payload["pair_relation_history"] = [
+                deepcopy(history)
+                for history in self._pair_relation_history
+                if self._history_touches_cases(history, normalized_case_ids)
+            ]
+        return payload
+
+    def snapshot_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_row_ids = {
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        }
+        normalized_case_ids = {
+            str(case_id).strip()
+            for case_id in list(case_ids or [])
+            if str(case_id).strip()
+        }
+        if not normalized_row_ids and not normalized_case_ids:
+            return {}
+
+        selected_relations: dict[str, dict[str, Any]] = {}
+        for case_id, relation in self._pair_relations.items():
+            relation_row_ids = {
+                str(row_id).strip()
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            }
+            if case_id in normalized_case_ids or normalized_row_ids.intersection(relation_row_ids):
+                selected_relations[case_id] = deepcopy(relation)
+
+        selected_case_ids = {*normalized_case_ids, *selected_relations}
+        payload: dict[str, Any] = {"pair_relations": selected_relations}
+        if self._pair_relation_history and selected_case_ids:
+            payload["pair_relation_history"] = [
+                deepcopy(history)
+                for history in self._pair_relation_history
+                if self._history_touches_cases(history, selected_case_ids)
+            ]
         return payload
 
     def list_active_relations(self) -> list[dict[str, Any]]:
@@ -760,6 +803,19 @@ class WorkbenchPairRelationService:
                 if after_case_id == case_id or (row_ids and row_ids.issubset(after_row_ids)):
                     return deepcopy(history)
         return None
+
+    @staticmethod
+    def _history_touches_cases(history: dict[str, Any], case_ids: set[str]) -> bool:
+        if not case_ids:
+            return False
+        for key in ("case_id", "relation_case_id"):
+            if str(history.get(key) or "").strip() in case_ids:
+                return True
+        for collection_key in ("before_relations", "after_relations"):
+            for relation in list(history.get(collection_key) or []):
+                if isinstance(relation, dict) and str(relation.get("case_id") or "").strip() in case_ids:
+                    return True
+        return False
 
     @staticmethod
     def _timestamp() -> str:

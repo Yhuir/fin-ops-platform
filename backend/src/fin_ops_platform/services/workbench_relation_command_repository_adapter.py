@@ -27,6 +27,20 @@ class WorkbenchRelationCommandRepositoryAdapter:
             return deepcopy(snapshot) if isinstance(snapshot, dict) else {}
         return self._pair_relation_service.snapshot()
 
+    def load_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        loader = getattr(self._repository, "load_workbench_pair_relations_for_row_ids", None)
+        if callable(loader):
+            snapshot = loader(list(row_ids or []), case_ids=list(case_ids or []))
+            return deepcopy(snapshot) if isinstance(snapshot, dict) else {}
+        return WorkbenchPairRelationService.from_snapshot(
+            self.load_workbench_pair_relations()
+        ).snapshot_for_row_ids(list(row_ids or []), case_ids=list(case_ids or []))
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, Any],

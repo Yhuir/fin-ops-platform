@@ -10,6 +10,15 @@ from fin_ops_platform.services.bank_batch_application_service import (
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 
 
+BANK_FLOW_RULE_BATCH_ONLINE_MUTATION_ACTIONS = frozenset(
+    {
+        "bank_flow_rule_batch_submit",
+        "bank_flow_rule_batch_withdraw",
+        "bank_flow_rule_batch_reset_submitted",
+    }
+)
+
+
 class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
     """Application boundary for 流水规则批量处理."""
 
@@ -143,16 +152,17 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             for month in list(affected_months or [])
             if SEARCH_MONTH_RE.match(str(month).strip())
         ]
-        self._execute_derived_data_lifecycle_event(
-            "bank_flow_rule_batch_changed",
-            months=normalized_months,
-            metadata={
-                "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                **({"action_name": normalized_action_name} if normalized_action_name else {}),
-            },
-            schedule_cost_warmup=False,
-        )
+        if normalized_action_name not in BANK_FLOW_RULE_BATCH_ONLINE_MUTATION_ACTIONS:
+            self._execute_derived_data_lifecycle_event(
+                "bank_flow_rule_batch_changed",
+                months=normalized_months,
+                metadata={
+                    "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                    "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                    **({"action_name": normalized_action_name} if normalized_action_name else {}),
+                },
+                schedule_cost_warmup=False,
+            )
         if persist:
             self.persist_mutation(
                 changed_case_ids=changed_case_ids,

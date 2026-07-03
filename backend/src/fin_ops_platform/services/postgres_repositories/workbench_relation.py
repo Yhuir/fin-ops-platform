@@ -77,6 +77,59 @@ class PostgresWorkbenchRelationRepository:
             [payload for row in history_rows if isinstance((payload := row_payload(row, "raw_payload")), dict)],
         )
 
+    def load_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_row_ids = text_list(row_ids)
+        normalized_case_ids = text_list(case_ids)
+        predicates: list[str] = []
+        params: list[Any] = []
+        if normalized_row_ids:
+            predicates.append("row_ids && %s::text[]")
+            params.append(normalized_row_ids)
+        if normalized_case_ids:
+            predicates.append("case_id = any(%s::text[])")
+            params.append(normalized_case_ids)
+        if not predicates:
+            return {}
+
+        rows = self._connection.fetch_all(
+            f"""
+            select case_id as key, raw_payload
+            from app.workbench_pair_relations
+            where {' or '.join(predicates)}
+            order by case_id
+            """,
+            tuple(params),
+        )
+        if not rows:
+            return {}
+
+        relations = {
+            str(row.get("key")): row_payload(row, "raw_payload")
+            for row in rows
+        }
+        selected_case_ids = text_list(list(relations))
+        history_rows = self._connection.fetch_all(
+            """
+            select raw_payload
+            from app.workbench_pair_relation_history
+            where case_id = any(%s::text[])
+            order by
+                (raw_payload->'raw_payload'->>'_stage04_child_index')::integer nulls last,
+                occurred_at,
+                case_id
+            """,
+            (selected_case_ids,),
+        )
+        return normalize_workbench_pair_relations(
+            relations,
+            [payload for row in history_rows if isinstance((payload := row_payload(row, "raw_payload")), dict)],
+        )
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, Any],
@@ -431,10 +484,29 @@ def _workbench_relation_pending_invoice_scope_keys(
 
 
 def _workbench_relation_domain_scope_keys(connection: Any, relation: dict[str, Any]) -> dict[str, set[str]]:
+    row_types = {item for item in text_list(relation.get("row_types")) if item}
+    relation_mode = text(relation.get("relation_mode") or relation.get("mode"))
     relation_scope_keys = _relation_month_scope_keys(relation)
-    bank_scope_keys = _workbench_relation_bank_scope_keys(connection, relation)
-    invoice_scope_keys = _workbench_relation_invoice_scope_keys(connection, relation)
-    oa_scope_keys = _workbench_relation_oa_scope_keys(connection, relation)
+    unknown_row_types = not row_types
+    has_bank = "bank" in row_types or unknown_row_types
+    has_invoice = "invoice" in row_types or unknown_row_types
+    has_oa = "oa" in row_types or unknown_row_types
+    can_use_relation_month_for_bank = (
+        bool(relation_scope_keys)
+        and has_bank
+        and not has_invoice
+        and not has_oa
+        and relation_mode in {*_NO_OA_BATCH_READ_MODEL_RELATION_MODES, BANK_FLOW_RULE_BATCH_RELATION_MODE}
+    )
+    bank_scope_keys = (
+        set(relation_scope_keys)
+        if can_use_relation_month_for_bank
+        else _workbench_relation_bank_scope_keys(connection, relation)
+        if has_bank
+        else set()
+    )
+    invoice_scope_keys = _workbench_relation_invoice_scope_keys(connection, relation) if has_invoice else set()
+    oa_scope_keys = _workbench_relation_oa_scope_keys(connection, relation) if has_oa else set()
     workbench_scope_keys = (
         set()
         if relation_scope_keys or bank_scope_keys or invoice_scope_keys or oa_scope_keys

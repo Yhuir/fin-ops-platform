@@ -46,6 +46,16 @@ class CallbackWorkbenchRelationRepository:
         snapshot = self._load_snapshot()
         return deepcopy(snapshot) if isinstance(snapshot, dict) else {}
 
+    def load_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return WorkbenchPairRelationService.from_snapshot(
+            self.load_workbench_pair_relations()
+        ).snapshot_for_row_ids(list(row_ids or []), case_ids=list(case_ids or []))
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, Any],
@@ -134,7 +144,7 @@ class WorkbenchRelationCommandService:
             row_ids=list(row_ids or []),
             month_scope=month_scope,
         )
-        pair_service = self._pair_service()
+        pair_service = self._pair_service_for_row_ids(list(row_ids or []), case_ids=[case_id])
         active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
         if not replace_existing:
             conflicts = [
@@ -252,7 +262,7 @@ class WorkbenchRelationCommandService:
         if replay is not None:
             return replay
 
-        pair_service = self._pair_service()
+        pair_service = self._pair_service_for_case_ids([resolved_case_id])
         before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
         if not isinstance(before_relation, dict):
             raise WorkbenchRelationCommandError(
@@ -326,7 +336,7 @@ class WorkbenchRelationCommandService:
         if replay is not None:
             return replay
 
-        pair_service = self._pair_service()
+        pair_service = self._pair_service_for_row_ids(normalized_row_ids)
         before_relations = pair_service.active_relations_for_row_ids(normalized_row_ids)
         freshness = self._assert_relation_read_model_fresh(
             row_ids=normalized_row_ids,
@@ -404,7 +414,7 @@ class WorkbenchRelationCommandService:
         if replay is not None:
             return replay
 
-        pair_service = self._pair_service()
+        pair_service = self._pair_service_for_case_ids([resolved_case_id])
         before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
         if not isinstance(before_relation, dict):
             raise WorkbenchRelationCommandError(
@@ -453,13 +463,13 @@ class WorkbenchRelationCommandService:
         )
 
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
-        return self._pair_service().active_relations_for_row_ids(list(row_ids or []))
+        return self._pair_service_for_row_ids(list(row_ids or [])).active_relations_for_row_ids(list(row_ids or []))
 
     def list_active_relations(self) -> list[dict[str, Any]]:
         return self._pair_service().list_active_relations()
 
     def get_active_relation_by_row_id(self, row_id: str) -> dict[str, Any] | None:
-        relation = self._pair_service().get_active_relation_by_row_id(str(row_id or ""))
+        relation = self._pair_service_for_row_ids([str(row_id or "")]).get_active_relation_by_row_id(str(row_id or ""))
         return deepcopy(relation) if isinstance(relation, dict) else None
 
     def list_history(self) -> list[dict[str, Any]]:
@@ -467,7 +477,7 @@ class WorkbenchRelationCommandService:
 
     def get_active_relation_by_case_id(self, case_id: str) -> dict[str, Any]:
         resolved_case_id = str(case_id or "").strip()
-        relation = self._pair_service().get_active_relation_by_case_id(resolved_case_id)
+        relation = self._pair_service_for_case_ids([resolved_case_id]).get_active_relation_by_case_id(resolved_case_id)
         if not isinstance(relation, dict):
             raise WorkbenchRelationCommandError(
                 "workbench_relation_not_found",
@@ -482,7 +492,7 @@ class WorkbenchRelationCommandService:
         row_ids: list[str],
         month_scope: str = "all",
     ) -> dict[str, Any]:
-        pair_service = self._pair_service()
+        pair_service = self._pair_service_for_row_ids(list(row_ids or []))
         return self._preview_withdraw_relation_from_pair_service(
             pair_service,
             row_ids=list(row_ids or []),
@@ -601,7 +611,7 @@ class WorkbenchRelationCommandService:
         if replay is not None:
             return replay
 
-        pair_service = self._pair_service()
+        pair_service = self._pair_service_for_case_ids([resolved_case_id])
         before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
         if not isinstance(before_relation, dict):
             raise WorkbenchRelationCommandError(
@@ -771,6 +781,32 @@ class WorkbenchRelationCommandService:
                 "Workbench relation repository does not expose load_workbench_pair_relations.",
             )
         return WorkbenchPairRelationService.from_snapshot(loader())
+
+    def _pair_service_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> WorkbenchPairRelationService:
+        normalized_row_ids = [
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        ]
+        normalized_case_ids = [
+            str(case_id).strip()
+            for case_id in list(case_ids or [])
+            if str(case_id).strip()
+        ]
+        loader = getattr(self._relation_repository, "load_workbench_pair_relations_for_row_ids", None)
+        if callable(loader):
+            return WorkbenchPairRelationService.from_snapshot(
+                loader(normalized_row_ids, case_ids=normalized_case_ids)
+            )
+        return self._pair_service()
+
+    def _pair_service_for_case_ids(self, case_ids: list[str]) -> WorkbenchPairRelationService:
+        return self._pair_service_for_row_ids([], case_ids=case_ids)
 
     def _save_changed_cases(self, pair_service: WorkbenchPairRelationService, changed_case_ids: list[str]) -> None:
         saver = getattr(self._relation_repository, "save_workbench_pair_relations", None)

@@ -531,6 +531,25 @@ class PostgresStateStore:
             )
         return {}
 
+    def load_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        snapshot = self._workbench_relation_repository.load_workbench_pair_relations_for_row_ids(
+            list(row_ids or []),
+            case_ids=list(case_ids or []),
+        )
+        if snapshot:
+            pair_relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
+            pair_history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else None
+            return normalize_workbench_pair_relations(
+                pair_relations if pair_relations else None,
+                pair_history if pair_history else None,
+            )
+        return {}
+
     def save_workbench_pair_relations(self, snapshot: dict[str, Any], *, changed_case_ids: set[str] | None = None) -> None:
         self._workbench_relation_repository.save_workbench_pair_relations(snapshot, changed_case_ids=changed_case_ids)
 
@@ -591,6 +610,17 @@ class PostgresStateStore:
             scope_key=scope_key,
         )
 
+    def save_bank_flow_rule_batch_items(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        batch_ids: set[str] | list[str] | tuple[str, ...],
+    ) -> None:
+        self._workbench_repository.save_bank_flow_rule_batch_items(
+            snapshot,
+            batch_ids=batch_ids,
+        )
+
     def load_workbench_read_models(self) -> dict[str, Any]:
         snapshot = self._read_model_repository.load_workbench_read_models()
         if snapshot:
@@ -637,6 +667,11 @@ class PostgresStateStore:
         normalized_case_ids = {str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()}
         normalized_scope_keys = {str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()}
         batch_scope_keys = _bank_flow_rule_batch_month_scopes(normalized_scope_keys)
+        changed_batch_ids = self._bank_flow_rule_batch_ids_from_mutation(
+            pair_relation_snapshot=pair_relation_snapshot,
+            bank_flow_rule_batch_snapshot=bank_flow_rule_batch_snapshot,
+            changed_case_ids=normalized_case_ids,
+        )
 
         def write(_connection: Any) -> None:
             if normalized_case_ids:
@@ -644,13 +679,48 @@ class PostgresStateStore:
                     pair_relation_snapshot,
                     changed_case_ids=normalized_case_ids,
                 )
-            if batch_scope_keys:
+            if changed_batch_ids:
+                self.save_bank_flow_rule_batch_items(
+                    bank_flow_rule_batch_snapshot,
+                    batch_ids=changed_batch_ids,
+                )
+            elif batch_scope_keys:
                 for scope_key in batch_scope_keys:
                     self.save_bank_flow_rule_batches_scope(bank_flow_rule_batch_snapshot, scope_key=scope_key)
             else:
                 self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
 
         run_in_transaction(self._connection, write)
+
+    @staticmethod
+    def _bank_flow_rule_batch_ids_from_mutation(
+        *,
+        pair_relation_snapshot: dict[str, Any],
+        bank_flow_rule_batch_snapshot: dict[str, Any],
+        changed_case_ids: set[str],
+    ) -> set[str]:
+        if not changed_case_ids:
+            return set()
+        batch_ids = set(changed_case_ids)
+        relations = pair_relation_snapshot.get("pair_relations") if isinstance(pair_relation_snapshot, dict) else None
+        if isinstance(relations, dict):
+            for case_id in changed_case_ids:
+                relation = relations.get(case_id)
+                metadata = relation.get("special_metadata") if isinstance(relation, dict) else None
+                source_batch_id = metadata.get("source_batch_id") if isinstance(metadata, dict) else None
+                normalized_source_batch_id = str(source_batch_id or "").strip()
+                if normalized_source_batch_id:
+                    batch_ids.add(normalized_source_batch_id)
+        batches = bank_flow_rule_batch_snapshot.get("batches") if isinstance(bank_flow_rule_batch_snapshot, dict) else None
+        if isinstance(batches, dict):
+            for batch_id, payload in batches.items():
+                normalized_batch_id = str(batch_id or "").strip()
+                if not normalized_batch_id or not isinstance(payload, dict):
+                    continue
+                relation_case_id = str(payload.get("relation_case_id") or payload.get("batch_id") or "").strip()
+                if relation_case_id in changed_case_ids:
+                    batch_ids.add(normalized_batch_id)
+        return {batch_id for batch_id in batch_ids if batch_id}
 
     def load_workbench_candidate_matches(self) -> dict[str, Any]:
         snapshot = self._read_model_repository.load_workbench_candidate_matches()

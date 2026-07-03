@@ -8,17 +8,35 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,
     WorkbenchRelationCommandService,
 )
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 class FakeRelationRepository:
     def __init__(self, snapshot: dict[str, object] | None = None) -> None:
         self.snapshot = deepcopy(snapshot or {})
         self.load_calls = 0
+        self.scoped_load_calls: list[dict[str, object]] = []
         self.save_calls: list[dict[str, object]] = []
 
     def load_workbench_pair_relations(self) -> dict[str, object]:
         self.load_calls += 1
         return deepcopy(self.snapshot)
+
+    def load_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        self.scoped_load_calls.append(
+            {
+                "row_ids": list(row_ids or []),
+                "case_ids": list(case_ids or []),
+            }
+        )
+        return WorkbenchPairRelationService.from_snapshot(
+            self.snapshot
+        ).snapshot_for_row_ids(list(row_ids or []), case_ids=list(case_ids or []))
 
     def save_workbench_pair_relations(
         self,
@@ -69,6 +87,38 @@ class FakeRelationFacade:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_confirm_relation_uses_scoped_relation_snapshot_for_target_rows(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "unrelated": {
+                        "case_id": "unrelated",
+                        "row_ids": ["bank-unrelated"],
+                        "row_types": ["bank"],
+                        "status": "active",
+                    }
+                }
+            }
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        result = service.confirm_relation(
+            case_id="case-new",
+            row_ids=["bank-1", "oa-1"],
+            row_types=["bank", "oa"],
+            relation_mode="manual_confirmed",
+            actor_id="finance-user",
+            month_scope="2026-05",
+        )
+
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(repository.load_calls, 0)
+        self.assertEqual(
+            repository.scoped_load_calls[0],
+            {"row_ids": ["bank-1", "oa-1"], "case_ids": ["case-new"]},
+        )
+        self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
+
     def test_preview_withdraw_relation_returns_locked_previous_state(self) -> None:
         previous_relation = {
             "case_id": "case-old",
@@ -213,7 +263,8 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "withdrawn")
-        self.assertEqual(repository.load_calls, 1)
+        self.assertEqual(repository.load_calls, 0)
+        self.assertEqual(repository.scoped_load_calls[0], {"row_ids": [], "case_ids": ["case-new"]})
         self.assertEqual(len(facade.calls), 1)
         self.assertEqual(facade.calls[0]["row_ids"], ["bank-1", "invoice-1"])
         self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-05"])

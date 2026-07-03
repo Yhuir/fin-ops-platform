@@ -590,6 +590,75 @@ def test_bank_flow_rule_batch_save_uses_dedicated_physical_tables() -> None:
     assert not any(forbidden in sql for sql in executed_sql for forbidden in forbidden_tables)
 
 
+def test_bank_flow_rule_batch_delta_save_only_upserts_changed_batch_items() -> None:
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRepository(connection)
+
+    repository.save_bank_flow_rule_batch_items(
+        {
+            "batches": {
+                "changed-batch": {
+                    "batch_id": "changed-batch",
+                    "relation_case_id": "case-changed",
+                    "status": "submitted",
+                    "status_bucket": "submitted",
+                    "version": 2,
+                    "scope_month": "2026-03",
+                    "account_key": "acct",
+                    "row_ids": ["txn-1"],
+                    "total_amount": "10.00",
+                    "relation_mode": "bank_flow_rule_batch",
+                },
+                "unchanged-batch": {
+                    "batch_id": "unchanged-batch",
+                    "relation_case_id": "case-unchanged",
+                    "status": "pending",
+                    "status_bucket": "pending",
+                    "version": 1,
+                    "scope_month": "2026-03",
+                    "account_key": "acct",
+                    "row_ids": ["txn-2"],
+                    "total_amount": "20.00",
+                    "relation_mode": "bank_flow_rule_batch",
+                },
+            },
+            "audit_log": [
+                {"batch_id": "changed-batch", "operation": "submitted"},
+                {"batch_id": "unchanged-batch", "operation": "created"},
+            ],
+        },
+        batch_ids={"case-changed"},
+    )
+
+    executed_sql = write_sql(connection)
+    assert not any("delete from read_model.bank_flow_rule_batch_rows" in sql for sql in executed_sql)
+    assert not any("delete from app.bank_flow_rule_batches" in sql for sql in executed_sql)
+    upsert_batch_params = [
+        params
+        for sql, params_seq in connection.executed_many_values
+        if sql.startswith("insert into app.bank_flow_rule_batches(")
+        for params in params_seq
+    ]
+    upsert_read_model_params = [
+        params
+        for sql, params_seq in connection.executed_many_values
+        if sql.startswith("insert into read_model.bank_flow_rule_batch_rows(")
+        for params in params_seq
+    ]
+    assert [params[0] for params in upsert_batch_params] == ["changed-batch"]
+    assert [params[0] for params in upsert_read_model_params] == ["changed-batch"]
+    assert [
+        params
+        for sql, params in connection.executed
+        if sql == "delete from app.bank_flow_rule_batch_events where batch_id = %s"
+    ] == [("changed-batch",)]
+    assert not any(
+        params[2] == "unchanged-batch"
+        for sql, params in connection.executed
+        if sql.startswith("insert into app.bank_flow_rule_batch_events(")
+    )
+
+
 def test_no_oa_bank_batch_save_does_not_touch_bank_flow_physical_tables() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRepository(connection)

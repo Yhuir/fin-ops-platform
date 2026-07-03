@@ -1306,7 +1306,28 @@ describe("BankFlowRuleBatchPage", () => {
 
   test("submits internal transfer draft batches through the batch endpoint", async () => {
     const user = userEvent.setup();
-    const fetchMock = installFetchMock(listPayload, {
+    const nextTransferBatch = {
+      ...listPayload.batches[4],
+      batch_id: "batch-draft-transfer-next",
+      account_key: "ceb:8826",
+      bank_name: "光大银行",
+      account_last4: "8826",
+      total_amount: "2000.00",
+    };
+    const payloadWithNextTransfer = {
+      ...listPayload,
+      summary: {
+        ...listPayload.summary,
+        draft_count: 4,
+        categories: listPayload.summary.categories.map((category) => (
+          category.code === "internal_transfer"
+            ? { ...category, total: 2, draft: 2, total_amount: "3000.00" }
+            : category
+        )),
+      },
+      batches: [...listPayload.batches, nextTransferBatch],
+    };
+    const fetchMock = installFetchMock(payloadWithNextTransfer, {
       mutationOperationBarrierTargets: [
         { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
         { read_model_key: "workbench_relation", scope_key: "all" },
@@ -1319,9 +1340,9 @@ describe("BankFlowRuleBatchPage", () => {
 
     try {
       renderPage();
-      await user.click(await screen.findByRole("button", { name: "往来 1批 · 2条" }));
-      await user.click(await screen.findByRole("button", { name: "内部往来款 1批 · 2条" }));
-      await user.click(await screen.findByRole("button", { name: "提交内部往来批次" }));
+      await user.click(await screen.findByRole("button", { name: "往来 2批 · 4条" }));
+      await user.click(await screen.findByRole("button", { name: "内部往来款 2批 · 4条" }));
+      await user.click((await screen.findAllByRole("button", { name: "提交内部往来批次" }))[0]);
 
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith(
@@ -1332,6 +1353,16 @@ describe("BankFlowRuleBatchPage", () => {
           }),
         );
       });
+      await waitFor(() => {
+        expect(screen.queryByText("正在加载流水明细")).not.toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(operationBarrierRequests(fetchMock)).toHaveLength(1);
+      });
+      expect(fetchMock.mock.calls.some(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer-next";
+      })).toBe(false);
       expect(fetchMock).not.toHaveBeenCalledWith(
         "/api/bank-flow-rule-batches/submit-selection",
         expect.anything(),

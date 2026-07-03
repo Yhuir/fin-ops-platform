@@ -153,6 +153,51 @@ def _batch_queue_write_calls(connection: RecordingConnection) -> list[tuple[str,
     ]
 
 
+def test_scoped_relation_load_uses_row_overlap_and_case_limited_history() -> None:
+    class ScopedLoadConnection(RecordingConnection):
+        def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:
+            self.fetch_all_calls.append((sql, params))
+            normalized_sql = " ".join(sql.lower().split())
+            if "from app.workbench_pair_relations" in normalized_sql:
+                assert "row_ids && %s::text[]" in normalized_sql
+                assert "case_id = any(%s::text[])" in normalized_sql
+                assert params == (["bank-1"], ["CASE-1"])
+                return [
+                    {
+                        "key": "CASE-1",
+                        "raw_payload": {
+                            "case_id": "CASE-1",
+                            "row_ids": ["bank-1", "oa-1"],
+                            "row_types": ["bank", "oa"],
+                            "status": "active",
+                        },
+                    }
+                ]
+            if "from app.workbench_pair_relation_history" in normalized_sql:
+                assert "where case_id = any(%s::text[])" in normalized_sql
+                assert params == (["CASE-1"],)
+                return [
+                    {
+                        "raw_payload": {
+                            "normalized_payload": {
+                                "operation_type": "confirm_link",
+                                "after_relations": [{"case_id": "CASE-1"}],
+                            }
+                        }
+                    }
+                ]
+            return super().fetch_all(sql, params)
+
+    connection = ScopedLoadConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    snapshot = repository.load_workbench_pair_relations_for_row_ids(["bank-1"], case_ids=["CASE-1"])
+
+    assert sorted(snapshot["pair_relations"]) == ["CASE-1"]
+    assert snapshot["pair_relation_history"][0]["operation_type"] == "confirm_link"
+    assert len(connection.fetch_all_calls) == 2
+
+
 def test_relation_change_enqueues_relation_read_model_before_relevant_downstream_by_priority() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
@@ -250,6 +295,10 @@ def test_bank_flow_relation_change_enqueues_bank_flow_read_model_refresh() -> No
     ]
 
     assert "no_oa_bank_batch" not in dirty_by_scope_type
+    normalized_fetch_sql = [" ".join(sql.lower().split()) for sql, _params in connection.fetch_all_calls]
+    assert not any("from app.invoices" in sql for sql in normalized_fetch_sql)
+    assert not any("from app.oa_applications" in sql for sql in normalized_fetch_sql)
+    assert not any("select distinct to_char(txn_month, 'yyyy-mm') as scope_key" in sql for sql in normalized_fetch_sql)
     assert dirty_by_scope_type["bank_flow_rule_batch"]["priority"] == "high"
     assert dirty_by_scope_type["bank_flow_rule_batch"]["payload"]["relation_mode"] == "bank_flow_rule_batch"
     assert bank_flow_outbox_rows[-1]["dedupe_key"] == (

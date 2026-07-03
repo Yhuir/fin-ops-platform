@@ -513,7 +513,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         with self.assertRaises(BankBatchPersistenceError):
             service.persist_mutation(changed_case_ids=[], changed_scope_keys=["all"])
 
-    def test_after_mutation_emits_bank_flow_lifecycle_event(self) -> None:
+    def test_after_mutation_skips_legacy_lifecycle_for_online_submit(self) -> None:
         lifecycle_events: list[dict[str, object]] = []
         persist_calls: list[dict[str, object]] = []
         service = object.__new__(BankFlowRuleBatchApplicationService)
@@ -535,21 +535,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(changed)
-        self.assertEqual(
-            lifecycle_events,
-            [
-                {
-                    "event_type": "bank_flow_rule_batch_changed",
-                    "months": ["2026-05"],
-                    "metadata": {
-                        "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                        "action_name": "bank_flow_rule_batch_submit",
-                    },
-                    "schedule_cost_warmup": False,
-                }
-            ],
-        )
+        self.assertEqual(lifecycle_events, [])
         self.assertEqual(
             persist_calls,
             [
@@ -559,6 +545,42 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_after_mutation_keeps_lifecycle_for_rule_changes(self) -> None:
+        lifecycle_events: list[dict[str, object]] = []
+        persist_calls: list[dict[str, object]] = []
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._execute_derived_data_lifecycle_event = (  # type: ignore[method-assign]
+            lambda event_type, **kwargs: lifecycle_events.append({"event_type": event_type, **kwargs})
+        )
+        service.persist_mutation = (  # type: ignore[method-assign]
+            lambda **kwargs: persist_calls.append(dict(kwargs))
+        )
+
+        changed = service.after_mutation(
+            ["2026-05", "not-a-month"],
+            changed_case_ids=[],
+            persist=False,
+            action_name="bank_flow_rule_batch_tag_rules_changed",
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(
+            lifecycle_events,
+            [
+                {
+                    "event_type": "bank_flow_rule_batch_changed",
+                    "months": ["2026-05"],
+                    "metadata": {
+                        "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                        "action_name": "bank_flow_rule_batch_tag_rules_changed",
+                    },
+                    "schedule_cost_warmup": False,
+                }
+            ],
+        )
+        self.assertEqual(persist_calls, [])
 
     def test_after_mutation_does_not_expand_workbench_scope_keys(self) -> None:
         service = object.__new__(BankFlowRuleBatchApplicationService)

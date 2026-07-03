@@ -337,6 +337,9 @@ class PostgresStateStoreTests(unittest.TestCase):
         store.save_workbench_pair_relations = lambda snapshot, *, changed_case_ids=None: calls.append(  # type: ignore[method-assign]
             ("pair_relations", {"snapshot": snapshot, "changed_case_ids": changed_case_ids})
         )
+        store.save_bank_flow_rule_batch_items = lambda snapshot, *, batch_ids: calls.append(  # type: ignore[method-assign]
+            ("bank_flow_items", {"snapshot": snapshot, "batch_ids": batch_ids})
+        )
         store.save_bank_flow_rule_batches_scope = lambda snapshot, *, scope_key: calls.append(  # type: ignore[method-assign]
             ("bank_flow_scope", {"snapshot": snapshot, "scope_key": scope_key})
         )
@@ -346,8 +349,20 @@ class PostgresStateStoreTests(unittest.TestCase):
         )
 
         store.save_bank_flow_rule_batch_mutation(
-            pair_relation_snapshot={"pair_relations": {"CASE-1": {"case_id": "CASE-1"}}},
-            bank_flow_rule_batch_snapshot={"batches": {"batch-1": {"batch_id": "batch-1"}}},
+            pair_relation_snapshot={
+                "pair_relations": {
+                    "CASE-1": {
+                        "case_id": "CASE-1",
+                        "special_metadata": {"source_batch_id": "batch-1"},
+                    }
+                }
+            },
+            bank_flow_rule_batch_snapshot={
+                "batches": {
+                    "batch-1": {"batch_id": "batch-1", "relation_case_id": "CASE-1"},
+                    "batch-2": {"batch_id": "batch-2", "relation_case_id": "CASE-2"},
+                }
+            },
             changed_case_ids=["CASE-1"],
             changed_scope_keys=["all", "visibility:paired:2026-02", "2026-02"],
         )
@@ -358,19 +373,83 @@ class PostgresStateStoreTests(unittest.TestCase):
                 (
                     "pair_relations",
                     {
-                        "snapshot": {"pair_relations": {"CASE-1": {"case_id": "CASE-1"}}},
+                        "snapshot": {
+                            "pair_relations": {
+                                "CASE-1": {
+                                    "case_id": "CASE-1",
+                                    "special_metadata": {"source_batch_id": "batch-1"},
+                                }
+                            }
+                        },
                         "changed_case_ids": {"CASE-1"},
                     },
                 ),
                 (
-                    "bank_flow_scope",
+                    "bank_flow_items",
                     {
-                        "snapshot": {"batches": {"batch-1": {"batch_id": "batch-1"}}},
-                        "scope_key": "2026-02",
+                        "snapshot": {
+                            "batches": {
+                                "batch-1": {"batch_id": "batch-1", "relation_case_id": "CASE-1"},
+                                "batch-2": {"batch_id": "batch-2", "relation_case_id": "CASE-2"},
+                            }
+                        },
+                        "batch_ids": {"CASE-1", "batch-1"},
                     },
                 ),
             ],
         )
+
+    def test_workbench_pair_relation_scoped_loader_delegates_to_canonical_repository(self) -> None:
+        class RelationRepository:
+            def __init__(self) -> None:
+                self.full_snapshot_loaded = False
+                self.scoped_calls: list[dict[str, object]] = []
+
+            def load_workbench_pair_relations(self) -> dict[str, object]:
+                self.full_snapshot_loaded = True
+                return {
+                    "pair_relations": {
+                        "unrelated-case": {
+                            "case_id": "unrelated-case",
+                            "row_ids": ["unrelated-row"],
+                        }
+                    }
+                }
+
+            def load_workbench_pair_relations_for_row_ids(
+                self,
+                row_ids: list[str],
+                *,
+                case_ids: list[str] | None = None,
+            ) -> dict[str, object]:
+                self.scoped_calls.append({"row_ids": list(row_ids), "case_ids": list(case_ids or [])})
+                return {
+                    "pair_relations": {
+                        "case-1": {
+                            "case_id": "case-1",
+                            "row_ids": ["bank-row-1", "bank-row-2"],
+                            "status": "confirmed",
+                        }
+                    },
+                    "pair_relation_history": [
+                        {
+                            "request_id": "request-1",
+                            "after_relations": [{"case_id": "case-1"}],
+                        }
+                    ],
+                }
+
+        repository = RelationRepository()
+        store = object.__new__(PostgresStateStore)
+        store._workbench_relation_repository = repository
+
+        snapshot = store.load_workbench_pair_relations_for_row_ids(["bank-row-1"], case_ids=["case-1"])
+
+        self.assertFalse(repository.full_snapshot_loaded)
+        self.assertEqual(repository.scoped_calls, [{"row_ids": ["bank-row-1"], "case_ids": ["case-1"]}])
+        self.assertEqual(list(snapshot["pair_relations"]), ["case-1"])
+        self.assertEqual(snapshot["pair_relations"]["case-1"]["row_ids"], ["bank-row-1", "bank-row-2"])
+        self.assertEqual(snapshot["pair_relation_history"][0]["request_id"], "request-1")
 
     def test_postgres_store_settings_and_cache_round_trip_through_parameterized_sql(self) -> None:
         with TemporaryDirectory() as temp_dir:

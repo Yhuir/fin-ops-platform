@@ -135,6 +135,7 @@ export default function BankFlowRuleBatchPage() {
   const detailRequestSeqRef = useRef(0);
   const batchQueryKeyRef = useRef("");
   const manualLabelSelectionRef = useRef(false);
+  const suppressNextAutoSelectRef = useRef(false);
   const readModelStatus = payload.readModelStatus;
   const readModelNeedsRefresh = readModelStatus !== "fresh";
 
@@ -396,6 +397,10 @@ export default function BankFlowRuleBatchPage() {
   useEffect(() => {
     if (visibleBatches.length === 0) {
       setSelectedBatchId("");
+      suppressNextAutoSelectRef.current = false;
+      return;
+    }
+    if (!selectedBatchId && suppressNextAutoSelectRef.current) {
       return;
     }
     if (!visibleBatches.some((batch) => batch.batchId === selectedBatchId)) {
@@ -469,6 +474,71 @@ export default function BankFlowRuleBatchPage() {
     setDetailErrors({});
     setFeedback({ severity: "success", message });
   }, [clearSelection]);
+
+  const applySubmittedBatchLocally = useCallback((batch: BankFlowRuleBatch, submittedBatch: BankFlowRuleBatch | null) => {
+    suppressNextAutoSelectRef.current = true;
+    setSelectedBatchId("");
+    setPayload((current) => {
+      const existingBatch = current.batches.find((item) => item.batchId === batch.batchId);
+      if (!existingBatch) {
+        return current;
+      }
+      const nextBatches = current.batches.filter((item) => item.batchId !== batch.batchId);
+      return {
+        ...current,
+        summary: {
+          ...current.summary,
+          draftCount: Math.max(0, current.summary.draftCount - 1),
+          submittedCount: current.summary.submittedCount + 1,
+          categories: current.summary.categories.map((category) => (
+            category.code === batch.batchType
+              ? {
+                ...category,
+                draft: Math.max(0, category.draft - 1),
+                submitted: category.submitted + 1,
+              }
+              : category
+          )),
+        },
+        batches: submittedBatch && bucket === "submitted"
+          ? [...nextBatches, submittedBatch]
+          : nextBatches,
+        pagination: current.pagination
+          ? { ...current.pagination, total: Math.max(0, current.pagination.total - 1) }
+          : current.pagination,
+      };
+    });
+    setDetails((current) => {
+      const next = { ...current };
+      delete next[batch.batchId];
+      return next;
+    });
+    setDetailErrors((current) => {
+      const next = { ...current };
+      delete next[batch.batchId];
+      return next;
+    });
+  }, [bucket]);
+
+  const reconcileMutationInBackground = useCallback((result: {
+    affectedMonths?: string[];
+    freshnessTargets?: Parameters<typeof mutationBarrierTargets>[0]["freshnessTargets"];
+    operationBarrierTargets?: Parameters<typeof mutationBarrierTargets>[0]["operationBarrierTargets"];
+  }, fallbackScopeKey: string) => {
+    void (async () => {
+      try {
+        await waitForOperationFreshness(
+          mutationBarrierTargets(result, fallbackScopeKey),
+        );
+        await reloadBatchesAfterMutation();
+      } catch (caught) {
+        setFeedback({
+          severity: "warning",
+          message: caught instanceof Error ? caught.message : "流水规则批次已提交，后台同步状态检查失败，请稍后刷新。",
+        });
+      }
+    })();
+  }, [reloadBatchesAfterMutation]);
 
   const toggleTransaction = (row: BankFlowRuleBatchDetailRow, checked: boolean) => {
     setSelectedTransactionIds((current) => {
@@ -562,12 +632,9 @@ export default function BankFlowRuleBatchPage() {
             expectedVersion: batch.version,
             note: "",
           });
-          setMessage("正在等待流水规则批次读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(submitResult, batch.scopeMonth || month),
-          );
-          setMessage("正在刷新流水规则批次...");
-          await reloadBatchesAfterMutation();
+          applySubmittedBatchLocally(batch, submitResult.batch);
+          setMessage("正在更新流水规则批次...");
+          reconcileMutationInBackground(submitResult, batch.scopeMonth || month);
           return submitResult;
         } finally {
           setMutating(false);
@@ -789,6 +856,7 @@ export default function BankFlowRuleBatchPage() {
   const unsubmittedCount = payload.summary.draftCount;
   const resetListScope = useCallback(() => {
     clearSelection();
+    suppressNextAutoSelectRef.current = false;
     manualLabelSelectionRef.current = false;
     setSelectedPrimaryLabel("");
     setSelectedSubKey("");

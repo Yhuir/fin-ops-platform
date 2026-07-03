@@ -418,6 +418,52 @@ class PostgresWorkbenchRepository:
 
         run_in_transaction(self._connection, write)
 
+    def save_bank_flow_rule_batch_items(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        batch_ids: set[str] | list[str] | tuple[str, ...],
+    ) -> None:
+        normalized_batch_ids = {
+            text(batch_id)
+            for batch_id in list(batch_ids or [])
+            if text(batch_id)
+        }
+        if not normalized_batch_ids:
+            return
+
+        batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
+        batch_items = [
+            (batch_id, payload)
+            for batch_id, payload in list(iter_mapping(batches))
+            if _no_oa_batch_relation_mode(payload) == BANK_FLOW_RULE_BATCH_RELATION_MODE
+            and (
+                text(batch_id) in normalized_batch_ids
+                or text(payload.get("batch_id")) in normalized_batch_ids
+                or text(payload.get("relation_case_id")) in normalized_batch_ids
+            )
+        ]
+        if not batch_items:
+            return
+        selected_batch_ids = {
+            text(batch_id)
+            for batch_id, _payload in batch_items
+            if text(batch_id)
+        }
+
+        def write(connection: Any) -> None:
+            self._upsert_bank_flow_rule_batch_items(connection, batch_items)
+            audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else []
+            audit_items = audit_log if isinstance(audit_log, list) else []
+            scoped_audit_log = [
+                item
+                for item in audit_items
+                if isinstance(item, dict) and text(item.get("batch_id")) in selected_batch_ids
+            ]
+            self._replace_bank_flow_rule_batch_events(connection, scoped_audit_log)
+
+        run_in_transaction(self._connection, write)
+
     def _upsert_no_oa_bank_batch_items(
         self,
         connection: Any,
