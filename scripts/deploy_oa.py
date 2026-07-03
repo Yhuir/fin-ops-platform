@@ -247,8 +247,15 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
     if config.activate:
         commands.extend(
             [
-                mark_remote_deploy_step("install deploy-control helper"),
-                'sudo -n install -m 0755 -o root -g root "$RELEASE_DIR/src/deploy/oa/bin/finops-deploy-control.sh" "$DEPLOY_CONTROL"',
+                mark_remote_deploy_step("deploy-control self-update"),
+                (
+                    'if ! sudo -n "$DEPLOY_CONTROL" self-update "$RELEASE_NAME"; then '
+                    "printf 'deploy-control helper cannot self-update; run initial root bootstrap: "
+                    "install -m 0755 -o root -g root %s %s\\n' "
+                    '"$RELEASE_DIR/src/deploy/oa/bin/finops-deploy-control.sh" "$DEPLOY_CONTROL" >&2; '
+                    "exit 68; "
+                    "fi"
+                ),
                 mark_remote_deploy_step("verify deploy-control contract"),
                 build_deploy_control_contract_check(),
             ]
@@ -350,6 +357,10 @@ def build_deploy_control_contract_check() -> str:
             "    fi",
             "    if ! grep -q 'install_runtime_queue_history_retention' \"$DEPLOY_CONTROL\"; then",
             "      printf '%s\\n' 'deploy-control helper does not install versioned runtime queue history retention; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
+            "      exit 68",
+            "    fi",
+            "    if ! grep -q 'install_deploy_control_helper' \"$DEPLOY_CONTROL\"; then",
+            "      printf '%s\\n' 'deploy-control helper does not self-update from versioned releases; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
             "      exit 68",
             "    fi",
             "    if ! grep -q 'install_oa_sync_enqueue_timer' \"$DEPLOY_CONTROL\"; then",

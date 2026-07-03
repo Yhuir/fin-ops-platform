@@ -17,6 +17,7 @@ LEGACY_CURRENT_ARCHIVE_DIR="${FINOPS_LEGACY_CURRENT_ARCHIVE_DIR:-/opt/fin-ops/le
 COMMON_ENV="$ENV_DIR/fin-ops.common.env"
 SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
 MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
+DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-deploy-control}"
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
 PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
@@ -34,6 +35,7 @@ usage: finops-deploy-control <command> [args]
 
 commands:
   check-release <release-name>         validate a release under /opt/fin-ops/releases
+  self-update <release-name>           install deploy-control helper from a validated release
   activate <release-name>              point API/workers/dispatcher at release and restart active services
   workbench-rehydrate <release-name> [args]
                                       rebuild Workbench SQL read models using runtime env
@@ -195,6 +197,16 @@ ensure_runtime_workers() {
   local src="$1"
   [[ -x "$ENSURE_RUNTIME_WORKERS_HELPER" ]] || die "runtime worker ensure helper is not executable: $ENSURE_RUNTIME_WORKERS_HELPER"
   "$ENSURE_RUNTIME_WORKERS_HELPER" "$src"
+}
+
+install_deploy_control_helper() {
+  local src="$1"
+  local helper_src="$src/deploy/oa/bin/finops-deploy-control.sh"
+  [[ -f "$helper_src" ]] || die "missing deploy-control helper in release: $helper_src"
+  if [[ -f "$DEPLOY_CONTROL_HELPER" ]] && cmp -s "$helper_src" "$DEPLOY_CONTROL_HELPER"; then
+    return 0
+  fi
+  install -m 0755 -o root -g root "$helper_src" "$DEPLOY_CONTROL_HELPER"
 }
 
 install_workbench_generation_retention() {
@@ -475,8 +487,13 @@ case "$cmd" in
     assert_runtime_env_contract
     echo "$src"
     ;;
+  self-update)
+    src="$(release_src "${2:-}")"
+    install_deploy_control_helper "$src"
+    ;;
   activate)
     src="$(release_src "${2:-}")"
+    install_deploy_control_helper "$src"
     assert_runtime_env_contract
     sync_python_envs "$src"
     run_schema_migrations "$src"
