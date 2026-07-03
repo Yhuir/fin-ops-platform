@@ -241,6 +241,39 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_detail_hydrates_missing_runtime_batch_from_read_model_without_all_refresh(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.filters: list[dict[str, object]] = []
+
+            def list_bank_flow_rule_batch_rows(self, filters: dict[str, object]) -> list[dict[str, object]]:
+                self.filters.append(dict(filters))
+                return [
+                    {
+                        "batch_id": "batch-1",
+                        "batch_type": "internal_transfer",
+                        "status": "draft",
+                        "status_bucket": "unsubmitted",
+                        "version": 1,
+                        "row_ids": ["bank-1", "bank-2"],
+                        "row_count": 2,
+                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                    }
+                ]
+
+        service, _batch_service, refresh_calls = self._service_with_refresh_aware_batch(
+            requires_refresh_before_lookup=True,
+            status="draft",
+        )
+        repository = Repository()
+        service._bank_batch_read_model_repository = repository
+
+        detail = service.detail_payload("batch-1")
+
+        self.assertEqual(detail["batch"]["batch_id"], "batch-1")
+        self.assertEqual(repository.filters, [{"batch_id": "batch-1"}])
+        self.assertEqual(refresh_calls, [])
+
     def test_withdraw_uses_current_bank_flow_batch_without_all_scope_refresh(self) -> None:
         service, batch_service, refresh_calls = self._service_with_refresh_aware_batch()
 

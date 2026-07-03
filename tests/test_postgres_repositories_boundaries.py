@@ -695,7 +695,12 @@ def test_bank_flow_rule_batch_read_model_queries_dedicated_table_without_relatio
     repository = PostgresReadModelRepository(connection)
 
     repository.list_bank_flow_rule_batch_rows(
-        {"month": "2026-03", "bucket": "submitted", "relation_mode": "bank_flow_rule_batch"}
+        {
+            "month": "2026-03",
+            "bucket": "submitted",
+            "batch_id": "bank-flow-batch",
+            "relation_mode": "bank_flow_rule_batch",
+        }
     )
     repository.bank_flow_rule_batch_source_versions_summary(
         {"month": "2026-03", "relation_mode": "bank_flow_rule_batch"}
@@ -703,6 +708,7 @@ def test_bank_flow_rule_batch_read_model_queries_dedicated_table_without_relatio
 
     read_sql = [sql for sql, _ in connection.fetched_all]
     assert any("from read_model.bank_flow_rule_batch_rows" in sql for sql in read_sql)
+    assert any("batch_id = %s" in sql for sql in read_sql)
     assert not any("from read_model.no_oa_bank_batch_rows" in sql for sql in read_sql)
     assert not any("payload->>'relation_mode'" in sql for sql in read_sql)
 

@@ -3975,6 +3975,9 @@ class PostgresSummaryReadModelRepository:
         if value := text(resolved_filters.get("account_key")):
             where.append("account_key = %s")
             params.append(value)
+        if value := text(resolved_filters.get("batch_id")):
+            where.append("batch_id = %s")
+            params.append(value)
         if relation_mode_filter_enabled and (value := text(resolved_filters.get("relation_mode"))):
             where.append("coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s")
             params.append(value)

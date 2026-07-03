@@ -34,9 +34,49 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             self._bank_batch_service.get_batch(batch_id)
             return
         except KeyError:
+            if self._restore_bank_flow_rule_batch_runtime_item(batch_id):
+                return
             if self._restore_bank_flow_rule_batch_runtime_snapshot(batch_id):
                 return
             self._refresh_bank_flow_rule_batch_runtime_snapshot()
+
+    def _restore_bank_flow_rule_batch_runtime_item(self, batch_id: str) -> bool:
+        normalized_batch_id = str(batch_id or "").strip()
+        read_repository = getattr(self, "_bank_batch_read_model_repository", None)
+        list_rows = getattr(read_repository, "list_bank_flow_rule_batch_rows", None)
+        replace_snapshot = getattr(self._bank_batch_service, "replace_snapshot", None)
+        snapshot = getattr(self._bank_batch_service, "snapshot", None)
+        if not normalized_batch_id or not callable(list_rows) or not callable(replace_snapshot):
+            return False
+        rows = list_rows({"batch_id": normalized_batch_id})
+        if not rows:
+            return False
+        batch = next(
+            (
+                {**row, "batch_id": normalized_batch_id}
+                for row in rows
+                if isinstance(row, dict) and str(row.get("batch_id") or "").strip() == normalized_batch_id
+            ),
+            None,
+        )
+        if batch is None:
+            return False
+        current_snapshot = snapshot() if callable(snapshot) else {}
+        current_batches = current_snapshot.get("batches") if isinstance(current_snapshot, dict) else None
+        replace_snapshot(
+            {
+                **(current_snapshot if isinstance(current_snapshot, dict) else {}),
+                "batches": {
+                    **(current_batches if isinstance(current_batches, dict) else {}),
+                    normalized_batch_id: batch,
+                },
+            }
+        )
+        try:
+            self._bank_batch_service.get_batch(normalized_batch_id)
+            return True
+        except KeyError:
+            return False
 
     def _restore_bank_flow_rule_batch_runtime_snapshot(self, batch_id: str) -> bool:
         state_store = getattr(self, "_state_store", None)
@@ -46,6 +86,9 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             return False
         snapshot = load_snapshot()
         if not isinstance(snapshot, dict):
+            return False
+        batches = snapshot.get("batches")
+        if not isinstance(batches, dict) or str(batch_id or "").strip() not in batches:
             return False
         replace_snapshot(snapshot)
         try:
