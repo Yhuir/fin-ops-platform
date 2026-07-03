@@ -21,7 +21,31 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             self._bank_batch_service.get_batch(batch_id)
             return
         except KeyError:
+            if self._restore_bank_flow_rule_batch_runtime_snapshot(batch_id):
+                return
             self._refresh_bank_flow_rule_batch_runtime_snapshot()
+
+    def _restore_bank_flow_rule_batch_runtime_snapshot(self, batch_id: str) -> bool:
+        state_store = getattr(self, "_state_store", None)
+        load_snapshot = getattr(state_store, "load_bank_flow_rule_batches", None)
+        replace_snapshot = getattr(self._bank_batch_service, "replace_snapshot", None)
+        if not callable(load_snapshot) or not callable(replace_snapshot):
+            return False
+        snapshot = load_snapshot()
+        if not isinstance(snapshot, dict):
+            return False
+        replace_snapshot(snapshot)
+        try:
+            self._bank_batch_service.get_batch(batch_id)
+            return True
+        except KeyError:
+            return False
+
+    def _prepare_batch_for_submit(self, batch_id: str, *, relation_mode: str) -> None:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)
+            return
+        super()._prepare_batch_for_submit(batch_id, relation_mode=relation_mode)
 
     def detail_payload(self, batch_id: str) -> dict[str, object]:
         self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)

@@ -662,7 +662,7 @@ class BankBatchApplicationService:
         previous_batch_snapshot = self._bank_batch_service.snapshot()
         previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
         try:
-            self.refresh_batches(relation_mode=relation_mode)
+            self._prepare_batch_for_submit(batch_id, relation_mode=relation_mode)
             before_batch = self._bank_batch_service.get_batch(batch_id)
             already_submitted = str(before_batch.get("status") or "") == "submitted"
             batch = self._bank_batch_service.submit_batch(
@@ -683,6 +683,9 @@ class BankBatchApplicationService:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
             raise
         return result
+
+    def _prepare_batch_for_submit(self, batch_id: str, *, relation_mode: str) -> None:
+        self.refresh_batches(relation_mode=relation_mode)
 
     def submit_selected_rows(
         self,

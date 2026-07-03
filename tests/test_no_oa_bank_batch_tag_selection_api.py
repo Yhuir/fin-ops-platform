@@ -14,6 +14,16 @@ def _json(response):
     return json.loads(response.body)
 
 
+def _bank_flow_rule_batch_operation_barrier_targets(month: str) -> list[dict[str, str]]:
+    return [
+        {"read_model_key": "bank_flow_rule_batch", "scope_key": month},
+        {"read_model_key": "workbench_relation", "scope_key": "all"},
+        {"read_model_key": "workbench_relation", "scope_key": month},
+        {"read_model_key": "workbench", "scope_key": "all"},
+        {"read_model_key": "workbench", "scope_key": month},
+    ]
+
+
 class _ReadModelQueue:
     def __init__(self) -> None:
         self.enqueued: list[tuple[str, str, str]] = []
@@ -369,7 +379,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertFalse(metadata["collapsed_bank_rows"])
         self.assertEqual(
             payload["operation_barrier_targets"],
-            [{"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}],
+            _bank_flow_rule_batch_operation_barrier_targets("2026-05"),
         )
 
     def test_bank_flow_rule_tag_rule_update_resyncs_submitted_relation_requirements(self) -> None:
@@ -618,7 +628,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(reset["results"], [{"batch_id": batch_id, "status": "withdrawn"}])
         self.assertEqual(
             reset["operation_barrier_targets"],
-            [{"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}],
+            _bank_flow_rule_batch_operation_barrier_targets("2026-05"),
         )
         self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))

@@ -95,7 +95,7 @@
 
 - 列表 API 优先读取 `BankFlowRuleBatchReadModelRepositoryPort.list_bank_flow_rule_batch_rows(...)`；read model missing/stale 时返回非 fresh 状态并 enqueue `bank_flow_rule_batch` refresh，不能伪装空态。
 - Worker 持久化写入必须保持 scoped incremental I/O；同一 scope 的多个 batch rows 应在 repository 边界批量 upsert，避免逐 batch round-trip 放大 worker handler 时间。
-- `detail_payload(batch_id)` 和 `withdraw_batch(batch_id)` 先读取当前 bank-flow batch storage；只有 batch 缺失时才 fallback `scope_key=all` 重建 runtime snapshot。
+- `detail_payload(batch_id)`、`submit_batch(batch_id)` 和 `withdraw_batch(batch_id)` 先读取当前 bank-flow batch runtime；runtime 缺失时先通过 `state_store.load_bank_flow_rule_batches()` 恢复持久化批次快照，只有持久化快照也缺目标 batch 时才 fallback `scope_key=all` 重建 runtime snapshot。已知 batch id 的提交热路径不得为了单批提交前置全量候选 refresh。
 - `reset-submitted` 不做前置 `all` refresh；撤回后只同步刷新受影响月份 scope，没有月份时才 fallback `all`。
 - 页面提交、撤回、reset 的前端阻塞等待只等待 `bank_flow_rule_batch` 自身 target。`workbench_relation` / `workbench` targets 保留在 mutation result 和事件广播中，由关联台或后台 runtime 收敛；不能让 `workbench/all` 聚合刷新拖慢当前页提交完成反馈。
 - Worker refresh 使用 `bank_flow_rule_batch_source_versions_summary(...)` 判断 scope source versions 是否 unchanged；能证明 unchanged 时完成 dirty scope 并跳过批次重建和 snapshot 发布。

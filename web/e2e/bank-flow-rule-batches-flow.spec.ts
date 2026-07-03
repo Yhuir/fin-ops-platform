@@ -382,15 +382,18 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(firstBatch).toBeVisible();
     await expect(firstBatch.getByText("2 条 · 合计 50,000.00")).toBeVisible();
     await expect(page.getByRole("table", { name: "光大银行8826流水" })).toBeVisible();
-    const secondBatch = page.locator(".bank-flow-rule-batches-batch").filter({ hasText: "建设银行8106" });
+    const secondBatch = page
+      .locator(".bank-flow-rule-batches-batch")
+      .filter({ hasText: "建设银行8106" })
+      .filter({ hasText: "2 条 · 合计 7,000.00" });
     await expect(secondBatch.getByText("2 条 · 合计 7,000.00")).toBeVisible();
 
     const submitRequest = page.waitForRequest((request) =>
-      request.url().endsWith("/api/bank-flow-rule-batches/bank-flow-internal-ceb-8826/submit")
+      request.url().endsWith("/api/bank-flow-rule-batches/bank-flow-internal-ccb-8106/submit")
       && request.method() === "POST",
     );
     const submitResponse = page.waitForResponse((response) =>
-      response.url().endsWith("/api/bank-flow-rule-batches/bank-flow-internal-ceb-8826/submit")
+      response.url().endsWith("/api/bank-flow-rule-batches/bank-flow-internal-ccb-8106/submit")
       && response.request().method() === "POST",
     );
     const barrierRequest = page.waitForRequest((request) =>
@@ -398,7 +401,7 @@ test.describe("bank flow rule batches browser flow", () => {
       && request.method() === "POST",
     );
     const startedAt = Date.now();
-    await firstBatch.getByRole("button", { name: "提交内部往来批次" }).click();
+    await secondBatch.getByRole("button", { name: "提交内部往来批次" }).click();
 
     const submitBody = JSON.parse((await submitRequest).postData() ?? "{}") as {
       expected_version?: number;
@@ -414,7 +417,7 @@ test.describe("bank flow rule batches browser flow", () => {
     ]);
     await expect(page.getByText("内部往来批次已提交")).toBeVisible({ timeout: 3_000 });
     expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(api.count("POST /api/bank-flow-rule-batches/bank-flow-internal-ceb-8826/submit")).toBe(1);
+    expect(api.count("POST /api/bank-flow-rule-batches/bank-flow-internal-ccb-8106/submit")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(1);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);

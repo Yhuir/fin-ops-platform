@@ -122,6 +122,15 @@ class BankBatchService:
             "audit_log": deepcopy(self._audit_log),
         }
 
+    def replace_snapshot(self, snapshot: dict[str, Any] | None) -> None:
+        restored = self.from_snapshot(
+            snapshot,
+            relation_read_port=self._relation_read_port,
+            relation_command_service=self._relation_command_service,
+        )
+        self._batches = deepcopy(restored._batches)
+        self._audit_log = deepcopy(restored._audit_log)
+
     def public_snapshot(self) -> dict[str, Any]:
         public_batches: dict[str, dict[str, Any]] = {}
         for batch in self.list_batches():
