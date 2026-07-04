@@ -654,6 +654,15 @@ class WorkbenchPairRelationService:
         *,
         row_id_aliases: dict[str, str] | None = None,
     ) -> bool:
+        metadata = relation.get("special_metadata")
+        if isinstance(metadata, dict) and metadata.get("immutable_oa_attachment_binding") is True:
+            row_types = {
+                cls._relation_row_type(relation, str(row_id))
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            }
+            if row_types and row_types <= {"oa", "invoice"}:
+                return True
         binding_row_ids: set[str] = set()
         for binding_relation in cls._oa_attachment_binding_relations(
             relation,

@@ -187,9 +187,10 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(repository.save_calls, [])
 
     def test_preview_withdraw_relation_blocks_plain_oa_attachment_binding(self) -> None:
+        invoice_id = "oa-att-inv-oa-exp-69fab21659b12d7d42a50a45:item:0:fb2a9c9fab23-b515bf77d490fdfe"
         active_relation = {
-            "case_id": "CASE-OA-ATT-oa-exp-2066-2",
-            "row_ids": ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"],
+            "case_id": "CASE-OA-ATT-oa-exp-2156",
+            "row_ids": ["oa-exp-2156", invoice_id],
             "row_types": ["oa", "invoice"],
             "status": "active",
             "relation_mode": "manual_confirmed",
@@ -198,9 +199,15 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
             "created_at": "2026-05-02T10:00:00+00:00",
             "updated_at": "2026-05-02T10:00:00+00:00",
             "version": 2,
+            "special_metadata": {
+                "source": "oa_attachment_invoice",
+                "parent_oa_row_id": "oa-exp-2156",
+                "immutable_oa_attachment_binding": True,
+                "contains_immutable_oa_attachment_binding": True,
+            },
         }
         repository = FakeRelationRepository(
-            {"pair_relations": {"CASE-OA-ATT-oa-exp-2066-2": active_relation}}
+            {"pair_relations": {"CASE-OA-ATT-oa-exp-2156": active_relation}}
         )
         facade = FakeRelationFacade({"status": "stale", "read_model_scope_keys": ["2026-05"]})
         service = WorkbenchRelationCommandService(
@@ -210,7 +217,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         )
 
         preview = service.preview_withdraw_relation(
-            row_ids=["oa-exp-2066-2"],
+            row_ids=["oa-exp-2156", invoice_id],
             month_scope="2026-05",
         )
 
@@ -218,7 +225,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertIn("无法撤回", preview["message"])
         self.assertEqual(preview["before_relations"][0]["row_ids"], active_relation["row_ids"])
         self.assertEqual(preview["after_relations"][0]["row_ids"], active_relation["row_ids"])
-        self.assertEqual(preview["submit_expected_versions"], {"relation:CASE-OA-ATT-oa-exp-2066-2": 2})
+        self.assertEqual(preview["submit_expected_versions"], {"relation:CASE-OA-ATT-oa-exp-2156": 2})
         self.assertEqual(facade.calls, [])
         self.assertEqual(repository.save_calls, [])
 
