@@ -64,7 +64,13 @@ class WorkbenchOaAttachmentRepairContextExecutor:
         changed_scope_keys: set[str] = {"all"}
         timestamp = self._clock().isoformat()
         command_service = self._command_service_provider()
-        for relation in self._active_relations():
+        active_relations = list(self._active_relations())
+        covered_row_ids = {
+            row_id
+            for relation in active_relations
+            for row_id in self._relation_row_ids(relation)
+        }
+        for relation in active_relations:
             repair = self._repair_payload_for_relation(
                 payload=payload,
                 rows_by_id=rows_by_id,
@@ -86,6 +92,28 @@ class WorkbenchOaAttachmentRepairContextExecutor:
                     month_scope=str(repaired_relation.get("month_scope") or ""),
                 )
             )
+            covered_row_ids.update(repair.repaired_row_ids)
+
+        for repair in self._missing_binding_repairs(
+            payload=payload,
+            rows_by_id=rows_by_id,
+            attachment_row_ids_by_oa_id=attachment_row_ids_by_oa_id,
+            covered_row_ids=covered_row_ids,
+            timestamp=timestamp,
+        ):
+            command_result = command_service.confirm_relation(**repair.confirm_kwargs)
+            repaired_relation = dict(command_result.get("relation") or {})
+            case_id = str(repaired_relation.get("case_id") or "").strip()
+            if case_id:
+                self._collect_changed_case_ids(changed_case_ids, command_result, fallback_case_id=case_id)
+            changed_scope_keys.update(
+                self._scope_keys_for_row_ids(
+                    month=str(payload.get("month") or "all"),
+                    row_ids=repair.repaired_row_ids,
+                    month_scope=str(repaired_relation.get("month_scope") or ""),
+                )
+            )
+            covered_row_ids.update(repair.repaired_row_ids)
 
         if not changed_case_ids:
             return False
@@ -113,12 +141,6 @@ class WorkbenchOaAttachmentRepairContextExecutor:
             return None
         row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
         relation_row_ids = set(row_ids)
-        relation_has_bank = any(
-            self._relation_row_type(row_types, index, row_id) == "bank"
-            for index, row_id in enumerate(row_ids)
-        )
-        if not relation_has_bank:
-            return None
         oa_row_ids = [
             row_id
             for index, row_id in enumerate(row_ids)
@@ -132,7 +154,7 @@ class WorkbenchOaAttachmentRepairContextExecutor:
             and any(attachment_row_id in relation_row_ids for attachment_row_id in attachment_row_ids)
         ]
         missing_attachment_row_ids: list[str] = []
-        for oa_row_id in oa_row_ids:
+        for oa_row_id in [*oa_row_ids, *missing_oa_row_ids]:
             for attachment_row_id in attachment_row_ids_by_oa_id.get(oa_row_id, []):
                 if attachment_row_id not in relation_row_ids and attachment_row_id in rows_by_id:
                     missing_attachment_row_ids.append(attachment_row_id)
@@ -151,6 +173,12 @@ class WorkbenchOaAttachmentRepairContextExecutor:
         repaired_rows = [rows_by_id[row_id] for row_id in repaired_row_ids if row_id in rows_by_id]
         before_relation = self._serialize_value(relation)
         amount_check = self._amount_check_for_rows_by_type(self._rows_by_type(repaired_rows))
+        special_metadata = self._source_binding_metadata(
+            relation_metadata=relation.get("special_metadata"),
+            row_ids=repaired_row_ids,
+            row_types=repaired_row_types,
+            attachment_row_ids_by_oa_id=attachment_row_ids_by_oa_id,
+        )
         return _RepairPayload(
             repaired_row_ids=repaired_row_ids,
             confirm_kwargs={
@@ -163,7 +191,7 @@ class WorkbenchOaAttachmentRepairContextExecutor:
                 "month_scope": str(relation.get("month_scope") or "all"),
                 "note": str(relation.get("note") or ""),
                 "amount_check": amount_check,
-                "special_metadata": relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else None,
+                "special_metadata": special_metadata,
                 "exception_case_id": str(relation.get("exception_case_id") or ""),
                 "rule_version": str(relation.get("rule_version") or ""),
                 "evidence": relation.get("evidence") if isinstance(relation.get("evidence"), dict) else None,
@@ -181,10 +209,95 @@ class WorkbenchOaAttachmentRepairContextExecutor:
             },
         )
 
+    def _missing_binding_repairs(
+        self,
+        *,
+        payload: dict[str, object],
+        rows_by_id: dict[str, dict[str, object]],
+        attachment_row_ids_by_oa_id: dict[str, list[str]],
+        covered_row_ids: set[str],
+        timestamp: str,
+    ) -> list["_RepairPayload"]:
+        repairs: list[_RepairPayload] = []
+        month_scope = str(payload.get("month") or "all")
+        for oa_row_id, attachment_row_ids in sorted(attachment_row_ids_by_oa_id.items()):
+            row_ids = [
+                row_id
+                for row_id in [oa_row_id, *attachment_row_ids]
+                if row_id in rows_by_id and row_id not in covered_row_ids
+            ]
+            if len(row_ids) < 2 or row_ids[0] != oa_row_id:
+                continue
+            special_metadata = {
+                "source": "oa_attachment_invoice",
+                "immutable_oa_attachment_binding": True,
+                "contains_immutable_oa_attachment_binding": True,
+                "parent_oa_row_id": oa_row_id,
+            }
+            repairs.append(
+                _RepairPayload(
+                    repaired_row_ids=row_ids,
+                    confirm_kwargs={
+                        "case_id": f"CASE-OA-ATT-{oa_row_id}",
+                        "row_ids": row_ids,
+                        "row_types": ["oa", *(["invoice"] * (len(row_ids) - 1))],
+                        "relation_mode": self._fallback_relation_mode,
+                        "actor_id": self._actor_id,
+                        "relation_created_by": self._fallback_created_by,
+                        "month_scope": month_scope,
+                        "note": "",
+                        "amount_check": self._amount_check_for_rows_by_type(
+                            self._rows_by_type([rows_by_id[row_id] for row_id in row_ids])
+                        ),
+                        "special_metadata": special_metadata,
+                        "display_tags": [],
+                        "occurred_at": timestamp,
+                        "replace_existing": False,
+                        "history_operation_type": self._history_operation_type,
+                        "history_note": self._history_note,
+                    },
+                )
+            )
+        return repairs
+
+    @staticmethod
+    def _source_binding_metadata(
+        *,
+        relation_metadata: object,
+        row_ids: list[str],
+        row_types: list[str],
+        attachment_row_ids_by_oa_id: dict[str, list[str]],
+    ) -> dict[str, object]:
+        metadata = dict(relation_metadata) if isinstance(relation_metadata, dict) else {}
+        row_id_set = set(row_ids)
+        parent_oa_row_ids = sorted(
+            oa_row_id
+            for oa_row_id, attachment_row_ids in attachment_row_ids_by_oa_id.items()
+            if oa_row_id in row_id_set and any(attachment_row_id in row_id_set for attachment_row_id in attachment_row_ids)
+        )
+        if not parent_oa_row_ids:
+            return metadata
+        metadata["contains_immutable_oa_attachment_binding"] = True
+        if len(parent_oa_row_ids) == 1:
+            metadata["parent_oa_row_id"] = parent_oa_row_ids[0]
+        else:
+            metadata["parent_oa_row_ids"] = parent_oa_row_ids
+
+        has_bank = any(row_type == "bank" for row_type in row_types)
+        has_only_oa_invoice_types = all(row_type in {"oa", "invoice"} for row_type in row_types)
+        if not has_bank and len(parent_oa_row_ids) == 1 and has_only_oa_invoice_types:
+            metadata.setdefault("source", "oa_attachment_invoice")
+            metadata["immutable_oa_attachment_binding"] = True
+        return metadata
+
     def _relation_row_type(self, row_types: list[str], index: int, row_id: str) -> str:
         if index < len(row_types) and row_types[index]:
             return row_types[index]
         return self._row_type_for_row_id(row_id)
+
+    @staticmethod
+    def _relation_row_ids(relation: dict[str, Any]) -> list[str]:
+        return [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
 
     @staticmethod
     def _collect_changed_case_ids(

@@ -29,13 +29,13 @@
 
 ## 历史记录
 
-## 2026-07-04 - OA 自带附件发票撤回不可拆分
+## 2026-07-04 - OA 自带附件发票 source binding 不可拆分
 
-- 目标：修复关联台撤回完整 OA+银行流水+OA 附件发票关系后，父 OA 和自带附件发票被拆成不同行的问题。
-- 影响范围：`WorkbenchPairRelationService` withdraw 状态转换、`WorkbenchRelationCommandService` withdraw preview/submit guard、`WorkbenchWriteFacade` withdraw preview payload、关联台 preview 弹窗测试。
-- 关键决策：普通 relation 没有可恢复 history 时仍撤到无关联；OA 自带附件发票不是普通可撤销配对，而是父 OA 的 source binding。完整关系撤回时只撤用户新增的银行/其他关系，必须保留或重建父 OA+附件发票 active relation；纯父 OA+附件发票撤回必须返回不可提交 preview 和业务错误。
+- 目标：修复关联台中父 OA、自带附件发票和银行流水在导入/repair/撤回后被拆成不同行，或父 OA+自带附件发票只停留在 display-only candidate 的问题。
+- 影响范围：`WorkbenchOaAttachmentRepairContextExecutor` source binding 创建/补齐、`WorkbenchCandidateGroupingService` paired/open 分区、`WorkbenchPairRelationService` withdraw 状态转换、`WorkbenchRelationCommandService` withdraw preview/submit guard、`WorkbenchWriteFacade` withdraw preview payload、关联台 preview 弹窗测试。
+- 关键决策：普通 relation 没有可恢复 history 时仍撤到无关联；OA 自带附件发票不是普通可撤销配对，而是父 OA 的 source binding。raw payload repair 发现可证明的父 OA+自带附件发票但缺 active relation 时，必须通过 relation command service 创建 `CASE-OA-ATT-<oa_row_id>`；已有 relation 缺父 OA 或缺附件时必须在同一 case 补齐并写入 immutable binding metadata。两栏 OA+自带附件发票 active relation 是显式 paired 例外，普通两栏 `manual_confirmed` relation 仍留在 open。完整关系撤回时只撤用户新增的银行/其他关系，必须保留或重建父 OA+附件发票 active relation；纯父 OA+附件发票撤回必须返回不可提交 preview 和业务错误。
 - 文档影响：已同步 `README.md`、`boundary-io.md`、`state-machine.md`、`tests.md`，并同步 `docs/modules/workbench-relations/`。
-- 测试覆盖：pair service、relation command service、Workbench v2 API、前端 preview 弹窗均有定向回归。
+- 测试覆盖：OA attachment repair executor、candidate grouping via Workbench v2 API、pair service、relation command service、Workbench v2 API、前端 preview 弹窗均有定向回归。
 - 验证命令：见本轮最终说明。
 - 未测风险：本地测试无法证明生产固定 145 样本的 worker drain 和 all-scope active generation 最终一致；发布后需要按生产操作步骤验证。
 

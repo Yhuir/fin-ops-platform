@@ -1384,6 +1384,8 @@ class WorkbenchCandidateGroupingService:
             if relation_codes and relation_codes.issubset(MULTI_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) >= 2:
                 return True
         if row_type_count == 2 and group.oa_rows and group.invoice_rows and not group.bank_rows:
+            if self._is_immutable_oa_attachment_binding_group(group):
+                return True
             relation_codes = {
                 self._relation_code(row)
                 for row in [*group.oa_rows, *group.invoice_rows]
@@ -1483,6 +1485,25 @@ class WorkbenchCandidateGroupingService:
             isinstance(metadata, dict)
             and str(metadata.get("source") or "").strip() == BATCH_ACCOUNTING_RELATION_MODE
         )
+
+    def _is_immutable_oa_attachment_binding_group(self, group: CandidateGroup) -> bool:
+        if len(group.oa_rows) != 1 or not group.invoice_rows or group.bank_rows:
+            return False
+        if not all(self._is_oa_attachment_invoice_row(row) for row in group.invoice_rows):
+            return False
+        rows = [*group.oa_rows, *group.invoice_rows]
+        relation_codes = {self._relation_code(row) for row in rows}
+        if relation_codes != {"fully_linked"}:
+            return False
+        for row in rows:
+            metadata = row.get("special_metadata")
+            if not isinstance(metadata, dict):
+                continue
+            if bool(metadata.get("immutable_oa_attachment_binding")) or bool(
+                metadata.get("contains_immutable_oa_attachment_binding")
+            ):
+                return True
+        return False
 
     def _group_counterparty(self, group: CandidateGroup) -> str | None:
         attachment_primary_row = self._attachment_group_primary_row(group)

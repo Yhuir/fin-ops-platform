@@ -3672,7 +3672,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(merged["summary"]["bank_count"], 1)
         self.assertEqual(merged["summary"]["invoice_count"], 1)
 
-    def test_get_api_workbench_merges_oa_attachment_invoice_rows_into_live_grouping(self) -> None:
+    def test_get_api_workbench_keeps_oa_attachment_binding_separate_from_live_bank_candidate(self) -> None:
         app = build_application()
         query_service = WorkbenchQueryService(oa_adapter=AttachmentAwareOAAdapter())
         action_service = WorkbenchActionService(query_service)
@@ -3692,10 +3692,19 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         ]
         self.assertEqual(len(matching_groups), 1)
         group = matching_groups[0]
-        self.assertEqual(group["group_type"], "auto_closed")
-        self.assertIn("txn-live-202603-001", [row["id"] for row in group["bank_rows"]])
+        self.assertEqual(group["group_type"], "manual_confirmed")
+        self.assertEqual(group["relation_mode"], "manual_confirmed")
+        self.assertEqual(group["bank_rows"], [])
         self.assertEqual(len(group["invoice_rows"]), 1)
         self.assertEqual(group["invoice_rows"][0]["detail_fields"]["来源OA单号"], "OA-ATT-001")
+        self.assertTrue(group["oa_rows"][0]["special_metadata"]["immutable_oa_attachment_binding"])
+        self.assertTrue(
+            any(
+                row["id"] == "txn-live-202603-001"
+                for open_group in payload["open"]["groups"]
+                for row in open_group["bank_rows"]
+            )
+        )
 
         invoice_row_id = group["invoice_rows"][0]["id"]
         invoice_detail_response = app.handle_request("GET", f"/api/workbench/rows/{invoice_row_id}")
@@ -3712,7 +3721,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(invoice_detail["detail_fields"]["附件文件名"], "设备发票.pdf")
         self.assertEqual(oa_detail["detail_fields"]["附件发票数量"], "1")
 
-    def test_get_api_workbench_groups_oa_attachment_source_rows_in_open_payload(self) -> None:
+    def test_get_api_workbench_groups_repairs_oa_attachment_source_binding_as_paired_relation(self) -> None:
         app = build_application()
         query_service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
         action_service = WorkbenchActionService(query_service)
@@ -3727,11 +3736,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         source_groups = [
             group
-            for group in payload["open"]["groups"]
-            if group["reason"] == "oa_attachment_source_relation"
+            for group in payload["paired"]["groups"]
+            if any(row.get("special_metadata", {}).get("immutable_oa_attachment_binding") for row in group["oa_rows"])
         ]
 
-        self.assertEqual(payload["paired"]["groups"], [])
         self.assertEqual(len(source_groups), 2)
         by_oa_id = {group["oa_rows"][0]["id"]: group for group in source_groups}
         self.assertCountEqual(
@@ -3740,8 +3748,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
 
         group_248 = by_oa_id["oa-exp-hurong-248"]
-        self.assertEqual(group_248["group_type"], "source_linked")
+        self.assertEqual(group_248["group_type"], "manual_confirmed")
         self.assertEqual(group_248["match_confidence"], "high")
+        self.assertEqual(group_248["reason"], "existing_case_group")
+        self.assertEqual(group_248["relation_mode"], "manual_confirmed")
         self.assertCountEqual(
             [row["detail_fields"]["发票号码"] for row in group_248["invoice_rows"]],
             ["24800001", "24800002", "24800003"],
@@ -3749,11 +3759,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(
             all(row["derived_from_oa_id"] == "oa-exp-hurong-248" for row in group_248["invoice_rows"])
         )
+        self.assertTrue(
+            all(
+                row["special_metadata"]["parent_oa_row_id"] == "oa-exp-hurong-248"
+                for row in [*group_248["oa_rows"], *group_248["invoice_rows"]]
+            )
+        )
 
         group_292 = by_oa_id["oa-exp-hurong-292"]
-        self.assertEqual(group_292["group_type"], "source_linked")
+        self.assertEqual(group_292["group_type"], "manual_confirmed")
         self.assertEqual([row["detail_fields"]["发票号码"] for row in group_292["invoice_rows"]], ["29200001"])
         self.assertEqual(group_292["invoice_rows"][0]["derived_from_oa_id"], "oa-exp-hurong-292")
+        self.assertEqual(group_292["oa_rows"][0]["case_id"], "CASE-OA-ATT-oa-exp-hurong-292")
 
     def test_get_api_workbench_groups_oa_2035_formal_attachment_invoices_only(self) -> None:
         app = build_application()

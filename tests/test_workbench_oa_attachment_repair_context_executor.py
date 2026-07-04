@@ -123,6 +123,9 @@ class WorkbenchOaAttachmentRepairContextExecutorTests(unittest.TestCase):
         self.assertEqual(call["history_note"], "repair note")
         self.assertEqual(call["display_tags"], ["linked"])
         self.assertTrue(call["replace_existing"])
+        self.assertEqual(call["special_metadata"]["contains_immutable_oa_attachment_binding"], True)
+        self.assertEqual(call["special_metadata"]["parent_oa_row_id"], "oa-1")
+        self.assertNotIn("source", call["special_metadata"])
         self.assertEqual(call["before_relations"], [active_relation])
         self.assertEqual(call["occurred_at"], "2026-06-25T00:00:00+00:00")
         self.assertEqual(call["amount_check"], {"status": "matched", "row_counts": {"oa": 1, "bank": 1, "invoice": 1}})
@@ -136,6 +139,7 @@ class WorkbenchOaAttachmentRepairContextExecutorTests(unittest.TestCase):
             "oa-1": {"id": "oa-1", "type": "oa"},
             "bk-1": {"id": "bk-1", "type": "bank"},
             "inv-1": {"id": "inv-1", "type": "invoice"},
+            "inv-2": {"id": "inv-2", "type": "invoice"},
         }
         active_relation = {
             "case_id": "CASE-INVOICE-FIRST",
@@ -147,7 +151,7 @@ class WorkbenchOaAttachmentRepairContextExecutorTests(unittest.TestCase):
         }
         executor, command_service, persist_calls, lifecycle_calls = self._executor(
             rows_by_id=rows_by_id,
-            attachment_row_ids_by_oa_id={"oa-1": ["inv-1"]},
+            attachment_row_ids_by_oa_id={"oa-1": ["inv-1", "inv-2"]},
             active_relations=[active_relation],
         )
 
@@ -156,18 +160,49 @@ class WorkbenchOaAttachmentRepairContextExecutorTests(unittest.TestCase):
         self.assertTrue(changed)
         call = command_service.confirm_calls[0]
         self.assertEqual(call["case_id"], "CASE-INVOICE-FIRST")
-        self.assertEqual(call["row_ids"], ["bk-1", "inv-1", "oa-1"])
-        self.assertEqual(call["row_types"], ["bank", "invoice", "oa"])
+        self.assertEqual(call["row_ids"], ["bk-1", "inv-1", "oa-1", "inv-2"])
+        self.assertEqual(call["row_types"], ["bank", "invoice", "oa", "invoice"])
+        self.assertEqual(call["special_metadata"]["contains_immutable_oa_attachment_binding"], True)
+        self.assertEqual(call["special_metadata"]["parent_oa_row_id"], "oa-1")
         self.assertEqual(call["before_relations"], [active_relation])
-        self.assertEqual(call["amount_check"], {"status": "matched", "row_counts": {"oa": 1, "bank": 1, "invoice": 1}})
+        self.assertEqual(call["amount_check"], {"status": "matched", "row_counts": {"oa": 1, "bank": 1, "invoice": 2}})
         self.assertEqual(persist_calls, [{"changed_case_ids": ["CASE-INVOICE-FIRST"]}])
         self.assertEqual(lifecycle_calls[0]["event_name"], "pair_relation_changed")
         self.assertEqual(set(lifecycle_calls[0]["scope_keys"]), {"all", "2026-05"})
 
-    def test_repair_skips_relations_without_bank_or_dedicated_withdraw_mode(self) -> None:
+    def test_repair_creates_missing_oa_attachment_binding_without_existing_relation(self) -> None:
         rows_by_id = {
             "oa-1": {"id": "oa-1", "type": "oa"},
             "inv-1": {"id": "inv-1", "type": "invoice"},
+        }
+        executor, command_service, persist_calls, lifecycle_calls = self._executor(
+            rows_by_id=rows_by_id,
+            attachment_row_ids_by_oa_id={"oa-1": ["inv-1"]},
+            active_relations=[],
+        )
+
+        changed = executor.repair({"month": "2026-05"})
+
+        self.assertTrue(changed)
+        call = command_service.confirm_calls[0]
+        self.assertEqual(call["case_id"], "CASE-OA-ATT-oa-1")
+        self.assertEqual(call["row_ids"], ["oa-1", "inv-1"])
+        self.assertEqual(call["row_types"], ["oa", "invoice"])
+        self.assertFalse(call["replace_existing"])
+        self.assertEqual(call["history_operation_type"], "repair_missing_oa_attachment_context")
+        self.assertEqual(call["special_metadata"]["immutable_oa_attachment_binding"], True)
+        self.assertEqual(call["special_metadata"]["parent_oa_row_id"], "oa-1")
+        self.assertEqual(call["amount_check"], {"status": "matched", "row_counts": {"oa": 1, "bank": 0, "invoice": 1}})
+        self.assertEqual(persist_calls, [{"changed_case_ids": ["CASE-OA-ATT-oa-1"]}])
+        self.assertEqual(lifecycle_calls[0]["event_name"], "pair_relation_changed")
+        self.assertEqual(set(lifecycle_calls[0]["scope_keys"]), {"all", "2026-05"})
+
+    def test_repair_adds_attachment_to_relation_without_bank_but_skips_dedicated_withdraw_mode(self) -> None:
+        rows_by_id = {
+            "oa-1": {"id": "oa-1", "type": "oa"},
+            "inv-1": {"id": "inv-1", "type": "invoice"},
+            "oa-dedicated": {"id": "oa-dedicated", "type": "oa"},
+            "inv-dedicated": {"id": "inv-dedicated", "type": "invoice"},
         }
         active_relations = [
             {
@@ -178,22 +213,30 @@ class WorkbenchOaAttachmentRepairContextExecutorTests(unittest.TestCase):
             },
             {
                 "case_id": "CASE-DEDICATED",
-                "row_ids": ["oa-1", "bk-1"],
-                "row_types": ["oa", "bank"],
+                "row_ids": ["oa-dedicated"],
+                "row_types": ["oa"],
                 "relation_mode": "no_oa_bank_batch",
             },
         ]
         executor, command_service, persist_calls, lifecycle_calls = self._executor(
             rows_by_id=rows_by_id,
-            attachment_row_ids_by_oa_id={"oa-1": ["inv-1"]},
+            attachment_row_ids_by_oa_id={"oa-1": ["inv-1"], "oa-dedicated": ["inv-dedicated"]},
             active_relations=active_relations,
             dedicated_modes={"no_oa_bank_batch"},
         )
 
-        self.assertFalse(executor.repair({"month": "2026-05"}))
-        self.assertEqual(command_service.confirm_calls, [])
-        self.assertEqual(persist_calls, [])
-        self.assertEqual(lifecycle_calls, [])
+        self.assertTrue(executor.repair({"month": "2026-05"}))
+        self.assertEqual(len(command_service.confirm_calls), 1)
+        call = command_service.confirm_calls[0]
+        self.assertEqual(call["case_id"], "CASE-NO-BANK")
+        self.assertEqual(call["row_ids"], ["oa-1", "inv-1"])
+        self.assertEqual(call["row_types"], ["oa", "invoice"])
+        self.assertEqual(call["special_metadata"]["source"], "oa_attachment_invoice")
+        self.assertEqual(call["special_metadata"]["immutable_oa_attachment_binding"], True)
+        self.assertEqual(call["special_metadata"]["contains_immutable_oa_attachment_binding"], True)
+        self.assertEqual(call["special_metadata"]["parent_oa_row_id"], "oa-1")
+        self.assertEqual(persist_calls, [{"changed_case_ids": ["CASE-NO-BANK"]}])
+        self.assertEqual(lifecycle_calls[0]["event_name"], "pair_relation_changed")
 
     @staticmethod
     def _rows_by_type(rows: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
