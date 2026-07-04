@@ -23,7 +23,7 @@
 | --- | --- | --- | --- |
 | `candidate` | `bank_flow_rule_batch` read model | 当前筛选下可选择的未占用银行流水候选。 | 用户选择后进入 `selected_draft`。 |
 | `selected_draft` | 页面本地状态 | 用户本次选择的银行流水，尚未写事实。 | 提交成功进入 `submitted`; 清空选择回到 `candidate`。 |
-| `submitted` | `app.bank_flow_rule_batches` + active relation | 已通过 command service 创建 relation。 | owner withdraw 或 rebaseline apply 后进入 `withdrawn`。 |
+| `submitted` | `app.bank_flow_rule_batches` + active relation | 已通过 command service 创建 relation。 | owner withdraw 或 reset-submitted 后进入 `withdrawn`。 |
 | `withdrawn` | batch event + cancelled/withdrawn relation | 批次关系已撤回，银行流水释放，可重新按新规则进入候选。 | 不自动恢复为 submitted；重新提交创建新 request/case。 |
 | `blocked` | service validation | 重复 row、跨月、跨账户、标签混用、relation 占用、版本冲突、无权限或 read/write safety 不满足。 | 修复输入或刷新后重新提交。 |
 
@@ -52,22 +52,6 @@
 - 禁止前端根据勾选本地推断 paired/open；必须消费后端 relation/read model payload。
 - 禁止缺少 metadata 时按无需 OA/发票处理。metadata 缺失应 fail closed 到 open 或诊断状态。
 
-## 历史 no-OA rebaseline 状态
-
-| 状态 | 事实源 | 语义 | 允许流转 |
-| --- | --- | --- | --- |
-| `legacy_submitted` | `app.no_oa_bank_batches` + `relation_mode=no_oa_bank_batch` | 历史已提交免 OA 批次。 | dry-run 识别为候选。 |
-| `rebaseline_planned` | dry-run manifest | 计划撤回的批次、关系、银行 rows、月份和风险清单。 | 用户确认 apply。 |
-| `rebaseline_applied` | batch event + relation history + audit | 旧 relation 已通过 command service 撤回，旧 batch 标记 rebaseline withdrawn，row 释放。 | 幂等重放返回已应用结果。 |
-| `rebaseline_blocked` | dry-run/apply validation | 存在非 no-OA active relation、缺失历史、权限不足或 scope 不一致。 | 人工修复后重新 dry-run。 |
-
-规则：
-
-- rebaseline 不自动把旧批次按新规则重新提交。
-- apply 必须提交 dry-run manifest，校验 batch/version 与当前候选一致后，通过 `WorkbenchRelationCommandService` 撤销旧 relation，并输出 affected scopes。
-- dry-run 和 apply 都必须记录审计；apply 必须可幂等重放。
-- 不能把 rebaseline 混入页面 GET 或普通 submit-selection。
-
 ## UI 状态
 
 | UI 状态 | 语义 |
@@ -79,8 +63,6 @@
 | `selection_dirty` | 用户已选择银行流水；切换月份、标签、账户、分页或 bucket 必须清空选择。 |
 | `submitting` | 批量提交中，等待 operation barrier。 |
 | `resetting_submitted` | 正在批量撤回已提交流水规则批次，等待 operation barrier 后刷新未提交候选。 |
-| `rebaseline_preview` | 展示 dry-run manifest，尚未改变事实。 |
-| `rebaseline_applying` | 正在撤回旧 no-OA submitted facts，禁止关闭或重复 apply。 |
 
 ## Read Model / Worker 状态
 
@@ -96,5 +78,5 @@
 
 - 银行流水导入或银行明细标签变化。
 - 本模块标签规则保存。
-- 本模块 submit/withdraw/rebaseline。
+- 本模块 submit/withdraw/reset-submitted。
 - Workbench relation 写入、撤回或下游 relation distribution 变化。

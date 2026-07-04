@@ -104,7 +104,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(fee_tag["output_sub_label"], saved_fee_rule["output_sub_label"])
         self.assertEqual(fee_tag["direction"], "expense")
 
-    def test_tag_selection_starts_empty_and_controls_unsubmitted_candidates(self) -> None:
+    def test_tag_selection_starts_empty_and_no_oa_list_fails_closed_without_read_model(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -144,6 +144,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertTrue(initial_fee_rule["requires_oa"])
         self.assertTrue(initial_fee_rule["requires_invoice"])
         self.assertEqual(empty_batches["batches"], [])
+        self.assertEqual(empty_batches["read_model_status"], "unavailable")
+        self.assertTrue(empty_batches["refresh_enqueued"])
 
         save_response = app.handle_request(
             "PUT",
@@ -155,12 +157,13 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             headers={"Content-Type": "application/json"},
         )
         app._no_oa_bank_batch_application_service().refresh_batches()
-        app._workbench_sql_read_repository = None
         still_blocked_batches = _json(app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted"))
 
         self.assertEqual(save_response.status_code, 200)
         self.assertEqual(_json(save_response)["selected_tag_codes"], [])
         self.assertEqual(still_blocked_batches["batches"], [])
+        self.assertEqual(still_blocked_batches["read_model_status"], "unavailable")
+        self.assertTrue(still_blocked_batches["refresh_enqueued"])
 
         next_selection = _json(save_response)
         save_response = app.handle_request(
@@ -173,7 +176,6 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             headers={"Content-Type": "application/json"},
         )
         app._no_oa_bank_batch_application_service().refresh_batches()
-        app._workbench_sql_read_repository = None
         enabled_batches = _json(app.handle_request("GET", "/api/no-oa-bank-batches?bucket=unsubmitted"))
 
         self.assertEqual(save_response.status_code, 200)
@@ -182,8 +184,11 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             _json(save_response)["requirements_by_tag_code"]["fee"],
             {"requires_oa": False, "requires_invoice": False},
         )
-        self.assertEqual([batch["batch_type"] for batch in enabled_batches["batches"]], ["fee"])
+        self.assertEqual(enabled_batches["batches"], [])
+        self.assertEqual(enabled_batches["read_model_status"], "unavailable")
+        self.assertTrue(enabled_batches["refresh_enqueued"])
         self.assertIn(("no_oa_bank_batch", "all", "no_oa_bank_batch_tag_selection_changed"), queue.enqueued)
+        self.assertIn(("no_oa_bank_batch", "all", "api_no_oa_read_model_unavailable"), queue.enqueued)
 
     def test_new_auto_tag_rule_is_available_but_not_selected_by_default(self) -> None:
         app = build_application()
@@ -683,104 +688,6 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
         unsubmitted = _json(app.handle_request("GET", "/api/bank-flow-rule-batches?bucket=unsubmitted"))
         self.assertEqual([batch["batch_type"] for batch in unsubmitted["batches"]], ["fee"])
-
-    def test_bank_flow_rule_rebaseline_no_oa_dry_run_and_apply_withdraw_submitted_history(self) -> None:
-        app = build_application()
-        preview = app._import_service.preview_import(
-            batch_type=BatchType.BANK_TRANSACTION,
-            source_name="fees-rebaseline.xlsx",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "account_no": "62220003",
-                    "account_name": "云南溯源科技有限公司建设银行基本户",
-                    "txn_date": "2026-05-03",
-                    "trade_time": "2026-05-03 10:20:00",
-                    "counterparty_name": "建设银行",
-                    "debit_amount": "8.80",
-                    "credit_amount": "",
-                    "summary": "网银手续费",
-                }
-            ],
-        )
-        app._import_service.confirm_import(preview.id)
-        row_id = app._import_service.list_transactions()[0].id
-        app._bank_transaction_category_service.apply_updates(
-            [{"transaction_id": row_id, "category_code": "fee"}],
-            actor="tester",
-        )
-        version = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))["version"]
-        app.handle_request(
-            "PUT",
-            "/api/no-oa-bank-batches/tag-selection",
-            body=json.dumps({"expected_version": version, "selected_tag_codes": ["fee"]}),
-            headers={"Content-Type": "application/json"},
-        )
-        submit_response = app.handle_request(
-            "POST",
-            "/api/no-oa-bank-batches/submit-selection",
-            body=json.dumps({"transaction_ids": [row_id], "note": "旧免OA提交"}),
-            headers={"Content-Type": "application/json"},
-        )
-        batch_id = _json(submit_response)["batch"]["batch_id"]
-        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))
-
-        dry_run_response = app.handle_request(
-            "POST",
-            "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run",
-            body=json.dumps({}),
-            headers={"Content-Type": "application/json"},
-        )
-        dry_run = _json(dry_run_response)
-
-        self.assertEqual(dry_run_response.status_code, 200)
-        self.assertTrue(dry_run["dry_run"])
-        self.assertFalse(dry_run["applied"])
-        self.assertEqual(dry_run["summary"]["candidate_count"], 1)
-        self.assertEqual(dry_run["batches"][0]["batch_id"], batch_id)
-        self.assertEqual(app._no_oa_bank_batch_service.get_batch(batch_id)["status"], "submitted")
-
-        missing_manifest_response = app.handle_request(
-            "POST",
-            "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
-            body=json.dumps({"reason": "缺 dry-run manifest"}),
-            headers={"Content-Type": "application/json"},
-        )
-        self.assertEqual(missing_manifest_response.status_code, 400)
-        self.assertEqual(_json(missing_manifest_response)["error"], "bank_flow_rule_rebaseline_manifest_required")
-
-        stale_manifest = {**dry_run, "batches": [{**dry_run["batches"][0], "version": 999}]}
-        stale_manifest_response = app.handle_request(
-            "POST",
-            "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
-            body=json.dumps({"reason": "陈旧 dry-run manifest", "manifest": stale_manifest}),
-            headers={"Content-Type": "application/json"},
-        )
-        self.assertEqual(stale_manifest_response.status_code, 400)
-        self.assertEqual(_json(stale_manifest_response)["error"], "bank_flow_rule_rebaseline_manifest_mismatch")
-
-        apply_response = app.handle_request(
-            "POST",
-            "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
-            body=json.dumps({"reason": "全部重新过流水规则", "manifest": dry_run}),
-            headers={"Content-Type": "application/json"},
-        )
-        applied = _json(apply_response)
-
-        self.assertEqual(apply_response.status_code, 200)
-        self.assertTrue(applied["applied"])
-        self.assertFalse(applied["dry_run"])
-        self.assertEqual(applied["summary"]["candidate_count"], 1)
-        self.assertEqual(app._no_oa_bank_batch_service.get_batch(batch_id)["status"], "withdrawn")
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))
-
-        second_apply = _json(app.handle_request(
-            "POST",
-            "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
-            body=json.dumps({"reason": "重复执行", "manifest": dry_run}),
-            headers={"Content-Type": "application/json"},
-        ))
-        self.assertEqual(second_apply["summary"]["candidate_count"], 0)
 
     def test_selected_row_submit_rejects_cross_bank_selection(self) -> None:
         app = build_application()

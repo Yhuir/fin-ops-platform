@@ -344,7 +344,7 @@ class StateStoreTests(unittest.TestCase):
         self.assertEqual(loaded["pair_relation_history"][0]["operation_type"], "confirm_link")
         self.assertEqual(loaded["pair_relation_history"][0]["amount_check"]["status"], "mismatch")
 
-    def test_save_no_oa_bank_batches_persists_and_loads_local_snapshot(self) -> None:
+    def test_save_submitted_no_oa_bank_batches_persists_and_loads_local_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             snapshot = {

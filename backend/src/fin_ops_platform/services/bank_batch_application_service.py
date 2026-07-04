@@ -134,7 +134,6 @@ class BankBatchApplicationService:
         read_model_refresh_producer: Any | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
-        rebaseline_no_oa_batch_service: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._effective_category_provider = effective_category_provider
@@ -163,7 +162,6 @@ class BankBatchApplicationService:
         self._read_model_refresh_producer = read_model_refresh_producer
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
-        self._rebaseline_no_oa_batch_service = rebaseline_no_oa_batch_service
 
     def list_batches_payload(
         self,
@@ -886,87 +884,10 @@ class BankBatchApplicationService:
             ],
         }
 
-    def rebaseline_submitted_no_oa_batches_dry_run(self) -> dict[str, object]:
-        candidates = self._submitted_no_oa_rebaseline_candidates()
-        return self._rebaseline_no_oa_manifest(candidates, applied=False)
-
-    def apply_submitted_no_oa_rebaseline(
-        self,
-        *,
-        actor: str,
-        reason: str | None,
-        manifest: object | None,
-    ) -> dict[str, object]:
-        rebaseline_batch_service = self._batch_service_for_relation_mode(NO_OA_BANK_BATCH_RELATION_MODE)
-        previous_batch_snapshot = rebaseline_batch_service.snapshot()
-        previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
-        candidates = self._submitted_no_oa_rebaseline_candidates()
-        self._assert_rebaseline_manifest_matches(
-            candidates,
-            manifest,
-            rebaseline_batch_service=rebaseline_batch_service,
-        )
-        withdrawn_batches: list[dict[str, object]] = []
-        changed_case_ids: list[str] = []
-        affected_months: set[str] = set()
-        resolved_reason = str(reason or "").strip() or "流水规则批量处理 rebaseline：撤回历史免OA已提交批次"
-        try:
-            for candidate in candidates:
-                batch_id = str(candidate.get("batch_id") or "").strip()
-                if not batch_id:
-                    continue
-                before_batch = rebaseline_batch_service.get_batch(batch_id)
-                already_withdrawn = str(before_batch.get("status") or "") == "withdrawn"
-                withdrawn = rebaseline_batch_service.withdraw_batch(
-                    batch_id,
-                    actor=actor,
-                    expected_version=int(before_batch.get("version") or 1),
-                    reason=resolved_reason,
-                )
-                if not already_withdrawn:
-                    self._cancel_relation_for_batch(
-                        withdrawn,
-                        actor=actor,
-                        reason=resolved_reason,
-                        history_operation_type="bank_flow_rule_rebaseline_no_oa_withdraw",
-                        idempotency_operation="rebaseline_no_oa_withdraw",
-                    )
-                withdrawn_batches.append(withdrawn)
-                relation_case_id = str(withdrawn.get("relation_case_id") or withdrawn.get("batch_id") or "").strip()
-                if relation_case_id:
-                    changed_case_ids.append(relation_case_id)
-                affected_months.update(self.affected_months(withdrawn))
-            workbench_rebuild_queued = self.after_mutation(
-                sorted(affected_months),
-                changed_case_ids=changed_case_ids,
-                persist=False,
-                action_name="bank_flow_rule_rebaseline_no_oa",
-            )
-            self.persist_no_oa_rebaseline_mutation(
-                rebaseline_batch_service=rebaseline_batch_service,
-                changed_case_ids=changed_case_ids,
-                changed_scope_keys=self._expand_workbench_read_model_scope_keys_for_base_scopes(
-                    ["all", *sorted(affected_months)]
-                ),
-            )
-        except Exception:
-            self._restore_batch_service_snapshot(rebaseline_batch_service, previous_batch_snapshot)
-            self._pair_relation_snapshot_port.restore(previous_relation_snapshot)
-            raise
-        manifest = self._rebaseline_no_oa_manifest(withdrawn_batches, applied=True)
-        return {
-            **manifest,
-            "workbench_rebuild_queued": workbench_rebuild_queued,
-        }
-
-    def _submitted_no_oa_rebaseline_candidates(self) -> list[dict[str, object]]:
-        return self._submitted_batches_for_relation_mode(NO_OA_BANK_BATCH_RELATION_MODE)
-
     def _submitted_batches_for_relation_mode(self, relation_mode: str) -> list[dict[str, object]]:
-        batch_service = self._batch_service_for_relation_mode(relation_mode)
         return [
             batch
-            for batch in batch_service.list_batches(
+            for batch in self._bank_batch_service.list_batches(
                 {
                     "bucket": "submitted",
                     "relation_mode": self._read_model_key_for_relation_mode(relation_mode),
@@ -974,120 +895,6 @@ class BankBatchApplicationService:
             )
             if str(batch.get("status") or "").strip() == "submitted"
         ]
-
-    def _batch_service_for_relation_mode(self, relation_mode: str) -> Any:
-        if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE and self._rebaseline_no_oa_batch_service is not None:
-            return self._rebaseline_no_oa_batch_service
-        return self._bank_batch_service
-
-    def persist_no_oa_rebaseline_mutation(
-        self,
-        *,
-        rebaseline_batch_service: Any,
-        changed_case_ids: list[str],
-        changed_scope_keys: list[str],
-    ) -> None:
-        if self._state_store is None:
-            return
-        try:
-            self._search_cache_clearer()
-            save_mutation = getattr(self._state_store, "save_no_oa_bank_batch_mutation", None)
-            if not callable(save_mutation):
-                raise RuntimeError("bank_flow_rule_batch rebaseline requires save_no_oa_bank_batch_mutation.")
-            save_mutation(
-                pair_relation_snapshot=self._pair_relation_snapshot_port.snapshot_case_ids(changed_case_ids)
-                if changed_case_ids
-                else self._pair_relation_snapshot_port.snapshot(),
-                no_oa_bank_batch_snapshot=rebaseline_batch_service.public_snapshot(),
-                workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
-                changed_case_ids=changed_case_ids,
-                changed_scope_keys=changed_scope_keys,
-            )
-        except Exception as exc:
-            raise BankBatchPersistenceError(str(exc)) from exc
-
-    def _assert_rebaseline_manifest_matches(
-        self,
-        candidates: list[dict[str, object]],
-        manifest: object | None,
-        *,
-        rebaseline_batch_service: Any,
-    ) -> None:
-        if not isinstance(manifest, dict):
-            raise ValueError("bank_flow_rule_rebaseline_manifest_required")
-        expected_rows = manifest.get("batches")
-        if not isinstance(expected_rows, list):
-            raise ValueError("bank_flow_rule_rebaseline_manifest_required")
-
-        def key(row: dict[str, object]) -> tuple[str, int]:
-            return str(row.get("batch_id") or "").strip(), int(row.get("version") or 1)
-
-        expected = sorted(
-            key(row)
-            for row in expected_rows
-            if isinstance(row, dict) and str(row.get("batch_id") or "").strip()
-        )
-        actual = sorted(key(row) for row in candidates)
-        if (
-            not actual
-            and expected
-            and self._rebaseline_manifest_already_applied(
-                expected,
-                rebaseline_batch_service=rebaseline_batch_service,
-            )
-        ):
-            return
-        if expected != actual:
-            raise ValueError("bank_flow_rule_rebaseline_manifest_mismatch")
-
-    def _rebaseline_manifest_already_applied(
-        self,
-        expected: list[tuple[str, int]],
-        *,
-        rebaseline_batch_service: Any,
-    ) -> bool:
-        for batch_id, _version in expected:
-            try:
-                batch = rebaseline_batch_service.get_batch(batch_id)
-            except KeyError:
-                return False
-            if str(batch.get("status") or "").strip() != "withdrawn":
-                return False
-        return True
-
-    @staticmethod
-    def _rebaseline_no_oa_manifest(batches: list[dict[str, object]], *, applied: bool) -> dict[str, object]:
-        affected_months = sorted({
-            str(batch.get("scope_month") or "").strip()
-            for batch in batches
-            if str(batch.get("scope_month") or "").strip()
-        })
-        rows = [
-            {
-                "batch_id": str(batch.get("batch_id") or ""),
-                "batch_type": str(batch.get("batch_type") or ""),
-                "batch_label": str(batch.get("batch_label") or ""),
-                "relation_case_id": str(batch.get("relation_case_id") or batch.get("batch_id") or ""),
-                "scope_month": str(batch.get("scope_month") or ""),
-                "row_ids": [str(row_id) for row_id in list(batch.get("row_ids") or [])],
-                "row_count": int(batch.get("row_count") or len(list(batch.get("row_ids") or []))),
-                "version": int(batch.get("version") or 1),
-                "status": str(batch.get("status") or ""),
-            }
-            for batch in batches
-        ]
-        return {
-            "dry_run": not applied,
-            "applied": applied,
-            "summary": {
-                "candidate_count": len(rows),
-                "batch_count": len(rows),
-                "row_count": sum(int(row.get("row_count") or 0) for row in rows),
-                "affected_months": affected_months,
-            },
-            "batches": rows,
-            "risks": [],
-        }
 
     def _eligible_tag_codes_for_relation_mode(self, relation_mode: str) -> set[str]:
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:

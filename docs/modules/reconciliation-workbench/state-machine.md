@@ -33,9 +33,9 @@
 - 关联台确认/撤回是跨页面事实，必须产生 affected scopes/months、审计和下游 refresh 信号。
 - 进行中 OA 在 OA 待付款核对页面关联的支出流水会写入 Workbench active relation，并在关联台银行行展示“已关联进行中OA”chip。由于进行中 OA 尚不属于普通 completed OA 关联台主流程，这类流水仍可能出现在 open/未配对上下文，但不得被当作未占用流水重复确认到其他 active case。
 - 普通 `relation_mode=manual_confirmed` 两栏 relation 是 Workbench active pair relation 事实源，允许 OA+银行、OA+发票、银行+发票任意两栏先确认或由 free paired decision 自动正式化并占用 row；但两栏只表示 partial relation，关联台必须保留 canonical `case:<case_id>` open group，不能进入三栏 paired。只有 OA + 银行 + 发票三栏完整，或显式业务例外，才能进入 paired。若 matching engine 产出唯一三栏 `paired` decision，且该 decision 正好补齐一个普通两栏 active relation 的剩余栏，后台可以通过 relation command service 原子替换原 case 为三栏 relation，并把 decision 标记为 `consumed`。
-- 显式 paired 例外必须在后端分区 policy 中白名单表达，不能回退到“任意两栏 confirmed active relation 都 paired”的宽泛规则。当前例外包括流水规则批量处理中 OA/发票 requirement 已满足的批量 relation、外部往来闭环 relation metadata 中 OA/发票 requirement 已满足的 relation、no-OA 批次/内部转账、工资或个人自动闭合、个人暂借款还清、OA 附件发票冲抵、批量账务、ETC summary/batch relation 和 processed/closed exception projection。
-- `relation_mode=bank_flow_rule_batch` 的分区规则：若 `requires_oa=true` 则必须存在 OA row；若 `requires_invoice=true` 则必须存在发票 row；两者都为 false 时银行-only relation 可 paired。缺 metadata 或 metadata 不完整时 fail closed 到 open/诊断状态。银行流水数大于 3 条时默认折叠展示，原始 rows 必须可展开。
-- 外部往来 `relation_mode=turnover_manual_closure` 是 Workbench active pair relation 事实源；同一个 active case 下两条及以上银行流水形成的外部往来闭环必须保留 canonical `case:<case_id>` ownership 和“收支闭环”证据。分区只读取 relation metadata：若 metadata 显式包含 `requires_oa` / `requires_invoice`，则按要求判断 required row type 是否已满足；例如 `requires_oa=true, requires_invoice=false` 时，OA + 银行即可进入 paired。metadata 缺失或不完整的旧 `turnover_manual_closure` 关系必须 fail closed，仍按三栏完整后 paired。旧 `manual_confirmed` 的 `turnover:*` case 必须先由规则保存同步链路升级为 `turnover_manual_closure`，不能由 Workbench 在查询时回读设置兜底。
+- 任何含银行流水的 group 必须先按 Bank Transaction Paired Policy 判定是否可进入 paired：银行流水 row 的 `special_metadata.requires_oa` / `paired_requires_oa` 为 true 时必须存在 OA row，`special_metadata.requires_invoice` / `paired_requires_invoice` 为 true 时必须存在发票 row；两者都为 false 时银行-only 或部分栏位 relation 可 paired。缺 metadata 或单项字段缺失时默认等价于需要 OA 和发票，fail closed 到 open。已配对例外不能再绕过这个门。
+- `relation_mode=bank_flow_rule_batch` 只是流水规则批量处理的关系类型和展示类型，不再单独决定 paired/open；它必须满足 Bank Transaction Paired Policy。银行流水数大于 3 条时默认折叠展示，原始 rows 必须可展开。
+- 外部往来 `relation_mode=turnover_manual_closure` 是 Workbench active pair relation 事实源；同一个 active case 下两条及以上银行流水形成的外部往来闭环必须保留 canonical `case:<case_id>` ownership 和“收支闭环”证据。分区仍只读取物化 relation metadata，不回读当前标签设置；旧 `manual_confirmed` 的 `turnover:*` case 必须先由规则保存同步链路升级为 `turnover_manual_closure`。
 
 禁止流转：
 

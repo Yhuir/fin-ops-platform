@@ -5102,33 +5102,6 @@ function bankFlowRuleBatchResetSubmittedPayload() {
   };
 }
 
-function bankFlowRuleRebaselineManifest(applied = false) {
-  return {
-    dry_run: !applied,
-    applied,
-    summary: {
-      candidate_count: 1,
-      batch_count: 1,
-      row_count: 1,
-      affected_months: ["2026-05"],
-    },
-    batches: [
-      {
-        batch_id: "legacy-no-oa-batch-e2e-001",
-        batch_type: "fee",
-        batch_label: "手续费",
-        relation_case_id: "legacy-no-oa-batch-e2e-001",
-        scope_month: "2026-05",
-        row_ids: ["legacy-no-oa-bank-e2e-001"],
-        row_count: 1,
-        version: 2,
-        status: applied ? "withdrawn" : "submitted",
-      },
-    ],
-    risks: [],
-  };
-}
-
 const defaultBankFlowRuleBatchTagRules = [
   { tag_code: "fee", requires_oa: false, requires_invoice: false },
   { tag_code: "salary", requires_oa: false, requires_invoice: false },
@@ -7838,7 +7811,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let bankFlowRuleBatchesRequestCount = 0;
   const bankFlowRuleMutationScope = options.bankFlowRuleBatchScenario === "internalTransferPairs" ? "2026-01" : "2026-05";
   let bankFlowRuleTagRules = [...defaultBankFlowRuleBatchTagRules];
-  let bankFlowRuleRebaselineApplied = false;
   let turnoverLedgerFailuresRemaining =
     options.turnoverLedgerFailuresBeforeSuccess ?? (options.turnoverLedgerFailOnce ? 1 : 0);
   let turnoverLedgerRequestCount = 0;
@@ -8838,23 +8810,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         Boolean(options.bankFlowRuleMutationWorkbenchTargets),
         bankFlowRuleMutationScope,
       ));
-    }
-
-    if (path === "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run") {
-      return json(route, bankFlowRuleRebaselineManifest(bankFlowRuleRebaselineApplied));
-    }
-
-    if (path === "/api/bank-flow-rule-batches/rebaseline-no-oa/apply") {
-      const body = parseJsonBody(request.postData()) as { manifest?: unknown; dry_run_manifest?: unknown };
-      const manifest = body.manifest ?? body.dry_run_manifest;
-      if (!manifest || typeof manifest !== "object") {
-        return json(route, {
-          error: "bank_flow_rule_rebaseline_manifest_required",
-          message: "需要先生成 dry-run 清单。",
-        }, 400);
-      }
-      bankFlowRuleRebaselineApplied = true;
-      return json(route, bankFlowRuleRebaselineManifest(true));
     }
 
     if (path === "/api/bank-flow-rule-batches/no-oa-batch-e2e-001/withdraw") {

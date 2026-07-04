@@ -982,7 +982,10 @@ class WorkbenchCandidateGroupingService:
                 group.reason = "unique_candidate_chain"
                 promoted.append(group)
             else:
-                if sum(len(rows) for rows in (group.oa_rows, group.bank_rows, group.invoice_rows)) > 1:
+                if (
+                    group.group_type == "candidate"
+                    and sum(len(rows) for rows in (group.oa_rows, group.bank_rows, group.invoice_rows)) > 1
+                ):
                     group.match_confidence = "medium"
                 candidates.append(group)
         return promoted, candidates
@@ -1367,96 +1370,51 @@ class WorkbenchCandidateGroupingService:
         if any(self._is_processed_exception_projection_row(row) for row in rows):
             return True
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
-        if self._is_turnover_manual_closure_group(group):
-            if self._group_has_explicit_paired_requirements(group):
-                return self._no_oa_group_has_required_row_types(group)
-            return row_type_count >= 3 and self._is_confirmed_active_relation_group(group)
-        relation_codes = {self._relation_code(row) for row in rows}
-        if relation_codes and relation_codes.issubset(NO_OA_BANK_BATCH_PAIRED_CODES):
-            return self._no_oa_group_has_required_row_types(group)
-        if row_type_count == 1 and group.bank_rows and not group.oa_rows and not group.invoice_rows:
-            relation_codes = {
-                str(row.get("invoice_relation", {}).get("code", ""))
-                for row in group.bank_rows
-            }
-            if relation_codes and relation_codes.issubset(SINGLE_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) == 1:
-                return True
-            if relation_codes and relation_codes.issubset(MULTI_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) >= 2:
-                return True
+        if group.bank_rows:
+            return self._bank_transaction_paired_policy_satisfied(group)
         if row_type_count == 2 and group.oa_rows and group.invoice_rows and not group.bank_rows:
-            if self._is_immutable_oa_attachment_binding_group(group):
-                return True
             relation_codes = {
                 self._relation_code(row)
                 for row in [*group.oa_rows, *group.invoice_rows]
             }
             if relation_codes and relation_codes.issubset(OA_INVOICE_AUTO_PAIRED_CODES):
                 return True
-        if row_type_count == 2 and group.oa_rows and group.bank_rows and not group.invoice_rows:
-            relation_codes = {
-                self._relation_code(row)
-                for row in [*group.oa_rows, *group.bank_rows]
-            }
-            if relation_codes and relation_codes.issubset(OA_BANK_SETTLEMENT_PAIRED_CODES):
-                return True
-            if any(self._is_etc_batch_oa_row(row) for row in group.oa_rows):
-                return True
-            if any(self._is_batch_accounting_relation_row(row) for row in [*group.oa_rows, *group.bank_rows]):
-                return True
         return row_type_count >= 3
 
-    def _no_oa_group_has_required_row_types(self, group: CandidateGroup) -> bool:
+    def _bank_transaction_paired_policy_satisfied(self, group: CandidateGroup) -> bool:
         if not group.bank_rows:
             return False
-        rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
-        requires_oa = any(
-            self._no_oa_paired_requirement(row, "paired_requires_oa")
-            or self._no_oa_paired_requirement(row, "requires_oa")
-            for row in rows
-        )
-        requires_invoice = any(
-            self._no_oa_paired_requirement(row, "paired_requires_invoice")
-            or self._no_oa_paired_requirement(row, "requires_invoice")
-            for row in rows
-        )
+        row_requirements = [
+            self._bank_transaction_paired_policy_requirements(row)
+            for row in group.bank_rows
+        ]
+        requires_oa = any(requirement["requires_oa"] for requirement in row_requirements)
+        requires_invoice = any(requirement["requires_invoice"] for requirement in row_requirements)
         return (not requires_oa or bool(group.oa_rows)) and (not requires_invoice or bool(group.invoice_rows))
 
-    @staticmethod
-    def _no_oa_paired_requirement(row: dict[str, Any], key: str) -> bool:
-        metadata = row.get("special_metadata")
-        return isinstance(metadata, dict) and bool(metadata.get(key))
-
-    @staticmethod
-    def _group_has_explicit_paired_requirements(group: CandidateGroup) -> bool:
-        for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]:
-            metadata = row.get("special_metadata")
-            if not isinstance(metadata, dict):
-                continue
-            if any(
-                key in metadata
-                for key in (
-                    "paired_requires_oa",
-                    "paired_requires_invoice",
-                    "requires_oa",
-                    "requires_invoice",
-                )
-            ):
-                return True
-        return False
-
-    def _is_turnover_manual_closure_group(self, group: CandidateGroup) -> bool:
-        rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
-        if not rows:
-            return False
-        relation_modes = {
-            self._string_value(row.get("relation_mode"))
-            for row in rows
-            if self._string_value(row.get("relation_mode"))
+    def _bank_transaction_paired_policy_requirements(self, row: dict[str, Any]) -> dict[str, bool]:
+        requires_oa = self._bank_transaction_paired_policy_value(row, "paired_requires_oa", "requires_oa")
+        requires_invoice = self._bank_transaction_paired_policy_value(
+            row,
+            "paired_requires_invoice",
+            "requires_invoice",
+        )
+        return {
+            "requires_oa": True if requires_oa is None else requires_oa,
+            "requires_invoice": True if requires_invoice is None else requires_invoice,
         }
-        return relation_modes == {TURNOVER_MANUAL_CLOSURE_RELATION_MODE}
 
-    def _is_confirmed_active_relation_group(self, group: CandidateGroup) -> bool:
-        rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+    @staticmethod
+    def _bank_transaction_paired_policy_value(row: dict[str, Any], *keys: str) -> bool | None:
+        metadata = row.get("special_metadata")
+        if not isinstance(metadata, dict):
+            return None
+        for key in keys:
+            if key in metadata:
+                return bool(metadata.get(key))
+        return None
+
+    def _rows_are_manual_confirmed_relation(self, rows: list[dict[str, Any]]) -> bool:
         if not rows:
             return False
         case_ids = {
@@ -1471,11 +1429,9 @@ class WorkbenchCandidateGroupingService:
             for row in rows
             if self._string_value(row.get("relation_mode"))
         }
-        if not relation_modes or "automatic_decision" in relation_modes:
+        if relation_modes != {"manual_confirmed"}:
             return False
         relation_codes = {self._relation_code(row) for row in rows}
-        if relation_modes == {TURNOVER_MANUAL_CLOSURE_RELATION_MODE}:
-            return bool(relation_codes) and relation_codes.issubset({TURNOVER_MANUAL_CLOSURE_RELATION_MODE})
         return bool(relation_codes) and relation_codes.issubset({"fully_linked"})
 
     @staticmethod
@@ -1485,25 +1441,6 @@ class WorkbenchCandidateGroupingService:
             isinstance(metadata, dict)
             and str(metadata.get("source") or "").strip() == BATCH_ACCOUNTING_RELATION_MODE
         )
-
-    def _is_immutable_oa_attachment_binding_group(self, group: CandidateGroup) -> bool:
-        if len(group.oa_rows) != 1 or not group.invoice_rows or group.bank_rows:
-            return False
-        if not all(self._is_oa_attachment_invoice_row(row) for row in group.invoice_rows):
-            return False
-        rows = [*group.oa_rows, *group.invoice_rows]
-        relation_codes = {self._relation_code(row) for row in rows}
-        if relation_codes != {"fully_linked"}:
-            return False
-        for row in rows:
-            metadata = row.get("special_metadata")
-            if not isinstance(metadata, dict):
-                continue
-            if bool(metadata.get("immutable_oa_attachment_binding")) or bool(
-                metadata.get("contains_immutable_oa_attachment_binding")
-            ):
-                return True
-        return False
 
     def _group_counterparty(self, group: CandidateGroup) -> str | None:
         attachment_primary_row = self._attachment_group_primary_row(group)
@@ -1627,6 +1564,8 @@ class WorkbenchCandidateGroupingService:
             return "open_exception"
         if any(self._is_legacy_exception_row(row) for row in rows):
             return "legacy_exception"
+        if self._rows_are_manual_confirmed_relation(rows):
+            return "manual_confirmed"
         if any(self._is_open_reconciliation_decision_row(row) for row in rows):
             return "open"
         return "candidate"
@@ -1639,6 +1578,8 @@ class WorkbenchCandidateGroupingService:
             return "ignored_exception_case"
         if group_type == "legacy_exception":
             return "legacy_exception_case"
+        if group_type == "manual_confirmed":
+            return "existing_case_group"
         if group_type == "open":
             return "reconciliation_decision_open"
         return "existing_case_candidate"

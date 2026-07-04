@@ -197,8 +197,6 @@ export type BankFlowRuleBatchTagRule = {
 export type BankFlowRuleBatchTagSelection = {
   version: number;
   bankAutoTagRulesVersion: number;
-  selectedTagCodes: string[];
-  inactiveSelectedTagCodes: string[];
   activeTags: BankFlowRuleBatchTagDefinition[];
   rules: BankFlowRuleBatchTagRule[];
   requirementsByTagCode: Record<string, { requiresOa: boolean; requiresInvoice: boolean }>;
@@ -213,36 +211,5 @@ export type SaveBankFlowRuleBatchTagSelectionRequest = {
 export type SubmitBankFlowRuleBatchSelectionRequest = {
   transactionIds: string[];
   note?: string;
-  signal?: AbortSignal;
-};
-
-export type BankFlowRuleBatchRebaselineBatch = {
-  batchId: string;
-  batchType: string;
-  batchLabel: string;
-  relationCaseId: string;
-  scopeMonth: string;
-  rowIds: string[];
-  rowCount: number;
-  version: number;
-  status: string;
-};
-
-export type BankFlowRuleBatchRebaselineManifest = {
-  dryRun: boolean;
-  applied: boolean;
-  summary: {
-    candidateCount: number;
-    batchCount: number;
-    rowCount: number;
-    affectedMonths: string[];
-  };
-  batches: BankFlowRuleBatchRebaselineBatch[];
-  risks: string[];
-};
-
-export type ApplyBankFlowRuleBatchRebaselineRequest = {
-  manifest: BankFlowRuleBatchRebaselineManifest;
-  reason: string;
   signal?: AbortSignal;
 };

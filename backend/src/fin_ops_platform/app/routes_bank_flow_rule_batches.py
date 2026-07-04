@@ -51,10 +51,6 @@ class BankFlowRuleBatchApiRoutes:
                 headers,
                 lambda payload, session: self.reset_submitted_batches(payload, session=session),
             )
-        if method == "POST" and route_path == "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run":
-            return self._json_write(body, headers, lambda payload, session: self.rebaseline_no_oa_dry_run(payload, session=session))
-        if method == "POST" and route_path == "/api/bank-flow-rule-batches/rebaseline-no-oa/apply":
-            return self._json_write(body, headers, lambda payload, session: self.apply_rebaseline_no_oa(payload, session=session))
 
         prefix = "/api/bank-flow-rule-batches/"
         submit_suffix = "/submit"
@@ -96,7 +92,7 @@ class BankFlowRuleBatchApiRoutes:
             return self._unknown_batch_response()
 
     def tag_rules(self) -> tuple[HTTPStatus, dict[str, Any]]:
-        return HTTPStatus.OK, self._tag_rules_payload(self._application_service.tag_selection_payload())
+        return HTTPStatus.OK, self._application_service.tag_selection_payload()
 
     def update_tag_rules(
         self,
@@ -117,24 +113,11 @@ class BankFlowRuleBatchApiRoutes:
         except AppSettingsValidationError as exc:
             status = (
                 HTTPStatus.CONFLICT
-                if exc.error_code
-                in {
-                    "bank_flow_rule_batch_tag_rules_version_conflict",
-                    "no_oa_bank_batch_tag_selection_version_conflict",
-                }
+                if exc.error_code == "bank_flow_rule_batch_tag_rules_version_conflict"
                 else HTTPStatus.BAD_REQUEST
             )
-            error = (
-                "bank_flow_rule_batch_tag_rules_version_conflict"
-                if exc.error_code
-                in {
-                    "bank_flow_rule_batch_tag_rules_version_conflict",
-                    "no_oa_bank_batch_tag_selection_version_conflict",
-                }
-                else exc.error_code
-            )
-            return status, {"error": error, "message": str(exc)}
-        return HTTPStatus.OK, self._tag_rules_payload(result)
+            return status, {"error": exc.error_code, "message": str(exc)}
+        return HTTPStatus.OK, result
 
     def submit_batch(
         self,
@@ -222,47 +205,6 @@ class BankFlowRuleBatchApiRoutes:
         except ValueError as exc:
             return self._value_error_response(exc)
         return HTTPStatus.OK, result
-
-    def rebaseline_no_oa_dry_run(
-        self,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession,
-    ) -> tuple[HTTPStatus, dict[str, Any]]:
-        del payload, session
-        return HTTPStatus.OK, self._application_service.rebaseline_submitted_no_oa_batches_dry_run()
-
-    def apply_rebaseline_no_oa(
-        self,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession,
-    ) -> tuple[HTTPStatus, dict[str, Any]]:
-        try:
-            result = self._application_service.apply_submitted_no_oa_rebaseline(
-                actor=self._actor(payload, session),
-                reason=str(payload.get("reason") or payload.get("note") or "").strip() or None,
-                manifest=payload.get("manifest") or payload.get("dry_run_manifest"),
-            )
-        except BankBatchPersistenceError as exc:
-            return self._persistence_error_response(exc)
-        except ValueError as exc:
-            return self._value_error_response(exc)
-        return HTTPStatus.OK, result
-
-    @staticmethod
-    def _tag_rules_payload(payload: dict[str, Any]) -> dict[str, Any]:
-        return {
-            key: value
-            for key, value in dict(payload).items()
-            if key
-            not in {
-                "selected_tag_codes",
-                "selectedTagCodes",
-                "inactive_selected_tag_codes",
-                "inactiveSelectedTagCodes",
-            }
-        }
 
     @staticmethod
     def _actor(payload: dict[str, Any], session: OARequestSession) -> str:

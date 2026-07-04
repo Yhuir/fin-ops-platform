@@ -3672,7 +3672,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(merged["summary"]["bank_count"], 1)
         self.assertEqual(merged["summary"]["invoice_count"], 1)
 
-    def test_get_api_workbench_keeps_oa_attachment_binding_separate_from_live_bank_candidate(self) -> None:
+    def test_get_api_workbench_promotes_oa_attachment_binding_with_live_bank_to_three_way_relation(self) -> None:
         app = build_application()
         query_service = WorkbenchQueryService(oa_adapter=AttachmentAwareOAAdapter())
         action_service = WorkbenchActionService(query_service)
@@ -3692,19 +3692,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         ]
         self.assertEqual(len(matching_groups), 1)
         group = matching_groups[0]
-        self.assertEqual(group["group_type"], "manual_confirmed")
-        self.assertEqual(group["relation_mode"], "manual_confirmed")
-        self.assertEqual(group["bank_rows"], [])
+        self.assertEqual(group["group_type"], "auto_closed")
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn-live-202603-001"])
         self.assertEqual(len(group["invoice_rows"]), 1)
         self.assertEqual(group["invoice_rows"][0]["detail_fields"]["来源OA单号"], "OA-ATT-001")
         self.assertTrue(group["oa_rows"][0]["special_metadata"]["immutable_oa_attachment_binding"])
-        self.assertTrue(
-            any(
-                row["id"] == "txn-live-202603-001"
-                for open_group in payload["open"]["groups"]
-                for row in open_group["bank_rows"]
-            )
-        )
+        self.assertFalse(payload["open"]["groups"])
 
         invoice_row_id = group["invoice_rows"][0]["id"]
         invoice_detail_response = app.handle_request("GET", f"/api/workbench/rows/{invoice_row_id}")
@@ -3721,7 +3714,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(invoice_detail["detail_fields"]["附件文件名"], "设备发票.pdf")
         self.assertEqual(oa_detail["detail_fields"]["附件发票数量"], "1")
 
-    def test_get_api_workbench_groups_repairs_oa_attachment_source_binding_as_paired_relation(self) -> None:
+    def test_get_api_workbench_groups_repairs_oa_attachment_source_binding_as_open_relation(self) -> None:
         app = build_application()
         query_service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
         action_service = WorkbenchActionService(query_service)
@@ -3736,7 +3729,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         source_groups = [
             group
-            for group in payload["paired"]["groups"]
+            for group in payload["open"]["groups"]
             if any(row.get("special_metadata", {}).get("immutable_oa_attachment_binding") for row in group["oa_rows"])
         ]
 

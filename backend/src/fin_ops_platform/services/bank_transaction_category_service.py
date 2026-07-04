@@ -1753,7 +1753,7 @@ class BankTransactionCategoryService:
         field_errors: list[dict[str, str]],
     ) -> None:
         seen_active_label_paths: dict[tuple[str, str], int] = {
-            (str(BANK_AUTO_TAG_SYSTEM_RULE.get("label") or BANK_AUTO_TAG_INTERNAL_TRANSFER_LABEL).strip(), ""): -1
+            (str(BANK_AUTO_TAG_SYSTEM_RULE["label"]).strip(), ""): -1
         }
         for index, definition in enumerate(definitions):
             status = str(definition.get("status") or "active")

@@ -4,8 +4,6 @@ import {
   fetchBankFlowRuleBatchDetail,
   fetchBankFlowRuleBatchTagSelection,
   fetchBankFlowRuleBatches,
-  applyBankFlowRuleBatchRebaseline,
-  dryRunBankFlowRuleBatchRebaseline,
   saveBankFlowRuleBatchTagSelection,
   resetSubmittedBankFlowRuleBatches,
   submitBankFlowRuleBatch,
@@ -25,8 +23,6 @@ describe("bank flow rule batch API", () => {
       if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && (!init?.method || init.method === "GET")) {
         return new Response(JSON.stringify({
           version: 3,
-          selected_tag_codes: ["fee"],
-          inactive_selected_tag_codes: ["archived_fee"],
           active_tags: [
             {
               code: "fee",
@@ -43,13 +39,15 @@ describe("bank flow rule batch API", () => {
               status: "active",
             },
           ],
+          rules: [
+            { tag_code: "fee", requires_oa: false, requires_invoice: false },
+          ],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       return new Response(JSON.stringify({
         version: 4,
-        selected_tag_codes: ["fee", "custom_no_sub"],
-        inactive_selected_tag_codes: [],
         active_tags: [],
+        rules: [],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -65,8 +63,6 @@ describe("bank flow rule batch API", () => {
 
     expect(payload).toMatchObject({
       version: 3,
-      selectedTagCodes: ["fee"],
-      inactiveSelectedTagCodes: ["archived_fee"],
       rules: [
         { tagCode: "fee", requiresOa: false, requiresInvoice: false },
         { tagCode: "custom_no_sub", requiresOa: true, requiresInvoice: true },
@@ -83,7 +79,7 @@ describe("bank flow rule batch API", () => {
         method: "PUT",
         body: JSON.stringify({
           expected_version: 3,
-        rules: [
+          rules: [
             { tag_code: "fee", requires_oa: false, requires_invoice: false },
             { tag_code: "custom_no_sub", requires_oa: true, requires_invoice: false },
           ],
@@ -91,117 +87,6 @@ describe("bank flow rule batch API", () => {
       }),
     );
     expect(saved.version).toBe(4);
-  });
-
-  test("dry-runs and applies legacy no-OA rebaseline with a manifest", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run") {
-        return new Response(JSON.stringify({
-          dry_run: true,
-          applied: false,
-          summary: {
-            candidate_count: 1,
-            batch_count: 1,
-            row_count: 2,
-            affected_months: ["2026-05"],
-          },
-          batches: [
-            {
-              batch_id: "legacy-no-oa-001",
-              batch_type: "fee",
-              batch_label: "手续费",
-              relation_case_id: "legacy-no-oa-001",
-              scope_month: "2026-05",
-              row_ids: ["bk-1", "bk-2"],
-              row_count: 2,
-              version: 3,
-              status: "submitted",
-            },
-          ],
-          risks: [],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      return new Response(JSON.stringify({
-        dry_run: false,
-        applied: true,
-        summary: {
-          candidate_count: 1,
-          batch_count: 1,
-          row_count: 2,
-          affected_months: ["2026-05"],
-        },
-        batches: [
-          {
-            batch_id: "legacy-no-oa-001",
-            batch_type: "fee",
-            batch_label: "手续费",
-            relation_case_id: "legacy-no-oa-001",
-            scope_month: "2026-05",
-            row_ids: ["bk-1", "bk-2"],
-            row_count: 2,
-            version: 4,
-            status: "withdrawn",
-          },
-        ],
-        risks: [],
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const manifest = await dryRunBankFlowRuleBatchRebaseline();
-    const applied = await applyBankFlowRuleBatchRebaseline({
-      manifest,
-      reason: "重新按流水规则处理",
-    });
-
-    expect(manifest).toMatchObject({
-      dryRun: true,
-      applied: false,
-      summary: { batchCount: 1, rowCount: 2, affectedMonths: ["2026-05"] },
-      batches: [
-        { batchId: "legacy-no-oa-001", rowIds: ["bk-1", "bk-2"], version: 3, status: "submitted" },
-      ],
-    });
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          reason: "重新按流水规则处理",
-          manifest: {
-            dry_run: true,
-            applied: false,
-            summary: {
-              candidate_count: 1,
-              batch_count: 1,
-              row_count: 2,
-              affected_months: ["2026-05"],
-            },
-            batches: [
-              {
-                batch_id: "legacy-no-oa-001",
-                batch_type: "fee",
-                batch_label: "手续费",
-                relation_case_id: "legacy-no-oa-001",
-                scope_month: "2026-05",
-                row_ids: ["bk-1", "bk-2"],
-                row_count: 2,
-                version: 3,
-                status: "submitted",
-              },
-            ],
-            risks: [],
-          },
-        }),
-      }),
-    );
-    expect(applied).toMatchObject({
-      dryRun: false,
-      applied: true,
-      batches: [{ batchId: "legacy-no-oa-001", status: "withdrawn", version: 4 }],
-    });
   });
 
   test("resets all submitted flow rule batches through the reset endpoint", async () => {

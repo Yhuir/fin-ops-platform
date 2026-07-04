@@ -89,29 +89,6 @@
 - OA 和发票都满足后才进入 paired。
 - relation metadata 缺失或不完整时 fail closed，不默认 paired。
 
-## BRB-E2E-005 历史 no-OA submitted rebaseline
-
-前置：
-
-- 存在多个 legacy `relation_mode=no_oa_bank_batch` submitted 批次。
-- 对应银行 rows 当前未被其它非 no-OA active relation 占用。
-
-步骤：
-
-1. 运行 rebaseline dry-run。
-2. 查看 manifest 中的批次数、银行 rows、月份、金额、风险。
-3. 执行 apply。
-4. 等待 operation barrier。
-5. 打开流水规则批量处理页和关联台。
-
-验收：
-
-- dry-run 不改变事实。
-- apply 通过 relation command service 撤回旧 relation。
-- 旧 no-OA 批次标记 rebaseline withdrawn。
-- 银行 rows 回到候选或按新规则进入 open/paired 候选链路。
-- 重复 apply 幂等。
-
 ## BRB-E2E-008 已提交批次批量重置回未提交候选
 
 前置：
@@ -137,13 +114,13 @@
 
 前置：
 
-- 准备只读用户、规则保存权限用户、rebaseline 管理权限用户。
+- 准备只读用户、规则保存权限用户、批次提交/撤回权限用户。
 - 准备 stale/missing read model 场景。
 
 步骤：
 
 1. 只读用户打开页面和抽屉。
-2. 尝试保存规则、提交批次、运行 rebaseline。
+2. 尝试保存规则、提交批次、撤回批次、reset submitted。
 3. 在 read model stale/missing 时查看列表和提交按钮。
 
 验收：

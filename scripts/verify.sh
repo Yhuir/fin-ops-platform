@@ -5,8 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/verify.sh [backend|frontend|e2e|docs|runtime-check|infra-smoke|all]
+Usage: scripts/verify.sh [lint|backend|frontend|e2e|docs|runtime-check|infra-smoke|all]
 
+lint      Run Ruff lint checks for backend Python code, tests, and scripts.
 backend   Run clean backend check and full backend unittest discovery.
 frontend  Run frontend Vitest and production build.
 e2e       Run deterministic Playwright browser smoke tests.
@@ -65,6 +66,11 @@ run_backend() {
   cd "$ROOT_DIR"
   run_clean_app_check
   PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
+}
+
+run_lint() {
+  cd "$ROOT_DIR"
+  python3 -m ruff check backend/src tests scripts
 }
 
 run_frontend() {
@@ -204,6 +210,9 @@ run_infra_smoke() {
 
 target="${1:-all}"
 case "$target" in
+  lint)
+    run_lint
+    ;;
   backend)
     run_backend
     ;;

@@ -282,51 +282,6 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("dry-runs and applies legacy no-OA rebaseline with a manifest", async ({ page }) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-    });
-
-    await page.goto("/bank-flow-rule-batches");
-    await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
-
-    const dryRunResponse = page.waitForResponse((response) =>
-      response.url().endsWith("/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run")
-      && response.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "扫描历史免OA" }).click();
-    expect((await dryRunResponse).status()).toBe(200);
-    await expect(page.getByText("待撤回 1 批 / 1 条 / 2026-05")).toBeVisible();
-    await expect(page.getByText("已生成历史免OA重算清单：1 批")).toBeVisible();
-
-    await page.getByLabel("原因").fill("浏览器 e2e 历史免OA重算");
-    const applyRequest = page.waitForRequest((request) =>
-      request.url().endsWith("/api/bank-flow-rule-batches/rebaseline-no-oa/apply")
-      && request.method() === "POST",
-    );
-    const applyResponse = page.waitForResponse((response) =>
-      response.url().endsWith("/api/bank-flow-rule-batches/rebaseline-no-oa/apply")
-      && response.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "应用重算" }).click();
-    const applyBody = JSON.parse((await applyRequest).postData() ?? "{}") as {
-      reason?: string;
-      manifest?: { batches?: Array<{ batch_id?: string; version?: number }> };
-    };
-    expect(applyBody.reason).toBe("浏览器 e2e 历史免OA重算");
-    expect(applyBody.manifest?.batches).toEqual([
-      expect.objectContaining({ batch_id: "legacy-no-oa-batch-e2e-001", version: 2 }),
-    ]);
-    expect((await applyResponse).status()).toBe(200);
-    await expect(page.getByText("历史免OA已撤回 1 批")).toBeVisible();
-    expect(api.count("POST /api/bank-flow-rule-batches/rebaseline-no-oa/dry-run")).toBe(1);
-    expect(api.count("POST /api/bank-flow-rule-batches/rebaseline-no-oa/apply")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThanOrEqual(1);
-    await expectNoUnexpectedSuccessUiErrors(page);
-    expect(browserErrors).toEqual([]);
-  });
-
   test("resets submitted flow rule batches back to unsubmitted", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {

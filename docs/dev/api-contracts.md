@@ -170,9 +170,9 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 前端必须对 `overall.level/color/reason`、domain `key/level/status/reason`、task `job_id/status` 做 fail-closed 校验。关键字段缺失或非法时，不能把 payload 默认解释为 `ok/green/ready`。
 
-## 流水规则批量处理 API
+## Bank Transaction Paired Policy / 流水规则批量处理 API
 
-状态：implemented-independent-storage-and-rule-family-io。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。迁移 `0082_bank_flow_rule_batch_storage.sql` 从历史 no-OA 表回填旧 bank-flow rows；迁移 `0083_bank_flow_rule_batch_tag_rules.sql` 只在缺失新规则 key 时从历史 no-OA settings 复制值。运行时不再把 no-OA 物理表或 no-OA settings family 作为 bank-flow source of truth。legacy `/api/no-oa-bank-batches/*` 仅作为 no-OA 兼容路径保留，不承接 bank-flow 新链路。
+状态：implemented-global-paired-policy。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。迁移 `0082_bank_flow_rule_batch_storage.sql` 从历史 no-OA 表回填旧 bank-flow rows；迁移 `0083_bank_flow_rule_batch_tag_rules.sql` 只在缺失新规则 key 时一次性从历史 no-OA settings 复制初始值。运行时不再把 no-OA 物理表、no-OA settings family、旧 `selected_tag_codes` 或旧 no-OA 历史重算作为 bank-flow source of truth。legacy `/api/no-oa-bank-batches/*` 仅作为 no-OA 兼容路径保留，不承接 bank-flow 新链路。
 
 `GET /api/bank-flow-rule-batches/tag-rules`
 
@@ -187,7 +187,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `active_tags` | 银行明细 active 标签，只读展示 `收支类型 / 流水主标签 / 流水子标签`。 |
 | `rules` | 当前可用标签的闭环要求列表。每行包含 `tag_code`、`requires_oa`、`requires_invoice`。 |
 | `requirements_by_tag_code` | `rules` 的 code map 形式。 |
-| `permissions` | 当前用户读取、保存、提交、rebaseline 权限。 |
+| `permissions` | 当前用户读取、保存、提交和撤回权限。 |
 
 `active_tags[*]` 至少包含：
 
@@ -279,25 +279,6 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 不直接修改银行流水、银行标签或 `app.workbench_pair_relations` 表。
 - 成功后返回 `summary.reset_count`、`summary.row_count`、`affected_months`、`results`、`freshness_targets` 和 `operation_barrier_targets`，其中 barrier target 使用 `read_model_key=bank_flow_rule_batch`。
 - 撤回后的旧批次进入 withdrawn/audit history；后续 read model rebuild 会按当前银行标签和规则重新生成未提交候选，不自动重新提交。
-
-`POST /api/bank-flow-rule-batches/rebaseline-no-oa/dry-run`
-
-生成历史 submitted no-OA 批次撤回计划，不改变事实。
-
-响应至少包含：
-
-| 字段 | 说明 |
-| --- | --- |
-| `manifest_id` | dry-run 计划身份。 |
-| `candidate_batches` | 待撤回旧 no-OA submitted 批次。 |
-| `candidate_relations` | 待通过 command service 撤回的旧 relation。 |
-| `affected_transaction_ids` | 释放的银行流水 ID。 |
-| `affected_months` | 受影响月份。 |
-| `blocked_items` | 不能自动处理的批次和原因。 |
-
-`POST /api/bank-flow-rule-batches/rebaseline-no-oa/apply`
-
-按 dry-run manifest 撤回历史 submitted no-OA 批次。apply 必须幂等、审计，并通过 `WorkbenchRelationCommandService` 撤销旧 `relation_mode=no_oa_bank_batch`。成功后旧批次标记为 rebaseline withdrawn，银行 rows 回到可按新规则处理的状态；不得自动重新提交。
 
 ## 免 OA 流水批量处理 API
 

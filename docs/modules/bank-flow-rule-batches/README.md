@@ -4,7 +4,7 @@
 - 类型: 页面模块
 - Route: `/bank-flow-rule-batches`
 - Page key: `bank-flow-rule-batches`
-- 状态: implemented-modular-closure。当前生产入口、API、规则抽屉、提交、关联台判定、rebaseline API、独立 application service、独立 read model key、独立 worker event、独立 persistence IO、独立 PostgreSQL 批次/read model 表、独立 tag-rule settings family、前端 feature I/O/view model/components 和 Browser E2E 已接入。
+- 状态: implemented-modular-closure。当前生产入口、API、全局 Bank Transaction Paired Policy 规则抽屉、提交、关联台判定、独立 application service、独立 read model key、独立 worker event、独立 persistence IO、独立 PostgreSQL 批次/read model 表、独立 tag-rule settings family、前端 feature I/O/view model/components 和 Browser E2E 已接入。
 
 ## 修改前必读
 
@@ -20,7 +20,7 @@
 
 ## 当前代码入口
 
-当前代码使用 bank-flow 独立 HTTP route、application boundary、read model key、refresh producer、worker event、批次/read model 表和 tag-rule settings key 承载新业务入口；新页面和生产 API 不再使用 `selected_tag_codes` 作为规则事实源。
+当前代码使用 bank-flow 独立 HTTP route、application boundary、read model key、refresh producer、worker event、批次/read model 表和 tag-rule settings key 承载新业务入口；新页面和生产 API 不接收或返回 `selected_tag_codes` 作为规则事实源。
 
 - Frontend page: `web/src/pages/BankFlowRuleBatchPage.tsx`，通过 `/bank-flow-rule-batches` route 作为流水规则批量处理页。
 - Frontend feature: `web/src/features/bankFlowRuleBatches/api.ts`（HTTP/DTO mapping）、`types.ts`（public DTO/domain types）、`policy.ts`（状态/权限策略）、`viewModel.ts`（格式化、规则 grid view model、operation barrier target helpers）、`components.tsx`（分页、状态标签、label rail）。API 指向 `/api/bank-flow-rule-batches`。
@@ -32,7 +32,7 @@
 
 ## 当前目标边界
 
-流水规则批量处理替代“免 OA 流水批量处理”的新增业务方向：它处理所有可批量提交的银行流水，不再只处理免 OA 候选。页面右侧抽屉以紧凑 xlsx/grid 方式维护每个银行明细标签是否需要 OA、发票才能进入关联台已配对区。
+流水规则批量处理是全局 Bank Transaction Paired Policy 的管理入口：它处理所有可批量提交的银行流水，不再只处理免 OA 候选。页面右侧抽屉以紧凑 xlsx/grid 方式维护每个银行明细标签是否需要 OA、发票才能进入关联台已配对区。
 
 核心规则：
 
@@ -40,16 +40,15 @@
 - 右侧只保留 `OA`、`发票` 两列勾选。勾选表示该标签流水进入关联台已配对区前必须具备对应 row type；空表示不需要该项即可闭环。
 - 新增或未配置的银行标签默认勾选 `OA` 和 `发票`，避免新标签自动进入无需 OA/发票闭环。
 - 旧 `selected_tag_codes` 不迁移为新事实源；实现时应移除或只作为只读 legacy 输入清理，所有流水重新按新规则计算。
-- 页面提交的是银行流水批量关系事实。是否进入关联台已配对区，由 relation metadata 中的 `requires_oa` / `requires_invoice` 与实际 row type 组合决定。
+- 页面提交的是银行流水批量关系事实。所有含银行流水的关联台 group 是否进入已配对区，由银行流水 row 上物化的 Bank Transaction Paired Policy metadata 中的 `requires_oa` / `requires_invoice` 与实际 row type 组合决定；缺失 metadata 默认等价于需要 OA 和发票。
 - 从本页面提交且银行流水超过 3 条时，关联台以折叠形式展示；1 到 3 条可展开展示。
-- 历史已提交 no-OA 批次需要通过受控 rebaseline 撤回到未处理状态，再由新规则重新处理。rebaseline 必须 dry-run、审计、幂等，并通过 relation command service 撤销旧关系。
 
 ## 不属于本模块事实源
 
 - 银行明细标签定义、自动匹配规则和分类确认归 `bank-details`。
 - Workbench relation canonical fact 归 `workbench-relations`。
 - 关联台 paired/open 展示归 `reconciliation-workbench` active generation。
-- 旧 no-OA 批次历史事实仍归 `no-oa-bank-batches` 管理；本模块只通过受控 rebaseline 合同处理明确 legacy submitted no-OA 批次，不再通过 no-OA route/event/scope 承接新 bank-flow 链路。
+- 旧 no-OA 批次历史事实仍归 `no-oa-bank-batches` 管理；本模块不再提供旧 no-OA 历史重算页面入口或 API。
 
 ## 维护触发器
 
@@ -58,14 +57,14 @@
 - 页面名称、路由、导航、抽屉 grid、筛选、分页、提交、撤回或权限变化。
 - 标签规则 DTO、默认值、乐观锁、审计、错误码或保存语义变化。
 - 批量提交 relation mode、metadata、折叠展示或 paired/open 判定变化。
-- 历史 no-OA rebaseline 范围、dry-run/apply 行为或回滚策略变化。
+- 旧 no-OA 迁移/运维工具若未来重新引入，必须作为独立运维模块建模，不能挂回本页面链路。
 - read model scope、worker、operation barrier、dirty scope 或 API freshness 变化。
 - Playwright E2E 业务验收范围变化。
 
 ## 本目录文件
 
 - `boundary-io.md`：模块边界、I/O、持久化、文件范围、依赖方向和旧代码删除条件。
-- `state-machine.md`：标签规则、批量提交、关联台展示和 rebaseline 状态机。
+- `state-machine.md`：标签规则、批量提交、关联台展示和 reset 状态机。
 - `tests.md`：七类测试适用性、计划测试入口和验证命令。
 - `e2e-spec.md`：Spec-first Playwright E2E 业务验收合同。
 - `e2e-coverage.md`：E2E spec 到当前自动化覆盖的映射和缺口。

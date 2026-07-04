@@ -192,6 +192,45 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in paired_group["bank_rows"]], ["bk-flow-loan-repayment"])
         self.assertEqual(paired_group["invoice_rows"], [])
 
+    def test_bank_transaction_missing_policy_defaults_to_full_three_pane_requirement(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        bank_row = {
+            "id": "bk-policy-missing-001",
+            "type": "bank",
+            "case_id": "CASE-POLICY-MISSING",
+            "relation_mode": "manual_confirmed",
+            "debit_amount": "145.00",
+            "credit_amount": "",
+            "counterparty_name": "策略供应商",
+            "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+        }
+        oa = {
+            "id": "oa-policy-missing-001",
+            "type": "oa",
+            "case_id": "CASE-POLICY-MISSING",
+            "relation_mode": "manual_confirmed",
+            "amount": "145.00",
+            "counterparty_name": "策略供应商",
+            "oa_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+        }
+        invoice = {
+            "id": "iv-policy-missing-001",
+            "type": "invoice",
+            "case_id": "CASE-POLICY-MISSING",
+            "relation_mode": "manual_confirmed",
+            "total_with_tax": "145.00",
+            "seller_name": "策略供应商",
+            "invoice_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+        }
+
+        missing_invoice = service.group_payload("2026-05", oa_rows=[oa], bank_rows=[bank_row], invoice_rows=[])
+        self.assertEqual(missing_invoice["summary"]["paired_count"], 0)
+        self.assertEqual(missing_invoice["summary"]["open_count"], 1)
+
+        complete = service.group_payload("2026-05", oa_rows=[oa], bank_rows=[bank_row], invoice_rows=[invoice])
+        self.assertEqual(complete["summary"]["paired_count"], 1)
+        self.assertEqual(complete["summary"]["open_count"], 0)
+
     def test_no_oa_bank_batch_group_collapses_to_summary_and_preserves_bank_rows(self) -> None:
         service = WorkbenchCandidateGroupingService()
         batch_id = "no_oa_batch_fee_001"
@@ -257,6 +296,11 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
             "withdrawable": True,
             "relation_mode": "no_oa_bank_batch",
             "display_tags": ["免OA", "内部往来款"],
+            "paired_requires_oa": False,
+            "paired_requires_invoice": False,
+            "paired_requirement_source": "bank_transaction_paired_policy",
+            "paired_requirement_tag_code": "internal_transfer",
+            "paired_requirement_version": 1,
         }
         payload = service.group_payload(
             "2026-03",
@@ -2100,6 +2144,11 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
                     "credit_amount": "",
                     "counterparty_name": "李四",
                     "invoice_relation": {"code": "salary_personal_auto_match", "label": "已匹配：工资", "tone": "success"},
+                    "special_metadata": bank_transaction_paired_policy(
+                        tag_code="salary",
+                        requires_oa=False,
+                        requires_invoice=False,
+                    ),
                     "available_actions": ["detail"],
                 }
             ],
@@ -2128,6 +2177,11 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
                     "credit_amount": "13000.00",
                     "counterparty_name": "云南溯源科技有限公司",
                     "invoice_relation": {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"},
+                    "special_metadata": bank_transaction_paired_policy(
+                        tag_code="internal_transfer",
+                        requires_oa=False,
+                        requires_invoice=False,
+                    ),
                     "available_actions": ["detail"],
                 },
                 {
@@ -2139,6 +2193,11 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
                     "credit_amount": "",
                     "counterparty_name": "云南溯源科技有限公司",
                     "invoice_relation": {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"},
+                    "special_metadata": bank_transaction_paired_policy(
+                        tag_code="internal_transfer",
+                        requires_oa=False,
+                        requires_invoice=False,
+                    ),
                     "available_actions": ["detail"],
                 },
             ],
@@ -2167,6 +2226,15 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
                     "counterparty_name": "云南溯源科技有限公司",
                     "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：内部往来款", "tone": "success"},
                     "display_tags": ["免OA", "内部往来款"],
+                    "special_metadata": {
+                        **bank_transaction_paired_policy(
+                            tag_code="internal_transfer",
+                            requires_oa=False,
+                            requires_invoice=False,
+                        ),
+                        "source": "no_oa_bank_batch",
+                        "relation_mode": "no_oa_bank_batch",
+                    },
                     "available_actions": ["detail"],
                 },
                 {
@@ -2180,6 +2248,15 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
                     "counterparty_name": "云南溯源科技有限公司",
                     "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：内部往来款", "tone": "success"},
                     "display_tags": ["免OA", "内部往来款"],
+                    "special_metadata": {
+                        **bank_transaction_paired_policy(
+                            tag_code="internal_transfer",
+                            requires_oa=False,
+                            requires_invoice=False,
+                        ),
+                        "source": "no_oa_bank_batch",
+                        "relation_mode": "no_oa_bank_batch",
+                    },
                     "available_actions": ["detail"],
                 },
             ],
@@ -2334,7 +2411,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(payload["paired"]["groups"], [])
         group = payload["open"]["groups"][0]
         self.assertEqual(group["group_id"], "case:CASE-CONFIRMED-OA-BANK")
-        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual(group["group_type"], "manual_confirmed")
         self.assertEqual(group["relation_mode"], "manual_confirmed")
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-confirmed-001"])
         self.assertCountEqual(
@@ -2465,6 +2542,54 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(group["group_type"], "manual_confirmed")
         self.assertEqual(group["relation_mode"], "manual_confirmed")
 
+    def test_keeps_immutable_oa_attachment_binding_open_without_bank_transaction(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        invoice_id = "oa-att-inv-oa-exp-69fab21659b12d7d42a50a45:item:0:fb2a9c9fab23-b515bf77d490fdfe"
+        metadata = {
+            "source": "oa_attachment_invoice",
+            "parent_oa_row_id": "oa-exp-2156",
+            "immutable_oa_attachment_binding": True,
+            "contains_immutable_oa_attachment_binding": True,
+        }
+
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[
+                {
+                    "id": "oa-exp-2156",
+                    "type": "oa",
+                    "case_id": "CASE-OA-ATT-oa-exp-2156",
+                    "relation_mode": "manual_confirmed",
+                    "amount": "145.00",
+                    "special_metadata": metadata,
+                    "oa_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+            bank_rows=[],
+            invoice_rows=[
+                {
+                    "id": invoice_id,
+                    "type": "invoice",
+                    "case_id": "CASE-OA-ATT-oa-exp-2156",
+                    "relation_mode": "manual_confirmed",
+                    "source_kind": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-exp-69fab21659b12d7d42a50a45:item:0:fb2a9c9fab23",
+                    "total_with_tax": "145.00",
+                    "special_metadata": metadata,
+                    "invoice_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_id"], "case:CASE-OA-ATT-oa-exp-2156")
+        self.assertEqual(group["group_type"], "manual_confirmed")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-exp-2156"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], [invoice_id])
+        self.assertEqual(group["bank_rows"], [])
+
     def test_demotes_single_type_paired_invoice_group_back_to_open(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
@@ -2551,6 +2676,21 @@ def flatten_groups(groups: list[dict[str, object]], row_type: str) -> list[dict[
         for group in groups
         for row in group[f"{row_type}_rows"]
     ]
+
+
+def bank_transaction_paired_policy(
+    *,
+    tag_code: str,
+    requires_oa: bool,
+    requires_invoice: bool,
+) -> dict[str, object]:
+    return {
+        "paired_requirement_source": "bank_transaction_paired_policy",
+        "paired_requirement_tag_code": tag_code,
+        "paired_requirement_version": 1,
+        "requires_oa": requires_oa,
+        "requires_invoice": requires_invoice,
+    }
 
 
 def no_oa_bank_row(

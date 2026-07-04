@@ -21,7 +21,7 @@ class FakeBankFlowRuleBatchApplicationService:
 
     def tag_selection_payload(self):  # type: ignore[no-untyped-def]
         self.calls.append(("tag_rules", None))
-        return {"version": 1, "selected_tag_codes": ["fee"], "rules": [{"tag_code": "fee"}]}
+        return {"version": 1, "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}]}
 
     def update_tag_selection(self, payload, *, actor_id):  # type: ignore[no-untyped-def]
         self.calls.append(("update_tag_rules", {"payload": payload, "actor_id": actor_id}))
@@ -29,7 +29,7 @@ class FakeBankFlowRuleBatchApplicationService:
             raise AppSettingsValidationError("bank_flow_rule_batch_tag_rules_version_conflict", "version conflict")
         if payload.get("duplicate_rule"):
             raise AppSettingsValidationError("duplicate_bank_flow_rule_batch_tag_rule", "duplicate tag rule")
-        return {"version": 2, "selected_tag_codes": ["fee"], "rules": [{"tag_code": "fee"}]}
+        return {"version": 2, "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}]}
 
     def submit_batch(self, batch_id, *, actor, expected_version, note, relation_mode):  # type: ignore[no-untyped-def]
         self.calls.append(
@@ -92,14 +92,6 @@ class FakeBankFlowRuleBatchApplicationService:
         self.calls.append(("reset", {"actor": actor, "reason": reason}))
         return {"summary": {"reset_count": 2}, "affected_months": ["2026-05"]}
 
-    def rebaseline_submitted_no_oa_batches_dry_run(self):  # type: ignore[no-untyped-def]
-        self.calls.append(("rebaseline_dry_run", None))
-        return {"dry_run": True}
-
-    def apply_submitted_no_oa_rebaseline(self, *, actor, reason, manifest):  # type: ignore[no-untyped-def]
-        self.calls.append(("rebaseline_apply", {"actor": actor, "reason": reason, "manifest": manifest}))
-        return {"applied": True}
-
 
 class BankFlowRuleBatchRoutesTests(unittest.TestCase):
     def test_list_route_uses_bank_flow_relation_mode(self) -> None:
@@ -116,7 +108,7 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         self.assertEqual(service.calls, [("list", {"bucket": ["submitted"]})])
         self.assertEqual(service.list_relation_modes, [BANK_FLOW_RULE_BATCH_RELATION_MODE])
 
-    def test_tag_rules_strip_no_oa_selection_fields_and_map_conflict(self) -> None:
+    def test_tag_rules_return_policy_rules_and_map_conflict(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()
         routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]
 
@@ -127,7 +119,7 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         )
 
         self.assertEqual(status, HTTPStatus.OK)
-        self.assertNotIn("selected_tag_codes", payload)
+        self.assertEqual(payload["rules"], [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}])
         self.assertEqual(conflict_status, HTTPStatus.CONFLICT)
         self.assertEqual(conflict_payload["error"], "bank_flow_rule_batch_tag_rules_version_conflict")
 

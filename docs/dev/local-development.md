@@ -6,10 +6,22 @@
 python -m pip install -r backend/requirements.txt
 ```
 
+开发工具：
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
 后端基础检查默认使用干净临时 app 状态，适合提交前和日常开发验证：
 
 ```bash
 bash scripts/verify.sh backend
+```
+
+Python lint：
+
+```bash
+bash scripts/verify.sh lint
 ```
 
 需要检查当前机器配置的 runtime 状态时再显式运行：

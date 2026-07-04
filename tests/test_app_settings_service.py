@@ -287,7 +287,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             settings["no_oa_bank_batch_tag_selection"]["version"],
             3,
         )
-        self.assertEqual(settings["bank_flow_rule_batch_tag_rules"]["selected_tag_codes"], [])
+        self.assertNotIn("selected_tag_codes", settings["bank_flow_rule_batch_tag_rules"])
         self.assertNotIn("salary", settings["bank_flow_rule_batch_tag_rules"]["requirements_by_tag_code"])
         self.assertEqual(
             settings["bank_flow_rule_batch_tag_rules"]["version"],

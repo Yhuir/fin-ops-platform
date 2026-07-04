@@ -2454,8 +2454,6 @@ class Application:
                 "/api/bank-flow-rule-batches",
                 "/api/bank-flow-rule-batches/tag-rules",
                 "/api/bank-flow-rule-batches/submit-selection",
-                "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run",
-                "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
                 "/api/bank-flow-rule-batches/{batch_id}",
                 "/api/bank-flow-rule-batches/{batch_id}/submit",
                 "/api/bank-flow-rule-batches/{batch_id}/withdraw",
@@ -9223,7 +9221,6 @@ class Application:
                 repository=self._state_store,
                 save_repository=False,
             ),
-            rebaseline_no_oa_batch_service=self._no_oa_bank_batch_service,
         )
 
     def _bank_flow_rule_batch_routes(self) -> BankFlowRuleBatchApiRoutes:

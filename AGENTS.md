@@ -50,6 +50,7 @@
 ## 工作约束
 
 - 优先读取现有代码和现有文档，不猜测字段、接口或数据库结构。
+- 后端 Python 改动优先运行 `bash scripts/verify.sh lint`；需要自动修复导入排序时先运行 `python3 -m ruff check --select I --fix backend/src tests scripts`，再复跑 lint。
 - 需要生产 admin token 做性能验证、只读 smoke 或其它生产操作时，先使用 `scripts/with-production-admin-token.sh <command>` 自动加载本机 token；默认读取 `~/.config/fin-ops-platform/admin-token.env`，或读取 `FIN_OPS_LOCAL_ADMIN_TOKEN_ENV` 指定的文件。不要把 token 粘贴到聊天、提交到仓库或打印到日志；本机缺失时让用户运行一次 `scripts/with-production-admin-token.sh --store`。
 - 变更范围保持最小；如果整理范围扩大到重构代码或改变业务口径，先说明并等待确认。
 - 大型跨模块、read model/worker、后端边界重构或需要全量定位的任务必须使用 GSD 流程。GSD 过程产物可以留在 `.planning/`，但长期事实必须沉淀到 `docs/`；不要把原始 prompt 写入主文档树。

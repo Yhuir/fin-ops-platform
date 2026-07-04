@@ -13,13 +13,11 @@ import {
 import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { operationBarrierTargets, operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
+import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   fetchBankFlowRuleBatchDetail,
   fetchBankFlowRuleBatchTagSelection,
   fetchBankFlowRuleBatches,
-  applyBankFlowRuleBatchRebaseline,
-  dryRunBankFlowRuleBatchRebaseline,
   resetSubmittedBankFlowRuleBatches,
   saveBankFlowRuleBatchTagSelection,
   submitBankFlowRuleBatch,
@@ -69,7 +67,6 @@ import type {
   BankFlowRuleBatchDetailRow,
   BankFlowRuleBatchTagRule,
   BankFlowRuleBatchTagSelection,
-  BankFlowRuleBatchRebaselineManifest,
 } from "../features/bankFlowRuleBatches/types";
 
 const EMPTY_BATCHES: BankFlowRuleBatchesResponse = {
@@ -90,8 +87,6 @@ const EMPTY_BATCHES: BankFlowRuleBatchesResponse = {
 const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
   version: 1,
   bankAutoTagRulesVersion: 1,
-  selectedTagCodes: [],
-  inactiveSelectedTagCodes: [],
   activeTags: [],
   rules: [],
   requirementsByTagCode: {},
@@ -127,8 +122,6 @@ export default function BankFlowRuleBatchPage() {
   const [error, setError] = useState<string | null>(null);
   const [withdrawTarget, setWithdrawTarget] = useState<BankFlowRuleBatch | null>(null);
   const [withdrawReason, setWithdrawReason] = useState("");
-  const [rebaselineManifest, setRebaselineManifest] = useState<BankFlowRuleBatchRebaselineManifest | null>(null);
-  const [rebaselineReason, setRebaselineReason] = useState("历史免OA已提交批次按流水规则重新处理");
   const [feedback, setFeedback] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const batchRequestSeqRef = useRef(0);
@@ -721,75 +714,6 @@ export default function BankFlowRuleBatchPage() {
     }
   };
 
-  const handleRebaselineDryRun = async () => {
-    if (!canMutateData || mutating) {
-      return;
-    }
-    const result = await runOperation({
-      loadingMessage: "正在扫描历史免OA已提交批次...",
-      action: async () => {
-        setMutating(true);
-        try {
-          return await dryRunBankFlowRuleBatchRebaseline();
-        } finally {
-          setMutating(false);
-        }
-      },
-      errorMessage: (caught) => caught instanceof Error ? caught.message : "历史免OA扫描失败",
-    });
-    if (result.status === "success") {
-      setRebaselineManifest(result.value);
-      const count = result.value.summary.batchCount;
-      setFeedback({
-        severity: count > 0 ? "warning" : "success",
-        message: count > 0 ? `已生成历史免OA重算清单：${count} 批` : "没有历史免OA已提交批次需要重算",
-      });
-    } else {
-      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "历史免OA扫描失败" });
-    }
-  };
-
-  const handleApplyRebaseline = async () => {
-    if (!canMutateData || mutating || !rebaselineManifest || rebaselineManifest.summary.batchCount === 0) {
-      return;
-    }
-    const manifest = rebaselineManifest;
-    const reason = rebaselineReason.trim() || "历史免OA已提交批次按流水规则重新处理";
-    const result = await runOperation({
-      loadingMessage: "正在撤回历史免OA已提交批次...",
-      action: async ({ setMessage }) => {
-        setMutating(true);
-        try {
-          const applied = await applyBankFlowRuleBatchRebaseline({ manifest, reason });
-          setMessage("正在等待流水规则批次读模型同步...");
-          await waitForOperationFreshness(
-            operationBarrierTargetsFromMonths(
-              BANK_FLOW_RULE_BATCH_READ_MODEL_KEY,
-              applied.summary.affectedMonths,
-              "all",
-            ),
-          );
-          setMessage("正在刷新流水规则批次...");
-          await reloadBatchesAfterMutation();
-          return applied;
-        } finally {
-          setMutating(false);
-        }
-      },
-      errorMessage: (caught) => caught instanceof Error ? caught.message : "历史免OA重算应用失败",
-    });
-    if (result.status === "success") {
-      setRebaselineManifest(result.value);
-      setFeedback({ severity: "success", message: `历史免OA已撤回 ${result.value.summary.batchCount} 批` });
-      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-        affectedMonths: result.value.summary.affectedMonths,
-        affectedScopeKeys: result.value.summary.affectedMonths,
-      });
-    } else {
-      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "历史免OA重算应用失败" });
-    }
-  };
-
   const saveTagSelection = async () => {
     if (!canMutateData || mutating) {
       return;
@@ -986,48 +910,6 @@ export default function BankFlowRuleBatchPage() {
             </span>
           ) : null}
       </div>
-
-      {canMutateData ? (
-        <div aria-label="历史免OA重算" className="bank-flow-rule-batches-rebaseline" role="region">
-          <button
-            className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact"
-            disabled={mutating}
-            onClick={handleRebaselineDryRun}
-            type="button"
-          >
-            扫描历史免OA
-          </button>
-          {rebaselineManifest ? (
-            <>
-              <span className="bank-flow-rule-batches-rebaseline__summary">
-                待撤回 {rebaselineManifest.summary.batchCount} 批 / {rebaselineManifest.summary.rowCount} 条
-                {rebaselineManifest.summary.affectedMonths.length > 0
-                  ? ` / ${rebaselineManifest.summary.affectedMonths.join("、")}`
-                  : ""}
-              </span>
-              <label className="bank-flow-rule-batches-rebaseline__reason">
-                <span>原因</span>
-                <input
-                  value={rebaselineReason}
-                  onChange={(event) => setRebaselineReason(event.target.value)}
-                />
-              </label>
-              <button
-                className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact bank-flow-rule-batches-button--primary"
-                disabled={mutating || rebaselineManifest.summary.batchCount === 0}
-                onClick={handleApplyRebaseline}
-                type="button"
-              >
-                应用重算
-              </button>
-            </>
-          ) : (
-            <span className="bank-flow-rule-batches-rebaseline__summary">
-              先 dry-run，再按清单撤回旧免OA已提交批次
-            </span>
-          )}
-        </div>
-      ) : null}
 
       {error ? <StatePanel tone="error" title={error} /> : null}
 
@@ -1291,11 +1173,6 @@ export default function BankFlowRuleBatchPage() {
               </button>
             </header>
             <div className="bank-flow-rule-batches-drawer__body">
-              {tagSelection.inactiveSelectedTagCodes.length > 0 ? (
-                <div className="bank-flow-rule-batches-notice bank-flow-rule-batches-notice--warning" role="alert">
-                  已停用标签不再生效：{tagSelection.inactiveSelectedTagCodes.join("、")}。保存后会清理这些引用。
-                </div>
-              ) : null}
               <div className="bank-flow-rule-batches-drawer__grid-wrap">
                 <table className="bank-flow-rule-batches-drawer__grid">
                   <colgroup>

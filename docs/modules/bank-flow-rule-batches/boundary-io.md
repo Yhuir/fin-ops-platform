@@ -1,4 +1,4 @@
-# 流水规则批量处理模块边界与 I/O
+# Bank Transaction Paired Policy / 流水规则批量处理模块边界与 I/O
 
 日期：2026-07-01
 
@@ -6,8 +6,8 @@
 
 - 状态：implemented-modular-closure
 - 当前边界可信度：high for API/UI/application service/relation rules/read model runtime/physical batch storage/tag-rule settings family/frontend feature split
-- 本 slice 范围：生产入口、API、规则抽屉、批量提交、关联台判定、历史 no-OA rebaseline API、文档和自动化测试。
-- 当前边界：新模块接管“按银行流水标签配置 OA/发票闭环要求并批量提交银行流水 relation”的业务；HTTP route、application service、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次存储、read model row 表和 tag-rule settings family 已独立为 `bank_flow_rule_batch`。旧 no-OA 模块只保留自身 legacy API 与历史批次功能，不再承接 bank-flow 新链路。
+- 本 slice 范围：生产入口、API、全局 Bank Transaction Paired Policy 规则抽屉、批量提交、关联台分区判定、旧 bank-flow/no-OA 历史重算页面链路清理、文档和自动化测试。
+- 当前边界：本模块是全局 Bank Transaction Paired Policy 的规则管理入口，负责按银行流水标签配置进入关联台已配对区所需的 OA/发票 row type；HTTP route、application service、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次存储、read model row 表和 tag-rule settings family 已独立为 `bank_flow_rule_batch`。旧 no-OA 模块只保留自身 legacy API 与历史批次功能，不再承接 bank-flow 新链路。
 - 当前缺口：无已知生产链路模块边界缺口。页面级 state/effect 编排仍保留在 `BankFlowRuleBatchPage.tsx`，纯 I/O、DTO、策略、view model、operation barrier helper 和通用组件位于 `web/src/features/bankFlowRuleBatches/`。新功能生产路径不接收 `selected_tag_codes`；旧 no-OA `selected_tag_codes` 写路径只属于 legacy no-OA 域。
 - 旧代码删除条件：bank-flow 新链路不得 import/继承 no-OA route、application service、derived lifecycle executor、read model refresh、persistence port、no-OA worker 或 no-OA physical batch/read-model 表；no-OA 主入口、`selected_tag_codes` 写路径和 no-OA 常驻 worker 只属于 no-OA legacy 业务，不得重新接入 bank-flow。
 
@@ -16,10 +16,9 @@
 ### 负责
 
 - 流水规则批量处理页面和右侧紧凑 xlsx/grid 抽屉。
-- 读取银行明细 active 标签事实，并为每个标签维护 `requires_oa` / `requires_invoice` 规则。
+- 读取银行明细 active 标签事实，并为每个标签维护全局 Bank Transaction Paired Policy：`requires_oa` / `requires_invoice`。
 - 基于用户当前选择的银行流水创建批量 relation，并写入足够 metadata 供关联台判定 paired/open。
 - 触发独立 `bank_flow_rule_batch`、`workbench_relation`、`workbench`、`bank_detail` 等受影响 read model 刷新。
-- 提供历史 no-OA submitted rebaseline 的 dry-run/apply 合同。
 
 ### 不负责
 
@@ -38,21 +37,20 @@
 | 页面查询 | `BankFlowRuleBatchPage.tsx` | 查询候选/已提交/已撤回批次，必须携带 read model freshness/status。 |
 | 批量提交 | `POST /api/bank-flow-rule-batches/submit-selection` | `transaction_ids` 必填、非空、去重。提交前重查银行流水身份、月份、账户、标签、active relation 占用和当前规则版本。 |
 | 已提交重置 | `POST /api/bank-flow-rule-batches/reset-submitted` | 批量撤回当前所有 submitted 批次，必须走 withdraw + relation command，不直接 SQL 改表；旧批次保留 withdrawn/audit history，释放的银行 rows 在 read model rebuild 后重新成为候选。 |
-| Rebaseline dry-run/apply | 管理 API 或运维工具 | 显式跨模块操作，只通过注入的 no-OA batch service 处理 legacy submitted no-OA relation/batch，并通过 no-OA mutation persistence 保存旧批次变更。apply 必须提交 dry-run manifest 并校验 batch/version 一致；缺失或漂移时拒绝。重复 apply 同一 manifest 幂等返回。 |
-| 权限/session | API session / permissions | 读取、保存规则、提交批次、rebaseline 分别校验权限；缺权限 fail fast。 |
+| 权限/session | API session / permissions | 读取、保存规则、提交批次、撤回批次、reset 分别校验权限；缺权限 fail fast。 |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 标签规则 payload | 前端抽屉 | 返回 `active_tags`、`rules`、`requirements_by_tag_code`、`version`、`bank_auto_tag_rules_version`、`permissions`。不返回可编辑左侧标签字段。 |
-| 标签规则保存副作用 | `workbench-relations` / read models | 保存 `requires_oa` / `requires_invoice` 后，必须同步所有 active `relation_mode=bank_flow_rule_batch` 关系的 `special_metadata.requires_oa`、`requires_invoice`、`flow_rule_version`；同时同步匹配外部往来规则的 active `turnover:*` 关系，把旧 `manual_confirmed` 升级为 `turnover_manual_closure` 并写入 `requires_oa`、`requires_invoice`、`paired_requirement_tag_codes`、`paired_requirement_source`、`paired_requirement_version`。同步只能通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(...)`，且 relation command 的 load/save 必须接入 durable relation repository；不能依赖进程内 snapshot，不能让 Workbench 查询当前 settings 兜底，也不能直接改 relation 表。 |
+| 标签规则 payload | 前端抽屉 | 返回 `active_tags`、`rules`、`requirements_by_tag_code`、`version`、`bank_auto_tag_rules_version`、`permissions`。不返回 `selected_tag_codes` / `inactive_selected_tag_codes`，不返回可编辑左侧标签字段。 |
+| 标签规则保存副作用 | `workbench-relations` / read models | 保存 `requires_oa` / `requires_invoice` 后，必须同步所有 active 含银行流水且由本 policy 管理的关系事实 metadata；当前已覆盖 active `relation_mode=bank_flow_rule_batch` 关系，并同步匹配外部往来规则的 active `turnover:*` 关系，把旧 `manual_confirmed` 升级为 `turnover_manual_closure` 并写入 `requires_oa`、`requires_invoice`、`paired_requirement_tag_codes`、`paired_requirement_source`、`paired_requirement_version`。同步只能通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(...)`，且 relation command 的 load/save 必须接入 durable relation repository；不能依赖进程内 snapshot，不能让 Workbench 查询当前 settings 兜底，也不能直接改 relation 表。 |
 | 批次列表 payload | 页面 | 返回 summary、rows、status bucket、read model status、stale reasons、scope keys 和分页信息。非 fresh 不能展示为真实空态。 |
 | Relation command | `workbench-relations` | 使用 `relation_mode=bank_flow_rule_batch`，行级 relation display code 必须保持 `bank_flow_rule_batch`，不能退回 `fully_linked` 或 `no_oa_bank_batch`。metadata 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；display tags 使用 `流水规则` + 业务标签，不能继承旧 `免OA` 标签。 |
-| 关联台展示 | `reconciliation-workbench` | 银行流水数 `>3` 时默认折叠；是否进入 paired 由 required row type 是否已满足决定。 |
+| 关联台展示 | `reconciliation-workbench` | 任何含银行流水的 group 是否进入 paired，只由物化到银行流水 relation row 的 Bank Transaction Paired Policy requirements 和实际 OA/发票 row type 决定；缺失 metadata 默认等价于 `requires_oa=true, requires_invoice=true`。银行流水数 `>3` 时默认折叠。 |
 | Operation barrier | 前端 | 写成功后返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。批量提交、撤回和 reset 的完整 target envelope 必须同时包含页面自身 `bank_flow_rule_batch` 受影响 month scope，以及关联台实际读取的 `workbench_relation`、`workbench` 的 `all` + 受影响 month scope；不能由 route 覆盖 service 返回的目标，也不能只返回 `bank_flow_rule_batch` 后让关联台读取旧 `month=all` 空 generation。流水规则批量处理页面的单批内部往来提交以 command 成功为用户阻塞边界，前端立即用 command response 更新本地列表、清空当前选择，并禁止自动选中下一笔触发 detail GET；`bank_flow_rule_batch` freshness wait 和 reload 只作为后台 reconcile I/O。完整跨页 visibility targets 必须继续通过 `workbenchRelationUpdated` 事件传给下游页面和全局刷新链路，禁止把 `workbench/all` 聚合刷新重新接入当前页提交阻塞链路。 |
 | Dirty scope/outbox | runtime/read models | 通过 owner producer 或同事务等价 writer 污染 `bank_flow_rule_batch`、`workbench_relation`、`workbench`、`bank_detail` 以及受影响下游。 |
-| Audit record | permissions/audit | 保存规则、提交、撤回、rebaseline dry-run/apply 都记录 actor、reason、before/after、affected rows/months 和 request id。 |
+| Audit record | permissions/audit | 保存规则、提交、撤回、reset 都记录 actor、reason、before/after、affected rows/months 和 request id。 |
 
 ## 持久化与投影
 
@@ -66,7 +64,7 @@
 
 - 使用 `app_settings.bank_flow_rule_batch_tag_rules.requirements_by_tag_code`，通过 `/api/bank-flow-rule-batches/tag-rules` 暴露为 `rules`。
 - 迁移 `0083_bank_flow_rule_batch_tag_rules.sql` 只在缺失新 key 时从 `app_settings.no_oa_bank_batch_tag_selection` 一次性复制历史值；运行时不再回退读取 no-OA settings family。
-- 新 API 和服务边界拒绝 `selected_tag_codes` / `selectedTagCodes`；`rules` 中重复 `tag_code` fail fast。legacy no-OA API 仍可读取旧字段用于历史兼容。
+- 新 API 和服务边界拒绝 `selected_tag_codes` / `selectedTagCodes`；`rules` 中重复 `tag_code` fail fast。bank-flow public payload 不返回旧 selected 字段。legacy no-OA API 仍可读取旧字段用于历史兼容。
 - 未配置 active tag 默认 `requires_oa=true`、`requires_invoice=true`。
 - 规则设置不是关联台运行时事实源。已提交批次是否进入 paired/open 只读取 relation metadata；规则保存后若 requirement 变化，规则 owner 必须重写 active bank-flow relation metadata 并触发 `bank_flow_rule_batch` / `workbench_relation` / `workbench` 相关刷新。
 
@@ -89,7 +87,7 @@
 - Read model refresh 从 active relation 或已提交批次 relation fact 回灌 submitted 批次时必须按调用方目标 relation mode 判定；`bank_flow_rule_batch` 刷新不能复用 no-OA event/scope/producer，也不能把 bank-flow 批次显示到 legacy no-OA 列表。
 - 规则配置或显式全局重算后的 derived lifecycle 事件为 `bank_flow_rule_batch_changed`，domain 为 `bank_flow_rule_batch_read_model` + Workbench/relation/cost/search 下游；在线 submit/withdraw/reset 已由 relation command repository 在同一写入边界内产生 downstream dirty/outbox fan-out，不得再同步调用 `bank_flow_rule_batch_changed` 旧生命周期。禁止再以 `no_oa_bank_batch_changed` / `source=no_oa_bank_batch` 表示 bank-flow 写入。
 - 服务内由 submitted batch 反推 relation fact 时，必须继承该 batch 的 `relation_mode`、`source=bank_flow_rule_batch` 和 bank-flow display tags，并且只为当前 refresh `relation_mode` 生成 fact；禁止再把所有 submitted batch 硬编码为 `no_oa_bank_batch`。旧 no-OA legacy migration/repair 只允许处理 no-OA/明确 legacy relation，不得处理 `bank_flow_rule_batch`。
-- 关联台按 relation metadata 判定 open/paired。
+- 关联台按银行流水 row 上的 relation metadata 判定 open/paired；缺失 policy metadata fail closed 为需要 OA 和发票。
 
 ## 性能与刷新 I/O
 
@@ -135,9 +133,9 @@ Workbench relation facts 仍归 `workbench-relations`：
 实现 slice 必须新增或更新：
 
 - Business unit tests：规则默认值、勾选语义、标签增减、提交校验、paired/open gate。
-- Service tests：规则保存、批次提交、relation command payload、rebaseline dry-run/apply、dirty scope。
-- API contract tests：规则 GET/PUT、列表、submit-selection、rebaseline dry-run/apply、权限和版本冲突。
-- Read model/worker tests：`bank_flow_rule_batch` freshness、scope、source version、旧 no-OA rebaseline 后刷新。
+- Service tests：规则保存、批次提交、relation command payload、dirty scope、旧历史重算页面链路不可达。
+- API contract tests：规则 GET/PUT、列表、submit-selection、reset、权限和版本冲突。
+- Read model/worker tests：`bank_flow_rule_batch` freshness、scope、source version。
 - Frontend interaction tests：xlsx/grid 抽屉、checkbox、只读左侧标签、保存错误、分页/选择/提交。
 - Playwright E2E：详见 `e2e-spec.md`。
 - Existing regression：no-OA、Workbench paired/open、bank details tag rules、pending invoices、turnover、search affected paths。
@@ -146,14 +144,14 @@ Workbench relation facts 仍归 `workbench-relations`：
 
 - 代码已实现 bank-flow route/service/worker/event/barrier/producer/repository/persistence IO、PostgreSQL 物理批次/read model 表和 tag-rule settings family 独立。
 - 旧 no-OA 模块仍承载自身历史事实和 legacy no-OA read model，当前不能删除其 route/service/tests；但 bank-flow HTTP、application service、read model event、worker、operation barrier、producer、mutation persistence 和 refresh persistence 不得再进入 no-OA route/service/event/scope/worker/persistence port。
-- 历史 submitted no-OA 全量撤回必须单独作为 rebaseline 工具/API 实现，不能在普通页面查询或提交时隐式执行。
+- 历史 submitted no-OA 全量撤回不再属于本页面/API 合同；若未来需要数据迁移，必须作为独立运维工具重新建模，不得重新挂回 `/api/bank-flow-rule-batches` 或页面 UI。
 - 旧 `selected_tag_codes` 写路径、no-OA 页面主入口、no-OA internal transfer 特例和 no-OA read model 常驻 worker 只能服务 no-OA legacy 域，要么删除，要么有明确 retained tooling 边界和退休条件。
 
 ## Canonical facts ownership
 
 - Owned facts: `app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events`、`read_model.bank_flow_rule_batch_rows`、`app_settings.bank_flow_rule_batch_tag_rules`。
 - Shared facts: 银行标签和分类由 `bank-details` owner 管理；relation facts 由 `workbench-relations` owner 管理；WorkBench active generation 由 `reconciliation-workbench` 管理。
-- Allowed writes: `BankFlowRuleBatchApplicationService`、明确 UoW、受控 rebaseline service。
+- Allowed writes: `BankFlowRuleBatchApplicationService`、明确 UoW。
 - Allowed reads: bank flow rule batch query/read ports、规则 read service、read model boundary。
 - Downstream outputs: `bank_flow_rule_batch`、`workbench_relation`、`workbench`、`bank_detail`、`turnover_ledger`、`search` dirty scopes 或 owner producer 输出。
 - Forbidden paths: shared state-store broad snapshot、旧 no-OA selected code 兼容写入、调用方直接改 batch/relation 状态。

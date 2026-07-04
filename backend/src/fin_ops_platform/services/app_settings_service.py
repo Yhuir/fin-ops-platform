@@ -227,7 +227,7 @@ class AppSettingsService:
                 self._snapshot["no_oa_bank_batch_tag_selection"],
                 bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             ),
-            "bank_flow_rule_batch_tag_rules": self._public_no_oa_bank_batch_tag_selection(
+            "bank_flow_rule_batch_tag_rules": self._public_bank_transaction_paired_policy(
                 self._snapshot["bank_flow_rule_batch_tag_rules"],
                 bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             ),
@@ -627,7 +627,7 @@ class AppSettingsService:
 
     def get_bank_flow_rule_batch_tag_rules_payload(self) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
-        return self._public_no_oa_bank_batch_tag_selection(
+        return self._public_bank_transaction_paired_policy(
             self._snapshot["bank_flow_rule_batch_tag_rules"],
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
         )
@@ -1604,6 +1604,44 @@ class AppSettingsService:
             "bank_auto_tag_rules_version": int(bank_transaction_tags.get("version") or 1),
             "selected_tag_codes": selected,
             "inactive_selected_tag_codes": inactive_selected,
+            "active_tags": active_tags,
+            "rules": rules,
+            "requirements_by_tag_code": {
+                rule["tag_code"]: {
+                    "requires_oa": rule["requires_oa"],
+                    "requires_invoice": rule["requires_invoice"],
+                }
+                for rule in rules
+            },
+        }
+
+    @staticmethod
+    def _public_bank_transaction_paired_policy(
+        payload: dict[str, Any],
+        *,
+        bank_transaction_tags: dict[str, Any],
+    ) -> dict[str, Any]:
+        active_tags = AppSettingsService._no_oa_bank_batch_auto_rule_tags(bank_transaction_tags)
+        raw_requirements = payload.get("requirements_by_tag_code") if isinstance(payload.get("requirements_by_tag_code"), dict) else {}
+        requirements_by_tag_code = {
+            str(code): {
+                "requires_oa": bool(rule.get("requires_oa")) if isinstance(rule, dict) else False,
+                "requires_invoice": bool(rule.get("requires_invoice")) if isinstance(rule, dict) else False,
+            }
+            for code, rule in dict(raw_requirements or {}).items()
+            if str(code)
+        }
+        rules = [
+            {
+                "tag_code": tag["code"],
+                "requires_oa": bool(requirements_by_tag_code.get(tag["code"], {}).get("requires_oa", True)),
+                "requires_invoice": bool(requirements_by_tag_code.get(tag["code"], {}).get("requires_invoice", True)),
+            }
+            for tag in active_tags
+        ]
+        return {
+            "version": int(payload.get("version") or 1),
+            "bank_auto_tag_rules_version": int(bank_transaction_tags.get("version") or 1),
             "active_tags": active_tags,
             "rules": rules,
             "requirements_by_tag_code": {

@@ -7522,6 +7522,7 @@ class PostgresReadModelRepository:
         try:
             run_in_transaction(self._connection, write)
         except Exception as exc:
+            error_message = str(exc)
             for scope_key, generation_id, source_versions in started_generations:
                 def mark_failed(
                     connection: Any,
@@ -7535,7 +7536,7 @@ class PostgresReadModelRepository:
                         scope_key=scope_key,
                         generation_id=generation_id,
                         source_versions=source_versions,
-                        error=str(exc),
+                        error=error_message,
                     )
 
                 try:

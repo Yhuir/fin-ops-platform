@@ -19,8 +19,6 @@ import type {
   SubmitBankFlowRuleBatchSelectionRequest,
   WithdrawBankFlowRuleBatchRequest,
   ResetSubmittedBankFlowRuleBatchesRequest,
-  ApplyBankFlowRuleBatchRebaselineRequest,
-  BankFlowRuleBatchRebaselineManifest,
 } from "./types";
 import { apiRequestJson } from "../apiClient";
 
@@ -137,10 +135,6 @@ type ApiBankFlowRuleBatchTagSelection = {
   version?: number | null;
   bank_auto_tag_rules_version?: number | null;
   bankAutoTagRulesVersion?: number | null;
-  selected_tag_codes?: unknown[] | null;
-  selectedTagCodes?: unknown[] | null;
-  inactive_selected_tag_codes?: unknown[] | null;
-  inactiveSelectedTagCodes?: unknown[] | null;
   active_tags?: ApiBankFlowRuleBatchTagDefinition[] | null;
   activeTags?: ApiBankFlowRuleBatchTagDefinition[] | null;
   rules?: ApiBankFlowRuleBatchTagRule[] | null;
@@ -233,43 +227,6 @@ type ApiBankFlowRuleBatchMutationResult = {
   workbench_rebuild_queued?: boolean | null;
   workbenchRebuildQueued?: boolean | null;
   results?: Array<Record<string, unknown>>;
-};
-
-type ApiBankFlowRuleBatchRebaselineBatch = {
-  batch_id?: string | null;
-  batchId?: string | null;
-  batch_type?: string | null;
-  batchType?: string | null;
-  batch_label?: string | null;
-  batchLabel?: string | null;
-  relation_case_id?: string | null;
-  relationCaseId?: string | null;
-  scope_month?: string | null;
-  scopeMonth?: string | null;
-  row_ids?: unknown[] | null;
-  rowIds?: unknown[] | null;
-  row_count?: number | null;
-  rowCount?: number | null;
-  version?: number | null;
-  status?: string | null;
-};
-
-type ApiBankFlowRuleBatchRebaselineManifest = {
-  dry_run?: boolean | null;
-  dryRun?: boolean | null;
-  applied?: boolean | null;
-  summary?: {
-    candidate_count?: number | null;
-    candidateCount?: number | null;
-    batch_count?: number | null;
-    batchCount?: number | null;
-    row_count?: number | null;
-    rowCount?: number | null;
-    affected_months?: unknown[] | null;
-    affectedMonths?: unknown[] | null;
-  } | null;
-  batches?: ApiBankFlowRuleBatchRebaselineBatch[] | null;
-  risks?: unknown[] | null;
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
@@ -492,7 +449,6 @@ function mapTagSelection(payload: ApiBankFlowRuleBatchTagSelection = {}): BankFl
   const activeTags = Array.isArray(payload.active_tags ?? payload.activeTags)
     ? (payload.active_tags ?? payload.activeTags ?? []).map(mapTagDefinition)
     : [];
-  const selectedTagCodes = unknownStringList(payload.selected_tag_codes ?? payload.selectedTagCodes);
   const rulesByCode = new Map<string, BankFlowRuleBatchTagRule>();
   if (Array.isArray(payload.rules)) {
     payload.rules.map(mapTagRule).forEach((rule) => {
@@ -508,11 +464,6 @@ function mapTagSelection(payload: ApiBankFlowRuleBatchTagSelection = {}): BankFl
       rulesByCode.set(tagCode, mapTagRule({ ...rulePayload, tag_code: tagCode }));
     });
   }
-  selectedTagCodes.forEach((tagCode) => {
-    if (!rulesByCode.has(tagCode)) {
-      rulesByCode.set(tagCode, { tagCode, requiresOa: false, requiresInvoice: false });
-    }
-  });
   const rules = activeTags.map((tag) => rulesByCode.get(tag.code) ?? {
     tagCode: tag.code,
     requiresOa: true,
@@ -521,8 +472,6 @@ function mapTagSelection(payload: ApiBankFlowRuleBatchTagSelection = {}): BankFl
   return {
     version: numberValue(payload.version),
     bankAutoTagRulesVersion: numberValue(payload.bank_auto_tag_rules_version ?? payload.bankAutoTagRulesVersion),
-    selectedTagCodes,
-    inactiveSelectedTagCodes: unknownStringList(payload.inactive_selected_tag_codes ?? payload.inactiveSelectedTagCodes),
     activeTags,
     rules,
     requirementsByTagCode: Object.fromEntries(rules.map((rule) => [
@@ -576,59 +525,6 @@ function mapMutationResult(payload: ApiBankFlowRuleBatchMutationResult): BankFlo
     operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
     workbenchRebuildQueued: Boolean(payload.workbench_rebuild_queued ?? payload.workbenchRebuildQueued),
     results: Array.isArray(payload.results) ? payload.results : [],
-  };
-}
-
-function mapRebaselineManifest(payload: ApiBankFlowRuleBatchRebaselineManifest = {}): BankFlowRuleBatchRebaselineManifest {
-  const summary = payload.summary ?? {};
-  return {
-    dryRun: Boolean(payload.dry_run ?? payload.dryRun),
-    applied: Boolean(payload.applied),
-    summary: {
-      candidateCount: numberValue(summary.candidate_count ?? summary.candidateCount),
-      batchCount: numberValue(summary.batch_count ?? summary.batchCount),
-      rowCount: numberValue(summary.row_count ?? summary.rowCount),
-      affectedMonths: unknownStringList(summary.affected_months ?? summary.affectedMonths),
-    },
-    batches: Array.isArray(payload.batches)
-      ? payload.batches.map((batch) => ({
-        batchId: text(batch.batch_id ?? batch.batchId),
-        batchType: text(batch.batch_type ?? batch.batchType),
-        batchLabel: text(batch.batch_label ?? batch.batchLabel),
-        relationCaseId: text(batch.relation_case_id ?? batch.relationCaseId),
-        scopeMonth: text(batch.scope_month ?? batch.scopeMonth),
-        rowIds: unknownStringList(batch.row_ids ?? batch.rowIds),
-        rowCount: numberValue(batch.row_count ?? batch.rowCount),
-        version: numberValue(batch.version),
-        status: text(batch.status),
-      }))
-      : [],
-    risks: unknownStringList(payload.risks),
-  };
-}
-
-function rebaselineManifestPayload(manifest: BankFlowRuleBatchRebaselineManifest) {
-  return {
-    dry_run: manifest.dryRun,
-    applied: manifest.applied,
-    summary: {
-      candidate_count: manifest.summary.candidateCount,
-      batch_count: manifest.summary.batchCount,
-      row_count: manifest.summary.rowCount,
-      affected_months: manifest.summary.affectedMonths,
-    },
-    batches: manifest.batches.map((batch) => ({
-      batch_id: batch.batchId,
-      batch_type: batch.batchType,
-      batch_label: batch.batchLabel,
-      relation_case_id: batch.relationCaseId,
-      scope_month: batch.scopeMonth,
-      row_ids: batch.rowIds,
-      row_count: batch.rowCount,
-      version: batch.version,
-      status: batch.status,
-    })),
-    risks: manifest.risks,
   };
 }
 
@@ -811,37 +707,4 @@ export async function submitBankFlowRuleBatchSelection({
     },
   );
   return mapMutationResult(payload);
-}
-
-export async function dryRunBankFlowRuleBatchRebaseline(signal?: AbortSignal): Promise<BankFlowRuleBatchRebaselineManifest> {
-  const payload = await requestJson<ApiBankFlowRuleBatchRebaselineManifest>(
-    "/api/bank-flow-rule-batches/rebaseline-no-oa/dry-run",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-      signal,
-    },
-  );
-  return mapRebaselineManifest(payload);
-}
-
-export async function applyBankFlowRuleBatchRebaseline({
-  manifest,
-  reason,
-  signal,
-}: ApplyBankFlowRuleBatchRebaselineRequest): Promise<BankFlowRuleBatchRebaselineManifest> {
-  const payload = await requestJson<ApiBankFlowRuleBatchRebaselineManifest>(
-    "/api/bank-flow-rule-batches/rebaseline-no-oa/apply",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        reason,
-        manifest: rebaselineManifestPayload(manifest),
-      }),
-      signal,
-    },
-  );
-  return mapRebaselineManifest(payload);
 }

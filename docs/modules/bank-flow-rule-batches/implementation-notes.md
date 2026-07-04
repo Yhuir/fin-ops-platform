@@ -1,5 +1,23 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-04 Bank Transaction Paired Policy 全局化
+
+目标：把“流水规则标签 / 流水规则标签管理”收敛为全局 Bank Transaction Paired Policy，并删除 bank-flow 页面链路中的旧 no-OA 历史重算和 selected-tag 兼容输出。
+
+关键决策：
+
+- 关联台 `WorkbenchCandidateGroupingService` 的 paired/open 分区改为：任何含银行流水的 group 都先按银行流水 row 上物化的 `requires_oa` / `requires_invoice` 或 legacy `paired_requires_*` 判定；缺失 policy metadata 默认需要 OA 和发票。
+- `bank_flow_rule_batch`、工资/内部转账、外部往来、legacy no-OA 等关系类型不再能绕过全局 policy 直接进入 paired；需要无 OA/无发票闭环时，必须由 relation metadata 显式声明 false/false 或对应单项 false。
+- `GET /api/bank-flow-rule-batches/tag-rules` 的 public payload 不再返回 `selected_tag_codes` / `inactive_selected_tag_codes`；前端 feature type/API/page 同步删除 `selectedTagCodes` 兼容字段。
+- 删除旧 no-OA 历史重算 route、页面入口、前端 API/type/test 和 application service 中无入口的方法；旧 no-OA 历史事实仍由 `no-oa-bank-batches` 模块管理，不再挂回 bank-flow 页面。
+
+测试覆盖：
+
+- `tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_bank_transaction_missing_policy_defaults_to_full_three_pane_requirement`
+- `tests/test_workbench_candidate_grouping.py`
+- `tests/test_bank_flow_rule_batch_routes.py`
+- `web/src/test/BankFlowRuleBatchApi.test.ts`
+
 ## 2026-07-03 Read model unchanged source-version probe
 
 目标：修复生产 full critical 1s smoke 中 `bank_flow_rule_batch:2026-02` 即使 `source_versions_unchanged` 也可能在 skip 前耗时约 1.4s 的问题。
@@ -75,7 +93,7 @@
 - 新增迁移 `0083_bank_flow_rule_batch_tag_rules.sql`，在 `app.app_settings.settings_payload` 缺失 `bank_flow_rule_batch_tag_rules` 时，从历史 `no_oa_bank_batch_tag_selection` 一次性复制规则值；运行时不做隐式 fallback。
 - `AppSettingsService` 新增 `get_bank_flow_rule_batch_tag_rules_payload()` / `update_bank_flow_rule_batch_tag_rules(...)`，保留原 public payload shape、乐观锁、active tag 校验、审计和自动标签归档时的失效规则清理。
 - `BankFlowRuleBatchApplicationService` 的规则读写切到 bank-flow settings key；`BankBatchApplicationService` 按 relation mode 选择 tag rules payload 和 source versions，`bank_flow_rule_batch` read model freshness 使用 `bank_flow_rule_batch_tag_rules_version`。
-- `rebaseline-no-oa` 保留为显式跨模块管理操作：通过注入的 no-OA batch service 扫描/撤回历史 submitted no-OA 批次，并通过 no-OA mutation persistence 写回旧批次状态；普通 bank-flow submit/reset/list 不再读写 no-OA batch service。
+- 2026-07-04 后旧 no-OA 历史重算不再属于 bank-flow 页面或公开 API；历史 no-OA 事实只由 no-OA legacy 域管理。
 
 测试覆盖：
 
@@ -83,8 +101,7 @@
 - `tests/test_app_settings_service.py::AppSettingsServiceTests::test_update_settings_preserves_bank_flow_rule_batch_tag_rules`
 - `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_update_tag_selection_uses_bank_flow_rule_settings_boundary`
 - `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_source_versions_use_bank_flow_rule_version_boundary`
-- `tests/test_bank_flow_rule_batch_routes.py::BankFlowRuleBatchRoutesTests::test_tag_rules_strip_no_oa_selection_fields_and_map_conflict`
-- `tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_bank_flow_rule_rebaseline_no_oa_dry_run_and_apply_withdraw_submitted_history`
+- `tests/test_bank_flow_rule_batch_routes.py::BankFlowRuleBatchRoutesTests::test_tag_rules_return_policy_rules_and_map_conflict`
 - `tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_bank_flow_rule_batch_tag_rules_settings_are_split_from_no_oa_settings`
 
 验证命令：
@@ -254,7 +271,6 @@
 - 旧 `selected_tag_codes` 不作为新规则迁移来源；所有数据重新按新规则处理。
 - 从本页面提交的批量银行流水进入关联台；超过 3 条银行流水默认折叠。
 - 是否进入已配对区仍由 OA/发票 requirement 和实际 row type 是否满足决定。
-- 历史已提交 no-OA 批次应通过受控 rebaseline 全部撤回到未处理状态，再按新规则重新处理。
 
 本 slice 更新：
 
@@ -265,7 +281,6 @@
 风险：
 
 - 当前代码和部分文档已经包含旧 no-OA 中间实现；implementation slice 必须先清理命名和边界，避免新旧规则同时生产写入。
-- rebaseline 是数据变更，不应与 UI 重命名混做；需要独立 dry-run/apply、审计和回滚验证。
 - 若实现阶段允许跨账户、跨月或跨标签批量提交，需要重新扩展状态机和 relation metadata；当前文档保守约束为同月、同账户、同标签。
 
 后续事项：
@@ -283,14 +298,13 @@
 - 新路径不接收 `selected_tag_codes`；保存只提交 `rules`。
 - 提交选中流水写入 `relation_mode=bank_flow_rule_batch`，metadata 保留规则版本、tag code、OA/发票 requirement 和折叠提示。
 - Workbench 根据 `requires_oa` / `requires_invoice` 判定 paired/open，大于 3 条银行流水折叠，并显示“流水规则批次明细”。
-- 新增历史 no-OA submitted rebaseline dry-run/apply API 和浏览器管理入口，apply 必须提交 dry-run manifest 并校验 batch/version，通过 relation command 撤回旧 relation，将旧 batch 标记 withdrawn，重复 apply 同一 manifest 幂等。
 
 当前实现说明：
 
 - 后端 route、application service、read model key、refresh producer、worker event、operation barrier、repository port、mutation persistence port 和 refresh persistence port 已作为 `bank_flow_rule_batch` 独立边界接入。
 - 旧 no-OA route 仍保留兼容；新页面和 E2E 使用 bank-flow-rule-batches route，且 bank-flow route/service/refresh 不再 import 或继承 no-OA route/application/refresh 模块。
 - 共享批次计算逻辑已放入中性 `bank_batch_application_service.py` / `bank_batch_service.py`；no-OA legacy 和 bank-flow 分别从自己的模块边界调用。
-- rebaseline 浏览器入口只提供 dry-run 清单和 apply；不会在普通查询、提交或刷新时自动撤回历史批次。
+- bank-flow 页面不提供历史 no-OA 管理入口；普通查询、提交、撤回和刷新不读写 no-OA batch service。
 - 新功能 mutation 和前端等待使用 `read_model_key=bank_flow_rule_batch`；operation barrier 直接读取 `bank_flow_rule_batch` readiness/outbox/worker，不再映射到 no-OA。
 
 验证：
@@ -307,8 +321,7 @@
 
 剩余风险：
 
-- 真实生产历史数据的全量 rebaseline 仍需先 dry-run 导出清单并人工确认后执行 apply。
-- 独立 `bank_flow_rule_batch` 物理表已在 2026-07-01 `0082_bank_flow_rule_batch_storage.sql` 中拆出；旧 statement 仅保留为当时实现 slice 的历史风险记录。
+- 独立 `bank_flow_rule_batch` 物理表已在 2026-07-01 `0082_bank_flow_rule_batch_storage.sql` 中拆出。
 - “补齐 OA/发票后从 open 进入 paired”的完整跨页浏览器动作仍需后续接入真实补票/补 OA 流程测试。
 
 ## 2026-06-30 标签规则抽屉分组 UI slice

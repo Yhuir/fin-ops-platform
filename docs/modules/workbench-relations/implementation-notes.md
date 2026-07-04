@@ -10,7 +10,7 @@
 - `WorkbenchRelationCommandService.preview_withdraw_relation(...)` 对纯父 OA+自带附件发票 relation 返回不可提交 preview，`withdraw_relation(...)` 对强制 submit 返回业务错误。
 - `WorkbenchWriteFacade._withdraw_relation_preview_payload(...)` 在 `can_submit=false` 时不再过滤掉与 active row-set 相同的 after relation，确保弹窗显示“无法撤回”时仍展示绑定前后不变。
 - `WorkbenchOaAttachmentRepairContextExecutor` 在 raw payload 中发现可证明的父 OA+自带附件发票但没有 active relation 时，通过 `WorkbenchRelationCommandService.confirm_relation(...)` 创建 `CASE-OA-ATT-<oa_row_id>` source binding；普通已有 relation 缺附件或缺父 OA 时继续补齐同一 case。
-- `WorkbenchCandidateGroupingService` 把带 immutable metadata 的 OA+自带附件发票两栏 active relation 作为合法 paired group；普通两栏 `manual_confirmed` relation 仍留在 open 区。
+- `WorkbenchCandidateGroupingService` 把带 immutable metadata 的 OA+自带附件发票两栏 active relation 作为不可拆 source binding open group；补齐银行流水形成三栏，或满足显式 relation metadata requirement 后，才允许进入 paired 区。
 
 旧逻辑删除：
 
