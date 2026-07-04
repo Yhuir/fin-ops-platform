@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 import re
 from typing import Any
 
+from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
 from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
     CostStatisticsReadModelService,
@@ -438,6 +439,7 @@ class CostStatisticsSqlProjectionBuilder:
                         "expense_content": context["expense_content"],
                         "oa_applicant": context["oa_applicant"],
                         "amount_decimal": amount,
+                        **bank_tag_context_from_row(bank_row),
                     }
                 )
         return entries
@@ -746,6 +748,7 @@ def _outflow_amount(bank_row: dict[str, Any]) -> Decimal | None:
 
 
 def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    bank_tag_context = bank_tag_context_from_row(entry)
     return {
         "transaction_id": entry["transaction_id"],
         "trade_time": entry["trade_time"],
@@ -758,6 +761,7 @@ def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "payment_account_label": entry["payment_account_label"],
         "remark": entry["remark"],
         "oa_applicant": entry["oa_applicant"],
+        **bank_tag_context,
     }
 
 
@@ -781,6 +785,7 @@ def _cost_entry_from_materialized_row(row: dict[str, Any], *, fallback_index: in
         "expense_content": str(row.get("expense_content") or payload.get("expense_content") or ""),
         "oa_applicant": str(row.get("oa_applicant") or payload.get("oa_applicant") or "—"),
         "amount_decimal": amount,
+        **bank_tag_context_from_row(payload),
     }
 
 

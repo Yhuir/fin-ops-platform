@@ -17,6 +17,11 @@ export type CostTimeRow = {
   counterpartyName: string;
   paymentAccountLabel: string;
   remark: string;
+  bankTagCode: string;
+  bankTagLabel: string;
+  bankTagPrimaryLabel: string;
+  bankTagSubLabel: string;
+  bankTagLabelPath: string[];
 };
 
 export type CostProjectExplorerRow = {
@@ -96,6 +101,11 @@ export type CostTransactionDetail = {
     remark: string;
     summaryFields: Record<string, string>;
     detailFields: Record<string, string>;
+    bankTagCode?: string;
+    bankTagLabel?: string;
+    bankTagPrimaryLabel?: string;
+    bankTagSubLabel?: string;
+    bankTagLabelPath?: string[];
   };
 };
 

@@ -16,6 +16,14 @@
 
 - `web/src/pages/CostStatisticsPage.tsx`
 - `web/src/components/cost-statistics/*`
+- `web/src/features/cost-statistics/*`
+- `backend/src/fin_ops_platform/app/routes_cost_statistics.py`
+- `backend/src/fin_ops_platform/services/cost_statistics_query_service.py`
+- `backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py`
+- `backend/src/fin_ops_platform/services/cost_statistics_service.py`
+- `backend/src/fin_ops_platform/services/cost_statistics_read_model_service.py`
+- `backend/src/fin_ops_platform/services/cost_statistics_bank_tags.py`
+- `backend/src/fin_ops_platform/services/cost_tax_sql_projection.py`
 
 ## 当前边界
 

@@ -2,6 +2,15 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-04 - 按流水标签类型视图与 bank tag payload 合同
+
+- 变更类型：read model payload contract + frontend 派生视图。
+- 架构结论：流水标签统计属于成本统计 explorer read model 的读侧派生功能；页面只能读取 `cost_statistics.time_rows.bank_tag_*`，不得直接调用银行明细页 read model 或本地重算银行标签事实。
+- 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts`、`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows`、`tests/test_cost_statistics_service.py::CostStatisticsServiceTests::test_project_statistics_returns_time_amount_and_expense_fields`、`tests/test_cost_statistics_service.py::CostStatisticsServiceTests::test_transaction_detail_includes_bank_and_oa_cost_fields`、`web/src/test/CostStatisticsApi.test.ts::maps bank tag fields from explorer time rows`、`web/src/test/CostStatisticsPage.test.tsx::bank tag view drills down from primary tag to sub tag to transaction`。
+- 覆盖点：Workbench bank row 的 `effective_category_*` / `category_*` 字段进入成本统计 month shard payload；parent scope 从 materialized rows 聚合时保留标签字段；fallback service 与 SQL projection 输出同一 shape；前端 mapper 归一 snake_case 标签字段；页面三栏为 `主标签 / 子标签 / 流水`，第一、第二栏合计 50% 宽度。
+- 七类测试决策：business core 不新增独立规则测试，因为成本归因金额口径不变；service-layer、API contract、read model/cache、frontend interaction、existing regression 适用并覆盖；E2E 本轮先不新增，因为该功能不新增跨模块写流，后续可并入成本统计浏览器 smoke。
+- 验证命令：见本轮最终说明。
+
 ## 2026-07-02 - secondary read/export route read-model closure
 
 - 变更类型：route-owner/query-service 边界收口。

@@ -43,6 +43,11 @@ type ApiCostTimeRow = {
   counterparty_name: string;
   payment_account_label: string;
   remark: string;
+  bank_tag_code?: string | null;
+  bank_tag_label?: string | null;
+  bank_tag_primary_label?: string | null;
+  bank_tag_sub_label?: string | null;
+  bank_tag_label_path?: string[] | null;
 };
 
 type ApiCostProjectExplorerRow = {
@@ -105,6 +110,11 @@ type ApiCostTransactionDetail = {
     remark: string;
     summary_fields: Record<string, string>;
     detail_fields: Record<string, string>;
+    bank_tag_code?: string | null;
+    bank_tag_label?: string | null;
+    bank_tag_primary_label?: string | null;
+    bank_tag_sub_label?: string | null;
+    bank_tag_label_path?: string[] | null;
   };
 };
 
@@ -145,6 +155,25 @@ function stringList(value: unknown): string[] | undefined {
     return undefined;
   }
   return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
+function bankTagFields(row: {
+  bank_tag_code?: string | null;
+  bank_tag_label?: string | null;
+  bank_tag_primary_label?: string | null;
+  bank_tag_sub_label?: string | null;
+  bank_tag_label_path?: string[] | null;
+}) {
+  const labelPath = stringList(row.bank_tag_label_path) ?? [];
+  const primaryLabel = optionalString(row.bank_tag_primary_label) ?? labelPath[0] ?? optionalString(row.bank_tag_label) ?? "未标记";
+  const subLabel = optionalString(row.bank_tag_sub_label) ?? labelPath[1] ?? optionalString(row.bank_tag_label) ?? primaryLabel;
+  return {
+    bankTagCode: optionalString(row.bank_tag_code) ?? "",
+    bankTagLabel: optionalString(row.bank_tag_label) ?? subLabel,
+    bankTagPrimaryLabel: primaryLabel,
+    bankTagSubLabel: subLabel,
+    bankTagLabelPath: labelPath.length > 0 ? labelPath : primaryLabel === subLabel ? [primaryLabel] : [primaryLabel, subLabel],
+  };
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
@@ -241,6 +270,7 @@ export async function fetchCostStatisticsExplorer(
       counterpartyName: row.counterparty_name,
       paymentAccountLabel: row.payment_account_label,
       remark: row.remark,
+      ...bankTagFields(row),
     })),
     projectRows: payload.project_rows.map<CostProjectExplorerRow>((row) => ({
       projectName: row.project_name,
@@ -332,6 +362,7 @@ export async function fetchCostTransactionDetail(
       remark: payload.transaction.remark,
       summaryFields: payload.transaction.summary_fields,
       detailFields: payload.transaction.detail_fields,
+      ...bankTagFields(payload.transaction),
     },
   };
 }

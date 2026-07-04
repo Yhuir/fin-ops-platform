@@ -3767,6 +3767,11 @@ type CostProjectRow = {
   amount: string;
   counterparty_name: string;
   payment_account_label: string;
+  bank_tag_code?: string;
+  bank_tag_label?: string;
+  bank_tag_primary_label?: string;
+  bank_tag_sub_label?: string;
+  bank_tag_label_path?: string[];
 };
 
 type CostTransactionDetail = {
@@ -4069,6 +4074,43 @@ const costStatisticsTransactionDetails: Record<string, CostTransactionDetail> = 
   },
 };
 
+function mockBankTagForCostRow(row: CostProjectRow) {
+  if (row.expense_type === "交通费") {
+    return {
+      bank_tag_code: "travel_transport",
+      bank_tag_label: "交通费",
+      bank_tag_primary_label: "差旅交通",
+      bank_tag_sub_label: "交通费",
+      bank_tag_label_path: ["差旅交通", "交通费"],
+    };
+  }
+  if (row.expense_type === "经营/办公费用") {
+    return {
+      bank_tag_code: "office_rent",
+      bank_tag_label: "办公租赁",
+      bank_tag_primary_label: "运营支出",
+      bank_tag_sub_label: "办公租赁",
+      bank_tag_label_path: ["运营支出", "办公租赁"],
+    };
+  }
+  if (row.expense_type === "人工费/劳务费/服务费") {
+    return {
+      bank_tag_code: "field_service",
+      bank_tag_label: "现场服务",
+      bank_tag_primary_label: "服务支出",
+      bank_tag_sub_label: "现场服务",
+      bank_tag_label_path: ["服务支出", "现场服务"],
+    };
+  }
+  return {
+    bank_tag_code: "project_material",
+    bank_tag_label: "设备材料",
+    bank_tag_primary_label: "项目开销",
+    bank_tag_sub_label: "设备材料",
+    bank_tag_label_path: ["项目开销", "设备材料"],
+  };
+}
+
 function sumCostAmounts(rows: Array<{ amount: string }>) {
   const total = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
   return total.toLocaleString("en-US", {
@@ -4142,6 +4184,7 @@ function buildCostStatisticsExplorerPayload(
         counterparty_name: row.counterparty_name,
         payment_account_label: row.payment_account_label,
         remark: costStatisticsTransactionDetails[row.transaction_id]?.transaction.remark ?? "",
+        ...mockBankTagForCostRow(row),
       })),
     )
     .sort((left, right) => right.trade_time.localeCompare(left.trade_time));

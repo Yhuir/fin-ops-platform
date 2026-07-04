@@ -428,7 +428,12 @@ class WorkbenchPairRelationService:
         )
         return deepcopy(normalized_relation), history
 
-    def preview_withdraw_for_row_ids(self, row_ids: list[str]) -> dict[str, Any]:
+    def preview_withdraw_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         active_relation = self._active_relation_for_any_row_id(row_ids)
         if not isinstance(active_relation, dict):
             raise KeyError("workbench_pair_relation_not_found")
@@ -441,6 +446,7 @@ class WorkbenchPairRelationService:
                 self._restorable_relation_snapshots(
                     confirm_history.get("before_relations") or [],
                     active_relation=active_relation,
+                    row_id_aliases=row_id_aliases,
                 )
                 if isinstance(confirm_history, dict)
                 else []
@@ -455,14 +461,16 @@ class WorkbenchPairRelationService:
         note: str | None = None,
         created_at: str | None = None,
         fallback_after_relations: list[dict[str, Any]] | None = None,
+        row_id_aliases: dict[str, str] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        preview = self.preview_withdraw_for_row_ids(row_ids)
+        preview = self.preview_withdraw_for_row_ids(row_ids, row_id_aliases=row_id_aliases)
         active_relation = preview["active_relation"]
         restored_relations = list(preview["after_relations"])
         if not restored_relations and fallback_after_relations:
             restored_relations = self._restorable_relation_snapshots(
                 fallback_after_relations,
                 active_relation=active_relation,
+                row_id_aliases=row_id_aliases,
             )
         timestamp = created_at or self._timestamp()
         self.cancel_relation(str(active_relation.get("case_id", "")), cancelled_at=timestamp)
@@ -770,11 +778,16 @@ class WorkbenchPairRelationService:
         relations: list[dict[str, Any]] | None,
         *,
         active_relation: dict[str, Any] | None = None,
+        row_id_aliases: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         return [
             deepcopy(relation)
             for relation in list(relations or [])
-            if cls._is_restorable_relation_snapshot(relation, active_relation=active_relation)
+            if cls._is_restorable_relation_snapshot(
+                relation,
+                active_relation=active_relation,
+                row_id_aliases=row_id_aliases,
+            )
         ]
 
     @staticmethod
@@ -782,8 +795,13 @@ class WorkbenchPairRelationService:
         relation: dict[str, Any],
         *,
         active_relation: dict[str, Any] | None = None,
+        row_id_aliases: dict[str, str] | None = None,
     ) -> bool:
-        return is_workbench_relation_snapshot_restorable(relation, active_relation=active_relation)
+        return is_workbench_relation_snapshot_restorable(
+            relation,
+            active_relation=active_relation,
+            row_id_aliases=row_id_aliases,
+        )
 
     def _latest_confirm_history_for_relation(self, relation: dict[str, Any]) -> dict[str, Any] | None:
         case_id = str(relation.get("case_id", "")).strip()

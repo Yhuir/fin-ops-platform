@@ -12187,17 +12187,6 @@ class Application:
         cached_read_model = self._workbench_read_model_service.get_read_model(read_model_scope_key)
         return cached_read_model if isinstance(cached_read_model, dict) else {}
 
-    def _bank_details_relation_tag_workbench_read_model(self) -> dict[str, object]:
-        read_model = self._get_persisted_workbench_read_model("all")
-        payload = read_model.get("payload") if isinstance(read_model, dict) else None
-        if isinstance(payload, dict) and payload:
-            return read_model
-        raw_payload = self._build_raw_workbench_payload("all")
-        return {
-            "scope_key": "all",
-            "payload": raw_payload if isinstance(raw_payload, dict) else {},
-        }
-
     @staticmethod
     def _can_use_legacy_workbench_read_model_without_source_versions(
         read_model: dict[str, object],

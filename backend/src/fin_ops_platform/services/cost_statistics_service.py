@@ -8,6 +8,7 @@ from typing import Any, Callable
 from openpyxl import Workbook
 
 from fin_ops_platform.domain.enums import TransactionDirection
+from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
 from fin_ops_platform.services.cost_statistics_relation_rules import is_cost_eligible_open_group
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.live_workbench_service import format_decimal
@@ -185,6 +186,7 @@ class CostStatisticsService:
                 "amount": format_decimal(entry["amount_decimal"]),
                 "counterparty_name": entry["counterparty_name"],
                 "payment_account_label": entry["payment_account_label"],
+                **bank_tag_context_from_row(entry),
             }
             for entry in sorted(entries, key=lambda item: (item["trade_time"], item["transaction_id"]))
         ]
@@ -222,6 +224,7 @@ class CostStatisticsService:
                 "amount": format_decimal(entry["amount_decimal"]),
                 "counterparty_name": entry["counterparty_name"],
                 "payment_account_label": entry["payment_account_label"],
+                **bank_tag_context_from_row(entry),
             }
             for entry in sorted(entries, key=lambda item: (item["trade_time"], item["transaction_id"]), reverse=True)
         ]
@@ -497,6 +500,7 @@ class CostStatisticsService:
                         if str(item.get("id") or item.get("invoice_id") or "").strip()
                     }
                 ),
+                **bank_tag_context_from_row(entry),
             },
             "relation_context": {
                 "row_id": str(relation_context.get("row_id") or transaction_id),
@@ -764,6 +768,7 @@ class CostStatisticsService:
                             "expense_content": context["expense_content"],
                             "oa_applicant": context["oa_applicant"],
                             "amount_decimal": amount,
+                            **bank_tag_context_from_row(bank_row),
                         }
                     )
         return self._filter_entries_by_project_scope(entries, normalized_project_scope)
@@ -816,6 +821,7 @@ class CostStatisticsService:
             "expense_content": self._clean_text(special_metadata.get("expense_content")) or "买票成本",
             "oa_applicant": str(context.get("oa_applicant") or self._cash_special_applicant(oa_rows) or "—"),
             "amount_decimal": amount,
+            **bank_tag_context_from_row(bank_row),
         }
 
     @classmethod
@@ -1460,4 +1466,5 @@ class CostStatisticsService:
             "payment_account_label": entry["payment_account_label"],
             "remark": entry["remark"],
             "oa_applicant": entry["oa_applicant"],
+            **bank_tag_context_from_row(entry),
         }

@@ -7770,10 +7770,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         path = SERVICES_ROOT / "bank_details_relation_tag_projection_service.py"
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         violations: list[str] = []
 
         forbidden_snippets = {
             "_build_raw_workbench_payload",
+            "_bank_details_relation_tag_workbench_read_model",
             "WorkbenchCandidateMatchService",
             "workbench_candidate_match_service",
             "candidate_match",
@@ -7790,6 +7792,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for snippet in sorted(forbidden_snippets):
             if snippet in source:
                 violations.append(f"{_relative(path)} contains forbidden bank relation tag source {snippet}")
+        if "_bank_details_relation_tag_workbench_read_model" in server_source:
+            violations.append("backend/src/fin_ops_platform/app/server.py keeps removed BankDetails raw workbench relation tag fallback")
 
         facade_method = _function_source(tree, source, "_relation_tags_from_distribution")
         if "get_by_row_ids" not in facade_method:

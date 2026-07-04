@@ -122,6 +122,11 @@ class CostStatisticsServiceTests(unittest.TestCase):
                                     "counterparty_name": "昆明设备供应商",
                                     "payment_account_label": "工商银行 账户 0001",
                                     "remark": "设备采购款",
+                                    "effective_category_code": "project_material",
+                                    "effective_category_label": "设备材料",
+                                    "effective_category_primary_label": "项目开销",
+                                    "effective_category_sub_label": "设备材料",
+                                    "effective_category_label_path": ["项目开销", "设备材料"],
                                 },
                                 {
                                     "id": "txn-cost-002",
@@ -233,6 +238,8 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["expense_type"], "设备货款及材料费")
         self.assertEqual(payload["rows"][0]["expense_content"], "PLC 模块采购")
         self.assertEqual(payload["rows"][0]["amount"], "1,000.00")
+        self.assertEqual(payload["rows"][0]["bank_tag_primary_label"], "项目开销")
+        self.assertEqual(payload["rows"][0]["bank_tag_sub_label"], "设备材料")
 
     def test_explorer_all_aggregates_entries_across_multiple_months(self) -> None:
         from fin_ops_platform.domain.models import BankTransaction
@@ -323,6 +330,8 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(payload["transaction"]["expense_type"], "设备货款及材料费")
         self.assertEqual(payload["transaction"]["expense_content"], "PLC 模块采购")
         self.assertEqual(payload["transaction"]["amount"], "1,000.00")
+        self.assertEqual(payload["transaction"]["bank_tag_primary_label"], "项目开销")
+        self.assertEqual(payload["transaction"]["bank_tag_sub_label"], "设备材料")
         self.assertIn("detail_fields", payload["transaction"])
 
     def test_transaction_detail_includes_workbench_relation_distribution_context(self) -> None:

@@ -147,6 +147,50 @@ describe("Cost statistics export API", () => {
     expect(payload.readModelStaleReasons).toEqual(["workbench_scope_key"]);
   });
 
+  test("maps bank tag fields from explorer time rows", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        month: "2026-03",
+        summary: {
+          row_count: 1,
+          transaction_count: 1,
+          total_amount: "145.00",
+        },
+        time_rows: [
+          {
+            transaction_id: "cost-txn-145",
+            trade_time: "2026-03-18 17:02:09",
+            direction: "支出",
+            project_name: "云南溯源科技",
+            expense_type: "交通费",
+            expense_content: "项目现场往返交通",
+            amount: "145.00",
+            counterparty_name: "陈佳玉",
+            payment_account_label: "建行 8106",
+            remark: "报销",
+            bank_tag_code: "travel_transport",
+            bank_tag_label: "交通费",
+            bank_tag_primary_label: "差旅交通",
+            bank_tag_sub_label: "交通费",
+            bank_tag_label_path: ["差旅交通", "交通费"],
+          },
+        ],
+        project_rows: [],
+        expense_type_rows: [],
+      }), { status: 200 }),
+    ) as typeof fetch;
+
+    const payload = await fetchCostStatisticsExplorer("2026-03", undefined, "active");
+
+    expect(payload.timeRows[0]).toMatchObject({
+      bankTagCode: "travel_transport",
+      bankTagLabel: "交通费",
+      bankTagPrimaryLabel: "差旅交通",
+      bankTagSubLabel: "交通费",
+      bankTagLabelPath: ["差旅交通", "交通费"],
+    });
+  });
+
   test("caches explorer payloads by month and project scope for fast page re-entry", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

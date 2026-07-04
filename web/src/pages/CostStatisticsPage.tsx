@@ -40,7 +40,7 @@ import type {
   CostTransactionDetail,
 } from "../features/cost-statistics/types";
 
-type CostViewMode = "time" | "project" | "bank" | "expenseType";
+type CostViewMode = "time" | "project" | "bank" | "expenseType" | "bankTag";
 type RangeScopeMode = "all" | "year" | "month";
 type ExplorerScopeMode = RangeScopeMode | "custom";
 type ScopePickerPanel = Exclude<ExplorerScopeMode, "all">;
@@ -68,6 +68,11 @@ type CostStatisticsPageSession = {
   expenseTypeScopeMonth: string;
   expenseTypeScopeStartDate: string;
   expenseTypeScopeEndDate: string;
+  bankTagScopeMode: ExplorerScopeMode;
+  bankTagScopeYear: string;
+  bankTagScopeMonth: string;
+  bankTagScopeStartDate: string;
+  bankTagScopeEndDate: string;
 };
 
 type ProjectExpenseTypeRow = {
@@ -83,6 +88,23 @@ type ExpenseTypeExplorerDisplayRow = CostExpenseTypeExplorerRow & {
 
 type CostBankExplorerRow = {
   paymentAccountLabel: string;
+  totalAmount: string;
+  transactionCount: number;
+  projectCount: number;
+  percentageLabel: string;
+};
+
+type CostBankTagPrimaryRow = {
+  primaryLabel: string;
+  totalAmount: string;
+  transactionCount: number;
+  subTagCount: number;
+  percentageLabel: string;
+};
+
+type CostBankTagSubRow = {
+  primaryLabel: string;
+  subLabel: string;
   totalAmount: string;
   transactionCount: number;
   projectCount: number;
@@ -216,6 +238,82 @@ function buildBankRowsFromTimeRows(rows: CostTimeRow[]) {
       projectCount: bucket.projects.size,
       percentageLabel: `${((bucket.totalAmount / (totalAmount || 1)) * 100).toFixed(1)}%`,
     }))
+    .sort((left, right) => Number(right.totalAmount.replace(/,/g, "")) - Number(left.totalAmount.replace(/,/g, "")));
+}
+
+function bankTagPrimaryLabel(row: CostTimeRow) {
+  return row.bankTagPrimaryLabel || row.bankTagLabelPath[0] || row.bankTagLabel || "未标记";
+}
+
+function bankTagSubLabel(row: CostTimeRow) {
+  return row.bankTagSubLabel || row.bankTagLabelPath[1] || row.bankTagLabel || bankTagPrimaryLabel(row);
+}
+
+function buildBankTagPrimaryRowsFromTimeRows(rows: CostTimeRow[]) {
+  const grouped = new Map<string, { totalAmount: number; transactionCount: number; subTags: Set<string> }>();
+  const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
+
+  for (const row of rows) {
+    const primaryLabel = bankTagPrimaryLabel(row);
+    const bucket = grouped.get(primaryLabel) ?? {
+      totalAmount: 0,
+      transactionCount: 0,
+      subTags: new Set<string>(),
+    };
+    bucket.totalAmount += Number(row.amount.replace(/,/g, ""));
+    bucket.transactionCount += 1;
+    bucket.subTags.add(bankTagSubLabel(row));
+    grouped.set(primaryLabel, bucket);
+  }
+
+  return Array.from(grouped.entries())
+    .map<CostBankTagPrimaryRow>(([primaryLabel, bucket]) => ({
+      primaryLabel,
+      totalAmount: bucket.totalAmount.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+      transactionCount: bucket.transactionCount,
+      subTagCount: bucket.subTags.size,
+      percentageLabel: `${((bucket.totalAmount / (totalAmount || 1)) * 100).toFixed(1)}%`,
+    }))
+    .sort((left, right) => Number(right.totalAmount.replace(/,/g, "")) - Number(left.totalAmount.replace(/,/g, "")));
+}
+
+function buildBankTagSubRowsFromTimeRows(rows: CostTimeRow[]) {
+  const grouped = new Map<string, { totalAmount: number; transactionCount: number; projects: Set<string> }>();
+  const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
+
+  for (const row of rows) {
+    const primaryLabel = bankTagPrimaryLabel(row);
+    const subLabel = bankTagSubLabel(row);
+    const groupKey = `${primaryLabel}\u0000${subLabel}`;
+    const bucket = grouped.get(groupKey) ?? {
+      totalAmount: 0,
+      transactionCount: 0,
+      projects: new Set<string>(),
+    };
+    bucket.totalAmount += Number(row.amount.replace(/,/g, ""));
+    bucket.transactionCount += 1;
+    bucket.projects.add(row.projectName);
+    grouped.set(groupKey, bucket);
+  }
+
+  return Array.from(grouped.entries())
+    .map<CostBankTagSubRow>(([groupKey, bucket]) => {
+      const [primaryLabel, subLabel] = groupKey.split("\u0000");
+      return {
+        primaryLabel,
+        subLabel,
+        totalAmount: bucket.totalAmount.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }),
+        transactionCount: bucket.transactionCount,
+        projectCount: bucket.projects.size,
+        percentageLabel: `${((bucket.totalAmount / (totalAmount || 1)) * 100).toFixed(1)}%`,
+      };
+    })
     .sort((left, right) => Number(right.totalAmount.replace(/,/g, "")) - Number(left.totalAmount.replace(/,/g, "")));
 }
 
@@ -372,6 +470,11 @@ function isCostStatisticsPageSession(value: unknown): value is CostStatisticsPag
     "expenseTypeScopeMonth",
     "expenseTypeScopeStartDate",
     "expenseTypeScopeEndDate",
+    "bankTagScopeMode",
+    "bankTagScopeYear",
+    "bankTagScopeMonth",
+    "bankTagScopeStartDate",
+    "bankTagScopeEndDate",
   ].every((key) => typeof session[key] === "string");
 }
 
@@ -407,6 +510,11 @@ export default function CostStatisticsPage() {
       expenseTypeScopeMonth: DEFAULT_MONTH,
       expenseTypeScopeStartDate: defaultMonthBounds.startDate,
       expenseTypeScopeEndDate: defaultMonthBounds.endDate,
+      bankTagScopeMode: "month",
+      bankTagScopeYear: DEFAULT_MONTH.slice(0, 4),
+      bankTagScopeMonth: DEFAULT_MONTH,
+      bankTagScopeStartDate: defaultMonthBounds.startDate,
+      bankTagScopeEndDate: defaultMonthBounds.endDate,
     },
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
@@ -505,6 +613,17 @@ export default function CostStatisticsPage() {
   const expenseTypeScopeEndDate = costSession.expenseTypeScopeEndDate;
   const setExpenseTypeScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeEndDate", value);
   const [expenseTypeSelections, setExpenseTypeSelections] = useState<string[]>([]);
+  const bankTagScopeMode = costSession.bankTagScopeMode;
+  const setBankTagScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("bankTagScopeMode", value);
+  const [bankTagScopePanel, setBankTagScopePanel] = useState<ScopePickerPanel | null>("month");
+  const bankTagScopeYear = costSession.bankTagScopeYear;
+  const setBankTagScopeYear = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeYear", value);
+  const bankTagScopeMonth = costSession.bankTagScopeMonth;
+  const setBankTagScopeMonth = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeMonth", value);
+  const bankTagScopeStartDate = costSession.bankTagScopeStartDate;
+  const setBankTagScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeStartDate", value);
+  const bankTagScopeEndDate = costSession.bankTagScopeEndDate;
+  const setBankTagScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeEndDate", value);
 
   const [selectedTimeTransactionId, setSelectedTimeTransactionId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
@@ -515,6 +634,9 @@ export default function CostStatisticsPage() {
   const [selectedBankTransactionId, setSelectedBankTransactionId] = useState<string | null>(null);
   const [selectedExpenseType, setSelectedExpenseType] = useState<string | null>(null);
   const [selectedExpenseTransactionId, setSelectedExpenseTransactionId] = useState<string | null>(null);
+  const [selectedBankTagPrimaryLabel, setSelectedBankTagPrimaryLabel] = useState<string | null>(null);
+  const [selectedBankTagSubLabel, setSelectedBankTagSubLabel] = useState<string | null>(null);
+  const [selectedBankTagTransactionId, setSelectedBankTagTransactionId] = useState<string | null>(null);
   const scopeControlsRef = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
@@ -535,6 +657,10 @@ export default function CostStatisticsPage() {
         ? timeScopeMode === "month"
           ? timeScopeMonth
           : "all"
+        : viewMode === "bankTag"
+          ? bankTagScopeMode === "month"
+            ? bankTagScopeMonth
+            : "all"
         : expenseTypeScopeMode === "month"
           ? expenseTypeScopeMonth
           : "all";
@@ -544,6 +670,7 @@ export default function CostStatisticsPage() {
     setSelectedProjectTransactionId(null);
     setSelectedBankTransactionId(null);
     setSelectedExpenseTransactionId(null);
+    setSelectedBankTagTransactionId(null);
   }
 
   const handleDomainMutation = useCallback(() => {
@@ -574,6 +701,8 @@ export default function CostStatisticsPage() {
       setSelectedBankAccountLabel(null);
       setSelectedBankProjectName(null);
       setSelectedExpenseType(null);
+      setSelectedBankTagPrimaryLabel(null);
+      setSelectedBankTagSubLabel(null);
       resetDetailSelection();
 
       if (cachedPayload) {
@@ -678,6 +807,16 @@ export default function CostStatisticsPage() {
     expenseTypeScopeEndDate,
   ]);
 
+  useEffect(() => {
+    if (viewMode !== "bankTag") {
+      return;
+    }
+    setSelectedBankTagPrimaryLabel(null);
+    setSelectedBankTagSubLabel(null);
+    setSelectedBankTagTransactionId(null);
+    setTransactionDetail(null);
+  }, [viewMode, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth, bankTagScopeStartDate, bankTagScopeEndDate]);
+
   const timeRows = explorerData?.timeRows ?? [];
   const availableScopeYears = useMemo(
     () =>
@@ -747,6 +886,22 @@ export default function CostStatisticsPage() {
     () => buildExpenseTypeRowsFromTimeRows(filteredExpenseTypeRows),
     [filteredExpenseTypeRows],
   );
+  const filteredBankTagRows = useMemo(
+    () =>
+      filterScopeTimeRows(
+        explorerData?.timeRows ?? [],
+        bankTagScopeMode,
+        bankTagScopeYear,
+        bankTagScopeMonth,
+        bankTagScopeStartDate,
+        bankTagScopeEndDate,
+      ),
+    [explorerData, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth, bankTagScopeStartDate, bankTagScopeEndDate],
+  );
+  const bankTagPrimaryRows = useMemo(
+    () => buildBankTagPrimaryRowsFromTimeRows(filteredBankTagRows),
+    [filteredBankTagRows],
+  );
 
   const selectedProjectRows = useMemo(
     () => filteredProjectTimeRows.filter((row) => row.projectName === selectedProjectName),
@@ -772,6 +927,18 @@ export default function CostStatisticsPage() {
   const selectedBankProjectRows = useMemo(
     () => selectedBankRows.filter((row) => row.projectName === selectedBankProjectName),
     [selectedBankRows, selectedBankProjectName],
+  );
+  const selectedBankTagPrimaryRows = useMemo(
+    () => filteredBankTagRows.filter((row) => bankTagPrimaryLabel(row) === selectedBankTagPrimaryLabel),
+    [filteredBankTagRows, selectedBankTagPrimaryLabel],
+  );
+  const bankTagSubRows = useMemo(
+    () => buildBankTagSubRowsFromTimeRows(selectedBankTagPrimaryRows),
+    [selectedBankTagPrimaryRows],
+  );
+  const selectedBankTagSubRows = useMemo(
+    () => selectedBankTagPrimaryRows.filter((row) => bankTagSubLabel(row) === selectedBankTagSubLabel),
+    [selectedBankTagPrimaryRows, selectedBankTagSubLabel],
   );
 
   useEffect(() => {
@@ -809,6 +976,15 @@ export default function CostStatisticsPage() {
       setExpenseTypeScopeYear(availableScopeYears[0]);
     }
   }, [availableScopeYears, expenseTypeScopeYear]);
+
+  useEffect(() => {
+    if (availableScopeYears.length === 0) {
+      return;
+    }
+    if (!availableScopeYears.includes(bankTagScopeYear)) {
+      setBankTagScopeYear(availableScopeYears[0]);
+    }
+  }, [availableScopeYears, bankTagScopeYear]);
 
   const exportProjectOptions = useMemo(
     () => (exportReferenceData?.projectRows ?? []).map((row) => row.projectName),
@@ -891,6 +1067,20 @@ export default function CostStatisticsPage() {
     expenseTypeScopeEndDate,
   ]);
 
+  const bankTagScopeLabel = useMemo(() => {
+    if (bankTagScopeMode === "all") {
+      return "全部时间";
+    }
+    if (bankTagScopeMode === "year") {
+      return `${bankTagScopeYear}年`;
+    }
+    if (bankTagScopeMode === "month") {
+      return formatMonthLabel(bankTagScopeMonth);
+    }
+    const range = normalizeDateRange(bankTagScopeStartDate, bankTagScopeEndDate);
+    return `${range.startDate}至${range.endDate}`;
+  }, [bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth, bankTagScopeStartDate, bankTagScopeEndDate]);
+
   const readModelStatus = explorerData?.readModelStatus?.trim().toLowerCase();
   const isReadModelRefreshing = readModelStatus === "refreshing";
   const isReadModelStale = readModelStatus === "stale";
@@ -914,10 +1104,12 @@ export default function CostStatisticsPage() {
         ? filteredProjectTimeRows.length === 0
         : viewMode === "bank"
           ? filteredBankTimeRows.length === 0
+          : viewMode === "bankTag"
+            ? filteredBankTagRows.length === 0
           : filteredExpenseTypeRows.length === 0
     : false;
 
-  async function openTransactionDetail(row: CostTimeRow, source: "time" | "project" | "bank" | "expenseType") {
+  async function openTransactionDetail(row: CostTimeRow, source: "time" | "project" | "bank" | "expenseType" | "bankTag") {
     setLoadError(null);
     setExportFeedback(null);
     setDetailLoadingMessage(`正在加载流水 ${row.transactionId} 的详情...`);
@@ -932,6 +1124,9 @@ export default function CostStatisticsPage() {
     }
     if (source === "expenseType") {
       setSelectedExpenseTransactionId(row.transactionId);
+    }
+    if (source === "bankTag") {
+      setSelectedBankTagTransactionId(row.transactionId);
     }
     try {
       const payload = await fetchCostTransactionDetail(row.transactionId, undefined, costProjectScope);
@@ -951,6 +1146,7 @@ export default function CostStatisticsPage() {
     setProjectScopePanel(null);
     setBankScopePanel(null);
     setExpenseTypeScopePanel(null);
+    setBankTagScopePanel(null);
     startTransition(() => {
       setViewMode(nextViewMode);
     });
@@ -983,13 +1179,15 @@ export default function CostStatisticsPage() {
       setProjectScopePanel(null);
       setBankScopePanel(null);
       setExpenseTypeScopePanel(null);
+      setBankTagScopePanel(null);
     }
 
     const hasOpenPanel =
       (viewMode === "time" && timeScopePanel !== null) ||
       (viewMode === "project" && projectScopePanel !== null) ||
       (viewMode === "bank" && bankScopePanel !== null) ||
-      (viewMode === "expenseType" && expenseTypeScopePanel !== null);
+      (viewMode === "expenseType" && expenseTypeScopePanel !== null) ||
+      (viewMode === "bankTag" && bankTagScopePanel !== null);
 
     if (!hasOpenPanel) {
       return;
@@ -997,7 +1195,7 @@ export default function CostStatisticsPage() {
 
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [viewMode, timeScopePanel, projectScopePanel, bankScopePanel, expenseTypeScopePanel]);
+  }, [viewMode, timeScopePanel, projectScopePanel, bankScopePanel, expenseTypeScopePanel, bankTagScopePanel]);
 
   const activeSummary = useMemo(() => {
     if (isReadModelNonFresh) {
@@ -1080,6 +1278,30 @@ export default function CostStatisticsPage() {
         totalAmount: formatCurrencyFromRows(filteredExpenseTypeRows),
       };
     }
+    if (viewMode === "bankTag") {
+      if (selectedBankTagPrimaryLabel && selectedBankTagSubLabel) {
+        return {
+          rowLabel: "该标签流水",
+          rowCount: selectedBankTagSubRows.length,
+          transactionCount: selectedBankTagSubRows.length,
+          totalAmount: formatCurrencyFromRows(selectedBankTagSubRows),
+        };
+      }
+      if (selectedBankTagPrimaryLabel) {
+        return {
+          rowLabel: "子标签数",
+          rowCount: bankTagSubRows.length,
+          transactionCount: selectedBankTagPrimaryRows.length,
+          totalAmount: formatCurrencyFromRows(selectedBankTagPrimaryRows),
+        };
+      }
+      return {
+        rowLabel: "主标签数",
+        rowCount: bankTagPrimaryRows.length,
+        transactionCount: filteredBankTagRows.length,
+        totalAmount: formatCurrencyFromRows(filteredBankTagRows),
+      };
+    }
     return {
       rowLabel: "时间流水",
       rowCount: filteredTimeRows.length,
@@ -1088,8 +1310,11 @@ export default function CostStatisticsPage() {
     };
   }, [
     explorerData,
+    bankTagPrimaryRows.length,
+    bankTagSubRows.length,
     expenseTypeRows,
     filteredExpenseTypeRows,
+    filteredBankTagRows,
     filteredTimeRows,
     expenseTypeRows.length,
     filteredBankTimeRows,
@@ -1105,6 +1330,10 @@ export default function CostStatisticsPage() {
     selectedBankRows,
     selectedExpenseType,
     selectedExpenseTypeRows,
+    selectedBankTagPrimaryLabel,
+    selectedBankTagPrimaryRows,
+    selectedBankTagSubLabel,
+    selectedBankTagSubRows,
     selectedProjectExpenseType,
     selectedProjectName,
     selectedProjectRows,
@@ -1354,7 +1583,11 @@ export default function CostStatisticsPage() {
 
   const hasExplorerLoadError = Boolean(loadError) && !explorerData;
   const activeTransactionId =
-    selectedTimeTransactionId ?? selectedProjectTransactionId ?? selectedBankTransactionId ?? selectedExpenseTransactionId;
+    selectedTimeTransactionId
+    ?? selectedProjectTransactionId
+    ?? selectedBankTransactionId
+    ?? selectedExpenseTransactionId
+    ?? selectedBankTagTransactionId;
   const isExportActionBusy = isExporting || isPreviewLoading || Boolean(detailLoadingMessage);
 
   return (
@@ -1424,6 +1657,13 @@ export default function CostStatisticsPage() {
               按费用类型
             </button>
             <button
+              className={viewMode === "bankTag" ? "cost-view-tab active" : "cost-view-tab"}
+              type="button"
+              onClick={() => handleViewModeChange("bankTag")}
+            >
+              按流水标签类型
+            </button>
+            <button
               aria-label={`项目范围：${costProjectScope === "active" ? "进行中" : "所有项目"}`}
               className={costProjectScope === "active" ? "cost-project-scope-trigger active" : "cost-project-scope-trigger"}
               type="button"
@@ -1437,6 +1677,7 @@ export default function CostStatisticsPage() {
             {viewMode === "project" ? <strong>从左到右依次展开：项目名 / 费用类型 / 流水，支持按范围重新统计</strong> : null}
             {viewMode === "bank" ? <strong>从左到右依次展开：银行账户 / 项目名 / 流水，支持按范围重新统计</strong> : null}
             {viewMode === "expenseType" ? <strong>按费用类型查看 {expenseTypeScopeLabel} 的对应流水</strong> : null}
+            {viewMode === "bankTag" ? <strong>从左到右依次展开：主标签 / 子标签 / 流水，支持按范围重新统计</strong> : null}
           </div>
         </div>
 
@@ -1461,6 +1702,8 @@ export default function CostStatisticsPage() {
                 ? "当前时间范围没有可用于银行成本统计的支出流水。"
                 : viewMode === "expenseType"
                   ? "当前时间范围没有可用于费用类型统计的支出流水。"
+                  : viewMode === "bankTag"
+                    ? "当前时间范围没有可用于流水标签统计的支出流水。"
                   : "当前时间范围没有可用于成本统计的支出流水。"}
           </div>
         ) : null}
@@ -2094,6 +2337,199 @@ export default function CostStatisticsPage() {
                       />
                     ) : (
                       <div className="cost-explorer-empty">请先在左侧选择费用类型。</div>
+                    )}
+                  </section>
+                </div>
+              </div>
+            ) : null}
+
+            {viewMode === "bankTag" ? (
+              <div className="cost-analysis-layout explorer-layout">
+                <div className="cost-section-heading cost-view-scope-heading">
+                  <div className="cost-section-heading-copy">
+                    <h2>按流水标签类型统计</h2>
+                    <span>{bankTagScopeLabel}</span>
+                  </div>
+                  <div className="cost-section-heading-actions cost-project-scope-actions">
+                    <div ref={scopeControlsRef} className="cost-scope-controls">
+                      <div className="cost-scope-toggle" role="tablist" aria-label="流水标签统计时间范围">
+                        <button
+                          className={bankTagScopeMode === "all" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
+                          type="button"
+                          onClick={() => {
+                            setBankTagScopeMode("all");
+                            setBankTagScopePanel(null);
+                          }}
+                        >
+                          全部时间
+                        </button>
+                        <button
+                          className={bankTagScopeMode === "year" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
+                          type="button"
+                          onClick={() =>
+                            toggleScopeSelection(
+                              bankTagScopeMode,
+                              bankTagScopePanel,
+                              "year",
+                              setBankTagScopeMode,
+                              setBankTagScopePanel,
+                            )
+                          }
+                        >
+                          {formatScopeButtonLabel("按年统计", bankTagScopeMode === "year", `${bankTagScopeYear}年`)}
+                        </button>
+                        <button
+                          className={bankTagScopeMode === "month" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
+                          type="button"
+                          onClick={() =>
+                            toggleScopeSelection(
+                              bankTagScopeMode,
+                              bankTagScopePanel,
+                              "month",
+                              setBankTagScopeMode,
+                              setBankTagScopePanel,
+                            )
+                          }
+                        >
+                          {formatScopeButtonLabel(
+                            "按月统计",
+                            bankTagScopeMode === "month",
+                            formatMonthLabel(bankTagScopeMonth),
+                          )}
+                        </button>
+                        <button
+                          className={bankTagScopeMode === "custom" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
+                          type="button"
+                          onClick={() =>
+                            toggleScopeSelection(
+                              bankTagScopeMode,
+                              bankTagScopePanel,
+                              "custom",
+                              setBankTagScopeMode,
+                              setBankTagScopePanel,
+                            )
+                          }
+                        >
+                          {formatScopeButtonLabel(
+                            "自定义时间段",
+                            bankTagScopeMode === "custom",
+                            `${normalizeDateRange(bankTagScopeStartDate, bankTagScopeEndDate).startDate}至${normalizeDateRange(bankTagScopeStartDate, bankTagScopeEndDate).endDate}`,
+                          )}
+                        </button>
+                      </div>
+                      {bankTagScopePanel === "year" ? (
+                        <div className="cost-scope-floating-panel">
+                          <ScopeYearPicker
+                            ariaLabel="流水标签统计年份"
+                            years={availableScopeYears}
+                            value={bankTagScopeYear}
+                            onChange={setBankTagScopeYear}
+                          />
+                        </div>
+                      ) : null}
+                      {bankTagScopePanel === "month" ? (
+                        <div className="cost-scope-floating-panel">
+                          <MonthPicker
+                            inline
+                            value={bankTagScopeMonth}
+                            onChange={setBankTagScopeMonth}
+                            ariaLabel="流水标签统计月份"
+                            caption={null}
+                          />
+                        </div>
+                      ) : null}
+                      {bankTagScopePanel === "custom" ? (
+                        <div className="cost-scope-floating-panel">
+                          <div className="cost-scope-date-panel">
+                            <div className="cost-date-range-fields">
+                              <label className="cost-inline-field">
+                                <span>开始日期</span>
+                                <input
+                                  aria-label="流水标签统计开始日期"
+                                  className="cost-date-input"
+                                  type="date"
+                                  value={bankTagScopeStartDate}
+                                  onChange={(event) => setBankTagScopeStartDate(event.target.value)}
+                                />
+                              </label>
+                              <label className="cost-inline-field">
+                                <span>结束日期</span>
+                                <input
+                                  aria-label="流水标签统计结束日期"
+                                  className="cost-date-input"
+                                  type="date"
+                                  value={bankTagScopeEndDate}
+                                  onChange={(event) => setBankTagScopeEndDate(event.target.value)}
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+                <div className="cost-explorer-grid bank-tag">
+                  <CostExplorerList<CostBankTagPrimaryRow>
+                    title="主标签"
+                    count={bankTagPrimaryRows.length}
+                    items={bankTagPrimaryRows}
+                    emptyLabel="当前时间范围没有流水标签数据。"
+                    getKey={(row) => row.primaryLabel}
+                    isActive={(row) => row.primaryLabel === selectedBankTagPrimaryLabel}
+                    onSelect={(row) => {
+                      setSelectedBankTagPrimaryLabel(row.primaryLabel);
+                      setSelectedBankTagSubLabel(null);
+                      setSelectedBankTagTransactionId(null);
+                      setTransactionDetail(null);
+                    }}
+                    renderPrimary={(row) => row.primaryLabel}
+                    renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.subTagCount} 个子标签`}
+                    renderMeta={(row) => (
+                      <div className="cost-explorer-item-meta-stack">
+                        <span>{row.totalAmount}</span>
+                        <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
+                      </div>
+                    )}
+                  />
+                  <CostExplorerList<CostBankTagSubRow>
+                    title="子标签"
+                    count={bankTagSubRows.length}
+                    items={bankTagSubRows}
+                    emptyLabel={selectedBankTagPrimaryLabel ? "该主标签下暂无子标签。" : "请先在左侧选择主标签。"}
+                    getKey={(row) => `${row.primaryLabel}:${row.subLabel}`}
+                    isActive={(row) => row.subLabel === selectedBankTagSubLabel}
+                    onSelect={(row) => {
+                      setSelectedBankTagSubLabel(row.subLabel);
+                      setSelectedBankTagTransactionId(null);
+                      setTransactionDetail(null);
+                    }}
+                    renderPrimary={(row) => row.subLabel}
+                    renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.projectCount} 个项目`}
+                    renderMeta={(row) => (
+                      <div className="cost-explorer-item-meta-stack">
+                        <span>{row.totalAmount}</span>
+                        <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
+                      </div>
+                    )}
+                  />
+                  <section className="cost-explorer-lane cost-explorer-lane-table">
+                    <header className="cost-explorer-lane-header">
+                      <h2>对应流水</h2>
+                      <span>{selectedBankTagSubRows.length}</span>
+                    </header>
+                    {selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? (
+                      <CostStatisticsTable
+                        ariaLabel="流水标签对应流水表"
+                        columns={transactionColumns}
+                        rows={selectedBankTagSubRows}
+                        getRowKey={getCostTimeRowRenderKey}
+                        onRowClick={(row) => void openTransactionDetail(row, "bankTag")}
+                        getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
+                        emptyLabel="该流水标签下暂无流水。"
+                      />
+                    ) : (
+                      <div className="cost-explorer-empty">请先依次选择主标签和子标签。</div>
                     )}
                   </section>
                 </div>

@@ -163,6 +163,11 @@ class CostStatisticsProjectionConnection:
                         "direction": "支出",
                         "remark": "采购",
                         "amount": "10.00",
+                        "effective_category_code": "project_material",
+                        "effective_category_label": "设备材料",
+                        "effective_category_primary_label": "项目开销",
+                        "effective_category_sub_label": "设备材料",
+                        "effective_category_label_path": ["项目开销", "设备材料"],
                     },
                     "member_payload": {"row_id": "bank-1", "type": "bank"},
                 }
@@ -291,6 +296,11 @@ class CostStatisticsParentAggregationConnection:
                         "payment_account_label": "建行",
                         "remark": "采购",
                         "oa_applicant": "张三",
+                        "bank_tag_code": "project_material",
+                        "bank_tag_label": "设备材料",
+                        "bank_tag_primary_label": "项目开销",
+                        "bank_tag_sub_label": "设备材料",
+                        "bank_tag_label_path": ["项目开销", "设备材料"],
                     },
                     "raw_payload": {},
                 },
@@ -913,6 +923,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["transaction_count"], 1)
         self.assertEqual(payload["summary"]["total_amount"], "10.00")
         self.assertEqual([row["transaction_id"] for row in payload["time_rows"]], ["bank-1"])
+        self.assertEqual(payload["time_rows"][0]["bank_tag_primary_label"], "项目开销")
+        self.assertEqual(payload["time_rows"][0]["bank_tag_sub_label"], "设备材料")
+        self.assertEqual(payload["time_rows"][0]["bank_tag_label_path"], ["项目开销", "设备材料"])
         workbench_sql, workbench_params = next(
             (sql, params) for sql, params in connection.fetch_all_calls if "read_model.workbench_groups" in sql
         )
@@ -1036,6 +1049,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["total_amount"], "15.50")
         self.assertEqual(payload["project_rows"][0]["project_name"], "项目A")
         self.assertEqual(payload["expense_type_rows"][0]["expense_type"], "材料")
+        self.assertEqual(payload["time_rows"][0]["bank_tag_primary_label"], "项目开销")
+        self.assertEqual(payload["time_rows"][0]["bank_tag_sub_label"], "设备材料")
         self.assertEqual(snapshot["read_models"]["active:all"]["source_versions"]["source_shard_count"], 2)
 
     def test_cost_statistics_sql_projection_rebuilds_all_all_as_first_class_read_model(self) -> None:

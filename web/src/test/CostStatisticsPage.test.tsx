@@ -130,6 +130,7 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-scope-toggle-btn\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*padding:\s*10px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.cost-explorer-grid\.bank-tag\s*{[^}]*grid-template-columns:\s*minmax\(180px,\s*1fr\) minmax\(180px,\s*1fr\) minmax\(420px,\s*2fr\)/s);
     expect(css).toMatch(/\.export-center-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
     expect(css).toMatch(/\.cost-detail-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
   });
@@ -332,6 +333,44 @@ describe("Cost statistics page", () => {
     expect(within(dialog).getByText("2201")).toBeInTheDocument();
     expect(within(dialog).queryByText("招商银行 账户 2201")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("支付账户")).not.toBeInTheDocument();
+  });
+
+  test("bank tag view drills down from primary tag to sub tag to transaction", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "按流水标签类型" }));
+
+    expect(screen.getByRole("heading", { name: "按流水标签类型统计" })).toBeInTheDocument();
+    expect(screen.getByText("从左到右依次展开：主标签 / 子标签 / 流水，支持按范围重新统计")).toBeInTheDocument();
+    const primaryLane = screen.getByRole("heading", { name: "主标签" }).closest(".cost-explorer-lane");
+    expect(primaryLane).not.toBeNull();
+    expect(within(primaryLane as HTMLElement).getByText("项目开销")).toBeInTheDocument();
+    expect(within(primaryLane as HTMLElement).getByText("差旅交通")).toBeInTheDocument();
+
+    await user.click(within(primaryLane as HTMLElement).getByRole("button", { name: /项目开销/ }));
+
+    const subLane = screen.getByRole("heading", { name: "子标签" }).closest(".cost-explorer-lane");
+    expect(subLane).not.toBeNull();
+    expect(within(subLane as HTMLElement).getByText("设备材料")).toBeInTheDocument();
+    await user.click(within(subLane as HTMLElement).getByRole("button", { name: /设备材料/ }));
+
+    const transactionTable = screen.getByRole("grid", { name: "流水标签对应流水表" });
+    expectProjectCostTable("流水标签对应流水表");
+    expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" })).toBeInTheDocument();
+    expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
+
+    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
+
+    expect(await screen.findByRole("dialog", { name: "流水详情" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/transactions/cost-txn-001?project_scope=active",
+      expect.any(Object),
+    );
   });
 
   test("shows empty state when the selected month has no cost statistics", async () => {

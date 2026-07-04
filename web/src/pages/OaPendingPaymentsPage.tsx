@@ -543,6 +543,7 @@ export default function OaPendingPaymentsPage() {
         open={detailTarget !== null}
         target={detailTarget}
         loadDetail={fetchOaPendingPaymentDetail}
+        layout="table"
         variant="persistent"
         onClose={() => setDetailTarget(null)}
       />

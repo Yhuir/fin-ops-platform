@@ -491,12 +491,14 @@ class WorkbenchRelationCommandService:
         *,
         row_ids: list[str],
         month_scope: str = "all",
+        row_id_aliases: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         pair_service = self._pair_service_for_row_ids(list(row_ids or []))
         return self._preview_withdraw_relation_from_pair_service(
             pair_service,
             row_ids=list(row_ids or []),
             month_scope=month_scope,
+            row_id_aliases=row_id_aliases,
         )
 
     def _preview_withdraw_relation_from_pair_service(
@@ -506,6 +508,7 @@ class WorkbenchRelationCommandService:
         row_ids: list[str],
         month_scope: str = "all",
         freshness: dict[str, Any] | None = None,
+        row_id_aliases: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
         if not active_relations:
@@ -538,7 +541,10 @@ class WorkbenchRelationCommandService:
             month_scope=resolved_month_scope,
         )
         try:
-            preview = pair_service.preview_withdraw_for_row_ids(active_row_ids)
+            preview = pair_service.preview_withdraw_for_row_ids(
+                active_row_ids,
+                row_id_aliases=row_id_aliases,
+            )
         except KeyError as exc:
             raise WorkbenchRelationCommandError(
                 "workbench_relation_not_found",
@@ -586,6 +592,7 @@ class WorkbenchRelationCommandService:
         preview_id: str | None = None,
         operation_type: str | None = None,
         expected_versions: dict[str, Any] | None = None,
+        row_id_aliases: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         resolved_case_id = str(case_id or "").strip()
         resolved_operation_type = str(operation_type or "withdraw_relation").strip()
@@ -605,6 +612,7 @@ class WorkbenchRelationCommandService:
                 "preview_id": preview_id,
                 "operation_type": resolved_operation_type,
                 "expected_versions": expected_versions,
+                "row_id_aliases": row_id_aliases,
             },
         )
         replay = self._idempotency_replay(idempotency_key, fingerprint)
@@ -634,6 +642,7 @@ class WorkbenchRelationCommandService:
             row_ids=before_row_ids,
             month_scope=before_month_scope,
             freshness=freshness,
+            row_id_aliases=row_id_aliases,
         )
         self._assert_withdraw_preview_lock(
             preview=current_preview,
@@ -645,6 +654,7 @@ class WorkbenchRelationCommandService:
             created_by=actor_id,
             note=reason,
             created_at=occurred_at,
+            row_id_aliases=row_id_aliases,
         )
         if history_operation_type != "withdraw_link":
             history = pair_service.record_history(

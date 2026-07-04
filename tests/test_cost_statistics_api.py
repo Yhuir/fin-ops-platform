@@ -13,6 +13,7 @@ from tests.app_test_support import build_local_state_application as build_applic
 from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 
 
@@ -1247,56 +1248,35 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(expense_sheet["D2"].value, "PLC 模块采购")
 
     def test_cost_statistics_uses_oa_detail_fields_after_manual_confirm_link(self) -> None:
-        from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
-        from fin_ops_platform.domain.enums import BatchType
-
         app = build_application()
         app._workbench_query_service = app._workbench_query_service.__class__(oa_adapter=_FallbackCostStatsOAAdapter())
-        app._workbench_api_routes = WorkbenchApiRoutes(
+        legacy_action_service = WorkbenchActionService(app._workbench_query_service)
+        legacy_workbench_routes = WorkbenchApiRoutes(
             app._workbench_query_service,
-            app._workbench_action_service,
+            legacy_action_service,
         )
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 
         app._cost_statistics_service = CostStatisticsService(
             app._import_service,
-            grouped_workbench_loader=app._build_api_workbench_payload,
-            row_detail_loader=app._get_api_workbench_row_detail_payload,
+            grouped_workbench_loader=lambda month: app._group_row_payload(legacy_workbench_routes.get_workbench(month)),
+            row_detail_loader=legacy_workbench_routes.get_row_detail,
             project_active_checker=app._app_settings_service.is_project_active,
         )
 
-        preview = app._import_service.preview_import(
-            batch_type=BatchType.BANK_TRANSACTION,
-            source_name="cost-fallback.json",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "account_no": "62229999",
-                    "txn_date": "2026-03-10",
-                    "trade_time": "2026-03-10 21:27:55",
-                    "counterparty_name": "昆明设备供应商",
-                    "debit_amount": "1250.00",
-                    "credit_amount": "",
-                    "bank_serial_no": "COST-FALLBACK-001",
-                    "summary": "PLC 模块采购",
-                    "remark": "设备采购款",
-                }
-            ],
+        confirm_result = legacy_workbench_routes.confirm_link(
+            {
+                "month": "2026-03",
+                "row_ids": ["oa-cost-fallback-001", "bk-o-202603-001"],
+            }
         )
-        app._import_service.confirm_import(preview.id)
+        self.assertEqual(confirm_result["action"], "confirm_link")
 
-        confirm_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/confirm-link",
-            json.dumps(
-                {
-                    "month": "2026-03",
-                    "row_ids": ["oa-cost-fallback-001", "txn_imported_0001"],
-                }
-            ),
+        app._cost_statistics_read_model_service.upsert_read_model(
+            "2026-03",
+            "active",
+            app._cost_statistics_service.get_explorer("2026-03", project_scope="active"),
         )
-        self.assertEqual(confirm_response.status_code, 200)
-
         payload = json.loads(app.handle_request("GET", "/api/cost-statistics?month=2026-03").body)
         self.assertEqual(payload["summary"]["row_count"], 1)
         self.assertEqual(payload["rows"][0]["project_name"], "云南溯源科技")

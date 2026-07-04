@@ -1129,6 +1129,16 @@ describe("Workbench row selection and detail modal", () => {
 
     expectRelationPreviewBlocking(preview, "确认撤回");
     expect(within(preview).getByText("正在撤回关联...")).toBeInTheDocument();
+    expect(
+      within(pairedZone).getByRole("row", {
+        name: /2026-03-25 14:22.*华东设备供应商/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(openZone).queryByRole("row", {
+        name: /2026-03-25 14:22.*华东设备供应商/,
+      }),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
     });

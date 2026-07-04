@@ -56,19 +56,42 @@ def mark_relation_restorable_on_withdraw(relation: dict[str, Any]) -> dict[str, 
     return marked
 
 
-def workbench_relation_row_id_set(relation: Any) -> frozenset[str]:
+def _canonical_workbench_relation_row_id(row_id: Any, row_id_aliases: dict[str, str] | None) -> str:
+    value = str(row_id).strip()
+    if not value or not row_id_aliases:
+        return value
+    seen = {value}
+    current = value
+    while True:
+        candidate = str(row_id_aliases.get(current, current)).strip()
+        if not candidate or candidate == current or candidate in seen:
+            return current
+        seen.add(candidate)
+        current = candidate
+
+
+def workbench_relation_row_id_set(
+    relation: Any,
+    *,
+    row_id_aliases: dict[str, str] | None = None,
+) -> frozenset[str]:
     if not isinstance(relation, dict):
         return frozenset()
     return frozenset(
-        str(row_id).strip()
+        _canonical_workbench_relation_row_id(row_id, row_id_aliases)
         for row_id in list(relation.get("row_ids") or [])
         if str(row_id).strip()
     )
 
 
-def workbench_relations_have_same_row_set(left: Any, right: Any) -> bool:
-    left_row_ids = workbench_relation_row_id_set(left)
-    right_row_ids = workbench_relation_row_id_set(right)
+def workbench_relations_have_same_row_set(
+    left: Any,
+    right: Any,
+    *,
+    row_id_aliases: dict[str, str] | None = None,
+) -> bool:
+    left_row_ids = workbench_relation_row_id_set(left, row_id_aliases=row_id_aliases)
+    right_row_ids = workbench_relation_row_id_set(right, row_id_aliases=row_id_aliases)
     return bool(left_row_ids) and left_row_ids == right_row_ids
 
 
@@ -81,10 +104,18 @@ def is_workbench_relation_snapshot_restorable(
     relation: Any,
     *,
     active_relation: dict[str, Any] | None = None,
+    row_id_aliases: dict[str, str] | None = None,
 ) -> bool:
     if not isinstance(relation, dict):
         return False
-    if active_relation is not None and workbench_relations_have_same_row_set(relation, active_relation):
+    if (
+        active_relation is not None
+        and workbench_relations_have_same_row_set(
+            relation,
+            active_relation,
+            row_id_aliases=row_id_aliases,
+        )
+    ):
         return False
     if not relation_has_withdraw_restore_marker(relation):
         return False

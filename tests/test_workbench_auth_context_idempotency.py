@@ -354,6 +354,24 @@ class _RawOaAliasWithdrawRelationCommandService(_RecordingRelationCommandService
         }
 
 
+class _RawOaAliasSameRowsPreviewRelationCommandService(_RawOaAliasWithdrawRelationCommandService):
+    def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+        preview = super().preview_withdraw_relation(**kwargs)
+        preview["after_relations"] = [
+            {
+                "case_id": "CASE-SAME-RAW-OA",
+                "row_ids": [self.raw_oa_row_id, self.bank_row_id, self.invoice_row_id],
+                "row_types": ["oa", "bank", "invoice"],
+                "status": "active",
+                "relation_mode": "manual_confirmed",
+                "month_scope": "2026-05",
+                "version": 4,
+                "special_metadata": {"restorable_on_withdraw": True},
+            }
+        ]
+        return preview
+
+
 class _RecordingExceptionCaseService:
     def __init__(self) -> None:
         self.created_cases: list[dict[str, object]] = []
@@ -933,7 +951,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(relation_command.withdraw_calls[0]["expected_versions"], {"relation:CASE-1": 3})
         self.assertEqual(relation_command.withdraw_calls[0]["idempotency_key"], "withdraw:1")
 
-    def test_withdraw_link_canonicalizes_legacy_oa_source_ids_from_active_relation(self) -> None:
+    def test_withdraw_link_canonicalizes_legacy_oa_source_ids_and_drops_same_row_restore(self) -> None:
         relation_command = _RawOaAliasWithdrawRelationCommandService()
         selected_row_ids = [
             relation_command.canonical_oa_row_id,
@@ -990,8 +1008,59 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertTrue(resolved_active_row_ids)
         self.assertTrue(all(row_ids == selected_row_ids for row_ids in resolved_active_row_ids))
         self.assertEqual(submit.payload["affected_row_ids"], selected_row_ids)
-        self.assertEqual(submit.payload["restored_relations"][0]["row_ids"], selected_row_ids)
+        self.assertEqual(submit.payload["restored_relations"], [])
         self.assertNotIn(relation_command.raw_oa_row_id, submit.payload["affected_row_ids"])
+
+    def test_withdraw_preview_filters_same_canonical_alias_after_relation(self) -> None:
+        relation_command = _RawOaAliasSameRowsPreviewRelationCommandService()
+        selected_row_ids = [
+            relation_command.canonical_oa_row_id,
+            relation_command.bank_row_id,
+            relation_command.invoice_row_id,
+        ]
+        live_rows = [
+            {
+                "id": relation_command.canonical_oa_row_id,
+                "type": "oa",
+                "amount": "145.00",
+                "detail_fields": {
+                    "Mongo文档ID": "69fab21659b12d7d42a50a45",
+                    "OA单号": "2156",
+                },
+            },
+            {"id": relation_command.bank_row_id, "type": "bank", "amount": "145.00"},
+            {"id": relation_command.invoice_row_id, "type": "invoice", "amount": "145.00"},
+        ]
+        relation_group_app = object.__new__(Application)
+        facade = _new_facade(
+            relation_command_service=relation_command,
+            live_rows=live_rows,
+            relation_groups=relation_group_app._relation_groups,
+            withdraw_rows_and_after_relations=lambda **_: (live_rows, [], selected_row_ids),
+        )
+
+        preview = facade.preview_withdraw_link(
+            {
+                "month": "all",
+                "row_ids": selected_row_ids,
+            }
+        )
+
+        self.assertEqual(preview.status_code, HTTPStatus.OK)
+        after_groups = preview.payload["after"]["groups"]
+        self.assertEqual(
+            [str(group["reason"]) for group in after_groups],
+            ["selected_row", "selected_row", "selected_row"],
+        )
+        self.assertEqual(
+            [str(group["group_id"]) for group in after_groups],
+            [f"selected:{row_id}" for row_id in selected_row_ids],
+        )
+        self.assertEqual(preview.payload["restored_relations"], [])
+        self.assertEqual(
+            relation_command.preview_withdraw_calls[0]["row_id_aliases"].get(relation_command.raw_oa_row_id),
+            relation_command.canonical_oa_row_id,
+        )
 
     def test_withdraw_preview_after_groups_unrestored_bank_invoice_rows_individually(self) -> None:
         relation_command = _BankInvoiceWithdrawRelationCommandService()

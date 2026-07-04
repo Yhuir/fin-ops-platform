@@ -31,6 +31,7 @@ type InputInvoiceUsageDetailDrawerProps<TTarget extends InputInvoiceUsageDetailT
   open: boolean;
   target: TTarget | null;
   loadDetail: (target: TTarget) => Promise<InputInvoiceUsageDetailPayload>;
+  layout?: "grid" | "table";
   variant?: "temporary" | "persistent";
   onClose: () => void;
 };
@@ -46,6 +47,7 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
   open,
   target,
   loadDetail,
+  layout = "grid",
   onClose,
 }: InputInvoiceUsageDetailDrawerProps<TTarget>) {
   const [detail, setDetail] = useState<InputInvoiceUsageDetailPayload | null>(null);
@@ -114,24 +116,65 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
             <div>{detail.unavailableReason ?? "后端未返回可展示的完整详情。"}</div>
           </div>
         ) : null}
-        {sections.map((section) => (
-          <section className="input-invoice-usage-detail-section" key={section.title}>
-            <h3>{section.title}</h3>
-            <div className="input-invoice-usage-detail-grid">
-              {section.fields.map((field) => (
-                <div className="input-invoice-usage-detail-field" key={`${section.title}-${field.label}`}>
-                  <div className="input-invoice-usage-detail-field__label">{field.label}</div>
-                  <div className="input-invoice-usage-detail-field__value">{formatDetailValue(field.value)}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-        ))}
+        {layout === "table" ? <DetailTable sections={sections} title={title} /> : (
+          sections.map((section) => (
+            <section className="input-invoice-usage-detail-section" key={section.title}>
+              <h3>{section.title}</h3>
+              <div className="input-invoice-usage-detail-grid">
+                {section.fields.map((field) => (
+                  <div className="input-invoice-usage-detail-field" key={`${section.title}-${field.label}`}>
+                    <div className="input-invoice-usage-detail-field__label">{field.label}</div>
+                    <div className="input-invoice-usage-detail-field__value">{formatDetailValue(field.value)}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))
+        )}
         {!loading && !error && detail && sections.length === 0 && detail.detailAvailable !== false ? (
           <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--info" role="status">暂无更多详情。</div>
         ) : null}
       </div>
     </AppDrawer>
+  );
+}
+
+function DetailTable({
+  sections,
+  title,
+}: {
+  sections: InputInvoiceUsageDetailSection[];
+  title: string;
+}) {
+  if (sections.length === 0) {
+    return null;
+  }
+  return (
+    <div className="input-invoice-usage-detail-table-shell">
+      <table aria-label={`${title}明细表`} className="input-invoice-usage-detail-table">
+        <tbody>
+          {sections.map((section) => (
+            <TableSection key={section.title} section={section} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TableSection({ section }: { section: InputInvoiceUsageDetailSection }) {
+  return (
+    <>
+      <tr className="input-invoice-usage-detail-table__section-row">
+        <th colSpan={2} scope="colgroup">{section.title}</th>
+      </tr>
+      {section.fields.map((field) => (
+        <tr key={`${section.title}-${field.label}`}>
+          <th scope="row">{field.label}</th>
+          <td>{formatDetailValue(field.value)}</td>
+        </tr>
+      ))}
+    </>
   );
 }
 

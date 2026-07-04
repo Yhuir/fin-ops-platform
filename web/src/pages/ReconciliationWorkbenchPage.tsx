@@ -810,6 +810,15 @@ export default function ReconciliationWorkbenchPage() {
     }
   }
 
+  function applyWorkbenchInitialPageResult(
+    workbenchPayload: WorkbenchInitialPageResult,
+    resolvedZoneQueries: Record<"paired" | "open", WorkbenchGroupsPageQuery>,
+  ) {
+    setWorkbenchData(workbenchPayload.data);
+    setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
+    setZonePages(workbenchPayload.pages);
+  }
+
   async function loadWorkbenchData(
     month: string,
     signal?: AbortSignal,
@@ -818,10 +827,12 @@ export default function ReconciliationWorkbenchPage() {
       includeAuxiliary?: boolean;
       zoneQueries?: Record<"paired" | "open", WorkbenchGroupsPageQuery>;
       propagateError?: boolean;
+      deferStateApply?: boolean;
     },
   ): Promise<WorkbenchInitialPageResult | null> {
     const background = options?.background ?? false;
     const includeAuxiliary = options?.includeAuxiliary ?? false;
+    const deferStateApply = options?.deferStateApply ?? false;
     const resolvedZoneQueries = options?.zoneQueries ?? zoneServerPageQueries;
 
     if (background) {
@@ -850,9 +861,9 @@ export default function ReconciliationWorkbenchPage() {
       if (signal?.aborted) {
         return null;
       }
-      setWorkbenchData(workbenchPayload.data);
-      setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
-      setZonePages(workbenchPayload.pages);
+      if (!deferStateApply) {
+        applyWorkbenchInitialPageResult(workbenchPayload, resolvedZoneQueries);
+      }
       if (!background) {
         setIsLoading(false);
       } else {
@@ -888,9 +899,12 @@ export default function ReconciliationWorkbenchPage() {
     }
   }
 
-  const waitForWorkbenchFreshAfterOperation = useCallback(async () => {
+  const waitForWorkbenchFreshAfterOperation = useCallback(async (options?: {
+    deferStateApply?: boolean;
+  }) => {
     const startedAt = Date.now();
     let lastReadModelStatus = "";
+    const deferStateApply = options?.deferStateApply ?? false;
 
     while (Date.now() - startedAt <= WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS) {
       const result = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
@@ -898,12 +912,13 @@ export default function ReconciliationWorkbenchPage() {
         includeAuxiliary: false,
         zoneQueries: zoneServerPageQueries,
         propagateError: true,
+        deferStateApply,
       });
       const pairedStatus = result?.pages.paired.readModelStatus ?? "unknown";
       const openStatus = result?.pages.open.readModelStatus ?? "unknown";
       lastReadModelStatus = pairedStatus === openStatus ? pairedStatus : `${pairedStatus}/${openStatus}`;
       if (workbenchInitialPageIsFresh(result)) {
-        return;
+        return result;
       }
       await delayWorkbenchOperationPoll();
     }
@@ -1518,12 +1533,16 @@ export default function ReconciliationWorkbenchPage() {
     action,
     onProgress,
     waitForFreshWorkbenchLoad = false,
+    deferFreshWorkbenchApply = false,
+    onFreshWorkbenchPayload,
   }: {
     loadingMessage: string;
     syncingMessage?: string;
     action: () => Promise<string | WorkbenchActionResult>;
     onProgress?: WorkbenchActionProgressHandler;
     waitForFreshWorkbenchLoad?: boolean;
+    deferFreshWorkbenchApply?: boolean;
+    onFreshWorkbenchPayload?: (payload: WorkbenchInitialPageResult) => void;
   }) => {
     onProgress?.({ phase: "submitting", message: loadingMessage, committed: false });
     const result = await action();
@@ -1542,7 +1561,12 @@ export default function ReconciliationWorkbenchPage() {
       : false;
     if (waitForFreshWorkbenchLoad || !projectionApplied) {
       onProgress?.({ phase: "loading", message: "正在加载关联台最新数据...", committed });
-      await waitForWorkbenchFreshAfterOperation();
+      const freshWorkbenchPayload = await waitForWorkbenchFreshAfterOperation({
+        deferStateApply: deferFreshWorkbenchApply,
+      });
+      if (deferFreshWorkbenchApply && freshWorkbenchPayload) {
+        onFreshWorkbenchPayload?.(freshWorkbenchPayload);
+      }
     } else {
       onProgress?.({ phase: "loading", message: "正在更新关联台页面...", committed });
       refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
@@ -1849,10 +1873,18 @@ export default function ReconciliationWorkbenchPage() {
       ? "系统建议已取消，正在同步关联台最新数据..."
       : "关系已写入，正在同步关联台最新数据...";
     let submittedResult: WorkbenchActionResult | null = null;
+    let deferredWorkbenchFreshApplied = false;
     const message = await executeWorkbenchActionWithFreshness({
       loadingMessage: operationCopy.submittingMessage,
       syncingMessage,
       onProgress,
+      waitForFreshWorkbenchLoad: true,
+      deferFreshWorkbenchApply: true,
+      onFreshWorkbenchPayload: (freshWorkbenchPayload) => {
+        deferredWorkbenchFreshApplied = true;
+        setRelationPreviewDialog(null);
+        applyWorkbenchInitialPageResult(freshWorkbenchPayload, zoneServerPageQueries);
+      },
       action: async () => {
         const result = await withdrawWorkbenchLink({
           month: WORKBENCH_VIEW_MONTH,
@@ -1875,7 +1907,9 @@ export default function ReconciliationWorkbenchPage() {
       });
     }
     setLastActionMessage(message);
-    setRelationPreviewDialog(null);
+    if (!deferredWorkbenchFreshApplied) {
+      setRelationPreviewDialog(null);
+    }
   };
 
   const handleConfirmOpenSelection = async () => {
