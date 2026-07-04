@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_ids
+
 
 class WorkbenchCanonicalOaAttachmentRawPayloadRepairer:
     """Appends or replaces canonical OA attachment invoice rows in raw payloads."""
@@ -50,7 +52,12 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairer:
 
         appended = 0
         changed = False
-        oa_row_ids = set(oa_rows_by_id)
+        oa_source_id_to_row_id: dict[str, str] = {}
+        for oa_row_id in sorted(oa_rows_by_id):
+            oa_row = oa_rows_by_id[oa_row_id]
+            for source_id in oa_row_source_ids(oa_row) or [oa_row_id]:
+                oa_source_id_to_row_id.setdefault(source_id, oa_row_id)
+        oa_row_ids = set(oa_source_id_to_row_id)
         for invoice in self._list_invoices():
             invoice_id = str(getattr(invoice, "id", "") or "").strip()
             if not invoice_id:
@@ -60,6 +67,9 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairer:
                 continue
             source_oa_id = self._source_oa_id_for_attachment_link(source_link, oa_row_ids)
             if source_oa_id is None:
+                continue
+            source_oa_id = oa_source_id_to_row_id.get(source_oa_id, source_oa_id)
+            if source_oa_id not in oa_rows_by_id:
                 continue
             row = self._canonical_oa_attachment_invoice_row(
                 invoice,

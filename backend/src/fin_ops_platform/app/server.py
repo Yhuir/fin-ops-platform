@@ -13726,6 +13726,7 @@ class Application:
             attachment_parent_oa_id=oa_attachment_parent_oa_id,
             attachment_matches_oa=oa_attachment_matches_oa,
             attachment_row_id_matches_oa=oa_attachment_row_id_matches_oa,
+            oa_source_ids=oa_row_source_ids,
         )
 
     @staticmethod

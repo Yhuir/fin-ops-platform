@@ -12,10 +12,12 @@ class WorkbenchOaAttachmentContextRowIndex:
         attachment_parent_oa_id: Callable[[object], str],
         attachment_matches_oa: Callable[[dict[str, object], object], bool],
         attachment_row_id_matches_oa: Callable[[str, str], bool],
+        oa_source_ids: Callable[[dict[str, object]], list[str]],
     ) -> None:
         self._attachment_parent_oa_id = attachment_parent_oa_id
         self._attachment_matches_oa = attachment_matches_oa
         self._attachment_row_id_matches_oa = attachment_row_id_matches_oa
+        self._oa_source_ids = oa_source_ids
 
     def raw_payload_rows_by_id(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
         rows_by_id: dict[str, dict[str, object]] = {}
@@ -46,28 +48,35 @@ class WorkbenchOaAttachmentContextRowIndex:
         rows_by_id: dict[str, dict[str, object]],
     ) -> dict[str, list[str]]:
         attachment_row_ids_by_oa_id: dict[str, list[str]] = {}
-        oa_row_ids = {
-            row_id
+        oa_rows_by_id = {
+            row_id: row
             for row_id, row in rows_by_id.items()
             if str(row.get("type") or "").strip() == "oa"
         }
-        if not oa_row_ids:
+        if not oa_rows_by_id:
             return attachment_row_ids_by_oa_id
+        oa_source_ids_by_row_id = {
+            row_id: self._oa_source_ids(row) or [row_id]
+            for row_id, row in oa_rows_by_id.items()
+        }
         for row_id, row in rows_by_id.items():
             if not self.invoice_row_is_attachment_context(row):
                 continue
             derived_from_oa_id = str(row.get("derived_from_oa_id") or "").strip()
             matched_oa_id = None
-            for oa_row_id in sorted(oa_row_ids):
-                if (
-                    derived_from_oa_id == oa_row_id
-                    or self._attachment_parent_oa_id(derived_from_oa_id) == oa_row_id
-                    or self._attachment_matches_oa(row, oa_row_id)
-                ):
-                    matched_oa_id = oa_row_id
+            for oa_row_id in sorted(oa_rows_by_id):
+                for oa_source_id in oa_source_ids_by_row_id[oa_row_id]:
+                    if (
+                        derived_from_oa_id == oa_source_id
+                        or self._attachment_parent_oa_id(derived_from_oa_id) == oa_source_id
+                        or self._attachment_matches_oa(row, oa_source_id)
+                    ):
+                        matched_oa_id = oa_row_id
+                        break
+                if matched_oa_id is not None:
                     break
             if matched_oa_id is None:
-                matched_oa_id = self.oa_id_from_attachment_invoice_id(row_id, list(oa_row_ids))
+                matched_oa_id = self.oa_id_from_attachment_invoice_id(row_id, list(oa_rows_by_id))
             if matched_oa_id:
                 attachment_row_ids_by_oa_id.setdefault(matched_oa_id, []).append(row_id)
         return attachment_row_ids_by_oa_id

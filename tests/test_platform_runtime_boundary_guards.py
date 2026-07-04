@@ -4267,6 +4267,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "attachment_parent_oa_id",
             "attachment_matches_oa",
             "attachment_row_id_matches_oa",
+            "oa_source_ids",
             "source_kind",
             "oa_attachment_invoice",
             "derived_from_oa_id",
@@ -4278,6 +4279,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "attachment_parent_oa_id=oa_attachment_parent_oa_id",
             "attachment_matches_oa=oa_attachment_matches_oa",
             "attachment_row_id_matches_oa=oa_attachment_row_id_matches_oa",
+            "oa_source_ids=oa_row_source_ids",
         ):
             if marker not in factory_source:
                 violations.append(f"Application row index factory missing explicit dependency: {marker}")

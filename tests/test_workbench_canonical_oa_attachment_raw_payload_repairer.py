@@ -6,6 +6,9 @@ from types import SimpleNamespace
 from fin_ops_platform.services.workbench_canonical_oa_attachment_raw_payload_repairer import (
     WorkbenchCanonicalOaAttachmentRawPayloadRepairer,
 )
+from fin_ops_platform.services.workbench_oa_attachment_source_link_resolver import (
+    WorkbenchOaAttachmentSourceLinkResolver,
+)
 
 
 class WorkbenchCanonicalOaAttachmentRawPayloadRepairerTests(unittest.TestCase):
@@ -61,6 +64,54 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairerTests(unittest.TestCase):
 
         self.assertEqual(payload["paired"]["invoice"], [{"id": "invoice-1", "fresh": True}])
         self.assertEqual(calls, ["replace", "dedupe", "summary"])
+
+    def test_repair_matches_oa_attachment_invoice_by_oa_source_alias(self) -> None:
+        calls: list[str] = []
+        invoice_id = "oa-att-inv-oa-exp-69fab21659b12d7d42a50a45:item:0:fb2a9c9fab23-b515bf77d490fdfe"
+        invoice = SimpleNamespace(
+            id=invoice_id,
+            source_links=[
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "source_workbench_row_id": invoice_id,
+                    "derived_from_oa_id": "oa-exp-69fab21659b12d7d42a50a45:item:0:fb2a9c9fab23",
+                    "source_expense_item_id": "oa-exp-69fab21659b12d7d42a50a45:item:0:fb2a9c9fab23",
+                }
+            ],
+        )
+        payload: dict[str, object] = {
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [
+                    {
+                        "id": "oa-exp-2156",
+                        "type": "oa",
+                        "detail_fields": {"Mongo文档ID": "69fab21659b12d7d42a50a45"},
+                    }
+                ],
+                "bank": [],
+                "invoice": [],
+            },
+        }
+        repairer = WorkbenchCanonicalOaAttachmentRawPayloadRepairer(
+            list_invoices=lambda: [invoice],
+            source_link_for_invoice=WorkbenchOaAttachmentSourceLinkResolver.source_link_for_invoice,
+            source_oa_id_for_attachment_link=(
+                WorkbenchOaAttachmentSourceLinkResolver.source_oa_id_for_attachment_link
+            ),
+            canonical_oa_attachment_invoice_row=lambda invoice, **kwargs: {
+                "id": invoice.id,
+                "source_oa_id": kwargs["oa_row"]["id"],
+            },
+            replace_raw_workbench_row=lambda *args, **kwargs: False,
+            dedupe_raw_workbench_rows_by_id=lambda payload, **kwargs: calls.append("dedupe"),
+            refresh_raw_workbench_payload_summary=lambda payload: calls.append("summary"),
+        )
+
+        repairer.repair(payload)
+
+        self.assertEqual(payload["open"]["invoice"], [{"id": invoice_id, "source_oa_id": "oa-exp-2156"}])
+        self.assertEqual(calls, ["dedupe", "summary"])
 
     def test_repair_noops_when_payload_has_no_oa_rows(self) -> None:
         calls: list[str] = []
