@@ -32,6 +32,7 @@
 | Refresh availability timestamp | `job.outbox_events.available_at` | write-operation / read-model refresh SLO 以 `available_at -> processed_at` 衡量 enqueue-to-done；事务内 writer 必须用 `clock_timestamp()` 写实际入队可处理时间，不能让 transaction-level `now()` 把业务写事务耗时计入 worker drain |
 | Worker instance env | deploy/systemd | instance name 必须匹配 registry；PostgreSQL durable queue worker 的默认 idle poll 为 `0.05s`，`workbench` 月分片热 lane 使用 `0.01s`，`workbench-aggregate` 保持 `0.25s`；历史 `--poll-interval-seconds 2`、`0.25`、`0.1`、`0.05` 只允许由 deploy helper 精确迁移到当前 release env 示例声明值，不能重新作为 read model worker 默认值 |
 | Claim scope filter | worker registry / worker env | 只用于同一 event type 下拆分 worker lane；`workbench` worker 必须 `--exclude-claim-scope-key all`，`workbench-aggregate` worker 必须 `--claim-scope-key all`。scope contract 仍由 read model scope policy 负责，不能把业务 scope 规则塞进 queue 层 |
+| Workbench all aggregate scheduling | `WorkbenchReadModelRefreshService` | high/urgent 月分片 refresh 代表用户写后可见路径，发布后必须立即投递 `workbench:all` aggregate；普通/低优先级 refresh 保留聚合合并窗口，避免后台批量重建反复抢占 aggregate lane |
 | Claim hot path index | PostgreSQL migration | `job.outbox_events` active queue claim 必须保留 event-type-first 索引 `outbox_events_claim_event_type_priority_idx`，覆盖 `event_type/status/priority rank/available_at/created_at/id`；该索引只优化 worker lane claim I/O，不改变 durable queue 状态机、priority 语义或 freshness/readiness 事实源 |
 | Handler call | runtime worker | handler 只处理登记 event type |
 

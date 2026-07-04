@@ -1635,3 +1635,11 @@
 - 旧逻辑删除：Workbench relation UoW 主链路不再对每个 target 逐个调用 `enqueue_refresh(...)`；禁止为了恢复生产性能把 repository `enqueue_refreshes=True` 接回 UoW repository factory 形成双 fan-out。
 - 本地保护：RuntimeQueue/UoW 合同测试覆盖批量 CTE、writer wiring 和 UoW response shape。
 - 未闭合：生产仍需发布后复跑固定 scenario/ticket 的 write-operation E2E；本地合同测试不等同于真实 POST latency 通过。
+
+## 2026-07-05 - Workbench hot aggregate scheduling
+
+- 触发事实：关联台确认/撤回写操作走 high 优先级 UoW，月分片 refresh 完成后旧逻辑仍固定延迟 3 秒再投递 `workbench:all` aggregate；用户默认看到的是 `all` 关联台，这个固定等待会直接放大写后 ReadModel 可见耗时。
+- 决策：保持 Workbench active generation、`workbench` / `workbench-aggregate` split lane、dirty scope/outbox 事实源和 parent consistency gate 不变；仅把 high/urgent 月分片发布后的 aggregate delay 调整为 `0s`。普通/低优先级后台 refresh 仍保留 3 秒合并窗口，避免批量重建反复抢占 aggregate lane。
+- 前端配套：关联台 operation barrier 显式使用 150ms 轮询间隔，减少 worker 已完成后页面观察到 fresh 的尾延迟；确认关联仍只等待操作级 `workbench_relation` 后应用 projection，`workbench` 月分片/all aggregate 后台追赶。
+- 本地保护：`tests/test_workbench_sql_runtime.py` 锁定 high priority 月分片立即投递 aggregate，普通事件仍带 3 秒 delay。
+- 未闭合：需要发布后用固定 scenario/ticket 复跑真实 Workbench relation confirm/withdraw 或 write-operation E2E，证明生产写后 `workbench:all` enqueue-to-fresh p95/p99 达标。

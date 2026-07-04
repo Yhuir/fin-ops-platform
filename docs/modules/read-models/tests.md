@@ -503,6 +503,12 @@ git diff --check
 - 覆盖合同：事务内多个 read model refresh target 可批量写入 dirty scope/outbox，但必须保持 source_version、dedupe、priority、trace_id、action metadata 和 response source version 映射。
 - 覆盖类别：service-layer tests、read model/cache/background job tests、existing feature regression。API contract、frontend interaction 和 E2E 真实业务流未新增，因为外部响应/页面行为不变，生产 latency 仍需固定 write scenario 证明。
 
+## 2026-07-05 - Workbench hot aggregate scheduling tests
+
+- 更新测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available` 断言 high priority 月分片发布后 `workbench:all` aggregate delay 为 `0s`。
+- 更新测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_can_enqueue_aggregate_without_legacy_enqueue_method` 断言普通优先级仍保留 `3s` aggregate 合并窗口。
+- 覆盖类别：read model/cache/background job tests、service-layer worker scheduling、existing feature regression。API contract 未改；frontend interaction 只调整轮询间隔，复用 `WorkbenchSelection` 行为测试；E2E 真实业务流仍需生产固定 write scenario 验证。
+
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 
 ## Nightly CI 覆盖

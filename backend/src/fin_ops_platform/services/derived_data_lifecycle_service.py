@@ -343,52 +343,52 @@ class DerivedDataLifecycleService:
         "invoice_import_confirmed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "bank_import_confirmed": (
             "workbench_matching",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "etc_import_confirmed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
             "historical_etc_reconcile",
         ),
         "etc_oa_submitted": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "etc_oa_revoked": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "oa_rebuilt": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
             "historical_etc_reconcile",
         ),
         "oa_attachment_invoice_cache_updated": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "bank_transaction_category_changed": (
             "workbench_matching",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "pending_invoice_manual_invoice_confirmed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "pending_invoice_attach_existing_invoice_confirmed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "pending_invoice_rules_changed": (
             "workbench_matching",
@@ -396,16 +396,16 @@ class DerivedDataLifecycleService:
             "cost_statistics.read_model.refresh",
         ),
         "no_oa_bank_batch_changed": (
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "bank_flow_rule_batch_changed": (
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "batch_accounting_relation_changed": (
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "turnover_relation_changed": (
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
         ),
         "tax_certified_import_confirmed": (
             "tax_offset_cache_warmup",
@@ -413,7 +413,7 @@ class DerivedDataLifecycleService:
         "etc_business_batch_changed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
             "historical_etc_reconcile",
         ),
         "pair_relation_changed": (
@@ -425,7 +425,7 @@ class DerivedDataLifecycleService:
         "settings_reset_completed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics_cache_warmup",
+            "cost_statistics.read_model.refresh",
             "historical_etc_reconcile",
         ),
         "startup_stale_scan": (

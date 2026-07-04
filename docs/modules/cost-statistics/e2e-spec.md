@@ -18,7 +18,7 @@
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
 | `COST-E2E-001` | fresh time/project/bank/expense baseline | P0 | 页面加载 fresh explorer，按时间、项目、银行和费用类型展示一致金额；首屏不从前端伪造金额或项目范围。 |
-| `COST-E2E-002` | project scope active/all | P0 | 默认 `active` 排除已完成项目；切换到 `all` 必须请求 `project_scope=all` 并展示已完成项目。 |
+| `COST-E2E-002` | project scope active page / all API contract | P0 | 页面默认 `active` 并排除已完成项目，且不暴露项目范围切换 UI；`project_scope=all` 保留为后端 API/read model 合同。 |
 | `COST-E2E-003` | project/expense/transaction drilldown | P0 | 用户可从项目进入费用类型，再进入对应流水，详情 modal 展示后端返回的流水和成本字段。 |
 | `COST-E2E-004` | export preview / row-limit feedback | P0 | 导出中心使用当前 view/project scope/filter 请求 preview；后端行数上限错误必须在浏览器中展示结构化消息。 |
 | `COST-E2E-005` | Workbench cost-bearing relation fan-out | P0 | 关联台 open candidate 不进入成本项目、金额或明细；确认 OA+bank+invoice 成本关系后，成本页重新读取并展示对应项目、金额、流水和详情。 |

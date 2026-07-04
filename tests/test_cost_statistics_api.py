@@ -1,8 +1,6 @@
+from dataclasses import replace
 from io import BytesIO
 import json
-from pathlib import Path
-import tempfile
-from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import quote
 import unittest
@@ -10,9 +8,8 @@ import unittest
 from openpyxl import load_workbook
 
 from tests.app_test_support import build_local_state_application as build_application
-from fin_ops_platform.services.background_job_service import BackgroundJobService
+from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 
@@ -107,7 +104,10 @@ class _MemoryCostStatisticsReadModelService:
         payload: dict[str, object],
         generated_at: str | None = None,
         source_scope_keys: list[str] | None = None,
+        source_versions: dict[str, object] | None = None,
+        schema_version: str = COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
         cache_status: str = "ready",
+        refresh_status: str = "fresh",
     ) -> dict[str, object]:
         scope_key = self.scope_key(month, project_scope)
         read_model = {
@@ -117,7 +117,10 @@ class _MemoryCostStatisticsReadModelService:
             "payload": payload,
             "generated_at": generated_at,
             "source_scope_keys": list(source_scope_keys or []),
+            "source_versions": dict(source_versions or {}),
+            "schema_version": schema_version,
             "cache_status": cache_status,
+            "refresh_status": refresh_status,
         }
         self.read_models[scope_key] = read_model
         return read_model
@@ -158,6 +161,54 @@ class _MemoryCostStatisticsReadModelService:
         ]
 
 
+class _MemoryCostStatisticsSqlRepository:
+    def __init__(
+        self,
+        read_model_service: _MemoryCostStatisticsReadModelService,
+        source_versions_provider,
+    ) -> None:
+        self._read_model_service = read_model_service
+        self._source_versions_provider = source_versions_provider
+
+    def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object] | None:
+        read_models = getattr(self._read_model_service, "read_models", None)
+        read_model = read_models.get(scope_key) if isinstance(read_models, dict) else None
+        if not isinstance(read_model, dict):
+            get_by_scope_key = getattr(self._read_model_service, "get_read_model_by_scope_key", None)
+            read_model = get_by_scope_key(scope_key) if callable(get_by_scope_key) else None
+        if not isinstance(read_model, dict):
+            return None
+        payload = read_model.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        source_versions = read_model.get("source_versions")
+        if not isinstance(source_versions, dict) or not source_versions:
+            source_versions = self._source_versions_provider(scope_key)
+        return {
+            "scope_key": scope_key,
+            "project_scope": read_model.get("project_scope"),
+            "scope_month": read_model.get("month"),
+            "payload": payload,
+            "raw_payload": payload,
+            "generated_at": read_model.get("generated_at") or "2026-07-05T00:00:00",
+            "entry_count": len(payload.get("time_rows") or []),
+            "source_versions": dict(source_versions or {}),
+            "schema_version": read_model.get("schema_version") or COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            "refresh_status": read_model.get("refresh_status") or "fresh",
+        }
+
+
+class _CostStatisticsQueueRecorder:
+    def __init__(self) -> None:
+        self.refreshes: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_kwargs: object) -> None:
+        self.refreshes.append((scope_type, scope_key, reason))
+
+    def read_model_refresh_is_active(self, **_kwargs: object) -> bool:
+        return False
+
+
 class CostStatisticsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.app = build_application()
@@ -175,11 +226,35 @@ class CostStatisticsApiTests(unittest.TestCase):
             row_detail_loader=self.app._get_api_workbench_row_detail_payload,
             project_active_checker=self.app._app_settings_service.is_project_active,
         )
+        self.app._cost_statistics_sql_read_repository = _MemoryCostStatisticsSqlRepository(
+            self.app._cost_statistics_read_model_service,
+            self.app._cost_statistics_source_versions,
+        )
 
-    def _prime_cost_statistics_read_model(self, month: str = "2026-03", project_scope: str = "active") -> None:
-        query = f"month={quote(month, safe='')}&project_scope={quote(project_scope, safe='')}"
-        response = self.app.handle_request("GET", f"/api/cost-statistics/explorer?{query}")
-        self.assertEqual(response.status_code, 200)
+    def _install_queue_recorder(self) -> _CostStatisticsQueueRecorder:
+        queue = _CostStatisticsQueueRecorder()
+        self.app._runtime_repositories = replace(self.app._runtime_repositories, queue_repository=queue)
+        return queue
+
+    def _prime_cost_statistics_read_model(self, month: str = "2026-03", project_scope: str | None = None) -> None:
+        project_scopes = [project_scope] if project_scope else ["active", "all"]
+        months = [month]
+        if month != "all":
+            months.append("all")
+        for scope in project_scopes:
+            for target_month in months:
+                payload = self.app._cost_statistics_service.get_explorer(target_month, project_scope=scope)
+                scope_key = self.app._cost_statistics_read_model_service.scope_key(target_month, scope)
+                self.app._cost_statistics_read_model_service.upsert_read_model(
+                    target_month,
+                    scope,
+                    payload,
+                    generated_at="2026-07-05T00:00:00",
+                    source_scope_keys=[target_month],
+                    source_versions=self.app._cost_statistics_source_versions(scope_key),
+                    schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                    refresh_status="fresh",
+                )
 
     def test_cost_statistics_explorer_cache_hit_does_not_rebuild(self) -> None:
         cached_payload = {
@@ -229,7 +304,6 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         routes = CostStatisticsApiRoutes(
             query_service=QueryService(),
-            cost_statistics_service=self.app._cost_statistics_service,
             json_response=lambda status, payload: Response(status_code=int(status), body=json.dumps(payload)),
             file_response=lambda _filename, _content: Response(status_code=200, body=b""),
         )
@@ -280,13 +354,8 @@ class CostStatisticsApiTests(unittest.TestCase):
                     message="成本统计数据正在刷新，请稍后重试。",
                 )
 
-        class LegacyService:
-            def __getattr__(self, name: str) -> object:
-                raise AssertionError(f"legacy cost statistics service was called: {name}")
-
         routes = CostStatisticsApiRoutes(
             query_service=QueryService(),
-            cost_statistics_service=LegacyService(),
             json_response=lambda status, payload: Response(status_code=int(status), body=json.dumps(payload)),
             file_response=lambda filename, content: Response(status_code=200, body=content, headers={"X-Filename": filename}),
         )
@@ -328,69 +397,91 @@ class CostStatisticsApiTests(unittest.TestCase):
             ],
         )
 
-    def test_cost_statistics_explorer_miss_writes_cache_and_logs_hit_metrics(self) -> None:
-        calls: list[tuple[str, str]] = []
+    def test_cost_statistics_explorer_reads_sql_read_model_and_logs_hit_metrics(self) -> None:
+        cached_payload = {
+            "month": "2026-03",
+            "summary": {"row_count": 2, "transaction_count": 2, "total_amount": "120.00"},
+            "time_rows": [{"transaction_id": "txn-1"}, {"transaction_id": "txn-2"}],
+            "project_rows": [],
+            "expense_type_rows": [],
+        }
+        scope_key = "active:2026-03"
+        self.app._cost_statistics_read_model_service.upsert_read_model(
+            "2026-03",
+            "active",
+            cached_payload,
+            generated_at="2026-07-05T00:00:00",
+            source_versions=self.app._cost_statistics_source_versions(scope_key),
+        )
 
-        def build_explorer(month: str, *, project_scope: str) -> dict[str, object]:
-            calls.append((month, project_scope))
-            return {
-                "month": month,
-                "summary": {"row_count": 2, "transaction_count": 2, "total_amount": "120.00"},
-                "time_rows": [{"transaction_id": "txn-1"}, {"transaction_id": "txn-2"}],
-                "project_rows": [],
-                "expense_type_rows": [],
-            }
-
-        self.app._cost_statistics_service = SimpleNamespace(get_explorer=build_explorer)
-
-        with patch("builtins.print") as print_mock:
+        with (
+            patch.object(
+                self.app._cost_statistics_service,
+                "get_explorer",
+                side_effect=AssertionError("API must not sync rebuild explorer"),
+            ),
+            patch("builtins.print") as print_mock,
+        ):
             first_response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
             second_response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(calls, [("2026-03", "active")])
-        self.assertEqual(
-            json.loads(second_response.body)["time_rows"],
-            [{"transaction_id": "txn-1"}, {"transaction_id": "txn-2"}],
-        )
+        self.assertEqual(json.loads(second_response.body)["time_rows"], cached_payload["time_rows"])
         metric_payloads = [
             json.loads(call.args[0])
             for call in print_mock.call_args_list
             if call.args and json.loads(call.args[0]).get("kind") == "cost_statistics_explorer_metric"
         ]
-        self.assertEqual([payload["cache_hit"] for payload in metric_payloads], [False, True])
+        self.assertEqual([payload["cache_hit"] for payload in metric_payloads], [False, False])
         self.assertEqual([payload["entry_count"] for payload in metric_payloads], [2, 2])
 
-    def test_cost_statistics_all_month_cache_miss_returns_empty_payload_and_schedules_warmup(self) -> None:
-        self.app._cost_statistics_service = SimpleNamespace(
-            get_explorer=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("all should warm asynchronously")),
-        )
-        job = SimpleNamespace(job_id="warmup-job-1", owner_user_id="system")
-
+    def test_cost_statistics_explorer_miss_returns_refreshing_without_warmup_job(self) -> None:
+        queue = self._install_queue_recorder()
         with (
             patch.object(
-                self.app._background_job_service,
-                "create_or_get_idempotent_job_with_created",
-                return_value=(job, True),
-            ) as create_job,
+                self.app._cost_statistics_service,
+                "get_explorer",
+                side_effect=AssertionError("API miss must not sync rebuild explorer"),
+            ),
+            patch.object(self.app._background_job_service, "create_or_get_idempotent_job_with_created") as create_job,
+            patch.object(self.app._background_job_service, "run_job") as run_job,
+        ):
+            response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["refresh_reason"], "api_miss")
+        self.assertEqual(payload["time_rows"], [])
+        self.assertEqual(queue.refreshes, [("cost_statistics", "active:2026-03", "api_miss")])
+        create_job.assert_not_called()
+        run_job.assert_not_called()
+
+    def test_cost_statistics_all_month_miss_returns_refreshing_without_warmup_job(self) -> None:
+        queue = self._install_queue_recorder()
+        with (
+            patch.object(
+                self.app._cost_statistics_service,
+                "get_explorer",
+                side_effect=AssertionError("all miss must not sync rebuild explorer"),
+            ),
+            patch.object(self.app._background_job_service, "create_or_get_idempotent_job_with_created") as create_job,
             patch.object(self.app._background_job_service, "run_job") as run_job,
         ):
             response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=all&project_scope=active")
 
-        self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 202)
         self.assertEqual(payload["month"], "all")
-        self.assertEqual(payload["summary"], {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"})
-        self.assertEqual(payload["time_rows"], [])
-        self.assertEqual(payload["project_rows"], [])
-        self.assertEqual(payload["expense_type_rows"], [])
-        create_job.assert_called_once()
-        self.assertEqual(create_job.call_args.kwargs["job_type"], "cost_statistics_cache_warmup")
-        self.assertIn("all", create_job.call_args.kwargs["idempotency_key"])
-        run_job.assert_called_once()
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["refresh_reason"], "api_miss")
+        self.assertEqual(queue.refreshes, [("cost_statistics", "active:all", "api_miss")])
+        create_job.assert_not_called()
+        run_job.assert_not_called()
 
-    def test_workbench_scope_invalidation_deletes_cost_statistics_month_and_all_models_and_schedules_warmup(self) -> None:
+    def test_workbench_scope_invalidation_deletes_cost_statistics_models_and_enqueues_refresh(self) -> None:
+        queue = self._install_queue_recorder()
         service = self.app._cost_statistics_read_model_service
         for month in ("2026-03", "all"):
             for project_scope in ("active", "all"):
@@ -406,13 +497,8 @@ class CostStatisticsApiTests(unittest.TestCase):
                     },
                 )
 
-        job = SimpleNamespace(job_id="warmup-job-invalidated-month", owner_user_id="system")
         with (
-            patch.object(
-                self.app._background_job_service,
-                "create_or_get_idempotent_job_with_created",
-                return_value=(job, True),
-            ) as create_job,
+            patch.object(self.app._background_job_service, "create_or_get_idempotent_job_with_created") as create_job,
             patch.object(self.app._background_job_service, "run_job") as run_job,
         ):
             deleted_workbench_scopes = self.app._invalidate_workbench_read_model_scopes(["2026-03"])
@@ -422,10 +508,16 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertIsNone(service.get_read_model("2026-03", "all"))
         self.assertIsNone(service.get_read_model("all", "active"))
         self.assertIsNone(service.get_read_model("all", "all"))
-        create_job.assert_called_once()
-        self.assertEqual(create_job.call_args.kwargs["job_type"], "cost_statistics_cache_warmup")
-        self.assertEqual(create_job.call_args.kwargs["affected_months"], ["2026-03"])
-        run_job.assert_called_once()
+        cost_refreshes = [refresh for refresh in queue.refreshes if refresh[0] == "cost_statistics"]
+        self.assertEqual(
+            cost_refreshes,
+            [
+                ("cost_statistics", "active:2026-03", "workbench_scope_invalidated"),
+                ("cost_statistics", "all:2026-03", "workbench_scope_invalidated"),
+            ],
+        )
+        create_job.assert_not_called()
+        run_job.assert_not_called()
 
         for project_scope in ("active", "all"):
             service.upsert_read_model(
@@ -439,223 +531,23 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "expense_type_rows": [],
                 },
             )
+        queue.refreshes.clear()
 
-        job = SimpleNamespace(job_id="warmup-job-invalidated-all", owner_user_id="system")
-        with (
-            patch.object(
-                self.app._background_job_service,
-                "create_or_get_idempotent_job_with_created",
-                return_value=(job, True),
-            ) as create_job,
-            patch.object(self.app._background_job_service, "run_job") as run_job,
-        ):
-            self.app._invalidate_workbench_read_model_scopes(["all"])
+        self.app._invalidate_workbench_read_model_scopes(["all"])
 
         self.assertIsNone(service.get_read_model("all", "active"))
         self.assertIsNone(service.get_read_model("all", "all"))
-        create_job.assert_called_once()
-        self.assertEqual(create_job.call_args.kwargs["job_type"], "cost_statistics_cache_warmup")
-        self.assertEqual(create_job.call_args.kwargs["affected_months"], ["all"])
-        run_job.assert_called_once()
-
-    def test_cost_statistics_month_warmup_does_not_append_all_scope(self) -> None:
-        job = SimpleNamespace(job_id="warmup-job-2026-03", owner_user_id="system")
-
-        with (
-            patch.object(
-                self.app._background_job_service,
-                "create_or_get_idempotent_job_with_created",
-                return_value=(job, True),
-            ) as create_job,
-            patch.object(self.app._background_job_service, "run_job") as run_job,
-        ):
-            scheduled_job = self.app._schedule_cost_statistics_cache_warmup(
-                ["2026-03"],
-                reason="cost_statistics_scope_invalidated",
-            )
-
-        self.assertIs(scheduled_job, job)
-        self.assertEqual(create_job.call_args.kwargs["affected_months"], ["2026-03"])
-        self.assertEqual(create_job.call_args.kwargs["source"]["months"], ["2026-03"])
-        self.assertNotIn("all", create_job.call_args.kwargs["affected_months"])
-        run_job.assert_called_once()
-
-    def test_cost_statistics_warmup_result_summary_tracks_checkpoint_scope_keys(self) -> None:
-        def build_explorer(month: str, *, project_scope: str) -> dict[str, object]:
-            if project_scope == "all":
-                raise RuntimeError("boom")
-            return {
-                "month": month,
-                "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "12.00"},
-                "time_rows": [],
-                "project_rows": [],
-                "expense_type_rows": [],
-            }
-
-        self.app._cost_statistics_service = SimpleNamespace(get_explorer=build_explorer)
-        job = self.app._background_job_service.create_job(
-            job_type="cost_statistics_cache_warmup",
-            label="预热成本统计缓存",
-            owner_user_id="system",
-            visibility="system",
-            total=2,
-        )
-        running_job = self.app._background_job_service.start_job(job.job_id)
-
-        result_summary = self.app._run_cost_statistics_cache_warmup_job(
-            running_job,
-            months=["2026-03"],
-            project_scopes=["active", "all"],
-        )
-        completed_job = self.app._background_job_service.get_job(job.job_id, "system")
-
-        self.assertEqual(completed_job.status, "partial_success")
-        self.assertEqual(result_summary["target_scope_keys"], ["active:2026-03", "all:2026-03"])
-        self.assertEqual(result_summary["warmed_scope_keys"], ["active:2026-03"])
-        self.assertEqual(result_summary["failed_scope_keys"], ["all:2026-03"])
-        self.assertEqual(result_summary["remaining_scope_keys"], [])
-        self.assertEqual(result_summary["warmed"], 1)
-        self.assertEqual(result_summary["failed"], 1)
-        self.assertEqual(result_summary["total"], 2)
-        self.assertEqual(completed_job.result_summary, result_summary)
-
-    def test_retry_partial_success_cost_statistics_warmup_only_requeues_failed_scopes(self) -> None:
-        job = self.app._background_job_service.create_job(
-            job_type="cost_statistics_cache_warmup",
-            label="预热成本统计缓存",
-            owner_user_id="system",
-            visibility="system",
-            affected_scopes=["active:2026-03", "all:2026-03"],
-            affected_months=["2026-03"],
-            result_summary={
-                "target_scope_keys": ["active:2026-03", "all:2026-03"],
-                "warmed_scope_keys": ["active:2026-03"],
-                "failed_scope_keys": ["all:2026-03"],
-                "remaining_scope_keys": [],
-                "warmed": 1,
-                "failed": 1,
-                "total": 2,
-            },
-            source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
-        )
-        self.app._background_job_service.start_job(job.job_id)
-        self.app._background_job_service.succeed_job(
-            job.job_id,
-            "成本统计缓存预热部分完成。",
-            result_summary=job.result_summary,
-            status="partial_success",
+        cost_refreshes = [refresh for refresh in queue.refreshes if refresh[0] == "cost_statistics"]
+        self.assertEqual(
+            cost_refreshes,
+            [
+                ("cost_statistics", "active:all", "workbench_scope_invalidated"),
+                ("cost_statistics", "all:all", "workbench_scope_invalidated"),
+            ],
         )
 
-        with patch.object(self.app._background_job_service, "run_job") as run_job:
-            response = self.app.handle_request("POST", f"/api/background-jobs/{job.job_id}/retry", body="{}")
-
-        payload = json.loads(response.body)
-        old_job = self.app._background_job_service.get_job(job.job_id, "system")
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(payload["job"]["affected_scopes"], ["all:2026-03"])
-        self.assertEqual(payload["job"]["result_summary"]["target_scope_keys"], ["all:2026-03"])
-        self.assertNotIn(job.job_id, payload["job"]["idempotency_key"])
-        self.assertEqual(old_job.status, "superseded")
-        self.assertEqual(old_job.superseded_by_job_id, payload["job"]["job_id"])
-        self.assertEqual(self.app._background_job_service.list_attention_jobs("system"), [])
-        run_job.assert_called_once()
-
-    def test_retry_interrupted_cost_statistics_warmup_requeues_remaining_and_failed_scopes(self) -> None:
-        job = self.app._background_job_service.create_job(
-            job_type="cost_statistics_cache_warmup",
-            label="预热成本统计缓存",
-            owner_user_id="system",
-            visibility="system",
-            affected_scopes=["active:2026-03", "all:2026-03"],
-            affected_months=["2026-03"],
-            result_summary={
-                "target_scope_keys": ["active:2026-03", "all:2026-03"],
-                "warmed_scope_keys": ["active:2026-03"],
-                "failed_scope_keys": ["all:2026-03"],
-                "remaining_scope_keys": ["active:all"],
-                "warmed": 1,
-                "failed": 1,
-                "total": 3,
-            },
-            source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
-        )
-        self.app._background_job_service.fail_job(
-            job.job_id,
-            "服务重启，任务已中断，请重新执行。",
-            "interrupted_by_restart",
-        )
-
-        with patch.object(self.app._background_job_service, "run_job") as run_job:
-            response = self.app.handle_request("POST", f"/api/background-jobs/{job.job_id}/retry", body="{}")
-
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(payload["job"]["affected_scopes"], ["active:all", "all:2026-03"])
-        self.assertEqual(payload["job"]["affected_months"], ["all", "2026-03"])
-        run_job.assert_called_once()
-
-    def test_startup_recovery_requeues_interrupted_cost_statistics_warmup_and_supersedes_old_job(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            store = ApplicationStateStore(Path(temp_dir))
-            service = BackgroundJobService(store)
-            interrupted_job = service.create_job(
-                job_type="cost_statistics_cache_warmup",
-                label="预热成本统计缓存",
-                owner_user_id="system",
-                visibility="system",
-                affected_scopes=["active:2026-03", "all:2026-03"],
-                affected_months=["2026-03"],
-                result_summary={
-                    "target_scope_keys": ["active:2026-03", "all:2026-03"],
-                    "warmed_scope_keys": ["active:2026-03"],
-                    "failed_scope_keys": [],
-                    "remaining_scope_keys": ["all:2026-03"],
-                    "warmed": 1,
-                    "failed": 0,
-                    "total": 2,
-                },
-                source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
-            )
-            service.fail_job(
-                interrupted_job.job_id,
-                "服务重启，任务已中断，请重新执行。",
-                "interrupted_by_restart",
-            )
-
-            with patch.object(BackgroundJobService, "run_job") as run_job:
-                recovered_app = build_application(data_dir=Path(temp_dir))
-
-            jobs = recovered_app._background_job_service.list_active_jobs("system")
-            old_job = recovered_app._background_job_service.get_job(interrupted_job.job_id, "system")
-            attention_jobs = recovered_app._background_job_service.list_attention_jobs("system")
-
-        self.assertEqual(len(jobs), 1)
-        self.assertEqual(jobs[0].affected_scopes, ["all:2026-03"])
-        self.assertEqual(old_job.status, "superseded")
-        self.assertEqual(old_job.superseded_by_job_id, jobs[0].job_id)
-        self.assertEqual(attention_jobs, [])
-        run_job.assert_called_once()
-
-    def test_cost_statistics_warmup_does_not_create_duplicate_running_job_for_same_target_scopes(self) -> None:
-        with patch.object(self.app._background_job_service, "run_job") as run_job:
-            first_job = self.app._schedule_cost_statistics_cache_warmup(
-                ["2026-03"],
-                reason="cost_statistics_scope_invalidated",
-            )
-            second_job = self.app._schedule_cost_statistics_cache_warmup(
-                ["2026-03"],
-                reason="another_reason_for_same_scope",
-            )
-
-        self.assertIsNotNone(first_job)
-        self.assertIsNotNone(second_job)
-        self.assertEqual(second_job.job_id, first_job.job_id)
-        self.assertEqual(len(self.app._background_job_service.list_active_jobs("system")), 1)
-        run_job.assert_called_once()
-
-    def test_retry_failed_cost_statistics_warmup_requeues_months_and_closes_old_job(self) -> None:
+    def test_legacy_cost_statistics_warmup_job_retry_closes_old_job_and_enqueues_refresh(self) -> None:
+        queue = self._install_queue_recorder()
         job = self.app._background_job_service.create_job(
             job_type="cost_statistics_cache_warmup",
             label="预热成本统计缓存",
@@ -670,18 +562,22 @@ class CostStatisticsApiTests(unittest.TestCase):
             "interrupted_by_restart",
         )
 
-        with patch.object(self.app._background_job_service, "run_job") as run_job:
-            response = self.app.handle_request("POST", f"/api/background-jobs/{job.job_id}/retry", body="{}")
+        response = self.app.handle_request("POST", f"/api/background-jobs/{job.job_id}/retry", body="{}")
 
         payload = json.loads(response.body)
         old_job = self.app._background_job_service.get_job(job.job_id, "system")
 
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(payload["retry_mode"], "cost_statistics_cache_warmup")
-        self.assertEqual(payload["job"]["type"], "cost_statistics_cache_warmup")
-        self.assertEqual(payload["job"]["affected_months"], ["2026-03"])
-        self.assertEqual(old_job.status, "superseded")
-        run_job.assert_called_once()
+        self.assertEqual(payload["retry_mode"], "cost_statistics.read_model.refresh")
+        self.assertIsNone(payload["job"])
+        self.assertEqual(old_job.status, "acknowledged")
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("cost_statistics", "active:2026-03", "retry:cost_statistics_scope_invalidated"),
+                ("cost_statistics", "all:2026-03", "retry:cost_statistics_scope_invalidated"),
+            ],
+        )
 
     def test_import_preview_does_not_invalidate_cost_statistics_cache(self) -> None:
         with (
@@ -844,6 +740,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             row_detail_loader=self.app._get_api_workbench_row_detail_payload,
             project_active_checker=self.app._app_settings_service.is_project_active,
         )
+        self._prime_cost_statistics_read_model("2026-03")
 
         default_payload = json.loads(
             self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03").body
@@ -994,7 +891,6 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         routes = CostStatisticsApiRoutes(
             query_service=ExportLimitQueryService(),
-            cost_statistics_service=object(),
             json_response=lambda status, payload: Response(status_code=int(status), body=json.dumps(payload)),
             file_response=lambda _filename, _content: Response(status_code=200, body=b""),
         )
@@ -1263,6 +1159,10 @@ class CostStatisticsApiTests(unittest.TestCase):
             row_detail_loader=legacy_workbench_routes.get_row_detail,
             project_active_checker=app._app_settings_service.is_project_active,
         )
+        app._cost_statistics_sql_read_repository = _MemoryCostStatisticsSqlRepository(
+            app._cost_statistics_read_model_service,
+            app._cost_statistics_source_versions,
+        )
 
         confirm_result = legacy_workbench_routes.confirm_link(
             {
@@ -1273,10 +1173,12 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(confirm_result["action"], "confirm_link")
 
         app._cost_statistics_read_model_service.upsert_read_model(
-            "2026-03",
-            "active",
-            app._cost_statistics_service.get_explorer("2026-03", project_scope="active"),
-        )
+                "2026-03",
+                "active",
+                app._cost_statistics_service.get_explorer("2026-03", project_scope="active"),
+                generated_at="2026-07-05T00:00:00",
+                source_versions=app._cost_statistics_source_versions("active:2026-03"),
+            )
         payload = json.loads(app.handle_request("GET", "/api/cost-statistics?month=2026-03").body)
         self.assertEqual(payload["summary"]["row_count"], 1)
         self.assertEqual(payload["rows"][0]["project_name"], "云南溯源科技")

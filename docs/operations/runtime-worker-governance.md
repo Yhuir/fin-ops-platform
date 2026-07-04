@@ -30,7 +30,7 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   `self-update` 时仍需要一次 root bootstrap。`/usr/local/sbin/finops-ensure-runtime-workers`
   仍是预安装的 root helper；release deploy 只校验该 helper 的合同并通过 `finops-deploy-control activate`
   间接调用它，不在发布链路中覆盖该 runtime worker helper。
-- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；`workbench` 月分片热 lane 为 `0.01s`，`workbench-aggregate` 仍为 `0.25s`，避免 all-scope 聚合挤占月份 shard pickup。新增 read model / 写后 fan-out worker 不能把
+- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；`workbench` 月分片热 lane 为 `0.01s`，`workbench-aggregate` 仍为 `0.25s`，避免 all-scope 聚合挤占月份 shard pickup。用户写操作产生的 high/urgent 月分片发布后可立即投递 `workbench:all` 聚合；普通/低优先级月分片仍保留聚合合并窗口。新增 read model / 写后 fan-out worker 不能把
   `--poll-interval-seconds 2`、`0.25`、`0.1` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，
   可保留显式 5s poll。发布 helper 会把已有 env 中精确命中的历史 `--poll-interval-seconds 2|0.25|0.1|0.05`
   迁移到当前 release env 示例声明的 poll 值，不会重写 RabbitMQ 灰度、自定义事件或吞吐参数。

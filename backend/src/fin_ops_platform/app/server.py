@@ -1357,7 +1357,6 @@ class Application:
             self._import_service,
             grouped_workbench_loader=self._build_api_workbench_payload,
             row_detail_loader=self._get_api_workbench_row_detail_payload,
-            raw_workbench_loader=self._build_raw_workbench_payload,
             project_active_checker=self._app_settings_service.is_project_active,
             relation_facade=self._workbench_relation_read_facade(),
         )
@@ -1583,7 +1582,6 @@ class Application:
 
     def _configure_cost_statistics_application_services(self) -> None:
         runtime_repositories = getattr(self, "_runtime_repositories", None)
-        cost_statistics_service = getattr(self, "_cost_statistics_service", None)
         self._cost_statistics_runtime_service = CostStatisticsRuntimeService(
             read_model_service=getattr(self, "_cost_statistics_read_model_service", None),
             background_job_service=getattr(self, "_background_job_service", None),
@@ -1591,21 +1589,14 @@ class Application:
             redis_helper=getattr(runtime_repositories, "redis_helper", None),
             source_versions_provider=self._cost_statistics_source_versions,
             persist_read_models=self._persist_cost_statistics_read_models_best_effort,
-            explorer_loader=getattr(cost_statistics_service, "get_explorer", None),
-            entry_count=CostStatisticsQueryService.explorer_entry_count,
         )
         self._cost_statistics_query_service = CostStatisticsQueryService(
-            cost_statistics_service=cost_statistics_service,
             runtime_service=self._cost_statistics_runtime_service,
-            read_model_service=getattr(self, "_cost_statistics_read_model_service", None),
             redis_helper=getattr(runtime_repositories, "redis_helper", None),
             sql_read_repository=getattr(self, "_cost_statistics_sql_read_repository", None),
-            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
-            persist_read_models=self._persist_cost_statistics_read_models_best_effort,
         )
         self._cost_statistics_api_routes = CostStatisticsApiRoutes(
             query_service=self._cost_statistics_query_service,
-            cost_statistics_service=cost_statistics_service,
             json_response=self._json_response,
             file_response=self._cost_statistics_file_response,
             metric_emitter=self._emit_cost_statistics_explorer_metric,
@@ -1617,7 +1608,6 @@ class Application:
 
     def _cost_statistics_current_dependency_key(self) -> tuple[int | None, ...]:
         return (
-            id(getattr(self, "_cost_statistics_service", None)) if getattr(self, "_cost_statistics_service", None) is not None else None,
             id(getattr(self, "_cost_statistics_read_model_service", None)) if getattr(self, "_cost_statistics_read_model_service", None) is not None else None,
             id(getattr(self, "_cost_statistics_sql_read_repository", None)) if getattr(self, "_cost_statistics_sql_read_repository", None) is not None else None,
             id(getattr(self, "_background_job_service", None)) if getattr(self, "_background_job_service", None) is not None else None,
@@ -5027,19 +5017,19 @@ class Application:
                 },
             )
         source = job.source if isinstance(job.source, dict) else {}
-        reason = str(source.get("reason") or "cost_statistics_cache_warmup_retry").strip()
-        retry_job = self._schedule_cost_statistics_cache_warmup(
+        reason = str(source.get("reason") or "cost_statistics_read_model_refresh_retry").strip()
+        self._schedule_cost_statistics_cache_warmup(
             [],
             reason=f"retry:{reason}",
             target_scope_keys=target_scope_keys,
         )
-        self._close_replaced_cost_statistics_warmup_job(job, owner_user_id, retry_job)
+        self._close_replaced_cost_statistics_warmup_job(job, owner_user_id, None)
         self._persist_state()
         return self._json_response(
             HTTPStatus.ACCEPTED,
             {
-                "job": self._serialize_background_job(retry_job) if retry_job is not None else None,
-                "retry_mode": "cost_statistics_cache_warmup",
+                "job": None,
+                "retry_mode": "cost_statistics.read_model.refresh",
             },
         )
 
@@ -11997,7 +11987,7 @@ class Application:
         self._runtime_redis_delete_best_effort(self._workbench_groups_redis_version_key(normalized_scope_key))
 
     def rebuild_cost_statistics_read_model_scope(self, scope_key: str) -> dict[str, object]:
-        return self._cost_statistics_runtime().rebuild_read_model_scope(scope_key)
+        raise RuntimeError("cost statistics read model refresh must use CostStatisticsReadModelRefreshService.")
 
     def rebuild_tax_offset_read_model_scope(self, scope_key: str) -> dict[str, object]:
         self._ensure_tax_offset_application_services()

@@ -15,7 +15,6 @@ class CostStatisticsApiRoutes:
         self,
         *,
         query_service: Any,
-        cost_statistics_service: Any,
         json_response: Callable[[HTTPStatus, dict[str, Any]], Any],
         file_response: Callable[[str, bytes], Any],
         metric_emitter: Callable[..., None] | None = None,

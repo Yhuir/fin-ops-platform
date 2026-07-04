@@ -193,8 +193,7 @@ test.describe("cost statistics browser flow", () => {
       await page.goto("/cost-statistics");
       await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
       await expect(page.getByRole("status").filter({ hasText: scenario.message })).toBeVisible();
-      await expect(page.getByText("待刷新")).toHaveCount(2);
-      await expect(page.getByText("--")).toBeVisible();
+      await expect(page.locator(".cost-page .stat-card")).toHaveCount(0);
       await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
       await expect(page.getByText("云南溯源科技")).toHaveCount(0);
       await expect(page.getByRole("grid", { name: "按时间统计表" })).toHaveCount(0);
@@ -286,6 +285,73 @@ test.describe("cost statistics browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test("keeps redesigned view buttons and range controls usable", async ({ page }) => {
+    const browserErrors = collectBrowserErrors(page);
+    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+
+    await page.goto("/cost-statistics");
+    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByText(/以已配对的支出流水为基准/)).toHaveCount(0);
+    await expect(page.locator(".cost-page .stat-card")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
+
+    const refreshResponse = waitForCostStatisticsExplorer(page, "2026-03", "active");
+    await page.getByRole("button", { name: "刷新成本统计" }).click();
+    expect((await refreshResponse).status()).toBe(200);
+
+    const aprilResponse = waitForCostStatisticsExplorer(page, "2026-04", "active");
+    await page.getByRole("button", { name: "时间统计时间范围：2026年3月" }).click();
+    const timePicker = page.getByRole("dialog", { name: "时间统计时间范围选择器" });
+    await expect(timePicker).toBeVisible();
+    await timePicker.getByRole("button", { name: "四月" }).click();
+    expect((await aprilResponse).status()).toBe(200);
+    await expect(page.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-101" })).toBeVisible();
+
+    await page.getByRole("button", { name: "按项目" }).click();
+    await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
+    await page.getByRole("button", { name: "项目统计时间范围：全部时间" }).click();
+    const projectPicker = page.getByRole("dialog", { name: "项目统计时间范围选择器" });
+    await expect(projectPicker).toBeVisible();
+    await projectPicker.getByRole("button", { name: "2026年" }).click();
+    await expect(page.getByRole("button", { name: "项目统计时间范围：2026年" })).toBeVisible();
+
+    await page.getByRole("button", { name: "按银行" }).click();
+    await expect(page.getByRole("heading", { name: "按银行统计" })).toBeVisible();
+    await page.getByRole("button", { name: "银行统计时间范围：全部时间" }).click();
+    const bankPicker = page.getByRole("dialog", { name: "银行统计时间范围选择器" });
+    await expect(bankPicker).toBeVisible();
+    await bankPicker.getByRole("button", { name: "四月" }).click();
+    await expect(page.getByRole("button", { name: "银行统计时间范围：2026年4月" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /平安银行 账户 8821/ })).toBeVisible();
+
+    await page.getByRole("button", { name: "按费用类型" }).click();
+    await expect(page.getByRole("heading", { name: "按费用类型统计" })).toBeVisible();
+    await page.getByRole("button", { name: "费用类型统计时间范围：2026年3月" }).click();
+    const expensePicker = page.getByRole("dialog", { name: "费用类型统计时间范围选择器" });
+    await expect(expensePicker).toBeVisible();
+    await expensePicker.getByRole("button", { name: "2026年" }).click();
+    await expect(page.getByRole("button", { name: "费用类型统计时间范围：2026年" })).toBeVisible();
+
+    await page.getByRole("button", { name: "按流水标签类型" }).click();
+    await expect(page.getByRole("heading", { name: "按流水标签类型统计" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeVisible();
+    await page
+      .locator(".cost-explorer-lane")
+      .filter({ has: page.getByRole("heading", { name: "主标签" }) })
+      .getByRole("button")
+      .first()
+      .click();
+    await page
+      .locator(".cost-explorer-lane")
+      .filter({ has: page.getByRole("heading", { name: "子标签" }) })
+      .getByRole("button")
+      .first()
+      .click();
+    await expect(page.getByRole("grid", { name: "流水标签对应流水表" })).toBeVisible();
+    expect(browserErrors).toEqual([]);
+  });
+
   test("drills into project cost rows and surfaces export row-limit feedback", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
@@ -299,17 +365,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     await expect(page.getByText("云南溯源科技")).toBeVisible();
     await expect(page.getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toHaveCount(0);
-
-    const allScopeRequest = page.waitForRequest((request) => {
-      const url = new URL(request.url());
-      return url.pathname.endsWith("/api/cost-statistics/explorer")
-        && url.searchParams.get("month") === "all"
-        && url.searchParams.get("project_scope") === "all";
-    });
-    await page.getByRole("button", { name: "项目范围：进行中" }).click();
-    expect(new URL((await allScopeRequest).url()).searchParams.get("project_scope")).toBe("all");
-    await expect(page.getByRole("button", { name: "项目范围：所有项目" })).toBeVisible();
-    await expect(page.getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeVisible();
+    await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
 
     await page.getByRole("button", { name: /云南溯源科技/ }).first().click();
     await page.getByRole("button", { name: /设备货款及材料费/ }).click();
@@ -322,7 +378,7 @@ test.describe("cost statistics browser flow", () => {
       requestPath(request.url()).endsWith("/api/cost-statistics/transactions/cost-txn-e2e-001"),
     );
     await projectRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" }).click();
-    expect(new URL((await detailRequest).url()).searchParams.get("project_scope")).toBe("all");
+    expect(new URL((await detailRequest).url()).searchParams.get("project_scope")).toBe("active");
     const detailDialog = page.getByRole("dialog", { name: "流水详情" });
     await expect(detailDialog).toBeVisible();
     await expect(detailDialog.getByText("PLC 模块采购").first()).toBeVisible();
@@ -342,8 +398,9 @@ test.describe("cost statistics browser flow", () => {
     });
     await exportDialog.getByRole("button", { name: "仅预览" }).click();
     const previewUrl = new URL((await previewRequest).url());
-    expect(previewUrl.searchParams.get("project_scope")).toBe("all");
+    expect(previewUrl.searchParams.get("project_scope")).toBe("active");
     expect(previewUrl.searchParams.getAll("project_name")).toContain("云南溯源科技");
+    expect(previewUrl.searchParams.getAll("expense_type")).toContain("设备货款及材料费");
     await expect(exportDialog.getByRole("table", { name: "导出预览表" })).toBeVisible();
     await expect(exportDialog.getByText("预计导出 3 条流水")).toBeVisible();
 
@@ -368,7 +425,7 @@ test.describe("cost statistics browser flow", () => {
 
     await page.getByRole("button", { name: "按银行" }).click();
     await expect(page.getByRole("heading", { name: "按银行统计" })).toBeVisible();
-    await expect(page.getByText("从左到右依次展开：银行账户 / 项目名 / 流水，支持按范围重新统计")).toBeVisible();
+    await expect(page.getByRole("button", { name: "银行统计时间范围：全部时间" })).toBeVisible();
 
     await page.getByRole("button", { name: /工商银行 账户 0001/ }).click();
     await page.getByRole("button", { name: /云南溯源科技/ }).first().click();
@@ -392,7 +449,7 @@ test.describe("cost statistics browser flow", () => {
 
     await page.getByRole("button", { name: "按费用类型" }).click();
     await expect(page.getByRole("heading", { name: "按费用类型统计" })).toBeVisible();
-    await expect(page.getByText("按费用类型查看 2026年3月 的对应流水")).toBeVisible();
+    await expect(page.getByRole("button", { name: "费用类型统计时间范围：2026年3月" })).toBeVisible();
     await page.getByRole("button", { name: /设备货款及材料费/ }).first().click();
     const expenseRows = page.getByRole("grid", { name: "按费用类型流水表" });
     await expect(expenseRows).toBeVisible();

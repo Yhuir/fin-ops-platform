@@ -1,13 +1,12 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 
-import MonthPicker, { formatMonthLabel } from "../components/MonthPicker";
+import { formatMonthLabel } from "../components/MonthPicker";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
 import ExportCenterModal, {
   type ExportCenterMode,
   type ExportRangeMode,
 } from "../components/cost-statistics/ExportCenterModal";
-import CostStatisticsSummaryCards from "../components/cost-statistics/CostStatisticsSummaryCards";
 import CostStatisticsTable, {
   type CostStatisticsTableColumn,
 } from "../components/cost-statistics/CostStatisticsTable";
@@ -42,37 +41,26 @@ import type {
 
 type CostViewMode = "time" | "project" | "bank" | "expenseType" | "bankTag";
 type RangeScopeMode = "all" | "year" | "month";
-type ExplorerScopeMode = RangeScopeMode | "custom";
-type ScopePickerPanel = Exclude<ExplorerScopeMode, "all">;
+type ExplorerScopeMode = RangeScopeMode;
+type ScopePickerPanel = "scope";
 
 type CostStatisticsPageSession = {
   viewMode: CostViewMode;
-  costProjectScope: CostProjectScope;
   timeScopeMode: ExplorerScopeMode;
   timeScopeYear: string;
   timeScopeMonth: string;
-  timeScopeStartDate: string;
-  timeScopeEndDate: string;
   projectScopeMode: ExplorerScopeMode;
   projectScopeYear: string;
   projectScopeMonth: string;
-  projectScopeStartDate: string;
-  projectScopeEndDate: string;
   bankScopeMode: ExplorerScopeMode;
   bankScopeYear: string;
   bankScopeMonth: string;
-  bankScopeStartDate: string;
-  bankScopeEndDate: string;
   expenseTypeScopeMode: ExplorerScopeMode;
   expenseTypeScopeYear: string;
   expenseTypeScopeMonth: string;
-  expenseTypeScopeStartDate: string;
-  expenseTypeScopeEndDate: string;
   bankTagScopeMode: ExplorerScopeMode;
   bankTagScopeYear: string;
   bankTagScopeMonth: string;
-  bankTagScopeStartDate: string;
-  bankTagScopeEndDate: string;
 };
 
 type ProjectExpenseTypeRow = {
@@ -111,20 +99,35 @@ type CostBankTagSubRow = {
   percentageLabel: string;
 };
 
-type ScopeYearPickerProps = {
+type ScopeRangePickerProps = {
   ariaLabel: string;
+  label: string;
+  mode: ExplorerScopeMode;
   years: string[];
-  value: string;
-  onChange: (year: string) => void;
+  year: string;
+  month: string;
+  open: boolean;
+  onToggle: () => void;
+  onModeChange: (mode: ExplorerScopeMode) => void;
+  onYearChange: (year: string) => void;
+  onMonthChange: (month: string) => void;
+  onClose: () => void;
 };
 
-function formatCurrencyFromRows(rows: Array<{ amount: string }>) {
-  const total = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
-  return total.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const SCOPE_MONTH_LABELS = [
+  "一月",
+  "二月",
+  "三月",
+  "四月",
+  "五月",
+  "六月",
+  "七月",
+  "八月",
+  "九月",
+  "十月",
+  "十一月",
+  "十二月",
+];
 
 function getCostTimeRowRenderKey(row: CostTimeRow, index: number) {
   return [
@@ -172,10 +175,6 @@ function buildMonthDateBounds(month: string) {
 
 function normalizeDateRange(startDate: string, endDate: string) {
   return startDate <= endDate ? { startDate, endDate } : { startDate: endDate, endDate: startDate };
-}
-
-function formatScopeButtonLabel(baseLabel: string, isActive: boolean, selectedLabel: string | null = null) {
-  return isActive && selectedLabel ? `${baseLabel} ${selectedLabel}` : baseLabel;
 }
 
 function buildProjectRowsFromTimeRows(rows: CostTimeRow[]) {
@@ -322,8 +321,6 @@ function filterScopeTimeRows(
   mode: ExplorerScopeMode,
   year: string,
   month: string,
-  startDate: string,
-  endDate: string,
 ) {
   if (mode === "all") {
     return rows;
@@ -334,11 +331,7 @@ function filterScopeTimeRows(
   if (mode === "month") {
     return rows.filter((row) => row.tradeTime.startsWith(month));
   }
-  const range = normalizeDateRange(startDate, endDate);
-  return rows.filter((row) => {
-    const tradeDate = row.tradeTime.slice(0, 10);
-    return tradeDate >= range.startDate && tradeDate <= range.endDate;
-  });
+  return rows;
 }
 
 function getExplorerRowsDateRange(rows: CostTimeRow[]) {
@@ -360,8 +353,6 @@ function getScopeDateRange(
   mode: ExplorerScopeMode,
   year: string,
   month: string,
-  startDate: string,
-  endDate: string,
 ) {
   if (mode === "month") {
     return buildMonthDateBounds(month);
@@ -371,9 +362,6 @@ function getScopeDateRange(
       startDate: `${year}-01-01`,
       endDate: `${year}-12-31`,
     };
-  }
-  if (mode === "custom") {
-    return normalizeDateRange(startDate, endDate);
   }
   return getExplorerRowsDateRange(rows);
 }
@@ -421,23 +409,109 @@ function getCostStatisticsLoadErrorMessage(error: unknown) {
   return "成本统计数据加载失败，请点击刷新重试。";
 }
 
-function ScopeYearPicker({ ariaLabel, years, value, onChange }: ScopeYearPickerProps) {
+function ScopeRangePicker({
+  ariaLabel,
+  label,
+  mode,
+  years,
+  year,
+  month,
+  open,
+  onToggle,
+  onModeChange,
+  onYearChange,
+  onMonthChange,
+  onClose,
+}: ScopeRangePickerProps) {
+  const pickerYears = years.length > 0 ? years : [DEFAULT_MONTH.slice(0, 4)];
+  const activeYear = mode === "month" ? month.slice(0, 4) || year : year || DEFAULT_MONTH.slice(0, 4);
+  const activeMonth = mode === "month" ? month.slice(5, 7) : "";
+  const selectedLabel = mode === "all" ? "全部时间" : mode === "year" ? `${year}年` : formatMonthLabel(month);
+
+  function selectAll() {
+    onModeChange("all");
+    onClose();
+  }
+
+  function selectYear(nextYear: string) {
+    onYearChange(nextYear);
+    onModeChange("year");
+    onClose();
+  }
+
+  function selectMonth(monthNumber: number) {
+    const nextMonth = `${activeYear}-${String(monthNumber).padStart(2, "0")}`;
+    onYearChange(activeYear);
+    onMonthChange(nextMonth);
+    onModeChange("month");
+    onClose();
+  }
+
   return (
-    <div aria-label={ariaLabel} className="cost-year-picker-panel" role="group">
-      <div className="cost-year-picker-title">年份</div>
-      <div className="cost-year-picker-grid">
-        {years.map((year) => (
+    <div className="cost-scope-picker">
+      <button
+        aria-expanded={open}
+        aria-label={`${ariaLabel}：${selectedLabel}`}
+        className={open ? "cost-scope-trigger is-open" : "cost-scope-trigger"}
+        type="button"
+        onClick={onToggle}
+      >
+        <span className="cost-scope-trigger-label">
+          <span>{label}</span>
+          <strong>{selectedLabel}</strong>
+        </span>
+        <span aria-hidden="true" className="cost-scope-trigger-icon">
+          ▾
+        </span>
+      </button>
+      {open ? (
+        <div className="cost-scope-popover" role="dialog" aria-label={`${ariaLabel}选择器`}>
           <button
-            key={year}
-            aria-pressed={year === value}
-            className={year === value ? "cost-year-picker-chip active" : "cost-year-picker-chip"}
+            aria-pressed={mode === "all"}
+            className={mode === "all" ? "cost-scope-option all active" : "cost-scope-option all"}
             type="button"
-            onClick={() => onChange(year)}
+            onClick={selectAll}
           >
-            {year}年
+            全部时间
           </button>
-        ))}
-      </div>
+          <div className="cost-scope-panel-section">
+            <span>年份</span>
+            <div className="cost-scope-option-grid years">
+              {pickerYears.map((candidateYear) => (
+                <button
+                  key={candidateYear}
+                  aria-pressed={mode === "year" && candidateYear === year}
+                  className={mode === "year" && candidateYear === year ? "cost-scope-option active" : "cost-scope-option"}
+                  type="button"
+                  onClick={() => selectYear(candidateYear)}
+                >
+                  {candidateYear}年
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="cost-scope-panel-section">
+            <span>月份</span>
+            <div className="cost-scope-option-grid months">
+              {SCOPE_MONTH_LABELS.map((monthLabel, index) => {
+                const monthNumber = index + 1;
+                const isActive = activeMonth === String(monthNumber).padStart(2, "0");
+                return (
+                  <button
+                    key={monthLabel}
+                    aria-pressed={mode === "month" && isActive}
+                    className={mode === "month" && isActive ? "cost-scope-option active" : "cost-scope-option"}
+                    type="button"
+                    onClick={() => selectMonth(monthNumber)}
+                  >
+                    {monthLabel}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -449,32 +523,21 @@ function isCostStatisticsPageSession(value: unknown): value is CostStatisticsPag
   const session = value as Record<string, unknown>;
   return [
     "viewMode",
-    "costProjectScope",
     "timeScopeMode",
     "timeScopeYear",
     "timeScopeMonth",
-    "timeScopeStartDate",
-    "timeScopeEndDate",
     "projectScopeMode",
     "projectScopeYear",
     "projectScopeMonth",
-    "projectScopeStartDate",
-    "projectScopeEndDate",
     "bankScopeMode",
     "bankScopeYear",
     "bankScopeMonth",
-    "bankScopeStartDate",
-    "bankScopeEndDate",
     "expenseTypeScopeMode",
     "expenseTypeScopeYear",
     "expenseTypeScopeMonth",
-    "expenseTypeScopeStartDate",
-    "expenseTypeScopeEndDate",
     "bankTagScopeMode",
     "bankTagScopeYear",
     "bankTagScopeMonth",
-    "bankTagScopeStartDate",
-    "bankTagScopeEndDate",
   ].every((key) => typeof session[key] === "string");
 }
 
@@ -486,35 +549,24 @@ export default function CostStatisticsPage() {
   const costPageSession = usePageSessionState<CostStatisticsPageSession>({
     pageKey: "cost-statistics",
     stateKey: "explorerState",
-    version: 1,
+    version: 2,
     initialValue: {
       viewMode: "time",
-      costProjectScope: "active",
       timeScopeMode: "month",
       timeScopeYear: DEFAULT_MONTH.slice(0, 4),
       timeScopeMonth: DEFAULT_MONTH,
-      timeScopeStartDate: defaultMonthBounds.startDate,
-      timeScopeEndDate: defaultMonthBounds.endDate,
       projectScopeMode: "all",
       projectScopeYear: DEFAULT_MONTH.slice(0, 4),
       projectScopeMonth: DEFAULT_MONTH,
-      projectScopeStartDate: defaultMonthBounds.startDate,
-      projectScopeEndDate: defaultMonthBounds.endDate,
       bankScopeMode: "all",
       bankScopeYear: DEFAULT_MONTH.slice(0, 4),
       bankScopeMonth: DEFAULT_MONTH,
-      bankScopeStartDate: defaultMonthBounds.startDate,
-      bankScopeEndDate: defaultMonthBounds.endDate,
       expenseTypeScopeMode: "month",
       expenseTypeScopeYear: DEFAULT_MONTH.slice(0, 4),
       expenseTypeScopeMonth: DEFAULT_MONTH,
-      expenseTypeScopeStartDate: defaultMonthBounds.startDate,
-      expenseTypeScopeEndDate: defaultMonthBounds.endDate,
       bankTagScopeMode: "month",
       bankTagScopeYear: DEFAULT_MONTH.slice(0, 4),
       bankTagScopeMonth: DEFAULT_MONTH,
-      bankTagScopeStartDate: defaultMonthBounds.startDate,
-      bankTagScopeEndDate: defaultMonthBounds.endDate,
     },
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
@@ -534,19 +586,14 @@ export default function CostStatisticsPage() {
   const { value: costSession } = costPageSession;
   const viewMode = costSession.viewMode;
   const setViewMode = (value: SetStateAction<CostViewMode>) => setCostSessionField("viewMode", value);
-  const costProjectScope = costSession.costProjectScope;
-  const setCostProjectScope = (value: SetStateAction<CostProjectScope>) => setCostSessionField("costProjectScope", value);
+  const costProjectScope: CostProjectScope = "active";
   const timeScopeMode = costSession.timeScopeMode;
   const setTimeScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("timeScopeMode", value);
-  const [timeScopePanel, setTimeScopePanel] = useState<ScopePickerPanel | null>("month");
+  const [timeScopePanel, setTimeScopePanel] = useState<ScopePickerPanel | null>(null);
   const timeScopeYear = costSession.timeScopeYear;
   const setTimeScopeYear = (value: SetStateAction<string>) => setCostSessionField("timeScopeYear", value);
   const timeScopeMonth = costSession.timeScopeMonth;
   const setTimeScopeMonth = (value: SetStateAction<string>) => setCostSessionField("timeScopeMonth", value);
-  const timeScopeStartDate = costSession.timeScopeStartDate;
-  const setTimeScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("timeScopeStartDate", value);
-  const timeScopeEndDate = costSession.timeScopeEndDate;
-  const setTimeScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("timeScopeEndDate", value);
 
   const [explorerData, setExplorerData] = useState<CostStatisticsExplorer | null>(() =>
     getCachedCostStatisticsExplorer(DEFAULT_MONTH, "active"),
@@ -581,10 +628,6 @@ export default function CostStatisticsPage() {
   const setProjectScopeYear = (value: SetStateAction<string>) => setCostSessionField("projectScopeYear", value);
   const projectScopeMonth = costSession.projectScopeMonth;
   const setProjectScopeMonth = (value: SetStateAction<string>) => setCostSessionField("projectScopeMonth", value);
-  const projectScopeStartDate = costSession.projectScopeStartDate;
-  const setProjectScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("projectScopeStartDate", value);
-  const projectScopeEndDate = costSession.projectScopeEndDate;
-  const setProjectScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("projectScopeEndDate", value);
   const bankScopeMode = costSession.bankScopeMode;
   const setBankScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("bankScopeMode", value);
   const [bankScopePanel, setBankScopePanel] = useState<ScopePickerPanel | null>(null);
@@ -592,14 +635,10 @@ export default function CostStatisticsPage() {
   const setBankScopeYear = (value: SetStateAction<string>) => setCostSessionField("bankScopeYear", value);
   const bankScopeMonth = costSession.bankScopeMonth;
   const setBankScopeMonth = (value: SetStateAction<string>) => setCostSessionField("bankScopeMonth", value);
-  const bankScopeStartDate = costSession.bankScopeStartDate;
-  const setBankScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("bankScopeStartDate", value);
-  const bankScopeEndDate = costSession.bankScopeEndDate;
-  const setBankScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("bankScopeEndDate", value);
 
   const expenseTypeScopeMode = costSession.expenseTypeScopeMode;
   const setExpenseTypeScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("expenseTypeScopeMode", value);
-  const [expenseTypeScopePanel, setExpenseTypeScopePanel] = useState<ScopePickerPanel | null>("month");
+  const [expenseTypeScopePanel, setExpenseTypeScopePanel] = useState<ScopePickerPanel | null>(null);
   const expenseTypeScopeYear = costSession.expenseTypeScopeYear;
   const setExpenseTypeScopeYear = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeYear", value);
   const expenseTypeScopeMonth = costSession.expenseTypeScopeMonth;
@@ -608,22 +647,14 @@ export default function CostStatisticsPage() {
   const [expenseTypeMonth, setExpenseTypeMonth] = useState(DEFAULT_MONTH);
   const [expenseTypeStartDate, setExpenseTypeStartDate] = useState(defaultMonthBounds.startDate);
   const [expenseTypeEndDate, setExpenseTypeEndDate] = useState(defaultMonthBounds.endDate);
-  const expenseTypeScopeStartDate = costSession.expenseTypeScopeStartDate;
-  const setExpenseTypeScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeStartDate", value);
-  const expenseTypeScopeEndDate = costSession.expenseTypeScopeEndDate;
-  const setExpenseTypeScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeEndDate", value);
   const [expenseTypeSelections, setExpenseTypeSelections] = useState<string[]>([]);
   const bankTagScopeMode = costSession.bankTagScopeMode;
   const setBankTagScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("bankTagScopeMode", value);
-  const [bankTagScopePanel, setBankTagScopePanel] = useState<ScopePickerPanel | null>("month");
+  const [bankTagScopePanel, setBankTagScopePanel] = useState<ScopePickerPanel | null>(null);
   const bankTagScopeYear = costSession.bankTagScopeYear;
   const setBankTagScopeYear = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeYear", value);
   const bankTagScopeMonth = costSession.bankTagScopeMonth;
   const setBankTagScopeMonth = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeMonth", value);
-  const bankTagScopeStartDate = costSession.bankTagScopeStartDate;
-  const setBankTagScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeStartDate", value);
-  const bankTagScopeEndDate = costSession.bankTagScopeEndDate;
-  const setBankTagScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("bankTagScopeEndDate", value);
 
   const [selectedTimeTransactionId, setSelectedTimeTransactionId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
@@ -763,33 +794,33 @@ export default function CostStatisticsPage() {
     return () => controller.abort();
   }, [costProjectScope]);
 
-  useEffect(() => {
-    if (viewMode !== "time") {
-      return;
-    }
-    setSelectedTimeTransactionId(null);
-    setTransactionDetail(null);
-  }, [viewMode, timeScopeMode, timeScopeYear, timeScopeMonth, timeScopeStartDate, timeScopeEndDate]);
+	  useEffect(() => {
+	    if (viewMode !== "time") {
+	      return;
+	    }
+	    setSelectedTimeTransactionId(null);
+	    setTransactionDetail(null);
+	  }, [viewMode, timeScopeMode, timeScopeYear, timeScopeMonth]);
 
   useEffect(() => {
     if (viewMode !== "project") {
       return;
     }
     setSelectedProjectName(null);
-    setSelectedProjectExpenseType(null);
-    setSelectedProjectTransactionId(null);
-    setTransactionDetail(null);
-  }, [viewMode, projectScopeMode, projectScopeYear, projectScopeMonth, projectScopeStartDate, projectScopeEndDate]);
+	    setSelectedProjectExpenseType(null);
+	    setSelectedProjectTransactionId(null);
+	    setTransactionDetail(null);
+	  }, [viewMode, projectScopeMode, projectScopeYear, projectScopeMonth]);
 
   useEffect(() => {
     if (viewMode !== "bank") {
       return;
     }
     setSelectedBankAccountLabel(null);
-    setSelectedBankProjectName(null);
-    setSelectedBankTransactionId(null);
-    setTransactionDetail(null);
-  }, [viewMode, bankScopeMode, bankScopeYear, bankScopeMonth, bankScopeStartDate, bankScopeEndDate]);
+	    setSelectedBankProjectName(null);
+	    setSelectedBankTransactionId(null);
+	    setTransactionDetail(null);
+	  }, [viewMode, bankScopeMode, bankScopeYear, bankScopeMonth]);
 
   useEffect(() => {
     if (viewMode !== "expenseType") {
@@ -798,24 +829,22 @@ export default function CostStatisticsPage() {
     setSelectedExpenseType(null);
     setSelectedExpenseTransactionId(null);
     setTransactionDetail(null);
-  }, [
-    viewMode,
-    expenseTypeScopeMode,
-    expenseTypeScopeYear,
-    expenseTypeScopeMonth,
-    expenseTypeScopeStartDate,
-    expenseTypeScopeEndDate,
-  ]);
+	  }, [
+	    viewMode,
+	    expenseTypeScopeMode,
+	    expenseTypeScopeYear,
+	    expenseTypeScopeMonth,
+	  ]);
 
   useEffect(() => {
     if (viewMode !== "bankTag") {
       return;
     }
     setSelectedBankTagPrimaryLabel(null);
-    setSelectedBankTagSubLabel(null);
-    setSelectedBankTagTransactionId(null);
-    setTransactionDetail(null);
-  }, [viewMode, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth, bankTagScopeStartDate, bankTagScopeEndDate]);
+	    setSelectedBankTagSubLabel(null);
+	    setSelectedBankTagTransactionId(null);
+	    setTransactionDetail(null);
+	  }, [viewMode, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth]);
 
   const timeRows = explorerData?.timeRows ?? [];
   const availableScopeYears = useMemo(
@@ -829,59 +858,49 @@ export default function CostStatisticsPage() {
     () =>
       filterScopeTimeRows(
         explorerData?.timeRows ?? [],
-        timeScopeMode,
-        timeScopeYear,
-        timeScopeMonth,
-        timeScopeStartDate,
-        timeScopeEndDate,
-      ),
-    [explorerData, timeScopeMode, timeScopeYear, timeScopeMonth, timeScopeStartDate, timeScopeEndDate],
-  );
+	        timeScopeMode,
+	        timeScopeYear,
+	        timeScopeMonth,
+	      ),
+	    [explorerData, timeScopeMode, timeScopeYear, timeScopeMonth],
+	  );
   const filteredProjectTimeRows = useMemo(
     () =>
       filterScopeTimeRows(
         explorerData?.timeRows ?? [],
-        projectScopeMode,
-        projectScopeYear,
-        projectScopeMonth,
-        projectScopeStartDate,
-        projectScopeEndDate,
-      ),
-    [explorerData, projectScopeMode, projectScopeYear, projectScopeMonth, projectScopeStartDate, projectScopeEndDate],
-  );
+	        projectScopeMode,
+	        projectScopeYear,
+	        projectScopeMonth,
+	      ),
+	    [explorerData, projectScopeMode, projectScopeYear, projectScopeMonth],
+	  );
   const projectRows = useMemo(() => buildProjectRowsFromTimeRows(filteredProjectTimeRows), [filteredProjectTimeRows]);
   const filteredBankTimeRows = useMemo(
     () =>
       filterScopeTimeRows(
         explorerData?.timeRows ?? [],
-        bankScopeMode,
-        bankScopeYear,
-        bankScopeMonth,
-        bankScopeStartDate,
-        bankScopeEndDate,
-      ),
-    [explorerData, bankScopeMode, bankScopeYear, bankScopeMonth, bankScopeStartDate, bankScopeEndDate],
-  );
+	        bankScopeMode,
+	        bankScopeYear,
+	        bankScopeMonth,
+	      ),
+	    [explorerData, bankScopeMode, bankScopeYear, bankScopeMonth],
+	  );
   const bankRows = useMemo(() => buildBankRowsFromTimeRows(filteredBankTimeRows), [filteredBankTimeRows]);
   const filteredExpenseTypeRows = useMemo(
     () =>
       filterScopeTimeRows(
         explorerData?.timeRows ?? [],
-        expenseTypeScopeMode,
-        expenseTypeScopeYear,
-        expenseTypeScopeMonth,
-        expenseTypeScopeStartDate,
-        expenseTypeScopeEndDate,
-      ),
-    [
-      explorerData,
-      expenseTypeScopeMode,
-      expenseTypeScopeYear,
-      expenseTypeScopeMonth,
-      expenseTypeScopeStartDate,
-      expenseTypeScopeEndDate,
-    ],
-  );
+	        expenseTypeScopeMode,
+	        expenseTypeScopeYear,
+	        expenseTypeScopeMonth,
+	      ),
+	    [
+	      explorerData,
+	      expenseTypeScopeMode,
+	      expenseTypeScopeYear,
+	      expenseTypeScopeMonth,
+	    ],
+	  );
   const expenseTypeRows = useMemo(
     () => buildExpenseTypeRowsFromTimeRows(filteredExpenseTypeRows),
     [filteredExpenseTypeRows],
@@ -890,14 +909,12 @@ export default function CostStatisticsPage() {
     () =>
       filterScopeTimeRows(
         explorerData?.timeRows ?? [],
-        bankTagScopeMode,
-        bankTagScopeYear,
-        bankTagScopeMonth,
-        bankTagScopeStartDate,
-        bankTagScopeEndDate,
-      ),
-    [explorerData, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth, bankTagScopeStartDate, bankTagScopeEndDate],
-  );
+	        bankTagScopeMode,
+	        bankTagScopeYear,
+	        bankTagScopeMonth,
+	      ),
+	    [explorerData, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth],
+	  );
   const bankTagPrimaryRows = useMemo(
     () => buildBankTagPrimaryRowsFromTimeRows(filteredBankTagRows),
     [filteredBankTagRows],
@@ -1005,81 +1022,55 @@ export default function CostStatisticsPage() {
     ).sort((left, right) => left.localeCompare(right, "zh-CN"));
   }, [exportReferenceData, projectExportNames]);
 
-  const projectScopeLabel = useMemo(() => {
-    if (projectScopeMode === "all") {
-      return "全部时间";
-    }
-    if (projectScopeMode === "year") {
-      return `${projectScopeYear}年`;
-    }
-    if (projectScopeMode === "month") {
-      return formatMonthLabel(projectScopeMonth);
-    }
-    const range = normalizeDateRange(projectScopeStartDate, projectScopeEndDate);
-    return `${range.startDate}至${range.endDate}`;
-  }, [projectScopeMode, projectScopeYear, projectScopeMonth, projectScopeStartDate, projectScopeEndDate]);
+	  const projectScopeLabel = useMemo(() => {
+	    if (projectScopeMode === "all") {
+	      return "全部时间";
+	    }
+	    if (projectScopeMode === "year") {
+	      return `${projectScopeYear}年`;
+	    }
+	    return formatMonthLabel(projectScopeMonth);
+	  }, [projectScopeMode, projectScopeYear, projectScopeMonth]);
 
-  const timeScopeLabel = useMemo(() => {
-    if (timeScopeMode === "all") {
-      return "全部时间";
-    }
-    if (timeScopeMode === "year") {
-      return `${timeScopeYear}年`;
-    }
-    if (timeScopeMode === "month") {
-      return formatMonthLabel(timeScopeMonth);
-    }
-    const range = normalizeDateRange(timeScopeStartDate, timeScopeEndDate);
-    return `${range.startDate}至${range.endDate}`;
-  }, [timeScopeMode, timeScopeYear, timeScopeMonth, timeScopeStartDate, timeScopeEndDate]);
+	  const timeScopeLabel = useMemo(() => {
+	    if (timeScopeMode === "all") {
+	      return "全部时间";
+	    }
+	    if (timeScopeMode === "year") {
+	      return `${timeScopeYear}年`;
+	    }
+	    return formatMonthLabel(timeScopeMonth);
+	  }, [timeScopeMode, timeScopeYear, timeScopeMonth]);
 
-  const bankScopeLabel = useMemo(() => {
-    if (bankScopeMode === "all") {
-      return "全部时间";
-    }
-    if (bankScopeMode === "year") {
-      return `${bankScopeYear}年`;
-    }
-    if (bankScopeMode === "month") {
-      return formatMonthLabel(bankScopeMonth);
-    }
-    const range = normalizeDateRange(bankScopeStartDate, bankScopeEndDate);
-    return `${range.startDate}至${range.endDate}`;
-  }, [bankScopeMode, bankScopeYear, bankScopeMonth, bankScopeStartDate, bankScopeEndDate]);
+	  const bankScopeLabel = useMemo(() => {
+	    if (bankScopeMode === "all") {
+	      return "全部时间";
+	    }
+	    if (bankScopeMode === "year") {
+	      return `${bankScopeYear}年`;
+	    }
+	    return formatMonthLabel(bankScopeMonth);
+	  }, [bankScopeMode, bankScopeYear, bankScopeMonth]);
 
-  const expenseTypeScopeLabel = useMemo(() => {
-    if (expenseTypeScopeMode === "all") {
-      return "全部时间";
-    }
-    if (expenseTypeScopeMode === "year") {
-      return `${expenseTypeScopeYear}年`;
-    }
-    if (expenseTypeScopeMode === "month") {
-      return formatMonthLabel(expenseTypeScopeMonth);
-    }
-    const range = normalizeDateRange(expenseTypeScopeStartDate, expenseTypeScopeEndDate);
-    return `${range.startDate}至${range.endDate}`;
-  }, [
-    expenseTypeScopeMode,
-    expenseTypeScopeYear,
-    expenseTypeScopeMonth,
-    expenseTypeScopeStartDate,
-    expenseTypeScopeEndDate,
-  ]);
+	  const expenseTypeScopeLabel = useMemo(() => {
+	    if (expenseTypeScopeMode === "all") {
+	      return "全部时间";
+	    }
+	    if (expenseTypeScopeMode === "year") {
+	      return `${expenseTypeScopeYear}年`;
+	    }
+	    return formatMonthLabel(expenseTypeScopeMonth);
+	  }, [expenseTypeScopeMode, expenseTypeScopeYear, expenseTypeScopeMonth]);
 
-  const bankTagScopeLabel = useMemo(() => {
-    if (bankTagScopeMode === "all") {
-      return "全部时间";
-    }
-    if (bankTagScopeMode === "year") {
-      return `${bankTagScopeYear}年`;
-    }
-    if (bankTagScopeMode === "month") {
-      return formatMonthLabel(bankTagScopeMonth);
-    }
-    const range = normalizeDateRange(bankTagScopeStartDate, bankTagScopeEndDate);
-    return `${range.startDate}至${range.endDate}`;
-  }, [bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth, bankTagScopeStartDate, bankTagScopeEndDate]);
+	  const bankTagScopeLabel = useMemo(() => {
+	    if (bankTagScopeMode === "all") {
+	      return "全部时间";
+	    }
+	    if (bankTagScopeMode === "year") {
+	      return `${bankTagScopeYear}年`;
+	    }
+	    return formatMonthLabel(bankTagScopeMonth);
+	  }, [bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth]);
 
   const readModelStatus = explorerData?.readModelStatus?.trim().toLowerCase();
   const isReadModelRefreshing = readModelStatus === "refreshing";
@@ -1153,18 +1144,10 @@ export default function CostStatisticsPage() {
   }
 
   function toggleScopeSelection(
-    currentMode: ExplorerScopeMode,
     currentPanel: ScopePickerPanel | null,
-    nextMode: ScopePickerPanel,
-    setMode: (mode: ExplorerScopeMode) => void,
     setPanel: (panel: ScopePickerPanel | null) => void,
   ) {
-    if (currentMode === nextMode && currentPanel === nextMode) {
-      setPanel(null);
-      return;
-    }
-    setMode(nextMode);
-    setPanel(nextMode);
+    setPanel(currentPanel === "scope" ? null : "scope");
   }
 
   useEffect(() => {
@@ -1197,150 +1180,6 @@ export default function CostStatisticsPage() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [viewMode, timeScopePanel, projectScopePanel, bankScopePanel, expenseTypeScopePanel, bankTagScopePanel]);
 
-  const activeSummary = useMemo(() => {
-    if (isReadModelNonFresh) {
-      return {
-        rowLabel: "数据状态",
-        rowCount: "待刷新",
-        transactionCount: "待刷新",
-        totalAmount: "--",
-      };
-    }
-    if (!explorerData) {
-      return {
-        rowLabel: "条目数",
-        rowCount: 0,
-        transactionCount: 0,
-        totalAmount: "0.00",
-      };
-    }
-    if (viewMode === "project") {
-      if (selectedProjectName && selectedProjectExpenseType) {
-        return {
-          rowLabel: "该类型流水",
-          rowCount: selectedProjectTransactionRows.length,
-          transactionCount: selectedProjectTransactionRows.length,
-          totalAmount: formatCurrencyFromRows(selectedProjectTransactionRows),
-        };
-      }
-      if (selectedProjectName) {
-        return {
-          rowLabel: "费用类型",
-          rowCount: projectExpenseTypeRows.length,
-          transactionCount: selectedProjectRows.length,
-          totalAmount: formatCurrencyFromRows(selectedProjectRows),
-        };
-      }
-      return {
-        rowLabel: "项目数",
-        rowCount: projectRows.length,
-        transactionCount: filteredProjectTimeRows.length,
-        totalAmount: formatCurrencyFromRows(filteredProjectTimeRows),
-      };
-    }
-    if (viewMode === "bank") {
-      if (selectedBankAccountLabel && selectedBankProjectName) {
-        return {
-          rowLabel: "该项目流水",
-          rowCount: selectedBankProjectRows.length,
-          transactionCount: selectedBankProjectRows.length,
-          totalAmount: formatCurrencyFromRows(selectedBankProjectRows),
-        };
-      }
-      if (selectedBankAccountLabel) {
-        return {
-          rowLabel: "项目数",
-          rowCount: bankProjectRows.length,
-          transactionCount: selectedBankRows.length,
-          totalAmount: formatCurrencyFromRows(selectedBankRows),
-        };
-      }
-      return {
-        rowLabel: "银行账户数",
-        rowCount: bankRows.length,
-        transactionCount: filteredBankTimeRows.length,
-        totalAmount: formatCurrencyFromRows(filteredBankTimeRows),
-      };
-    }
-    if (viewMode === "expenseType") {
-      if (selectedExpenseType) {
-        return {
-          rowLabel: "该类型流水",
-          rowCount: selectedExpenseTypeRows.length,
-          transactionCount: selectedExpenseTypeRows.length,
-          totalAmount: formatCurrencyFromRows(selectedExpenseTypeRows),
-        };
-      }
-      return {
-        rowLabel: "费用类型数",
-        rowCount: expenseTypeRows.length,
-        transactionCount: filteredExpenseTypeRows.length,
-        totalAmount: formatCurrencyFromRows(filteredExpenseTypeRows),
-      };
-    }
-    if (viewMode === "bankTag") {
-      if (selectedBankTagPrimaryLabel && selectedBankTagSubLabel) {
-        return {
-          rowLabel: "该标签流水",
-          rowCount: selectedBankTagSubRows.length,
-          transactionCount: selectedBankTagSubRows.length,
-          totalAmount: formatCurrencyFromRows(selectedBankTagSubRows),
-        };
-      }
-      if (selectedBankTagPrimaryLabel) {
-        return {
-          rowLabel: "子标签数",
-          rowCount: bankTagSubRows.length,
-          transactionCount: selectedBankTagPrimaryRows.length,
-          totalAmount: formatCurrencyFromRows(selectedBankTagPrimaryRows),
-        };
-      }
-      return {
-        rowLabel: "主标签数",
-        rowCount: bankTagPrimaryRows.length,
-        transactionCount: filteredBankTagRows.length,
-        totalAmount: formatCurrencyFromRows(filteredBankTagRows),
-      };
-    }
-    return {
-      rowLabel: "时间流水",
-      rowCount: filteredTimeRows.length,
-      transactionCount: filteredTimeRows.length,
-      totalAmount: formatCurrencyFromRows(filteredTimeRows),
-    };
-  }, [
-    explorerData,
-    bankTagPrimaryRows.length,
-    bankTagSubRows.length,
-    expenseTypeRows,
-    filteredExpenseTypeRows,
-    filteredBankTagRows,
-    filteredTimeRows,
-    expenseTypeRows.length,
-    filteredBankTimeRows,
-    filteredProjectTimeRows,
-    bankProjectRows.length,
-    bankRows.length,
-    projectExpenseTypeRows.length,
-    projectRows.length,
-    isReadModelNonFresh,
-    selectedBankAccountLabel,
-    selectedBankProjectName,
-    selectedBankProjectRows,
-    selectedBankRows,
-    selectedExpenseType,
-    selectedExpenseTypeRows,
-    selectedBankTagPrimaryLabel,
-    selectedBankTagPrimaryRows,
-    selectedBankTagSubLabel,
-    selectedBankTagSubRows,
-    selectedProjectExpenseType,
-    selectedProjectName,
-    selectedProjectRows,
-    selectedProjectTransactionRows,
-    viewMode,
-  ]);
-
   function updateProjectExportSelection(projectNames: string[]) {
     setProjectExportNames(projectNames);
     const nextExpenseTypes = Array.from(
@@ -1365,29 +1204,27 @@ export default function CostStatisticsPage() {
             ? [selectedProjectName]
             : exportProjectOptions.slice(0, 1);
       updateProjectExportSelection(nextProjectNames);
-    } else if (viewMode === "expenseType") {
-      setExportCenterMode("expense_type");
-      const rangeMode = expenseTypeScopeMode === "month" ? "month" : "custom";
-      const bounds = getScopeDateRange(
-        timeRows,
-        expenseTypeScopeMode,
-        expenseTypeScopeYear,
-        expenseTypeScopeMonth,
-        expenseTypeScopeStartDate,
-        expenseTypeScopeEndDate,
-      );
-      setExpenseTypeRangeMode(rangeMode);
-      setExpenseTypeMonth(expenseTypeScopeMonth);
-      setExpenseTypeStartDate(bounds.startDate);
-      setExpenseTypeEndDate(bounds.endDate);
+	    } else if (viewMode === "expenseType") {
+	      setExportCenterMode("expense_type");
+	      const rangeMode = expenseTypeScopeMode === "month" ? "month" : "custom";
+	      const bounds = getScopeDateRange(
+	        timeRows,
+	        expenseTypeScopeMode,
+	        expenseTypeScopeYear,
+	        expenseTypeScopeMonth,
+	      );
+	      setExpenseTypeRangeMode(rangeMode);
+	      setExpenseTypeMonth(expenseTypeScopeMonth);
+	      setExpenseTypeStartDate(bounds.startDate);
+	      setExpenseTypeEndDate(bounds.endDate);
       setExpenseTypeSelections(selectedExpenseType ? [selectedExpenseType] : []);
-    } else {
-      setExportCenterMode("time");
-      const rangeMode = timeScopeMode === "month" ? "month" : "custom";
-      const bounds = getScopeDateRange(timeRows, timeScopeMode, timeScopeYear, timeScopeMonth, timeScopeStartDate, timeScopeEndDate);
-      setTimeRangeMode(rangeMode);
-      setTimeMonth(timeScopeMonth);
-      setTimeStartDate(bounds.startDate);
+	    } else {
+	      setExportCenterMode("time");
+	      const rangeMode = timeScopeMode === "month" ? "month" : "custom";
+	      const bounds = getScopeDateRange(timeRows, timeScopeMode, timeScopeYear, timeScopeMonth);
+	      setTimeRangeMode(rangeMode);
+	      setTimeMonth(timeScopeMonth);
+	      setTimeStartDate(bounds.startDate);
       setTimeEndDate(bounds.endDate);
     }
     setIsExportCenterOpen(true);
@@ -1592,11 +1429,10 @@ export default function CostStatisticsPage() {
 
   return (
     <div className="page-stack cost-page">
-      <header className="page-header">
-        <div>
-          <h1>成本统计</h1>
-          <p>以已配对的支出流水为基准，按时间、项目和费用类型查看项目成本，并逐条下钻到具体流水。</p>
-        </div>
+	      <header className="page-header">
+	        <div>
+	          <h1>成本统计</h1>
+	        </div>
         <div className="page-header-actions cost-header-actions">
           <button
             aria-label="刷新成本统计"
@@ -1614,19 +1450,12 @@ export default function CostStatisticsPage() {
             onClick={openExportCenter}
           >
             导出中心
-          </button>
-        </div>
-      </header>
+	          </button>
+	        </div>
+	      </header>
 
-      <CostStatisticsSummaryCards
-        rowLabel={activeSummary.rowLabel}
-        rowCount={activeSummary.rowCount}
-        transactionCount={activeSummary.transactionCount}
-        totalAmount={activeSummary.totalAmount}
-      />
-
-      <section className="cost-content-shell">
-        <div className="cost-analysis-toolbar">
+	      <section className="cost-content-shell">
+	        <div className="cost-analysis-toolbar">
           <div className="cost-view-switcher" role="tablist" aria-label="成本统计视图切换">
             <button
               className={viewMode === "time" ? "cost-view-tab active" : "cost-view-tab"}
@@ -1660,26 +1489,11 @@ export default function CostStatisticsPage() {
               className={viewMode === "bankTag" ? "cost-view-tab active" : "cost-view-tab"}
               type="button"
               onClick={() => handleViewModeChange("bankTag")}
-            >
-              按流水标签类型
-            </button>
-            <button
-              aria-label={`项目范围：${costProjectScope === "active" ? "进行中" : "所有项目"}`}
-              className={costProjectScope === "active" ? "cost-project-scope-trigger active" : "cost-project-scope-trigger"}
-              type="button"
-              onClick={() => setCostProjectScope((current) => (current === "active" ? "all" : "active"))}
-            >
-              {costProjectScope === "active" ? "进行中" : "所有项目"}
-            </button>
-          </div>
-          <div className="cost-toolbar-meta">
-            {viewMode === "time" ? <strong>按时间查看 {timeScopeLabel} 的全部支出流水</strong> : null}
-            {viewMode === "project" ? <strong>从左到右依次展开：项目名 / 费用类型 / 流水，支持按范围重新统计</strong> : null}
-            {viewMode === "bank" ? <strong>从左到右依次展开：银行账户 / 项目名 / 流水，支持按范围重新统计</strong> : null}
-            {viewMode === "expenseType" ? <strong>按费用类型查看 {expenseTypeScopeLabel} 的对应流水</strong> : null}
-            {viewMode === "bankTag" ? <strong>从左到右依次展开：主标签 / 子标签 / 流水，支持按范围重新统计</strong> : null}
-          </div>
-        </div>
+	            >
+	              按流水标签类型
+	            </button>
+	          </div>
+	        </div>
 
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
         {isExplorerLoading && !explorerData ? (
@@ -1717,97 +1531,25 @@ export default function CostStatisticsPage() {
                     <div className="cost-section-heading-copy">
                       <h2>按时间统计</h2>
                       <span>{timeScopeLabel}</span>
-                    </div>
-                    <div className="cost-section-heading-actions cost-project-scope-actions">
-                      <div ref={scopeControlsRef} className="cost-scope-controls">
-                        <div className="cost-scope-toggle" role="tablist" aria-label="时间统计时间范围">
-                          <button
-                            className={timeScopeMode === "all" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                            type="button"
-                            onClick={() => {
-                              setTimeScopeMode("all");
-                              setTimeScopePanel(null);
-                            }}
-                          >
-                            全部时间
-                          </button>
-                          <button
-                            className={timeScopeMode === "year" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                            type="button"
-                            onClick={() =>
-                              toggleScopeSelection(timeScopeMode, timeScopePanel, "year", setTimeScopeMode, setTimeScopePanel)
-                            }
-                          >
-                            {formatScopeButtonLabel("按年统计", timeScopeMode === "year", `${timeScopeYear}年`)}
-                          </button>
-                          <button
-                            className={timeScopeMode === "month" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                            type="button"
-                            onClick={() =>
-                              toggleScopeSelection(timeScopeMode, timeScopePanel, "month", setTimeScopeMode, setTimeScopePanel)
-                            }
-                          >
-                            {formatScopeButtonLabel("按月统计", timeScopeMode === "month", formatMonthLabel(timeScopeMonth))}
-                          </button>
-                          <button
-                            className={timeScopeMode === "custom" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                            type="button"
-                            onClick={() =>
-                              toggleScopeSelection(timeScopeMode, timeScopePanel, "custom", setTimeScopeMode, setTimeScopePanel)
-                            }
-                          >
-                            {formatScopeButtonLabel(
-                              "自定义时间段",
-                              timeScopeMode === "custom",
-                              `${normalizeDateRange(timeScopeStartDate, timeScopeEndDate).startDate}至${normalizeDateRange(timeScopeStartDate, timeScopeEndDate).endDate}`,
-                            )}
-                          </button>
-                        </div>
-                        {timeScopePanel === "year" ? (
-                          <div className="cost-scope-floating-panel">
-                            <ScopeYearPicker
-                              ariaLabel="时间统计年份"
-                              years={availableScopeYears}
-                              value={timeScopeYear}
-                              onChange={setTimeScopeYear}
-                            />
-                          </div>
-                        ) : null}
-                        {timeScopePanel === "month" ? (
-                          <div className="cost-scope-floating-panel">
-                            <MonthPicker inline value={timeScopeMonth} onChange={setTimeScopeMonth} ariaLabel="时间统计月份" caption={null} />
-                          </div>
-                        ) : null}
-                        {timeScopePanel === "custom" ? (
-                          <div className="cost-scope-floating-panel">
-                            <div className="cost-scope-date-panel">
-                              <div className="cost-date-range-fields">
-                                <label className="cost-inline-field">
-                                  <span>开始日期</span>
-                                  <input
-                                    aria-label="时间统计开始日期"
-                                    className="cost-date-input"
-                                    type="date"
-                                    value={timeScopeStartDate}
-                                    onChange={(event) => setTimeScopeStartDate(event.target.value)}
-                                  />
-                                </label>
-                                <label className="cost-inline-field">
-                                  <span>结束日期</span>
-                                  <input
-                                    aria-label="时间统计结束日期"
-                                    className="cost-date-input"
-                                    type="date"
-                                    value={timeScopeEndDate}
-                                    onChange={(event) => setTimeScopeEndDate(event.target.value)}
-                                  />
-                                </label>
-                              </div>
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
+	                    </div>
+	                    <div className="cost-section-heading-actions cost-project-scope-actions">
+	                      <div ref={scopeControlsRef} className="cost-scope-controls">
+	                        <ScopeRangePicker
+	                          ariaLabel="时间统计时间范围"
+	                          label="时间范围"
+	                          mode={timeScopeMode}
+	                          years={availableScopeYears}
+	                          year={timeScopeYear}
+	                          month={timeScopeMonth}
+	                          open={timeScopePanel === "scope"}
+	                          onToggle={() => toggleScopeSelection(timeScopePanel, setTimeScopePanel)}
+	                          onModeChange={setTimeScopeMode}
+	                          onYearChange={setTimeScopeYear}
+	                          onMonthChange={setTimeScopeMonth}
+	                          onClose={() => setTimeScopePanel(null)}
+	                        />
+	                      </div>
+	                    </div>
                   </div>
                   <CostStatisticsTable
                     ariaLabel="按时间统计表"
@@ -1828,115 +1570,25 @@ export default function CostStatisticsPage() {
                   <div className="cost-section-heading-copy">
                     <h2>按项目统计</h2>
                     <span>{projectScopeLabel}</span>
-                  </div>
-                  <div className="cost-section-heading-actions cost-project-scope-actions">
-                    <div ref={scopeControlsRef} className="cost-scope-controls">
-                      <div className="cost-scope-toggle" role="tablist" aria-label="项目统计时间范围">
-                        <button
-                          className={projectScopeMode === "all" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() => {
-                            setProjectScopeMode("all");
-                            setProjectScopePanel(null);
-                          }}
-                        >
-                          全部时间
-                        </button>
-                        <button
-                          className={projectScopeMode === "year" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(
-                              projectScopeMode,
-                              projectScopePanel,
-                              "year",
-                              setProjectScopeMode,
-                              setProjectScopePanel,
-                            )
-                          }
-                        >
-                          {formatScopeButtonLabel("按年统计", projectScopeMode === "year", `${projectScopeYear}年`)}
-                        </button>
-                        <button
-                          className={projectScopeMode === "month" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(
-                              projectScopeMode,
-                              projectScopePanel,
-                              "month",
-                              setProjectScopeMode,
-                              setProjectScopePanel,
-                            )
-                          }
-                        >
-                          {formatScopeButtonLabel("按月统计", projectScopeMode === "month", formatMonthLabel(projectScopeMonth))}
-                        </button>
-                        <button
-                          className={projectScopeMode === "custom" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(
-                              projectScopeMode,
-                              projectScopePanel,
-                              "custom",
-                              setProjectScopeMode,
-                              setProjectScopePanel,
-                            )
-                          }
-                        >
-                          {formatScopeButtonLabel(
-                            "自定义时间段",
-                            projectScopeMode === "custom",
-                            `${normalizeDateRange(projectScopeStartDate, projectScopeEndDate).startDate}至${normalizeDateRange(projectScopeStartDate, projectScopeEndDate).endDate}`,
-                          )}
-                        </button>
-                      </div>
-                      {projectScopePanel === "year" ? (
-                        <div className="cost-scope-floating-panel">
-                          <ScopeYearPicker
-                            ariaLabel="项目统计年份"
-                            years={availableScopeYears}
-                            value={projectScopeYear}
-                            onChange={setProjectScopeYear}
-                          />
-                        </div>
-                      ) : null}
-                      {projectScopePanel === "month" ? (
-                        <div className="cost-scope-floating-panel">
-                          <MonthPicker inline value={projectScopeMonth} onChange={setProjectScopeMonth} ariaLabel="项目统计月份" caption={null} />
-                        </div>
-                      ) : null}
-                      {projectScopePanel === "custom" ? (
-                        <div className="cost-scope-floating-panel">
-                          <div className="cost-scope-date-panel">
-                            <div className="cost-date-range-fields">
-                              <label className="cost-inline-field">
-                                <span>开始日期</span>
-                                <input
-                                  aria-label="项目统计开始日期"
-                                  className="cost-date-input"
-                                  type="date"
-                                  value={projectScopeStartDate}
-                                  onChange={(event) => setProjectScopeStartDate(event.target.value)}
-                                />
-                              </label>
-                              <label className="cost-inline-field">
-                                <span>结束日期</span>
-                                <input
-                                  aria-label="项目统计结束日期"
-                                  className="cost-date-input"
-                                  type="date"
-                                  value={projectScopeEndDate}
-                                  onChange={(event) => setProjectScopeEndDate(event.target.value)}
-                                />
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
+	                  </div>
+	                  <div className="cost-section-heading-actions cost-project-scope-actions">
+	                    <div ref={scopeControlsRef} className="cost-scope-controls">
+	                      <ScopeRangePicker
+	                        ariaLabel="项目统计时间范围"
+	                        label="时间范围"
+	                        mode={projectScopeMode}
+	                        years={availableScopeYears}
+	                        year={projectScopeYear}
+	                        month={projectScopeMonth}
+	                        open={projectScopePanel === "scope"}
+	                        onToggle={() => toggleScopeSelection(projectScopePanel, setProjectScopePanel)}
+	                        onModeChange={setProjectScopeMode}
+	                        onYearChange={setProjectScopeYear}
+	                        onMonthChange={setProjectScopeMonth}
+	                        onClose={() => setProjectScopePanel(null)}
+	                      />
+	                    </div>
+	                  </div>
                 </div>
                 <div className="cost-explorer-grid project">
                   <CostExplorerList<CostProjectExplorerRow>
@@ -2013,97 +1665,25 @@ export default function CostStatisticsPage() {
                   <div className="cost-section-heading-copy">
                     <h2>按银行统计</h2>
                     <span>{bankScopeLabel}</span>
-                  </div>
-                  <div className="cost-section-heading-actions cost-project-scope-actions">
-                    <div ref={scopeControlsRef} className="cost-scope-controls">
-                      <div className="cost-scope-toggle" role="tablist" aria-label="银行统计时间范围">
-                        <button
-                          className={bankScopeMode === "all" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() => {
-                            setBankScopeMode("all");
-                            setBankScopePanel(null);
-                          }}
-                        >
-                          全部时间
-                        </button>
-                        <button
-                          className={bankScopeMode === "year" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(bankScopeMode, bankScopePanel, "year", setBankScopeMode, setBankScopePanel)
-                          }
-                        >
-                          {formatScopeButtonLabel("按年统计", bankScopeMode === "year", `${bankScopeYear}年`)}
-                        </button>
-                        <button
-                          className={bankScopeMode === "month" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(bankScopeMode, bankScopePanel, "month", setBankScopeMode, setBankScopePanel)
-                          }
-                        >
-                          {formatScopeButtonLabel("按月统计", bankScopeMode === "month", formatMonthLabel(bankScopeMonth))}
-                        </button>
-                        <button
-                          className={bankScopeMode === "custom" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(bankScopeMode, bankScopePanel, "custom", setBankScopeMode, setBankScopePanel)
-                          }
-                        >
-                          {formatScopeButtonLabel(
-                            "自定义时间段",
-                            bankScopeMode === "custom",
-                            `${normalizeDateRange(bankScopeStartDate, bankScopeEndDate).startDate}至${normalizeDateRange(bankScopeStartDate, bankScopeEndDate).endDate}`,
-                          )}
-                        </button>
-                      </div>
-                      {bankScopePanel === "year" ? (
-                        <div className="cost-scope-floating-panel">
-                          <ScopeYearPicker
-                            ariaLabel="银行统计年份"
-                            years={availableScopeYears}
-                            value={bankScopeYear}
-                            onChange={setBankScopeYear}
-                          />
-                        </div>
-                      ) : null}
-                      {bankScopePanel === "month" ? (
-                        <div className="cost-scope-floating-panel">
-                          <MonthPicker inline value={bankScopeMonth} onChange={setBankScopeMonth} ariaLabel="银行统计月份" caption={null} />
-                        </div>
-                      ) : null}
-                      {bankScopePanel === "custom" ? (
-                        <div className="cost-scope-floating-panel">
-                          <div className="cost-scope-date-panel">
-                            <div className="cost-date-range-fields">
-                              <label className="cost-inline-field">
-                                <span>开始日期</span>
-                                <input
-                                  aria-label="银行统计开始日期"
-                                  className="cost-date-input"
-                                  type="date"
-                                  value={bankScopeStartDate}
-                                  onChange={(event) => setBankScopeStartDate(event.target.value)}
-                                />
-                              </label>
-                              <label className="cost-inline-field">
-                                <span>结束日期</span>
-                                <input
-                                  aria-label="银行统计结束日期"
-                                  className="cost-date-input"
-                                  type="date"
-                                  value={bankScopeEndDate}
-                                  onChange={(event) => setBankScopeEndDate(event.target.value)}
-                                />
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
+	                  </div>
+	                  <div className="cost-section-heading-actions cost-project-scope-actions">
+	                    <div ref={scopeControlsRef} className="cost-scope-controls">
+	                      <ScopeRangePicker
+	                        ariaLabel="银行统计时间范围"
+	                        label="时间范围"
+	                        mode={bankScopeMode}
+	                        years={availableScopeYears}
+	                        year={bankScopeYear}
+	                        month={bankScopeMonth}
+	                        open={bankScopePanel === "scope"}
+	                        onToggle={() => toggleScopeSelection(bankScopePanel, setBankScopePanel)}
+	                        onModeChange={setBankScopeMode}
+	                        onYearChange={setBankScopeYear}
+	                        onMonthChange={setBankScopeMonth}
+	                        onClose={() => setBankScopePanel(null)}
+	                      />
+	                    </div>
+	                  </div>
                 </div>
                 <div className="cost-explorer-grid project">
                   <CostExplorerList<CostBankExplorerRow>
@@ -2178,125 +1758,25 @@ export default function CostStatisticsPage() {
                   <div className="cost-section-heading-copy">
                     <h2>按费用类型统计</h2>
                     <span>{expenseTypeScopeLabel}</span>
-                  </div>
-                  <div className="cost-section-heading-actions cost-project-scope-actions">
-                    <div ref={scopeControlsRef} className="cost-scope-controls">
-                      <div className="cost-scope-toggle" role="tablist" aria-label="费用类型统计时间范围">
-                        <button
-                          className={expenseTypeScopeMode === "all" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() => {
-                            setExpenseTypeScopeMode("all");
-                            setExpenseTypeScopePanel(null);
-                          }}
-                        >
-                          全部时间
-                        </button>
-                        <button
-                          className={expenseTypeScopeMode === "year" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(
-                              expenseTypeScopeMode,
-                              expenseTypeScopePanel,
-                              "year",
-                              setExpenseTypeScopeMode,
-                              setExpenseTypeScopePanel,
-                            )
-                          }
-                        >
-                          {formatScopeButtonLabel("按年统计", expenseTypeScopeMode === "year", `${expenseTypeScopeYear}年`)}
-                        </button>
-                        <button
-                          className={expenseTypeScopeMode === "month" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(
-                              expenseTypeScopeMode,
-                              expenseTypeScopePanel,
-                              "month",
-                              setExpenseTypeScopeMode,
-                              setExpenseTypeScopePanel,
-                            )
-                          }
-                        >
-                          {formatScopeButtonLabel(
-                            "按月统计",
-                            expenseTypeScopeMode === "month",
-                            formatMonthLabel(expenseTypeScopeMonth),
-                          )}
-                        </button>
-                        <button
-                          className={expenseTypeScopeMode === "custom" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(
-                              expenseTypeScopeMode,
-                              expenseTypeScopePanel,
-                              "custom",
-                              setExpenseTypeScopeMode,
-                              setExpenseTypeScopePanel,
-                            )
-                          }
-                        >
-                          {formatScopeButtonLabel(
-                            "自定义时间段",
-                            expenseTypeScopeMode === "custom",
-                            `${normalizeDateRange(expenseTypeScopeStartDate, expenseTypeScopeEndDate).startDate}至${normalizeDateRange(expenseTypeScopeStartDate, expenseTypeScopeEndDate).endDate}`,
-                          )}
-                        </button>
-                      </div>
-                      {expenseTypeScopePanel === "year" ? (
-                        <div className="cost-scope-floating-panel">
-                          <ScopeYearPicker
-                            ariaLabel="费用类型统计年份"
-                            years={availableScopeYears}
-                            value={expenseTypeScopeYear}
-                            onChange={setExpenseTypeScopeYear}
-                          />
-                        </div>
-                      ) : null}
-                      {expenseTypeScopePanel === "month" ? (
-                        <div className="cost-scope-floating-panel">
-                          <MonthPicker
-                            inline
-                            value={expenseTypeScopeMonth}
-                            onChange={setExpenseTypeScopeMonth}
-                            ariaLabel="费用类型统计月份"
-                            caption={null}
-                          />
-                        </div>
-                      ) : null}
-                      {expenseTypeScopePanel === "custom" ? (
-                        <div className="cost-scope-floating-panel">
-                          <div className="cost-scope-date-panel">
-                            <div className="cost-date-range-fields">
-                              <label className="cost-inline-field">
-                                <span>开始日期</span>
-                                <input
-                                  aria-label="费用类型统计开始日期"
-                                  className="cost-date-input"
-                                  type="date"
-                                  value={expenseTypeScopeStartDate}
-                                  onChange={(event) => setExpenseTypeScopeStartDate(event.target.value)}
-                                />
-                              </label>
-                              <label className="cost-inline-field">
-                                <span>结束日期</span>
-                                <input
-                                  aria-label="费用类型统计结束日期"
-                                  className="cost-date-input"
-                                  type="date"
-                                  value={expenseTypeScopeEndDate}
-                                  onChange={(event) => setExpenseTypeScopeEndDate(event.target.value)}
-                                />
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
+	                  </div>
+	                  <div className="cost-section-heading-actions cost-project-scope-actions">
+	                    <div ref={scopeControlsRef} className="cost-scope-controls">
+	                      <ScopeRangePicker
+	                        ariaLabel="费用类型统计时间范围"
+	                        label="时间范围"
+	                        mode={expenseTypeScopeMode}
+	                        years={availableScopeYears}
+	                        year={expenseTypeScopeYear}
+	                        month={expenseTypeScopeMonth}
+	                        open={expenseTypeScopePanel === "scope"}
+	                        onToggle={() => toggleScopeSelection(expenseTypeScopePanel, setExpenseTypeScopePanel)}
+	                        onModeChange={setExpenseTypeScopeMode}
+	                        onYearChange={setExpenseTypeScopeYear}
+	                        onMonthChange={setExpenseTypeScopeMonth}
+	                        onClose={() => setExpenseTypeScopePanel(null)}
+	                      />
+	                    </div>
+	                  </div>
                 </div>
                 <div className="cost-explorer-grid expense">
                   <CostExplorerList<ExpenseTypeExplorerDisplayRow>
@@ -2352,120 +1832,20 @@ export default function CostStatisticsPage() {
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
                     <div ref={scopeControlsRef} className="cost-scope-controls">
-                      <div className="cost-scope-toggle" role="tablist" aria-label="流水标签统计时间范围">
-                        <button
-                          className={bankTagScopeMode === "all" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() => {
-                            setBankTagScopeMode("all");
-                            setBankTagScopePanel(null);
-                          }}
-                        >
-                          全部时间
-                        </button>
-                        <button
-                          className={bankTagScopeMode === "year" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(
-                              bankTagScopeMode,
-                              bankTagScopePanel,
-                              "year",
-                              setBankTagScopeMode,
-                              setBankTagScopePanel,
-                            )
-                          }
-                        >
-                          {formatScopeButtonLabel("按年统计", bankTagScopeMode === "year", `${bankTagScopeYear}年`)}
-                        </button>
-                        <button
-                          className={bankTagScopeMode === "month" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(
-                              bankTagScopeMode,
-                              bankTagScopePanel,
-                              "month",
-                              setBankTagScopeMode,
-                              setBankTagScopePanel,
-                            )
-                          }
-                        >
-                          {formatScopeButtonLabel(
-                            "按月统计",
-                            bankTagScopeMode === "month",
-                            formatMonthLabel(bankTagScopeMonth),
-                          )}
-                        </button>
-                        <button
-                          className={bankTagScopeMode === "custom" ? "cost-scope-toggle-btn active" : "cost-scope-toggle-btn"}
-                          type="button"
-                          onClick={() =>
-                            toggleScopeSelection(
-                              bankTagScopeMode,
-                              bankTagScopePanel,
-                              "custom",
-                              setBankTagScopeMode,
-                              setBankTagScopePanel,
-                            )
-                          }
-                        >
-                          {formatScopeButtonLabel(
-                            "自定义时间段",
-                            bankTagScopeMode === "custom",
-                            `${normalizeDateRange(bankTagScopeStartDate, bankTagScopeEndDate).startDate}至${normalizeDateRange(bankTagScopeStartDate, bankTagScopeEndDate).endDate}`,
-                          )}
-                        </button>
-                      </div>
-                      {bankTagScopePanel === "year" ? (
-                        <div className="cost-scope-floating-panel">
-                          <ScopeYearPicker
-                            ariaLabel="流水标签统计年份"
-                            years={availableScopeYears}
-                            value={bankTagScopeYear}
-                            onChange={setBankTagScopeYear}
-                          />
-                        </div>
-                      ) : null}
-                      {bankTagScopePanel === "month" ? (
-                        <div className="cost-scope-floating-panel">
-                          <MonthPicker
-                            inline
-                            value={bankTagScopeMonth}
-                            onChange={setBankTagScopeMonth}
-                            ariaLabel="流水标签统计月份"
-                            caption={null}
-                          />
-                        </div>
-                      ) : null}
-                      {bankTagScopePanel === "custom" ? (
-                        <div className="cost-scope-floating-panel">
-                          <div className="cost-scope-date-panel">
-                            <div className="cost-date-range-fields">
-                              <label className="cost-inline-field">
-                                <span>开始日期</span>
-                                <input
-                                  aria-label="流水标签统计开始日期"
-                                  className="cost-date-input"
-                                  type="date"
-                                  value={bankTagScopeStartDate}
-                                  onChange={(event) => setBankTagScopeStartDate(event.target.value)}
-                                />
-                              </label>
-                              <label className="cost-inline-field">
-                                <span>结束日期</span>
-                                <input
-                                  aria-label="流水标签统计结束日期"
-                                  className="cost-date-input"
-                                  type="date"
-                                  value={bankTagScopeEndDate}
-                                  onChange={(event) => setBankTagScopeEndDate(event.target.value)}
-                                />
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
+                      <ScopeRangePicker
+                        ariaLabel="流水标签统计时间范围"
+                        label="时间范围"
+                        mode={bankTagScopeMode}
+                        years={availableScopeYears}
+                        year={bankTagScopeYear}
+                        month={bankTagScopeMonth}
+                        open={bankTagScopePanel === "scope"}
+                        onToggle={() => toggleScopeSelection(bankTagScopePanel, setBankTagScopePanel)}
+                        onModeChange={setBankTagScopeMode}
+                        onYearChange={setBankTagScopeYear}
+                        onMonthChange={setBankTagScopeMonth}
+                        onClose={() => setBankTagScopePanel(null)}
+                      />
                     </div>
                   </div>
                 </div>

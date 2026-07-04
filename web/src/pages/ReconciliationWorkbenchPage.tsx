@@ -224,7 +224,7 @@ const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
 const WORKBENCH_REFRESH_POLL_INTERVAL_MS = 5_000;
 const WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS = 300;
-const WORKBENCH_OPERATION_FRESH_POLL_MS = 300;
+const WORKBENCH_OPERATION_FRESH_POLL_MS = 150;
 const WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS = 20_000;
 const WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS = 10_000;
 
@@ -1553,7 +1553,10 @@ export default function ReconciliationWorkbenchPage() {
       onProgress?.({ phase: "syncing", message: syncingMessage, committed: true });
       await waitForOperationFreshness(
         targets,
-        { timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS },
+        {
+          timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS,
+          intervalMs: WORKBENCH_OPERATION_FRESH_POLL_MS,
+        },
       );
     }
     const projectionApplied = !waitForFreshWorkbenchLoad && actionResult
@@ -1619,7 +1622,10 @@ export default function ReconciliationWorkbenchPage() {
       });
       await waitForOperationFreshness(
         targets,
-        { timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS },
+        {
+          timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS,
+          intervalMs: WORKBENCH_OPERATION_FRESH_POLL_MS,
+        },
       );
     }
     if (result.workbenchRefreshRequired || targets.length > 0) {

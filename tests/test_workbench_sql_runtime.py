@@ -7517,7 +7517,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "source_version": 19,
                     "reason": "workbench_shard_published",
                     "priority": "low",
-                    "delay_seconds": 3.0,
+                    "delay_seconds": 0.0,
                     "trace_id": "trace-workbench-month",
                 }
             ],
@@ -7563,6 +7563,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result["aggregate_enqueued"], True)
         self.assertEqual(queue.aggregate_enqueued[0]["parent_scope_keys"], ["2026-05"])
+        self.assertEqual(queue.aggregate_enqueued[0]["delay_seconds"], 3.0)
 
     def test_workbench_refresh_handler_expands_all_into_month_shards(self) -> None:
         class FakeBuilder:

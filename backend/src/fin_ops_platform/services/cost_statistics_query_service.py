@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
-from typing import Any, Callable
+from typing import Any
 
 from openpyxl import Workbook
 
@@ -36,20 +35,12 @@ class CostStatisticsQueryService:
     def __init__(
         self,
         *,
-        cost_statistics_service: Any,
         runtime_service: Any,
-        read_model_service: Any | None = None,
         redis_helper: Any | None = None,
         sql_read_repository: Any | None = None,
-        requires_sql_read_model_runtime: Callable[[], bool] | None = None,
-        persist_read_models: Callable[..., None] | None = None,
     ) -> None:
-        self._cost_statistics_service = cost_statistics_service
         self._runtime_service = runtime_service
-        self._read_model_service = read_model_service
         self._sql_read_repository = sql_read_repository
-        self._requires_sql_read_model_runtime = requires_sql_read_model_runtime or (lambda: False)
-        self._persist_read_models = persist_read_models
         self._read_model_query_gateway = ReadModelQueryGateway(
             queue_repository=ReadModelRefreshQueueAdapter(
                 scope_type="cost_statistics",
@@ -63,63 +54,22 @@ class CostStatisticsQueryService:
         sql_result = self.get_month_from_sql_read_model(month, normalized_project_scope)
         if sql_result is not None:
             return sql_result
-        payload = self._cost_statistics_service.get_month_statistics(
+        return self._refreshing_month_payload(
             month,
-            project_scope=normalized_project_scope,
-        )
-        return payload, False
+            normalized_project_scope,
+            reason="api_sql_repository_unavailable",
+        ), False
 
     def get_explorer(self, month: str, project_scope: str) -> tuple[dict[str, Any], bool]:
         normalized_project_scope = self._normalize_project_scope(project_scope)
         sql_result = self.get_explorer_from_sql_read_model(month, normalized_project_scope)
         if sql_result is not None:
             return sql_result
-        if self._requires_sql_read_model_runtime():
-            scope_key = self._runtime_service.request_scope_key(month, normalized_project_scope)
-            self._runtime_service.enqueue_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
-            payload = self.empty_explorer_payload(month)
-            payload["error"] = "read_model_unavailable"
-            payload["read_model_status"] = "refreshing"
-            payload["read_model_scope_key"] = scope_key
-            return payload, False
-
-        read_model_service = self._read_model_service
-        if read_model_service is not None:
-            cached_read_model = read_model_service.get_read_model(month, normalized_project_scope)
-            if isinstance(cached_read_model, dict):
-                cached_payload = cached_read_model.get("payload")
-                if isinstance(cached_payload, dict):
-                    return cached_payload, True
-
-        if month == "all":
-            self._runtime_service.schedule_cache_warmup(["all"], reason="explorer_all_cache_miss")
-            return self.empty_explorer_payload(month), False
-
-        payload = self._cost_statistics_service.get_explorer(
+        return self._refreshing_explorer_payload(
             month,
-            project_scope=normalized_project_scope,
-        )
-        if read_model_service is not None:
-            read_model = read_model_service.upsert_read_model(
-                month,
-                normalized_project_scope,
-                payload,
-                generated_at=datetime.now().isoformat(),
-                source_scope_keys=[month],
-                cache_status="ready",
-            )
-            scope_key = self._runtime_service.read_model_scope_key(
-                month,
-                normalized_project_scope,
-                read_model=read_model,
-            )
-            if self._persist_read_models is not None:
-                self._persist_read_models(
-                    snapshot=read_model_service.snapshot_scope_keys([scope_key]),
-                    changed_scope_keys=[scope_key],
-                    operation="upsert_cost_statistics_explorer_read_model",
-                )
-        return payload, False
+            normalized_project_scope,
+            reason="api_sql_repository_unavailable",
+        ), False
 
     def get_project_statistics(
         self,
@@ -171,8 +121,6 @@ class CostStatisticsQueryService:
         payload = self._require_fresh_explorer("all", normalized_project_scope)
         normalized_transaction_id = str(transaction_id or "").strip()
         entries = self._entries_from_explorer_payload(payload)
-        if not entries and not self._requires_sql_read_model_runtime():
-            entries = self._cached_month_entries(normalized_project_scope)
         entry = next(
             (
                 candidate
@@ -300,6 +248,28 @@ class CostStatisticsQueryService:
             source_mismatch_reason="api_month_source_versions_stale",
         )
         return result.payload, result.cache_hit
+
+    def _refreshing_explorer_payload(self, month: str, project_scope: str, *, reason: str) -> dict[str, Any]:
+        scope_key = self._runtime_service.request_scope_key(month, project_scope)
+        refresh_enqueued = self._runtime_service.enqueue_read_model_refresh(scope_key, reason=reason)
+        payload = self.empty_explorer_payload(month)
+        payload["error"] = "read_model_unavailable"
+        payload["read_model_status"] = "refreshing"
+        payload["read_model_scope_key"] = scope_key
+        payload["refresh_reason"] = reason
+        payload["refresh_enqueued"] = refresh_enqueued
+        return payload
+
+    def _refreshing_month_payload(self, month: str, project_scope: str, *, reason: str) -> dict[str, Any]:
+        scope_key = self._runtime_service.request_scope_key(month, project_scope)
+        refresh_enqueued = self._runtime_service.enqueue_read_model_refresh(scope_key, reason=reason)
+        payload = self.empty_month_payload(month)
+        payload["error"] = "read_model_unavailable"
+        payload["read_model_status"] = "refreshing"
+        payload["read_model_scope_key"] = scope_key
+        payload["refresh_reason"] = reason
+        payload["refresh_enqueued"] = refresh_enqueued
+        return payload
 
     @staticmethod
     def month_payload_from_explorer_payload(
@@ -722,23 +692,6 @@ class CostStatisticsQueryService:
     ) -> list[dict[str, Any]]:
         payload = self._require_fresh_explorer(month, project_scope, message="成本统计数据正在刷新，请稍后重试导出。")
         entries = self._entries_from_explorer_payload(payload)
-        if not entries and str(month or "").strip().lower() == "all" and not self._requires_sql_read_model_runtime():
-            resolved_month = self._single_month_from_range(
-                start_month=start_month,
-                end_month=end_month,
-                start_date=start_date,
-                end_date=end_date,
-            )
-            if resolved_month:
-                entries = self._entries_from_explorer_payload(
-                    self._require_fresh_explorer(
-                        resolved_month,
-                        project_scope,
-                        message="成本统计数据正在刷新，请稍后重试导出。",
-                    )
-                )
-            else:
-                entries = self._cached_month_entries(project_scope)
         if start_month and end_month and start_month > end_month:
             start_month, end_month = end_month, start_month
         if start_date and end_date and start_date > end_date:
@@ -761,29 +714,6 @@ class CostStatisticsQueryService:
                 continue
             filtered.append(entry)
         return sorted(filtered, key=lambda item: (item["trade_time"], item["transaction_id"]), reverse=True)
-
-    def _cached_month_entries(self, project_scope: str) -> list[dict[str, Any]]:
-        read_model_service = self._read_model_service
-        list_scope_keys = getattr(read_model_service, "list_scope_keys", None)
-        get_by_scope_key = getattr(read_model_service, "get_read_model_by_scope_key", None)
-        get_by_month = getattr(read_model_service, "get_read_model", None)
-        if not callable(list_scope_keys) or (not callable(get_by_scope_key) and not callable(get_by_month)):
-            return []
-        entries: list[dict[str, Any]] = []
-        for scope_key in sorted(str(item) for item in list_scope_keys()):
-            if not scope_key.startswith(f"{project_scope}:") or scope_key.endswith(":all"):
-                continue
-            if callable(get_by_scope_key):
-                read_model = get_by_scope_key(scope_key)
-            else:
-                _, month = scope_key.split(":", 1)
-                read_model = get_by_month(month, project_scope)
-            if not isinstance(read_model, dict):
-                continue
-            payload = read_model.get("payload")
-            if isinstance(payload, dict):
-                entries.extend(self._entries_from_explorer_payload(payload))
-        return sorted(entries, key=lambda item: (item["trade_time"], item["transaction_id"]), reverse=True)
 
     @staticmethod
     def _single_month_from_range(

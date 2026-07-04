@@ -147,7 +147,7 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
             },
         )
 
-    def test_execute_all_scope_uses_all_invalidation_and_reports_cache_warmup_when_gateway_unavailable(self) -> None:
+    def test_execute_all_scope_uses_all_invalidation_without_warmup_fallback_when_gateway_unavailable(self) -> None:
         runtime = _RuntimeRecorder()
         executor = CostStatisticsDerivedLifecycleExecutor(
             runtime_service=runtime,
@@ -170,7 +170,7 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
             {
                 "deleted_counts": {"cost_statistics_read_models": 2},
                 "invalidated_scopes": ["active:all", "all:all"],
-                "enqueued_jobs": ["cost_statistics_cache_warmup"],
+                "enqueued_jobs": [],
             },
         )
 

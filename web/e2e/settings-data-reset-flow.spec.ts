@@ -106,7 +106,7 @@ test.describe("settings data reset browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("marks a project completed and verifies cost statistics active/all project scopes refresh", async ({ page }) => {
+  test("marks a project completed and verifies cost statistics active project scope refresh", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "admin",
@@ -155,21 +155,7 @@ test.describe("settings data reset browser flow", () => {
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     await expect(page.getByText(projectName)).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
-
-    const allScopeResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "GET"
-        && responsePathMatches(response.url(), "/api/cost-statistics/explorer")
-        && url.searchParams.get("project_scope") === "all"
-        && response.status() === 200;
-    });
-    await page.getByRole("button", { name: "项目范围：进行中" }).click();
-    const allPayload = await (await allScopeResponse).json() as { read_model_status?: string };
-    expect(allPayload.read_model_status).toBe("fresh");
-    await expect(page.getByRole("button", { name: "项目范围：所有项目" })).toBeVisible();
-    const allProject = page.getByRole("button", { name: new RegExp(projectName) });
-    await expect(allProject).toBeVisible();
-    await expect(allProject).toContainText("4,800.00");
+    await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     expect(api.count("POST /api/workbench/settings")).toBe(1);

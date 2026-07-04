@@ -33,7 +33,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         )
         self.assertEqual(plan["protected_targets"], list(PROTECTED_TARGETS))
         self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
-        self.assertIn("cost_statistics_cache_warmup", plan["will_enqueue_jobs"])
+        self.assertIn("cost_statistics.read_model.refresh", plan["will_enqueue_jobs"])
+        self.assertNotIn("cost_statistics_cache_warmup", plan["will_enqueue_jobs"])
         json.dumps(plan)
 
     def test_invoice_lifecycle_domain_precedes_downstream_invoice_pages(self) -> None:

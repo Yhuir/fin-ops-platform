@@ -47,11 +47,8 @@ class CostStatisticsDerivedLifecycleExecutor:
             if not deleted_scope_keys:
                 deleted_scope_keys = list(target_scope_keys or ["all"])
         else:
-            enqueued_jobs.append(
-                "cost_statistics.read_model.refresh"
-                if self._can_enqueue_refresh()
-                else "cost_statistics_cache_warmup"
-            )
+            if self._can_enqueue_refresh():
+                enqueued_jobs.append("cost_statistics.read_model.refresh")
 
         return {
             "deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)},

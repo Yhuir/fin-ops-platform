@@ -2448,10 +2448,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             '"deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)}',
             '"enqueued_jobs": enqueued_jobs',
             '"cost_statistics.read_model.refresh"',
-            '"cost_statistics_cache_warmup"',
         ):
             if snippet not in executor_source:
                 violations.append(f"cost statistics lifecycle executor is missing behavior {snippet}")
+        if '"cost_statistics_cache_warmup"' in executor_source:
+            violations.append("cost statistics lifecycle executor still reports legacy cache warmup fallback")
 
         self.assertEqual(violations, [])
 
@@ -2497,6 +2498,55 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"server.py still owns cost statistics route callback {removed_handler}")
         if "self._cost_statistics_routes().route(method, route_path, query)" not in server_source:
             violations.append("server.py does not delegate cost statistics routing to the route owner")
+
+        self.assertEqual(violations, [])
+
+    def test_cost_statistics_query_runtime_do_not_keep_legacy_live_fallbacks(self) -> None:
+        query_path = SERVICES_ROOT / "cost_statistics_query_service.py"
+        runtime_path = SERVICES_ROOT / "cost_statistics_runtime_service.py"
+        service_path = SERVICES_ROOT / "cost_statistics_service.py"
+        removed_export_service_path = SERVICES_ROOT / "project_detail_export_service.py"
+        server_path = APP_ROOT / "server.py"
+        query_source = query_path.read_text(encoding="utf-8")
+        runtime_source = runtime_path.read_text(encoding="utf-8")
+        service_source = service_path.read_text(encoding="utf-8")
+        server_source = server_path.read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        for forbidden in (
+            "_cost_statistics_service",
+            "self._read_model_service",
+            "read_model_service:",
+            "_cached_month_entries",
+            "upsert_cost_statistics_explorer_read_model",
+            "schedule_cache_warmup",
+            "requires_sql_read_model_runtime",
+        ):
+            if forbidden in query_source:
+                violations.append(f"CostStatisticsQueryService still has legacy fallback input {forbidden}")
+        for forbidden in (
+            "explorer_loader",
+            "_explorer_loader",
+            "_upsert_read_model",
+            "_cache_fresh_explorer_payload",
+            "worker_cost_statistics_read_model_refresh",
+            "build_fresh_cache_envelope",
+        ):
+            if forbidden in runtime_source:
+                violations.append(f"CostStatisticsRuntimeService still has legacy writer path {forbidden}")
+        for forbidden in (
+            "ProjectDetailExportService",
+            "project_detail_export_service",
+            "def get_export_preview(",
+            "def export_view(",
+            "raw_workbench_loader",
+        ):
+            if forbidden in service_source:
+                violations.append(f"CostStatisticsService still owns legacy export path {forbidden}")
+        if removed_export_service_path.exists():
+            violations.append("project_detail_export_service.py still exists")
+        if "raw_workbench_loader=self._build_raw_workbench_payload" in server_source:
+            violations.append("server.py still injects raw workbench loader into CostStatisticsService")
 
         self.assertEqual(violations, [])
 

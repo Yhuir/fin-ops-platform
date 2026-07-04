@@ -11,6 +11,7 @@
 - 成本税务 projection 中的发票输入必须来自 canonical invoice facts；OA 附件正式发票先 promotion 到 Invoice repository / `app.invoices`，不能从 `app.oa_attachment_invoice_cache` 直接拼计划或成本税务输入项。
 - 成本统计 export-preview/export 是同步生成路径；time、month、project、expense_type 导出超过 20,000 行时必须返回 `cost_statistics_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 - 成本统计月份 shard 的 Workbench 输入来自 active generation 的 `workbench_group_rows + workbench_rows` 结构化成员，不再读取 `workbench_groups.payload` 里的 `oa_rows/bank_rows` 旧 JSON 成员数组。
+- 成本统计模块边界已 closed：query service 只读 SQL read model/Redis fresh cache；miss/stale 不同步 rebuild；runtime 不持有 live explorer loader；历史 warmup job 只作兼容桥接；live export helper 和 `ProjectDetailExportService` 已删除。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖成本归因、API/导出、SQL read model、parent/shard readiness、scope gateway、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
 
 ## 记录模板
@@ -29,6 +30,17 @@
 ```
 
 ## 历史记录
+
+## 2026-07-05 - 成本统计模块化 Close：删除旧 fallback 和 live export 链路
+
+- 目标：关闭 `boundary-io.md` 中的 `partial` 状态，移除会污染 SQL read model/fresh gate 的旧代码逻辑。
+- 影响范围：`CostStatisticsQueryService`、`CostStatisticsRuntimeService`、`CostStatisticsService`、derived lifecycle plan/executor、成本统计 API tests、静态边界守卫和模块文档。
+- 关键决策：query service 只读取 SQL read model/Redis fresh cache；缺失、stale 或 repository unavailable 时返回 `refreshing` envelope 并入队 `cost_statistics.read_model.refresh`，不再同步调用 live `CostStatisticsService` 或 local read model fallback。runtime service 不再接收 `explorer_loader`，旧 `cost_statistics_cache_warmup` 入口仅关闭历史 job 或桥接 refresh，不写 read model/Redis fresh cache。live `CostStatisticsService.get_export_preview/export_view`、`ProjectDetailExportService` 和对应旧测试已删除，导出只由 `CostStatisticsQueryService` 从 fresh explorer read model 组装。
+- 文档影响：更新 `README.md`、`boundary-io.md`、`tests.md`、`state-machine.md` 和本实施记录。
+- 测试覆盖：更新 `tests/test_cost_statistics_api.py` 使用内存 SQL repository 验证 SQL read model 命中、API miss fail-closed、invalidation enqueue refresh、历史 warmup retry 关闭旧 job；更新 `tests/test_cost_statistics_service.py` 保留 business-core 成本归因；更新 `tests/test_cost_statistics_derived_lifecycle_executor.py`、`tests/test_derived_data_lifecycle_service.py` 和 `tests/test_platform_runtime_boundary_guards.py` 锁定不再回退 warmup。
+- 验证命令：`python3 -m pytest tests/test_cost_statistics_api.py tests/test_cost_statistics_service.py tests/test_cost_statistics_runtime_service.py tests/test_cost_statistics_derived_lifecycle_executor.py tests/test_derived_data_lifecycle_service.py -q`；`python3 -m pytest tests/test_cost_statistics_sql_runtime.py tests/test_platform_runtime_boundary_guards.py -q`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis worker drain、生产 p95/p99 和全浏览器回归需按最终验证命令继续执行。
+- 后续事项：生产发布前后继续执行成本统计 HTTP SLO、route shell/browser smoke 和 worker/App Status 检查。
 
 ## 2026-07-03 - Workbench group payload 去重后的成本输入迁移
 

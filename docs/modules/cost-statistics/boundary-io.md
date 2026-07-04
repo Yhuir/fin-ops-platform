@@ -1,14 +1,14 @@
 # 成本统计模块边界与 I/O
 
-日期：2026-07-04
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：medium
-- 目标边界：成本统计页面读取 `cost_statistics` read model，经 query gateway 暴露 parent rollup fresh 状态。
-- 当前缺口：local/non-SQL explorer fallback 仍作为兼容路径保留；所有新字段合同必须同步 SQL projection 与 fallback service，避免运行时 shape 分叉。
-- 旧代码删除条件：已完成 route-owner 二级读路径收口；project/detail/export/export-preview 不再从 route 直接调用旧成本统计 service，后续剩余工作是继续收敛 local/non-SQL explorer fallback 与 workbook 辅助实现。
+- 状态：closed
+- 当前边界可信度：high
+- 目标边界：成本统计页面读取 `cost_statistics` SQL read model，经 query gateway 暴露 parent rollup fresh 状态。
+- 当前结论：local/non-SQL explorer fallback、route-owner live service fallback、live export workbook helper 和旧 `ProjectDetailExportService` 已删除。成本统计页不再暴露项目范围切换按钮，页面查询固定使用 `project_scope=active`；`project_scope=all` 仍是后端 API/export/read model 合同。
+- 旧代码删除状态：route owner 不接收旧 `CostStatisticsService` 依赖；project/detail/export/export-preview 只调用 `CostStatisticsQueryService`；query miss/stale 只返回 refreshing 并入队 durable refresh，不同步扫描 live service；历史 `cost_statistics_cache_warmup` job 入口仅作为兼容桥接，关闭或转入 `cost_statistics.read_model.refresh`，不再构造 payload、写 read model 或写 Redis fresh cache。
 
 ## 职责边界
 
@@ -29,9 +29,9 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面筛选/月份/父级聚合查询 | `CostStatisticsPage.tsx`、`features/cost-statistics/api.ts` | 进入成本统计 API/query service |
+| 页面筛选/月份/父级聚合查询 | `CostStatisticsPage.tsx`、`features/cost-statistics/api.ts` | 进入成本统计 API/query service；页面主时间范围只暴露单一按钮选择 `all` / `year` / `month`，不再暴露主页面自定义日期范围；精确日期范围只属于导出中心 |
 | 流水标签三栏统计 | `CostStatisticsPage.tsx` | 输入是 fresh explorer `time_rows` 中的 `bank_tag_code`、`bank_tag_label`、`bank_tag_primary_label`、`bank_tag_sub_label`、`bank_tag_label_path`；缺失旧 payload 在 query/API mapper 层归一为 `未标记`，正常生产链路通过 schema version 重新投影 |
-| 项目明细/流水详情/导出请求 | `routes_cost_statistics.py` | 只调用 `CostStatisticsQueryService`；read model 不 fresh 时返回 `409 cost_statistics_read_model_not_fresh`，不得同步扫描旧 live service 伪装成功 |
+| 项目明细/流水详情/导出请求 | `routes_cost_statistics.py` | 只调用 `CostStatisticsQueryService`；read model 不 fresh 时返回 `409 cost_statistics_read_model_not_fresh`，不得同步扫描旧 live service 伪装成功；成本统计页面默认透传 `project_scope=active` |
 | Refresh scope | `cost_statistics` manifest | active/all month + parent aggregate |
 | Workbench 月度输入 | `read_model.workbench_generations` active generation + `read_model.workbench_groups` | 先定位 active generation，再按 `generation_id + scope_key` 读取 groups；禁止按裸 `scope_key` 扫描历史 generation |
 | 关系变更 | workbench relation/downstream lifecycle | 转换为受影响 cost_statistics scopes |
@@ -42,7 +42,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 成本统计 rows/summary | 前端页面 | query gateway 后返回 freshness；`time_rows` 输出项目/费用/银行流水字段和流水标签 `bank_tag_*` 字段 |
-| Project/detail/export payload | 前端页面 / 下载 | 由 fresh `cost_statistics` explorer read model 组装；导出保留现有 filename/workbook/row-limit contract |
+| Project/detail/export payload | 前端页面 / 下载 | 由 fresh `cost_statistics` explorer read model 组装；导出保留 filename/workbook/row-limit contract；live `CostStatisticsService` 不再拥有 export-preview/export 输出 |
 | Parent rollup | read model repository | scoped parent aggregate |
 | Dirty scope | runtime queue | fan-out 到必要 parent/month scopes |
 | Write target visibility | 导入/关系写 API | 上游写操作必须显式透出 `cost_statistics` targets，成本统计页面自身保持纯读面 |
@@ -54,6 +54,7 @@
 - `all` 语义：`queryable_parent_aggregate`
 - Worker：`cost-statistics`；旧 `cost-tax` 成本统计消费链路已移除
 - Query owner：`CostStatisticsQueryService`；项目明细、流水详情、export-preview、export 都归属该 owner。
+- Miss/stale owner：`ReadModelQueryGateway`；SQL view 缺失、stale、source mismatch 或 payload invalid 时返回 `refreshing` envelope 并入队 `cost_statistics.read_model.refresh`，禁止同步 rebuild。
 - `time_rows.bank_tag_*` 的来源是 Workbench active generation 中银行行 payload 的 `effective_category_*` / `category_*` 字段，经 `cost_statistics_bank_tags.bank_tag_context_from_row(...)` 归一化后写入成本统计 read model payload。父 scope 从已物化月份 rows 的 payload 回读这些字段，不能回头读 Workbench `all` 或银行明细页。
 - Upstream read model 输入：月份 shard 只消费 Workbench active generation；父 scope 从已物化 `read_model.cost_statistics_rows` 聚合，不读 Workbench `all` 或历史 generation。
 
@@ -71,9 +72,9 @@
 
 ## 依赖方向
 
-- 允许依赖：workbench active generation read model、workbench relation read model、cost/tax projection, query gateway。
+- 允许依赖：workbench active generation read model、workbench relation read model、cost/tax projection、query gateway。
 - 必须通过：CostStatisticsQueryService 和 read model query gateway。
-- 禁止绕过：页面/API 直接扫描源表伪装 fresh；route owner 调用旧 `CostStatisticsService.get_project_statistics/get_transaction_detail/get_export_preview/export_view`；成本统计投影按裸 `scope_key` 扫描 Workbench 历史 generation；把税金抵扣状态写入成本统计模块；成本统计页面为了流水标签直接读取银行明细页 API/read model。
+- 禁止绕过：页面/API 直接扫描源表伪装 fresh；route owner 调用旧 `CostStatisticsService.get_project_statistics/get_transaction_detail/get_export_preview/export_view`；query service 持有 live `CostStatisticsService`、local read model service 或 `_cached_month_entries` fallback；runtime service 持有 `explorer_loader`、`_upsert_read_model` 或 `worker_cost_statistics_read_model_refresh` 写入路径；成本统计投影按裸 `scope_key` 扫描 Workbench 历史 generation；把税金抵扣状态写入成本统计模块；成本统计页面为了流水标签直接读取银行明细页 API/read model。
 
 ## 测试与验证
 
@@ -87,6 +88,7 @@
 
 ## 当前缺口和删除条件
 
-- 将后端 read model 文件范围同步回模块 README。
-- route 层旧查询路径已删除；继续删除 local/non-SQL fallback 前必须验证 parent rollup、relation/import fan-out、fresh/stale UI 和导出 workbook 兼容。
+- 模块边界已 closed；后续若恢复 local fallback、live export helper、旧 warmup writer 或页面项目范围切换，必须重新打开本模块状态并补全 UAT。
+- 成本统计页面旧 UI 已删除：标题下解释文案、三张顶部 summary card、项目范围切换按钮、主页面自定义日期范围和旧范围 tab 不再作为页面 I/O；导出中心仍保留精确日期范围。
 - 成本统计页面无直接写 API；若新增设置或来源修正写入口，必须返回 cost_statistics operation barrier targets，不能只依赖页面刷新兜底。
+- 性能边界：首屏 API/read model 只能走 SQL read model + Redis fresh cache；API miss 不同步扫描 Workbench/live service。当前生产 HTTP SLO 目标继续按 page shell、explorer、summary p95 <= 1000ms 验收，worker direct refresh 保持父 scope 有界聚合。

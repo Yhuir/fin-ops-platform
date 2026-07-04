@@ -8,6 +8,7 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 WORKBENCH_SHARD_AGGREGATE_DELAY_SECONDS = 3.0
+WORKBENCH_HOT_SHARD_AGGREGATE_DELAY_SECONDS = 0.0
 
 
 class WorkbenchReadModelRefreshService:
@@ -164,6 +165,7 @@ class WorkbenchReadModelRefreshService:
             return None
         source_version = event.source_version or event.payload.get("source_version")
         aggregate_priority = "low"
+        aggregate_delay_seconds = _aggregate_delay_seconds_for(event)
         if callable(enqueue_aggregate):
             enqueue_aggregate(
                 tenant_id=event.tenant_id,
@@ -171,7 +173,7 @@ class WorkbenchReadModelRefreshService:
                 source_version=source_version,
                 reason=str(event.payload.get("reason") or "workbench_shard_published"),
                 priority=aggregate_priority,
-                delay_seconds=WORKBENCH_SHARD_AGGREGATE_DELAY_SECONDS,
+                delay_seconds=aggregate_delay_seconds,
                 trace_id=event.trace_id,
             )
         else:
@@ -249,6 +251,13 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _aggregate_delay_seconds_for(event: RuntimeQueueEvent) -> float:
+    priority = str(event.priority or "").strip().lower()
+    if priority in {"urgent", "high"}:
+        return WORKBENCH_HOT_SHARD_AGGREGATE_DELAY_SECONDS
+    return WORKBENCH_SHARD_AGGREGATE_DELAY_SECONDS
 
 
 def _normalized_parent_scope_keys(parent_scope_keys: list[Any]) -> list[str]:
