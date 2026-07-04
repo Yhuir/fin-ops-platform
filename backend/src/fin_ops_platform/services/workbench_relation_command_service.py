@@ -9,6 +9,7 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
 
 FRESH_WORKBENCH_RELATION_STATUS = "fresh"
+IMMUTABLE_OA_ATTACHMENT_BINDING_MESSAGE = "无法撤回：OA 附件发票必须和来源 OA 保持绑定。"
 
 
 class WorkbenchRelationCommandError(Exception):
@@ -536,6 +537,33 @@ class WorkbenchRelationCommandService:
             if str(row_id).strip()
         ]
         resolved_month_scope = str(active_relation.get("month_scope") or month_scope or "all")
+        if pair_service.is_immutable_oa_attachment_binding_relation(
+            active_relation,
+            row_id_aliases=row_id_aliases,
+        ):
+            expected_versions = self._withdraw_expected_versions(active_relation)
+            after_relations = [deepcopy(active_relation)]
+            preview_id = self._withdraw_preview_id(
+                operation_type="withdraw_relation",
+                active_relation=active_relation,
+                after_relations=after_relations,
+            )
+            return {
+                "operation": "withdraw_link",
+                "operation_type": "withdraw_relation",
+                "preview_id": preview_id,
+                "can_submit": False,
+                "requires_note": False,
+                "message": IMMUTABLE_OA_ATTACHMENT_BINDING_MESSAGE,
+                "active_relation": self._relation_identity(active_relation),
+                "before_relations": [deepcopy(active_relation)],
+                "after_relations": after_relations,
+                "submit_expected_versions": expected_versions,
+                "read_model_status": FRESH_WORKBENCH_RELATION_STATUS,
+                "read_model_scope_keys": self._affected_months(resolved_month_scope),
+                "read_model_stale_reasons": [],
+                "refresh_enqueued": False,
+            }
         resolved_freshness = freshness or self._assert_relation_read_model_fresh(
             row_ids=active_row_ids,
             month_scope=resolved_month_scope,
@@ -633,6 +661,15 @@ class WorkbenchRelationCommandService:
             if str(row_id).strip()
         ]
         before_month_scope = str(before_relation.get("month_scope") or "all")
+        if pair_service.is_immutable_oa_attachment_binding_relation(
+            before_relation,
+            row_id_aliases=row_id_aliases,
+        ):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_immutable_oa_attachment_binding",
+                IMMUTABLE_OA_ATTACHMENT_BINDING_MESSAGE,
+                payload={"case_id": resolved_case_id, "row_ids": before_row_ids},
+            )
         freshness = self._assert_relation_read_model_fresh(
             row_ids=before_row_ids,
             month_scope=before_month_scope,

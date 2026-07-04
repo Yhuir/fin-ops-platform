@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-07-04 - OA 自带附件发票撤回不可拆分
+
+- 目标：修复关联台撤回完整 OA+银行流水+OA 附件发票关系后，父 OA 和自带附件发票被拆成不同行的问题。
+- 影响范围：`WorkbenchPairRelationService` withdraw 状态转换、`WorkbenchRelationCommandService` withdraw preview/submit guard、`WorkbenchWriteFacade` withdraw preview payload、关联台 preview 弹窗测试。
+- 关键决策：普通 relation 没有可恢复 history 时仍撤到无关联；OA 自带附件发票不是普通可撤销配对，而是父 OA 的 source binding。完整关系撤回时只撤用户新增的银行/其他关系，必须保留或重建父 OA+附件发票 active relation；纯父 OA+附件发票撤回必须返回不可提交 preview 和业务错误。
+- 文档影响：已同步 `README.md`、`boundary-io.md`、`state-machine.md`、`tests.md`，并同步 `docs/modules/workbench-relations/`。
+- 测试覆盖：pair service、relation command service、Workbench v2 API、前端 preview 弹窗均有定向回归。
+- 验证命令：见本轮最终说明。
+- 未测风险：本地测试无法证明生产固定 145 样本的 worker drain 和 all-scope active generation 最终一致；发布后需要按生产操作步骤验证。
+
 ## 2026-07-03 - Workbench generation payload owner 去重
 
 - 目标：删除 Workbench 月分片 refresh 写路径里的旧 grouped payload 放大，确保 snapshot/group/group_row 三层 owner 边界清晰。
@@ -736,7 +746,7 @@
 - 目标：彻底修复 withdraw preview/submit 中未恢复 row 仍在“操作后”显示成同一行的问题，避免未标记 manual history、自动候选或同 row-set snapshot 污染撤回链路。
 - 影响范围：`WorkbenchPairRelationService`、`WorkbenchRelationCommandService` relation mode registry、Workbench withdraw preview API、PostgreSQL relation history replay dry-run。
 - 关键决策：可恢复关系由统一策略 `workbench_relation_modes` 判定；真实 active before relation 写入 confirm history 时才由 PairRelationService 标记 `special_metadata.restorable_on_withdraw=true`。外部传入的 display/candidate/history snapshot 不再因为 `relation_mode != existing_case` 就默认恢复；同一 row-set snapshot 永不恢复。
-- 清理：移除 withdraw preview 的 OA 附件无 history 合成恢复路径；OA 附件 ID 解析 helper 仅保留给 active relation repair 使用，不再参与撤回恢复。
+- 清理：移除 withdraw preview 依赖 display/existing_case 的 OA 附件无 history 合成恢复路径；OA 附件 ID 解析不允许把任意旧显示归属恢复为 active relation。2026-07-04 起，父 OA + 自带附件发票改由关系状态机维护不可变 source binding，完整 relation 撤回后必须保留该 binding，纯 OA+自带附件发票撤回必须被阻止。
 - 测试覆盖：新增/更新 PairRelationService、Workbench v2 API、relation command service 和 history replay 工具测试，覆盖 owned active snapshot 可恢复、未拥有 manual snapshot 不恢复、同 row-set 不恢复、API after groups 拆行、发布前 dry-run 报告非可恢复 history。
 - 文档影响：更新本模块 `README.md`、`tests.md`、`implementation-notes.md`，并同步 Workbench relation 模块测试/实施说明。
 - 未测风险：真实生产数据 dry-run 需要发布前在目标环境执行；本轮本地 fake connection 覆盖审计输出结构，不读取生产库。

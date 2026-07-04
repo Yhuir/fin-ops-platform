@@ -2045,6 +2045,7 @@ class WorkbenchWriteFacade:
         )
 
     def _withdraw_relation_preview_payload(self, preview: dict[str, object], *, month: str) -> dict[str, object]:
+        can_submit = bool(preview.get("can_submit", True))
         selected_row_ids = [
             str(row_id)
             for row_id in list(preview.get("selected_row_ids") or [])
@@ -2077,10 +2078,11 @@ class WorkbenchWriteFacade:
             alias_map=selected_alias_map,
         )
         active_relation = before_relations[0] if before_relations else {}
-        after_relations = self._withdraw_restored_relations_excluding_active(
-            after_relations,
-            active_relation=active_relation,
-        )
+        if can_submit:
+            after_relations = self._withdraw_restored_relations_excluding_active(
+                after_relations,
+                active_relation=active_relation,
+            )
         rows, _synthetic_after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
             active_relation=active_relation,
             after_relations=after_relations,
@@ -2100,7 +2102,7 @@ class WorkbenchWriteFacade:
             "operation": "withdraw_link",
             "operation_type": "withdraw_relation",
             "preview_id": str(preview.get("preview_id") or ""),
-            "can_submit": bool(preview.get("can_submit", True)),
+            "can_submit": can_submit,
             "requires_note": bool(preview.get("requires_note")),
             "message": str(preview.get("message") or ""),
             "before": {"groups": before_groups},
@@ -2162,8 +2164,21 @@ class WorkbenchWriteFacade:
         return [
             dict(relation)
             for relation in list(relations or [])
-            if not workbench_relations_have_same_row_set(relation, active_relation)
+            if (
+                not workbench_relations_have_same_row_set(relation, active_relation)
+                or WorkbenchWriteFacade._relation_contains_immutable_oa_attachment_binding(relation)
+            )
         ]
+
+    @staticmethod
+    def _relation_contains_immutable_oa_attachment_binding(relation: dict[str, object]) -> bool:
+        special_metadata = relation.get("special_metadata")
+        if not isinstance(special_metadata, dict):
+            return False
+        return (
+            special_metadata.get("immutable_oa_attachment_binding") is True
+            or special_metadata.get("contains_immutable_oa_attachment_binding") is True
+        )
 
     def _canonicalize_withdraw_row_ids(
         self,

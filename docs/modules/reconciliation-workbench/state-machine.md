@@ -23,6 +23,7 @@
 - `oa_bank_invoice_exact_amount` 三方闭合允许从任意强证据边进入：OA+银行强证据、OA+发票强证据或银行+发票强证据都可以作为 anchor；当银行流水与发票先形成唯一强证据且金额闭合时，只能补齐唯一一个同时具备 OA-银行或 OA-发票业务证据的 OA。仅金额相同、缺少业务文本/名称/税号/source evidence 的 OA 不能被自动提升为三方 paired。
 - `oa_bank_invoice_exact_sum` 三方闭合覆盖任意非空三栏 exact-sum 组合：1 条或多条 OA、1 条或多条银行流水、1 张或多张正式发票均可参与，但每栏组合大小有固定上限。生成 paired decision 的前置条件是三栏同方向、总额严格相等、处在五个月窗口内、预约付款日期兼容、证据图在 OA/银行/发票 row 之间连通且每个 row 至少有一条确定性证据边。现有 `oa_bank_invoice_exact_amount`、OA 附件发票、单笔精确和多 OA+bank pair 等具体规则优先；通用 exact-sum 只补缺口。仅金额相等、证据断裂、候选组合过多或多个候选竞争时必须保持 open/conflict。
 - OA 附件发票 source-linked 是父 OA 归属证据，不是最终分区状态。候选 case 中 OA+银行先出现、OA 附件发票随后通过 `derived_from_oa_id` 回挂父 OA 时，回挂后的 group 必须重新判定三栏闭合：1 条 OA、1 条银行流水和 1 张或多张 OA 附件发票含税合计闭合时进入 paired；缺少银行流水、金额不闭合、存在多个可选银行流水或附件来源不明确时保持 source-linked open。
+- OA 自带附件发票一旦能通过 canonical row id 或 source alias 证明父 OA，必须始终与父 OA 保持同一 active relation。用户撤回完整 OA+银行+附件发票关系时，只能撤回用户新增的银行/其他关系，不能把 OA 与自带附件发票拆成不同 open 行；用户只选择 OA+自带附件发票撤回时，preview 必须提示“无法撤回”并禁用提交。
 - `oa_bank_exact_amount` 预约付款日期消歧：当 OA 文本明确包含“预约 X 月 X 日转款/付款/支付/打款”时，该日期是 OA-bank 候选的强消歧证据；只有银行流水真实交易日期与预约日期一致的候选可继续参与唯一性判断。预约日期不替代金额、方向和业务文本证据；没有明确预约付款日期时，重复同金额候选仍保持 conflict/open，不随机选择。
 - 单笔 `oa_bank_exact_amount` 优先于多流水合计；存在多个等额银行流水组合、任一流水缺少证据、或已有更高优先级候选时，不自动选择。
 - 发票方向归一化是自动匹配前置契约：`input`、`进项*` 和 `source_kind=oa_attachment_invoice` 只进入支出侧匹配，`output`、`销项*` 只进入收入侧匹配；未知发票类型 fail closed，不得默认当作支出侧发票参与三方候选或金额核对。

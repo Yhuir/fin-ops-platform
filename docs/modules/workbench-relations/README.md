@@ -130,7 +130,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 - row id 去重并保持 row type 对齐。
 - active case reuse 和 active row overlap 校验。
 - relation replace/cancel/withdraw/history 生成。
-- withdraw 的上一状态计算和无 history 时撤到无关联的领域转换。
+- withdraw 的上一状态计算、普通无 history 时撤到无关联、以及 OA 自带附件发票 binding 不可拆分的领域转换。
 - mode/state registry 的领域规则校验可以委托给它或独立 policy。
 
 禁止它承担以下职责：
@@ -175,7 +175,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 
 写入口必须迁移到 command service：
 
-- `POST /api/workbench/actions/confirm-link`、`cancel-link` 和 `withdraw-link` 已迁入 command service；缺 command service 时 fail fast，不再回退到 direct pair snapshot 写入。`withdraw-link` preview/submit 由 command service 锁定 relation identity；无 history 时撤到无关联，不再由 facade 合成恢复关系。个人暂借款还清 `confirm_personal_advance_repayment` 已迁入 command service。Workbench exception closed apply 已通过 command service 写入 `normal_match` / `oa_exempt`，并在创建本地 exception case 前执行 canonical relation write safety。`server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 已通过 command service 写入；其他 server 读/展示/persist helper 仍待后续抽离。
+- `POST /api/workbench/actions/confirm-link`、`cancel-link` 和 `withdraw-link` 已迁入 command service；缺 command service 时 fail fast，不再回退到 direct pair snapshot 写入。`withdraw-link` preview/submit 由 command service 锁定 relation identity；普通无 history relation 撤到无关联，不再由 facade 合成任意恢复关系。OA 自带附件发票是父 OA 的 source binding，完整关系撤回后必须保留父 OA+附件发票 active relation，纯父 OA+附件发票撤回必须返回不可提交 preview 和业务错误。个人暂借款还清 `confirm_personal_advance_repayment` 已迁入 command service。Workbench exception closed apply 已通过 command service 写入 `normal_match` / `oa_exempt`，并在创建本地 exception case 前执行 canonical relation write safety。`server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 已通过 command service 写入；其他 server 读/展示/persist helper 仍待后续抽离。
 
 `split_candidate` 不属于 relation lifecycle，不写入 `app.workbench_pair_relations` 或 relation history。关联台未配对区统一按钮在没有 active relation 但命中自动候选时，由 `WorkbenchWriteFacade` 复用 `WorkbenchCandidateMatchService.mark_candidates_suppressed(..., suppressed_reason="manual_override")` suppress 候选，并触发 Workbench read model refresh。
 - pending invoice manual invoice confirm、attach existing 单条和批量已迁入 command service；读侧 active linked relation 仍走 `WorkbenchRelationReadFacade` distribution，写侧 row occupation、version、idempotency 和状态转换由 canonical relation command 负责。

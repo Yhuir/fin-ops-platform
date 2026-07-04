@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_row_id_matches_oa
 from fin_ops_platform.services.workbench_relation_modes import (
     DISPLAY_ONLY_WORKBENCH_RELATION_MODES,
     is_workbench_relation_snapshot_restorable,
@@ -438,19 +439,25 @@ class WorkbenchPairRelationService:
         if not isinstance(active_relation, dict):
             raise KeyError("workbench_pair_relation_not_found")
         confirm_history = self._latest_confirm_history_for_relation(active_relation)
+        after_relations = (
+            self._restorable_relation_snapshots(
+                confirm_history.get("before_relations") or [],
+                active_relation=active_relation,
+                row_id_aliases=row_id_aliases,
+            )
+            if isinstance(confirm_history, dict)
+            else []
+        )
+        after_relations = self._preserve_oa_attachment_bindings(
+            after_relations,
+            active_relation=active_relation,
+            row_id_aliases=row_id_aliases,
+        )
         return {
             "active_relation": deepcopy(active_relation),
             "confirm_history": deepcopy(confirm_history) if isinstance(confirm_history, dict) else {},
             "before_relations": [deepcopy(active_relation)],
-            "after_relations": (
-                self._restorable_relation_snapshots(
-                    confirm_history.get("before_relations") or [],
-                    active_relation=active_relation,
-                    row_id_aliases=row_id_aliases,
-                )
-                if isinstance(confirm_history, dict)
-                else []
-            ),
+            "after_relations": after_relations,
         }
 
     def withdraw_latest_for_row_ids(
@@ -465,6 +472,11 @@ class WorkbenchPairRelationService:
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         preview = self.preview_withdraw_for_row_ids(row_ids, row_id_aliases=row_id_aliases)
         active_relation = preview["active_relation"]
+        if self.is_immutable_oa_attachment_binding_relation(
+            active_relation,
+            row_id_aliases=row_id_aliases,
+        ):
+            raise ValueError("immutable_oa_attachment_binding")
         restored_relations = list(preview["after_relations"])
         if not restored_relations and fallback_after_relations:
             restored_relations = self._restorable_relation_snapshots(
@@ -472,6 +484,11 @@ class WorkbenchPairRelationService:
                 active_relation=active_relation,
                 row_id_aliases=row_id_aliases,
             )
+        restored_relations = self._preserve_oa_attachment_bindings(
+            restored_relations,
+            active_relation=active_relation,
+            row_id_aliases=row_id_aliases,
+        )
         timestamp = created_at or self._timestamp()
         self.cancel_relation(str(active_relation.get("case_id", "")), cancelled_at=timestamp)
         normalized_restored_relations: list[dict[str, Any]] = []
@@ -631,6 +648,24 @@ class WorkbenchPairRelationService:
         return self.cancel_relation(str(relation.get("case_id", "")), cancelled_at=cancelled_at)
 
     @classmethod
+    def is_immutable_oa_attachment_binding_relation(
+        cls,
+        relation: dict[str, Any],
+        *,
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> bool:
+        binding_row_ids: set[str] = set()
+        for binding_relation in cls._oa_attachment_binding_relations(
+            relation,
+            row_id_aliases=row_id_aliases,
+        ):
+            binding_row_ids.update(
+                cls._relation_row_id_set(binding_relation, row_id_aliases=row_id_aliases)
+            )
+        relation_row_ids = cls._relation_row_id_set(relation, row_id_aliases=row_id_aliases)
+        return bool(binding_row_ids) and relation_row_ids == binding_row_ids
+
+    @classmethod
     def _normalize_pair_relations(cls, pair_relations: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         normalized: dict[str, dict[str, Any]] = {}
         for case_id, relation in pair_relations.items():
@@ -710,6 +745,208 @@ class WorkbenchPairRelationService:
     @staticmethod
     def _row_type_for_row_id(row_id: str) -> str:
         return row_type_for_workbench_row_id(row_id)
+
+    @classmethod
+    def _preserve_oa_attachment_bindings(
+        cls,
+        relations: list[dict[str, Any]] | None,
+        *,
+        active_relation: dict[str, Any],
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        preserved = [deepcopy(relation) for relation in list(relations or []) if isinstance(relation, dict)]
+        for binding_relation in cls._oa_attachment_binding_relations(
+            active_relation,
+            row_id_aliases=row_id_aliases,
+        ):
+            binding_row_ids = cls._relation_row_id_set(
+                binding_relation,
+                row_id_aliases=row_id_aliases,
+            )
+            target_indexes = [
+                index
+                for index, relation in enumerate(preserved)
+                if cls._relation_row_id_set(relation, row_id_aliases=row_id_aliases).intersection(binding_row_ids)
+            ]
+            if not target_indexes:
+                preserved.append(binding_relation)
+                continue
+
+            merged = preserved[target_indexes[0]]
+            for index in target_indexes[1:]:
+                merged = cls._append_relation_rows(merged, preserved[index])
+            merged = cls._append_relation_rows(merged, binding_relation)
+            parent_oa_row_id = str(binding_relation.get("special_metadata", {}).get("parent_oa_row_id") or "")
+            special_metadata = merged.get("special_metadata")
+            merged["special_metadata"] = {
+                **(deepcopy(special_metadata) if isinstance(special_metadata, dict) else {}),
+                "contains_immutable_oa_attachment_binding": True,
+                "parent_oa_row_id": parent_oa_row_id,
+            }
+            if cls._relation_row_id_set(merged, row_id_aliases=row_id_aliases) == binding_row_ids:
+                merged["special_metadata"] = {
+                    **deepcopy(merged["special_metadata"]),
+                    "source": "oa_attachment_invoice",
+                    "immutable_oa_attachment_binding": True,
+                }
+
+            target_index_set = set(target_indexes)
+            preserved = [
+                merged if index == target_indexes[0] else relation
+                for index, relation in enumerate(preserved)
+                if index == target_indexes[0] or index not in target_index_set
+            ]
+        return preserved
+
+    @classmethod
+    def _oa_attachment_binding_relations(
+        cls,
+        relation: dict[str, Any],
+        *,
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(relation, dict):
+            return []
+        row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
+        oa_row_ids = [
+            row_id
+            for row_id in row_ids
+            if cls._relation_row_type(relation, row_id) == "oa"
+        ]
+        invoice_row_ids = [
+            row_id
+            for row_id in row_ids
+            if cls._relation_row_type(relation, row_id) == "invoice"
+        ]
+        bindings: list[dict[str, Any]] = []
+        for oa_row_id in oa_row_ids:
+            attachment_invoice_row_ids = [
+                row_id
+                for row_id in invoice_row_ids
+                if cls._invoice_row_is_oa_attachment_for_oa(
+                    row_id,
+                    oa_row_id,
+                    row_id_aliases=row_id_aliases,
+                )
+            ]
+            if not attachment_invoice_row_ids:
+                continue
+            row_ids_for_binding = [oa_row_id, *attachment_invoice_row_ids]
+            row_types_for_binding = [
+                cls._relation_row_type(relation, row_id)
+                for row_id in row_ids_for_binding
+            ]
+            timestamp = str(relation.get("created_at") or relation.get("updated_at") or cls._timestamp())
+            bindings.append(
+                cls._normalize_relation(
+                    {
+                        "case_id": f"CASE-OA-ATT-{oa_row_id}",
+                        "row_ids": row_ids_for_binding,
+                        "row_types": row_types_for_binding,
+                        "status": ACTIVE_PAIR_RELATION_STATUS,
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": str(relation.get("month_scope") or "all"),
+                        "created_by": str(relation.get("created_by") or ""),
+                        "note": "OA attachment invoice binding",
+                        "amount_check": {},
+                        "special_metadata": {
+                            "source": "oa_attachment_invoice",
+                            "immutable_oa_attachment_binding": True,
+                            "contains_immutable_oa_attachment_binding": True,
+                            "parent_oa_row_id": oa_row_id,
+                        },
+                        "created_at": timestamp,
+                        "updated_at": str(relation.get("updated_at") or timestamp),
+                    },
+                    fallback_case_id=f"CASE-OA-ATT-{oa_row_id}",
+                )
+            )
+        return bindings
+
+    @classmethod
+    def _append_relation_rows(cls, relation: dict[str, Any], rows_from: dict[str, Any]) -> dict[str, Any]:
+        merged = deepcopy(relation)
+        merged_row_ids, merged_row_types = cls._normalize_relation_entries(
+            list(merged.get("row_ids") or []),
+            list(merged.get("row_types") or []),
+        )
+        additional_row_ids, additional_row_types = cls._normalize_relation_entries(
+            list(rows_from.get("row_ids") or []),
+            list(rows_from.get("row_types") or []),
+        )
+        known_row_ids = set(merged_row_ids)
+        for row_id, row_type in zip(additional_row_ids, additional_row_types):
+            if row_id in known_row_ids:
+                continue
+            known_row_ids.add(row_id)
+            merged_row_ids.append(row_id)
+            merged_row_types.append(row_type)
+        merged["row_ids"] = merged_row_ids
+        merged["row_types"] = merged_row_types
+        return merged
+
+    @classmethod
+    def _relation_row_id_set(
+        cls,
+        relation: dict[str, Any],
+        *,
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> set[str]:
+        return {
+            cls._canonical_relation_row_id(row_id, row_id_aliases=row_id_aliases)
+            for row_id in list(relation.get("row_ids") or [])
+            if str(row_id).strip()
+        }
+
+    @staticmethod
+    def _canonical_relation_row_id(row_id: Any, *, row_id_aliases: dict[str, str] | None = None) -> str:
+        value = str(row_id).strip()
+        if not value or not row_id_aliases:
+            return value
+        seen = {value}
+        current = value
+        while True:
+            candidate = str(row_id_aliases.get(current, current)).strip()
+            if not candidate or candidate == current or candidate in seen:
+                return current
+            seen.add(candidate)
+            current = candidate
+
+    @classmethod
+    def _invoice_row_is_oa_attachment_for_oa(
+        cls,
+        invoice_row_id: str,
+        oa_row_id: str,
+        *,
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> bool:
+        invoice_candidates = {
+            str(invoice_row_id).strip(),
+            cls._canonical_relation_row_id(invoice_row_id, row_id_aliases=row_id_aliases),
+        }
+        oa_candidates = {
+            str(oa_row_id).strip(),
+            cls._canonical_relation_row_id(oa_row_id, row_id_aliases=row_id_aliases),
+        }
+        return any(
+            oa_attachment_row_id_matches_oa(invoice_candidate, oa_candidate)
+            for invoice_candidate in invoice_candidates
+            if invoice_candidate
+            for oa_candidate in oa_candidates
+            if oa_candidate
+        )
+
+    @classmethod
+    def _relation_row_type(cls, relation: dict[str, Any], row_id: str) -> str:
+        row_ids = [str(value).strip() for value in list(relation.get("row_ids") or [])]
+        row_types = [str(value).strip() for value in list(relation.get("row_types") or [])]
+        for index, candidate in enumerate(row_ids):
+            if candidate != row_id:
+                continue
+            if index < len(row_types) and row_types[index]:
+                return row_types[index]
+            break
+        return cls._row_type_for_row_id(row_id)
 
     @classmethod
     def _normalize_history(cls, history: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -2065,6 +2065,113 @@ describe("Workbench row selection and detail modal", () => {
     expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
   });
 
+  test("paired zone withdraw preview blocks immutable OA attachment invoice binding", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      workbenchWithdrawPreview: {
+        operation: "withdraw_link",
+        operation_type: "withdraw_relation",
+        preview_id: "withdraw_relation:immutable-oa-attachment",
+        can_submit: false,
+        requires_note: false,
+        message: "无法撤回：OA 附件发票必须和来源 OA 保持绑定。",
+        active_relation: {
+          case_id: "CASE-OA-ATT-oa-exp-2066-2",
+          row_ids: ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"],
+        },
+        submit_expected_versions: {
+          "relation:CASE-OA-ATT-oa-exp-2066-2": 1,
+        },
+        before: {
+          groups: [
+            {
+              group_id: "case:CASE-OA-ATT-oa-exp-2066-2",
+              group_type: "manual_confirmed",
+              can_withdraw: false,
+              oa_rows: [
+                {
+                  id: "oa-exp-2066-2",
+                  type: "oa",
+                  applicant: "陈佳玉",
+                  project_name: "大理卷烟厂余热综合利用项目",
+                  amount: "145.00",
+                },
+              ],
+              bank_rows: [],
+              invoice_rows: [
+                {
+                  id: "oa-att-inv-oa-exp-2066-2-01",
+                  type: "invoice",
+                  seller_name: "云南铁路发展有限公司",
+                  buyer_name: "云南湖源科技有限公司",
+                  total_with_tax: "145.00",
+                },
+              ],
+            },
+          ],
+        },
+        after: {
+          groups: [
+            {
+              group_id: "case:CASE-OA-ATT-oa-exp-2066-2",
+              group_type: "manual_confirmed",
+              can_withdraw: false,
+              oa_rows: [
+                {
+                  id: "oa-exp-2066-2",
+                  type: "oa",
+                  applicant: "陈佳玉",
+                  project_name: "大理卷烟厂余热综合利用项目",
+                  amount: "145.00",
+                },
+              ],
+              bank_rows: [],
+              invoice_rows: [
+                {
+                  id: "oa-att-inv-oa-exp-2066-2-01",
+                  type: "invoice",
+                  seller_name: "云南铁路发展有限公司",
+                  buyer_name: "云南湖源科技有限公司",
+                  total_with_tax: "145.00",
+                },
+              ],
+            },
+          ],
+        },
+        amount_summary: {
+          before: { oa_total: "145.00", bank_total: "-", invoice_total: "145.00" },
+          after: { oa_total: "145.00", bank_total: "-", invoice_total: "145.00" },
+          status: "matched",
+          direction: "payment",
+          mismatch_fields: [],
+        },
+        restored_relations: [
+          {
+            case_id: "CASE-OA-ATT-oa-exp-2066-2",
+            row_ids: ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"],
+            row_types: ["oa", "invoice"],
+          },
+        ],
+      },
+    });
+    renderWorkbenchPage();
+
+    const pairedZone = await screen.findByTestId("zone-paired");
+    await user.click(
+      within(pairedZone).getByRole("row", {
+        name: /2026-03-25 14:22.*华东设备供应商/,
+      }),
+    );
+    await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    expect(within(preview).getByText("撤回关联预览")).toBeInTheDocument();
+    expect(within(preview).getByText("无法撤回：OA 附件发票必须和来源 OA 保持绑定。")).toBeInTheDocument();
+    expect(within(preview).getByRole("button", { name: "确认撤回" })).toBeDisabled();
+    expect(within(preview).getAllByText("陈佳玉").length).toBeGreaterThanOrEqual(2);
+    expect(within(preview).getAllByText("云南铁路发展有限公司").length).toBeGreaterThanOrEqual(2);
+  });
+
   test("paired zone supports multi-select cancel and moves the selected group back to open", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

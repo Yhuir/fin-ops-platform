@@ -76,7 +76,7 @@ stateDiagram-v2
 - 同一个 `case_id` 已 active 且 row set 不同，必须 fail fast。
 - 同一个 row 已属于其他 active case，必须 fail fast。
 - 同一 request/idempotency key 重放，只能返回原 relation 或原业务错误。
-- `cancelled`、`withdrawn`、`superseded` 默认不恢复先前 relation。只有 `withdraw_relation` 按最新确认历史中的 `before_relations` 恢复显式标记为 `restorable_on_withdraw` 的关系；普通 cancel/delete repair 不能恢复。ETC 删除场景已明确不能恢复旧 OA+银行二栏 relation。
+- `cancelled`、`withdrawn`、`superseded` 默认不恢复先前 relation。只有 `withdraw_relation` 按最新确认历史中的 `before_relations` 恢复显式标记为 `restorable_on_withdraw` 的关系；普通 cancel/delete repair 不能恢复。ETC 删除场景已明确不能恢复旧 OA+银行二栏 relation。OA 自带附件发票 binding 是状态机例外：完整关系撤回时必须保留或重建父 OA+附件发票 relation；纯父 OA+自带附件发票 relation 不是用户可撤回的配对结果，preview/submit 都必须拒绝撤回。
 - owner withdraw 不能绕过 owner 状态。例如 no-OA submitted batch 必须从 no-OA API 撤回，不能从关联台普通取消绕过业务 batch。
 - turnover relation 如果仅包含 `oa` + `bank` rows，外部往来页可撤回 `turnover_manual_closure` 并恢复闭环确认前的 OA-bank relation；如果已升级为包含发票或其他业务 row type 的完整关系，turnover withdraw 必须返回冲突并要求到关联台处理完整关系。
 

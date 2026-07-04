@@ -14,6 +14,15 @@ Spec-first Browser e2e 审计入口：
 - 验证命令：见本轮最终说明。
 - 未测风险：本地 fake 不证明真实生产 `workbench_relation` / `pending_invoice` worker drain 时延；发布后仍需用固定 145 类样本触发 Workbench payload repair，并确认 pending invoice fresh rows 显示 OA。
 
+## 2026-07-04 - OA 自带附件发票撤回不可拆分
+
+- 变更类型：Workbench withdraw relation 状态机修复；不改变 HTTP response shape、权限、read model schema 或 dirty/outbox 合同。
+- 根因：withdraw 状态转换只依赖 `restorable_on_withdraw` 历史快照；完整 OA+银行+OA 附件发票 relation 没有可恢复 history 时，会把父 OA、自带附件发票和银行流水全部取消成独立行。业务上 OA 附件发票是来源 OA 的 source binding，不是用户可撤回的普通配对关系。
+- 新增/更新测试：`tests/test_workbench_pair_relation_service.py::WorkbenchPairRelationServiceTests::test_withdraw_preserves_oa_attachment_binding_without_history`；`test_withdraw_rejects_plain_oa_attachment_binding_relation`；`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_preview_withdraw_relation_blocks_plain_oa_attachment_binding`；`test_withdraw_relation_rejects_plain_oa_attachment_binding_submit`；`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_withdraw_link_without_history_preserves_oa_attachment_invoice_binding`；`test_withdraw_link_blocks_plain_oa_attachment_invoice_binding`；`web/src/test/WorkbenchSelection.test.tsx::paired zone withdraw preview blocks immutable OA attachment invoice binding`。
+- 七类测试决策：business core unit tests 覆盖 pair service 状态转换；service-layer tests 覆盖 command service preview/submit guard；API contract tests 覆盖 preview `can_submit=false` 和 submit error；frontend component/interaction tests 覆盖弹窗提示和禁用确认；existing feature regression tests 保留普通无 history relation 撤到无关联、display-only/history 污染不恢复。read model/cache/background job tests 不新增，因为 relation dirty/outbox 合同和 projection schema 不变；E2E 本地不新增，生产固定 145 样本验证作为发布后证据。
+- 验证命令：见本轮最终说明。
+- 未测风险：本地 fake 无法证明生产环境该 145 样本的 worker drain 和 all-scope active generation 最终一致性；发布后必须用生产 admin token 执行固定样本确认/撤回/再撤回阻断验证。
+
 ## 2026-07-03 - Workbench withdraw UoW legacy snapshot restore 删除
 
 - 变更类型：Workbench relation write-path boundary cleanup；不改变业务状态机、HTTP/API response shape、权限、审计、dirty/outbox/readiness 或 read model payload。
@@ -102,7 +111,7 @@ Spec-first Browser e2e 审计入口：
 
 - `PostgresWorkbenchRelationRepository` load/save/history/dirty scope 行为等价。
 - `workbench_relation_history_replay` 只读读取 relation、history 和 readiness，不执行 repair/write。
-- `WorkbenchRelationCommandService` confirm/cancel/withdraw/attach/no-OA/turnover/batch accounting/ETC/input reverse/OA offset 写入；withdraw 必须覆盖 preview lock、expected_versions conflict、恢复上一状态和无 history 撤到无关联。Phase 7A 已补 ETC row-id batch cancel 和 relation metadata update，Phase 7B 已补 ETC repair/link/migration 缺 command fail-fast，Phase 7C 已补 input invoice OA reverse command delegation 和缺 command fail-fast，Phase 7D 已补 batch accounting submit 缺 command fail-fast，Phase 7E 已补 turnover legacy fallback 缺 command fail-fast，Phase 7J 已补 OA offset mode 和 replace-existing repair history，Phase 7K 已补 batch accounting legacy repair command delegation 和缺 command fail-fast，Phase 7L 已补 no-OA legacy migration/repair/consolidation command delegation 和缺 command fail-fast。
+- `WorkbenchRelationCommandService` confirm/cancel/withdraw/attach/no-OA/turnover/batch accounting/ETC/input reverse/OA offset 写入；withdraw 必须覆盖 preview lock、expected_versions conflict、恢复上一状态、普通无 history 撤到无关联，以及 OA 自带附件发票 binding 不可撤回。Phase 7A 已补 ETC row-id batch cancel 和 relation metadata update，Phase 7B 已补 ETC repair/link/migration 缺 command fail-fast，Phase 7C 已补 input invoice OA reverse command delegation 和缺 command fail-fast，Phase 7D 已补 batch accounting submit 缺 command fail-fast，Phase 7E 已补 turnover legacy fallback 缺 command fail-fast，Phase 7J 已补 OA offset mode 和 replace-existing repair history，Phase 7K 已补 batch accounting legacy repair command delegation 和缺 command fail-fast，Phase 7L 已补 no-OA legacy migration/repair/consolidation command delegation 和缺 command fail-fast。
 - `repair_workbench_pair_relation_integrity` 必须覆盖 active relation 旧 row id 清理、OA 附件发票明细项 `oa-exp-*:item:*` 回挂父 OA、只读取 active generation、以及 repair 后 `amount_check` 重算；不能只改 `row_ids` 后保留旧 `invoice_total`。
 - `PendingInvoiceApplicationService` manual invoice、attach existing 单条/批量必须委托 `WorkbenchRelationCommandService`，不得直接调用 pair service 写入。
 - transaction rollback 不产生半写入。

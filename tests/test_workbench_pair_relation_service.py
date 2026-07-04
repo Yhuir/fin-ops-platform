@@ -349,6 +349,92 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
         self.assertIsNone(service.get_active_relation_by_row_id("bank-001"))
         self.assertIsNone(service.get_active_relation_by_row_id("invoice-001"))
 
+    def test_withdraw_preserves_oa_attachment_binding_without_history(self) -> None:
+        service = WorkbenchPairRelationService()
+        service.create_active_relation(
+            case_id="CASE-FULL",
+            row_ids=["oa-exp-2066-2", "txn_imported_0640", "oa-att-inv-oa-exp-2066-2-01"],
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-05",
+        )
+
+        preview = service.preview_withdraw_for_row_ids(["txn_imported_0640"])
+
+        self.assertEqual(len(preview["after_relations"]), 1)
+        self.assertEqual(preview["after_relations"][0]["case_id"], "CASE-OA-ATT-oa-exp-2066-2")
+        self.assertEqual(
+            preview["after_relations"][0]["row_ids"],
+            ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"],
+        )
+
+        restored_relations, history = service.withdraw_latest_for_row_ids(
+            ["txn_imported_0640"],
+            created_by="finance",
+        )
+
+        self.assertEqual([relation["case_id"] for relation in restored_relations], ["CASE-OA-ATT-oa-exp-2066-2"])
+        self.assertEqual(history["after_relations"][0]["case_id"], "CASE-OA-ATT-oa-exp-2066-2")
+        self.assertIsNone(service.get_active_relation_by_row_id("txn_imported_0640"))
+        restored = service.get_active_relation_by_row_id("oa-exp-2066-2")
+        assert restored is not None
+        self.assertEqual(restored["row_ids"], ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"])
+        self.assertEqual(
+            service.get_active_relation_by_row_id("oa-att-inv-oa-exp-2066-2-01"),
+            restored,
+        )
+
+    def test_withdraw_preserves_oa_attachment_when_restored_relation_contains_parent_oa(self) -> None:
+        service = WorkbenchPairRelationService()
+        previous = service.create_active_relation(
+            case_id="CASE-OA-BANK",
+            row_ids=["oa-exp-2066-2", "txn_imported_0640"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-05",
+        )
+        service.replace_with_confirmed_relation(
+            case_id="CASE-FULL",
+            row_ids=["oa-exp-2066-2", "txn_imported_0640", "oa-att-inv-oa-exp-2066-2-01"],
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-05",
+            before_relations=[previous],
+        )
+
+        preview = service.preview_withdraw_for_row_ids(["txn_imported_0640"])
+
+        self.assertEqual(len(preview["after_relations"]), 1)
+        self.assertEqual(preview["after_relations"][0]["case_id"], "CASE-OA-BANK")
+        self.assertEqual(
+            preview["after_relations"][0]["row_ids"],
+            ["oa-exp-2066-2", "txn_imported_0640", "oa-att-inv-oa-exp-2066-2-01"],
+        )
+        self.assertTrue(
+            preview["after_relations"][0]["special_metadata"]["contains_immutable_oa_attachment_binding"]
+        )
+
+    def test_withdraw_rejects_plain_oa_attachment_binding_relation(self) -> None:
+        service = WorkbenchPairRelationService()
+        service.create_active_relation(
+            case_id="CASE-OA-ATT-oa-exp-2066-2",
+            row_ids=["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-05",
+        )
+
+        preview = service.preview_withdraw_for_row_ids(["oa-exp-2066-2"])
+
+        self.assertEqual(preview["after_relations"][0]["row_ids"], ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"])
+        with self.assertRaisesRegex(ValueError, "immutable_oa_attachment_binding"):
+            service.withdraw_latest_for_row_ids(["oa-exp-2066-2"], created_by="finance")
+        self.assertIsNotNone(service.get_active_relation_by_case_id("CASE-OA-ATT-oa-exp-2066-2"))
+
     def test_withdraw_ignores_explicit_restorable_snapshot_with_same_row_set(self) -> None:
         service = WorkbenchPairRelationService()
         active = service.create_active_relation(

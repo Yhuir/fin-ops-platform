@@ -11,7 +11,7 @@
 | `stale/conflict` | 前端持有的 bank row 或 relation version 已落后，提交/撤回应失败并要求刷新。 | `expected_version`、active relation version |
 | `mismatch_pending_note` | 银行金额与选中 OA 合计不一致，尚未填写有效差额说明。 | 前端选择状态 + `BatchAccountingService` 金额校验 |
 | `mismatch_closed` | 金额不一致但已填写差额说明，提交后视为人工差额闭环。 | batch relation history / `special_metadata` |
-| `withdrawn` | 批量账务关系撤回，当前 batch relation 被 durable command repository 持久化为 `cancelled`，历史保留；不走旧 snapshot restore，OA 附件 case_id / `existing_case` 显示归属只回到读侧分组，不恢复成 active relation。 | Workbench pair relation + relation history |
+| `withdrawn` | 批量账务关系撤回，当前 batch relation 被 durable command repository 持久化为 `cancelled`，历史保留；不走调用方旧 snapshot restore，不把 OA 附件 case_id / `existing_case` 显示归属恢复成任意 active relation。若行集包含可证明的父 OA + 自带附件发票，则由 Workbench relation 状态机按不可变 source binding 保留该 active relation。 | Workbench pair relation + relation history |
 
 ### 允许流转
 

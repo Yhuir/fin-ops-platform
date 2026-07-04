@@ -78,6 +78,7 @@ type MockApiOptions = {
   workbenchExceptionPreview?: Record<string, unknown>;
   workbenchExceptionApply?: Record<string, unknown>;
   workbenchConfirmPreview?: Record<string, unknown>;
+  workbenchWithdrawPreview?: Record<string, unknown>;
   transformWorkbenchConfirmActionResponse?: (body: Record<string, unknown>) => Record<string, unknown>;
   transformWorkbenchWithdrawActionResponse?: (body: Record<string, unknown>) => Record<string, unknown>;
   workbenchExceptionPreviewStatus?: number;
@@ -6886,13 +6887,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
       const month = String(jsonBody?.month ?? "");
       return {
-        body: buildMockRelationPreview({
-          operation: "withdraw_link",
-          month,
-          rowIds,
-          caseId: "preview:withdraw",
-          workbenchStateStore,
-        }),
+        body: options.workbenchWithdrawPreview
+          ? cloneJson(options.workbenchWithdrawPreview)
+          : buildMockRelationPreview({
+              operation: "withdraw_link",
+              month,
+              rowIds,
+              caseId: "preview:withdraw",
+              workbenchStateStore,
+            }),
       };
     },
     "/api/workbench/actions/withdraw-link": ({ jsonBody }) => {

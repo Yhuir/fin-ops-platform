@@ -1,5 +1,31 @@
 # 关联台关系事实源 实施记录
 
+## 2026-07-04 - OA 自带附件发票撤回不可拆分
+
+目标：修复 Workbench withdraw 把父 OA、自带附件发票和银行流水一起取消的问题。OA 附件发票来自父 OA source binding，不是用户手工配对结果，不能被撤回状态机拆成 standalone 发票行。
+
+变更：
+
+- `WorkbenchPairRelationService.preview_withdraw_for_row_ids(...)` 和 `withdraw_latest_for_row_ids(...)` 在恢复 after relation 时保留或重建父 OA+自带附件发票 binding。
+- `WorkbenchRelationCommandService.preview_withdraw_relation(...)` 对纯父 OA+自带附件发票 relation 返回不可提交 preview，`withdraw_relation(...)` 对强制 submit 返回业务错误。
+- `WorkbenchWriteFacade._withdraw_relation_preview_payload(...)` 在 `can_submit=false` 时不再过滤掉与 active row-set 相同的 after relation，确保弹窗显示“无法撤回”时仍展示绑定前后不变。
+
+旧逻辑删除：
+
+- 禁止把 OA 附件发票 binding 当作普通无 history relation 一并撤到无关系。
+- 禁止只靠前端禁用按钮保护；API submit 也必须由 relation command 边界拒绝。
+- 禁止通过 `existing_case`、row payload `case_id` 或未标记 history 恢复任意旧关系；本次例外只针对可由 OA 附件 row id/source alias 证明的父 OA binding。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_pair_relation_service.py tests/test_workbench_relation_command_service.py tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_withdraw_link_without_history_preserves_oa_attachment_invoice_binding tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_withdraw_link_blocks_plain_oa_attachment_invoice_binding -q
+cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx --testNamePattern "immutable OA attachment"
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_pair_relation_service.py backend/src/fin_ops_platform/services/workbench_relation_command_service.py backend/src/fin_ops_platform/services/workbench_write_facade.py
+```
+
+未测风险：本地 fake 不覆盖真实生产 145 样本、PostgreSQL worker drain、`workbench:all` 最终 active generation 和跨页面 fan-out；发布后必须执行固定样本生产验证。
+
 ## 2026-07-03 - Workbench withdraw UoW 移除 legacy snapshot restore
 
 目标：移除 Workbench withdraw UoW 写路径中残留的旧 pair relation snapshot 回滚链路。生产固定 write scenario 显示 HTTP submit 存在约 1s 级事务外慢段；`WorkbenchWriteUnitOfWork` 已经拥有单一事务、幂等、relation command write 和 dirty/outbox enqueue 边界，facade 再无条件读取整张 pair snapshot 属于旧逻辑污染。
@@ -1906,7 +1932,7 @@ PYTHONPATH=backend/src python -m pytest tests/test_platform_runtime_boundary_gua
 - `WorkbenchPairRelationService` 只为真实 active before relation 写入 `special_metadata.restorable_on_withdraw=true`；外部传入的 preview/display/candidate/history snapshot 没有该标记时不可恢复。
 - 同一 row-set snapshot 即使带 `restorable_on_withdraw` 也不可恢复，避免撤回后仍显示成同一行。
 - PostgreSQL history replay dry-run 新增 `non_restorable_relation_in_confirm_history` 和 summary count，用于发布前识别撤回后会拆行的历史。
-- 移除 withdraw preview 的 OA 附件无 history 合成恢复路径；OA 附件 ID 解析 helper 只保留给 active relation repair。
+- 移除 withdraw preview 依赖 display/existing_case 的 OA 附件无 history 合成恢复路径；OA 附件 ID 解析不得把任意旧显示归属恢复为 active relation。2026-07-04 起，父 OA + 自带附件发票由撤回状态机维护不可变 source binding，完整 relation 撤回后必须保留该 binding，纯 OA+自带附件发票撤回必须被拒绝。
 
 验证：
 

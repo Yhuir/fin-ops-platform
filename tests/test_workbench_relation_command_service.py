@@ -186,6 +186,71 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-05"])
         self.assertEqual(repository.save_calls, [])
 
+    def test_preview_withdraw_relation_blocks_plain_oa_attachment_binding(self) -> None:
+        active_relation = {
+            "case_id": "CASE-OA-ATT-oa-exp-2066-2",
+            "row_ids": ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"],
+            "row_types": ["oa", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "created_by": "finance-user",
+            "created_at": "2026-05-02T10:00:00+00:00",
+            "updated_at": "2026-05-02T10:00:00+00:00",
+            "version": 2,
+        }
+        repository = FakeRelationRepository(
+            {"pair_relations": {"CASE-OA-ATT-oa-exp-2066-2": active_relation}}
+        )
+        facade = FakeRelationFacade({"status": "stale", "read_model_scope_keys": ["2026-05"]})
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            relation_facade=facade,
+            require_fresh_relations=True,
+        )
+
+        preview = service.preview_withdraw_relation(
+            row_ids=["oa-exp-2066-2"],
+            month_scope="2026-05",
+        )
+
+        self.assertFalse(preview["can_submit"])
+        self.assertIn("无法撤回", preview["message"])
+        self.assertEqual(preview["before_relations"][0]["row_ids"], active_relation["row_ids"])
+        self.assertEqual(preview["after_relations"][0]["row_ids"], active_relation["row_ids"])
+        self.assertEqual(preview["submit_expected_versions"], {"relation:CASE-OA-ATT-oa-exp-2066-2": 2})
+        self.assertEqual(facade.calls, [])
+        self.assertEqual(repository.save_calls, [])
+
+    def test_withdraw_relation_rejects_plain_oa_attachment_binding_submit(self) -> None:
+        active_relation = {
+            "case_id": "CASE-OA-ATT-oa-exp-2066-2",
+            "row_ids": ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"],
+            "row_types": ["oa", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "created_by": "finance-user",
+            "created_at": "2026-05-02T10:00:00+00:00",
+            "updated_at": "2026-05-02T10:00:00+00:00",
+            "version": 2,
+        }
+        repository = FakeRelationRepository(
+            {"pair_relations": {"CASE-OA-ATT-oa-exp-2066-2": active_relation}}
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        with self.assertRaises(WorkbenchRelationCommandError) as raised:
+            service.withdraw_relation(
+                case_id="CASE-OA-ATT-oa-exp-2066-2",
+                actor_id="finance-user",
+                operation_type="withdraw_relation",
+            )
+
+        self.assertEqual(raised.exception.error_code, "workbench_relation_immutable_oa_attachment_binding")
+        self.assertIn("无法撤回", raised.exception.message)
+        self.assertEqual(repository.save_calls, [])
+
     def test_withdraw_relation_uses_canonical_relation_when_distribution_is_stale_by_default(self) -> None:
         active_relation = {
             "case_id": "case-new",

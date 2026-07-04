@@ -7858,25 +7858,29 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         partial_row_ids = ["oa-o-202605-001", "iv-o-202605-001"]
         full_row_ids = ["oa-o-202605-001", "bk-o-202605-001", "iv-o-202605-001"]
-        partial_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/confirm-link",
-            json.dumps({"month": "2026-05", "row_ids": partial_row_ids, "case_id": "CASE-PARTIAL"}),
-        )
+        row_detail = row_detail_side_effect_for_raw_payload(raw_payload)
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            partial_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link",
+                json.dumps({"month": "2026-05", "row_ids": partial_row_ids, "case_id": "CASE-PARTIAL"}),
+            )
         self.assertEqual(partial_response.status_code, 200)
 
-        full_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/confirm-link",
-            json.dumps({"month": "2026-05", "row_ids": full_row_ids, "case_id": "CASE-FULL"}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            full_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link",
+                json.dumps({"month": "2026-05", "row_ids": full_row_ids, "case_id": "CASE-FULL"}),
+            )
         self.assertEqual(full_response.status_code, 200)
 
-        preview_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link/preview",
-            json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            preview_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link/preview",
+                json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
+            )
         self.assertEqual(preview_response.status_code, 200)
         preview_payload = json.loads(preview_response.body)
         self.assertTrue(preview_payload["can_submit"])
@@ -7886,11 +7890,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIn("case:CASE-PARTIAL", after_group_ids)
         self.assertIn("selected:bk-o-202605-001", after_group_ids)
 
-        withdraw_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link",
-            json.dumps({"month": "2026-05", "row_ids": full_row_ids, "note": "撤回最近一次关联"}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            withdraw_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link",
+                json.dumps({"month": "2026-05", "row_ids": full_row_ids, "note": "撤回最近一次关联"}),
+            )
         self.assertEqual(withdraw_response.status_code, 200)
         withdraw_payload = json.loads(withdraw_response.body)
         self.assertIn("2026-05", withdraw_payload["affected_months"])
@@ -7911,18 +7916,21 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app.handle_request("GET", "/api/workbench?month=2026-05")
 
         full_row_ids = ["oa-o-202605-001", "bk-o-202605-001", "iv-o-202605-001"]
-        full_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/confirm-link",
-            json.dumps({"month": "2026-05", "row_ids": full_row_ids, "case_id": "CASE-FULL"}),
-        )
+        row_detail = row_detail_side_effect_for_raw_payload(raw_payload)
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            full_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link",
+                json.dumps({"month": "2026-05", "row_ids": full_row_ids, "case_id": "CASE-FULL"}),
+            )
         self.assertEqual(full_response.status_code, 200)
 
-        preview_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link/preview",
-            json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            preview_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link/preview",
+                json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
+            )
 
         self.assertEqual(preview_response.status_code, 200)
         preview_payload = json.loads(preview_response.body)
@@ -7950,11 +7958,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(invoice_group["bank_rows"], [])
         self.assertEqual(preview_payload["restored_relations"], [])
 
-        withdraw_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link",
-            json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            withdraw_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link",
+                json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
+            )
         self.assertEqual(withdraw_response.status_code, 200)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-FULL"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-EXISTING-PARTIAL"))
@@ -7969,6 +7978,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             app.handle_request("GET", "/api/workbench?month=2026-05")
 
+        row_detail = row_detail_side_effect_for_raw_payload(raw_payload)
         row_ids = ["bk-o-202605-001", "iv-o-202605-001"]
         active_relation = app._workbench_pair_relation_service.create_active_relation(
             case_id="CASE-BANK-INVOICE",
@@ -7995,11 +8005,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             created_by="test",
         )
 
-        preview_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link/preview",
-            json.dumps({"month": "2026-05", "row_ids": row_ids}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            preview_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link/preview",
+                json.dumps({"month": "2026-05", "row_ids": row_ids}),
+            )
 
         self.assertEqual(preview_response.status_code, 200)
         preview_payload = json.loads(preview_response.body)
@@ -8015,11 +8026,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in bank_group["bank_rows"]], ["bk-o-202605-001"])
         self.assertEqual([row["id"] for row in invoice_group["invoice_rows"]], ["iv-o-202605-001"])
 
-        withdraw_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link",
-            json.dumps({"month": "2026-05", "row_ids": row_ids}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            withdraw_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link",
+                json.dumps({"month": "2026-05", "row_ids": row_ids}),
+            )
         self.assertEqual(withdraw_response.status_code, 200)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BANK-INVOICE"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-DISPLAY-BANK-INVOICE"))
@@ -8030,6 +8042,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             app.handle_request("GET", "/api/workbench?month=2026-05")
 
+        row_detail = row_detail_side_effect_for_raw_payload(raw_payload)
         row_ids = ["bk-o-202605-001", "iv-o-202605-001"]
         active_relation = app._workbench_pair_relation_service.create_active_relation(
             case_id="CASE-BANK-INVOICE",
@@ -8056,11 +8069,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             created_by="test",
         )
 
-        preview_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link/preview",
-            json.dumps({"month": "2026-05", "row_ids": row_ids}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            preview_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link/preview",
+                json.dumps({"month": "2026-05", "row_ids": row_ids}),
+            )
 
         self.assertEqual(preview_response.status_code, 200)
         preview_payload = json.loads(preview_response.body)
@@ -8072,16 +8086,17 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         self.assertFalse(any(group["bank_rows"] and group["invoice_rows"] for group in after_groups))
 
-        withdraw_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link",
-            json.dumps({"month": "2026-05", "row_ids": row_ids}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            withdraw_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link",
+                json.dumps({"month": "2026-05", "row_ids": row_ids}),
+            )
         self.assertEqual(withdraw_response.status_code, 200)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BANK-INVOICE"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-UNOWNED-MANUAL"))
 
-    def test_withdraw_link_without_history_does_not_restore_oa_attachment_invoice_relation(self) -> None:
+    def test_withdraw_link_without_history_preserves_oa_attachment_invoice_binding(self) -> None:
         app = build_application()
         raw_payload = build_relation_amount_raw_payload(invoice_amount="500.00")
         raw_payload["open"]["oa"][0]["id"] = "oa-exp-2066-2"
@@ -8124,20 +8139,102 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(preview_payload["amount_summary"]["after"]["invoice_total"], "500.00")
         self.assertEqual(preview_payload["amount_summary"]["mismatch_fields"], ["bank_total"])
         self.assertTrue(after_groups)
-        self.assertFalse(any(group["group_id"] == "case:CASE-OA-ATT-oa-exp-2066-2" for group in after_groups))
-        self.assertEqual(preview_payload["restored_relations"], [])
-
-        withdraw_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link",
-            json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
+        binding_group = next(
+            group
+            for group in after_groups
+            if [row["id"] for row in group["oa_rows"]] == ["oa-exp-2066-2"]
         )
+        self.assertEqual(binding_group["group_id"], "case:CASE-OA-ATT-oa-exp-2066-2")
+        self.assertEqual([row["id"] for row in binding_group["invoice_rows"]], ["oa-att-inv-oa-exp-2066-2-01"])
+        self.assertEqual(binding_group["bank_rows"], [])
+        self.assertTrue(any([row["id"] for row in group["bank_rows"]] == ["txn_imported_0640"] for group in after_groups))
+        self.assertEqual(preview_payload["restored_relations"][0]["case_id"], "CASE-OA-ATT-oa-exp-2066-2")
+        self.assertEqual(
+            preview_payload["restored_relations"][0]["row_ids"],
+            ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"],
+        )
+
+        rows_by_id = {
+            row["id"]: dict(row)
+            for pane in ("oa", "bank", "invoice")
+            for row in raw_payload["open"][pane]
+        }
+
+        def row_detail(row_id: str, **_kwargs: object) -> dict[str, object]:
+            return {"row": dict(rows_by_id[row_id])}
+
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            withdraw_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link",
+                json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
+            )
 
         self.assertEqual(withdraw_response.status_code, 200)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-AUTO-0001"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_0640"))
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-2066-2"))
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-att-inv-oa-exp-2066-2-01"))
+        restored = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-2066-2")
+        assert restored is not None
+        self.assertEqual(restored["case_id"], "CASE-OA-ATT-oa-exp-2066-2")
+        self.assertEqual(restored["row_ids"], ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"])
+        self.assertEqual(
+            app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-att-inv-oa-exp-2066-2-01"),
+            restored,
+        )
+
+    def test_withdraw_link_blocks_plain_oa_attachment_invoice_binding(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="500.00")
+        raw_payload["open"]["oa"][0]["id"] = "oa-exp-2066-2"
+        raw_payload["open"]["oa"][0]["case_id"] = "CASE-OA-ATT-oa-exp-2066-2"
+        raw_payload["open"]["oa"][0]["amount"] = "500.00"
+        raw_payload["open"]["invoice"][0]["id"] = "oa-att-inv-oa-exp-2066-2-01"
+        raw_payload["open"]["invoice"][0]["case_id"] = "CASE-OA-ATT-oa-exp-2066-2"
+        raw_payload["open"]["invoice"][0]["source_kind"] = "oa_attachment_invoice"
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-05")
+
+        row_ids = ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"]
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-OA-ATT-oa-exp-2066-2",
+            row_ids=row_ids,
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="2026-05",
+        )
+
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link/preview",
+            json.dumps({"month": "2026-05", "row_ids": row_ids}),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        self.assertFalse(preview_payload["can_submit"])
+        self.assertIn("无法撤回", preview_payload["message"])
+        self.assertEqual(preview_payload["restored_relations"][0]["row_ids"], row_ids)
+        before_groups = preview_payload["before"]["groups"]
+        after_groups = preview_payload["after"]["groups"]
+        self.assertEqual([row["id"] for row in before_groups[0]["oa_rows"]], ["oa-exp-2066-2"])
+        self.assertEqual([row["id"] for row in before_groups[0]["invoice_rows"]], ["oa-att-inv-oa-exp-2066-2-01"])
+        self.assertEqual([row["id"] for row in after_groups[0]["oa_rows"]], ["oa-exp-2066-2"])
+        self.assertEqual([row["id"] for row in after_groups[0]["invoice_rows"]], ["oa-att-inv-oa-exp-2066-2-01"])
+
+        withdraw_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link",
+            json.dumps({"month": "2026-05", "row_ids": row_ids}),
+        )
+
+        self.assertEqual(withdraw_response.status_code, 400)
+        withdraw_payload = json.loads(withdraw_response.body)
+        self.assertEqual(withdraw_payload["error"], "workbench_relation_immutable_oa_attachment_binding")
+        self.assertIn("无法撤回", withdraw_payload["message"])
+        self.assertIsNotNone(
+            app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-OA-ATT-oa-exp-2066-2")
+        )
 
     def test_withdraw_link_without_history_falls_back_to_cancelling_active_relation(self) -> None:
         app = build_application()
@@ -8158,11 +8255,19 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             },
         )
 
-        response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link/preview",
-            json.dumps({"month": "all", "row_ids": ["oa-no-history", "bk-no-history"]}),
-        )
+        def row_detail(row_id: str, **_kwargs: object) -> dict[str, object]:
+            rows = {
+                "oa-no-history": {"id": "oa-no-history", "type": "oa", "amount": "100.00"},
+                "bk-no-history": {"id": "bk-no-history", "type": "bank", "debit_amount": "90.00"},
+            }
+            return {"row": rows[row_id]}
+
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link/preview",
+                json.dumps({"month": "all", "row_ids": ["oa-no-history", "bk-no-history"]}),
+            )
 
         self.assertEqual(response.status_code, 200)
         preview_payload = json.loads(response.body)
@@ -8175,11 +8280,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(after_group_ids, ["selected:oa-no-history", "selected:bk-no-history"])
         self.assertEqual(preview_payload["restored_relations"], [])
 
-        withdraw_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/withdraw-link",
-            json.dumps({"month": "all", "row_ids": ["oa-no-history", "bk-no-history"]}),
-        )
+        with patch.object(app, "_get_api_workbench_row_detail_payload", side_effect=row_detail):
+            withdraw_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/withdraw-link",
+                json.dumps({"month": "all", "row_ids": ["oa-no-history", "bk-no-history"]}),
+            )
         self.assertEqual(withdraw_response.status_code, 200)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-NO-HISTORY"))
 
@@ -8553,6 +8659,19 @@ def build_relation_amount_raw_payload(*, invoice_amount: str) -> dict[str, objec
             ],
         },
     }
+
+
+def row_detail_side_effect_for_raw_payload(raw_payload: dict[str, object]):
+    rows_by_id = {
+        row["id"]: dict(row)
+        for pane in ("oa", "bank", "invoice")
+        for row in raw_payload["open"][pane]
+    }
+
+    def row_detail(row_id: str, **_kwargs: object) -> dict[str, object]:
+        return {"row": dict(rows_by_id[row_id])}
+
+    return row_detail
 
 
 def build_batch_accounting_raw_payload() -> dict[str, object]:
