@@ -53,6 +53,11 @@
 - 后端 Python 改动优先运行 `bash scripts/verify.sh lint`；需要自动修复导入排序时先运行 `python3 -m ruff check --select I --fix backend/src tests scripts`，再复跑 lint。
 - 需要生产 admin token 做性能验证、只读 smoke 或其它生产操作时，先使用 `scripts/with-production-admin-token.sh <command>` 自动加载本机 token；默认读取 `~/.config/fin-ops-platform/admin-token.env`，或读取 `FIN_OPS_LOCAL_ADMIN_TOKEN_ENV` 指定的文件。不要把 token 粘贴到聊天、提交到仓库或打印到日志；本机缺失时让用户运行一次 `scripts/with-production-admin-token.sh --store`。
 - 变更范围保持最小；如果整理范围扩大到重构代码或改变业务口径，先说明并等待确认。
+- 开发和修复默认采用 Ponytail 原则：先判断是否需要新增代码，优先复用现有模块、边界、helper、service、repository、read model gateway 和测试模式；删除旧逻辑优先于叠加兼容分支，不为未来需求新增抽象。
+- 复杂设计、跨模块改动、边界不清、旧链路迁移或生产级风险变更前，必须先做 grill-me 式追问：目标、受影响模块、输入 I/O、输出 I/O、事实源、旧链路、测试责任和回滚风险是否清楚；不清楚则先澄清或查代码事实源。
+- 开发和修复必须遵循当前模块化架构，保持清晰边界和 I/O；禁止让页面、route、service、repository、worker、read model、API DTO 互相污染职责。
+- 修复旧模块或迁移新链路时，必须识别并移除会继续影响新链路的旧代码逻辑；不要用并行旧路径、隐藏 fallback 或重复实现来绕过当前边界。
+- 删除或替换旧逻辑前，必须对受影响链路做全量扫描：入口、调用方、API client、service、repository、worker、read model、测试和文档；跨模块或删除公共符号时，还必须做 whole-repo symbol/text scan。
 - 大型跨模块、read model/worker、后端边界重构或需要全量定位的任务必须使用 GSD 流程。GSD 过程产物可以留在 `.planning/`，但长期事实必须沉淀到 `docs/`；不要把原始 prompt 写入主文档树。
 - 修复旧模块时，优先保持最小变更；但当旧模块职责边界已经错误，且继续补丁会让接口约定、数据流、测试责任或运维边界更分散时，不要在旧模块继续堆砌代码。应先设计符合当前架构方向的中心边界，小步迁移调用点，再删除重复、过期或绕过新边界的旧路径。此类重构必须有测试保护，并且不得扩大到与当前目标无关的业务行为。
 - 生产级需求必须同时考虑权限、审计、回滚、数据一致性和验证方式。
