@@ -1,5 +1,6 @@
 import type {
   CostExpenseTypeExplorerRow,
+  CostBankAccount,
   CostProjectScope,
   CostProjectExplorerRow,
   CostStatisticsExportPreview,
@@ -64,10 +65,18 @@ type ApiCostExpenseTypeExplorerRow = {
   project_count: number;
 };
 
+type ApiCostBankAccount = {
+  payment_account_label: string;
+  bank_name?: string | null;
+  account_last4?: string | null;
+  source?: string | null;
+};
+
 type ApiCostStatisticsExplorer = {
   month: string;
   summary: ApiCostSummary;
   time_rows: ApiCostTimeRow[];
+  bank_accounts?: ApiCostBankAccount[] | null;
   project_rows: ApiCostProjectExplorerRow[];
   expense_type_rows: ApiCostExpenseTypeExplorerRow[];
   read_model_status?: string | null;
@@ -176,6 +185,15 @@ function bankTagFields(row: {
   };
 }
 
+function mapBankAccount(row: ApiCostBankAccount): CostBankAccount {
+  return {
+    paymentAccountLabel: row.payment_account_label,
+    bankName: optionalString(row.bank_name),
+    accountLast4: optionalString(row.account_last4),
+    source: optionalString(row.source),
+  };
+}
+
 async function requestJson<T>(url: string, init: RequestInit = {}) {
   return apiRequestJson<T>(url, init);
 }
@@ -272,6 +290,7 @@ export async function fetchCostStatisticsExplorer(
       remark: row.remark,
       ...bankTagFields(row),
     })),
+    bankAccounts: (payload.bank_accounts ?? []).map(mapBankAccount),
     projectRows: payload.project_rows.map<CostProjectExplorerRow>((row) => ({
       projectName: row.project_name,
       totalAmount: row.total_amount,

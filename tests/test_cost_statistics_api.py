@@ -1,17 +1,16 @@
+import json
+import unittest
 from dataclasses import replace
 from io import BytesIO
-import json
 from unittest.mock import patch
 from urllib.parse import quote
-import unittest
 
+from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
+from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from openpyxl import load_workbook
 
 from tests.app_test_support import build_local_state_application as build_application
-from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
-from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
-from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 
 
 class _CostStatsOAAdapter:
@@ -70,6 +69,23 @@ class _FallbackCostStatsOAAdapter:
                 },
             )
         ]
+
+
+def _pair_query_service_rows_for_cost_statistics(query_service, *, month: str, row_ids: list[str]) -> None:
+    query_service.get_workbench(month)
+    relation = query_service.linked_relation()
+    for row_id in row_ids:
+        row = query_service.get_row_record(row_id, month_hint=month)
+        row["_section"] = "paired"
+        row["case_id"] = "CASE-COST-FALLBACK"
+        query_service.set_relation(row, **relation)
+        row["available_actions"] = query_service.available_actions(row["type"], "paired")
+        summary_fields = row.get("_summary_fields")
+        if isinstance(summary_fields, dict):
+            if row["type"] == "oa":
+                summary_fields["OA和流水关联情况"] = relation["label"]
+            elif row["type"] == "bank":
+                summary_fields["和发票关联情况"] = relation["label"]
 
 
 class _MemoryCostStatisticsReadModelService:
@@ -214,16 +230,12 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.app = build_application()
         self.app._cost_statistics_read_model_service = _MemoryCostStatisticsReadModelService()
         self.app._workbench_query_service = self.app._workbench_query_service.__class__(oa_adapter=_CostStatsOAAdapter())
-        self.app._workbench_api_routes = WorkbenchApiRoutes(
-            self.app._workbench_query_service,
-            self.app._workbench_action_service,
-        )
+        self.app._workbench_api_routes = WorkbenchApiRoutes(self.app._workbench_query_service)
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 
         self.app._cost_statistics_service = CostStatisticsService(
             self.app._import_service,
             grouped_workbench_loader=self.app._build_api_workbench_payload,
-            row_detail_loader=self.app._get_api_workbench_row_detail_payload,
             project_active_checker=self.app._app_settings_service.is_project_active,
         )
         self.app._cost_statistics_sql_read_repository = _MemoryCostStatisticsSqlRepository(
@@ -261,6 +273,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             "month": "2026-03",
             "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "88.00"},
             "time_rows": [{"transaction_id": "cached-sentinel"}],
+            "bank_accounts": [],
             "project_rows": [],
             "expense_type_rows": [],
         }
@@ -298,6 +311,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "month": month,
                     "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
                     "time_rows": [],
+                    "bank_accounts": [],
                     "project_rows": [],
                     "expense_type_rows": [],
                 }, False
@@ -402,6 +416,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             "month": "2026-03",
             "summary": {"row_count": 2, "transaction_count": 2, "total_amount": "120.00"},
             "time_rows": [{"transaction_id": "txn-1"}, {"transaction_id": "txn-2"}],
+            "bank_accounts": [],
             "project_rows": [],
             "expense_type_rows": [],
         }
@@ -492,6 +507,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                         "month": month,
                         "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "1.00"},
                         "time_rows": [{"transaction_id": f"{project_scope}-{month}"}],
+                        "bank_accounts": [],
                         "project_rows": [],
                         "expense_type_rows": [],
                     },
@@ -527,6 +543,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "month": "all",
                     "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "1.00"},
                     "time_rows": [{"transaction_id": f"{project_scope}-all-rebuilt"}],
+                    "bank_accounts": [],
                     "project_rows": [],
                     "expense_type_rows": [],
                 },
@@ -737,7 +754,6 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.app._cost_statistics_service = CostStatisticsService(
             self.app._import_service,
             grouped_workbench_loader=self.app._build_api_workbench_payload,
-            row_detail_loader=self.app._get_api_workbench_row_detail_payload,
             project_active_checker=self.app._app_settings_service.is_project_active,
         )
         self._prime_cost_statistics_read_model("2026-03")
@@ -1146,17 +1162,12 @@ class CostStatisticsApiTests(unittest.TestCase):
     def test_cost_statistics_uses_oa_detail_fields_after_manual_confirm_link(self) -> None:
         app = build_application()
         app._workbench_query_service = app._workbench_query_service.__class__(oa_adapter=_FallbackCostStatsOAAdapter())
-        legacy_action_service = WorkbenchActionService(app._workbench_query_service)
-        legacy_workbench_routes = WorkbenchApiRoutes(
-            app._workbench_query_service,
-            legacy_action_service,
-        )
+        workbench_routes = WorkbenchApiRoutes(app._workbench_query_service)
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 
         app._cost_statistics_service = CostStatisticsService(
             app._import_service,
-            grouped_workbench_loader=lambda month: app._group_row_payload(legacy_workbench_routes.get_workbench(month)),
-            row_detail_loader=legacy_workbench_routes.get_row_detail,
+            grouped_workbench_loader=lambda month: app._group_row_payload(workbench_routes.get_workbench(month)),
             project_active_checker=app._app_settings_service.is_project_active,
         )
         app._cost_statistics_sql_read_repository = _MemoryCostStatisticsSqlRepository(
@@ -1164,21 +1175,19 @@ class CostStatisticsApiTests(unittest.TestCase):
             app._cost_statistics_source_versions,
         )
 
-        confirm_result = legacy_workbench_routes.confirm_link(
-            {
-                "month": "2026-03",
-                "row_ids": ["oa-cost-fallback-001", "bk-o-202603-001"],
-            }
+        _pair_query_service_rows_for_cost_statistics(
+            app._workbench_query_service,
+            month="2026-03",
+            row_ids=["oa-cost-fallback-001", "bk-o-202603-001"],
         )
-        self.assertEqual(confirm_result["action"], "confirm_link")
 
         app._cost_statistics_read_model_service.upsert_read_model(
-                "2026-03",
-                "active",
-                app._cost_statistics_service.get_explorer("2026-03", project_scope="active"),
-                generated_at="2026-07-05T00:00:00",
-                source_versions=app._cost_statistics_source_versions("active:2026-03"),
-            )
+            "2026-03",
+            "active",
+            app._cost_statistics_service.get_explorer("2026-03", project_scope="active"),
+            generated_at="2026-07-05T00:00:00",
+            source_versions=app._cost_statistics_source_versions("active:2026-03"),
+        )
         payload = json.loads(app.handle_request("GET", "/api/cost-statistics?month=2026-03").body)
         self.assertEqual(payload["summary"]["row_count"], 1)
         self.assertEqual(payload["rows"][0]["project_name"], "云南溯源科技")

@@ -66,6 +66,7 @@ describe("Cost statistics export API", () => {
             total_amount: "0.00",
           },
           time_rows: [],
+          bank_accounts: [],
           project_rows: [],
           expense_type_rows: [],
         }), { status: 200 });
@@ -130,6 +131,7 @@ describe("Cost statistics export API", () => {
           total_amount: "0.00",
         },
         time_rows: [],
+        bank_accounts: [],
         project_rows: [],
         expense_type_rows: [],
         read_model_status: "refreshing",
@@ -175,6 +177,14 @@ describe("Cost statistics export API", () => {
             bank_tag_label_path: ["差旅交通", "交通费"],
           },
         ],
+        bank_accounts: [
+          {
+            bank_name: "民生银行",
+            account_last4: "9486",
+            payment_account_label: "民生银行 账户 9486",
+            source: "settings",
+          },
+        ],
         project_rows: [],
         expense_type_rows: [],
       }), { status: 200 }),
@@ -189,6 +199,14 @@ describe("Cost statistics export API", () => {
       bankTagSubLabel: "交通费",
       bankTagLabelPath: ["差旅交通", "交通费"],
     });
+    expect(payload.bankAccounts).toEqual([
+      {
+        paymentAccountLabel: "民生银行 账户 9486",
+        bankName: "民生银行",
+        accountLast4: "9486",
+        source: "settings",
+      },
+    ]);
   });
 
   test("caches explorer payloads by month and project scope for fast page re-entry", async () => {
@@ -201,6 +219,7 @@ describe("Cost statistics export API", () => {
           total_amount: "0.00",
         },
         time_rows: [],
+        bank_accounts: [],
         project_rows: [],
         expense_type_rows: [],
       }), { status: 200 }),

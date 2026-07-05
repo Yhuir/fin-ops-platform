@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import ast
-from decimal import Decimal
 import inspect
 import os
-from pathlib import Path
 import re
-from types import SimpleNamespace
 import unittest
+from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fin_ops_platform.app import server as server_module
@@ -15,7 +15,6 @@ from fin_ops_platform.services.cutover_preflight import redact_secret_text
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import EtcImportItem, EtcImportResult
 from fin_ops_platform.services.runtime_worker_handlers import _link_etc_import_result_to_existing_invoices
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = REPO_ROOT / "backend" / "src" / "fin_ops_platform"
@@ -1203,11 +1202,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "class": "InputInvoiceUsageApiRoutes",
                 "server_markers": ("def _input_invoice_usage_routes", "_input_invoice_usage_routes().route("),
             },
-            "routes_legacy_workbench_actions.py": {
-                "module": "fin_ops_platform.app.routes_legacy_workbench_actions",
-                "class": "LegacyWorkbenchActionRoutes",
-                "server_markers": ("_legacy_workbench_action_routes = LegacyWorkbenchActionRoutes(", "_handle_legacy_workbench_action("),
-            },
             "routes_no_oa_bank_batches.py": {
                 "module": "fin_ops_platform.app.routes_no_oa_bank_batches",
                 "class": "NoOaBankBatchApiRoutes",
@@ -2042,33 +2036,44 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_legacy_workbench_actions_stay_quarantined_in_route_owner(self) -> None:
+    def test_legacy_workbench_http_endpoints_stay_deleted(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
         route_path = APP_ROOT / "routes_legacy_workbench_actions.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
+        prototype_path = REPO_ROOT / "web/prototypes/reconciliation-workbench-v2.html"
         violations: list[str] = []
 
-        if not _class_source(route_tree, route_source, "LegacyWorkbenchActionRoutes"):
-            violations.append("legacy Workbench action route owner is missing")
-        if not _imports_name_from_module(
+        if route_path.exists():
+            violations.append("routes_legacy_workbench_actions.py must stay deleted")
+        if prototype_path.exists():
+            violations.append("legacy reconciliation workbench prototype must stay deleted")
+        if _imports_name_from_module(
             server_tree,
             module="fin_ops_platform.app.routes_legacy_workbench_actions",
             name="LegacyWorkbenchActionRoutes",
         ):
-            violations.append("server.py does not import LegacyWorkbenchActionRoutes")
-        for marker in (
+            violations.append("server.py still imports LegacyWorkbenchActionRoutes")
+        for forbidden in (
+            "LegacyWorkbenchActionRoutes",
             "self._legacy_workbench_action_routes = LegacyWorkbenchActionRoutes(",
+            'route_path == "/workbench"',
+            'route_path == "/workbench/prototype"',
             'return self._handle_legacy_workbench_action("confirm", body)',
             'return self._handle_legacy_workbench_action("difference", body)',
             'return self._handle_legacy_workbench_action("exception", body)',
             'return self._handle_legacy_workbench_action("offline", body)',
             'return self._handle_legacy_workbench_action("offset", body)',
+            '"/workbench"',
+            '"/workbench/prototype"',
+            '"/workbench/actions/confirm"',
+            '"/workbench/actions/difference"',
+            '"/workbench/actions/exception"',
+            '"/workbench/actions/offline"',
+            '"/workbench/actions/offset"',
         ):
-            if marker not in server_source:
-                violations.append(f"server.py legacy route quarantine marker missing: {marker}")
+            if forbidden in server_source:
+                violations.append(f"server.py still exposes legacy Workbench action marker {forbidden}")
 
         for old_handler in (
             "_handle_workbench_confirm",
@@ -2077,31 +2082,46 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_handle_workbench_offline",
             "_handle_workbench_offset",
             "_handle_legacy_workbench_exception_via_application",
+            "_handle_legacy_workbench_action",
+            "_handle_workbench",
+            "_handle_workbench_prototype",
         ):
             if _function_source(server_tree, server_source, old_handler):
                 violations.append(f"server.py still owns legacy Workbench action handler {old_handler}")
 
-        for marker in (
-            "ManualReconciliationService",
-            "LedgerReminderService",
-            "confirm_manual_reconciliation(",
-            "confirm_difference_reconciliation(",
-            "record_exception(",
-            "record_offline_reconciliation(",
-            "record_offset_reconciliation(",
-            "sync_from_case(",
-        ):
-            if marker not in route_source:
-                violations.append(f"legacy route owner is missing compat behavior marker {marker}")
+        self.assertEqual(violations, [])
+
+    def test_legacy_workbench_api_routes_are_read_only_and_action_service_deleted(self) -> None:
+        route_path = APP_ROOT / "routes_workbench.py"
+        service_path = SERVICES_ROOT / "workbench_action_service.py"
+        server_path = APP_ROOT / "server.py"
+        route_source = route_path.read_text(encoding="utf-8")
+        server_source = server_path.read_text(encoding="utf-8")
+        route_tree = _parse(route_path)
+        route_class = _class_source(route_tree, route_source, "WorkbenchApiRoutes")
+        violations: list[str] = []
+
+        if service_path.exists():
+            violations.append("legacy workbench_action_service.py must stay deleted")
+
+        for required in ("def get_workbench(", "def get_row_detail("):
+            if required not in route_class:
+                violations.append(f"legacy WorkbenchApiRoutes lost required read compat method {required}")
+
+        for old_action in ("confirm_link", "mark_exception", "cancel_link", "update_bank_exception"):
+            if f"def {old_action}(" in route_class:
+                violations.append(f"legacy WorkbenchApiRoutes resurrected unused action {old_action}")
+
         for forbidden in (
-            "WorkbenchWriteFacade",
-            "WorkbenchRelationCommandService",
-            "ReadModelRefreshGateway",
-            "job.outbox_events",
-            "job.read_model_dirty_scopes",
+            "WorkbenchActionService",
+            "workbench_action_service",
+            "_workbench_action_service",
+            "_action_service",
         ):
             if forbidden in route_source:
-                violations.append(f"legacy route owner bypasses quarantine via {forbidden}")
+                violations.append(f"legacy WorkbenchApiRoutes still references {forbidden}")
+            if forbidden in server_source:
+                violations.append(f"Application runtime still references {forbidden}")
 
         self.assertEqual(violations, [])
 
@@ -6256,14 +6276,22 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_full_payload_fetcher_stays_off_runtime_pages(self) -> None:
+    def test_workbench_full_payload_fetcher_stays_deleted_from_frontend_runtime(self) -> None:
         violations: list[str] = []
-        allowed = {WEB_SRC_ROOT / "features" / "workbench" / "api.ts"}
+        api_source = (WEB_SRC_ROOT / "features" / "workbench" / "api.ts").read_text(encoding="utf-8")
+        for marker in (
+            "function fetchWorkbench(",
+            "function fetchWorkbenchWithProgress(",
+            "requestJsonWithByteProgress<ApiWorkbenchPayload>(`/api/workbench?month=",
+        ):
+            if marker in api_source:
+                violations.append(f"Workbench frontend API resurrected legacy full payload fetcher: {marker}")
+
         for path in sorted(WEB_SRC_ROOT.rglob("*.ts*")):
-            if path in allowed or "/test/" in path.as_posix() or path.name.endswith((".test.ts", ".test.tsx")):
+            if "/test/" in path.as_posix() or path.name.endswith((".test.ts", ".test.tsx")):
                 continue
             source = path.read_text(encoding="utf-8")
-            for marker in ("fetchWorkbench(", "fetchWorkbenchWithProgress("):
+            for marker in ("fetchWorkbench(", "fetchWorkbenchWithProgress(", "/api/workbench?month="):
                 if marker in source:
                     violations.append(f"{_relative(path)} calls legacy Workbench full payload fetcher: {marker}")
 
@@ -8269,7 +8297,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_workbench_write_and_matching_services_do_not_import_external_clients_directly(self) -> None:
         workbench_boundary_files = {
-            "backend/src/fin_ops_platform/services/workbench_action_service.py",
             "backend/src/fin_ops_platform/services/workbench_write_facade.py",
             "backend/src/fin_ops_platform/services/workbench_pair_relation_service.py",
             "backend/src/fin_ops_platform/services/workbench_override_service.py",

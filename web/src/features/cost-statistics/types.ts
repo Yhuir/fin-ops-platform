@@ -24,6 +24,13 @@ export type CostTimeRow = {
   bankTagLabelPath: string[];
 };
 
+export type CostBankAccount = {
+  paymentAccountLabel: string;
+  bankName?: string;
+  accountLast4?: string;
+  source?: string;
+};
+
 export type CostProjectExplorerRow = {
   projectName: string;
   totalAmount: string;
@@ -43,6 +50,7 @@ export type CostStatisticsExplorer = {
   month: string;
   summary: CostSummary;
   timeRows: CostTimeRow[];
+  bankAccounts: CostBankAccount[];
   projectRows: CostProjectExplorerRow[];
   expenseTypeRows: CostExpenseTypeExplorerRow[];
   readModelStatus?: "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});

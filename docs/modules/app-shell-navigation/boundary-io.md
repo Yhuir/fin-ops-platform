@@ -53,6 +53,7 @@
 | App root | `web/src/app/App.tsx`、`main.tsx` |
 | Routing | `web/src/app/pageRegistry.tsx`、`router.tsx`、`PageRouteHost.tsx`、`runtime.ts` |
 | Shell components | `web/src/components/shell/AppSidebar.tsx`、`AppTopBar.tsx`、`sidebarItems.ts`、`AppStatusIndicator.tsx` |
+| Shell styles | `web/src/app/styles.css` 中 `.app-sidebar-*` 导航样式 |
 | Contexts | `GlobalOperationOverlayContext.tsx`、`PageRuntimeContext.tsx`、`PageSessionStateContext.tsx`、`SessionContext.tsx` |
 | Hooks | `web/src/hooks/useFinanceTableSession.ts` |
 | Tests | `web/src/test/App*.test.*`、`PageRouteHost.test.tsx`、`AppSidebar.test.tsx`、`web/e2e/app-shell*.spec.ts` |

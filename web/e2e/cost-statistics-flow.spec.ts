@@ -426,6 +426,7 @@ test.describe("cost statistics browser flow", () => {
     await page.getByRole("button", { name: "按银行" }).click();
     await expect(page.getByRole("heading", { name: "按银行统计" })).toBeVisible();
     await expect(page.getByRole("button", { name: "银行统计时间范围：全部时间" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /民生银行 账户 9486/ })).toBeVisible();
 
     await page.getByRole("button", { name: /工商银行 账户 0001/ }).click();
     await page.getByRole("button", { name: /云南溯源科技/ }).first().click();

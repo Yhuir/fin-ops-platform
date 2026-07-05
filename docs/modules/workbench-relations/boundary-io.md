@@ -1,14 +1,14 @@
 # 关联台关系事实源模块边界与 I/O
 
-日期：2026-07-04
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
+- 状态：closed
 - 当前边界可信度：high
 - 目标边界：关系写入、撤回、展示、历史回放和下游 read model 扇出统一通过 workbench relation command/read boundary。
-- 当前缺口：仍有多个页面和历史修复工具调用关系相关 service，后续删除旧链路必须逐调用点核验。
-- 旧代码删除条件：所有确认/撤回/修复调用点都通过 command service 或明确 adapter，且下游 fan-out 测试覆盖。
+- 当前闭环：确认、撤回、修复、展示、历史回放和 fan-out 的运行时入口通过 command service、read facade 或明确 adapter；旧 Workbench action service、旧 `/workbench*` HTTP 入口和旧 direct Workbench action wrapper 已删除。离线 migration/audit/repair 工具可保留为显式 adapter，不属于页面链路污染。
+- 旧代码删除条件：新增或修改确认/撤回/修复调用点时，必须继续通过 command service 或明确 adapter，且下游 fan-out 测试覆盖；删除离线工具前必须逐工具核验迁移/审计用途。
 
 ## 职责边界
 
@@ -108,4 +108,4 @@
 - Downstream outputs: workbench_relation、workbench、bank_flow_rule_batch、pending invoice、input/output invoice usage、OA pending、tax、cost、search dirty scopes 或 owner producer 输出。
 - `no_oa_bank_batch` 下游输出在过渡期同时覆盖 no-OA 与 bank-flow 批量处理：关系事实源只根据 relation payload 的 `relation_mode` 分发，不解释业务规则；worker handler 必须从 payload/metadata 读取目标 relation mode。
 - Forbidden paths: 调用方不得直接改关系表、不得自行拼 confirmed relation 状态、不得通过 legacy fallback 绕过 command service。
-- Old code deletion: direct pair relation write fallback、旧关系修复半写入和调用方内联关系状态机必须删除；离线 migration/audit/rollback 工具保留不算 closure。
+- Old code deletion: direct pair relation write fallback、旧关系修复半写入和调用方内联关系状态机必须删除；legacy `WorkbenchActionService` 已删除，legacy `WorkbenchApiRoutes` 不再承载 `confirm_link`、`mark_exception`、`cancel_link` 或 `update_bank_exception` 写状态机；旧 `/workbench`、`/workbench/prototype` 和 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP compat route owner 已删除，不再作为 relation 写入口；离线 migration/audit/rollback 工具保留不算 closure。

@@ -10651,9 +10651,9 @@ body.workbench-focus-mode .global-header {
 .app-sidebar-paper {
   width: 100%;
   height: 100dvh;
-  border-right: 1px solid #e1e4e8;
-  background: #f7f7f8;
-  color: #24272d;
+  border-right: 1px solid rgba(147, 197, 253, 0.18);
+  background: #0f2447;
+  color: #e6f0ff;
   box-shadow: none;
   overflow: hidden;
   transition: width var(--app-sidebar-motion);
@@ -10708,7 +10708,7 @@ body.workbench-focus-mode .global-header {
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: #30343a;
+  color: #d7e7fb;
   cursor: pointer;
   transition:
     color var(--motion-fast) var(--ease-standard),
@@ -10744,13 +10744,13 @@ body.workbench-focus-mode .global-header {
 
 .app-sidebar-toggle:hover {
   background: transparent;
-  color: #171717;
+  color: #ffffff;
 }
 
 .app-sidebar-toggle:focus-visible {
   background: transparent;
-  color: #171717;
-  outline: 2px solid #c7d2fe;
+  color: #ffffff;
+  outline: 2px solid rgba(147, 197, 253, 0.72);
   outline-offset: 2px;
 }
 
@@ -10783,20 +10783,20 @@ body.workbench-focus-mode .global-header {
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: #2f7d4f;
+  color: #86efac;
 }
 
 .app-sidebar-brand-mark:focus-visible {
-  outline: 2px solid #2f7d4f;
+  outline: 2px solid #86efac;
   outline-offset: 3px;
 }
 
 .app-sidebar-brand-mark.pending {
-  color: #b7791f;
+  color: #facc15;
 }
 
 .app-sidebar-brand-mark.error {
-  color: #c53030;
+  color: #fca5a5;
 }
 
 .app-sidebar-brand-status-icon {
@@ -11062,7 +11062,7 @@ body.workbench-focus-mode .global-header {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
-  color: #171717;
+  color: #f8fbff;
 }
 
 .app-sidebar-title {
@@ -11070,7 +11070,7 @@ body.workbench-focus-mode .global-header {
   font-size: 11.5px;
   font-weight: 600;
   line-height: 1.25;
-  color: #71717a;
+  color: #9db8d8;
 }
 
 .app-sidebar-scroll {
@@ -11100,7 +11100,7 @@ body.workbench-focus-mode .global-header {
 }
 
 .app-sidebar-group + .app-sidebar-group {
-  border-top: 1px solid #e8eaee;
+  border-top: 1px solid rgba(147, 197, 253, 0.14);
 }
 
 .app-sidebar-content.collapsed .app-sidebar-group {
@@ -11120,7 +11120,7 @@ body.workbench-focus-mode .global-header {
   font-size: 10px;
   font-weight: 700;
   line-height: 1.2;
-  color: #8a8f98;
+  color: #86a8d5;
 }
 
 .app-sidebar-content.collapsed .app-sidebar-group-title {
@@ -11162,7 +11162,7 @@ body.workbench-focus-mode .global-header {
   gap: 0;
   padding: 0 8px;
   border-radius: 5px;
-  color: #2f3137;
+  color: #dceafe;
   font-size: 13px;
   font-weight: 650;
   text-decoration: none;
@@ -11174,16 +11174,16 @@ body.workbench-focus-mode .global-header {
 
 .app-sidebar-link:hover,
 .app-sidebar-link:focus-visible {
-  background: #eeeeef;
-  color: #171717;
+  background: rgba(147, 197, 253, 0.12);
+  color: #ffffff;
   outline: none;
 }
 
 .app-sidebar-link.active,
 .app-sidebar-link.active:hover {
-  background: #e9eaec;
-  color: #171717;
-  box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.02);
+  background: rgba(59, 130, 246, 0.28);
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.18);
 }
 
 .app-sidebar-link-icon {
@@ -18265,6 +18265,15 @@ body.column-layout-dragging {
   color: var(--fp-text-muted);
   font-size: 11px;
   font-weight: 800;
+}
+
+.cost-section-total {
+  color: var(--fp-accent);
+  font-family: var(--fp-font-data);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .cost-section-heading-copy {

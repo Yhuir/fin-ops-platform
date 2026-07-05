@@ -149,8 +149,11 @@ describe("Cost statistics page", () => {
     expectProjectCostTable("按时间统计表");
     expect(within(timeGrid).getByRole("button", { name: "查看流水 cost-txn-003" })).toBeInTheDocument();
     expect(within(timeGrid).queryByRole("button", { name: "查看流水 cost-txn-004" })).not.toBeInTheDocument();
+    expect(within(timeGrid).getByText("2026-03-10 21:27:55")).toBeInTheDocument();
+    expect(within(timeGrid).queryByText("2026-03-10T21:27:55+08:00")).not.toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
     expect(within(timeGrid).getAllByText("支出")[0]).toHaveClass("direction-tag");
+    expect(screen.getByText("总金额 13,360.00")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年3月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?month=2026-03&project_scope=active",
@@ -390,7 +393,9 @@ describe("Cost statistics page", () => {
     expect(bankLane).not.toBeNull();
     expect(within(bankLane as HTMLElement).getByText("工商银行 账户 0001")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("平安银行 账户 8821")).toBeInTheDocument();
+    expect(within(bankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("54.4%")).toBeInTheDocument();
+    expect(screen.getByText("总金额 22,960.00")).toBeInTheDocument();
 
     await user.click(within(bankLane as HTMLElement).getByRole("button", { name: /工商银行 账户 0001/ }));
 
@@ -414,7 +419,9 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("button", { name: "银行统计时间范围：2026年4月" })).toBeInTheDocument();
 
     expect(await within(bankLane as HTMLElement).findByText("平安银行 账户 8821")).toBeInTheDocument();
-    expect(within(bankLane as HTMLElement).queryByText("工商银行 账户 0001")).not.toBeInTheDocument();
+    expect(within(bankLane as HTMLElement).getByText("工商银行 账户 0001")).toBeInTheDocument();
+    expect(within(bankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
+    expect(screen.getByText("总金额 9,600.00")).toBeInTheDocument();
   });
 
   test("time and expense type scopes stay independent with one range control per view", async () => {

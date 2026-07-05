@@ -37,8 +37,7 @@ class ProjectCostingApiTests(unittest.TestCase):
         create_payload = json.loads(create_response.body)
         project_id = create_payload["project"]["id"]
 
-        workbench_payload = json.loads(app.handle_request("GET", "/workbench?month=2026-03").body)
-        invoice_id = workbench_payload["open"]["invoice"][0]["id"]
+        invoice_id = app._import_service.list_invoices(month="2026-03")[0].id
 
         assign_response = app.handle_request(
             "POST",

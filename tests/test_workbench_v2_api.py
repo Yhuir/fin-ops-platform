@@ -31,7 +31,6 @@ from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASe
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
 from fin_ops_platform.services.settings_data_reset_service import RESET_OA_AND_REBUILD_ACTION
-from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.services.workbench_candidate_match_service import (
     CANDIDATE_MATCH_SCHEMA_VERSION,
     WorkbenchCandidateMatchService,
@@ -249,6 +248,11 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
         self.addCleanup(cost_warmup_patcher.stop)
         cost_warmup_patcher.start()
+
+    def _install_workbench_query_service(self, app: Application, query_service: WorkbenchQueryService) -> None:
+        app._workbench_query_service = query_service
+        app._workbench_api_routes = WorkbenchApiRoutes(query_service)
+        app._invalidate_workbench_read_models(invalidate_cost_statistics=False)
 
     def _create_imported_bank_transaction(
         self,
@@ -3675,10 +3679,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_get_api_workbench_promotes_oa_attachment_binding_with_live_bank_to_three_way_relation(self) -> None:
         app = build_application()
         query_service = WorkbenchQueryService(oa_adapter=AttachmentAwareOAAdapter())
-        action_service = WorkbenchActionService(query_service)
-        app._workbench_query_service = query_service
-        app._workbench_action_service = action_service
-        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+        self._install_workbench_query_service(app, query_service)
         app._live_workbench_service = _StubLiveWorkbenchService()
 
         response = app.handle_request("GET", "/api/workbench?month=2026-03")
@@ -3717,10 +3718,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_get_api_workbench_groups_repairs_oa_attachment_source_binding_as_open_relation(self) -> None:
         app = build_application()
         query_service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
-        action_service = WorkbenchActionService(query_service)
-        app._workbench_query_service = query_service
-        app._workbench_action_service = action_service
-        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+        self._install_workbench_query_service(app, query_service)
 
         with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
             response = app.handle_request("GET", "/api/workbench?month=2026-03")
@@ -3788,17 +3786,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             attachment_file_count=6,
         )
         query_service = WorkbenchQueryService(oa_adapter=InMemoryOAAdapter({"2026-03": [record]}))
-        action_service = WorkbenchActionService(query_service)
-        app._workbench_query_service = query_service
-        app._workbench_action_service = action_service
-        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+        self._install_workbench_query_service(app, query_service)
 
         with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
             response = app.handle_request("GET", "/api/workbench?month=2026-03")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
-        source_group = next(group for group in payload["open"]["groups"] if group["reason"] == "oa_attachment_source_relation")
+        source_group = next(
+            group
+            for group in payload["open"]["groups"]
+            if any(row["id"] == "oa-2035" for row in group["oa_rows"])
+        )
         self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-2035"])
         self.assertEqual(len(source_group["bank_rows"]), 0)
         self.assertEqual(len(source_group["invoice_rows"]), 3)
@@ -3853,10 +3852,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         query_service = WorkbenchQueryService(
             oa_adapter=InMemoryOAAdapter({"2026-02": [target_oa_record]})
         )
-        action_service = WorkbenchActionService(query_service)
-        app._workbench_query_service = query_service
-        app._workbench_action_service = action_service
-        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+        self._install_workbench_query_service(app, query_service)
 
         with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
             response = app.handle_request("GET", "/api/workbench?month=2026-02")
@@ -3910,10 +3906,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         query_service = WorkbenchQueryService(
             oa_adapter=InMemoryOAAdapter({"2026-03": [target_oa_record]})
         )
-        action_service = WorkbenchActionService(query_service)
-        app._workbench_query_service = query_service
-        app._workbench_action_service = action_service
-        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+        self._install_workbench_query_service(app, query_service)
 
         with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
             response = app.handle_request("GET", "/api/workbench?month=2026-03")

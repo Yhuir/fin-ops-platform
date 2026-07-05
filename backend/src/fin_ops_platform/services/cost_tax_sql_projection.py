@@ -1,35 +1,39 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-import re
 from typing import Any
 
+from fin_ops_platform.services.cost_statistics_bank_accounts import (
+    bank_account_mappings_fingerprint_from_settings_payload,
+    bank_accounts_from_settings_payload,
+    bank_auto_tag_rules_version_from_settings_payload,
+)
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
+from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
     CostStatisticsReadModelService,
 )
-from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_relation_rules import (
     is_candidate_workbench_group,
     is_cost_eligible_open_group,
 )
 from fin_ops_platform.services.live_workbench_service import format_decimal
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
-from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
+from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
+from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
 from fin_ops_platform.services.tax_offset_read_model_service import (
     TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
     TaxOffsetReadModelService,
 )
-from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
-
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 PROJECT_SCOPES = {"active", "all"}
@@ -202,11 +206,13 @@ class CostStatisticsSqlProjectionBuilder:
         }
 
     def _source_versions(self, month: str) -> dict[str, Any]:
+        settings_payload = _app_settings_payload(self._connection)
         source_versions = {
             "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             "workbench_scope_key": month,
             "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-            "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(self._connection),
+            "bank_auto_tag_rules_version": bank_auto_tag_rules_version_from_settings_payload(settings_payload),
+            "bank_account_mappings_fingerprint": bank_account_mappings_fingerprint_from_settings_payload(settings_payload),
             "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         }
@@ -307,6 +313,7 @@ class CostStatisticsSqlProjectionBuilder:
                 "total_amount": format_decimal(sum((entry["amount_decimal"] for entry in sorted_entries), start=ZERO)),
             },
             "time_rows": [_serialize_cost_entry(entry) for entry in sorted_entries],
+            "bank_accounts": self._bank_accounts_from_settings(),
             "project_rows": [
                 {
                     "project_name": bucket["project_name"],
@@ -489,12 +496,8 @@ class CostStatisticsSqlProjectionBuilder:
         return payload if isinstance(payload, dict) else {}
 
     def _active_project_names(self) -> set[str] | None:
-        row = self._connection.fetch_one(
-            "select settings_payload from app.app_settings where settings_key = %s limit 1",
-            ("app_settings",),
-        )
-        payload = row.get("settings_payload") if isinstance(row, dict) else {}
-        if not isinstance(payload, dict):
+        payload = _app_settings_payload(self._connection)
+        if not payload:
             return None
         projects = payload.get("projects")
         if not isinstance(projects, list):
@@ -508,6 +511,9 @@ class CostStatisticsSqlProjectionBuilder:
             if name and bool(enabled):
                 active.add(name)
         return active or None
+
+    def _bank_accounts_from_settings(self) -> list[dict[str, str]]:
+        return bank_accounts_from_settings_payload(_app_settings_payload(self._connection))
 
     def _set_redis_json(self, key: str, value: dict[str, Any]) -> None:
         set_json = getattr(self._redis_helper, "set_json", None)
@@ -696,20 +702,19 @@ def _parse_cost_scope_key(scope_key: str) -> tuple[str, str]:
 
 
 def _current_bank_auto_tag_rules_version(connection: Any) -> int:
-    row = connection.fetch_one(
-        "select settings_payload from app.app_settings where settings_key = %s limit 1",
-        ("app_settings",),
-    )
-    payload = row.get("settings_payload") if isinstance(row, dict) else {}
-    if not isinstance(payload, dict):
-        return 1
-    rules_payload = payload.get("bank_transaction_tags")
-    if not isinstance(rules_payload, dict):
-        return 1
+    return bank_auto_tag_rules_version_from_settings_payload(_app_settings_payload(connection))
+
+
+def _app_settings_payload(connection: Any) -> dict[str, Any]:
     try:
-        return int(rules_payload.get("version") or 1)
-    except (TypeError, ValueError):
-        return 1
+        row = connection.fetch_one(
+            "select settings_payload from app.app_settings where settings_key = %s limit 1",
+            ("app_settings",),
+        )
+    except Exception:
+        return {}
+    payload = row.get("settings_payload") if isinstance(row, dict) else {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _cost_context_from_oa_rows(oa_rows: list[dict[str, Any]]) -> dict[str, str] | None:

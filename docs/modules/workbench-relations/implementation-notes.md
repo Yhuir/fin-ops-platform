@@ -1,5 +1,40 @@
 # 关联台关系事实源 实施记录
 
+## 2026-07-05 - legacy `/workbench` HTTP compat 删除
+
+目标：删除旧 `/workbench` 页面读入口、静态 prototype 和旧 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP 包装层，防止旧 `ManualReconciliationService` / `LedgerReminderService` 链路继续作为 Workbench relation action 入口存在。
+
+变更：
+
+- 删除 `routes_legacy_workbench_actions.py`。
+- 删除 `Application._legacy_workbench_action_routes` 装配、旧 `/workbench` / `/workbench/prototype` / `/workbench/actions/*` dispatch、`_handle_workbench(...)`、`_handle_workbench_prototype(...)`、`_handle_legacy_workbench_action(...)`、prototype HTML 和 health entrypoints。
+- `tests/test_ledger_api.py` 不再通过旧 Workbench action endpoint 造数，改为直接调用 reconciliation/ledger services，再验证 `/ledgers` 和 `/reminders` API。
+- `tests/test_workbench_api.py` 增加旧 endpoint 404 护栏。
+
+旧逻辑删除：
+
+- 禁止 `LegacyWorkbenchActionRoutes`、`routes_legacy_workbench_actions.py`、`_handle_workbench(...)`、`_handle_workbench_prototype(...)`、`_handle_legacy_workbench_action(...)` 或旧 `/workbench*` route 回流。
+- 现代 action 写链路继续由 `WorkbenchActionApiRoutes` 和 `WorkbenchWriteFacade` 拥有。
+
+验证：见本轮最终说明。
+
+## 2026-07-05 - legacy Workbench API action service 删除
+
+目标：继续收口旧 Workbench route/action service，防止已迁移到 `WorkbenchActionApiRoutes` / `WorkbenchWriteFacade` 的现代 relation 写操作被旧 `WorkbenchApiRoutes` action 方法重新承载。
+
+变更：
+
+- 删除 legacy `WorkbenchApiRoutes.confirm_link(...)`、`mark_exception(...)`、`cancel_link(...)`、`update_bank_exception(...)`。
+- 删除 legacy `WorkbenchActionService` 文件和 `Application._workbench_action_service` 装配。
+- 成本统计回归不再调用 legacy confirm 造数，改为显式准备已关联测试输入并继续只消费 grouped Workbench payload。
+
+旧逻辑删除：
+
+- 禁止旧 `WorkbenchApiRoutes` / `WorkbenchActionService` 重新承载 confirm-link、mark-exception、cancel-link 或 update-bank-exception 写状态机。
+- 现代 action 写链路继续由 `WorkbenchActionApiRoutes` 和 `WorkbenchWriteFacade` 拥有。
+
+验证：见本轮最终说明。
+
 ## 2026-07-04 - OA 自带附件发票 source binding 不可拆分
 
 目标：修复 Workbench 中父 OA、自带附件发票和银行流水被撤回或展示成散行的问题。OA 附件发票来自父 OA source binding，不是用户手工配对结果，不能被撤回状态机拆成 standalone 发票行，也不能只停留在 display-only candidate。
@@ -774,7 +809,7 @@ git diff --check
 
 - 旧 `/workbench/actions/confirm|difference|exception|offline|offset` 已由 `LegacyWorkbenchActionRoutes` 显式隔离为 compat-only owner。
 - 现代 `/api/workbench/actions/*` wrapper 继续委托 `WorkbenchWriteFacade`，未回退到旧 `ManualReconciliationService` 链路。
-- `routes_workbench.py` 仍是 `WorkbenchActionService` 的旧薄封装，不适合作为现代 facade 写链路的直接承载点。
+- `routes_workbench.py` 已降为 read-only legacy compat wrapper，不适合作为现代 facade 写链路的直接承载点。
 - 现代 action route owner 应围绕 `WorkbenchWriteFacade`、`WorkbenchExceptionApplicationService`、freshness guard、auth context、request id 和 timing 语义逐步建立。
 - `_handle_api_workbench_cancel_exception(...)` 中存在一个无行为差异的 live-service 分支；它的两个分支都调用同一个 delegate，后续可作为小清理，但不应替代 route-owner 拆分主线。
 

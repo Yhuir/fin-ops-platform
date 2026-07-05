@@ -247,6 +247,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         domains = [domain["domain"] for domain in plan["domains"]]
         self.assertIn("bank_detail_read_model", domains)
         self.assertIn("no_oa_bank_batch_read_model", domains)
+        self.assertIn("cost_statistics_read_model", domains)
+        self.assertIn("cost_statistics.read_model.refresh", plan["will_enqueue_jobs"])
         self.assertNotIn("bank_account_balance_read_model", domains)
 
     def test_no_oa_bank_batch_changed_refreshes_no_oa_read_model(self) -> None:

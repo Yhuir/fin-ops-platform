@@ -4562,6 +4562,26 @@ function costStatisticsExplorerPayload(
       total_amount: sumCostAmounts(timeRows),
     },
     time_rows: timeRows,
+    bank_accounts: [
+      {
+        bank_name: "工商银行",
+        account_last4: "0001",
+        payment_account_label: "工商银行 账户 0001",
+        source: "settings",
+      },
+      {
+        bank_name: "平安银行",
+        account_last4: "8821",
+        payment_account_label: "平安银行 账户 8821",
+        source: "settings",
+      },
+      {
+        bank_name: "民生银行",
+        account_last4: "9486",
+        payment_account_label: "民生银行 账户 9486",
+        source: "settings",
+      },
+    ],
     project_rows: Array.from(projectGroups.entries()).map(([projectName, bucket]) => ({
       project_name: projectName,
       total_amount: bucket.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),

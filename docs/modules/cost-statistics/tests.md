@@ -2,6 +2,15 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-05 - 银行账户全集、标签规则联动、时间格式与表头总金额
+
+- 变更类型：read model payload contract + frontend interaction/layout + cross-module lifecycle。
+- 架构结论：按银行统计的银行全集由 settings owner 的 `bank_account_mappings` 经成本统计 SQL projection 写入 explorer `bank_accounts`，页面只合并 `bank_accounts + time_rows`，不再只从当前流水推断银行列表。按流水标签类型继续只读 `time_rows.bank_tag_*`；自动标签规则变化通过 `bank_auto_tag_rules_changed -> cost_statistics.read_model.refresh` 刷新 read model。按时间展示格式化后的 `YYYY-MM-DD HH:mm:ss`，过滤仍使用原始 `trade_time`。五种统计口径表头均展示当前范围总金额。
+- 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_bank_details_sql_runtime.py`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx`、`web/src/test/AppSidebar.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts`。
+- 覆盖点：explorer payload 必须包含 `bank_accounts`；settings 银行账户映射进入 `source_versions.bank_account_mappings_fingerprint`；标签规则版本继续进入 `source_versions.bank_auto_tag_rules_version`；`bank_auto_tag_rules_changed` lifecycle 计划包含 `cost_statistics.read_model.refresh`；前端 mapper 归一 `bank_accounts`；按银行统计展示设置中的零金额账户；时间列不直出 ISO/T 字符串；各视图表头展示总金额；sidebar 深蓝背景有组件回归断言。
+- 七类测试决策：service-layer、API contract、read model/cache/background job、frontend interaction、existing regression 适用并覆盖；business core 金额归因口径不变，不新增独立业务规则测试；end-to-end business-flow 使用既有成本统计/银行明细/settings browser flows，本轮新增的是读模型合同与页面交互，不新增跨模块写流 e2e。
+- 验证命令：见本轮最终说明。
+
 ## 2026-07-05 - 成本统计页面 I/O、旧 UI 与旧后端 fallback 关闭
 
 - 变更类型：frontend layout / page I/O cleanup + route-owner/query-runtime legacy dependency cleanup。
@@ -15,7 +24,7 @@
 
 - 变更类型：read model payload contract + frontend 派生视图。
 - 架构结论：流水标签统计属于成本统计 explorer read model 的读侧派生功能；页面只能读取 `cost_statistics.time_rows.bank_tag_*`，不得直接调用银行明细页 read model 或本地重算银行标签事实。
-- 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts`、`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows`、`tests/test_cost_statistics_service.py::CostStatisticsServiceTests::test_project_statistics_returns_time_amount_and_expense_fields`、`tests/test_cost_statistics_service.py::CostStatisticsServiceTests::test_transaction_detail_includes_bank_and_oa_cost_fields`、`web/src/test/CostStatisticsApi.test.ts::maps bank tag fields from explorer time rows`、`web/src/test/CostStatisticsPage.test.tsx::bank tag view drills down from primary tag to sub tag to transaction`。
+- 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts`、`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows`、`tests/test_cost_statistics_service.py::CostStatisticsServiceTests::test_month_statistics_only_counts_outflow_rows_with_complete_oa_cost_fields`、`tests/test_cost_statistics_service.py::CostStatisticsServiceTests::test_explorer_all_aggregates_entries_across_multiple_months`、`web/src/test/CostStatisticsApi.test.ts::maps bank tag fields from explorer time rows`、`web/src/test/CostStatisticsPage.test.tsx::bank tag view drills down from primary tag to sub tag to transaction`。
 - 覆盖点：Workbench bank row 的 `effective_category_*` / `category_*` 字段进入成本统计 month shard payload；parent scope 从 materialized rows 聚合时保留标签字段；SQL projection 与 read-model query/export 输出同一 shape；前端 mapper 归一 snake_case 标签字段；页面三栏为 `主标签 / 子标签 / 流水`，第一、第二栏合计 50% 宽度。
 - 七类测试决策：business core 不新增独立规则测试，因为成本归因金额口径不变；service-layer、API contract、read model/cache、frontend interaction、existing regression 适用并覆盖；E2E 本轮先不新增，因为该功能不新增跨模块写流，后续可并入成本统计浏览器 smoke。
 - 验证命令：见本轮最终说明。

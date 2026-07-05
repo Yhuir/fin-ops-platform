@@ -1012,6 +1012,33 @@ class AppSettingsService:
             for item in self._snapshot["bank_account_mappings"]
         }
 
+    def get_bank_account_mappings_payload(self) -> list[dict[str, str]]:
+        self._refresh_snapshot_from_state_store()
+        return [
+            {
+                "id": str(item.get("id") or ""),
+                "last4": str(item.get("last4") or ""),
+                "bank_name": str(item.get("bank_name") or ""),
+                "short_name": str(item.get("short_name") or ""),
+            }
+            for item in self._snapshot["bank_account_mappings"]
+        ]
+
+    def get_cost_statistics_source_settings_payload(self) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        return {
+            "bank_transaction_tags": dict(self._snapshot.get("bank_transaction_tags") or {}),
+            "bank_account_mappings": [
+                {
+                    "id": str(item.get("id") or ""),
+                    "last4": str(item.get("last4") or ""),
+                    "bank_name": str(item.get("bank_name") or ""),
+                    "short_name": str(item.get("short_name") or ""),
+                }
+                for item in self._snapshot["bank_account_mappings"]
+            ],
+        }
+
     def get_completed_project_ids(self) -> set[str]:
         self._refresh_snapshot_from_state_store()
         return set(self._snapshot["completed_project_ids"])

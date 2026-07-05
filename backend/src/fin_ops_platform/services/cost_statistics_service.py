@@ -10,7 +10,6 @@ from fin_ops_platform.services.cost_statistics_relation_rules import is_cost_eli
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.live_workbench_service import format_decimal
 
-
 ZERO = Decimal("0.00")
 EXCLUDED_COST_EXPENSE_TYPES = {"借款", "还款"}
 OA_INVOICE_OFFSET_AUTO_MATCH_CODE = "oa_invoice_offset_auto_match"
@@ -35,15 +34,11 @@ class CostStatisticsService:
         import_service: ImportNormalizationService,
         *,
         grouped_workbench_loader: Callable[[str], dict[str, Any]],
-        row_detail_loader: Callable[[str], dict[str, Any]],
         project_active_checker: Callable[[str | None, str], bool] | None = None,
-        relation_facade: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._grouped_workbench_loader = grouped_workbench_loader
-        self._row_detail_loader = row_detail_loader
         self._project_active_checker = project_active_checker or (lambda project_id, project_name: True)
-        self._relation_facade = relation_facade
 
     def get_month_statistics(self, month: str, *, project_scope: str = PROJECT_SCOPE_ACTIVE) -> dict[str, Any]:
         entries = self._build_cost_entries(month, project_scope=project_scope)
@@ -128,6 +123,7 @@ class CostStatisticsService:
             "month": month,
             "summary": self._summary_payload(sorted_entries),
             "time_rows": [self._serialize_cost_entry(entry) for entry in sorted_entries],
+            "bank_accounts": [],
             "project_rows": [
                 {
                     "project_name": bucket["project_name"],
@@ -152,43 +148,6 @@ class CostStatisticsService:
                     key=lambda item: (-item["total_amount"], item["expense_type"]),
                 )
             ],
-        }
-
-    def get_project_statistics(
-        self,
-        month: str,
-        project_name: str,
-        *,
-        project_scope: str = PROJECT_SCOPE_ACTIVE,
-    ) -> dict[str, Any]:
-        entries = [
-            entry
-            for entry in self._build_cost_entries(month, project_scope=project_scope)
-            if entry["project_name"] == project_name
-        ]
-        rows = [
-            {
-                "transaction_id": entry["transaction_id"],
-                "trade_time": entry["trade_time"],
-                "direction": entry["direction"],
-                "expense_type": entry["expense_type"],
-                "expense_content": entry["expense_content"],
-                "amount": format_decimal(entry["amount_decimal"]),
-                "counterparty_name": entry["counterparty_name"],
-                "payment_account_label": entry["payment_account_label"],
-                **bank_tag_context_from_row(entry),
-            }
-            for entry in sorted(entries, key=lambda item: (item["trade_time"], item["transaction_id"]))
-        ]
-        return {
-            "month": month,
-            "project_name": project_name,
-            "summary": {
-                "row_count": len(rows),
-                "transaction_count": len(entries),
-                "total_amount": format_decimal(sum((entry["amount_decimal"] for entry in entries), start=ZERO)),
-            },
-            "rows": rows,
         }
 
     def get_expense_type_statistics(
@@ -224,105 +183,6 @@ class CostStatisticsService:
             "summary": self._summary_payload(entries),
             "rows": rows,
         }
-
-    def get_transaction_detail(
-        self,
-        transaction_id: str,
-        *,
-        project_scope: str = PROJECT_SCOPE_ACTIVE,
-    ) -> dict[str, Any]:
-        transaction = self._import_service.get_transaction(transaction_id)
-        month = (transaction.txn_date or "")[:7]
-        if not month:
-            raise KeyError(transaction_id)
-        entry = next(
-            (
-                candidate
-                for candidate in self._build_cost_entries(month, project_scope=project_scope)
-                if candidate["transaction_id"] == transaction_id
-            ),
-            None,
-        )
-        if entry is None:
-            raise KeyError(transaction_id)
-        raw_detail = self._row_detail_loader(transaction_id)
-        row_detail = raw_detail.get("row", raw_detail) if isinstance(raw_detail, dict) else {}
-        relation_context = self._relation_context_for_transaction(transaction_id)
-        relation_case_ids = [
-            str(group_id).strip()
-            for group_id in list(relation_context.get("group_ids") or [])
-            if str(group_id).strip()
-        ]
-        linked_oa = [item for item in list(relation_context.get("linked_oa") or []) if isinstance(item, dict)]
-        linked_input_invoices = [
-            item for item in list(relation_context.get("linked_input_invoices") or []) if isinstance(item, dict)
-        ]
-        linked_output_invoices = [
-            item for item in list(relation_context.get("linked_output_invoices") or []) if isinstance(item, dict)
-        ]
-        return {
-            "month": month,
-            "transaction": {
-                "id": transaction_id,
-                "project_name": entry["project_name"],
-                "expense_type": entry["expense_type"],
-                "expense_content": entry["expense_content"],
-                "trade_time": entry["trade_time"],
-                "direction": entry["direction"],
-                "amount": format_decimal(entry["amount_decimal"]),
-                "counterparty_name": entry["counterparty_name"],
-                "payment_account_label": entry["payment_account_label"],
-                "remark": entry["remark"],
-                "oa_applicant": entry["oa_applicant"],
-                "summary_fields": dict(row_detail.get("summary_fields", {})),
-                "detail_fields": dict(row_detail.get("detail_fields", {})),
-                "relation_status": str(relation_context.get("relation_status") or ("linked" if relation_case_ids else "unlinked")),
-                "relation_case_ids": list(dict.fromkeys(relation_case_ids)),
-                "linked_oa_count": len({str(item.get("id") or item.get("oa_id") or "").strip() for item in linked_oa if str(item.get("id") or item.get("oa_id") or "").strip()}),
-                "linked_invoice_count": len(
-                    {
-                        str(item.get("id") or item.get("invoice_id") or "").strip()
-                        for item in [*linked_input_invoices, *linked_output_invoices]
-                        if str(item.get("id") or item.get("invoice_id") or "").strip()
-                    }
-                ),
-                **bank_tag_context_from_row(entry),
-            },
-            "relation_context": {
-                "row_id": str(relation_context.get("row_id") or transaction_id),
-                "row_type": str(relation_context.get("row_type") or "bank_transaction"),
-                "relation_status": str(relation_context.get("relation_status") or ("linked" if relation_case_ids else "unlinked")),
-                "group_ids": list(dict.fromkeys(relation_case_ids)),
-                "linked_oa": linked_oa,
-                "linked_bank_transactions": [
-                    item for item in list(relation_context.get("linked_bank_transactions") or []) if isinstance(item, dict)
-                ],
-                "linked_input_invoices": linked_input_invoices,
-                "linked_output_invoices": linked_output_invoices,
-            },
-        }
-
-    def _relation_context_for_transaction(self, transaction_id: str) -> dict[str, Any]:
-        normalized_transaction_id = str(transaction_id or "").strip()
-        if not normalized_transaction_id or self._relation_facade is None:
-            return {}
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
-        if not callable(reader):
-            return {}
-        try:
-            payload = reader(
-                [normalized_transaction_id],
-                require_fresh=False,
-                reason="cost_statistics_transaction_detail_relations",
-            )
-        except TypeError:
-            payload = reader([normalized_transaction_id])
-        if not isinstance(payload, dict):
-            return {}
-        for row in list(payload.get("rows") or []):
-            if isinstance(row, dict) and str(row.get("row_id") or "").strip() == normalized_transaction_id:
-                return row
-        return {}
 
     def _build_cost_entries(self, month: str, *, project_scope: str = PROJECT_SCOPE_ACTIVE) -> list[dict[str, Any]]:
         normalized_project_scope = self._normalize_project_scope(project_scope)

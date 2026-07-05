@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from http import HTTPStatus
 import unittest
+from http import HTTPStatus
 
 from fin_ops_platform.app.server import Application
-from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
+from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.cost_tax_sql_projection import CostStatisticsSqlProjectionBuilder
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
@@ -43,6 +43,20 @@ class RedisRecorder:
     def delete(self, key: str) -> bool:
         self.deletes.append(key)
         return True
+
+
+class CostStatisticsAppSettingsStub:
+    def get_bank_auto_tag_rules_payload(self, **_kwargs: object) -> dict[str, object]:
+        return {"version": 7, "active_rules": []}
+
+    def get_bank_account_mappings_payload(self) -> list[dict[str, str]]:
+        return [{"bank_name": "工商银行", "last4": "0001", "id": "bank_mapping_0001", "short_name": ""}]
+
+    def get_cost_statistics_source_settings_payload(self) -> dict[str, object]:
+        return {
+            "bank_transaction_tags": {"version": 7, "active_rules": []},
+            "bank_account_mappings": self.get_bank_account_mappings_payload(),
+        }
 
 
 def redis_fresh_payload(
@@ -240,6 +254,10 @@ class CostStatisticsProjectionConnection:
         if "from app.app_settings" in normalized:
             return {
                 "settings_payload": {
+                    "bank_account_mappings": [
+                        {"bank_name": "工商银行", "last4": "0001"},
+                        {"bank_name": "民生银行", "last4": "9486"},
+                    ],
                     "projects": [{"name": "项目A", "active": True}],
                     "bank_transaction_tags": {"version": 7},
                 }
@@ -350,7 +368,12 @@ class CostStatisticsParentAggregationConnection:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
         if "from app.app_settings" in normalized:
-            return {"settings_payload": {"bank_transaction_tags": {"version": 7}}}
+            return {
+                "settings_payload": {
+                    "bank_account_mappings": [{"bank_name": "工商银行", "last4": "0001"}],
+                    "bank_transaction_tags": {"version": 7},
+                }
+            }
         return None
 
 
@@ -547,6 +570,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
     def test_cost_statistics_api_reads_redis_hot_cache_without_sql_or_sync_build(self) -> None:
         app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
         source_versions = app._cost_statistics_expected_source_versions("active:2026-05")
         app._runtime_repositories = type(
             "RuntimeRepos",
@@ -559,6 +583,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                             "month": "2026-05",
                             "summary": {"total_amount": "0.00", "transaction_count": 0},
                             "time_rows": [],
+                            "bank_accounts": [],
                             "project_rows": [],
                             "expense_type_rows": [],
                         },
@@ -594,6 +619,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         queue = QueueRecorder()
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
             (),
@@ -624,6 +650,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_production_postgres_cost_statistics_requires_sql_read_model_without_sync_build(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
         app._runtime_repositories = type(
@@ -654,6 +681,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         queue = QueueRecorder()
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
             (),
@@ -685,6 +713,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_cost_statistics_month_summary_reads_sql_aggregate_and_populates_redis(self) -> None:
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
             (),
@@ -748,6 +777,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_cost_statistics_api_reads_sql_and_populates_short_redis_cache(self) -> None:
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
             (),
@@ -775,6 +805,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                                 "remark": "",
                             }
                         ],
+                        "bank_accounts": [],
                         "project_rows": [
                             {
                                 "project_name": "云南溯源科技",
@@ -825,6 +856,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         queue = QueueRecorder()
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
             (),
@@ -926,6 +958,27 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"][0]["bank_tag_primary_label"], "项目开销")
         self.assertEqual(payload["time_rows"][0]["bank_tag_sub_label"], "设备材料")
         self.assertEqual(payload["time_rows"][0]["bank_tag_label_path"], ["项目开销", "设备材料"])
+        self.assertEqual(
+            payload["bank_accounts"],
+            [
+                {
+                    "bank_name": "工商银行",
+                    "account_last4": "0001",
+                    "payment_account_label": "工商银行 账户 0001",
+                    "source": "settings",
+                },
+                {
+                    "bank_name": "民生银行",
+                    "account_last4": "9486",
+                    "payment_account_label": "民生银行 账户 9486",
+                    "source": "settings",
+                },
+            ],
+        )
+        self.assertIn(
+            "bank_account_mappings_fingerprint",
+            snapshot["read_models"]["active:2026-05"]["source_versions"],
+        )
         workbench_sql, workbench_params = next(
             (sql, params) for sql, params in connection.fetch_all_calls if "read_model.workbench_groups" in sql
         )
@@ -1051,6 +1104,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["expense_type_rows"][0]["expense_type"], "材料")
         self.assertEqual(payload["time_rows"][0]["bank_tag_primary_label"], "项目开销")
         self.assertEqual(payload["time_rows"][0]["bank_tag_sub_label"], "设备材料")
+        self.assertEqual(payload["bank_accounts"][0]["payment_account_label"], "工商银行 账户 0001")
         self.assertEqual(snapshot["read_models"]["active:all"]["source_versions"]["source_shard_count"], 2)
 
     def test_cost_statistics_sql_projection_rebuilds_all_all_as_first_class_read_model(self) -> None:
@@ -1163,6 +1217,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         queue = QueueRecorder()
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
             (),
@@ -1197,6 +1252,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         queue = QueueRecorder()
         app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._cost_statistics_read_model_service = EmptyCostReadModelService()
 

@@ -10,7 +10,6 @@ import type {
 import type {
   WorkbenchActionVariant,
   WorkbenchCandidateGroup,
-  WorkbenchData,
   WorkbenchDetailField,
   IgnoredWorkbenchData,
   BankAccountMapping,
@@ -57,7 +56,6 @@ import type {
   SaveOaApplicantCredentialRequest,
 } from "./types";
 import { apiUrl } from "../../app/runtime";
-import { countWorkbenchGroupsRows } from "./groupDisplayModel";
 import { ApiClientError, apiRequestJson } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
 import { readOATokenCookie } from "../session/api";
@@ -1813,10 +1811,6 @@ function mapWorkbenchExceptionApplyResult(
   };
 }
 
-function createEmptyZoneCounts(groups = 0): WorkbenchZoneCounts {
-  return { groups, oa: 0, bank: 0, invoice: 0, rows: 0 };
-}
-
 function mapZoneCounts(
   summary: ApiWorkbenchPayload["summary"],
   fallback?: Partial<Record<WorkbenchZoneId, Partial<WorkbenchZoneCounts>>>,
@@ -1840,33 +1834,6 @@ function mapZoneCounts(
   return {
     paired: mapOne(paired, toCount(summary.paired_count)),
     open: mapOne(open, toCount(summary.open_count)),
-  };
-}
-
-function mapSummary(
-  summary: ApiWorkbenchPayload["summary"],
-  pairedGroups: WorkbenchCandidateGroup[],
-  openGroups: WorkbenchCandidateGroup[],
-): WorkbenchSummary {
-  const fallbackZoneCounts: Record<WorkbenchZoneId, WorkbenchZoneCounts> = {
-    paired: {
-      ...createEmptyZoneCounts(toCount(summary.paired_count)),
-      rows: countWorkbenchGroupsRows(pairedGroups),
-    },
-    open: {
-      ...createEmptyZoneCounts(toCount(summary.open_count)),
-      rows: countWorkbenchGroupsRows(openGroups),
-    },
-  };
-  return {
-    oaCount: summary.oa_count,
-    bankCount: summary.bank_count,
-    invoiceCount: summary.invoice_count,
-    pairedCount: countWorkbenchGroupsRows(pairedGroups),
-    openCount: summary.open_count,
-    exceptionCount: summary.exception_count,
-    totalCount: summary.oa_count + summary.bank_count + summary.invoice_count,
-    zoneCounts: mapZoneCounts(summary, fallbackZoneCounts),
   };
 }
 
@@ -2686,58 +2653,6 @@ export async function fetchWorkbenchInitialPage(
     pages: {
       paired: pairedPage.page,
       open: openPage.page,
-    },
-  };
-}
-
-export async function fetchWorkbench(month: string, signal?: AbortSignal): Promise<WorkbenchData> {
-  return fetchWorkbenchWithProgress(month, signal);
-}
-
-export async function fetchWorkbenchWithProgress(
-  month: string,
-  signal?: AbortSignal,
-  onProgress?: (progress: WorkbenchBootstrapProgress) => void,
-): Promise<WorkbenchData> {
-  const payload = await requestJsonWithByteProgress<ApiWorkbenchPayload>(`/api/workbench?month=${month}`, {
-    signal,
-    onProgress: onProgress
-      ? (loadedBytes, totalBytes) => {
-        const resolvedPercent = totalBytes > 0 ? clampPercent((loadedBytes / totalBytes) * 100) : null;
-        onProgress({
-          label: "读 OA 中",
-          loadedBytes,
-          totalBytes,
-          percent: resolvedPercent,
-          indeterminate: totalBytes <= 0,
-        });
-      }
-      : undefined,
-  });
-
-  if (onProgress) {
-    onProgress({
-      label: "关联台数据已加载完成",
-      loadedBytes: 0,
-      totalBytes: 0,
-      percent: 100,
-      indeterminate: false,
-    });
-  }
-
-  const pairedGroups = payload.paired.groups.map((group) => mapGroup(group, "paired"));
-  const openGroups = payload.open.groups.map((group) => mapGroup(group, "open"));
-
-  return {
-    month: payload.month,
-    oaStatus: mapOaStatus(payload.oa_status),
-    summary: mapSummary(payload.summary, pairedGroups, openGroups),
-    invoiceInventory: mapInvoiceInventory(payload.invoice_inventory),
-    paired: {
-      groups: pairedGroups,
-    },
-    open: {
-      groups: openGroups,
     },
   };
 }

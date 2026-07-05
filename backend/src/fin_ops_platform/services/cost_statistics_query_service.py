@@ -344,6 +344,7 @@ class CostStatisticsQueryService:
                 "total_amount": "0.00",
             },
             "time_rows": [],
+            "bank_accounts": [],
             "project_rows": [],
             "expense_type_rows": [],
         }
@@ -353,7 +354,7 @@ class CostStatisticsQueryService:
         summary = payload.get("summary")
         if not isinstance(summary, dict):
             return False
-        return all(isinstance(payload.get(key), list) for key in ("time_rows", "project_rows", "expense_type_rows"))
+        return all(isinstance(payload.get(key), list) for key in ("time_rows", "bank_accounts", "project_rows", "expense_type_rows"))
 
     @staticmethod
     def empty_month_payload(month: str) -> dict[str, Any]:

@@ -3845,7 +3845,7 @@ const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>
     云南溯源科技: [
       {
         transaction_id: "cost-txn-001",
-        trade_time: "2026-03-10 21:27:55",
+        trade_time: "2026-03-10T21:27:55+08:00",
         direction: "支出",
         expense_type: "设备货款及材料费",
         expense_content: "PLC 模块采购",
@@ -4231,6 +4231,26 @@ function buildCostStatisticsExplorerPayload(
       total_amount: sumCostAmounts(timeRows),
     },
     time_rows: timeRows,
+    bank_accounts: [
+      {
+        bank_name: "工商银行",
+        account_last4: "0001",
+        payment_account_label: "工商银行 账户 0001",
+        source: "settings",
+      },
+      {
+        bank_name: "平安银行",
+        account_last4: "8821",
+        payment_account_label: "平安银行 账户 8821",
+        source: "settings",
+      },
+      {
+        bank_name: "民生银行",
+        account_last4: "9486",
+        payment_account_label: "民生银行 账户 9486",
+        source: "settings",
+      },
+    ],
     project_rows: projectRows,
     expense_type_rows: expenseTypeRows,
   };

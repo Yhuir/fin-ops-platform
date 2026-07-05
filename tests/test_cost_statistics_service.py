@@ -1,51 +1,9 @@
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
-
-
-class FakeCostRelationFacade:
-    last_source_versions = {"schema_version": 52}
-
-    def __init__(self, *, relation_status: str = "linked") -> None:
-        self.calls: list[list[str]] = []
-        self.relation_status = relation_status
-
-    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
-        normalized = [str(row_id) for row_id in row_ids]
-        self.calls.append(normalized)
-        return {
-            "status": "fresh",
-            "rows": [
-                {
-                    "row_id": "txn-cost-001",
-                    "row_type": "bank_transaction",
-                    "relation_status": self.relation_status,
-                    "group_ids": ["group-cost-001"],
-                    "linked_oa": [
-                        {
-                            "id": "oa-cost-001",
-                            "applicant": "成本申请人",
-                            "project_name": "云南溯源科技",
-                            "expense_type": "设备货款及材料费",
-                            "expense_content": "PLC 模块采购",
-                        }
-                    ],
-                    "linked_input_invoices": [
-                        {"id": "inv-cost-001", "invoice_no": "COST-001", "total_with_tax": "1000.00"}
-                    ],
-                    "linked_output_invoices": [],
-                    "linked_bank_transactions": [{"id": "txn-cost-001", "amount": "1000.00"}],
-                }
-            ],
-            "groups": [],
-            "source_versions": self.last_source_versions,
-            "read_model_scope_keys": ["2026-03"],
-            "refresh_enqueued": False,
-            "stale_reasons": [],
-        }
 
 
 class CostStatisticsServiceTests(unittest.TestCase):
@@ -175,38 +133,12 @@ class CostStatisticsServiceTests(unittest.TestCase):
                 "open": {"groups": []},
             }
         }
-        self.row_details = {
-            "txn-cost-001": {
-                "id": "txn-cost-001",
-                "type": "bank",
-                "summary_fields": {"交易时间": "2026-03-10 21:27:55"},
-                "detail_fields": {
-                    "账号": "62220001",
-                    "账户名称": "云南溯源科技有限公司",
-                    "摘要": "设备采购",
-                    "备注": "设备采购款",
-                },
-            },
-            "txn-cost-002": {
-                "id": "txn-cost-002",
-                "type": "bank",
-                "summary_fields": {"交易时间": "2026-03-11 09:01:02"},
-                "detail_fields": {
-                    "账号": "62220002",
-                    "账户名称": "云南溯源科技有限公司",
-                    "摘要": "设备采购",
-                    "备注": "设备配件款",
-                },
-            },
-        }
-
     def test_month_statistics_only_counts_outflow_rows_with_complete_oa_cost_fields(self) -> None:
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 
         service = CostStatisticsService(
             self.import_service,
             grouped_workbench_loader=lambda month: self.grouped_payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
         )
 
         payload = service.get_month_statistics("2026-03")
@@ -219,27 +151,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["expense_type"], "设备货款及材料费")
         self.assertEqual(payload["rows"][0]["expense_content"], "PLC 模块采购")
         self.assertEqual(payload["rows"][0]["amount"], "1,250.00")
-
-    def test_project_statistics_returns_time_amount_and_expense_fields(self) -> None:
-        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
-
-        service = CostStatisticsService(
-            self.import_service,
-            grouped_workbench_loader=lambda month: self.grouped_payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
-        )
-
-        payload = service.get_project_statistics("2026-03", "云南溯源科技")
-
-        self.assertEqual(payload["project_name"], "云南溯源科技")
-        self.assertEqual(payload["summary"]["transaction_count"], 2)
-        self.assertEqual(payload["summary"]["total_amount"], "1,250.00")
-        self.assertEqual(payload["rows"][0]["trade_time"], "2026-03-10 21:27:55")
-        self.assertEqual(payload["rows"][0]["expense_type"], "设备货款及材料费")
-        self.assertEqual(payload["rows"][0]["expense_content"], "PLC 模块采购")
-        self.assertEqual(payload["rows"][0]["amount"], "1,000.00")
-        self.assertEqual(payload["rows"][0]["bank_tag_primary_label"], "项目开销")
-        self.assertEqual(payload["rows"][0]["bank_tag_sub_label"], "设备材料")
 
     def test_explorer_all_aggregates_entries_across_multiple_months(self) -> None:
         from fin_ops_platform.domain.models import BankTransaction
@@ -303,7 +214,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         service = CostStatisticsService(
             import_service,
             grouped_workbench_loader=lambda month: grouped_payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
         )
 
         payload = service.get_explorer("all")
@@ -313,66 +223,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["total_amount"], "6,050.00")
         self.assertEqual(payload["project_rows"][0]["project_name"], "昆明卷烟厂动力设备控制系统升级改造项目")
         self.assertEqual(payload["project_rows"][1]["project_name"], "云南溯源科技")
-
-    def test_transaction_detail_includes_bank_and_oa_cost_fields(self) -> None:
-        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
-
-        service = CostStatisticsService(
-            self.import_service,
-            grouped_workbench_loader=lambda month: self.grouped_payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
-        )
-
-        payload = service.get_transaction_detail("txn-cost-001")
-
-        self.assertEqual(payload["transaction"]["id"], "txn-cost-001")
-        self.assertEqual(payload["transaction"]["project_name"], "云南溯源科技")
-        self.assertEqual(payload["transaction"]["expense_type"], "设备货款及材料费")
-        self.assertEqual(payload["transaction"]["expense_content"], "PLC 模块采购")
-        self.assertEqual(payload["transaction"]["amount"], "1,000.00")
-        self.assertEqual(payload["transaction"]["bank_tag_primary_label"], "项目开销")
-        self.assertEqual(payload["transaction"]["bank_tag_sub_label"], "设备材料")
-        self.assertIn("detail_fields", payload["transaction"])
-
-    def test_transaction_detail_includes_workbench_relation_distribution_context(self) -> None:
-        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
-
-        relation_facade = FakeCostRelationFacade()
-        service = CostStatisticsService(
-            self.import_service,
-            grouped_workbench_loader=lambda month: self.grouped_payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
-            relation_facade=relation_facade,
-        )
-
-        payload = service.get_transaction_detail("txn-cost-001")
-        explorer = service.get_explorer("2026-03")
-
-        self.assertEqual(payload["transaction"]["amount"], "1,000.00")
-        self.assertEqual(payload["transaction"]["relation_status"], "linked")
-        self.assertEqual(payload["transaction"]["relation_case_ids"], ["group-cost-001"])
-        self.assertEqual([item["id"] for item in payload["relation_context"]["linked_oa"]], ["oa-cost-001"])
-        self.assertEqual([item["id"] for item in payload["relation_context"]["linked_input_invoices"]], ["inv-cost-001"])
-        self.assertEqual(explorer["summary"]["total_amount"], "1,250.00")
-        self.assertEqual(relation_facade.calls[0], ["txn-cost-001"])
-
-    def test_transaction_detail_preserves_candidate_relation_status_without_changing_cost_total(self) -> None:
-        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
-
-        relation_facade = FakeCostRelationFacade(relation_status="candidate")
-        service = CostStatisticsService(
-            self.import_service,
-            grouped_workbench_loader=lambda month: self.grouped_payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
-            relation_facade=relation_facade,
-        )
-
-        payload = service.get_transaction_detail("txn-cost-001")
-        explorer = service.get_explorer("2026-03")
-
-        self.assertEqual(payload["transaction"]["relation_status"], "candidate")
-        self.assertEqual(payload["relation_context"]["relation_status"], "candidate")
-        self.assertEqual(explorer["summary"]["total_amount"], "1,250.00")
 
     def test_group_cost_context_treats_dash_placeholders_as_empty_and_falls_back_to_detail_fields(self) -> None:
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
@@ -425,7 +275,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         service = CostStatisticsService(
             self.import_service,
             grouped_workbench_loader=lambda month: payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
         )
 
         payload = service.get_explorer("2026-03")
@@ -481,7 +330,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         service = CostStatisticsService(
             self.import_service,
             grouped_workbench_loader=lambda month: payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
         )
 
         payload = service.get_explorer("2026-03")
@@ -517,7 +365,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         service = CostStatisticsService(
             self.import_service,
             grouped_workbench_loader=lambda month: payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
         )
 
         payload = service.get_explorer("2026-03", project_scope="all")
@@ -553,7 +400,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         service = CostStatisticsService(
             self.import_service,
             grouped_workbench_loader=lambda month: payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
         )
 
         payload = service.get_explorer("2026-03", project_scope="all")
@@ -593,7 +439,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         service = CostStatisticsService(
             self.import_service,
             grouped_workbench_loader=lambda month: payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
         )
 
         payload = service.get_explorer("2026-03", project_scope="all")
@@ -639,7 +484,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         service = CostStatisticsService(
             self.import_service,
             grouped_workbench_loader=lambda month: payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
             project_active_checker=lambda project_id, project_name: project_name != "已完成项目",
         )
 
@@ -707,7 +551,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         service = CostStatisticsService(
             self.import_service,
             grouped_workbench_loader=lambda month: payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
         )
 
         payload = service.get_explorer("2026-03", project_scope="all")
@@ -722,7 +565,6 @@ class CostStatisticsServiceTests(unittest.TestCase):
         service = CostStatisticsService(
             self.import_service,
             grouped_workbench_loader=lambda month: self.grouped_payloads[month],
-            row_detail_loader=lambda row_id: self.row_details[row_id],
         )
 
         with self.assertRaisesRegex(ValueError, "project_scope must be active or all"):

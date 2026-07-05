@@ -53,7 +53,6 @@ from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
 from fin_ops_platform.app.routes_etc_import import EtcImportApiRoutes
 from fin_ops_platform.app.routes_etc_invoices import EtcInvoiceApiRoutes
 from fin_ops_platform.app.routes_etc_reconciliation import EtcReconciliationTaskApiRoutes
-from fin_ops_platform.app.routes_legacy_workbench_actions import LegacyWorkbenchActionRoutes
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
@@ -119,6 +118,10 @@ from fin_ops_platform.services.background_job_service import (
 )
 from fin_ops_platform.services.bank_flow_rule_batch_derived_lifecycle_executor import (
     BankFlowRuleBatchDerivedLifecycleExecutor,
+)
+from fin_ops_platform.services.cost_statistics_bank_accounts import (
+    bank_account_mappings_fingerprint_from_settings_payload,
+    bank_auto_tag_rules_version_from_settings_payload,
 )
 from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
@@ -439,7 +442,6 @@ from fin_ops_platform.services.turnover_relation_service import (
     TurnoverRelationValidationError,
 )
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
-from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_api_payload_assembler import WorkbenchApiPayloadAssembler
 from fin_ops_platform.services.workbench_candidate_match_service import (
@@ -1154,7 +1156,6 @@ class Application:
             source_versions_provider=self._workbench_matching_source_versions,
         )
         self._configure_workbench_exception_application_service()
-        self._workbench_action_service = WorkbenchActionService(self._workbench_query_service)
         self._live_workbench_service = LiveWorkbenchService(
             self._import_service,
             self._matching_service,
@@ -1356,9 +1357,7 @@ class Application:
         self._cost_statistics_service = CostStatisticsService(
             self._import_service,
             grouped_workbench_loader=self._build_api_workbench_payload,
-            row_detail_loader=self._get_api_workbench_row_detail_payload,
             project_active_checker=self._app_settings_service.is_project_active,
-            relation_facade=self._workbench_relation_read_facade(),
         )
         self._configure_cost_statistics_application_services()
         self._search_service = SearchService(
@@ -1371,19 +1370,12 @@ class Application:
         self._pending_workbench_read_model_scope_keys: set[str] = set()
         self._workbench_pair_relation_persist_version = 0
         self._pending_workbench_pair_relation_case_ids: set[str] = set()
-        self._workbench_api_routes = WorkbenchApiRoutes(
-            self._workbench_query_service,
-            self._workbench_action_service,
-        )
+        self._workbench_api_routes = WorkbenchApiRoutes(self._workbench_query_service)
         self._workbench_group_detail_api_routes = self._build_workbench_group_detail_api_routes()
         self._workbench_row_detail_api_routes = self._build_workbench_row_detail_api_routes()
         self._workbench_action_api_routes = WorkbenchActionApiRoutes(
             exception_service=self._workbench_exception_application_service,
             write_facade_provider=self._workbench_write_facade,
-        )
-        self._legacy_workbench_action_routes = LegacyWorkbenchActionRoutes(
-            reconciliation_service=self._reconciliation_service,
-            ledger_service=self._ledger_service,
         )
         self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
             ledger_service=self._turnover_ledger_service,
@@ -2216,21 +2208,6 @@ class Application:
             cost_statistics_response = self._cost_statistics_routes().route(method, route_path, query)
             if cost_statistics_response is not None:
                 return cost_statistics_response
-        if method == "GET" and route_path == "/workbench/prototype":
-            return self._handle_workbench_prototype()
-        if method == "GET" and route_path == "/workbench":
-            month = query.get("month", [None])[0]
-            return self._handle_workbench(month)
-        if method == "POST" and route_path == "/workbench/actions/confirm":
-            return self._handle_legacy_workbench_action("confirm", body)
-        if method == "POST" and route_path == "/workbench/actions/difference":
-            return self._handle_legacy_workbench_action("difference", body)
-        if method == "POST" and route_path == "/workbench/actions/exception":
-            return self._handle_legacy_workbench_action("exception", body)
-        if method == "POST" and route_path == "/workbench/actions/offline":
-            return self._handle_legacy_workbench_action("offline", body)
-        if method == "POST" and route_path == "/workbench/actions/offset":
-            return self._handle_legacy_workbench_action("offset", body)
         if method == "GET" and route_path == "/integrations/oa":
             return self._handle_oa_dashboard()
         if method == "POST" and route_path == "/integrations/oa/sync":
@@ -2483,12 +2460,6 @@ class Application:
                 "/api/cost-statistics/export",
                 "/api/cost-statistics/projects/{project_name}",
                 "/api/cost-statistics/transactions/{transaction_id}",
-                "/workbench",
-                "/workbench/actions/confirm",
-                "/workbench/actions/difference",
-                "/workbench/actions/exception",
-                "/workbench/actions/offline",
-                "/workbench/actions/offset",
                 "/integrations/oa",
                 "/integrations/oa/sync",
                 "/integrations/oa/sync-runs",
@@ -2828,14 +2799,6 @@ class Application:
             "groups": groups,
             "errors": errors,
         }
-
-    def _handle_workbench_prototype(self) -> Response:
-        prototype_path = Path(__file__).resolve().parents[4] / "web" / "prototypes" / "reconciliation-workbench-v2.html"
-        return Response(
-            status_code=int(HTTPStatus.OK),
-            body=prototype_path.read_text(encoding="utf-8"),
-            headers={"Content-Type": "text/html; charset=utf-8"},
-        )
 
     def _handle_api_workbench(
         self,
@@ -5551,7 +5514,6 @@ class Application:
             return False
         protected_prefixes = (
             "/api/",
-            "/workbench",
             "/integrations",
             "/projects",
             "/ledgers",
@@ -8470,11 +8432,13 @@ class Application:
 
     def _cost_statistics_source_versions(self, scope_key: str) -> dict[str, object]:
         _project_scope, month = str(scope_key or "active:all").split(":", 1)
+        cost_settings_payload = self._app_settings_service.get_cost_statistics_source_settings_payload()
         return {
             "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             "workbench_scope_key": month,
             "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
+            "bank_auto_tag_rules_version": bank_auto_tag_rules_version_from_settings_payload(cost_settings_payload),
+            "bank_account_mappings_fingerprint": bank_account_mappings_fingerprint_from_settings_payload(cost_settings_payload),
             "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
             "oa_projection_sync_version": self._current_oa_projection_sync_version(),
         }
@@ -9682,11 +9646,6 @@ class Application:
             },
         )
 
-    def _handle_workbench(self, month: str | None) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
-        payload = self._reconciliation_service.build_workbench(month=current_month)
-        return self._json_response(HTTPStatus.OK, payload)
-
     def _handle_api_workbench_action(
         self,
         body: str | bytes | None,
@@ -9791,21 +9750,6 @@ class Application:
     def _handle_workbench_unignore_row_payload(self, payload: dict[str, object]) -> Response:
         result = self._workbench_action_api_routes.unignore_row(payload)
         return self._workbench_write_response(result)
-
-    def _handle_legacy_workbench_action(self, action: str, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        routes = self._legacy_workbench_action_routes
-        handlers = {
-            "confirm": routes.confirm,
-            "difference": routes.difference,
-            "exception": routes.exception,
-            "offline": routes.offline,
-            "offset": routes.offset,
-        }
-        status_code, result = handlers[action](payload)
-        return self._json_response(status_code, result)
 
     def _handle_oa_dashboard(self) -> Response:
         postgres_dashboard = self._postgres_oa_projection_dashboard()

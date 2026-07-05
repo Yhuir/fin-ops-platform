@@ -66,6 +66,7 @@ describe("AppSidebar shell contract", () => {
 
   test("keeps the desktop rail fixed and uses compact navigation row rhythm", () => {
     const sidebarRule = appStyles.match(/\.app-sidebar\s*\{[^}]*\}/s)?.[0] ?? "";
+    const paperRule = appStyles.match(/\.app-sidebar-paper\s*\{[^}]*\}/s)?.[0] ?? "";
     const brandRule = appStyles.match(/\.app-sidebar-brand\s*\{[^}]*\}/s)?.[0] ?? "";
     const itemRule = appStyles.match(/\.app-sidebar-item\s*\{[^}]*\}/s)?.[0] ?? "";
     const linkRule = appStyles.match(/\.app-sidebar-link\s*\{[^}]*\}/s)?.[0] ?? "";
@@ -75,6 +76,8 @@ describe("AppSidebar shell contract", () => {
     expect(sidebarRule).toMatch(/position:\s*sticky;/);
     expect(sidebarRule).toMatch(/top:\s*0;/);
     expect(sidebarRule).toMatch(/height:\s*100dvh;/);
+    expect(paperRule).toMatch(/background:\s*#0f2447;/);
+    expect(paperRule).toMatch(/color:\s*#e6f0ff;/);
     expect(brandRule).toMatch(/min-height:\s*52px;/);
     expect(itemRule).toMatch(/min-height:\s*30px;/);
     expect(linkRule).toMatch(/min-height:\s*30px;/);
@@ -101,7 +104,7 @@ describe("AppSidebar shell contract", () => {
     expect(brandMarkRule).toMatch(/border:\s*0;/);
     expect(brandMarkRule).toMatch(/border-radius:\s*50%;/);
     expect(brandMarkRule).toMatch(/background:\s*transparent;/);
-    expect(brandMarkRule).toMatch(/color:\s*#2f7d4f;/);
+    expect(brandMarkRule).toMatch(/color:\s*#86efac;/);
   });
 
   test("renders the expand control as an icon-only control without visible tooltip copy", () => {

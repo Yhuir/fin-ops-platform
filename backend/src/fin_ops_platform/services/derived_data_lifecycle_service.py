@@ -4,7 +4,6 @@ from copy import deepcopy
 from time import perf_counter
 from typing import Any, Callable
 
-
 DERIVED_DATA_EVENTS = (
     "invoice_import_confirmed",
     "bank_import_confirmed",
@@ -377,6 +376,10 @@ class DerivedDataLifecycleService:
             "cost_statistics.read_model.refresh",
         ),
         "bank_transaction_category_changed": (
+            "workbench_matching",
+            "cost_statistics.read_model.refresh",
+        ),
+        "bank_auto_tag_rules_changed": (
             "workbench_matching",
             "cost_statistics.read_model.refresh",
         ),

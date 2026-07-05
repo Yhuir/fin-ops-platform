@@ -44,6 +44,7 @@
 | 自动标签规则写入结果 | 前端页面 | 前端优先等待服务端返回的 `operation_barrier_targets`；缺少/未知 read model status 默认按 `refreshing` 处理 |
 | 标签/分类事实写入 | canonical store | `BankDetailsApplicationService` 只依赖显式 `BankTransactionCategoryStorePort.save_bank_transaction_categories(...)`；禁止通过宽 `state_store` 在业务 service 内散写 |
 | 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播；`bank-flow-rule-batches` 只能读取 active 标签并维护自身 OA/发票规则 |
+| 自动标签规则下游刷新 | cost_statistics / workbench matching | `bank_auto_tag_rules_changed` 必须入队 `workbench_matching` 和 `cost_statistics.read_model.refresh`；成本统计页面只读取刷新后的 `time_rows.bank_tag_*`，不得直接读取银行明细 API 或规则表 |
 | 关系标签展示 | 银行明细列表/下游展示 | 只输出 relation chip/status；不发布 relation 事实、不触发 relation 写入、不绕过 `workbench-relations` freshness/command 边界 |
 | 导出文件 | 用户下载 | 复用当前查询边界，不绕过权限 |
 
@@ -93,7 +94,7 @@
 - Shared facts: `app.bank_transactions` 由银行流水导入 owner 正式化；本模块通过受控 write/read port 维护分类、标签和展示上下文。
 - Allowed writes: BankDetailsApplicationService、category/rule/confirmation services、bank detail write UoW。
 - Allowed reads: bank detail query/read ports、bank transaction identity/category service。
-- Downstream outputs: bank_detail、bank_account_balance、bank_flow_rule_batch、turnover_ledger、no_oa_bank_batch、workbench、search dirty scopes 或 owner producer 输出。
+- Downstream outputs: bank_detail、bank_account_balance、bank_flow_rule_batch、turnover_ledger、no_oa_bank_batch、workbench、cost_statistics、search dirty scopes 或 owner producer 输出。
 - Forbidden paths: turnover、no-OA 或前端不得直接写银行分类表；read model rows 不得反向成为分类事实源。
 - Old code deletion: 旧 snapshot 分类、前端推断分类和直接跨模块分类写入必须删除；migration/audit/rollback 工具保留不算 closure。
 - 2026-07-04 删除项：`Application._bank_details_relation_tag_workbench_read_model(...)` 无调用且会绕过 relation distribution/freshness 边界，已删除并由 `test_bank_details_relation_tags_only_read_relation_distribution_facade` 防回归。

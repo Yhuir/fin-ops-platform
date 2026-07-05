@@ -36,25 +36,17 @@ class LedgerApiTests(unittest.TestCase):
                 }
             ],
         )
-        workbench_before = json.loads(app.handle_request("GET", "/workbench?month=2026-03").body)
-        invoice_id = workbench_before["open"]["invoice"][0]["id"]
-        transaction_id = workbench_before["open"]["bank"][0]["id"]
+        invoice_id = app._import_service.list_invoices(month="2026-03")[0].id
+        transaction_id = app._import_service.list_transactions(month="2026-03")[0].id
 
-        confirm_response = app.handle_request(
-            "POST",
-            "/workbench/actions/confirm",
-            json.dumps(
-                {
-                    "actor_id": "user_finance_01",
-                    "invoice_ids": [invoice_id],
-                    "transaction_ids": [transaction_id],
-                    "remark": "partial receivable settlement",
-                }
-            ),
+        case = app._reconciliation_service.confirm_manual_reconciliation(
+            actor_id="user_finance_01",
+            invoice_ids=[invoice_id],
+            transaction_ids=[transaction_id],
+            remark="partial receivable settlement",
         )
-        self.assertEqual(confirm_response.status_code, 200)
-        confirm_payload = json.loads(confirm_response.body)
-        self.assertEqual(confirm_payload["ledgers"][0]["ledger_type"], "payment_collection")
+        ledgers = app._ledger_service.sync_from_case(case)
+        self.assertEqual(ledgers[0].ledger_type.value, "payment_collection")
 
         ledgers_response = app.handle_request("GET", "/ledgers?view=all")
         self.assertEqual(ledgers_response.status_code, 200)
@@ -83,27 +75,19 @@ class LedgerApiTests(unittest.TestCase):
                 }
             ],
         )
-        workbench_before = json.loads(app.handle_request("GET", "/workbench?month=2026-03").body)
-        transaction_id = workbench_before["open"]["bank"][0]["id"]
+        transaction_id = app._import_service.list_transactions(month="2026-03")[0].id
 
-        exception_response = app.handle_request(
-            "POST",
-            "/workbench/actions/exception",
-            json.dumps(
-                {
-                    "actor_id": "user_finance_01",
-                    "biz_side": "receivable",
-                    "invoice_ids": [],
-                    "transaction_ids": [transaction_id],
-                    "exception_code": "SO-B",
-                    "resolution_action": "create_follow_up_ledger",
-                    "note": "money received before invoice issued",
-                }
-            ),
+        case, exception_record = app._reconciliation_service.record_exception(
+            actor_id="user_finance_01",
+            biz_side="receivable",
+            invoice_ids=[],
+            transaction_ids=[transaction_id],
+            exception_code="SO-B",
+            resolution_action="create_follow_up_ledger",
+            note="money received before invoice issued",
         )
-        self.assertEqual(exception_response.status_code, 200)
-        exception_payload = json.loads(exception_response.body)
-        ledger_id = exception_payload["ledgers"][0]["id"]
+        ledgers = app._ledger_service.sync_from_case(case, exception_record=exception_record)
+        ledger_id = ledgers[0].id
 
         run_response = app.handle_request(
             "POST",

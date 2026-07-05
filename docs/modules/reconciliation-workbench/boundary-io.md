@@ -1,14 +1,14 @@
 # 关联台模块边界与 I/O
 
-日期：2026-07-04
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：medium
+- 状态：closed
+- 当前边界可信度：high
 - 目标边界：页面查询走 `workbench` read model active generation；首屏 summary 只读物化 `read_model.workbench_summary`，groups summary 页只输出 UI 必需字段；写操作通过 workbench action/relation service 进入关系事实源和 dirty scope。
-- 当前缺口：`server.py` 与历史 workbench service 仍保留部分入口，`GET /api/workbench` full payload 仍是兼容迁移面；confirm-link context expansion 仍在 `Application` adapter 内，但输出合同已收紧为 canonical Workbench row id，禁止把上游 source id 注入 action row_ids；withdraw-link action boundary 会用已选 canonical OA row 的 source aliases 生成显式 `row_id_aliases`，并传入 relation command/pair service 的 preview 与 submit 恢复判断。历史 relation fact 中残留的 OA source id 必须在 preview、submit response、restored relations、scope fallback 和刷新目标前统一收敛为 canonical Workbench row id；canonical 后与当前 active relation 同 row-set 的历史快照不得恢复，也不得在撤回预览“操作后”合成同一行。OA 自带附件发票绑定不是历史快照恢复，而是 relation command/repair/grouping 必须维护的 source binding 不变量：row index 和 raw payload repair 必须用 OA canonical row id 和 source aliases 识别附件发票父 OA；raw payload repair 发现可证明父 OA+附件发票且缺 active relation 时必须创建 `CASE-OA-ATT-<oa_row_id>`；已有 relation 缺父 OA 或缺附件时必须补齐同一 case；完整关系撤回后 OA+自带附件发票仍保持同一 active relation，纯 OA+自带附件发票撤回必须返回不可提交。row detail legacy fallback 已在生产 SQL read model runtime 完全关闭，只保留非 SQL/legacy 模式兼容入口。`workbench-matching` worker 已走 PostgreSQL dirty scope 和 `WorkbenchMatchingRelationReadPort`，运行时本地 pair service 只作为 canonical relation command/read 支撑，不再作为页面或 read model fallback。
-- 旧代码删除条件：没有 API、前端、worker、测试继续读取 legacy live/pickle 路径，并且 active generation freshness 与回归测试覆盖写后刷新。
+- 当前闭环：前端 `fetchWorkbench` / `fetchWorkbenchWithProgress` full-payload 客户端已删除，运行时页面只能走 `fetchWorkbenchInitialPage` + summary/groups API；旧 `/workbench`、`/workbench/prototype` 和 `/workbench/actions/*` HTTP 入口已删除；legacy `WorkbenchApiRoutes` 已降为只读兼容壳，仅保留 `get_workbench` / `get_row_detail`，不再拥有 action I/O。后端 `GET /api/workbench` full payload 是受限 read-only API contract：生产 SQL runtime 必须通过 `WorkbenchLegacyApiSqlReadProvider` 读取 active generation，repository/provider 缺失时 fail closed；非生产/local 才允许 `_build_api_workbench_payload(...)` 兼容构造。confirm-link context expansion 仍在 `Application` adapter 内，但输出合同已收紧为 canonical Workbench row id，禁止把上游 source id 注入 action row_ids；withdraw-link action boundary 会用已选 canonical OA row 的 source aliases 生成显式 `row_id_aliases`，并传入 relation command/pair service 的 preview 与 submit 恢复判断。历史 relation fact 中残留的 OA source id 必须在 preview、submit response、restored relations、scope fallback 和刷新目标前统一收敛为 canonical Workbench row id；canonical 后与当前 active relation 同 row-set 的历史快照不得恢复，也不得在撤回预览“操作后”合成同一行。OA 自带附件发票绑定不是历史快照恢复，而是 relation command/repair/grouping 必须维护的 source binding 不变量：row index 和 raw payload repair 必须用 OA canonical row id 和 source aliases 识别附件发票父 OA；raw payload repair 发现可证明父 OA+附件发票且缺 active relation时必须创建 `CASE-OA-ATT-<oa_row_id>`；已有 relation 缺父 OA 或缺附件时必须补齐同一 case；完整关系撤回后 OA+自带附件发票仍保持同一 active relation，纯 OA+自带附件发票撤回必须返回不可提交。row detail legacy fallback 已在生产 SQL read model runtime 完全关闭，只保留非 SQL/legacy 模式兼容入口。`workbench-matching` worker 已走 PostgreSQL dirty scope 和 `WorkbenchMatchingRelationReadPort`，运行时本地 pair service 只作为 canonical relation command/read 支撑，不再作为页面或 read model fallback。
+- 旧代码删除条件：已满足当前页面/runtime close；后续若要物理删除后端 `GET /api/workbench` full-payload contract，必须先迁移仍直接覆盖该 contract 的后端集成测试和外部调用方。
 
 ## 职责边界
 
@@ -77,7 +77,7 @@
 | Frontend page | `web/src/pages/ReconciliationWorkbenchPage.tsx` |
 | Frontend components | `web/src/components/workbench/*` |
 | Frontend API/tests | `web/src/features/workbench/*`、`web/src/test/Workbench*.test.*`、`web/e2e/workbench-*.spec.ts` |
-| Backend route | `backend/src/fin_ops_platform/app/routes_workbench.py`、`backend/src/fin_ops_platform/app/routes_workbench_actions.py`、`backend/src/fin_ops_platform/app/routes_legacy_workbench_actions.py` |
+| Backend route | `backend/src/fin_ops_platform/app/routes_workbench.py`、`backend/src/fin_ops_platform/app/routes_workbench_actions.py` |
 | Backend service | `backend/src/fin_ops_platform/services/workbench_*`、`backend/src/fin_ops_platform/services/live_workbench_service.py`、`backend/src/fin_ops_platform/services/matching.py` |
 | Repository / SQL | `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`、`backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py`、`backend/src/fin_ops_platform/services/workbench_sql_projection.py` |
 | Worker/read model | `backend/src/fin_ops_platform/services/workbench_read_model_service.py`、`backend/src/fin_ops_platform/services/runtime_worker_registry.py` |
@@ -102,12 +102,12 @@
 ## 当前缺口和删除条件
 
 - 对 legacy workbench API 的任何修改都必须同时写清是否仍有调用方。
-- `fetchWorkbenchInitialPage` 是当前首屏和导入后 fallback 刷新入口；`fetchWorkbenchWithProgress` / `/api/workbench` full payload 只允许作为兼容迁移面存在，不能重新进入页面 runtime 主链路。
+- `fetchWorkbenchInitialPage` 是当前首屏和导入后 fallback 刷新入口；前端 full-payload `fetchWorkbench` / `fetchWorkbenchWithProgress` 已删除，`/api/workbench` full payload 仅允许作为后端兼容迁移面存在，不能重新进入页面 runtime 主链路。
 - `GET /api/workbench` 在生产 SQL read model runtime 下必须通过 `WorkbenchLegacyApiSqlReadProvider` 读取 SQL active generation；repository/provider 缺失时返回 `read_model_unavailable`，不得回退 `_build_api_workbench_payload(...)` raw builder。
 - `GET /api/workbench/rows/{row_id}` 在生产 SQL read model runtime 下不得回退到 `WorkbenchApiRoutes.get_row_detail(...)` 或旧 query service 内存记录；命中 live/cache/query facade 失败时必须 fail closed。
 - `workbench-matching` 只能通过 `job.workbench_matching_dirty_scopes` claim/complete/fail 和 `WorkbenchMatchingRelationReadPort` 读取 canonical active relations；不得直接依赖页面 full payload、legacy dirty scope snapshot 或 read model distribution 作为 matching 事实源。
-- 删除旧路径前必须证明 route、frontend、worker、tests、生产脚本都不再依赖。
-- legacy exception action 不得再丢弃 `_apply_exception_payload` 计算出的 affected scopes；删除旧异常入口前必须保留 target envelope 回归。
+- 删除后端 `GET /api/workbench` full-payload contract 前必须证明 route、backend tests、生产脚本和外部调用方都不再依赖。
+- Workbench exception action 已归入现代 `/api/workbench/actions/*`/`/api/workbench/exception/*` 写边界；不得回退到旧 `/workbench/actions/*` 或丢弃 `_apply_exception_payload` 计算出的 affected scopes。
 
 ## Canonical facts ownership
 
@@ -117,4 +117,4 @@
 - Allowed reads: workbench query/facade ports、active generation/read model boundary。
 - Downstream outputs: workbench active generation、workbench_relation、search/cost/tax dirty scopes 或 owner producer 输出。
 - Forbidden paths: legacy workbench handler 不得直接写 relation facts、read model 或 dirty/outbox；building/failed projection 不得被当作页面事实。
-- Old code deletion: legacy workbench API、legacy exception action 和同步 builder production fallback 必须删除或迁移到 route/service owner；保留 compat wrapper 不算 closure。
+- Old code deletion: frontend legacy full-payload client 已删除；legacy `WorkbenchActionService` 已删除，legacy `WorkbenchApiRoutes` 只保留 read-only `get_workbench` / `get_row_detail` 兼容壳，不得承载 `confirm_link`、`mark_exception`、`cancel_link` 或 `update_bank_exception` 写状态机；旧 `/workbench`、`/workbench/prototype` 和 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP compat route owner 已删除，ledger/reminder 行为保留在 reconciliation/ledger service 和 `/ledgers`/`/reminders` API；后端 `GET /api/workbench` full payload 是受限 read-only compat API，不进入前端页面 runtime，不拥有写 I/O，不作为旧代码污染面。

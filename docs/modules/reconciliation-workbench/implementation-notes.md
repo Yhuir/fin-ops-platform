@@ -29,6 +29,38 @@
 
 ## 历史记录
 
+## 2026-07-05 - legacy `/workbench` HTTP compat 删除
+
+- 目标：删除旧 `/workbench` 页面读入口、旧静态 prototype 和旧 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP 包装层，避免旧 `ManualReconciliationService` + ledger sync 链路继续作为关联台 action 入口污染现代 `/api/workbench/actions/*` relation/read-model 链路。
+- 影响范围：`backend/src/fin_ops_platform/app/server.py`、`backend/src/fin_ops_platform/app/routes_legacy_workbench_actions.py`、`tests/test_workbench_api.py`、`tests/test_ledger_api.py`、`tests/test_app.py`、`tests/test_platform_runtime_boundary_guards.py`、本模块边界 I/O 和测试矩阵。
+- 关键决策：保留 `ManualReconciliationService` 与 `LedgerReminderService` 本身；它们仍有 reconciliation/ledger service 层用途。删除的是旧 Workbench HTTP compat route owner 和 entrypoints。
+- 已删除：`routes_legacy_workbench_actions.py`、`Application._legacy_workbench_action_routes` 装配、`Application._handle_legacy_workbench_action(...)`、`Application._handle_workbench(...)`、`Application._handle_workbench_prototype(...)`、旧 `/workbench` / `/workbench/prototype` / `/workbench/actions/*` dispatch、prototype HTML 和 health entrypoints。
+- 测试覆盖：`test_legacy_workbench_http_endpoints_stay_deleted` 防止旧 route owner/server/prototype 回流；`test_legacy_workbench_endpoints_are_removed` 断言旧 endpoint 返回 404；ledger API 测试改为 service 造数后继续验证 `/ledgers` 与 `/reminders`。
+- 验证命令：见本轮最终说明。
+- 未测风险：本轮未迁移后端 `/api/workbench` full payload contract。
+
+## 2026-07-05 - legacy Workbench API action service 删除
+
+- 目标：继续关闭关联台旧 action 逻辑污染面，把 legacy `WorkbenchApiRoutes` 从 action wrapper 降为 read-only 兼容壳，并删除旧 `WorkbenchActionService`。
+- 影响范围：`backend/src/fin_ops_platform/app/routes_workbench.py`、`backend/src/fin_ops_platform/app/server.py`、`backend/src/fin_ops_platform/services/workbench_action_service.py`、`tests/test_platform_runtime_boundary_guards.py`、`tests/test_cost_statistics_api.py`、`tests/test_workbench_v2_api.py`、本模块边界 I/O 和测试矩阵。
+- 关键发现：`WorkbenchActionApiRoutes` 已拥有现代 confirm/mark/cancel/update-bank-exception 写链路；成本统计回归只是借 legacy `confirm_link` 构造“已关联”的 full-payload 输入，不是成本统计边界或关联台写链路的真实调用方。
+- 已删除：legacy `WorkbenchActionService` 文件、`Application._workbench_action_service` 装配、`WorkbenchApiRoutes.confirm_link(...)`，以及旧 `mark_exception`、`cancel_link`、`update_bank_exception` action surface。
+- 保留为受限只读兼容合同：后端 `GET /api/workbench` full payload read compat 不进入前端页面 runtime，不拥有写 I/O；生产 SQL runtime 必须读取 active generation 并 fail closed。
+- 测试覆盖：更新 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_legacy_workbench_api_routes_are_read_only_and_action_service_deleted`，防止旧 action service 或旧 action method 回流；成本统计测试改为显式准备已关联输入，不再通过 legacy confirm 写链路造数。
+- 验证命令：见本轮最终说明。
+- 未测风险：后端 `/api/workbench` full payload 仍是兼容迁移面；删除它需要继续迁移依赖 full payload contract 的后端测试和调用点。
+
+## 2026-07-05 - full payload 前端旧客户端删除
+
+- 目标：按 Grill/Ponytail/GSD 审计结论删除关联台前端旧 full-payload 客户端，避免 `fetchWorkbench` / `fetchWorkbenchWithProgress` 继续维护 `/api/workbench?month=...` 首屏旧链路。
+- 影响范围：`web/src/features/workbench/api.ts`、`web/src/test/WorkbenchApi.test.ts`、`tests/test_platform_runtime_boundary_guards.py`、本模块边界 I/O 和测试矩阵。
+- 关键发现：关联台页面与导入后 fallback runtime 已经只调用 `fetchWorkbenchInitialPage` + `/api/workbench/summary` + `/api/workbench/groups`；`fetchWorkbenchWithProgress` 只剩 API 模块导出和旧 mapper 测试维护面，属于可删除旧代码。后端 `GET /api/workbench` 仍由 `WorkbenchLegacyApiSqlReadProvider` 作为兼容迁移面承接，删除后端 route 需要单独迁移仍依赖 full payload 的后端集成测试。
+- 已删除：前端 `fetchWorkbench`、`fetchWorkbenchWithProgress`、旧 full-payload `mapSummary` fallback helper，以及 23 个只覆盖旧 full-payload 客户端的前端测试块。
+- 后续已收口：legacy Workbench action service、旧 `/workbench` HTTP 入口和旧 prototype 已在 2026-07-05 后续步骤删除；后端 `GET /api/workbench` 保留为受限只读兼容合同。
+- 测试覆盖：更新 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_full_payload_fetcher_stays_deleted_from_frontend_runtime`，禁止前端 API 和 runtime 重新出现旧 full-payload fetcher；既有 `web/src/test/App.test.tsx` 继续断言关联台首页不请求 `/api/workbench?`。
+- 验证命令：见本轮最终说明。
+- 未测风险：前端旧客户端删除不等于后端 legacy route 删除；后端 `/api/workbench` full payload 仍需独立 caller-removal、API contract 和集成测试迁移后才能移除。
+
 ## 2026-07-04 - OA 自带附件发票 source binding 不可拆分
 
 - 目标：修复关联台中父 OA、自带附件发票和银行流水在导入/repair/撤回后被拆成不同行，或父 OA+自带附件发票只停留在 display-only candidate 的问题。
@@ -92,7 +124,7 @@
 - 目标：防止旧 `fetchWorkbenchWithProgress` / `/api/workbench?month=...` full payload 再次进入关联台首屏或导入后 fallback 运行链路。
 - 影响范围：`web/src` runtime import/call 边界、`tests/test_platform_runtime_boundary_guards.py`、本模块测试矩阵。
 - 关键决策：后端 `/api/workbench` 仍作为兼容迁移面和既有集成测试入口保留；当前生产首屏闭环先用 `fetchWorkbenchInitialPage` + summary/groups API 作为唯一 runtime 主链路，并用边界守卫禁止页面/组件重新调用 full payload fetcher。
-- 测试覆盖：新增 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_full_payload_fetcher_stays_off_runtime_pages`；既有 `web/src/test/App.test.tsx` 继续断言关联台首页不请求 `/api/workbench?`。
+- 测试覆盖：该守卫已在 2026-07-05 升级为 `tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_full_payload_fetcher_stays_deleted_from_frontend_runtime`；既有 `web/src/test/App.test.tsx` 继续断言关联台首页不请求 `/api/workbench?`。
 - 验证命令：见本轮最终说明。
 - 未测风险：后端 legacy route 尚未删除；后续删除需要逐步迁移仍依赖 `/api/workbench` 的后端集成测试。
 
