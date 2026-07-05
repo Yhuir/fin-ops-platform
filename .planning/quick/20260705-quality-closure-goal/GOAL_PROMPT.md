@@ -19,6 +19,65 @@ Playwright full page/action coverage + per-operation latency baseline + API/Serv
 6. The No OA Bank Batch page no longer exists. The current page is `/bank-flow-rule-batches` named `流水规则批量处理`. Treat old no-oa/no-oa-bank-batches references only as legacy API/read-model/policy migration risk, not as a page E2E target.
 7. Do not write raw prompts into `docs/`. Stable facts may be promoted into module docs; working prompts/plans belong under `.planning/`.
 8. If a credential appears in conversation history, treat it as sensitive and do not repeat it.
+9. Business-spec-first is mandatory. Do not generate tests by mirroring the current app implementation. Existing code is allowed only to locate routes, selectors, API endpoints, mock seams, and current behavior. Expected behavior must come from product docs, business-flow docs, module `e2e-spec.md`, module state machines, API contracts, or explicit user business rules.
+10. If current code behavior conflicts with business specs, keep the business expectation and produce a failing test/bug report. Do not weaken assertions so the current app passes.
+11. If business expectations are missing or ambiguous, create a focused business-spec gap entry and continue with other known flows. Do not invent a happy path from code shape.
+12. E2E tests must be adversarial enough to find bugs: cover invalid/empty/duplicate inputs, permission denial, stale/refreshing/failed read models, partial failure, retry, duplicate click prevention, conflict/version errors, and no-half-write behavior where applicable.
+13. Test failure triage is mandatory. After writing or changing tests, run the relevant tests. If a new or changed test fails, do not immediately modify production implementation.
+14. First classify every failure as one of: outdated/ambiguous business documentation, incorrect test expectation, unrealistic fixture/mock data, flaky wait/selector/test harness issue, real implementation bug, or real performance issue.
+15. For outdated docs, incorrect tests, unrealistic fixtures, or flaky harness failures, fix the spec/test/fixture/docs first, not app implementation.
+16. For real implementation/performance bugs, modify implementation only after the expected behavior is confirmed by business/product/module docs or explicit user instruction, the failing test is minimal and deterministic, and the root cause is traced to the shared source of behavior.
+17. If docs and current behavior conflict and the authoritative business rule cannot be determined, stop that specific change, record `business-spec-clarification-required`, and continue other independent safe work.
+18. Never weaken a valid business assertion just to make tests pass. Never change app behavior solely because a newly generated test failed.
+
+## Business-First Test Source Order
+
+Use this order to define expected behavior:
+
+1. `docs/business-flows/` real business workflows.
+2. `docs/product-specs/` product/business rules.
+3. `docs/modules/<module>/e2e-spec.md`.
+4. `docs/modules/<module>/state-machine.md`.
+5. `docs/modules/<module>/boundary-io.md`.
+6. `docs/dev/api-contracts.md` or route/API contract tests.
+7. Explicit user instructions in this prompt/thread.
+8. Existing production behavior only when it is proven to match the business spec.
+
+Use codebase inspection only after the expected behavior is known, and only for:
+
+- locating page entries and controls
+- finding existing test helpers and mock fixtures
+- identifying current implementation gaps
+- extracting stable selectors/accessibility names
+- wiring API mocks and operation barriers
+- tracing the real flow to the root cause of failures
+
+Forbidden test-generation shortcuts:
+
+- Do not snapshot the current DOM and call it coverage.
+- Do not assert only that current buttons exist.
+- Do not mark an operation covered only because current implementation calls some endpoint.
+- Do not make mocks copy current broken responses if product/API docs say otherwise.
+- Do not change expected business results to fit the existing app.
+- Do not convert a real bug into a test fixture workaround.
+
+## Test Failure Triage Policy
+
+After writing or changing any E2E/API/service/read-model/worker/permission test:
+
+1. Run the smallest relevant test command first.
+2. If it fails, do not jump straight into app code.
+3. Classify the failure:
+   - `outdated-docs`: product/module/business docs are stale or contradictory.
+   - `wrong-test`: test expectation does not match the confirmed business rule.
+   - `bad-fixture`: mock/fixture data is unrealistic or internally inconsistent.
+   - `harness-flake`: selector, timing, wait condition, browser setup, or test harness issue.
+   - `implementation-bug`: app violates confirmed business/API/state-machine contract.
+   - `performance-bug`: behavior is correct but latency/feedback/read-model/worker timing violates target or baseline expectation.
+4. For `outdated-docs`, `wrong-test`, `bad-fixture`, or `harness-flake`, fix docs/tests/fixtures/harness and rerun. Do not modify implementation.
+5. For `implementation-bug` or `performance-bug`, inspect the real flow end to end, identify the shared root cause, then make the smallest implementation fix with the failing test as regression coverage.
+6. If classification is unclear, record `business-spec-clarification-required` for that scenario and continue other independent safe work.
+7. Every final or phase report must list failing tests by classification and state whether implementation was changed.
 
 ## Known Local Inputs
 
@@ -169,6 +228,8 @@ Read first:
 - `README.md`
 - `ARCHITECTURE.md`
 - `docs/index.md`
+- `docs/business-flows/README.md`
+- `docs/product-specs/index.md`
 - `docs/app-architecture/README.md`
 - `docs/app-architecture/pages.md`
 - `docs/modules/README.md`
@@ -201,6 +262,8 @@ Targets:
 - Cover every route from `pageRegistry.tsx`.
 - Cover buttons, menus, drawers, dialogs, inputs, uploads, downloads, pagination, filters, sorting, permission states, failure states, and non-fresh states.
 - Record latency for every user operation.
+- Derive every expected user outcome from business specs/workflows first, then use code only to implement the browser interaction.
+- When the app fails the business expectation, keep the failing test and record the bug/performance issue.
 
 Performance schema must include at least:
 - route
@@ -244,10 +307,13 @@ Page order:
 
 For each page:
 - Read module `README.md`, `boundary-io.md`, `tests.md`, `e2e-spec.md`, and `e2e-coverage.md`.
+- Read the matching `docs/business-flows/` and `docs/product-specs/` entries when available.
+- Write or refine the operation checklist from business workflow steps, not from JSX alone.
 - Compare real page/feature code against existing specs.
 - Fill only real gaps.
 - Update module docs if facts or coverage change.
 - Run directed Playwright for that page.
+- If directed Playwright fails, apply the Test Failure Triage Policy before modifying app implementation.
 - Rerun docs/permissions/nightly/list gates.
 
 ## Phase 2 - API / Service Backend Test Closure
@@ -435,4 +501,3 @@ Closure definition:
 - no unexecuted item is mislabeled as `covered`
 ```
 ```
-
