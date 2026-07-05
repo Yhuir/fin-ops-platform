@@ -87,7 +87,6 @@ from fin_ops_platform.services.runtime_worker_handlers import (
     WorkbenchMatchingWorkerFactory,
     build_import_job_handler_bundle,
     check_import_job_processors,
-    handle_import_fact_changed_event,
 )
 from fin_ops_platform.services.runtime_worker_registry import (
     RuntimeWorkerRegistration,
@@ -654,10 +653,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     worker.run_forever()
     return 0
-
-
-def _handle_import_fact_changed_event(event: Any) -> dict[str, Any]:
-    return handle_import_fact_changed_event(event)
 
 
 def _no_oa_workbench_matching_source_versions(app_settings_service: AppSettingsService) -> dict[str, object]:

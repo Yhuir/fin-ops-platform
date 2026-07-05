@@ -28,6 +28,21 @@
 
 ## 历史记录
 
+## 2026-07-05 - Settings route owner 与旧链路删除 close
+
+- 目标：完成设置模块 HTTP I/O 边界收口，移除 `server.py` 中 `/api/workbench/settings*` 旧 handler 和 settings 持久化内存 fallback。
+- 影响范围：`backend/src/fin_ops_platform/app/routes_settings.py`、`backend/src/fin_ops_platform/app/server.py`、`backend/src/fin_ops_platform/services/app_settings_service.py`、settings API/service tests、runtime boundary guard 和本模块边界文档。
+- 关键决策：
+  - `SettingsApiRoutes` 统一拥有 settings path matching、body/query parsing、权限 gate、错误码、response shape、OA 凭据、OA 手工导入和 data reset job HTTP I/O。
+  - `server.py` 只保留 route owner 组装、runtime reset executor、read model/lifecycle side-effect ports，不再定义 `_handle_api_workbench_settings*` 旧 handler。
+  - `AppSettingsService._refresh_snapshot_from_state_store()` 不再用当前内存 `_snapshot` 给持久化结果补字段；缺失字段只能通过 normalizer/default contract 得到。
+  - `/api/workbench/settings` 保存 pending invoice rules 时，通过 settings event finalizer 触发 `pending_invoice_rules_changed` lifecycle fan-out；银行自动标签写入仍归属银行明细模块。
+- 文档影响：更新 `boundary-io.md` 为 `closed`，同步 `README.md`、`tests.md` 和本文件。
+- 测试覆盖：新增/更新 `tests/test_app_settings_service.py`，覆盖持久化 settings contract 不读内存 fallback、settings API pending rules lifecycle fan-out；更新 `tests/test_platform_runtime_boundary_guards.py` 锁定 `routes_settings.py` route owner 和 data reset job route 边界；更新 `tests/test_workbench_dirty_queue_wiring.py` 改走公开 HTTP route。
+- 验证命令：见本轮最终说明。
+- 未测风险：真实生产数据重置、真实 OA 登录、真实 worker drain 和多页面最终 smoke 仍需要 staging/production 验证；本轮覆盖本地 service/API/static boundary contract。
+- 后续事项：新增 settings 子路由时必须进 `SettingsApiRoutes`，不得恢复 `server.py` route-inline handler；新增 settings 持久化字段必须通过 normalizer/default contract，不得恢复内存 snapshot fallback。
+
 ## 2026-06-19 - 成功写流可见错误残留 guard
 
 - 目标：防止 data reset 或项目范围保存到成本统计 active/all fresh fan-out 已成功，但页面仍残留“操作失败/同步失败/read model 失败”等可见错误提示。

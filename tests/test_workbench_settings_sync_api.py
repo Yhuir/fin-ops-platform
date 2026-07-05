@@ -94,7 +94,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(payload["error"], "app_settings_persistence_failed")
-        self.assertIn("无法写入 app Mongo", payload["message"])
+        self.assertIn("无法写入持久化设置源", payload["message"])
 
     def test_project_sync_endpoint_syncs_oa_projects_into_settings_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

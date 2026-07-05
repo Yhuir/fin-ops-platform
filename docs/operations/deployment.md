@@ -76,33 +76,29 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 `./scripts/deploy-oa.sh` 生成 versioned release，并由 root-owned `finops-deploy-control`
 完成 check-release、activate、readiness 和 cleanup。
 
-## Worker 进程矩阵
+## Worker 启动合同
 
 生产环境按职责拆分 worker 进程，所有进程都连接同一个 PostgreSQL durable queue。不要用 API in-process thread 作为生产刷新机制。
 
-| 进程 | 推荐事件类型 | 启动参数 |
-| --- | --- | --- |
-| `worker-oa-sync` | `oa.sync` | `--enable-oa-sync --event-type oa.sync` |
-| `worker-workbench` | `workbench.read_model.refresh` | `--enable-workbench-read-model-refresh --event-type workbench.read_model.refresh` |
-| `worker-workbench-relation` | `workbench_relation.read_model.refresh` | `--enable-workbench-relation-read-model-refresh --event-type workbench_relation.read_model.refresh` |
-| `worker-invoice-lifecycle` | `invoice_lifecycle.read_model.refresh` | `--enable-invoice-lifecycle-read-model-refresh --event-type invoice_lifecycle.read_model.refresh` |
-| `worker-bank-detail` | `bank_detail.read_model.refresh` | `--enable-bank-detail-read-model-refresh --event-type bank_detail.read_model.refresh --max-events-per-iteration 24` |
-| `worker-no-oa-bank-batch` | `no_oa_bank_batch.read_model.refresh` | `--enable-no-oa-bank-batch-read-model-refresh --event-type no_oa_bank_batch.read_model.refresh --max-events-per-iteration 24` |
-| `worker-turnover-ledger` | `turnover_ledger.read_model.refresh` | `--enable-turnover-ledger-read-model-refresh --event-type turnover_ledger.read_model.refresh --max-events-per-iteration 12` |
-| `worker-search-pending` | `search.read_model.refresh`, `pending_invoice.read_model.refresh` | `--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh --event-type search.read_model.refresh --event-type pending_invoice.read_model.refresh` |
-| `worker-search` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
-| `worker-search-secondary` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
-| `worker-search-tertiary` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
-| `worker-pending-invoice` | `pending_invoice.read_model.refresh` | `--enable-pending-invoice-read-model-refresh --event-type pending_invoice.read_model.refresh` |
-| `worker-invoice-usage-collection` | `input_invoice_usage.read_model.refresh`, `output_invoice_collection.read_model.refresh` | `--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh` |
-| `worker-invoice-lifecycle-secondary` | `invoice_lifecycle.read_model.refresh` | `--enable-invoice-lifecycle-read-model-refresh --event-type invoice_lifecycle.read_model.refresh` |
-| `worker-cost-tax` | `tax_offset.read_model.refresh` | `--enable-tax-offset-read-model-refresh --event-type tax_offset.read_model.refresh` |
-| `worker-cost-statistics` | `cost_statistics.read_model.refresh` | `--enable-cost-statistics-read-model-refresh --event-type cost_statistics.read_model.refresh` |
-| `worker-tax-offset` | `tax_offset.read_model.refresh` | `--enable-tax-offset-read-model-refresh --event-type tax_offset.read_model.refresh` |
-| `worker-import` | `import.process.requested` | `--enable-import-job-processing --event-type import.process.requested` |
-| `worker-workbench-matching` | `job.workbench_matching_dirty_scopes` | `--enable-workbench-matching` |
+Worker 实例、event types、env 模板和 check 命令只以 registry 为事实源：
 
-不要部署 `fin-ops-worker@oa-rabbitmq.service` 这类没有匹配 handler 的实例。OA worker 的实例名应指向 `oa.sync`，例如 `fin-ops-worker@oa-sync-rabbitmq.service`，并配置 `--enable-oa-sync --event-type oa.sync`。
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest --required-instances
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest --json
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest --worker-check-command workbench
+```
+
+生产 systemd 只使用 registration contract：
+
+```bash
+python -m fin_ops_platform.app.worker \
+  --registration <instance> \
+  --worker-instance <instance>
+```
+
+不要在本文维护第二份 worker 矩阵；新增 worker 或 read model refresh event 时先改
+`backend/src/fin_ops_platform/services/runtime_worker_registry.py`，再让
+`deploy/oa/bin/finops-ensure-runtime-workers.sh` 和 App Health 从 registry 收敛。
 
 可复制的 systemd/env 模板位于：
 
@@ -162,30 +158,7 @@ sudo visudo -cf /etc/sudoers.d/finops-runtime-workers
 ```
 
 该 helper 只在目标 env 文件缺失时从模板创建，不覆盖已有 secret 或 worker 配置；它会安装/更新
-`fin-ops-worker@.service`，并启用、重启：
-
-```bash
-fin-ops-worker@oa-sync.service
-fin-ops-worker@workbench.service
-fin-ops-worker@workbench-relation.service
-fin-ops-worker@invoice-lifecycle.service
-fin-ops-worker@workbench-matching.service
-fin-ops-worker@bank-detail.service
-fin-ops-worker@bank-account-balance.service
-fin-ops-worker@no-oa-bank-batch.service
-fin-ops-worker@turnover-ledger.service
-fin-ops-worker@search-pending.service
-fin-ops-worker@search.service
-fin-ops-worker@search-secondary.service
-fin-ops-worker@search-tertiary.service
-fin-ops-worker@pending-invoice.service
-fin-ops-worker@invoice-usage-collection.service
-fin-ops-worker@invoice-lifecycle-secondary.service
-fin-ops-worker@cost-tax.service
-fin-ops-worker@cost-statistics.service
-fin-ops-worker@tax-offset.service
-fin-ops-worker@import.service
-```
+`fin-ops-worker@.service`，并按 `runtime_worker_manifest --required-instances` 启用、重启 required worker。
 
 如果需要手动修复一台历史服务器，可以执行等价命令：
 
@@ -196,22 +169,8 @@ sudo install -m 0755 -o root -g root \
 sudo /usr/local/sbin/finops-ensure-runtime-workers "$(pwd)"
 ```
 
-`--check` 应在发布前对每类 worker 跑一次，确认 handler、PostgreSQL 和 Redis 状态：
-
-```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker \
-  --enable-oa-sync \
-  --enable-workbench-read-model-refresh \
-  --enable-bank-detail-read-model-refresh \
-  --enable-search-read-model-refresh \
-  --enable-pending-invoice-read-model-refresh \
-  --enable-input-invoice-usage-read-model-refresh \
-  --enable-output-invoice-collection-read-model-refresh \
-  --enable-cost-statistics-read-model-refresh \
-  --enable-tax-offset-read-model-refresh \
-  --enable-import-job-processing \
-  --check
-```
+`--check` 应在发布前对 required worker 跑一次，确认 handler、PostgreSQL 和 Redis 状态；命令由
+`runtime_worker_manifest --worker-check-command <instance>` 生成，禁止手写 `--enable-*` 组合作为生产检查入口。
 
 ## Worker 运行边界
 

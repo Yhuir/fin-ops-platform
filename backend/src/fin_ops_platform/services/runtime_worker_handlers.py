@@ -628,13 +628,6 @@ def build_workbench_matching_dirty_scope_worker(
     )
 
 
-def required_worker_dependency(container: Any, attr_name: str) -> Any:
-    dependency = getattr(container, attr_name, None)
-    if dependency is None:
-        raise RuntimeError(f"Worker handler bootstrap requires dependency {attr_name}.")
-    return dependency
-
-
 def _call_or_empty(container: Any, method_name: str) -> dict[str, Any]:
     method = getattr(container, method_name, None)
     if callable(method):

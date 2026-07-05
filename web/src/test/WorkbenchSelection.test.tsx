@@ -145,6 +145,32 @@ describe("Workbench row selection and detail drawer", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/workbench/rows/bk-p-202603-001?month=all", expect.any(Object));
   });
 
+  test("detail drawer opens before the row detail request resolves", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input).startsWith("/api/workbench/rows/")) {
+        return new Promise<Response>(() => undefined);
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+    renderWorkbenchPage();
+
+    const bankRow = await screen.findByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    });
+
+    await user.click(within(bankRow).getByRole("button", { name: /查看银行流水 .* 详情/ }));
+
+    const dialog = screen.getByRole("dialog", { name: "银行流水详情" });
+    expect(within(dialog).getByText("正在加载详情...")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/workbench/rows/bk-p-202603-001?month=all", expect.any(Object));
+  });
+
   test("OA applicant column keeps the detail icon on the first line and time chip on the second line", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

@@ -1,14 +1,15 @@
 # Runtime Worker 模块边界与 I/O
 
-日期：2026-07-03
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
+- 状态：closed
 - 当前边界可信度：high
 - 目标边界：所有后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明。
-- 当前缺口：部分 worker 同时承担多个 read model event，变更时必须同步检查 systemd/env、RabbitMQ dispatch 和 tests；高性能闭环还需要生产 SLO 复测证明所有页面/读写操作 p95 收敛。`workbench.read_model.refresh` 已按 `scope_key` 拆成月份 shard lane 与 `all` aggregate lane，避免慢聚合阻塞首屏月份刷新。
-- 旧代码删除条件：旧 worker 启动方式不再被 deploy/systemd/scripts 引用。
+- 当前闭环：worker 入口使用 registration contract；worker instance、event type、claim scope lane、env example、manifest/check command 和 App Health readiness 均由 `runtime_worker_registry.py` 派生。`workbench.read_model.refresh` 已按 `scope_key` 拆成月份 shard lane 与 `all` aggregate lane，避免慢聚合阻塞首屏月份刷新。部署文档不再维护手写 worker 矩阵或 `sudo systemctl enable --now fin-ops-worker@...` 清单。
+- 性能证据风险：高性能全域闭环仍需要生产 SLO 复测证明所有页面/读写操作 p95 收敛；该风险属于运行证据，不再代表 Runtime Worker 边界或 I/O open。
+- 旧代码删除状态：旧 `worker_legacy_application` / `RuntimeWorkerApplicationBridge` / GridFS migration worker / 手写生产 worker 矩阵已移除；本轮删除无调用 `_handle_import_fact_changed_event` wrapper 与 `required_worker_dependency(...)` 死 helper。
 
 ## 职责边界
 
@@ -30,7 +31,7 @@
 | --- | --- | --- |
 | Outbox/job event | PostgreSQL durable queue | event type 必须在 registry 中登记 |
 | Refresh availability timestamp | `job.outbox_events.available_at` | write-operation / read-model refresh SLO 以 `available_at -> processed_at` 衡量 enqueue-to-done；事务内 writer 必须用 `clock_timestamp()` 写实际入队可处理时间，不能让 transaction-level `now()` 把业务写事务耗时计入 worker drain |
-| Worker instance env | deploy/systemd | instance name 必须匹配 registry；PostgreSQL durable queue worker 的默认 idle poll 为 `0.05s`，`workbench` 月分片热 lane 使用 `0.01s`，`workbench-aggregate` 保持 `0.25s`；历史 `--poll-interval-seconds 2`、`0.25`、`0.1`、`0.05` 只允许由 deploy helper 精确迁移到当前 release env 示例声明值，不能重新作为 read model worker 默认值 |
+| Worker instance env | deploy/systemd | 生产 systemd 必须传 `--registration <instance>` 与 `--worker-instance <instance>`；instance name、event types、claim scope filters 与 handler flags 由 registry 派生。PostgreSQL durable queue worker 的默认 idle poll 为 `0.05s`，`workbench` 月分片热 lane 使用 `0.01s`，`workbench-aggregate` 保持 `0.25s`；历史 `--poll-interval-seconds 2`、`0.25`、`0.1`、`0.05` 只允许由 deploy helper 精确迁移到当前 release env 示例声明值，不能重新作为 read model worker 默认值 |
 | Claim scope filter | worker registry / worker env | 只用于同一 event type 下拆分 worker lane；`workbench` worker 必须 `--exclude-claim-scope-key all`，`workbench-aggregate` worker 必须 `--claim-scope-key all`。scope contract 仍由 read model scope policy 负责，不能把业务 scope 规则塞进 queue 层 |
 | Workbench all aggregate scheduling | `WorkbenchReadModelRefreshService` | high/urgent 月分片 refresh 代表用户写后可见路径，发布后必须立即投递 `workbench:all` aggregate；普通/低优先级 refresh 保留聚合合并窗口，避免后台批量重建反复抢占 aggregate lane |
 | Claim hot path index | PostgreSQL migration | `job.outbox_events` active queue claim 必须保留 event-type-first 索引 `outbox_events_claim_event_type_priority_idx`，覆盖 `event_type/status/priority rank/available_at/created_at/id`；该索引只优化 worker lane claim I/O，不改变 durable queue 状态机、priority 语义或 freshness/readiness 事实源 |
@@ -78,6 +79,7 @@
 - `tests/test_deploy_runtime_examples.py`
 - `tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_workbench_workers_split_month_shards_from_all_scope_aggregate`
 - `tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_required_worker_env_examples_do_not_pin_legacy_slow_poll_interval`
+- `tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_runtime_worker_docs_use_registry_manifest_instead_of_manual_matrix`
 - `tests/test_runtime_worker.py::RuntimeWorkerTests::test_default_poll_interval_is_fast_enough_for_read_model_slo`
 - `tests/test_runtime_worker.py::RuntimeWorkerTests::test_fast_empty_polls_throttle_idle_heartbeat_writes`
 - `tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_all_expected_migration_files_exist`
@@ -87,4 +89,5 @@
 
 - 新增 worker 必须同步 registry、manifest/systemd env、tests、docs。
 - 移除 worker 前必须证明 deploy、queue event、RabbitMQ dispatch 和 app health 不再引用。
+- 生产 env 示例仍可保留 `--enable-*` flag 作为本地开发和迁移期兼容参数；生产 systemd 主合同是 `--registration`，且 `_apply_registration_args(...)` 会由 registry 写入 handler flags、event types 和 scope lane。后续若要删除 env 示例里的兼容 flags，应单独迁移现有服务器 env 文件，避免扩大本次边界 close 的行为面。
 - `0086_runtime_queue_claim_hot_path.sql` 已本地保护，仍需生产发布后用 grouped 1s read model smoke 证明 Workbench/invoice lifecycle 总耗时是否真正低于目标。

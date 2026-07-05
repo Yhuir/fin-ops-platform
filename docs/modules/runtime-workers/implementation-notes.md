@@ -31,6 +31,16 @@
 
 ## 历史记录
 
+## 2026-07-05 - Runtime Worker boundary close
+
+- 目标：把 Runtime Worker 模块从 partial 收口为 closed，确认 worker 入口、queue、registry、deployment manifest、RabbitMQ transport 和 App Health readiness 的 I/O 边界都由当前 registry/durable queue 合同驱动。
+- 影响范围：`app/worker.py`、`runtime_worker_handlers.py`、部署文档和 deploy runtime examples test；不改变 event type、handler、durable queue schema、dirty scope、readiness 或 worker env 示例行为。
+- 关键决策：生产启动主合同是 `--registration <instance>` / `--worker-instance <instance>`；worker 矩阵只从 `runtime_worker_manifest` 派生。部署文档不再维护手写 worker 表或 systemd enable 清单。env 示例中的 `--enable-*` 兼容 flags 暂不批量删除，避免触碰现有服务器 env 迁移；registration 仍会覆盖 handler/event/scope lane。
+- 旧逻辑清理：删除无调用 `_handle_import_fact_changed_event(...)` wrapper 和 `required_worker_dependency(...)` helper；移除部署文档中的 `file migration` RabbitMQ 文案、手写 worker 矩阵和 `sudo systemctl enable --now fin-ops-worker@...` 清单。
+- 文档影响：同步 `boundary-io.md`、`tests.md`、`docs/operations/deployment.md` 和 `deploy/oa/README.md`。
+- 测试覆盖：新增 `DeployRuntimeExampleTests.test_runtime_worker_docs_use_registry_manifest_instead_of_manual_matrix`；复用 platform runtime boundary guards 保护 Application/auth/GridFS/direct queue producer 禁止项。
+- 未测风险：本地不证明真实 RabbitMQ broker、真实 Postgres migration、systemd worker 长时间 drain 或生产 grouped 1s SLO；这些仍需 staging/production gate。
+
 ## 2026-07-03 - Runtime queue enqueue timestamp boundary
 
 - 目标：修复事务内 read model refresh 使用 PostgreSQL transaction-level `now()` 作为 outbox `available_at/created_at` 时，长业务事务会被错误计入 worker enqueue-to-done SLO 的问题。

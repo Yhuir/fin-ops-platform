@@ -172,3 +172,10 @@ FIN_OPS_TEST_DATABASE_URL=postgresql://... FIN_OPS_WRITE_OPERATION_AUDIT_OPERATI
 - 新增测试：`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_read_model_refresh_writer_uses_batch_repository_interface_when_available`，覆盖生产组合中的 `RuntimeQueueReadModelRefreshWriter.enqueue_refreshes(...)` 会优先调用 repository 批量接口，且不会回落到单条入队。
 - 新增测试：`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_relation_write_uow_uses_batch_read_model_refresh_writer_when_available`，覆盖 Workbench relation UoW 对 confirm/withdraw 类 target 一次性提交 refresh targets，并保持 response 中 `source_versions` / `outbox_event_ids` 的旧 shape。
 - 覆盖类别：service-layer tests、read model/cache/background job tests、existing feature regression。API contract 和 frontend interaction 未新增，因为 HTTP response shape 与页面行为不变；E2E 真实业务流需要生产固定 scenario/ticket 复跑验证。
+
+## 2026-07-05 - Runtime Worker 边界 close
+
+- 删除旧代码：`backend/src/fin_ops_platform/app/worker.py` 中无调用 `_handle_import_fact_changed_event(...)` wrapper；`backend/src/fin_ops_platform/services/runtime_worker_handlers.py` 中无调用 `required_worker_dependency(...)` helper。
+- 新增测试：`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_runtime_worker_docs_use_registry_manifest_instead_of_manual_matrix`，防止 `docs/operations/deployment.md` 或 `deploy/oa/README.md` 重新维护手写 worker 矩阵、`sudo systemctl enable --now fin-ops-worker@...` 清单或已删除 file migration worker 文案。
+- 更新测试：`tests/test_runtime_monitoring.py::RuntimeMonitoringRepositoryTests::test_dashboard_outbox_metric_only_scans_current_attention_statuses` 不再绑定旧 SQL 括号格式，改为断言 current-effective attention statuses 与 publish statuses 的实际查询合同。
+- 覆盖类别：service-layer tests、read model/cache/background job tests、existing feature regression。API contract 和 frontend interaction 未新增，因为本轮未改变 HTTP response shape 或前端页面；真实 RabbitMQ/PostgreSQL/systemd drain 仍由 `infra-smoke` / staging gate 覆盖。

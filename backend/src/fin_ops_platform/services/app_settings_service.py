@@ -120,39 +120,6 @@ class AppSettingsService:
         if self._state_store is None:
             return
         loaded_settings = self._state_store.load_app_settings()
-        if (
-            isinstance(loaded_settings, dict)
-            and (
-                "no_oa_bank_batch_tag_selection" not in loaded_settings
-                or "bank_flow_rule_batch_tag_rules" not in loaded_settings
-                or "turnover_ledger_tag_selection" not in loaded_settings
-            )
-            and isinstance(getattr(self, "_snapshot", None), dict)
-        ):
-            loaded_settings = {
-                **loaded_settings,
-                **(
-                    {
-                        "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
-                    }
-                    if "no_oa_bank_batch_tag_selection" not in loaded_settings
-                    else {}
-                ),
-                **(
-                    {
-                        "bank_flow_rule_batch_tag_rules": self._snapshot.get("bank_flow_rule_batch_tag_rules", {}),
-                    }
-                    if "bank_flow_rule_batch_tag_rules" not in loaded_settings
-                    else {}
-                ),
-                **(
-                    {
-                        "turnover_ledger_tag_selection": self._snapshot.get("turnover_ledger_tag_selection", {}),
-                    }
-                    if "turnover_ledger_tag_selection" not in loaded_settings
-                    else {}
-                ),
-            }
         normalized_snapshot = self._normalize_settings(
             loaded_settings,
             validate_pending_invoice_tag_groups=False,

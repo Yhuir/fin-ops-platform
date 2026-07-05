@@ -1273,6 +1273,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "class": "PendingInvoiceApiRoutes",
                 "server_markers": ("def _pending_invoice_routes", "_pending_invoice_routes()."),
             },
+            "routes_settings.py": {
+                "module": "fin_ops_platform.app.routes_settings",
+                "class": "SettingsApiRoutes",
+                "server_markers": ("def _settings_routes", "_settings_routes().route("),
+            },
             "routes_tax.py": {
                 "module": "fin_ops_platform.app.routes_tax",
                 "class": "TaxApiRoutes",
@@ -2181,6 +2186,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
         routes_source = (APP_ROOT / "routes_bank_details.py").read_text(encoding="utf-8")
+        settings_routes_source = (APP_ROOT / "routes_settings.py").read_text(encoding="utf-8")
         service_source = (SERVICES_ROOT / "bank_details_application_service.py").read_text(encoding="utf-8")
         app_settings_source = (SERVICES_ROOT / "app_settings_service.py").read_text(encoding="utf-8")
 
@@ -2251,8 +2257,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if snippet not in service_source:
                 violations.append(f"BankDetailsApplicationService is missing boundary behavior {snippet}")
 
-        if "bank_transaction_tags_write_forbidden" not in server_source:
-            violations.append("workbench settings route no longer blocks legacy bank_transaction_tags writes")
+        if "bank_transaction_tags_write_forbidden" not in settings_routes_source:
+            violations.append("settings route owner no longer blocks legacy bank_transaction_tags writes")
         if "def update_bank_auto_tag_rules" not in app_settings_source:
             violations.append("AppSettingsService no longer owns bank auto-tag settings persistence")
 
@@ -7991,9 +7997,45 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_settings_routes_use_route_owner(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        route_source = (APP_ROOT / "routes_settings.py").read_text(encoding="utf-8")
+        route_tree = _parse(APP_ROOT / "routes_settings.py")
+        violations: list[str] = []
+
+        route_class = _class_source(route_tree, route_source, "SettingsApiRoutes")
+        if not route_class:
+            violations.append("settings route owner is missing")
+        for marker in (
+            "def update_settings(",
+            "bank_transaction_tags_write_forbidden",
+            "def oa_applicant_credentials(",
+            "def create_oa_manual_imports(",
+            "def create_data_reset_job(",
+            "job_type=\"settings_data_reset\"",
+            "app_settings_persistence_failed",
+        ):
+            if marker not in route_class:
+                violations.append(f"settings route owner missing marker {marker}")
+        if "settings_response = self._settings_routes().route(" not in server_source:
+            violations.append("server.py does not delegate settings routes to SettingsApiRoutes")
+        for forbidden in (
+            "def _handle_api_workbench_settings",
+            "def _resolve_settings_mutation_session",
+            "def _parse_oa_manual_search_pagination",
+            "def _parse_oa_manual_import_row_ids",
+            "def _unsupported_settings_data_reset_response",
+            "def _handle_api_workbench_settings_data_reset",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py still owns settings route I/O {forbidden}")
+
+        self.assertEqual(violations, [])
+
     def test_settings_data_reset_uses_background_job_service_only(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        routes_source = (APP_ROOT / "routes_settings.py").read_text(encoding="utf-8")
+        combined_source = f"{server_source}\n{routes_source}"
 
         violations: list[str] = []
         for forbidden in (
@@ -8004,12 +8046,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def _run_settings_data_reset_job(",
             "def _update_data_reset_job(",
         ):
-            if forbidden in source:
+            if forbidden in combined_source:
                 violations.append(f"server.py keeps legacy in-memory data reset job path {forbidden}")
-        if "job_type=\"settings_data_reset\"" not in source:
-            violations.append("data reset job create no longer uses BackgroundJobService")
-        if "def _active_data_reset_background_job(" not in source:
-            violations.append("data reset active job lookup no longer uses BackgroundJobService")
+        for forbidden in (
+            "def _handle_api_workbench_settings_data_reset",
+            "def _run_settings_data_reset_background_job(",
+            "def _active_data_reset_background_job(",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py still owns settings data reset route concern {forbidden}")
+        if "job_type=\"settings_data_reset\"" not in routes_source:
+            violations.append("settings route owner data reset job create no longer uses BackgroundJobService")
+        if "def _active_data_reset_background_job(" not in routes_source:
+            violations.append("settings route owner data reset active job lookup no longer uses BackgroundJobService")
 
         self.assertEqual(violations, [])
 

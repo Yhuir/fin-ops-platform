@@ -567,15 +567,17 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             "pending_output_invoice_tag_groups": dict(current.get("pending_output_invoice_tag_groups") or {}),
         }
         session = SimpleNamespace(
+            allowed=True,
+            can_access_app=True,
             can_mutate_data=True,
-            identity=SimpleNamespace(username="finance-admin"),
+            identity=SimpleNamespace(user_id=None, username="finance-admin"),
         )
 
         with (
             patch.object(app._workbench_query_service, "list_available_months", return_value=["2026-05"]),
             patch("fin_ops_platform.app.server.resolve_oa_request_session", return_value=session),
         ):
-            response = app._handle_api_workbench_settings_update(json.dumps(payload), headers={})
+            response = app.handle_request("POST", "/api/workbench/settings", body=json.dumps(payload), headers={})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(

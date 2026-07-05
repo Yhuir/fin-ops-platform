@@ -1,14 +1,14 @@
 # 设置模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：medium
-- 目标边界：设置页面只通过 settings API/service 修改配置、OA 凭证、数据重置等控制面能力。
-- 当前缺口：`server.py` 仍保留部分设置 endpoint，数据重置和 OA 凭证横跨多个模块。
-- 旧代码删除条件：设置相关 endpoint 全部有 route/service owner，前端不再调用 legacy path。
+- 状态：closed
+- 当前边界可信度：high
+- 目标边界：设置页面只通过 settings API/route owner/service 修改配置、OA 凭证、数据重置等控制面能力。
+- 当前缺口：无已知阻断项；真实生产 reset、真实 OA、worker drain 和多页面 smoke 仍属于运维验证风险。
+- 旧代码删除状态：`server.py` 中 `/api/workbench/settings*` 旧 handler、settings data reset job handler、OA 手工导入 settings handler 已删除；`AppSettingsService` 不再用内存 `_snapshot` 补齐持久化 settings 缺失字段。
 
 ## 职责边界
 
@@ -56,7 +56,7 @@
 | Frontend page | `web/src/pages/SettingsPage.tsx` |
 | Frontend components | `web/src/components/settings/*`、`web/src/components/workbench/WorkbenchSettingsModal.tsx` |
 | Frontend API | `web/src/features/workbench/api.ts` |
-| Backend route | settings endpoints in `backend/src/fin_ops_platform/app/server.py` |
+| Backend route | `backend/src/fin_ops_platform/app/routes_settings.py`；`server.py` 只负责 route owner 组装和 runtime side-effect ports |
 | Backend service | `app_settings_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Repository | `postgres_repositories/oa_applicant_credentials.py` |
 | Lifecycle | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`、`app_status_read_model_registry.py` |
@@ -77,7 +77,7 @@
 
 ## 当前缺口和删除条件
 
-- 拆分 route owner 后同步本文件和 README。
+- Route owner 已拆分为 `SettingsApiRoutes`；`server.py` 不再拥有 settings HTTP I/O 解析、body 校验或 settings response shape。
 - 重置行为变更必须先读 data-safety-reset boundary。
 
 ## Canonical facts ownership
@@ -88,4 +88,4 @@
 - Allowed reads: settings APIs、owner read ports。
 - Downstream outputs: 按 setting family 产生 affected read model dirty scopes、domain events 或 explicit not-applicable；银行账户映射变化会通过成本统计 source version 的 `bank_account_mappings_fingerprint` 使旧 read model payload 失配并刷新。
 - Forbidden paths: `state:*` JSON、`state:full_state` 或旧 snapshot 不得作为 production 业务事实 fallback；其它模块不得直接写 settings store。
-- Old code deletion: legacy settings snapshot、state JSON fallback 和 route-inline settings writes 必须删除；migration/audit/rollback 工具保留不算 closure。
+- Old code deletion: legacy settings snapshot、state JSON fallback、route-inline settings writes 和内存 `_snapshot` 持久化补字段 fallback 已删除；migration/audit/rollback 工具保留不算 closure。

@@ -320,7 +320,7 @@ PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.postgres apply
 ```
 
-RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、发票使用/收款、bank-flow/no-OA、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。运行前置检查见 `docs/operations/postgresql-runtime.md`，worker/read model 运维口径见 `docs/operations/runtime-worker-governance.md`。
+RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 只覆盖 runtime worker registry 中声明的 RabbitMQ eligible event；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。运行前置检查见 `docs/operations/postgresql-runtime.md`，worker/read model 运维口径见 `docs/operations/runtime-worker-governance.md`。
 
 RabbitMQ 生产 env 拆分：
 
@@ -335,7 +335,7 @@ RabbitMQ 生产 env 拆分：
 
 最小生产正确性不依赖 RabbitMQ。标准 release 发布会通过服务器 root-owned helper
 `/usr/local/sbin/finops-ensure-runtime-workers`，安装/更新 worker systemd 模板，补齐缺失的
-worker env，并启用、重启以下 required worker。仓库内的
+worker env，并启用、重启 registry 声明的 required worker。仓库内的
 `deploy/oa/bin/finops-ensure-runtime-workers.sh` 是该 helper 的源文件，不能由 `finops-deploy`
 从 release 目录直接 `sudo /bin/bash` 执行，也不能在每次 release 发布中用原始 `sudo install`
 覆盖 `/usr/local/sbin`；helper 安装/升级属于一次性 bootstrap 或受控运维动作，release 发布只校验
@@ -345,28 +345,6 @@ worker 实例、event types、env 模板和 smoke check 命令均从
 `python -m fin_ops_platform.tools.runtime_worker_manifest` 推导。不要在生产 runbook 中维护第二份
 worker 清单；新增 worker 或 read model refresh event 时先改 registry，再让部署和监控从 registry
 收敛。完整运维口径见 `docs/operations/runtime-worker-governance.md`。
-
-```bash
-sudo systemctl enable --now fin-ops-worker@oa-sync.service
-sudo systemctl enable --now fin-ops-worker@workbench.service
-sudo systemctl enable --now fin-ops-worker@workbench-matching.service
-sudo systemctl enable --now fin-ops-worker@bank-detail.service
-sudo systemctl enable --now fin-ops-worker@bank-account-balance.service
-sudo systemctl enable --now fin-ops-worker@no-oa-bank-batch.service
-sudo systemctl enable --now fin-ops-worker@bank-flow-rule-batch.service
-sudo systemctl enable --now fin-ops-worker@turnover-ledger.service
-sudo systemctl enable --now fin-ops-worker@search-pending.service
-sudo systemctl enable --now fin-ops-worker@search.service
-sudo systemctl enable --now fin-ops-worker@search-secondary.service
-sudo systemctl enable --now fin-ops-worker@search-tertiary.service
-sudo systemctl enable --now fin-ops-worker@pending-invoice.service
-sudo systemctl enable --now fin-ops-worker@invoice-usage-collection.service
-sudo systemctl enable --now fin-ops-worker@invoice-lifecycle-secondary.service
-sudo systemctl enable --now fin-ops-worker@cost-tax.service
-sudo systemctl enable --now fin-ops-worker@cost-statistics.service
-sudo systemctl enable --now fin-ops-worker@tax-offset.service
-sudo systemctl enable --now fin-ops-worker@import.service
-```
 
 这些实例分别加载 `/etc/fin-ops/fin-ops.worker.<instance>.env`。如果仍使用
 PostgreSQL polling，这些文件应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。

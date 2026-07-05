@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.app_settings_service import (
@@ -50,6 +51,14 @@ class RecordingSyncService:
             for username in list(snapshot.get("admin_usernames") or [])
         ]
         self.assignments = [*readonly, *full_access, *admin]
+
+
+class RecordingQueueRepository:
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+        self.enqueued.append((scope_type, scope_key, reason))
 
 
 class AppSettingsServiceTests(unittest.TestCase):
@@ -157,6 +166,33 @@ class AppSettingsServiceTests(unittest.TestCase):
             self.assertIn(tag["output_primary_label"], {"外部往来款付款", "外部往来款收款", "往来款付款", "往来款收款"})
             self.assertTrue(tag["output_sub_label"])
             self.assertTrue(tag["turnover_action_type"])
+
+    def test_refresh_uses_persisted_settings_contract_not_previous_memory_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[self._external_rule("external_rule_borrow_out")],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            initial = app._app_settings_service.get_turnover_ledger_tag_selection_payload()
+            app._app_settings_service.update_turnover_ledger_tag_selection(
+                {
+                    "expected_version": initial["version"],
+                    "selected_tag_codes": [],
+                },
+                actor_id="settings-owner",
+            )
+            original_load = app._state_store.load_app_settings
+
+            def load_without_turnover_selection() -> dict[str, object]:
+                snapshot = original_load()
+                snapshot.pop("turnover_ledger_tag_selection", None)
+                return snapshot
+
+            app._state_store.load_app_settings = load_without_turnover_selection
+            refreshed = app._app_settings_service.get_turnover_ledger_tag_selection_payload()
+
+        self.assertEqual(refreshed["selected_tag_codes"], ["external_rule_borrow_out"])
 
     def test_turnover_ledger_tag_selection_saves_with_version_and_rejects_invalid_codes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -688,6 +724,51 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(mapping_changed["bank_transaction_tags"]["version"], initial["bank_transaction_tags"]["version"])
         self.assertEqual(mapping_changed["pending_invoice_tag_groups"]["version"], initial["pending_invoice_tag_groups"]["version"] + 1)
         self.assertEqual(mapping_changed["pending_output_invoice_tag_groups"]["version"], initial["pending_output_invoice_tag_groups"]["version"])
+
+    def test_workbench_settings_api_pending_invoice_rules_trigger_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            queue_repository = RecordingQueueRepository()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue_repository)
+            current = app._app_settings_service.get_settings_payload()
+            access_control = current["access_control"]
+            projects = current["projects"]
+
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/settings",
+                body=json.dumps(
+                    {
+                        "completed_project_ids": projects["completed_project_ids"],
+                        "bank_account_mappings": current["bank_account_mappings"],
+                        "allowed_usernames": access_control["allowed_usernames"],
+                        "readonly_export_usernames": access_control["readonly_export_usernames"],
+                        "admin_usernames": access_control["admin_usernames"],
+                        "workbench_column_layouts": current["workbench_column_layouts"],
+                        "oa_retention": current["oa_retention"],
+                        "oa_import": current["oa_import"],
+                        "oa_invoice_offset": current["oa_invoice_offset"],
+                        "pending_invoice_tag_groups": {
+                            "version": current["pending_invoice_tag_groups"]["version"],
+                            "groups": {
+                                "requires_invoice": {"tag_codes": []},
+                                "bank_statement_as_invoice": {"tag_codes": []},
+                                "no_invoice_required": {"tag_codes": ["fee"]},
+                            },
+                        },
+                        "pending_output_invoice_tag_groups": current["pending_output_invoice_tag_groups"],
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            saved = app._app_settings_service.get_settings_payload()
+
+        enqueued_reasons = {reason for _scope_type, _scope_key, reason in queue_repository.enqueued}
+        enqueued_scope_types = {scope_type for scope_type, _scope_key, _reason in queue_repository.enqueued}
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("pending_invoice_rules_changed", enqueued_reasons)
+        self.assertIn("pending_invoice", enqueued_scope_types)
+        self.assertEqual(saved["pending_invoice_tag_groups"]["version"], current["pending_invoice_tag_groups"]["version"] + 1)
 
     def test_income_and_expense_pending_invoice_rule_versions_are_independent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

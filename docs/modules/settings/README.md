@@ -25,7 +25,8 @@
 - `web/src/components/settings/*`
 - `web/src/components/workbench/WorkbenchSettingsModal.tsx`
 - `web/src/features/workbench/api.ts`
-- `backend/src/fin_ops_platform/app/server.py` 中 `/api/workbench/settings*`、数据重置和 OA 申请人凭据 routes
+- `backend/src/fin_ops_platform/app/routes_settings.py` 中 `/api/workbench/settings*`、数据重置和 OA 申请人凭据 routes
+- `backend/src/fin_ops_platform/app/server.py` 中 settings route owner 组装、runtime reset executor 和 read model/lifecycle side-effect ports
 - `backend/src/fin_ops_platform/services/app_settings_service.py`
 - `backend/src/fin_ops_platform/services/settings_data_reset_service.py`
 - `backend/src/fin_ops_platform/services/oa_applicant_credentials.py`
@@ -47,6 +48,8 @@
 - 数据重置：银行流水域、发票域、OA 源重置与重建；必须保护禁止删除目标、保留必要事实、记录 job progress，并避免旧 read model/cache 被误判为 fresh。
 
 设置模块本身多数事实写入 `ApplicationStateStore`，但它的变更会扇出到 read model、dirty scope、worker、App Status 和多个页面。任何改动都必须先做影响面评估。
+
+当前 HTTP I/O 边界已关闭：`SettingsApiRoutes` 负责 settings path matching、body/query parsing、权限 gate、错误码和 response shape；`server.py` 不再定义 `_handle_api_workbench_settings*` 旧 handler。`AppSettingsService` 只从持久化 settings store 刷新事实，缺失字段由 normalizer/default contract 处理，不再用旧内存 `_snapshot` 补齐持久化结果。
 
 ## 关键 fan-out
 

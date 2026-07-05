@@ -437,6 +437,7 @@ export default function ReconciliationWorkbenchPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const detailRequestSeqRef = useRef(0);
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
   const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "open" | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
@@ -1388,21 +1389,33 @@ export default function ReconciliationWorkbenchPage() {
     return relatedIds.length > 0 ? relatedIds : [row.id];
   }, [sourceAllGroups, sourceAllRows]);
 
-  const handleOpenDetail = useCallback(async (row: WorkbenchRecord) => {
+  const handleOpenDetail = useCallback((row: WorkbenchRecord) => {
+    const requestSeq = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestSeq;
     setDetailError(null);
     setIsDetailLoading(true);
     openDetail(row);
-    try {
-      const detailedRow = await fetchWorkbenchRowDetail(row.id, { month: WORKBENCH_VIEW_MONTH });
-      replaceDetailRow(detailedRow);
-    } catch {
-      setDetailError("详情加载失败，请稍后重试。");
-    } finally {
-      setIsDetailLoading(false);
-    }
+
+    void fetchWorkbenchRowDetail(row.id, { month: WORKBENCH_VIEW_MONTH })
+      .then((detailedRow) => {
+        if (detailRequestSeqRef.current === requestSeq) {
+          replaceDetailRow(detailedRow);
+        }
+      })
+      .catch(() => {
+        if (detailRequestSeqRef.current === requestSeq) {
+          setDetailError("详情加载失败，请稍后重试。");
+        }
+      })
+      .finally(() => {
+        if (detailRequestSeqRef.current === requestSeq) {
+          setIsDetailLoading(false);
+        }
+      });
   }, [openDetail, replaceDetailRow]);
 
   const handleCloseDetail = useCallback(() => {
+    detailRequestSeqRef.current += 1;
     setDetailError(null);
     setIsDetailLoading(false);
     closeDetail();

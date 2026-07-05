@@ -21,6 +21,8 @@ DISPATCHER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.exam
 RABBITMQ_WORKER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-worker.env.example"
 COMMON_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.common.env.example"
 WORKER_ENV_DIR = REPO_ROOT / "deploy/oa/env"
+DEPLOYMENT_DOC = REPO_ROOT / "docs/operations/deployment.md"
+OA_DEPLOY_README = REPO_ROOT / "deploy/oa/README.md"
 PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh"
 RUNTIME_QUEUE_PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
 OA_SYNC_ENQUEUE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-enqueue-oa-sync.sh"
@@ -126,6 +128,14 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("--poll-interval-seconds (2|0\\\\.25|0\\\\.1|0\\\\.05)([^0-9.]|$)", helper)
         self.assertIn("--poll-interval-seconds ${source_poll}", helper)
         self.assertIn("--poll-interval-seconds 0.01", workbench_env)
+
+    def test_runtime_worker_docs_use_registry_manifest_instead_of_manual_matrix(self) -> None:
+        for doc_path in (DEPLOYMENT_DOC, OA_DEPLOY_README):
+            content = doc_path.read_text(encoding="utf-8")
+            self.assertIn("runtime_worker_manifest", content, doc_path.name)
+            self.assertNotIn("sudo systemctl enable --now fin-ops-worker@", content, doc_path.name)
+            self.assertNotIn("| `worker-", content, doc_path.name)
+            self.assertNotIn("file migration", content.lower(), doc_path.name)
 
     def test_workbench_workers_split_month_shards_from_all_scope_aggregate(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")

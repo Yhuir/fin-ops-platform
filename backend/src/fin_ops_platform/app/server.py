@@ -25,8 +25,6 @@ from typing import Any, Callable, Iterable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from uuid import uuid4
 
-from pymongo.errors import PyMongoError
-
 import fin_ops_platform
 from fin_ops_platform import __version__
 from fin_ops_platform.app.auth import (
@@ -58,6 +56,7 @@ from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoute
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
 from fin_ops_platform.app.routes_output_invoice_collections import OutputInvoiceCollectionApiRoutes
 from fin_ops_platform.app.routes_pending_invoices import PendingInvoiceApiRoutes, PendingInvoiceExportFile
+from fin_ops_platform.app.routes_settings import SettingsApiRoutes
 from fin_ops_platform.app.routes_turnover_ledger import (
     InMemoryTurnoverLedgerExtraService,
     TurnoverLedgerApiRoutes,
@@ -312,11 +311,7 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
 )
 from fin_ops_platform.services.oa_applicant_credentials import (
     InMemoryOaApplicantCredentialRepository,
-    OaApplicantCredentialConfigurationError,
-    OaApplicantCredentialError,
-    OaApplicantCredentialPermissionError,
     OaApplicantCredentialService,
-    OaApplicantCredentialValidationError,
 )
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 from fin_ops_platform.services.oa_identity_service import (
@@ -326,7 +321,7 @@ from fin_ops_platform.services.oa_identity_service import (
     OASessionExpiredError,
 )
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
-from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
+from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.target_oa_applicant_token_provider import (
     OaLoginClient,
     TargetOaApplicantTokenProvider,
@@ -370,7 +365,6 @@ from fin_ops_platform.services.search_query_freshness_service import (
 )
 from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 from fin_ops_platform.services.settings_data_reset_service import (
-    RESET_BANK_TRANSACTIONS_ACTION,
     RESET_INVOICES_ACTION,
     RESET_OA_AND_REBUILD_ACTION,
     SettingsDataResetPairSnapshotPort,
@@ -2048,52 +2042,10 @@ class Application:
         if method == "GET" and route_path == "/api/workbench/ignored":
             month = query.get("month", [None])[0]
             return self._handle_api_workbench_ignored(month)
-        if method == "GET" and route_path == "/api/workbench/settings":
-            return self._handle_api_workbench_settings()
-        if method == "POST" and route_path == "/api/workbench/settings":
-            return self._handle_api_workbench_settings_update(body, headers)
-        if method == "GET" and route_path == "/api/workbench/settings/oa-applicant-credentials":
-            return self._handle_api_workbench_settings_oa_applicant_credentials(headers)
-        if route_path.startswith("/api/workbench/settings/oa-applicant-credentials/"):
-            target_applicant_code = unquote(route_path.rsplit("/", 1)[-1])
-            if method == "PUT":
-                return self._handle_api_workbench_settings_oa_applicant_credential_save(
-                    target_applicant_code,
-                    body,
-                    headers,
-                )
-            if method == "DELETE":
-                return self._handle_api_workbench_settings_oa_applicant_credential_delete(
-                    target_applicant_code,
-                    headers,
-                )
-        if method == "GET" and route_path == "/api/workbench/settings/oa/manual-search":
-            return self._handle_api_workbench_settings_oa_manual_search(query)
-        if method == "POST" and route_path == "/api/workbench/settings/oa/manual-search/refresh-attachments":
-            return self._handle_api_workbench_settings_oa_manual_search_refresh_attachments(body, headers)
-        if method == "GET" and route_path == "/api/workbench/settings/oa/manual-imports":
-            return self._handle_api_workbench_settings_oa_manual_imports()
-        if method == "POST" and route_path == "/api/workbench/settings/oa/manual-imports":
-            return self._handle_api_workbench_settings_oa_manual_imports_create(body, headers)
-        if method == "DELETE" and route_path.startswith("/api/workbench/settings/oa/manual-imports/"):
-            row_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_workbench_settings_oa_manual_import_delete(row_id, body, headers)
-        if method == "POST" and route_path == "/api/workbench/settings/projects/sync":
-            return self._handle_api_workbench_settings_projects_sync(body, headers)
-        if method == "POST" and route_path == "/api/workbench/settings/projects":
-            return self._handle_api_workbench_settings_project_create(body, headers)
-        if method == "DELETE" and route_path.startswith("/api/workbench/settings/projects/"):
-            project_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_workbench_settings_project_delete(project_id, headers)
-        if method == "POST" and route_path == "/api/workbench/settings/data-reset/jobs":
-            return self._handle_api_workbench_settings_data_reset_job_create(body, headers)
-        if method == "GET" and route_path == "/api/workbench/settings/data-reset/jobs/active":
-            return self._handle_api_workbench_settings_data_reset_active_job(headers)
-        if method == "GET" and route_path.startswith("/api/workbench/settings/data-reset/jobs/"):
-            job_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_workbench_settings_data_reset_job(job_id, headers)
-        if method == "POST" and route_path == "/api/workbench/settings/data-reset":
-            return self._handle_api_workbench_settings_data_reset(body, headers)
+        if route_path == "/api/workbench/settings" or route_path.startswith("/api/workbench/settings/"):
+            settings_response = self._settings_routes().route(method, route_path, query, body, headers)
+            if settings_response is not None:
+                return settings_response
         if method == "GET" and route_path.startswith("/api/workbench/rows/"):
             row_id = unquote(route_path.rsplit("/", 1)[-1])
             return self._handle_api_workbench_row_detail(row_id, month=query.get("month", [None])[0])
@@ -6269,6 +6221,41 @@ class Application:
         self._target_oa_applicant_token_provider_instance = provider
         return provider
 
+    def _settings_routes(self) -> SettingsApiRoutes:
+        routes = getattr(self, "_settings_api_routes", None)
+        if isinstance(routes, SettingsApiRoutes):
+            return routes
+        routes = SettingsApiRoutes(
+            app_settings_service_provider=lambda: self._app_settings_service,
+            project_costing_service_provider=lambda: self._project_costing_service,
+            settings_data_reset_service_provider=lambda: self._settings_data_reset_service,
+            background_job_service_provider=lambda: self._background_job_service,
+            oa_applicant_credential_service_provider=self._oa_applicant_credential_service,
+            oa_manual_import_service_provider=lambda: getattr(self, "_oa_manual_import_service", None),
+            resolve_read_session=lambda headers: self._resolve_fin_ops_read_session(
+                headers,
+                denied_message="当前账户没有访问设置页面权限。",
+            ),
+            resolve_admin_session=self._resolve_admin_session,
+            verify_reset_oa_password=self._verify_reset_oa_password,
+            oa_password_verification_failed_response=self._oa_password_verification_failed_response,
+            resolve_background_job_owner=self._resolve_background_job_owner,
+            load_json_body=self._load_json_body,
+            json_response=self._json_response,
+            finalize_settings_event=self._finalize_workbench_settings_event,
+            after_settings_update=self._after_workbench_settings_update,
+            execute_data_reset=self._execute_settings_data_reset,
+            serialize_sync_run=self._serialize_sync_run,
+            serialize_data_reset_background_job=self._serialize_data_reset_background_job,
+            import_job_processing_enabled=self._import_job_processing_enabled,
+            enqueue_import_process_job=self._enqueue_import_process_job,
+            serialize_import_job=self._serialize_import_job,
+            manual_import_affected_scope_keys=self._settings_oa_manual_import_affected_scope_keys,
+            manual_import_write_target_envelope=self._settings_oa_manual_import_write_target_envelope,
+        )
+        self._settings_api_routes = routes
+        return routes
+
     def _input_invoice_usage_oa_reverse_service(self) -> InputInvoiceUsageOaReverseService:
         service = getattr(self, "_input_invoice_usage_oa_reverse_service_instance", None)
         if isinstance(service, InputInvoiceUsageOaReverseService):
@@ -7096,221 +7083,41 @@ class Application:
             },
         )
 
-    def _handle_api_workbench_settings(self) -> Response:
-        return self._json_response(HTTPStatus.OK, self._app_settings_service.get_settings_payload())
-
-    def _handle_api_workbench_settings_oa_applicant_credentials(
-        self,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问设置页面权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._oa_applicant_credential_service().list_credentials(
-                can_admin_access=bool(session and session.can_admin_access),
-            )
-        except OaApplicantCredentialError as exc:
-            return self._oa_applicant_credential_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_workbench_settings_oa_applicant_credential_save(
-        self,
-        target_applicant_code: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问设置页面权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        actor_id = actor_id_for_session(session) if session is not None else "system"
-        try:
-            credential = self._oa_applicant_credential_service().save_credential(
-                target_applicant_code=target_applicant_code,
-                target_applicant_name=str(payload.get("targetApplicantName") or ""),
-                oa_username=str(payload.get("oaUsername") or ""),
-                password=str(payload.get("password") or ""),
-                actor_id=actor_id,
-                can_admin_access=bool(session and session.can_admin_access),
-            )
-        except OaApplicantCredentialError as exc:
-            return self._oa_applicant_credential_error_response(exc)
-        return self._json_response(HTTPStatus.OK, {"credential": credential})
-
-    def _handle_api_workbench_settings_oa_applicant_credential_delete(
-        self,
-        target_applicant_code: str,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问设置页面权限。",
-        )
-        if auth_error is not None:
-            return auth_error
-        actor_id = actor_id_for_session(session) if session is not None else "system"
-        try:
-            credential = self._oa_applicant_credential_service().delete_credential(
-                target_applicant_code=target_applicant_code,
-                actor_id=actor_id,
-                can_admin_access=bool(session and session.can_admin_access),
-            )
-        except OaApplicantCredentialError as exc:
-            return self._oa_applicant_credential_error_response(exc)
-        return self._json_response(HTTPStatus.OK, {"credential": credential})
-
-    def _oa_applicant_credential_error_response(self, exc: OaApplicantCredentialError) -> Response:
-        if isinstance(exc, OaApplicantCredentialPermissionError):
-            status = HTTPStatus.FORBIDDEN
-        elif isinstance(exc, OaApplicantCredentialValidationError):
-            status = HTTPStatus.BAD_REQUEST
-        elif isinstance(exc, OaApplicantCredentialConfigurationError):
-            status = HTTPStatus.SERVICE_UNAVAILABLE
-        else:
-            status = HTTPStatus.BAD_REQUEST
-        return self._json_response(
-            status,
-            {
-                "error": getattr(exc, "code", "oa_applicant_credentials_error"),
-                "message": str(exc),
+    def _finalize_workbench_settings_event(self, event: dict[str, Any]) -> None:
+        if event.get("tags_changed"):
+            self._finalize_bank_transaction_tag_settings_update(event)
+        if not event.get("groups_changed"):
+            return
+        pending_invoice_service = getattr(self, "_pending_invoice_query_service", None)
+        for method_name in ("clear_cache", "invalidate_cache", "refresh"):
+            method = getattr(pending_invoice_service, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except TypeError:
+                    method(event)
+                break
+        self._search_service.clear_cache()
+        new_versions = event.get("new_versions") if isinstance(event.get("new_versions"), dict) else {}
+        self._execute_derived_data_lifecycle_event(
+            "pending_invoice_rules_changed",
+            scope_keys=["all"],
+            include_all=True,
+            schedule_cost_warmup=False,
+            metadata={
+                "reason": "pending_invoice_rules_changed",
+                "direction": "both",
+                "new_versions": dict(new_versions),
+                "affected_groups": list(event.get("affected_groups") or []),
             },
         )
 
-    def _handle_api_workbench_settings_update(
+    def _after_workbench_settings_update(
         self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
-        except UnauthorizedOASessionError as exc:
-            return self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
-        except ForbiddenOAAccessError as exc:
-            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
-        if not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有保存设置权限。"},
-            )
-        completed_project_ids = payload.get("completed_project_ids", [])
-        bank_account_mappings = payload.get("bank_account_mappings", [])
-        allowed_usernames = payload.get("allowed_usernames", [])
-        readonly_export_usernames = payload.get("readonly_export_usernames", [])
-        admin_usernames = payload.get("admin_usernames", [])
-        workbench_column_layouts = payload.get("workbench_column_layouts", {})
-        oa_retention = payload.get("oa_retention", {})
-        oa_invoice_offset = payload.get("oa_invoice_offset", {})
-        oa_import = payload.get("oa_import", {})
-        pending_invoice_tag_groups = payload.get("pending_invoice_tag_groups")
-        pending_output_invoice_tag_groups = payload.get("pending_output_invoice_tag_groups")
-        actor_id = str(session.identity.username or "workbench_settings").strip()
-        previous_oa_invoice_offset = self._app_settings_service.get_settings_payload().get("oa_invoice_offset")
-        if not isinstance(previous_oa_invoice_offset, dict):
-            previous_oa_invoice_offset = {}
-        if (
-            not isinstance(completed_project_ids, list)
-            or not isinstance(bank_account_mappings, list)
-            or not isinstance(allowed_usernames, list)
-            or not isinstance(readonly_export_usernames, list)
-            or not isinstance(admin_usernames, list)
-            or not isinstance(workbench_column_layouts, dict)
-            or not isinstance(oa_retention, dict)
-            or not isinstance(oa_import, dict)
-            or not isinstance(oa_invoice_offset, dict)
-        ):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_settings_request",
-                    "message": (
-                        "completed_project_ids, bank_account_mappings, allowed_usernames, "
-                        "readonly_export_usernames, and admin_usernames must be arrays, "
-                        "and workbench_column_layouts, oa_retention, oa_import, and oa_invoice_offset must be objects."
-                    ),
-                },
-            )
-        if "bank_transaction_tags" in payload:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "bank_transaction_tags_write_forbidden",
-                    "message": "银行明细自动标签规则只能在银行明细的自动标签规则中保存。",
-                },
-            )
-        if pending_invoice_tag_groups is not None and not isinstance(pending_invoice_tag_groups, dict):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_settings_request",
-                    "message": "pending_invoice_tag_groups must be an object when provided.",
-                },
-            )
-        if pending_output_invoice_tag_groups is not None and not isinstance(pending_output_invoice_tag_groups, dict):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_settings_request",
-                    "message": "pending_output_invoice_tag_groups must be an object when provided.",
-                },
-            )
-        try:
-            updated_payload = self._app_settings_service.update_settings(
-                completed_project_ids=[str(item) for item in completed_project_ids],
-                bank_account_mappings=[item for item in bank_account_mappings if isinstance(item, dict)],
-                allowed_usernames=[str(item).strip() for item in allowed_usernames if str(item).strip()],
-                readonly_export_usernames=[
-                    str(item).strip() for item in readonly_export_usernames if str(item).strip()
-                ],
-                admin_usernames=[str(item).strip() for item in admin_usernames if str(item).strip()],
-                workbench_column_layouts=workbench_column_layouts,
-                oa_retention=oa_retention,
-                oa_import=oa_import,
-                oa_invoice_offset=oa_invoice_offset,
-                pending_invoice_tag_groups=pending_invoice_tag_groups,
-                pending_output_invoice_tag_groups=pending_output_invoice_tag_groups,
-                actor_id=actor_id or "workbench_settings",
-                after_bank_transaction_tag_settings_saved=self._finalize_bank_transaction_tag_settings_update,
-            )
-        except AppSettingsValidationError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": exc.error_code,
-                    "message": str(exc),
-                },
-            )
-        except OARoleSyncError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_GATEWAY,
-                {
-                    "error": "oa_role_sync_failed",
-                    "message": f"OA 角色同步失败：{exc}",
-                },
-            )
-        except PyMongoError as exc:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": "app_settings_persistence_failed",
-                    "message": f"设置保存失败：无法写入 app Mongo，请检查 139.155.5.132:27017 连接后重试。底层错误：{exc}",
-                },
-            )
+        previous_oa_invoice_offset: dict[str, Any],
+        updated_payload: dict[str, Any],
+        _pending_invoice_rules_changed: bool,
+    ) -> None:
         self._invalidate_workbench_read_models()
         if self._state_store is not None:
             self._persist_workbench_read_models_best_effort(
@@ -7324,234 +7131,67 @@ class Application:
                 self._workbench_query_service.list_available_months(),
                 reason="oa_invoice_offset_settings_changed",
             )
-        if pending_invoice_tag_groups is not None or pending_output_invoice_tag_groups is not None:
-            self._invalidate_pending_invoice_read_model_scopes(reason="settings_update")
-        return self._json_response(HTTPStatus.OK, updated_payload)
 
-    def _handle_api_workbench_settings_oa_manual_search(self, query: dict[str, list[str]]) -> Response:
-        service = self._oa_manual_import_service_or_response()
-        if isinstance(service, Response):
-            return service
-        pagination, error = self._parse_oa_manual_search_pagination(query)
-        if error is not None:
-            return error
-        payload = service.search(
-            q=query.get("q", [None])[0],
-            form_types=self._parse_csv_query_values(query, "form_types"),
-            statuses=self._parse_csv_query_values(query, "statuses"),
-            date_from=query.get("date_from", [None])[0],
-            date_to=query.get("date_to", [None])[0],
-            page=pagination["page"],
-            page_size=pagination["page_size"],
-        )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_workbench_settings_oa_manual_search_refresh_attachments(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        _session, auth_error = self._resolve_settings_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        service = self._oa_manual_import_service_or_response()
-        if isinstance(service, Response):
-            return service
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        row_ids, row_ids_error = self._parse_oa_manual_import_row_ids(payload)
-        if row_ids_error is not None:
-            return row_ids_error
-        result = service.refresh_attachments(row_ids)
-        scope_keys = self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
-        result.update(self._oa_manual_import_write_target_envelope(scope_keys))
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_workbench_settings_oa_manual_imports(self) -> Response:
-        service = self._oa_manual_import_service_or_response()
-        if isinstance(service, Response):
-            return service
-        return self._json_response(HTTPStatus.OK, service.list_manual_imports())
-
-    def _handle_api_workbench_settings_oa_manual_imports_create(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_settings_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        service = self._oa_manual_import_service_or_response()
-        if isinstance(service, Response):
-            return service
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        row_ids, row_ids_error = self._parse_oa_manual_import_row_ids(payload)
-        if row_ids_error is not None:
-            return row_ids_error
-        actor_id = (
-            actor_id_for_session(session)
-            if session is not None
-            else str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
-        )
-        normalized_actor_id = actor_id or "workbench_settings"
-        if self._import_job_processing_enabled():
-            try:
-                import_job, event = self._enqueue_import_process_job(
-                    import_type="oa_manual_import.create",
-                    import_session_id=",".join(sorted(row_ids)),
-                    idempotency_key=f"oa_manual_import.create:{normalized_actor_id}:{','.join(sorted(row_ids))}",
-                    payload={"row_ids": row_ids, "actor_id": normalized_actor_id},
-                    created_by=normalized_actor_id,
-                    reason="oa_manual_import_create",
-                )
-            except RuntimeError as exc:
-                return self._json_response(
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                    {"error": "import_queue_unavailable", "message": str(exc)},
-                )
-            return self._json_response(
-                HTTPStatus.ACCEPTED,
-                {
-                    "status": "queued",
-                    "import_job": self._serialize_import_job(import_job),
-                    "event_id": getattr(event, "event_id", None),
-                },
-            )
-        result = self._execute_oa_manual_import_create(row_ids, actor_id=normalized_actor_id)
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _execute_oa_manual_import_create(self, row_ids: list[str], *, actor_id: str) -> dict[str, object]:
-        service = self._oa_manual_import_service_or_response()
-        if isinstance(service, Response):
-            raise RuntimeError("OA manual import service is not available.")
-        result = service.import_row_ids(row_ids, actor_id=actor_id)
-        scope_keys = self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
-        result.update(self._oa_manual_import_write_target_envelope(scope_keys))
-        return result
-
-    def _handle_api_workbench_settings_oa_manual_import_delete(
-        self,
-        row_id: str,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_settings_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        service = self._oa_manual_import_service_or_response()
-        if isinstance(service, Response):
-            return service
-        payload: dict[str, object] = {}
-        if body:
-            payload, error = self._load_json_body(body)
-            if error is not None:
-                return error
-        normalized_row_id = str(row_id or "").strip()
-        if not normalized_row_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_manual_import_request", "message": "row_id is required."},
-            )
-        actor_id = (
-            actor_id_for_session(session)
-            if session is not None
-            else str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
-        )
-        result = service.remove_manual_import(normalized_row_id, actor_id=actor_id or "workbench_settings")
-        scope_keys = self._invalidate_after_oa_manual_import_mutation(result, row_ids=[normalized_row_id])
-        result.update(self._oa_manual_import_write_target_envelope(scope_keys))
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _oa_manual_import_service_or_response(self) -> OAManualImportService | Response:
-        service = getattr(self, "_oa_manual_import_service", None)
-        if service is None:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": "oa_manual_import_unavailable",
-                    "message": "OA 手动导入服务不可用，请检查 OA Mongo 与状态存储配置。",
-                },
-            )
-        return service
-
-    @staticmethod
-    def _parse_csv_query_values(query: dict[str, list[str]], key: str) -> list[str] | None:
-        raw_values = query.get(key)
-        if raw_values is None:
-            return None
-        values: list[str] = []
-        for raw_value in raw_values:
-            values.extend(str(part).strip() for part in str(raw_value or "").split(","))
-        return [value for value in values if value]
-
-    def _parse_oa_manual_search_pagination(
-        self,
-        query: dict[str, list[str]],
-    ) -> tuple[dict[str, int], Response | None]:
-        try:
-            page = int(query.get("page", ["0"])[0] or 0)
-            page_size = int(query.get("page_size", ["20"])[0] or 20)
-        except (TypeError, ValueError):
-            return {}, self._invalid_oa_manual_search_request("page and page_size must be integers.")
-        if page < 0:
-            return {}, self._invalid_oa_manual_search_request("page must be greater than or equal to 0.")
-        if page_size < 1 or page_size > 100:
-            return {}, self._invalid_oa_manual_search_request("page_size must be between 1 and 100.")
-        return {"page": page, "page_size": page_size}, None
-
-    def _invalid_oa_manual_search_request(self, message: str) -> Response:
-        return self._json_response(
-            HTTPStatus.BAD_REQUEST,
-            {"error": "invalid_oa_manual_search_request", "message": message},
-        )
-
-    def _parse_oa_manual_import_row_ids(
-        self,
-        payload: dict[str, object],
-    ) -> tuple[list[str], Response | None]:
-        row_ids = payload.get("row_ids")
-        if not isinstance(row_ids, list):
-            return [], self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_manual_import_request", "message": "row_ids must be an array."},
-            )
-        normalized = []
-        seen: set[str] = set()
-        for row_id in row_ids:
-            text = str(row_id or "").strip()
-            if not text or text in seen:
-                continue
-            normalized.append(text)
-            seen.add(text)
-        if not normalized:
-            return [], self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_manual_import_request", "message": "row_ids is required."},
-            )
-        return normalized, None
-
-    def _invalidate_after_oa_manual_import_mutation(
+    def _settings_oa_manual_import_affected_scope_keys(
         self,
         result: dict[str, object],
-        *,
         row_ids: list[str],
     ) -> list[str]:
-        scope_keys = self._oa_manual_import_affected_scope_keys(result, row_ids=row_ids)
+        scope_keys: set[str] = {"all"}
+        rows = result.get("rows") if isinstance(result, dict) else None
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    month = self._settings_oa_manual_import_month_from_row(row)
+                    if month:
+                        scope_keys.add(month)
+        normalized_row_ids = {str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()}
+        if normalized_row_ids:
+            for row in self._workbench_query_service.list_record_snapshots():
+                if str(row.get("id", "")).strip() in normalized_row_ids:
+                    month = str(row.get("_month", "")).strip()
+                    if SEARCH_MONTH_RE.match(month):
+                        scope_keys.add(month)
+            list_application_records_by_row_ids = getattr(
+                self._workbench_query_service._oa_adapter,
+                "list_application_records_by_row_ids",
+                None,
+            )
+            if callable(list_application_records_by_row_ids):
+                try:
+                    for record in list_application_records_by_row_ids(sorted(normalized_row_ids)):
+                        month = str(getattr(record, "month", "") or "").strip()
+                        if SEARCH_MONTH_RE.match(month):
+                            scope_keys.add(month)
+                except Exception:
+                    pass
+        resolved_scope_keys = sorted(scope_keys)
         self._execute_derived_data_lifecycle_event(
             "oa_attachment_invoice_cache_updated",
-            scope_keys=scope_keys,
+            scope_keys=resolved_scope_keys,
             metadata={"source": "oa_manual_import_mutation"},
         )
         invalidate_records_cache = getattr(self._workbench_query_service._oa_adapter, "invalidate_records_cache", None)
         if callable(invalidate_records_cache):
-            invalidate_records_cache([scope_key for scope_key in scope_keys if scope_key != "all"])
-        return scope_keys
+            invalidate_records_cache([scope_key for scope_key in resolved_scope_keys if scope_key != "all"])
+        return resolved_scope_keys
 
     @staticmethod
-    def _oa_manual_import_write_target_envelope(scope_keys: list[str]) -> dict[str, object]:
+    def _settings_oa_manual_import_month_from_row(row: dict[str, object]) -> str:
+        for key in ("month", "application_date", "apply_date", "date"):
+            value = str(row.get(key) or "").strip()
+            if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
+                return value[:7]
+        for item in list(row.get("items") or []):
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("date") or "").strip()
+            if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
+                return value[:7]
+        return ""
+
+    @staticmethod
+    def _settings_oa_manual_import_write_target_envelope(scope_keys: list[str]) -> dict[str, object]:
         targets: list[dict[str, str]] = []
 
         def add(read_model_key: str, raw_scope_keys: list[str]) -> None:
@@ -7583,327 +7223,6 @@ class Application:
             "freshness_targets": targets,
             "operation_barrier_targets": list(targets),
         }
-
-    def _oa_manual_import_affected_scope_keys(
-        self,
-        result: dict[str, object],
-        *,
-        row_ids: list[str],
-    ) -> list[str]:
-        scope_keys: set[str] = {"all"}
-        rows = result.get("rows") if isinstance(result, dict) else None
-        if isinstance(rows, list):
-            for row in rows:
-                if isinstance(row, dict):
-                    month = self._month_from_oa_manual_import_row(row)
-                    if month:
-                        scope_keys.add(month)
-        normalized_row_ids = {str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()}
-        if normalized_row_ids:
-            for row in self._workbench_query_service.list_record_snapshots():
-                if str(row.get("id", "")).strip() in normalized_row_ids:
-                    month = str(row.get("_month", "")).strip()
-                    if SEARCH_MONTH_RE.match(month):
-                        scope_keys.add(month)
-            list_application_records_by_row_ids = getattr(
-                self._workbench_query_service._oa_adapter,
-                "list_application_records_by_row_ids",
-                None,
-            )
-            if callable(list_application_records_by_row_ids):
-                try:
-                    for record in list_application_records_by_row_ids(sorted(normalized_row_ids)):
-                        month = str(getattr(record, "month", "") or "").strip()
-                        if SEARCH_MONTH_RE.match(month):
-                            scope_keys.add(month)
-                except Exception:
-                    pass
-        return sorted(scope_keys)
-
-    @staticmethod
-    def _month_from_oa_manual_import_row(row: dict[str, object]) -> str:
-        for key in ("month", "application_date", "apply_date", "date"):
-            value = str(row.get(key) or "").strip()
-            if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
-                return value[:7]
-        for item in list(row.get("items") or []):
-            if not isinstance(item, dict):
-                continue
-            value = str(item.get("date") or "").strip()
-            if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
-                return value[:7]
-        return ""
-
-    def _resolve_settings_mutation_session(
-        self,
-        headers: dict[str, str] | None,
-    ) -> tuple[OARequestSession | None, Response | None]:
-        session, auth_error = self._resolve_fin_ops_read_session(
-            headers,
-            denied_message="当前账户没有访问设置页面权限。",
-        )
-        if auth_error is not None:
-            return None, auth_error
-        if session is not None and not session.can_mutate_data:
-            return None, self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有保存设置权限。"},
-            )
-        return session, None
-
-    def _handle_api_workbench_settings_projects_sync(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_settings_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor_id = actor_id_for_session(session) if session is not None else str(payload.get("actor_id", "")).strip()
-        if not actor_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_sync_request", "message": "actor_id is required."},
-            )
-        try:
-            run = self._project_costing_service.sync_projects_from_oa(actor_id=actor_id)
-        except Exception as exc:
-            return self._json_response(
-                HTTPStatus.BAD_GATEWAY,
-                {
-                    "error": "oa_project_sync_failed",
-                    "message": f"OA 项目同步失败：{exc}",
-                },
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "sync": self._serialize_sync_run(run),
-                "settings": self._app_settings_service.get_settings_payload(),
-            },
-        )
-
-    def _handle_api_workbench_settings_project_create(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        session, auth_error = self._resolve_settings_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor_id = actor_id_for_session(session) if session is not None else str(payload.get("actor_id", "")).strip()
-        if not actor_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_create_request", "message": "actor_id is required."},
-            )
-        try:
-            settings_payload = self._app_settings_service.create_manual_project(
-                actor_id=actor_id,
-                project_code=str(payload.get("project_code", "")),
-                project_name=str(payload.get("project_name", "")),
-                department_name=payload.get("department_name"),
-                owner_name=payload.get("owner_name"),
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_create_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
-
-    def _handle_api_workbench_settings_project_delete(
-        self,
-        project_id: str,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        _session, auth_error = self._resolve_settings_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        normalized_project_id = str(project_id).strip()
-        if not normalized_project_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_delete_request", "message": "project_id is required."},
-            )
-        settings_payload = self._app_settings_service.delete_project(normalized_project_id)
-        return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
-
-    def _handle_api_workbench_settings_data_reset(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        payload, error = self._validate_settings_data_reset_request(body, headers)
-        if error is not None:
-            return error
-        action = str(payload.get("action") or "").strip()
-        try:
-            result = self._execute_settings_data_reset(action)
-        except ValueError:
-            return self._unsupported_settings_data_reset_response()
-        return self._json_response(HTTPStatus.OK, result)
-
-    def _handle_api_workbench_settings_data_reset_job_create(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        payload, error = self._validate_settings_data_reset_request(body, headers)
-        if error is not None:
-            return error
-        action = str(payload.get("action") or "").strip()
-        if action not in self._settings_data_reset_service.supported_actions():
-            return self._unsupported_settings_data_reset_response()
-
-        owner_user_id = self._resolve_background_job_owner(headers)
-        active_job = self._active_data_reset_background_job(owner_user_id)
-        if active_job is not None:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {
-                    "error": "settings_data_reset_job_running",
-                    "message": "已有数据重置任务正在执行，请等待当前任务完成。",
-                    "job": self._serialize_data_reset_background_job(active_job),
-                },
-            )
-
-        job = self._background_job_service.create_job(
-            job_type="settings_data_reset",
-            label=self._data_reset_job_label(action),
-            owner_user_id=owner_user_id,
-            visibility="system",
-            phase="queued",
-            current=1,
-            total=100,
-            message="数据重置任务已排队。",
-            result_summary={"action": action},
-            source={"action": action},
-            affected_scopes=["settings", "workbench"],
-        )
-        self._background_job_service.run_job(job, lambda running_job: self._run_settings_data_reset_background_job(running_job, action))
-        return self._json_response(HTTPStatus.ACCEPTED, {"job": self._serialize_data_reset_background_job(job)})
-
-    def _run_settings_data_reset_background_job(self, running_job, action: str) -> dict[str, object]:
-        def update(phase: str, message: str, percent: int) -> None:
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase=phase,
-                message=message,
-                current=max(0, min(int(percent), 100)),
-                total=100,
-                result_summary={"action": action},
-            )
-
-        update("start", "数据重置任务已开始。", 1)
-        result = self._execute_settings_data_reset(action, progress=update)
-        failed = str(result.get("status") or "") == "partial" or str(result.get("rebuild_status") or "") == "failed"
-        self._background_job_service.update_progress(
-            running_job.job_id,
-            phase="failed" if failed else "complete",
-            message=str(result.get("message") or ("数据重置失败。" if failed else "数据重置已完成。")),
-            current=100,
-            total=100,
-            result_summary=result,
-        )
-        if failed:
-            self._background_job_service.fail_job(
-                running_job.job_id,
-                str(result.get("message") or "数据重置失败。"),
-                str(result.get("message") or "数据重置失败。"),
-            )
-        else:
-            self._background_job_service.succeed_job(
-                running_job.job_id,
-                str(result.get("message") or "数据重置已完成。"),
-                result_summary=result,
-            )
-        return result
-
-    def _handle_api_workbench_settings_data_reset_job(
-        self,
-        job_id: str,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        normalized_job_id = str(job_id or "").strip()
-        owner_user_id = self._resolve_background_job_owner(headers)
-        try:
-            job = self._background_job_service.get_job(normalized_job_id, owner_user_id)
-        except (BackgroundJobNotFoundError, BackgroundJobAccessError):
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "settings_data_reset_job_not_found", "message": "数据重置任务不存在或已过期。"},
-            )
-        if job.type != "settings_data_reset":
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "settings_data_reset_job_not_found", "message": "数据重置任务不存在或已过期。"},
-            )
-        return self._json_response(HTTPStatus.OK, {"job": self._serialize_data_reset_background_job(job)})
-
-    def _handle_api_workbench_settings_data_reset_active_job(
-        self,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        owner_user_id = self._resolve_background_job_owner(headers)
-        active_job = self._active_data_reset_background_job(owner_user_id)
-        return self._json_response(
-            HTTPStatus.OK,
-            {"job": self._serialize_data_reset_background_job(active_job) if active_job is not None else None},
-        )
-
-    def _validate_settings_data_reset_request(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> tuple[dict[str, object], Response | None]:
-        if self._settings_data_reset_service is None:
-            return {}, self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": "settings_data_reset_unavailable",
-                    "message": "当前运行模式未启用持久化状态存储，不能执行数据重置。",
-                },
-            )
-        admin_session, admin_error = self._resolve_admin_session(headers)
-        if admin_error is not None:
-            return {}, admin_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return {}, error
-        action = str(payload.get("action") or "").strip()
-        if not action:
-            return {}, self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_settings_reset_request",
-                    "message": "action is required.",
-                },
-            )
-        oa_password = payload.get("oa_password")
-        if not isinstance(oa_password, str) or not oa_password:
-            return {}, self._oa_password_verification_failed_response()
-        password_error = self._verify_reset_oa_password(admin_session, oa_password)
-        if password_error is not None:
-            return {}, password_error
-        return dict(payload), None
-
-    def _unsupported_settings_data_reset_response(self) -> Response:
-        return self._json_response(
-            HTTPStatus.BAD_REQUEST,
-            {
-                "error": "invalid_workbench_settings_reset_request",
-                "message": "unsupported action.",
-                "supported_actions": self._settings_data_reset_service.supported_actions(),
-                "protected_targets": self._settings_data_reset_service.protected_targets(),
-            },
-        )
 
     def _execute_settings_data_reset(
         self,
@@ -7974,22 +7293,6 @@ class Application:
         payload = result.to_payload()
         payload["derived_data_lifecycle"] = lifecycle_summary
         return payload
-
-    def _active_data_reset_background_job(self, owner_user_id: str):
-        for job in self._background_job_service.list_active_jobs(owner_user_id, include_system=True):
-            if job.type == "settings_data_reset" and job.status in {"queued", "running"}:
-                return job
-        return None
-
-    @staticmethod
-    def _data_reset_job_label(action: str) -> str:
-        if action == RESET_BANK_TRANSACTIONS_ACTION:
-            return "重置银行流水"
-        if action == RESET_INVOICES_ACTION:
-            return "重置发票数据"
-        if action == RESET_OA_AND_REBUILD_ACTION:
-            return "重置OA数据"
-        return "数据重置"
 
     @staticmethod
     def _serialize_data_reset_background_job(job) -> dict[str, object]:
