@@ -1401,6 +1401,8 @@ class WorkbenchCandidateGroupingService:
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
         if group.bank_rows and self._uses_bank_transaction_paired_policy(group):
             return self._bank_transaction_paired_policy_satisfied(group)
+        if row_type_count == 2 and group.oa_rows and group.bank_rows and any(self._is_etc_batch_oa_row(row) for row in group.oa_rows):
+            return True
         if group.bank_rows and any(self._is_batch_accounting_relation_row(row) for row in rows):
             return bool(group.oa_rows)
         if row_type_count == 2 and group.oa_rows and group.invoice_rows and not group.bank_rows:
@@ -1444,6 +1446,8 @@ class WorkbenchCandidateGroupingService:
             and requires_invoice is None
         ):
             return {"requires_oa": False, "requires_invoice": False}
+        if self._relation_code(row) in OA_BANK_SETTLEMENT_PAIRED_CODES and requires_oa is None and requires_invoice is None:
+            return {"requires_oa": True, "requires_invoice": False}
         return {
             "requires_oa": True if requires_oa is None else requires_oa,
             "requires_invoice": True if requires_invoice is None else requires_invoice,

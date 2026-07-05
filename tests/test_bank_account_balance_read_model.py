@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import unittest
 
-from fin_ops_platform.services.bank_account_balance_projection import BankAccountBalanceProjectionBuilder
+from fin_ops_platform.services.bank_account_balance_projection import BankAccountBalanceProjectionBuilder, _account_identity
 from fin_ops_platform.services.bank_account_balance_read_model_repository import BankAccountBalanceReadModelRepositoryPort
+from fin_ops_platform.services.bank_account_balance_read_model_refresh import BankAccountBalanceReadModelRefreshService
 from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import BankAccountBalanceReadModelRefreshProducer
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
     PostgresReadModelRepository,
 )
+from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class FakeConnection:
@@ -24,6 +26,10 @@ class FakeConnection:
     def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
         self.calls.append(("execute", sql, params))
         return 0
+
+    def execute_many(self, sql: str, params_seq: list[tuple[object, ...]]) -> int:
+        self.calls.append(("execute_many", sql, tuple(params_seq)))
+        return len(params_seq)
 
     def transaction(self):
         connection = self
@@ -145,62 +151,55 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
             ],
         )
 
-    def test_projection_uses_latest_non_empty_balance_with_stable_account_identity(self) -> None:
+    def test_projection_saves_account_level_sql_projection_rows(self) -> None:
         repository = CaptureAccountBalanceRepository()
+        account_one_identity, _ = _account_identity(
+            account_no="6222000011116386",
+            bank_name="工商银行",
+            account_last4="6386",
+        )
+        account_two_identity, _ = _account_identity(
+            account_no="9558800011116386",
+            bank_name="工商银行",
+            account_last4="6386",
+        )
         connection = FakeConnection(
             rows=[
                 [
                     {
-                        "id": "txn-old",
-                        "transaction_id": "pg-old",
+                        "account_identity": account_one_identity,
+                        "account_key": account_one_identity,
+                        "bank_name": "工商银行",
+                        "account_last4": "6386",
                         "account_no": "6222000011116386",
                         "account_name": "基本户",
-                        "txn_date": "2026-04-01",
-                        "trade_time": "2026-04-01 09:00:00",
-                        "trade_time_sort": "2026-04-01 09:00:00",
-                        "bank_serial_no": "001",
-                        "balance": "900.00",
+                        "identity_confidence": "account_no",
                         "currency": "CNY",
-                        "raw_payload": {"normalized_payload": {"imported_bank_name": "工商银行", "imported_bank_last4": "6386"}},
+                        "transaction_total_count": 3,
+                        "latest_balance": "117644.93",
+                        "latest_balance_at": "2026-04-02 09:00:00",
+                        "latest_balance_transaction_id": "txn-latest-balance",
+                        "latest_trade_time_sort": "2026-04-02 09:00:00",
+                        "latest_bank_serial_no": "002",
+                        "source_batch_id": "batch-one",
+                        "legacy_source_batch_id": "legacy-one",
+                        "raw_payload": {"latest_transaction": {"id": "txn-latest-balance"}},
                     },
                     {
-                        "id": "txn-new-empty",
-                        "transaction_id": "pg-new-empty",
-                        "account_no": "6222000011116386",
-                        "account_name": "基本户",
-                        "txn_date": "2026-04-03",
-                        "trade_time": "2026-04-03 10:00:00",
-                        "trade_time_sort": "2026-04-03 10:00:00",
-                        "bank_serial_no": "003",
-                        "balance": None,
-                        "currency": "CNY",
-                        "raw_payload": {"normalized_payload": {"imported_bank_name": "工商银行", "imported_bank_last4": "6386"}},
-                    },
-                    {
-                        "id": "txn-latest-balance",
-                        "transaction_id": "pg-latest-balance",
-                        "account_no": "6222000011116386",
-                        "account_name": "基本户",
-                        "txn_date": "2026-04-02",
-                        "trade_time": "2026-04-02 09:00:00",
-                        "trade_time_sort": "2026-04-02 09:00:00",
-                        "bank_serial_no": "002",
-                        "balance": "117644.93",
-                        "currency": "CNY",
-                        "raw_payload": {"normalized_payload": {"imported_bank_name": "工商银行", "imported_bank_last4": "6386"}},
-                    },
-                    {
-                        "id": "txn-same-tail",
-                        "transaction_id": "pg-same-tail",
+                        "account_identity": account_two_identity,
+                        "account_key": account_two_identity,
+                        "bank_name": "工商银行",
+                        "account_last4": "6386",
                         "account_no": "9558800011116386",
                         "account_name": "一般户",
-                        "txn_date": "2026-04-02",
-                        "trade_time": "2026-04-02 09:00:00",
-                        "trade_time_sort": "2026-04-02 09:00:00",
-                        "bank_serial_no": "002",
-                        "balance": "200.00",
+                        "identity_confidence": "account_no",
                         "currency": "CNY",
-                        "raw_payload": {"normalized_payload": {"imported_bank_name": "工商银行", "imported_bank_last4": "6386"}},
+                        "transaction_total_count": 1,
+                        "latest_balance": "200.00",
+                        "latest_balance_at": "2026-04-02 09:00:00",
+                        "latest_balance_transaction_id": "txn-same-tail",
+                        "latest_trade_time_sort": "2026-04-02 09:00:00",
+                        "latest_bank_serial_no": "002",
                     },
                 ]
             ]
@@ -216,29 +215,37 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
         by_account_no = {row["account_no"]: row for row in repository.saved_rows}
         self.assertEqual(by_account_no["6222000011116386"]["latest_balance"], "117644.93")
         self.assertEqual(by_account_no["6222000011116386"]["latest_balance_transaction_id"], "txn-latest-balance")
+        self.assertEqual(by_account_no["6222000011116386"]["transaction_total_count"], 3)
         self.assertEqual(by_account_no["9558800011116386"]["latest_balance"], "200.00")
         self.assertNotEqual(
             by_account_no["6222000011116386"]["account_identity"],
             by_account_no["9558800011116386"]["account_identity"],
         )
+        projection_sql = " ".join(connection.calls[0][1].lower().split())
+        self.assertIn("select distinct on (account_identity)", projection_sql)
+        self.assertIn("digest(normalized_account_no, 'sha256')", projection_sql)
 
     def test_projection_normalizes_renminbi_currency_aliases(self) -> None:
         repository = CaptureAccountBalanceRepository()
+        account_identity, _ = _account_identity(
+            account_no="6222000011116386",
+            bank_name="工商银行",
+            account_last4="6386",
+        )
         connection = FakeConnection(
             rows=[
                 [
                     {
-                        "id": "txn-rmb",
-                        "transaction_id": "pg-rmb",
+                        "account_identity": account_identity,
+                        "account_key": account_identity,
+                        "bank_name": "工商银行",
+                        "account_last4": "6386",
                         "account_no": "6222000011116386",
                         "account_name": "基本户",
-                        "txn_date": "2026-04-01",
-                        "trade_time": "2026-04-01 09:00:00",
-                        "trade_time_sort": "2026-04-01 09:00:00",
-                        "bank_serial_no": "001",
-                        "balance": "900.00",
+                        "identity_confidence": "account_no",
+                        "latest_balance": "900.00",
                         "currency": "人民币元",
-                        "raw_payload": {"normalized_payload": {"imported_bank_name": "工商银行", "imported_bank_last4": "6386"}},
+                        "transaction_total_count": 1,
                     }
                 ]
             ]
@@ -250,6 +257,60 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
         ).rebuild_bank_account_balance_read_model()
 
         self.assertEqual(repository.saved_rows[0]["currency"], "CNY")
+
+    def test_refresh_service_skips_stale_source_version_without_rebuild(self) -> None:
+        class ProjectionBuilder:
+            def rebuild_bank_account_balance_read_model(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("stale bank account balance event must not rebuild")
+
+        class QueueRepository:
+            def __init__(self) -> None:
+                self.current_checks: list[dict[str, object]] = []
+                self.completions: list[dict[str, object]] = []
+
+            def read_model_refresh_is_current(self, **kwargs: object) -> bool:
+                self.current_checks.append(dict(kwargs))
+                return False
+
+            def complete_read_model_refresh(self, **kwargs: object) -> None:
+                self.completions.append(dict(kwargs))
+
+        queue = QueueRepository()
+        service = BankAccountBalanceReadModelRefreshService(
+            projection_builder=ProjectionBuilder(),
+            queue_repository=queue,
+        )
+
+        result = service.handle_runtime_event(
+            RuntimeQueueEvent(
+                event_id="evt-stale",
+                tenant_id="default",
+                event_type="bank_account_balance.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="all",
+                scope_type="bank_account_balance",
+                scope_key="all",
+                dedupe_key="bank_account_balance.read_model.refresh:bank_account_balance:all",
+                payload={"scope_type": "bank_account_balance", "scope_key": "all", "source_version": 4},
+                attempts=1,
+                status="processing",
+                source_version=4,
+            )
+        )
+
+        self.assertEqual(result["skip_reason"], "stale_source_version")
+        self.assertEqual(
+            queue.current_checks,
+            [
+                {
+                    "tenant_id": "default",
+                    "scope_type": "bank_account_balance",
+                    "scope_key": "all",
+                    "source_version": 4,
+                }
+            ],
+        )
+        self.assertEqual(queue.completions, [])
 
     def test_repository_lists_balances_without_reading_bank_detail_rows_for_balance(self) -> None:
         connection = FakeConnection(
@@ -318,6 +379,40 @@ class BankAccountBalanceProjectionTests(unittest.TestCase):
         balance_sql = " ".join(balance_call[1].lower().split())
         self.assertIn("from read_model.bank_account_balances", balance_sql)
         self.assertNotIn("from read_model.bank_detail_rows", balance_sql)
+
+    def test_repository_saves_balances_with_bulk_insert(self) -> None:
+        connection = FakeConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_bank_account_balances(
+            rows=[
+                {
+                    "account_identity": "acct:one",
+                    "account_key": "acct:one",
+                    "bank_name": "工商银行",
+                    "account_last4": "6386",
+                    "account_no": "6222000011116386",
+                    "identity_confidence": "account_no",
+                    "latest_balance": "117644.93",
+                    "latest_balance_at": "2026-04-02 09:00:00",
+                    "latest_balance_transaction_id": "txn-latest",
+                    "currency": "CNY",
+                    "transaction_total_count": 3,
+                    "source_versions": {"source_version": 7},
+                    "generated_at": "2026-04-02 10:00:00",
+                }
+            ]
+        )
+
+        execute_many_calls = [
+            call for call in connection.calls if call[0] == "execute_many" and "insert into read_model.bank_account_balances" in call[1].lower()
+        ]
+        self.assertEqual(len(execute_many_calls), 1)
+        self.assertEqual(len(execute_many_calls[0][2]), 1)
+        per_row_executes = [
+            call for call in connection.calls if call[0] == "execute" and "insert into read_model.bank_account_balances" in call[1].lower()
+        ]
+        self.assertEqual(per_row_executes, [])
 
     def test_repository_returns_empty_fresh_payload_after_empty_projection(self) -> None:
         connection = FakeConnection(

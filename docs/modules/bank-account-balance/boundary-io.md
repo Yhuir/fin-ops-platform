@@ -6,8 +6,8 @@
 
 - 状态：completed
 - 当前边界可信度：high
-- 目标边界：银行账户余额作为 all-only read model，由银行明细应用服务读取，由 worker 重建快照。
-- 当前缺口：当前 partition 是 global all scope only，性能目标依赖快照重建成本可控。
+- 目标边界：银行账户余额作为 all-only read model，由银行明细应用服务读取，由 worker 通过账户级 SQL 投影重建快照。
+- 当前缺口：当前 partition 是 global all scope only；生产性能依赖账户级 SQL 聚合、批量写入和 hot-path index，不允许恢复为 Python 全量流水聚合。
 - 旧代码删除条件：旧账户余额即时计算路径无人引用，且账户余额 API/read model 测试覆盖。
 
 ## 职责边界
@@ -44,10 +44,11 @@
 ## 持久化与投影
 
 - Read model：`bank_account_balance`
-- Projection：`partitioned_scoped_incremental`
+- Projection：`partitioned_scoped_incremental`；当前 all scope 使用 SQL 直接按账户聚合，只返回账户级 rows，禁止 worker 把全量 `app.bank_transactions` 搬回 Python 再计算余额。
 - Partition：global all scope only
 - Worker：`bank-account-balance`
 - Repository owner：`BankAccountBalanceReadModelRepositoryPort`
+- Performance I/O：`save_bank_account_balances(...)` 必须批量写入；stale source-version event 必须跳过重建；PostgreSQL hot path index 位于 `0089_read_model_performance_hot_paths.sql`。
 
 ## 文件范围
 
@@ -77,4 +78,5 @@
 ## 当前缺口和删除条件
 
 - 若未来账户余额变为按账号/月分区，必须先更新 manifest、scope policy、worker 和本文档。
+- 禁止恢复旧账户余额即时计算或 worker 端 Python 全量流水扫描；若 SQL 投影无法满足新字段，先扩展 SQL projection 和测试。
 - 删除旧账户余额即时计算路径前，必须保留银行流水导入确认/job result 的 `bank_account_balance:all` operation barrier 回归。

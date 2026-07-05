@@ -40,6 +40,14 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn(key, payload)
 
+    def _assert_error_message(self, payload: dict[str, object]) -> None:
+        error = payload.get("error")
+        if isinstance(error, dict):
+            self.assertIn("code", error)
+            self.assertIn("message", error)
+            return
+        self.assertIn("message", payload)
+
     def test_default_api_probes_expose_sanitized_local_envelopes(self) -> None:
         with self._default_test_auth(enabled=True), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -70,13 +78,15 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
                     self.assertIn(response.status_code, expected_statuses)
                     if response.status_code == 403:
                         self.assertIn(payload.get("error"), {"admin_only", "forbidden"})
-                        self.assertIn("message", payload)
+                        self._assert_error_message(payload)
                         continue
                     if response.status_code == 501:
-                        self._assert_keys(payload, "error", "message")
+                        self._assert_keys(payload, "error")
+                        self._assert_error_message(payload)
                         continue
                     if response.status_code == 503:
-                        self._assert_keys(payload, "error", "message")
+                        self._assert_keys(payload, "error")
+                        self._assert_error_message(payload)
                         if probe.path.startswith("/api/workbench/"):
                             self.assertEqual(payload.get("read_model_status"), "unavailable")
                         continue

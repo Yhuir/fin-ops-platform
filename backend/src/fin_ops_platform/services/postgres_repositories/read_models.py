@@ -86,6 +86,7 @@ def _should_execute_many_values(sql: str) -> bool:
         or "insert into read_model.workbench_group_rows" in normalized
         or "insert into read_model.search_index_rows" in normalized
         or "insert into read_model.turnover_ledger_rows" in normalized
+        or "insert into read_model.bank_account_balances" in normalized
     )
 
 
@@ -1699,69 +1700,73 @@ class PostgresBankReadModelRepository:
 
         def write(connection: Any) -> None:
             connection.execute("delete from read_model.bank_account_balances where tenant_id = %s", (tenant_id,))
-            for row in list(rows or []):
-                connection.execute(
-                    """
-                    insert into read_model.bank_account_balances(
-                        tenant_id, account_identity, account_key, bank_name, account_last4,
-                        account_no, account_name, identity_confidence, latest_balance,
-                        latest_balance_at, latest_balance_transaction_id, latest_trade_time_sort,
-                        latest_bank_serial_no, source_batch_id, legacy_source_batch_id, currency,
-                        transaction_total_count, schema_version, source_versions, generated_at, raw_payload
-                    )
-                    values (
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s,
-                        %s::timestamptz, %s, %s::timestamptz,
-                        %s, %s, %s, %s,
-                        %s, %s, %s, coalesce(%s::timestamptz, now()), %s
-                    )
-                    on conflict (tenant_id, account_identity) do update set
-                        account_key = excluded.account_key,
-                        bank_name = excluded.bank_name,
-                        account_last4 = excluded.account_last4,
-                        account_no = excluded.account_no,
-                        account_name = excluded.account_name,
-                        identity_confidence = excluded.identity_confidence,
-                        latest_balance = excluded.latest_balance,
-                        latest_balance_at = excluded.latest_balance_at,
-                        latest_balance_transaction_id = excluded.latest_balance_transaction_id,
-                        latest_trade_time_sort = excluded.latest_trade_time_sort,
-                        latest_bank_serial_no = excluded.latest_bank_serial_no,
-                        source_batch_id = excluded.source_batch_id,
-                        legacy_source_batch_id = excluded.legacy_source_batch_id,
-                        currency = excluded.currency,
-                        transaction_total_count = excluded.transaction_total_count,
-                        schema_version = excluded.schema_version,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        tenant_id,
-                        text(row.get("account_identity")),
-                        text(row.get("account_key") or row.get("account_identity")),
-                        text(row.get("bank_name")) or "未知银行",
-                        text(row.get("account_last4")) or "unknown",
-                        text(row.get("account_no")),
-                        text(row.get("account_name")),
-                        text(row.get("identity_confidence")) or "fallback",
-                        decimal_text(row.get("latest_balance")),
-                        text(row.get("latest_balance_at")),
-                        text(row.get("latest_balance_transaction_id")),
-                        text(row.get("latest_trade_time_sort")),
-                        text(row.get("latest_bank_serial_no")),
-                        text(row.get("source_batch_id")),
-                        text(row.get("legacy_source_batch_id")),
-                        text(row.get("currency")) or "CNY",
-                        int_value(row.get("transaction_total_count"), 0),
-                        BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
-                        jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
-                        text(row.get("generated_at")),
-                        jsonb(row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}),
-                    ),
+            params_seq = [
+                (
+                    tenant_id,
+                    text(row.get("account_identity")),
+                    text(row.get("account_key") or row.get("account_identity")),
+                    text(row.get("bank_name")) or "未知银行",
+                    text(row.get("account_last4")) or "unknown",
+                    text(row.get("account_no")),
+                    text(row.get("account_name")),
+                    text(row.get("identity_confidence")) or "fallback",
+                    decimal_text(row.get("latest_balance")),
+                    text(row.get("latest_balance_at")),
+                    text(row.get("latest_balance_transaction_id")),
+                    text(row.get("latest_trade_time_sort")),
+                    text(row.get("latest_bank_serial_no")),
+                    text(row.get("source_batch_id")),
+                    text(row.get("legacy_source_batch_id")),
+                    text(row.get("currency")) or "CNY",
+                    int_value(row.get("transaction_total_count"), 0),
+                    BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION,
+                    jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
+                    text(row.get("generated_at")),
+                    jsonb(row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}),
                 )
+                for row in list(rows or [])
+            ]
+            _execute_many(
+                connection,
+                """
+                insert into read_model.bank_account_balances(
+                    tenant_id, account_identity, account_key, bank_name, account_last4,
+                    account_no, account_name, identity_confidence, latest_balance,
+                    latest_balance_at, latest_balance_transaction_id, latest_trade_time_sort,
+                    latest_bank_serial_no, source_batch_id, legacy_source_batch_id, currency,
+                    transaction_total_count, schema_version, source_versions, generated_at, raw_payload
+                )
+                values (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s::timestamptz, %s, %s::timestamptz,
+                    %s, %s, %s, %s,
+                    %s, %s, %s, coalesce(%s::timestamptz, now()), %s
+                )
+                on conflict (tenant_id, account_identity) do update set
+                    account_key = excluded.account_key,
+                    bank_name = excluded.bank_name,
+                    account_last4 = excluded.account_last4,
+                    account_no = excluded.account_no,
+                    account_name = excluded.account_name,
+                    identity_confidence = excluded.identity_confidence,
+                    latest_balance = excluded.latest_balance,
+                    latest_balance_at = excluded.latest_balance_at,
+                    latest_balance_transaction_id = excluded.latest_balance_transaction_id,
+                    latest_trade_time_sort = excluded.latest_trade_time_sort,
+                    latest_bank_serial_no = excluded.latest_bank_serial_no,
+                    source_batch_id = excluded.source_batch_id,
+                    legacy_source_batch_id = excluded.legacy_source_batch_id,
+                    currency = excluded.currency,
+                    transaction_total_count = excluded.transaction_total_count,
+                    schema_version = excluded.schema_version,
+                    source_versions = excluded.source_versions,
+                    generated_at = excluded.generated_at,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                params_seq,
+            )
             self._upsert_bank_detail_scope(
                 connection,
                 tenant_id=tenant_id,
@@ -4046,17 +4051,20 @@ class PostgresSummaryReadModelRepository:
         if relation_mode_filter_enabled and (value := text(resolved_filters.get("relation_mode"))):
             where.append("coalesce(nullif(payload->>'relation_mode', ''), 'no_oa_bank_batch') = %s")
             params.append(value)
-        rows = self._connection.fetch_all(
+        row = self._connection.fetch_one(
             f"""
-            select source_versions
+            select
+              count(*)::bigint as row_count,
+              count(distinct source_versions)::bigint as distinct_source_versions_count,
+              (array_agg(source_versions order by scope_month desc nulls last, batch_id))[1] as source_versions
             from {table_name}
             where {" and ".join(where)}
-            order by scope_month desc nulls last, batch_id
             """,
             tuple(params),
-        )
+        ) or {}
         normalized_month = text(resolved_filters.get("month"))
-        if not rows:
+        row_count = int_value(row.get("row_count"), 0)
+        if row_count <= 0:
             if not self._bank_batch_readiness_is_fresh(readiness_scope_type, normalized_month):
                 return None
             return {
@@ -4064,18 +4072,13 @@ class PostgresSummaryReadModelRepository:
                 "row_count": 0,
                 "source_versions": {},
             }
-        source_versions_values = [
-            row.get("source_versions")
-            for row in list(rows)
-            if isinstance(row, dict) and isinstance(row.get("source_versions"), dict)
-        ]
-        source_versions = dict(source_versions_values[0]) if source_versions_values else {}
-        consistent = bool(source_versions_values) and all(dict(value) == source_versions for value in source_versions_values)
+        source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+        consistent = int_value(row.get("distinct_source_versions_count"), 0) == 1 and bool(source_versions)
         return {
             "read_model_status": "fresh"
             if self._bank_batch_readiness_is_fresh(readiness_scope_type, normalized_month)
             else "refreshing",
-            "row_count": len(rows),
+            "row_count": row_count,
             "source_versions": source_versions if consistent else {},
         }
 

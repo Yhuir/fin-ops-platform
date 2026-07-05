@@ -13696,6 +13696,15 @@ class Application:
         for row_id in row_ids:
             if row_id not in resolved:
                 missing.append(row_id)
+        if missing and set(self._row_types_for_row_ids(missing)) == {"bank"}:
+            try:
+                for row in self._resolve_live_rows_direct(missing, month_hint=month):
+                    resolved_row_id = str(row.get("id") or "").strip()
+                    if resolved_row_id:
+                        resolved[resolved_row_id] = self._serialize_value(row)
+            except KeyError:
+                pass
+            missing = [row_id for row_id in row_ids if row_id not in resolved]
         for row_id in missing:
             # Row detail owns the live/cache/SQL-facade fallback. Do not synthesize
             # placeholder rows here; previews must fail instead of rendering "--".

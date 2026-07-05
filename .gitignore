@@ -16,6 +16,8 @@ rust/**/target/
 *.tsbuildinfo
 /package-lock.json
 node_modules/
+/web/test-results/
+/web/playwright-report/
 fixtures/**/*.xls
 fixtures/**/*.xlsx
 fixtures/**/*.zip

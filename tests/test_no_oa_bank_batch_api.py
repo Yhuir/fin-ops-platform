@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 import tempfile
 import time
 import unittest
@@ -120,6 +121,13 @@ def bank_transaction(
 
 
 class NoOaBankBatchApiTests(unittest.TestCase):
+    def _install_runtime_read_model_repository(self, app) -> None:
+        batch_service = app._no_oa_bank_batch_service
+        app._no_oa_bank_batch_sql_read_repository = SimpleNamespace(
+            list_no_oa_bank_batch_rows=lambda filters: batch_service.list_batches(filters),
+            list_bank_flow_rule_batch_rows=lambda filters: batch_service.list_batches(filters),
+        )
+
     def _app_with_transactions(
         self,
         transactions: list[BankTransaction],
@@ -147,6 +155,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             },
             actor_id="tester",
         )
+        self._install_runtime_read_model_repository(app)
         return app
 
     def _replace_transaction_text(self, app, transaction_id: str, text: str) -> None:
@@ -157,6 +166,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
 
     def _list_batches(self, app, query: str = ""):
         app._no_oa_bank_batch_application_service().refresh_batches()
+        self._install_runtime_read_model_repository(app)
         response = app.handle_request("GET", f"/api/no-oa-bank-batches{query}")
         self.assertEqual(response.status_code, 200, response.body)
         return json.loads(response.body)
@@ -165,6 +175,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         app._no_oa_bank_batch_application_service().refresh_batches(
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
+        self._install_runtime_read_model_repository(app)
         response = app.handle_request("GET", f"/api/bank-flow-rule-batches{query}")
         self.assertEqual(response.status_code, 200, response.body)
         return json.loads(response.body)
@@ -523,7 +534,13 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["pair_relation"]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
         self.assertEqual(
             payload["operation_barrier_targets"],
-            [{"read_model_key": BANK_FLOW_RULE_BATCH_RELATION_MODE, "scope_key": "2026-03"}],
+            [
+                {"read_model_key": BANK_FLOW_RULE_BATCH_RELATION_MODE, "scope_key": "2026-03"},
+                {"read_model_key": "workbench_relation", "scope_key": "all"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
+                {"read_model_key": "workbench", "scope_key": "all"},
+                {"read_model_key": "workbench", "scope_key": "2026-03"},
+            ],
         )
         self.assertEqual([item["batch_id"] for item in submitted_payload["batches"]], [payload["batch"]["batch_id"]])
         self.assertEqual(submitted_payload["batches"][0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)

@@ -1,8 +1,41 @@
-import { expect, test, type Page } from "./fixtures/strictTest";
+import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
 import { gotoAndExpectPageReady, startPageDiagnostics } from "./fixtures/pageReady";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
+
+function createPendingInvoicesLatencyRecorder(page: Page, testInfo: TestInfo) {
+  return createOperationLatencyRecorder(page, testInfo, {
+    route: "/pending-invoices",
+    pageKey: "pending-invoices",
+    module: "pending-invoices",
+  });
+}
+
+function waitForInvoiceCandidatesBatch(page: Page) {
+  return page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "POST"
+      && url.pathname.endsWith("/api/pending-invoices/invoice-candidates/batch");
+  });
+}
+
+function waitForAttachExistingPreview(page: Page) {
+  return page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "POST"
+      && url.pathname.endsWith("/api/pending-invoices/attach-existing-invoices/preview");
+  });
+}
+
+function waitForAttachExistingConfirm(page: Page) {
+  return page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "POST"
+      && url.pathname === "/api/pending-invoices/attach-existing-invoices";
+  });
+}
 
 function startStrictBrowserErrorCapture(
   page: Page,
@@ -45,24 +78,54 @@ function startStrictBrowserErrorCapture(
 }
 
 test.describe("pending invoices attach existing invoice browser flow", () => {
-  test("previews and confirms selected expense rows with existing input invoices then refreshes rows", async ({ page }) => {
+  test("previews and confirms selected expense rows with existing input invoices then refreshes rows", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceAttachExistingBatchRows: true,
       sessionMode: "full_access",
     });
+    const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
-    await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
+    await recordLatency({
+      operationId: "pending-invoices.open-page-attach-existing",
+      visibleLabel: "待找发票",
+      actionType: "navigate",
+    }, async (mark) => {
+      await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
+      await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ }).first()).toBeVisible());
+    });
     const rowsBeforeConfirm = api.count("GET /api/pending-invoices/rows");
 
-    await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
-    await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).check();
+    await recordLatency({
+      operationId: "pending-invoices.select-attach-row-primary",
+      visibleLabel: "选择流水 智能工厂设备商",
+      actionType: "check",
+    }, async (mark) => {
+      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
+      await mark("finalSettledLatencyMs", expect(page.getByText("已选 1 条流水")).toBeVisible());
+    });
+    await recordLatency({
+      operationId: "pending-invoices.select-attach-row-secondary",
+      visibleLabel: "选择流水 智能工厂设备商二号",
+      actionType: "check",
+    }, async (mark) => {
+      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).check();
+      await mark("finalSettledLatencyMs", expect(page.getByText("已选 2 条流水")).toBeVisible());
+    });
     await expect(page.getByText("已选 2 条流水")).toBeVisible();
     await expect(page.getByText("流水合计 65,540.00")).toBeVisible();
 
-    await page.getByRole("button", { name: "选择发票" }).click();
     const picker = page.getByRole("dialog", { name: "选择已有进项发票" });
+    await recordLatency({
+      operationId: "pending-invoices.open-attach-existing-picker",
+      visibleLabel: "选择发票",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "选择发票" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(picker).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(picker.getByRole("table", { name: "发票候选" })).toBeVisible());
+    });
     await expect(picker).toBeVisible();
     await expect(picker.getByRole("table", { name: "发票候选" })).toBeVisible();
     await expect(picker.getByRole("columnheader", { name: "流水关联" })).toBeVisible();
@@ -70,30 +133,60 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     await expect(picker.getByText("已关联流水", { exact: true })).toBeVisible();
     await expect(picker.getByText("1 条已关联流水")).toBeVisible();
 
-    const candidateSearchRequest = page.waitForRequest((request) => {
-      const url = new URL(request.url());
-      if (request.method() !== "POST" || !url.pathname.endsWith("/api/pending-invoices/invoice-candidates/batch")) {
-        return false;
-      }
-      const body = JSON.parse(request.postData() || "{}") as { seller_name?: string };
-      return body.seller_name === "智能工厂";
+    await recordLatency({
+      operationId: "pending-invoices.fill-attach-candidate-seller",
+      visibleLabel: "销方",
+      actionType: "fill",
+    }, async (mark) => {
+      await picker.getByLabel("销方").fill("智能工厂");
+      await mark("finalSettledLatencyMs", expect(picker.getByLabel("销方")).toHaveValue("智能工厂"));
     });
-    await picker.getByLabel("销方").fill("智能工厂");
-    await picker.getByRole("button", { name: "搜索" }).click();
-    await candidateSearchRequest;
+    await recordLatency({
+      operationId: "pending-invoices.search-attach-candidates",
+      visibleLabel: "搜索",
+      actionType: "click",
+    }, async (mark) => {
+      const candidateSearchResponse = waitForInvoiceCandidatesBatch(page);
+      await picker.getByRole("button", { name: "搜索" }).click();
+      expect((await mark("apiLatencyMs", candidateSearchResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(picker.getByText("未关联流水")).toBeVisible());
+    });
     expect(api.lastBody("POST /api/pending-invoices/invoice-candidates/batch")).toMatchObject({
       page_size: 20,
       seller_name: "智能工厂",
       transaction_ids: ["bk-o-202603-001", "bk-o-202603-002"],
     });
 
-    await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-001" }).check();
-    await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-002" }).check();
+    await recordLatency({
+      operationId: "pending-invoices.select-attach-invoice-primary",
+      visibleLabel: "选择发票 DIG-EQP-001",
+      actionType: "check",
+    }, async (mark) => {
+      await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-001" }).check();
+      await mark("finalSettledLatencyMs", expect(picker.getByText("已选发票金额")).toBeVisible());
+    });
+    await recordLatency({
+      operationId: "pending-invoices.select-attach-invoice-secondary",
+      visibleLabel: "选择发票 DIG-EQP-002",
+      actionType: "check",
+    }, async (mark) => {
+      await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-002" }).check();
+      await mark("finalSettledLatencyMs", expect(picker.getByText("本次选择差额")).toBeVisible());
+    });
     await expect(picker.getByText("已选发票金额")).toBeVisible();
     await expect(picker.getByText("本次选择差额")).toBeVisible();
     await expect(picker.getByText("0.00", { exact: true })).toBeVisible();
 
-    await picker.getByRole("button", { name: "预览关联" }).click();
+    await recordLatency({
+      operationId: "pending-invoices.preview-attach-existing",
+      visibleLabel: "预览关联",
+      actionType: "click",
+    }, async (mark) => {
+      const previewResponse = waitForAttachExistingPreview(page);
+      await picker.getByRole("button", { name: "预览关联" }).click();
+      expect((await mark("apiLatencyMs", previewResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(picker.getByText("pending_invoice_attach_existing:batch")).toBeVisible());
+    });
     await expect(picker.getByText("pending_invoice_attach_existing:batch")).toBeVisible();
     await expect(picker.getByText("关联后待付 0.00")).toBeVisible();
     expect(api.lastBody("POST /api/pending-invoices/attach-existing-invoices/preview")).toMatchObject({
@@ -101,7 +194,17 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       transaction_ids: ["bk-o-202603-001", "bk-o-202603-002"],
     });
 
-    await picker.getByRole("button", { name: "确认建立关系" }).click();
+    await recordLatency({
+      operationId: "pending-invoices.confirm-attach-existing",
+      visibleLabel: "确认建立关系",
+      actionType: "click",
+    }, async (mark) => {
+      const confirmResponse = waitForAttachExistingConfirm(page);
+      await picker.getByRole("button", { name: "确认建立关系" }).click();
+      expect((await mark("apiLatencyMs", confirmResponse)).status()).toBe(200);
+      await mark("firstVisibleResponseLatencyMs", expect(picker).toBeHidden());
+      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeConfirm));
+    });
     await expect(picker).toBeHidden();
     expect(api.lastBody("POST /api/pending-invoices/attach-existing-invoices")).toMatchObject({
       invoice_ids: ["iv-o-202603-001", "iv-o-202603-002"],
@@ -123,7 +226,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     diagnostics.dispose();
   });
 
-  test("keeps attach-existing confirmation recoverable after a transient relation failure", async ({ page }) => {
+  test("keeps attach-existing confirmation recoverable after a transient relation failure", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
       allowedResponses: [/503 POST .*\/api\/pending-invoices\/attach-existing-invoices$/],
@@ -134,28 +237,70 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       pendingInvoiceAttachExistingConfirmFailuresBeforeSuccess: 1,
       sessionMode: "full_access",
     });
+    const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
-    await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
+    await recordLatency({
+      operationId: "pending-invoices.open-page-attach-existing-failure",
+      visibleLabel: "待找发票",
+      actionType: "navigate",
+    }, async (mark) => {
+      await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
+      await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ }).first()).toBeVisible());
+    });
     const rowsBeforeConfirm = api.count("GET /api/pending-invoices/rows");
 
-    await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
-    await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).check();
-    await page.getByRole("button", { name: "选择发票" }).click();
+    await recordLatency({
+      operationId: "pending-invoices.select-attach-rows-before-failure",
+      visibleLabel: "选择流水",
+      actionType: "check",
+    }, async (mark) => {
+      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
+      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).check();
+      await mark("finalSettledLatencyMs", expect(page.getByText("已选 2 条流水")).toBeVisible());
+    });
     const picker = page.getByRole("dialog", { name: "选择已有进项发票" });
+    await recordLatency({
+      operationId: "pending-invoices.open-attach-picker-before-failure",
+      visibleLabel: "选择发票",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "选择发票" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(picker).toBeVisible());
+    });
     await expect(picker).toBeVisible();
-    await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-001" }).check();
-    await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-002" }).check();
-    await picker.getByRole("button", { name: "预览关联" }).click();
+    await recordLatency({
+      operationId: "pending-invoices.select-attach-invoices-before-failure",
+      visibleLabel: "选择发票",
+      actionType: "check",
+    }, async (mark) => {
+      await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-001" }).check();
+      await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-002" }).check();
+      await mark("finalSettledLatencyMs", expect(picker.getByText("本次选择差额")).toBeVisible());
+    });
+    await recordLatency({
+      operationId: "pending-invoices.preview-attach-before-failure",
+      visibleLabel: "预览关联",
+      actionType: "click",
+    }, async (mark) => {
+      const previewResponse = waitForAttachExistingPreview(page);
+      await picker.getByRole("button", { name: "预览关联" }).click();
+      expect((await mark("apiLatencyMs", previewResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(picker.getByText("pending_invoice_attach_existing:batch")).toBeVisible());
+    });
     await expect(picker.getByText("pending_invoice_attach_existing:batch")).toBeVisible();
     await expect(picker.getByText("关联后待付 0.00")).toBeVisible();
 
-    const failedConfirm = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST"
-        && url.pathname === "/api/pending-invoices/attach-existing-invoices";
+    await recordLatency({
+      operationId: "pending-invoices.confirm-attach-existing-failed",
+      visibleLabel: "确认建立关系",
+      actionType: "click",
+    }, async (mark) => {
+      const failedConfirm = waitForAttachExistingConfirm(page);
+      await picker.getByRole("button", { name: "确认建立关系" }).click();
+      expect((await mark("apiLatencyMs", failedConfirm)).status()).toBe(503);
+      await mark("firstVisibleResponseLatencyMs", expect(picker.getByText("选择已有发票关系确认暂时失败，请重试。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(picker.getByRole("button", { name: "确认建立关系" })).toBeEnabled());
     });
-    await picker.getByRole("button", { name: "确认建立关系" }).click();
-    expect((await failedConfirm).status()).toBe(503);
     expect(api.count("POST /api/pending-invoices/attach-existing-invoices")).toBe(1);
     expect(api.lastBody("POST /api/pending-invoices/attach-existing-invoices")).toMatchObject({
       invoice_ids: ["iv-o-202603-001", "iv-o-202603-002"],
@@ -170,13 +315,17 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     await expect(page.getByRole("row", { name: /智能工厂设备商二号/ }).getByText("已支付待开票")).toBeVisible();
     await expect(page.getByText("12561048")).toHaveCount(0);
 
-    const recoveredConfirm = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST"
-        && url.pathname === "/api/pending-invoices/attach-existing-invoices";
+    await recordLatency({
+      operationId: "pending-invoices.confirm-attach-existing-retry",
+      visibleLabel: "确认建立关系",
+      actionType: "click",
+    }, async (mark) => {
+      const recoveredConfirm = waitForAttachExistingConfirm(page);
+      await picker.getByRole("button", { name: "确认建立关系" }).click();
+      expect((await mark("apiLatencyMs", recoveredConfirm)).status()).toBe(200);
+      await mark("firstVisibleResponseLatencyMs", expect(picker).toBeHidden());
+      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeConfirm));
     });
-    await picker.getByRole("button", { name: "确认建立关系" }).click();
-    expect((await recoveredConfirm).status()).toBe(200);
     expect(api.count("POST /api/pending-invoices/attach-existing-invoices")).toBe(2);
 
     await expect(picker).toBeHidden();
@@ -194,23 +343,61 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     diagnostics.dispose();
   });
 
-  test("shows preview conflicts and blocks confirm without a half-written relation", async ({ page }) => {
+  test("shows preview conflicts and blocks confirm without a half-written relation", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceAttachExistingPreviewConflict: true,
       sessionMode: "full_access",
     });
+    const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
-    await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
+    await recordLatency({
+      operationId: "pending-invoices.open-page-attach-conflict",
+      visibleLabel: "待找发票",
+      actionType: "navigate",
+    }, async (mark) => {
+      await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
+      await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ }).first()).toBeVisible());
+    });
     const rowsBeforePreview = api.count("GET /api/pending-invoices/rows");
 
-    await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
-    await page.getByRole("button", { name: "选择发票" }).click();
+    await recordLatency({
+      operationId: "pending-invoices.select-attach-row-before-conflict",
+      visibleLabel: "选择流水 智能工厂设备商",
+      actionType: "check",
+    }, async (mark) => {
+      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
+      await mark("finalSettledLatencyMs", expect(page.getByText("已选 1 条流水")).toBeVisible());
+    });
     const picker = page.getByRole("dialog", { name: "选择已有进项发票" });
+    await recordLatency({
+      operationId: "pending-invoices.open-attach-picker-before-conflict",
+      visibleLabel: "选择发票",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "选择发票" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(picker).toBeVisible());
+    });
     await expect(picker).toBeVisible();
-    await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-001" }).check();
-    await picker.getByRole("button", { name: "预览关联" }).click();
+    await recordLatency({
+      operationId: "pending-invoices.select-attach-invoice-before-conflict",
+      visibleLabel: "选择发票 DIG-EQP-001",
+      actionType: "check",
+    }, async (mark) => {
+      await picker.getByRole("checkbox", { name: "选择发票 DIG-EQP-001" }).check();
+      await mark("finalSettledLatencyMs", expect(picker.getByText("本次选择差额")).toBeVisible());
+    });
+    await recordLatency({
+      operationId: "pending-invoices.preview-attach-conflict",
+      visibleLabel: "预览关联",
+      actionType: "click",
+    }, async (mark) => {
+      const previewResponse = waitForAttachExistingPreview(page);
+      await picker.getByRole("button", { name: "预览关联" }).click();
+      expect((await mark("apiLatencyMs", previewResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(picker.getByText("不可确认原因")).toBeVisible());
+    });
 
     await expect(picker.getByText("不可确认原因")).toBeVisible();
     await expect(picker.getByText("关系 CASE-CONFLICT-202603，模式 manual_confirmed，对象 bk-o-202603-001, iv-o-202603-001")).toBeVisible();

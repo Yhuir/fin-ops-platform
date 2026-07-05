@@ -42,7 +42,7 @@
 
 - `/api/app-health`：面向页面和 App Status provider 的运行健康 snapshot，包含 workbench/read model、background jobs、dependencies、alerts、`app_status`。
 - `/api/app-health/stream`：SSE snapshot/heartbeat，只负责通知 UI 更新状态，不替代 durable facts。
-- `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、导入历史、请求性能、runtime outbox/RabbitMQ/read model/worker 指标。
+- `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、导入历史、请求性能、runtime outbox/read model/worker 指标。RabbitMQ 管理接口是可选 transport 观测，不是 read model freshness 事实源；dashboard 默认不阻塞等待 RabbitMQ management API，需显式设置 `FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS=1` 才读取实时队列管理指标。
 - `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
@@ -70,7 +70,7 @@
 | dirty scope/outbox backlog | domain busy/yellow；只统计当前有效记录，已被后续 `done` 或 `fresh` readiness 覆盖的旧 pending/failed 不再进入 backlog/同步中 | 用户看到真实后台刷新，而不是被历史队列噪声误导 |
 | runtime summary counts | `/api/app-health.app_status.runtime_summary` 聚合 read model、worker、queue 状态 | 左上角 popover 和 `/operations/app-health` 必须能直接看出 fresh/refreshing/failed、active/working/stale/missing、pending/processing/failed/backlog |
 | background job queued/running/attention | overall/domain busy 或 attention | 导入、数据重置、ETC、worker rebuild 状态可见 |
-| dependency unavailable | blocked/red 或 degraded | OA/session/PostgreSQL/RabbitMQ/Redis 等依赖异常可见 |
+| dependency unavailable | blocked/red 或 degraded | OA/session/PostgreSQL/RabbitMQ/Redis 等依赖异常可见；operations dashboard 默认只把 RabbitMQ queue metrics 标记 unknown，不让可选管理接口拖慢写后健康探针 |
 | dashboard metrics refresh 失败 | dashboard 保留上一份 payload 并显示 stale warning | 运维读侧不中断，但不能作为 fresh 事实 |
 
 ## 维护触发器

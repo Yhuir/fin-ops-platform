@@ -1,6 +1,7 @@
-import { expect, test, type Page } from "./fixtures/strictTest";
+import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { createOperationLatencyRecorder, type OperationLatencyRecorder } from "./fixtures/operationLatency";
 import { gotoAndExpectPageReady } from "./fixtures/pageReady";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
@@ -9,11 +10,41 @@ const REAPPLY_RULES_PATH = "POST /api/bank-details/auto-tag-rules/reapply";
 const OPERATION_BARRIER_PATH = "POST /api/operation-barrier/status";
 const TRANSACTIONS_PATH = "GET /api/bank-details/transactions";
 
-async function openAutoTagRulesDrawer(page: Page) {
-  await page.getByRole("button", { name: /自动标签规则/ }).click();
+function createBankDetailsLatencyRecorder(page: Page, testInfo: TestInfo) {
+  return createOperationLatencyRecorder(page, testInfo, {
+    route: "/bank-details",
+    pageKey: "bank-details",
+    module: "bank-details",
+  });
+}
+
+function responseFor(method: "POST" | "PUT", pathname: string) {
+  return (response: { url(): string; request(): { method(): string } }) => {
+    const url = new URL(response.url());
+    return response.request().method() === method && url.pathname === pathname;
+  };
+}
+
+async function openAutoTagRulesDrawer(page: Page, recordLatency?: OperationLatencyRecorder) {
   const drawer = page.getByRole("dialog", { name: "自动标签规则" });
-  await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole("table", { name: "自动标签规则表格" })).toBeVisible();
+  const open = async () => {
+    await page.getByRole("button", { name: /自动标签规则/ }).click();
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole("table", { name: "自动标签规则表格" })).toBeVisible();
+  };
+  if (recordLatency) {
+    await recordLatency({
+      operationId: "bank-details.open-auto-tag-rules-drawer",
+      visibleLabel: "自动标签规则",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: /自动标签规则/ }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(drawer.getByRole("table", { name: "自动标签规则表格" })).toBeVisible());
+    });
+  } else {
+    await open();
+  }
   return drawer;
 }
 
@@ -22,17 +53,39 @@ function barrierTargets(body: Record<string, unknown>) {
 }
 
 test.describe("bank details auto tag rules browser flow", () => {
-  test("saves edited automatic tag rules with the visible date scope and waits for fresh bank detail rows", async ({ page }) => {
+  test("saves edited automatic tag rules with the visible date scope and waits for fresh bank detail rows", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
     await gotoAndExpectPageReady(page, "/bank-details", "bank-details-page");
     const initialTransactionRequests = api.count(TRANSACTIONS_PATH);
 
-    const drawer = await openAutoTagRulesDrawer(page);
-    await drawer.getByRole("textbox", { name: "费用 / 工资 子标签" }).fill("规则刷新测试");
+    const drawer = await openAutoTagRulesDrawer(page, recordLatency);
+    await recordLatency({
+      operationId: "bank-details.fill-auto-tag-salary-sub-label",
+      visibleLabel: "费用 / 工资 子标签",
+      actionType: "fill",
+    }, async (mark) => {
+      const input = drawer.getByRole("textbox", { name: "费用 / 工资 子标签" });
+      await input.fill("规则刷新测试");
+      await mark("firstVisibleResponseLatencyMs", expect(drawer.getByRole("button", { name: "保存" })).toBeEnabled());
+      await mark("finalSettledLatencyMs", expect(drawer.getByRole("button", { name: "保存" })).toBeEnabled());
+    });
     await expect(drawer.getByRole("button", { name: "保存" })).toBeEnabled();
 
-    await drawer.getByRole("button", { name: "保存" }).click();
+    await recordLatency({
+      operationId: "bank-details.save-auto-tag-rules",
+      visibleLabel: "保存",
+      actionType: "click",
+    }, async (mark) => {
+      const saveResponse = page.waitForResponse(responseFor("PUT", "/api/bank-details/auto-tag-rules"));
+      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
+      await drawer.getByRole("button", { name: "保存" }).click();
+      await mark("apiLatencyMs", saveResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("规则已保存，银行明细已刷新。").first()).toBeVisible());
+      await mark("finalSettledLatencyMs", expect.poll(() => api.count(TRANSACTIONS_PATH)).toBeGreaterThan(initialTransactionRequests));
+    });
 
     await expect.poll(() => api.count(SAVE_RULES_PATH)).toBe(1);
     const saveBody = api.lastBody(SAVE_RULES_PATH);
@@ -68,17 +121,30 @@ test.describe("bank details auto tag rules browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
-  test("reapplies existing automatic tag rules without saving a draft and refreshes bank detail rows", async ({ page }) => {
+  test("reapplies existing automatic tag rules without saving a draft and refreshes bank detail rows", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
     await gotoAndExpectPageReady(page, "/bank-details", "bank-details-page");
     const initialTransactionRequests = api.count(TRANSACTIONS_PATH);
 
-    const drawer = await openAutoTagRulesDrawer(page);
+    const drawer = await openAutoTagRulesDrawer(page, recordLatency);
     await expect(drawer.getByRole("button", { name: "保存" })).toBeDisabled();
     await expect(drawer.getByRole("button", { name: "重新应用规则" })).toBeEnabled();
 
-    await drawer.getByRole("button", { name: "重新应用规则" }).click();
+    await recordLatency({
+      operationId: "bank-details.reapply-auto-tag-rules",
+      visibleLabel: "重新应用规则",
+      actionType: "click",
+    }, async (mark) => {
+      const reapplyResponse = page.waitForResponse(responseFor("POST", "/api/bank-details/auto-tag-rules/reapply"));
+      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
+      await drawer.getByRole("button", { name: "重新应用规则" }).click();
+      await mark("apiLatencyMs", reapplyResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("重新应用已完成，银行明细已刷新。").first()).toBeVisible());
+      await mark("finalSettledLatencyMs", expect.poll(() => api.count(TRANSACTIONS_PATH)).toBeGreaterThan(initialTransactionRequests));
+    });
 
     await expect.poll(() => api.count(REAPPLY_RULES_PATH)).toBe(1);
     expect(api.lastBody(REAPPLY_RULES_PATH)).toEqual({});
@@ -92,17 +158,30 @@ test.describe("bank details auto tag rules browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
-  test("keeps a successful save as a warning instead of a failure when the post-save sync is blocked", async ({ page }) => {
+  test("keeps a successful save as a warning instead of a failure when the post-save sync is blocked", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       operationBarrierMode: "blocked",
       sessionMode: "full_access",
     });
+    const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
     await gotoAndExpectPageReady(page, "/bank-details", "bank-details-page");
 
-    const drawer = await openAutoTagRulesDrawer(page);
+    const drawer = await openAutoTagRulesDrawer(page, recordLatency);
     await drawer.getByRole("textbox", { name: "费用 / 工资 子标签" }).fill("同步阻断测试");
-    await drawer.getByRole("button", { name: "保存" }).click();
+    await recordLatency({
+      operationId: "bank-details.save-auto-tag-rules-sync-blocked",
+      visibleLabel: "保存",
+      actionType: "click",
+    }, async (mark) => {
+      const saveResponse = page.waitForResponse(responseFor("PUT", "/api/bank-details/auto-tag-rules"));
+      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
+      await drawer.getByRole("button", { name: "保存" }).click();
+      await mark("apiLatencyMs", saveResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("规则已保存，后台同步尚未完成，请稍后刷新。").first()).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "操作失败" })).toHaveCount(0));
+    });
 
     await expect.poll(() => api.count(SAVE_RULES_PATH)).toBe(1);
     await expect.poll(() => api.count(OPERATION_BARRIER_PATH)).toBeGreaterThanOrEqual(1);

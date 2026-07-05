@@ -4,7 +4,7 @@
 - 类型: 页面模块
 - Route: `/bank-flow-rule-batches`
 - Page key: `bank-flow-rule-batches`
-- 状态: close。当前生产入口、API、全局 Bank Transaction Paired Policy 规则抽屉、提交、关联台判定、独立 application service、独立 read model key、独立 worker event、独立 persistence IO、独立 PostgreSQL 批次/read model 表、独立 tag-rule settings family、前端 feature I/O/view model/components 和 Browser E2E 已接入；本轮已收口 bank-flow HTTP 错误码、Workbench 折叠摘要 `source_kind`、display tags、关联台撤回文案和 read model display-only 判定，旧 no-OA 残留只保留在 `no-oa-bank-batches` legacy 边界内。
+- 状态: close。当前生产入口、API、全局 Bank Transaction Paired Policy 规则抽屉、提交、关联台判定、独立 application service、独立 read model key、独立 worker event、独立 persistence IO、独立 PostgreSQL 批次/read model 表、独立 tag-rule settings family、前端 feature I/O/view model/components 和 Browser E2E 已接入；本轮已收口 bank-flow HTTP 错误码、Workbench 折叠摘要 `source_kind`、display tags、关联台撤回文案和 read model display-only 判定，旧 no-OA 残留只作为 backend legacy API/read-model 兼容风险跟踪，不再作为页面模块登记。
 
 ## 修改前必读
 
@@ -15,7 +15,6 @@
 - `docs/modules/bank-details/boundary-io.md`
 - `docs/modules/workbench-relations/boundary-io.md`
 - `docs/modules/reconciliation-workbench/boundary-io.md`
-- `docs/modules/no-oa-bank-batches/boundary-io.md`
 - `docs/dev/api-contracts.md`
 
 ## 当前代码入口
@@ -48,7 +47,7 @@
 - 银行明细标签定义、自动匹配规则和分类确认归 `bank-details`。
 - Workbench relation canonical fact 归 `workbench-relations`。
 - 关联台 paired/open 展示归 `reconciliation-workbench` active generation；bank-flow 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，不得复用 `no_oa_bank_batch_summary` 或 `免OA` 标签。
-- 旧 no-OA 批次历史事实仍归 `no-oa-bank-batches` 管理；本模块不再提供旧 no-OA 历史重算页面入口或 API。
+- 旧 no-OA 批次历史事实仅作为 backend legacy API/read-model 兼容风险处理；本模块不再提供旧 no-OA 历史重算页面入口或 API。
 
 ## 维护触发器
 

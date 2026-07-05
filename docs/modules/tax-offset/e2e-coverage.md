@@ -15,6 +15,10 @@
 | `TAX-E2E-007` | `covered` | `tests/test_tax_offset_api.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/tax-offset-flow.spec.ts` | Browser 覆盖 read-export 用户可读但无保存/导入入口且零 tax write API、forbidden/expired session 在加载 `/api/tax-offset` 前被 gate、admin 可见保存/导入入口；API/Vitest 覆盖后端写权限拒绝合同。 |
 | `TAX-E2E-008` | `covered` | `web/e2e/tax-offset-flow.spec.ts`、`web/src/test/TaxOffsetPage.test.tsx` | Browser 覆盖 390px 窄屏下 81 张销项/92 张进项大表，保存/导入按钮未遮挡，搜索、时间排序、对方名称筛选、共享横向滚动和右侧金额列可见；真实生产超大数据性能仍归 staging/runtime smoke。 |
 
+## Operation latency baseline
+
+本轮已为 `web/e2e/tax-offset-flow.spec.ts` 接入 Playwright `operation-latency-*.json` 附件。当前记录的操作覆盖：read-export/admin/forbidden/expired/large-dataset/non-fresh/conflict/happy-path 页面打开、已认证发票导入弹窗打开、窄屏大表搜索打开/输入/清空/收起、时间排序、对方名称筛选打开/应用、non-fresh 202 和自动重试恢复、进项计划勾选试算、保存计划成功、保存计划 409 conflict、已认证导入文件选择、预览识别结果和确认导入后的税金页刷新屏障。
+
 ## 下一轮补测建议
 
 1. 保持真实 worker drain 为 staging/runtime smoke，不把 deterministic mock 标成真实基础设施 covered。

@@ -1,6 +1,7 @@
-import { expect, test, type Page } from "./fixtures/strictTest";
+import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 function startStrictBrowserErrorCapture(page: Page, options: { allowedConsoleErrors?: RegExp[] } = {}) {
@@ -63,6 +64,14 @@ function waitForEtcTicketRootUpload(page: Page) {
   });
 }
 
+function createEtcLatencyRecorder(page: Page, testInfo: TestInfo) {
+  return createOperationLatencyRecorder(page, testInfo, {
+    route: "/etc-tickets",
+    pageKey: "etc-tickets",
+    module: "etc-tickets",
+  });
+}
+
 async function openEtcDisclosure(page: Page, name: RegExp | string) {
   const trigger = page.getByRole("button", { name });
   await expect(trigger).toBeVisible();
@@ -73,7 +82,7 @@ async function openEtcDisclosure(page: Page, name: RegExp | string) {
 }
 
 test.describe("ETC ticket management browser flow", () => {
-  test("recovers business batches after a transient load failure when refreshed", async ({ page }) => {
+  test("recovers business batches after a transient load failure when refreshed", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
     });
@@ -81,19 +90,38 @@ test.describe("ETC ticket management browser flow", () => {
       etcTicketBusinessBatchesFailuresBeforeSuccess: 2,
       sessionMode: "full_access",
     });
+    const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
-    await page.goto("/etc-tickets");
-    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-page-load-failure",
+      visibleLabel: "ETC票据",
+      actionType: "navigate",
+    }, async (mark) => {
+      await page.goto("/etc-tickets");
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByText("ETC业务批次加载暂时失败，请刷新后重试。")).toBeVisible());
+    });
     await expect(page.getByRole("heading", { name: "ETC票据" })).toBeVisible();
     await expect(page.getByText("ETC业务批次加载暂时失败，请刷新后重试。")).toBeVisible();
     await expect(page.getByText("无匹配批次。")).toHaveCount(0);
 
     let recovered = false;
     for (let attempt = 0; attempt < 4 && !recovered; attempt += 1) {
-      const responsePromise = waitForEtcBusinessBatches(page);
-      await page.getByRole("button", { name: /^刷新$/ }).click();
-      const response = await responsePromise;
-      recovered = response.status() === 200;
+      await recordLatency({
+        operationId: `etc-tickets.refresh-after-load-failure.${attempt + 1}`,
+        visibleLabel: "刷新",
+        actionType: "click",
+      }, async (mark) => {
+        const responsePromise = waitForEtcBusinessBatches(page);
+        await page.getByRole("button", { name: /^刷新$/ }).click();
+        const response = await mark("apiLatencyMs", responsePromise);
+        recovered = response.status() === 200;
+        if (recovered) {
+          await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-batch-row-etc-business-e2e-001")).toBeVisible());
+        } else {
+          await mark("firstVisibleResponseLatencyMs", expect(page.getByText("ETC业务批次加载暂时失败，请刷新后重试。")).toBeVisible());
+        }
+      });
     }
     expect(recovered).toBe(true);
 
@@ -111,7 +139,7 @@ test.describe("ETC ticket management browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps a business batch deletion recoverable after a transient failure", async ({ page }) => {
+  test("keeps a business batch deletion recoverable after a transient failure", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
     });
@@ -119,31 +147,60 @@ test.describe("ETC ticket management browser flow", () => {
       etcTicketBusinessBatchDeleteFailuresBeforeSuccess: 1,
       sessionMode: "full_access",
     });
+    const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
-    await page.goto("/etc-tickets");
-    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-page-delete-unsubmitted",
+      visibleLabel: "ETC票据",
+      actionType: "navigate",
+    }, async (mark) => {
+      await page.goto("/etc-tickets");
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
+    });
     await expect(page.getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
     await expect(row).toContainText("3月批次");
 
-    await row.getByRole("button", { name: "删除批次 3月批次" }).click();
     const deleteDialog = page.getByRole("dialog", { name: "删除批次" });
-    await expect(deleteDialog).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-delete-unsubmitted-dialog",
+      visibleLabel: "删除批次 3月批次",
+      actionType: "click",
+    }, async (mark) => {
+      await row.getByRole("button", { name: "删除批次 3月批次" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(deleteDialog).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(deleteDialog).toContainText("3月批次"));
+    });
     await expect(deleteDialog).toContainText("3月批次");
 
-    const failedDeleteResponse = waitForEtcBusinessBatchDelete(page);
-    await deleteDialog.getByRole("button", { name: "确认删除" }).click();
-    expect((await failedDeleteResponse).status()).toBe(503);
+    await recordLatency({
+      operationId: "etc-tickets.confirm-delete-unsubmitted-failed",
+      visibleLabel: "确认删除",
+      actionType: "click",
+    }, async (mark) => {
+      const failedDeleteResponse = waitForEtcBusinessBatchDelete(page);
+      await deleteDialog.getByRole("button", { name: "确认删除" }).click();
+      expect((await mark("apiLatencyMs", failedDeleteResponse)).status()).toBe(503);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "删除批次" })).toBeVisible());
+    });
     expect(api.count("DELETE /api/etc/business-batches/etc-business-e2e-001")).toBe(1);
     await expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toBeVisible();
     await expect(page.getByRole("dialog", { name: "删除批次" })).toBeVisible();
     await expect(row).toBeVisible();
     await expect(page.getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
 
-    const recoveredDeleteResponse = waitForEtcBusinessBatchDelete(page);
-    await deleteDialog.getByRole("button", { name: "确认删除" }).click();
-    expect((await recoveredDeleteResponse).status()).toBe(200);
+    await recordLatency({
+      operationId: "etc-tickets.confirm-delete-unsubmitted-retry",
+      visibleLabel: "确认删除",
+      actionType: "click",
+    }, async (mark) => {
+      const recoveredDeleteResponse = waitForEtcBusinessBatchDelete(page);
+      await deleteDialog.getByRole("button", { name: "确认删除" }).click();
+      expect((await mark("apiLatencyMs", recoveredDeleteResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-batch-row-etc-business-e2e-001")).toHaveCount(0));
+    });
     expect(api.count("DELETE /api/etc/business-batches/etc-business-e2e-001")).toBe(2);
 
     await expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toHaveCount(0);
@@ -156,7 +213,7 @@ test.describe("ETC ticket management browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps submitted batch reset deletion recoverable after a relation command failure", async ({ page }) => {
+  test("keeps submitted batch reset deletion recoverable after a relation command failure", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
     });
@@ -165,11 +222,25 @@ test.describe("ETC ticket management browser flow", () => {
       etcTicketInitialBusinessBatchStatus: "manually_marked_submitted",
       sessionMode: "full_access",
     });
+    const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
-    await page.goto("/etc-tickets");
-    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-page-delete-submitted",
+      visibleLabel: "ETC票据",
+      actionType: "navigate",
+    }, async (mark) => {
+      await page.goto("/etc-tickets");
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
+    });
     await expect(page.getByRole("radio", { name: "未提交 0" })).toHaveAttribute("aria-checked", "true");
-    await page.getByRole("radio", { name: "已提交 1" }).click();
+    await recordLatency({
+      operationId: "etc-tickets.open-submitted-bucket",
+      visibleLabel: "已提交 1",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("radio", { name: "已提交 1" }).click();
+      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true"));
+    });
     await expect(page.getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true");
 
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
@@ -177,15 +248,30 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(row).toContainText("3月批次");
     await expect(row).toContainText("人工确认已提交");
 
-    await row.getByRole("button", { name: "删除批次 3月批次" }).click();
     const deleteDialog = page.getByRole("dialog", { name: "删除批次" });
-    await expect(deleteDialog).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-delete-submitted-dialog",
+      visibleLabel: "删除批次 3月批次",
+      actionType: "click",
+    }, async (mark) => {
+      await row.getByRole("button", { name: "删除批次 3月批次" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(deleteDialog).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(deleteDialog).toContainText("取消发票合并"));
+    });
     await expect(deleteDialog).toContainText("取消发票合并");
     await expect(deleteDialog).toContainText("审批系统中的草稿和已提交记录不会删除");
 
-    const failedDeleteResponse = waitForEtcBusinessBatchDelete(page);
-    await deleteDialog.getByRole("button", { name: "确认删除" }).click();
-    expect((await failedDeleteResponse).status()).toBe(503);
+    await recordLatency({
+      operationId: "etc-tickets.confirm-delete-submitted-failed",
+      visibleLabel: "确认删除",
+      actionType: "click",
+    }, async (mark) => {
+      const failedDeleteResponse = waitForEtcBusinessBatchDelete(page);
+      await deleteDialog.getByRole("button", { name: "确认删除" }).click();
+      expect((await mark("apiLatencyMs", failedDeleteResponse)).status()).toBe(503);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "删除批次" })).toBeVisible());
+    });
     expect(api.count("DELETE /api/etc/business-batches/etc-business-e2e-001")).toBe(1);
     expect(api.lastBody("DELETE /api/etc/business-batches/etc-business-e2e-001")).toMatchObject({
       expectedVersion: 9,
@@ -197,10 +283,17 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("radio", { name: "未提交 0" })).toBeVisible();
 
-    const recoveredDeleteResponse = waitForEtcBusinessBatchDelete(page);
     await expect(deleteDialog.getByRole("button", { name: "确认删除" })).toBeEnabled();
-    await deleteDialog.getByRole("button", { name: "确认删除" }).click();
-    expect((await recoveredDeleteResponse).status()).toBe(200);
+    await recordLatency({
+      operationId: "etc-tickets.confirm-delete-submitted-retry",
+      visibleLabel: "确认删除",
+      actionType: "click",
+    }, async (mark) => {
+      const recoveredDeleteResponse = waitForEtcBusinessBatchDelete(page);
+      await deleteDialog.getByRole("button", { name: "确认删除" }).click();
+      expect((await mark("apiLatencyMs", recoveredDeleteResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-batch-row-etc-business-e2e-001")).toHaveCount(0));
+    });
     expect(api.count("DELETE /api/etc/business-batches/etc-business-e2e-001")).toBe(2);
 
     await expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toHaveCount(0);
@@ -213,7 +306,7 @@ test.describe("ETC ticket management browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps source file deletion recoverable after a transient failure", async ({ page }) => {
+  test("keeps source file deletion recoverable after a transient failure", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
     });
@@ -223,31 +316,67 @@ test.describe("ETC ticket management browser flow", () => {
       etcTicketWorkflowTaskMatchesBusinessBatch: true,
       sessionMode: "full_access",
     });
+    const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
-    await page.goto("/etc-tickets");
-    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-page-source-file-delete",
+      visibleLabel: "ETC票据",
+      actionType: "navigate",
+    }, async (mark) => {
+      await page.goto("/etc-tickets");
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
+    });
     await expect(page.getByTestId("etc-batch-row-etc-business-e2e-001")).toBeVisible();
-    await openEtcDisclosure(page, /已上传文件/);
+    await recordLatency({
+      operationId: "etc-tickets.expand-source-files",
+      visibleLabel: "已上传文件",
+      actionType: "click",
+    }, async (mark) => {
+      await openEtcDisclosure(page, /已上传文件/);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("list", { name: "已上传文件列表" })).toBeVisible());
+    });
     const sourceFileList = page.getByRole("list", { name: "已上传文件列表" });
     await expect(sourceFileList).toBeVisible();
     await expect(sourceFileList.getByText("ccb-statement.pdf")).toBeVisible();
 
-    await page.getByRole("button", { name: "删除源文件 ccb-statement.pdf" }).click();
     const deleteDialog = page.getByRole("dialog", { name: "删除源文件" });
-    await expect(deleteDialog).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-source-file-delete-dialog",
+      visibleLabel: "删除源文件 ccb-statement.pdf",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "删除源文件 ccb-statement.pdf" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(deleteDialog).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(deleteDialog).toContainText("ccb-statement.pdf"));
+    });
     await expect(deleteDialog).toContainText("ccb-statement.pdf");
 
-    const failedDeleteResponse = waitForEtcSourceFileDelete(page);
-    await deleteDialog.getByRole("button", { name: "确认删除" }).click();
-    expect((await failedDeleteResponse).status()).toBe(503);
+    await recordLatency({
+      operationId: "etc-tickets.confirm-source-file-delete-failed",
+      visibleLabel: "确认删除",
+      actionType: "click",
+    }, async (mark) => {
+      const failedDeleteResponse = waitForEtcSourceFileDelete(page);
+      await deleteDialog.getByRole("button", { name: "确认删除" }).click();
+      expect((await mark("apiLatencyMs", failedDeleteResponse)).status()).toBe(503);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("ETC源文件删除暂时失败，请重试。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "删除源文件" })).toBeVisible());
+    });
     expect(api.count("DELETE /api/etc/reconciliation-tasks/etc-recon-e2e-001/source-files/etc-source-e2e-001")).toBe(1);
     await expect(page.getByText("ETC源文件删除暂时失败，请重试。")).toBeVisible();
     await expect(page.getByRole("dialog", { name: "删除源文件" })).toBeVisible();
     await expect(sourceFileList.getByText("ccb-statement.pdf")).toBeVisible();
 
-    const recoveredDeleteResponse = waitForEtcSourceFileDelete(page);
-    await deleteDialog.getByRole("button", { name: "确认删除" }).click();
-    expect((await recoveredDeleteResponse).status()).toBe(200);
+    await recordLatency({
+      operationId: "etc-tickets.confirm-source-file-delete-retry",
+      visibleLabel: "确认删除",
+      actionType: "click",
+    }, async (mark) => {
+      const recoveredDeleteResponse = waitForEtcSourceFileDelete(page);
+      await deleteDialog.getByRole("button", { name: "确认删除" }).click();
+      expect((await mark("apiLatencyMs", recoveredDeleteResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(sourceFileList.getByText("ccb-statement.pdf")).toHaveCount(0));
+    });
     expect(api.count("DELETE /api/etc/reconciliation-tasks/etc-recon-e2e-001/source-files/etc-source-e2e-001")).toBe(2);
 
     await expect(page.getByText("ETC源文件删除暂时失败，请重试。")).toHaveCount(0);
@@ -258,7 +387,7 @@ test.describe("ETC ticket management browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps ticket-root source upload recoverable after a transient failure", async ({ page }) => {
+  test("keeps ticket-root source upload recoverable after a transient failure", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
     });
@@ -268,12 +397,33 @@ test.describe("ETC ticket management browser flow", () => {
       etcTicketWorkflowTaskMatchesBusinessBatch: true,
       sessionMode: "full_access",
     });
+    const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
-    await page.goto("/etc-tickets");
-    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-page-ticket-root-upload",
+      visibleLabel: "ETC票据",
+      actionType: "navigate",
+    }, async (mark) => {
+      await page.goto("/etc-tickets");
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
+    });
     await expect(page.getByTestId("etc-batch-row-etc-business-e2e-001")).toBeVisible();
-    await openEtcDisclosure(page, /^上传文件\s/);
-    await openEtcDisclosure(page, /已上传文件/);
+    await recordLatency({
+      operationId: "etc-tickets.expand-upload-files",
+      visibleLabel: "上传文件",
+      actionType: "click",
+    }, async (mark) => {
+      await openEtcDisclosure(page, /^上传文件\s/);
+      await mark("finalSettledLatencyMs", expect(page.getByLabel("上传票根网")).toBeVisible());
+    });
+    await recordLatency({
+      operationId: "etc-tickets.expand-uploaded-files",
+      visibleLabel: "已上传文件",
+      actionType: "click",
+    }, async (mark) => {
+      await openEtcDisclosure(page, /已上传文件/);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("list", { name: "已上传文件列表" })).toBeVisible());
+    });
     const sourceFileList = page.getByRole("list", { name: "已上传文件列表" });
     await expect(sourceFileList.getByText("ccb-statement.pdf")).toBeVisible();
     await expect(sourceFileList.getByText("ticket-root-upload.txt")).toHaveCount(0);
@@ -281,26 +431,41 @@ test.describe("ETC ticket management browser flow", () => {
     const ticketRootInput = page.locator('label[aria-label="上传票根网"] input[type="file"]');
     await expect(page.getByLabel("上传票根网")).toBeVisible();
 
-    const failedUploadResponse = waitForEtcTicketRootUpload(page);
-    await ticketRootInput.setInputFiles({
-      name: "ticket-root-upload.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("车牌号：云ADA0381\n交易时间：2026-03-27 10:20:00\n交易金额：95.00"),
+    await recordLatency({
+      operationId: "etc-tickets.upload-ticket-root-failed",
+      visibleLabel: "上传票根网",
+      actionType: "upload",
+    }, async (mark) => {
+      const failedUploadResponse = waitForEtcTicketRootUpload(page);
+      await ticketRootInput.setInputFiles({
+        name: "ticket-root-upload.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("车牌号：云ADA0381\n交易时间：2026-03-27 10:20:00\n交易金额：95.00"),
+      });
+      expect((await mark("apiLatencyMs", failedUploadResponse)).status()).toBe(503);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("ETC票根网文件上传暂时失败，请重试。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(sourceFileList.getByText("ticket-root-upload.txt")).toHaveCount(0));
     });
-    expect((await failedUploadResponse).status()).toBe(503);
     expect(api.count("POST /api/etc/reconciliation-tasks/etc-recon-e2e-001/ticket-root-files")).toBe(1);
     await expect(page.getByText("ETC票根网文件上传暂时失败，请重试。")).toBeVisible();
     await expect(sourceFileList.getByText("ccb-statement.pdf")).toBeVisible();
     await expect(sourceFileList.getByText("ticket-root-upload.txt")).toHaveCount(0);
     await expect(page.getByLabel("上传票根网")).not.toHaveAttribute("aria-disabled", "true");
 
-    const recoveredUploadResponse = waitForEtcTicketRootUpload(page);
-    await ticketRootInput.setInputFiles({
-      name: "ticket-root-upload.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("车牌号：云ADA0381\n交易时间：2026-03-27 10:20:00\n交易金额：95.00"),
+    await recordLatency({
+      operationId: "etc-tickets.upload-ticket-root-retry",
+      visibleLabel: "上传票根网",
+      actionType: "upload",
+    }, async (mark) => {
+      const recoveredUploadResponse = waitForEtcTicketRootUpload(page);
+      await ticketRootInput.setInputFiles({
+        name: "ticket-root-upload.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("车牌号：云ADA0381\n交易时间：2026-03-27 10:20:00\n交易金额：95.00"),
+      });
+      expect((await mark("apiLatencyMs", recoveredUploadResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(sourceFileList.getByText("ticket-root-upload.txt")).toBeVisible());
     });
-    expect((await recoveredUploadResponse).status()).toBe(200);
     expect(api.count("POST /api/etc/reconciliation-tasks/etc-recon-e2e-001/ticket-root-files")).toBe(2);
 
     await expect(page.getByText("ETC票根网文件上传暂时失败，请重试。")).toHaveCount(0);
@@ -310,7 +475,7 @@ test.describe("ETC ticket management browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps the OA draft dialog recoverable after a transient draft creation failure", async ({ page }) => {
+  test("keeps the OA draft dialog recoverable after a transient draft creation failure", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
     });
@@ -318,36 +483,65 @@ test.describe("ETC ticket management browser flow", () => {
       etcTicketOaDraftFailuresBeforeSuccess: 1,
       sessionMode: "full_access",
     });
+    const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
-    await page.goto("/etc-tickets");
-    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-page-oa-draft-failure",
+      visibleLabel: "ETC票据",
+      actionType: "navigate",
+    }, async (mark) => {
+      await page.goto("/etc-tickets");
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
+    });
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
     await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
 
-    await page.getByRole("button", { name: "提交审批" }).click();
     const createDialog = page.getByRole("dialog", { name: "创建审批草稿" });
-    await expect(createDialog).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-oa-draft-dialog",
+      visibleLabel: "提交审批",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "提交审批" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(createDialog).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(createDialog.getByText("为当前批次创建审批草稿。")).toBeVisible());
+    });
     await expect(createDialog.getByText("为当前批次创建审批草稿。")).toBeVisible();
 
-    const failedDraftResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
-        && response.request().method() === "POST",
-    );
-    await createDialog.getByRole("button", { name: "创建草稿" }).click();
-    expect((await failedDraftResponse).status()).toBe(503);
+    await recordLatency({
+      operationId: "etc-tickets.create-oa-draft-failed",
+      visibleLabel: "创建草稿",
+      actionType: "click",
+    }, async (mark) => {
+      const failedDraftResponse = page.waitForResponse((response) =>
+        response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
+          && response.request().method() === "POST",
+      );
+      await createDialog.getByRole("button", { name: "创建草稿" }).click();
+      expect((await mark("apiLatencyMs", failedDraftResponse)).status()).toBe(503);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("审批草稿创建暂时失败，请重试。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "创建审批草稿" })).toBeVisible());
+    });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/oa-draft")).toBe(1);
     await expect(page.getByText("审批草稿创建暂时失败，请重试。")).toBeVisible();
     await expect(page.getByRole("dialog", { name: "创建审批草稿" })).toBeVisible();
     await expect(page.getByRole("dialog", { name: "审批提交确认" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
 
-    const recoveredDraftResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
-        && response.request().method() === "POST",
-    );
-    await createDialog.getByRole("button", { name: "创建草稿" }).click();
-    expect((await recoveredDraftResponse).status()).toBe(200);
+    await recordLatency({
+      operationId: "etc-tickets.create-oa-draft-retry",
+      visibleLabel: "创建草稿",
+      actionType: "click",
+    }, async (mark) => {
+      const recoveredDraftResponse = page.waitForResponse((response) =>
+        response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
+          && response.request().method() === "POST",
+      );
+      await createDialog.getByRole("button", { name: "创建草稿" }).click();
+      expect((await mark("apiLatencyMs", recoveredDraftResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible());
+    });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/oa-draft")).toBe(2);
 
     const resultDialog = page.getByRole("dialog", { name: "审批提交确认" });
@@ -358,7 +552,7 @@ test.describe("ETC ticket management browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps the manual OA status confirmation recoverable after a transient failure", async ({ page }) => {
+  test("keeps the manual OA status confirmation recoverable after a transient failure", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
     });
@@ -366,31 +560,59 @@ test.describe("ETC ticket management browser flow", () => {
       etcTicketManualStatusFailuresBeforeSuccess: 1,
       sessionMode: "full_access",
     });
+    const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
-    await page.goto("/etc-tickets");
-    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-page-manual-status-failure",
+      visibleLabel: "ETC票据",
+      actionType: "navigate",
+    }, async (mark) => {
+      await page.goto("/etc-tickets");
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
+    });
     await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
-    await page.getByRole("button", { name: "提交审批" }).click();
 
     const createDialog = page.getByRole("dialog", { name: "创建审批草稿" });
-    await expect(createDialog).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-oa-draft-dialog-before-manual-status",
+      visibleLabel: "提交审批",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "提交审批" }).click();
+      await mark("finalSettledLatencyMs", expect(createDialog).toBeVisible());
+    });
     const draftResponse = page.waitForResponse((response) =>
       response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
         && response.request().method() === "POST",
     );
-    await createDialog.getByRole("button", { name: "创建草稿" }).click();
-    expect((await draftResponse).status()).toBe(200);
+    await recordLatency({
+      operationId: "etc-tickets.create-oa-draft-before-manual-status",
+      visibleLabel: "创建草稿",
+      actionType: "click",
+    }, async (mark) => {
+      await createDialog.getByRole("button", { name: "创建草稿" }).click();
+      expect((await mark("apiLatencyMs", draftResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible());
+    });
 
     const resultDialog = page.getByRole("dialog", { name: "审批提交确认" });
     await expect(resultDialog).toBeVisible();
     await expect(resultDialog.getByText("审批草稿已创建，等待提交确认。")).toBeVisible();
 
-    const failedManualStatusResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/etc/business-batches/etc-business-e2e-001/manual-oa-status")
-        && response.request().method() === "POST",
-    );
-    await resultDialog.getByRole("button", { name: "已提交" }).click();
-    expect((await failedManualStatusResponse).status()).toBe(503);
+    await recordLatency({
+      operationId: "etc-tickets.manual-status-submitted-failed",
+      visibleLabel: "已提交",
+      actionType: "click",
+    }, async (mark) => {
+      const failedManualStatusResponse = page.waitForResponse((response) =>
+        response.url().includes("/api/etc/business-batches/etc-business-e2e-001/manual-oa-status")
+          && response.request().method() === "POST",
+      );
+      await resultDialog.getByRole("button", { name: "已提交" }).click();
+      expect((await mark("apiLatencyMs", failedManualStatusResponse)).status()).toBe(503);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("人工确认暂时失败，请重试。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible());
+    });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/manual-oa-status")).toBe(1);
     await expect(page.getByText("人工确认暂时失败，请重试。")).toBeVisible();
     await expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible();
@@ -399,12 +621,19 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
 
-    const recoveredManualStatusResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/etc/business-batches/etc-business-e2e-001/manual-oa-status")
-        && response.request().method() === "POST",
-    );
-    await resultDialog.getByRole("button", { name: "已提交" }).click();
-    expect((await recoveredManualStatusResponse).status()).toBe(200);
+    await recordLatency({
+      operationId: "etc-tickets.manual-status-submitted-retry",
+      visibleLabel: "已提交",
+      actionType: "click",
+    }, async (mark) => {
+      const recoveredManualStatusResponse = page.waitForResponse((response) =>
+        response.url().includes("/api/etc/business-batches/etc-business-e2e-001/manual-oa-status")
+          && response.request().method() === "POST",
+      );
+      await resultDialog.getByRole("button", { name: "已提交" }).click();
+      expect((await mark("apiLatencyMs", recoveredManualStatusResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true"));
+    });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/manual-oa-status")).toBe(2);
 
     await expect(page.getByText("人工确认暂时失败，请重试。")).toHaveCount(0);
@@ -416,12 +645,20 @@ test.describe("ETC ticket management browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("creates an OA draft for an imported ETC batch and moves it to submitted history", async ({ page }) => {
+  test("creates an OA draft for an imported ETC batch and moves it to submitted history", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
-    await page.goto("/etc-tickets");
-    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-page-oa-happy-path",
+      visibleLabel: "ETC票据",
+      actionType: "navigate",
+    }, async (mark) => {
+      await page.goto("/etc-tickets");
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "ETC票据" })).toBeVisible());
+    });
     await expect(page.getByRole("heading", { name: "ETC票据" })).toBeVisible();
     await expect(page.getByRole("radiogroup", { name: "ETC批次状态" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
@@ -436,10 +673,17 @@ test.describe("ETC ticket management browser flow", () => {
 
     const submitButton = page.getByRole("button", { name: "提交审批" });
     await expect(submitButton).toBeEnabled();
-    await submitButton.click();
 
     const createDialog = page.getByRole("dialog", { name: "创建审批草稿" });
-    await expect(createDialog).toBeVisible();
+    await recordLatency({
+      operationId: "etc-tickets.open-oa-draft-dialog-happy-path",
+      visibleLabel: "提交审批",
+      actionType: "click",
+    }, async (mark) => {
+      await submitButton.click();
+      await mark("firstVisibleResponseLatencyMs", expect(createDialog).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(createDialog.getByText("为当前批次创建审批草稿。")).toBeVisible());
+    });
     await expect(createDialog.getByText("为当前批次创建审批草稿。")).toBeVisible();
     await expect(createDialog.getByText("批次：3月批次")).toBeVisible();
 
@@ -447,8 +691,15 @@ test.describe("ETC ticket management browser flow", () => {
       response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
         && response.request().method() === "POST",
     );
-    await createDialog.getByRole("button", { name: "创建草稿" }).click();
-    expect((await draftResponse).status()).toBe(200);
+    await recordLatency({
+      operationId: "etc-tickets.create-oa-draft-happy-path",
+      visibleLabel: "创建草稿",
+      actionType: "click",
+    }, async (mark) => {
+      await createDialog.getByRole("button", { name: "创建草稿" }).click();
+      expect((await mark("apiLatencyMs", draftResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible());
+    });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/oa-draft")).toBe(1);
 
     const resultDialog = page.getByRole("dialog", { name: "审批提交确认" });
@@ -461,8 +712,15 @@ test.describe("ETC ticket management browser flow", () => {
       response.url().includes("/api/etc/business-batches/etc-business-e2e-001/manual-oa-status")
         && response.request().method() === "POST",
     );
-    await resultDialog.getByRole("button", { name: "已提交" }).click();
-    expect((await manualStatusResponse).status()).toBe(200);
+    await recordLatency({
+      operationId: "etc-tickets.manual-status-submitted-happy-path",
+      visibleLabel: "已提交",
+      actionType: "click",
+    }, async (mark) => {
+      await resultDialog.getByRole("button", { name: "已提交" }).click();
+      expect((await mark("apiLatencyMs", manualStatusResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true"));
+    });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/manual-oa-status")).toBe(1);
 
     await expect(page.getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true");

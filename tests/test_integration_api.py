@@ -1,5 +1,7 @@
 import json
 import unittest
+from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests.app_test_support import build_local_state_application as build_application
@@ -23,44 +25,37 @@ class OAIntegrationApiTests(unittest.TestCase):
             ],
         )
 
+        enqueued: list[dict[str, object]] = []
+
+        class QueueRepository:
+            def enqueue(self, **kwargs: object) -> SimpleNamespace:
+                enqueued.append(dict(kwargs))
+                return SimpleNamespace(event_id="evt-oa-sync-001")
+
+        app._runtime_repositories = replace(app._runtime_repositories, queue_repository=QueueRepository())
+
         with patch.object(app, "_run_workbench_auto_matching_for_scopes", return_value=None) as auto_match:
             sync_response = app.handle_request(
                 "POST",
                 "/integrations/oa/sync",
                 json.dumps({"actor_id": "user_finance_01", "scope": "all"}),
             )
-        auto_match.assert_called_once()
-        self.assertEqual(auto_match.call_args.kwargs["reason"], "oa_integration_sync")
-        self.assertEqual(sync_response.status_code, 200)
+        auto_match.assert_not_called()
+        self.assertEqual(sync_response.status_code, 202)
         sync_payload = json.loads(sync_response.body)
-        run_id = sync_payload["run"]["id"]
-        self.assertEqual(sync_payload["run"]["scope"], "all")
+        self.assertEqual(sync_payload["status"], "queued")
+        self.assertEqual(sync_payload["event_id"], "evt-oa-sync-001")
+        self.assertEqual(sync_payload["scope_key"], "all")
+        self.assertEqual(enqueued[0]["event_type"], "oa.sync")
+        self.assertEqual(enqueued[0]["scope_key"], "all")
+        self.assertEqual(enqueued[0]["payload"]["triggered_by"], "user_finance_01")
 
         dashboard_response = app.handle_request("GET", "/integrations/oa")
         self.assertEqual(dashboard_response.status_code, 200)
         dashboard_payload = json.loads(dashboard_response.body)
-        self.assertGreaterEqual(dashboard_payload["summary"]["project_count"], 2)
-        self.assertGreaterEqual(dashboard_payload["summary"]["document_count"], 4)
-        self.assertEqual(dashboard_payload["mappings"][0]["source_system"], "oa")
-
-        runs_response = app.handle_request("GET", "/integrations/oa/sync-runs")
-        self.assertEqual(runs_response.status_code, 200)
-        runs_payload = json.loads(runs_response.body)
-        self.assertEqual(len(runs_payload["runs"]), 1)
-
-        detail_response = app.handle_request("GET", f"/integrations/oa/sync-runs/{run_id}")
-        self.assertEqual(detail_response.status_code, 200)
-        detail_payload = json.loads(detail_response.body)
-        self.assertEqual(detail_payload["run"]["id"], run_id)
-
-        retry_response = app.handle_request(
-            "POST",
-            "/integrations/oa/sync",
-            json.dumps({"actor_id": "user_finance_01", "retry_run_id": run_id}),
-        )
-        self.assertEqual(retry_response.status_code, 200)
-        retry_payload = json.loads(retry_response.body)
-        self.assertEqual(retry_payload["run"]["retry_of_run_id"], run_id)
+        self.assertEqual(dashboard_payload["source_system"], "oa")
+        self.assertEqual(dashboard_payload["summary"]["run_count"], 0)
+        self.assertEqual(dashboard_payload["runs"], [])
 
     def _preview_and_confirm(self, app, batch_type: str, rows: list[dict[str, str]]) -> None:
         preview_response = app.handle_request(

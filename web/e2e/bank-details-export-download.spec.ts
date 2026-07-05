@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
 import { expectPageReady, gotoAndExpectPageReady, startPageDiagnostics } from "./fixtures/pageReady";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
@@ -10,34 +11,80 @@ test.describe("bank details export browser download", () => {
   test("downloads current filtered bank rows with confirmed relation fields", async ({ page }, testInfo) => {
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const recordLatency = createOperationLatencyRecorder(page, testInfo, {
+      route: "/bank-details",
+      pageKey: "bank-details",
+      module: "bank-details",
+    });
 
     await gotoAndExpectPageReady(page, "/bank-details", "bank-details-page", { diagnostics });
     const bankRowBefore = page.getByRole("row", { name: /智能工厂设备商/ });
     await expect(bankRowBefore.getByText("候选oa")).toBeVisible();
     await expect(bankRowBefore.getByText("候选发票")).toBeVisible();
 
-    await confirmWorkbenchRelation(page);
+    await confirmWorkbenchRelation(page, recordLatency);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
 
-    await page.getByRole("link", { name: "银行明细" }).click();
-    await expectPageReady(page, "bank-details-page", {
-      diagnostics,
-      routeDescription: "return to /bank-details after workbench relation confirmation",
+    await recordLatency({
+      route: "/bank-details",
+      pageKey: "bank-details",
+      module: "bank-details",
+      operationId: "bank-details.return-after-workbench-confirm",
+      visibleLabel: "银行明细",
+      actionType: "click",
+    }, async (mark) => {
+      const rowsResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return response.request().method() === "GET" && url.pathname === "/api/bank-details/transactions";
+      });
+      await page.getByRole("link", { name: "银行明细" }).click();
+      await mark("apiLatencyMs", rowsResponse);
+      await mark("firstVisibleResponseLatencyMs", expectPageReady(page, "bank-details-page", {
+        diagnostics,
+        routeDescription: "return to /bank-details after workbench relation confirmation",
+      }));
+      await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ }).getByText("有发票")).toBeVisible());
     });
     const bankRowAfter = page.getByRole("row", { name: /智能工厂设备商/ });
     await expect(bankRowAfter.getByText("有oa")).toBeVisible();
     await expect(bankRowAfter.getByText("有发票")).toBeVisible();
 
-    await page.getByRole("button", { name: "导出" }).click();
     const exportMenu = page.getByRole("menu", { name: "导出银行明细" });
-    await expect(exportMenu).toBeVisible();
+    await recordLatency({
+      route: "/bank-details",
+      pageKey: "bank-details",
+      module: "bank-details",
+      operationId: "bank-details.open-export-menu",
+      visibleLabel: "导出",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "导出" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(exportMenu).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(exportMenu.getByRole("menuitem", { name: "导出全部银行" })).toBeVisible());
+    });
 
     const exportRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
       return request.method() === "GET" && url.pathname.endsWith("/api/bank-details/transactions/export");
     });
+    const exportResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET" && url.pathname.endsWith("/api/bank-details/transactions/export");
+    });
     const download = page.waitForEvent("download");
-    await exportMenu.getByRole("menuitem", { name: "导出全部银行" }).click();
+    await recordLatency({
+      route: "/bank-details",
+      pageKey: "bank-details",
+      module: "bank-details",
+      operationId: "bank-details.export-all-banks",
+      visibleLabel: "导出全部银行",
+      actionType: "click",
+    }, async (mark) => {
+      await exportMenu.getByRole("menuitem", { name: "导出全部银行" }).click();
+      await mark("apiLatencyMs", exportResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("已开始下载")).toBeVisible());
+      await mark("finalSettledLatencyMs", download.then(() => undefined));
+    });
 
     const requestUrl = new URL((await exportRequest).url());
     expect(requestUrl.searchParams.get("mode")).toBe("all");

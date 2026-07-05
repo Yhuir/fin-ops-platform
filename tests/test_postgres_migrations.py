@@ -102,6 +102,7 @@ EXPECTED_MIGRATIONS = [
     "0086_runtime_queue_claim_hot_path.sql",
     "0087_oa_pending_payment_claim_hot_path.sql",
     "0088_app_health_dashboard_current_effective_hot_path.sql",
+    "0089_read_model_performance_hot_paths.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -249,7 +250,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 89)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 90)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -329,6 +330,19 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("where status in", normalized_sql)
         self.assertIn("app_status_readiness_fresh_scope_updated_idx", normalized_sql)
         self.assertIn("where status = 'fresh'", normalized_sql)
+
+    def test_read_model_performance_hot_path_indexes_are_declared(self) -> None:
+        sql = (MIGRATIONS_DIR / "0089_read_model_performance_hot_paths.sql").read_text().lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("bank_transactions_account_balance_projection_idx", normalized_sql)
+        self.assertIn("on app.bank_transactions", normalized_sql)
+        self.assertIn("trade_time desc", normalized_sql)
+        self.assertIn("include ( balance, currency, account_name, source_batch_id, legacy_source_batch_id, raw_payload )", normalized_sql)
+        self.assertIn("bank_flow_rule_batch_rows_scope_source_versions_idx", normalized_sql)
+        self.assertIn("on read_model.bank_flow_rule_batch_rows", normalized_sql)
+        self.assertIn("include (source_versions)", normalized_sql)
+        self.assertIn("where status <> 'superseded'", normalized_sql)
 
     def test_oa_pending_payment_bank_relation_schema_and_migration_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

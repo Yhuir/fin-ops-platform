@@ -5241,6 +5241,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "month": "all",
                     "row_ids": ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
                     "case_id": "CASE-MINIMAL-CONFIRM-001",
+                    "note": "hot path regression covers documented mismatch path",
                 }
             )
 
@@ -6809,6 +6810,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_confirm_link_falls_back_to_underlying_live_row_services_when_group_payload_is_missing_selected_rows(self) -> None:
         app = build_application()
         app._live_workbench_service = _StubLiveWorkbenchService()
+        app._workbench_row_detail_api_routes = app._build_workbench_row_detail_api_routes()
 
         original_build_api_workbench_payload = app._build_api_workbench_payload
 
@@ -6995,6 +6997,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "month": "all",
                     "row_ids": ["oa-o-202603-001", "bk-o-202604-001"],
                     "case_id": "CASE-CROSS-MONTH-001",
+                    "note": "cross-month regression covers documented mismatch path",
                 }
             ),
         )

@@ -101,7 +101,8 @@
 - `workbench-relations` owner 在保存 relation facts 后仍负责输出下游 dirty scope/outbox，但该事务内 fan-out 必须先计算 refresh intents，再一次性批量写 `job.read_model_dirty_scopes` 和 `job.outbox_events`。禁止恢复旧的 per-scope `fetch_one + execute` 入队函数；新增下游 scope 必须扩展批量 intent 合同和测试，而不是在 bank-flow service 内补同步刷新。
 - `reset-submitted` 不做前置 `all` refresh；撤回后只同步刷新受影响月份 scope，没有月份时才 fallback `all`。
 - 页面单批内部往来提交的前端阻塞等待到 command 成功为止，随后立即本地移除已提交批次并清空选择；提交成功后的下一笔不得被自动选中或自动触发 detail GET，下一笔明细 I/O 只能来自用户显式选择或后续正常列表加载。`bank_flow_rule_batch` freshness wait / reload 在后台 reconcile。批量选择提交、撤回、reset 至少只能等待 `bank_flow_rule_batch` 自身 target。`workbench_relation` / `workbench` targets 保留在 mutation result 和事件广播中，由关联台或后台 runtime 收敛；不能让 `workbench/all` 聚合刷新拖慢当前页提交完成反馈。
-- Worker refresh 使用 `bank_flow_rule_batch_source_versions_summary(...)` 判断 scope source versions 是否 unchanged；能证明 unchanged 时完成 dirty scope 并跳过批次重建和 snapshot 发布。
+- Worker refresh 使用 `bank_flow_rule_batch_source_versions_summary(...)` 判断 scope source versions 是否 unchanged；该 summary 必须在数据库内聚合 row count、distinct source versions 和示例 source_versions，不能把 scope 下全部 read-model rows 的 JSON 拉回 Python。能证明 unchanged 时完成 dirty scope 并跳过批次重建和 snapshot 发布。
+- PostgreSQL hot path index 位于 `0089_read_model_performance_hot_paths.sql`；新增 source-version 判断字段时必须同步维护该查询和索引，不得用 no-OA summary 或全量 Workbench snapshot 兜底。
 - `tag-rules` 保存仍触发 `all` refresh，因为规则变更可能影响所有 active bank-flow relation requirement metadata；后续若要优化必须先有按 relation/tag 反查受影响 scope 的可靠索引。
 
 Workbench relation facts 仍归 `workbench-relations`：

@@ -14,6 +14,10 @@
 | `PENDING-E2E-008` | `covered` | `web/e2e/pending-invoices-income-status-flow.spec.ts`、`web/src/test/PendingInvoicesPage.test.tsx`、`tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py` | Browser 覆盖收入方向多选、工具栏批量标记现金收入、单次 `PUT /income-statuses`、rows refetch、状态更新；失败分支覆盖后端拒绝时错误可见、选中保留、rows 不重读且状态不半写；并覆盖第一次保存暂时 503 时错误可见、选择保持、按钮恢复、rows 不重读且保持 `未开票`，第二次重试成功后才刷新到 `现金收入`。 |
 | `PENDING-E2E-009` | `covered` | `web/e2e/pending-invoices-rules-save-flow.spec.ts`、`web/src/test/PendingInvoicesPage.test.tsx`、`web/src/test/PendingInvoicesRulesSaveTimeout.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、后端 rules tests | Browser 覆盖支出规则抽屉保存、`PUT /api/pending-invoices/rules` contract、`pending_invoice:expense:requires_invoice` operation barrier、rows 重读、刷新中提示，以及成功后没有保存失败/同步失败/read model 失败残留；并覆盖第一次保存暂时 503 时规则抽屉内错误可见、草稿勾选保持、全局操作弹窗不阻塞、不触发 barrier/rows 刷新，第二次重试成功后才刷新 rows；组件/API 覆盖 barrier timeout 仍保持保存成功、支出/收入版本隔离、conflict 和 global operation 非阻塞错误选项。 |
 
+## Operation latency baseline
+
+本轮已为 `web/e2e/pending-invoices-fanout.spec.ts`、`web/e2e/pending-invoices-filter-sort-flow.spec.ts`、`web/e2e/pending-invoices-attach-existing-flow.spec.ts`、`web/e2e/pending-invoices-income-status-flow.spec.ts`、`web/e2e/pending-invoices-export-download.spec.ts`、`web/e2e/pending-invoices-rules-save-flow.spec.ts` 和 `web/e2e/workbench-relations-nonfresh-diagnostics.spec.ts` 接入 Playwright `operation-latency-*.json` 附件。当前记录的操作覆盖：页面打开、首屏 rows 失败后的刷新恢复、金额排序、对方户名筛选、文本拖选、Workbench relation fan-out 后返回待找发票、筛选内容导出预览/下载/row-limit 错误、选择已有发票的流水多选、候选搜索、发票选择、preview、confirm、confirm 503 失败与重试、preview conflict、收入方向切换、收入批量选择、现金收入/无需开票写入成功、503 重试和 409 拒绝、规则抽屉打开、规则勾选、保存成功、保存 503 失败与重试，以及 relation-backed refreshing/stale 诊断和刷新中选择流水入口。
+
 ## 下一轮补测建议
 
 1. 在 staging/真实 infra 中补 `PENDING-E2E-007` / `PENDING-E2E-008` 的 PostgreSQL/RabbitMQ/Redis/systemd worker drain 证据，证明 attach existing 和 income status 后 pending/search/invoice-lifecycle read model 最终 fresh。

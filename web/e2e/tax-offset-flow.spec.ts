@@ -1,12 +1,56 @@
 import { Buffer } from "node:buffer";
 
-import { expect, test, type Locator, type Page } from "./fixtures/strictTest";
+import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 function statCard(page: Page, label: string) {
   return page.locator(".stat-card").filter({ hasText: label });
+}
+
+function createTaxOffsetLatencyRecorder(page: Page, testInfo: TestInfo) {
+  return createOperationLatencyRecorder(page, testInfo, {
+    route: "/tax-offset",
+    pageKey: "tax-offset",
+    module: "tax-offset",
+  });
+}
+
+function waitForTaxOffset(page: Page) {
+  return page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "GET" && url.pathname.endsWith("/api/tax-offset");
+  });
+}
+
+function waitForTaxOffsetCalculate(page: Page) {
+  return page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "POST" && url.pathname.endsWith("/api/tax-offset/calculate");
+  });
+}
+
+function waitForTaxOffsetPlanSave(page: Page) {
+  return page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "POST" && url.pathname.endsWith("/api/tax-offset/plans");
+  });
+}
+
+function waitForCertifiedImportPreview(page: Page) {
+  return page.waitForResponse((response) =>
+    response.url().includes("/api/tax-offset/certified-import/preview")
+      && response.request().method() === "POST",
+  );
+}
+
+function waitForCertifiedImportConfirm(page: Page) {
+  return page.waitForResponse((response) =>
+    response.url().includes("/api/tax-offset/certified-import/confirm")
+      && response.request().method() === "POST",
+  );
 }
 
 async function expectVisibleAndUncovered(locator: Locator, label: string) {
@@ -84,11 +128,21 @@ function startStrictBrowserErrorCapture(
 }
 
 test.describe("tax offset browser flow", () => {
-  test("keeps read-export users on read-only tax offset controls without write API calls", async ({ page }) => {
+  test("keeps read-export users on read-only tax offset controls without write API calls", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
+    const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
 
-    await page.goto("/tax-offset");
+    await recordLatency({
+      operationId: "tax-offset.open-page-read-export",
+      visibleLabel: "税金抵扣计划与试算",
+      actionType: "navigate",
+    }, async (mark) => {
+      const response = waitForTaxOffset(page);
+      await page.goto("/tax-offset");
+      expect((await mark("apiLatencyMs", response)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
+    });
 
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
     await expect(statCard(page, "销项税额").getByText("41,600.00")).toBeVisible();
@@ -116,10 +170,18 @@ test.describe("tax offset browser flow", () => {
       message: null,
     },
   ] as const) {
-    test(`blocks ${scenario.sessionMode} sessions before tax offset protected APIs load`, async ({ page }) => {
+    test(`blocks ${scenario.sessionMode} sessions before tax offset protected APIs load`, async ({ page }, testInfo) => {
       const api = await installDeterministicApiMocks(page, { sessionMode: scenario.sessionMode });
+      const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
 
-      await page.goto("/tax-offset");
+      await recordLatency({
+        operationId: `tax-offset.open-page-${scenario.sessionMode}`,
+        visibleLabel: scenario.heading,
+        actionType: "navigate",
+      }, async (mark) => {
+        await page.goto("/tax-offset");
+        await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: scenario.heading })).toBeVisible());
+      });
 
       await expect(page.getByRole("heading", { name: scenario.heading })).toBeVisible();
       if (scenario.message) {
@@ -134,18 +196,36 @@ test.describe("tax offset browser flow", () => {
     });
   }
 
-  test("shows tax offset write controls for admin users without requiring admin-only pages", async ({ page }) => {
+  test("shows tax offset write controls for admin users without requiring admin-only pages", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+    const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
 
-    await page.goto("/tax-offset");
+    await recordLatency({
+      operationId: "tax-offset.open-page-admin",
+      visibleLabel: "税金抵扣计划与试算",
+      actionType: "navigate",
+    }, async (mark) => {
+      const response = waitForTaxOffset(page);
+      await page.goto("/tax-offset");
+      expect((await mark("apiLatencyMs", response)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
+    });
 
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
     await expect(page.getByRole("button", { name: "已认证发票导入" })).toBeVisible();
     await expect(page.getByRole("button", { name: "保存计划" })).toBeEnabled();
 
-    await page.getByRole("button", { name: "已认证发票导入" }).click();
     const dialog = page.getByRole("dialog", { name: "已认证发票导入" });
+    await recordLatency({
+      operationId: "tax-offset.open-certified-import-dialog-admin",
+      visibleLabel: "已认证发票导入",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "已认证发票导入" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(dialog).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(dialog.getByText("当前账号仅支持查看和导出，不能导入已认证发票。")).toHaveCount(0));
+    });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("当前账号仅支持查看和导出，不能导入已认证发票。")).toHaveCount(0);
 
@@ -154,15 +234,25 @@ test.describe("tax offset browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps large tax tables searchable, sortable, filterable, and horizontally scrollable on narrow screens", async ({ page }) => {
+  test("keeps large tax tables searchable, sortable, filterable, and horizontally scrollable on narrow screens", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       taxOffsetLargeDataset: true,
     });
+    const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
 
     await page.setViewportSize({ width: 390, height: 820 });
-    await page.goto("/tax-offset");
+    await recordLatency({
+      operationId: "tax-offset.open-page-large-dataset",
+      visibleLabel: "税金抵扣计划与试算",
+      actionType: "navigate",
+    }, async (mark) => {
+      const response = waitForTaxOffset(page);
+      await page.goto("/tax-offset");
+      expect((await mark("apiLatencyMs", response)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
+    });
 
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
     await expect(statCard(page, "销项税额").getByText("41,600.00")).toBeVisible();
@@ -181,15 +271,50 @@ test.describe("tax offset browser flow", () => {
     await expectVisibleAndUncovered(outputPanel.getByRole("columnheader", { name: "金额（税率）" }), "output table amount-rate column");
     await expectVisibleAndUncovered(inputPanel.getByRole("columnheader", { name: "金额（税率）" }), "input table amount-rate column");
 
-    await inputPanel.getByRole("button", { name: "搜索 进项票认证计划" }).click();
-    await page.getByRole("searchbox", { name: "搜索 进项票认证计划" }).fill("超长供应商-089");
+    await recordLatency({
+      operationId: "tax-offset.open-input-search",
+      visibleLabel: "搜索 进项票认证计划",
+      actionType: "click",
+    }, async (mark) => {
+      await inputPanel.getByRole("button", { name: "搜索 进项票认证计划" }).click();
+      await mark("finalSettledLatencyMs", expect(page.getByRole("searchbox", { name: "搜索 进项票认证计划" })).toBeVisible());
+    });
+    await recordLatency({
+      operationId: "tax-offset.filter-input-search",
+      visibleLabel: "搜索 进项票认证计划",
+      actionType: "fill",
+    }, async (mark) => {
+      await page.getByRole("searchbox", { name: "搜索 进项票认证计划" }).fill("超长供应商-089");
+      await mark("finalSettledLatencyMs", expect(inputPanel.getByRole("row", { name: /1129900089/ })).toBeVisible());
+    });
     await expect(inputPanel.getByRole("row", { name: /1129900089/ })).toBeVisible();
     await expect(inputPanel.getByText("已选 0 / 1（共 92）")).toBeVisible();
 
-    await inputPanel.getByRole("button", { name: "清空搜索 进项票认证计划" }).click();
+    await recordLatency({
+      operationId: "tax-offset.clear-input-search",
+      visibleLabel: "清空搜索 进项票认证计划",
+      actionType: "click",
+    }, async (mark) => {
+      await inputPanel.getByRole("button", { name: "清空搜索 进项票认证计划" }).click();
+      await mark("finalSettledLatencyMs", expect(inputPanel.getByText("已选 2 / 92")).toBeVisible());
+    });
     await expect(inputPanel.getByText("已选 2 / 92")).toBeVisible();
-    await inputPanel.getByRole("button", { name: "收起搜索 进项票认证计划" }).click();
-    await inputPanel.getByRole("button", { name: "进项票认证计划按时间降序" }).click();
+    await recordLatency({
+      operationId: "tax-offset.close-input-search",
+      visibleLabel: "收起搜索 进项票认证计划",
+      actionType: "click",
+    }, async (mark) => {
+      await inputPanel.getByRole("button", { name: "收起搜索 进项票认证计划" }).click();
+      await mark("finalSettledLatencyMs", expect(page.getByRole("searchbox", { name: "搜索 进项票认证计划" })).toHaveCount(0));
+    });
+    await recordLatency({
+      operationId: "tax-offset.sort-input-time-ascending",
+      visibleLabel: "进项票认证计划按时间降序",
+      actionType: "click",
+    }, async (mark) => {
+      await inputPanel.getByRole("button", { name: "进项票认证计划按时间降序" }).click();
+      await mark("finalSettledLatencyMs", expect(inputPanel.getByRole("button", { name: "进项票认证计划按时间升序" })).toBeVisible());
+    });
     await expect(inputPanel.getByRole("button", { name: "进项票认证计划按时间升序" })).toBeVisible();
 
     await inputGrid.evaluate((grid) => grid.scrollIntoView({ block: "start", inline: "nearest" }));
@@ -197,12 +322,26 @@ test.describe("tax offset browser flow", () => {
       .getByRole("columnheader", { name: /对方名称/ })
       .getByRole("button", { name: "筛选 对方名称" });
     await expectVisibleAndUncovered(inputCounterpartyFilter, "input tax counterparty filter");
-    await inputCounterpartyFilter.click();
     const counterpartyFilterDialog = page.getByRole("dialog", { name: "筛选 对方名称" });
+    await recordLatency({
+      operationId: "tax-offset.open-input-counterparty-filter",
+      visibleLabel: "筛选 对方名称",
+      actionType: "click",
+    }, async (mark) => {
+      await inputCounterpartyFilter.click();
+      await mark("firstVisibleResponseLatencyMs", expect(counterpartyFilterDialog).toBeVisible());
+    });
     await expect(counterpartyFilterDialog).toBeVisible();
-    await counterpartyFilterDialog
-      .getByRole("checkbox", { name: "进项超长供应商-003-筛选滚动验证", exact: true })
-      .click();
+    await recordLatency({
+      operationId: "tax-offset.apply-input-counterparty-filter",
+      visibleLabel: "进项超长供应商-003-筛选滚动验证",
+      actionType: "click",
+    }, async (mark) => {
+      await counterpartyFilterDialog
+        .getByRole("checkbox", { name: "进项超长供应商-003-筛选滚动验证", exact: true })
+        .click();
+      await mark("finalSettledLatencyMs", expect(inputPanel.getByRole("row", { name: /1129900003/ })).toBeVisible());
+    });
     await expect(inputPanel.getByRole("row", { name: /1129900003/ })).toBeVisible();
     await expect(inputPanel.getByText("已选 0 / 1（共 92）")).toBeVisible();
 
@@ -225,19 +364,25 @@ test.describe("tax offset browser flow", () => {
       message: "税金抵扣读模型暂不可用，请稍后刷新或检查系统状态。",
     },
   ] as const) {
-    test(`blocks false-empty and plan saves while tax offset read model is ${scenario.status}`, async ({ page }) => {
+    test(`blocks false-empty and plan saves while tax offset read model is ${scenario.status}`, async ({ page }, testInfo) => {
       const browserErrors = startStrictBrowserErrorCapture(page);
       const api = await installDeterministicApiMocks(page, {
         sessionMode: "full_access",
         taxOffsetReadModelStatus: scenario.status,
       });
+      const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
 
-      const taxOffsetResponse = page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return response.request().method() === "GET" && url.pathname.endsWith("/api/tax-offset");
+      await recordLatency({
+        operationId: `tax-offset.open-page-read-model-${scenario.status}`,
+        visibleLabel: "税金抵扣计划与试算",
+        actionType: "navigate",
+      }, async (mark) => {
+        const taxOffsetResponse = waitForTaxOffset(page);
+        await page.goto("/tax-offset");
+        expect((await mark("apiLatencyMs", taxOffsetResponse)).status()).toBe(202);
+        await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
+        await mark("finalSettledLatencyMs", expect(page.getByText(scenario.message)).toBeVisible());
       });
-      await page.goto("/tax-offset");
-      expect((await taxOffsetResponse).status()).toBe(202);
 
       await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
       await expect(page.getByText(scenario.message)).toBeVisible();
@@ -250,19 +395,25 @@ test.describe("tax offset browser flow", () => {
     });
   }
 
-  test("keeps non-fresh read models out of false-empty and recovers after automatic retry", async ({ page }) => {
+  test("keeps non-fresh read models out of false-empty and recovers after automatic retry", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       taxOffsetReadModelStatuses: ["stale", "stale", "fresh"],
     });
+    const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
 
-    const firstTaxOffsetResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "GET" && url.pathname.endsWith("/api/tax-offset");
+    await recordLatency({
+      operationId: "tax-offset.open-page-stale-then-fresh",
+      visibleLabel: "税金抵扣计划与试算",
+      actionType: "navigate",
+    }, async (mark) => {
+      const firstTaxOffsetResponse = waitForTaxOffset(page);
+      await page.goto("/tax-offset");
+      expect((await mark("apiLatencyMs", firstTaxOffsetResponse)).status()).toBe(202);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByText("税金抵扣读模型正在刷新，完成后页面会自动重试。")).toBeVisible());
     });
-    await page.goto("/tax-offset");
-    expect((await firstTaxOffsetResponse).status()).toBe(202);
 
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
     await expect(page.getByText("税金抵扣读模型正在刷新，完成后页面会自动重试。")).toBeVisible();
@@ -271,8 +422,14 @@ test.describe("tax offset browser flow", () => {
     await expect(page.getByRole("button", { name: "保存计划" })).toBeDisabled();
     expect(api.count("POST /api/tax-offset/plans")).toBe(0);
 
-    await expect.poll(() => api.count("GET /api/tax-offset")).toBeGreaterThanOrEqual(2);
-    await expect(page.getByText("税金抵扣读模型正在刷新，完成后页面会自动重试。")).toHaveCount(0);
+    await recordLatency({
+      operationId: "tax-offset.auto-retry-stale-read-model",
+      visibleLabel: "税金抵扣读模型自动重试",
+      actionType: "wait",
+    }, async (mark) => {
+      await mark("apiLatencyMs", expect.poll(() => api.count("GET /api/tax-offset")).toBeGreaterThanOrEqual(2));
+      await mark("finalSettledLatencyMs", expect(page.getByText("税金抵扣读模型正在刷新，完成后页面会自动重试。")).toHaveCount(0));
+    });
     await expect(statCard(page, "销项税额").getByText("41,600.00")).toBeVisible();
     await expect(page.getByRole("grid", { name: "销项票开票情况" })).toBeVisible();
     await expect(page.getByRole("grid", { name: "进项票认证计划" })).toBeVisible();
@@ -282,7 +439,7 @@ test.describe("tax offset browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("shows a version conflict instead of a false save success when plan source versions are stale", async ({ page }) => {
+  test("shows a version conflict instead of a false save success when plan source versions are stale", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 409 \(Conflict\)/],
     });
@@ -290,21 +447,45 @@ test.describe("tax offset browser flow", () => {
       sessionMode: "full_access",
       taxOffsetPlanSaveConflict: true,
     });
+    const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
 
-    await page.goto("/tax-offset");
+    await recordLatency({
+      operationId: "tax-offset.open-page-plan-conflict",
+      visibleLabel: "税金抵扣计划与试算",
+      actionType: "navigate",
+    }, async (mark) => {
+      const response = waitForTaxOffset(page);
+      await page.goto("/tax-offset");
+      expect((await mark("apiLatencyMs", response)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
+    });
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
     await expect(statCard(page, "计划进项税额").getByText("18,240.00")).toBeVisible();
 
-    await page.getByRole("row", { name: /11203491/ }).locator(".checkbox__control").click();
+    await recordLatency({
+      operationId: "tax-offset.toggle-input-plan-before-conflict",
+      visibleLabel: "进项计划 11203491",
+      actionType: "click",
+    }, async (mark) => {
+      const calculateResponse = waitForTaxOffsetCalculate(page);
+      await page.getByRole("row", { name: /11203491/ }).locator(".checkbox__control").click();
+      expect((await mark("apiLatencyMs", calculateResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(statCard(page, "计划进项税额").getByText("12,480.00")).toBeVisible());
+    });
     await expect(statCard(page, "计划进项税额").getByText("12,480.00")).toBeVisible();
 
     const fetchCountBeforeSave = api.count("GET /api/tax-offset");
-    const conflictResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST" && url.pathname.endsWith("/api/tax-offset/plans");
+    await recordLatency({
+      operationId: "tax-offset.save-plan-conflict",
+      visibleLabel: "保存计划",
+      actionType: "click",
+    }, async (mark) => {
+      const conflictResponse = waitForTaxOffsetPlanSave(page);
+      await page.getByRole("button", { name: "保存计划" }).click();
+      expect((await mark("apiLatencyMs", conflictResponse)).status()).toBe(409);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("税金抵扣数据已变化，请刷新后重新保存。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "保存计划" })).toBeEnabled());
     });
-    await page.getByRole("button", { name: "保存计划" }).click();
-    expect((await conflictResponse).status()).toBe(409);
 
     await expect(page.getByText("税金抵扣数据已变化，请刷新后重新保存。")).toBeVisible();
     await expect(page.getByText("已保存本月税金抵扣计划。")).toHaveCount(0);
@@ -315,38 +496,89 @@ test.describe("tax offset browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("recalculates and saves a tax plan, then imports certified invoices in the page modal", async ({ page }) => {
+  test("recalculates and saves a tax plan, then imports certified invoices in the page modal", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
 
-    await page.goto("/tax-offset");
+    await recordLatency({
+      operationId: "tax-offset.open-page-happy-path",
+      visibleLabel: "税金抵扣计划与试算",
+      actionType: "navigate",
+    }, async (mark) => {
+      const response = waitForTaxOffset(page);
+      await page.goto("/tax-offset");
+      expect((await mark("apiLatencyMs", response)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
+    });
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
     await expect(statCard(page, "销项税额").getByText("41,600.00")).toBeVisible();
     await expect(statCard(page, "计划进项税额").getByText("18,240.00")).toBeVisible();
     await expect(page.getByRole("grid", { name: "销项票开票情况" })).toBeVisible();
     await expect(page.getByRole("grid", { name: "进项票认证计划" })).toBeVisible();
 
-    await page.getByRole("row", { name: /11203491/ }).locator(".checkbox__control").click();
+    await recordLatency({
+      operationId: "tax-offset.toggle-input-plan-happy-path",
+      visibleLabel: "进项计划 11203491",
+      actionType: "click",
+    }, async (mark) => {
+      const calculateResponse = waitForTaxOffsetCalculate(page);
+      await page.getByRole("row", { name: /11203491/ }).locator(".checkbox__control").click();
+      expect((await mark("apiLatencyMs", calculateResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(statCard(page, "计划进项税额").getByText("12,480.00")).toBeVisible());
+    });
     await expect(statCard(page, "计划进项税额").getByText("12,480.00")).toBeVisible();
     await expect(statCard(page, "本月应纳税额").getByText("29,120.00")).toBeVisible();
     expect(api.count("POST /api/tax-offset/calculate")).toBe(1);
 
-    await page.getByRole("button", { name: "保存计划" }).click();
+    await recordLatency({
+      operationId: "tax-offset.save-plan-happy-path",
+      visibleLabel: "保存计划",
+      actionType: "click",
+    }, async (mark) => {
+      const saveResponse = waitForTaxOffsetPlanSave(page);
+      await page.getByRole("button", { name: "保存计划" }).click();
+      expect((await mark("apiLatencyMs", saveResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(page.getByText("已保存本月税金抵扣计划。")).toBeVisible());
+    });
     await expect(page.getByText("已保存本月税金抵扣计划。")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(api.count("POST /api/tax-offset/plans")).toBe(1);
 
-    await page.getByRole("button", { name: "已认证发票导入" }).click();
     const dialog = page.getByRole("dialog", { name: "已认证发票导入" });
+    await recordLatency({
+      operationId: "tax-offset.open-certified-import-dialog-happy-path",
+      visibleLabel: "已认证发票导入",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "已认证发票导入" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(dialog).toBeVisible());
+    });
     await expect(dialog).toBeVisible();
-    await dialog.locator('input[type="file"]').setInputFiles({
-      name: "2026年3月 进项认证结果.xlsx",
-      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      buffer: Buffer.from("tax-certified-import-e2e"),
+    await recordLatency({
+      operationId: "tax-offset.select-certified-import-file",
+      visibleLabel: "选择已认证发票文件",
+      actionType: "upload",
+    }, async (mark) => {
+      await dialog.locator('input[type="file"]').setInputFiles({
+        name: "2026年3月 进项认证结果.xlsx",
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        buffer: Buffer.from("tax-certified-import-e2e"),
+      });
+      await mark("finalSettledLatencyMs", expect(dialog.getByText("已选择 1 个文件，当前页面月份为 2026-03。确认导入后会刷新当前税金抵扣页。")).toBeVisible());
     });
     await expect(dialog.getByText("已选择 1 个文件，当前页面月份为 2026-03。确认导入后会刷新当前税金抵扣页。")).toBeVisible();
 
-    await dialog.getByRole("button", { name: "预览识别结果" }).click();
+    await recordLatency({
+      operationId: "tax-offset.preview-certified-import",
+      visibleLabel: "预览识别结果",
+      actionType: "click",
+    }, async (mark) => {
+      const previewResponse = waitForCertifiedImportPreview(page);
+      await dialog.getByRole("button", { name: "预览识别结果" }).click();
+      expect((await mark("apiLatencyMs", previewResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(dialog.getByRole("region", { name: "已认证发票预览结果" })).toBeVisible());
+    });
     await expect(dialog.getByRole("region", { name: "已认证发票预览结果" })).toBeVisible();
     await expect(dialog.getByText("识别记录 2 条")).toBeVisible();
     await expect(dialog.getByText("匹配计划 1 条").first()).toBeVisible();
@@ -355,11 +587,17 @@ test.describe("tax offset browser flow", () => {
     expect(api.count("POST /api/tax-offset/certified-import/preview")).toBe(1);
 
     const taxOffsetFetchCountBeforeConfirm = api.count("GET /api/tax-offset");
-    const confirmResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/tax-offset/certified-import/confirm") && response.request().method() === "POST",
-    );
-    await dialog.getByRole("button", { name: "确认导入" }).click();
-    expect((await confirmResponse).status()).toBe(200);
+    await recordLatency({
+      operationId: "tax-offset.confirm-certified-import",
+      visibleLabel: "确认导入",
+      actionType: "click",
+    }, async (mark) => {
+      const confirmResponse = waitForCertifiedImportConfirm(page);
+      await dialog.getByRole("button", { name: "确认导入" }).click();
+      expect((await mark("apiLatencyMs", confirmResponse)).status()).toBe(200);
+      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/tax-offset")).toBeGreaterThan(taxOffsetFetchCountBeforeConfirm));
+      await mark("finalSettledLatencyMs", expect(page.getByText("已导入 2 条已认证记录，并已刷新当前税金抵扣页面。")).toBeVisible());
+    });
     await expect.poll(() => api.count("POST /api/tax-offset/certified-import/confirm")).toBe(1);
     await expect.poll(() => api.count("GET /api/tax-offset")).toBeGreaterThan(taxOffsetFetchCountBeforeConfirm);
     await expect(page.getByText("已导入 2 条已认证记录，并已刷新当前税金抵扣页面。")).toBeVisible();

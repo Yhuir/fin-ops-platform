@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
-
-import { expect, test, type Locator, type Page } from "./fixtures/strictTest";
+import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { createOperationLatencyRecorder, type OperationLatencyRecorder } from "./fixtures/operationLatency";
 
 type CostExplorerBrowserPayload = {
   read_model_scope_key?: string;
@@ -15,6 +15,19 @@ type CostExplorerBrowserPayload = {
 
 function requestPath(requestUrl: string) {
   return new URL(requestUrl).pathname;
+}
+
+function createCostStatisticsLatencyRecorder(page: Page, testInfo: TestInfo) {
+  return createOperationLatencyRecorder(page, testInfo, {
+    route: "/cost-statistics",
+    pageKey: "cost-statistics",
+    module: "cost-statistics",
+  });
+}
+
+function getResponse(pathnameSuffix: string) {
+  return (response: { url(): string; request(): { method(): string } }) =>
+    response.request().method() === "GET" && requestPath(response.url()).endsWith(pathnameSuffix);
 }
 
 function waitForCostStatisticsExplorer(page: Page, month = "2026-03", projectScope = "active") {
@@ -221,22 +234,45 @@ test.describe("cost statistics browser flow", () => {
       costStatisticsExportDownloadSuccess: true,
       sessionMode: "read_export_only",
     });
+    const recordLatency = createCostStatisticsLatencyRecorder(page, testInfo);
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
     await expect(page.getByRole("button", { name: "导出中心" })).toBeEnabled();
 
-    await page.getByRole("button", { name: "导出中心" }).click();
     const exportDialog = page.getByRole("dialog", { name: "导出中心" });
-    await expect(exportDialog).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.open-export-center",
+      visibleLabel: "导出中心",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "导出中心" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(exportDialog).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(exportDialog.getByRole("button", { name: "导出" })).toBeEnabled());
+    });
     await expect(exportDialog.getByRole("button", { name: "导出" })).toBeEnabled();
 
     const previewResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "GET" && url.pathname.endsWith("/api/cost-statistics/export-preview");
     });
-    await exportDialog.getByRole("button", { name: "仅预览" }).click();
+    await recordLatency({
+      operationId: "cost-statistics.preview-time-export",
+      visibleLabel: "仅预览",
+      actionType: "click",
+    }, async (mark) => {
+      await exportDialog.getByRole("button", { name: "仅预览" }).click();
+      await mark("apiLatencyMs", previewResponsePromise);
+      await mark(
+        "firstVisibleResponseLatencyMs",
+        expect(exportDialog.getByRole("table", { name: "导出预览表" })).toContainText("云南溯源科技"),
+      );
+      await mark(
+        "finalSettledLatencyMs",
+        expect(exportDialog.getByRole("table", { name: "导出预览表" })).toContainText("设备货款及材料费"),
+      );
+    });
     const previewResponse = await previewResponsePromise;
     const previewUrl = new URL(previewResponse.url());
     expect(previewResponse.status()).toBe(200);
@@ -245,15 +281,21 @@ test.describe("cost statistics browser flow", () => {
     expect(previewUrl.searchParams.get("project_scope")).toBe("active");
     expect(previewUrl.searchParams.has("page")).toBe(false);
     expect(previewUrl.searchParams.has("page_size")).toBe(false);
-    await expect(exportDialog.getByRole("table", { name: "导出预览表" })).toContainText("云南溯源科技");
-    await expect(exportDialog.getByRole("table", { name: "导出预览表" })).toContainText("设备货款及材料费");
-
     const exportResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "GET" && url.pathname.endsWith("/api/cost-statistics/export");
     });
     const downloadPromise = page.waitForEvent("download");
-    await exportDialog.getByRole("button", { name: "导出" }).click();
+    await recordLatency({
+      operationId: "cost-statistics.export-time-view",
+      visibleLabel: "导出",
+      actionType: "click",
+    }, async (mark) => {
+      await exportDialog.getByRole("button", { name: "导出" }).click();
+      await mark("apiLatencyMs", exportResponsePromise);
+      await mark("firstVisibleResponseLatencyMs", expect(exportDialog.getByText("已导出 成本统计_全部期间_按时间统计.xlsx")).toBeVisible());
+      await mark("finalSettledLatencyMs", downloadPromise.then(() => undefined));
+    });
     const [exportResponse, download] = await Promise.all([exportResponsePromise, downloadPromise]);
 
     const exportUrl = new URL(exportResponse.url());
@@ -279,15 +321,15 @@ test.describe("cost statistics browser flow", () => {
     expect(downloadedText).toContain("project_scope=active");
     expect(downloadedText).toContain("page=");
     expect(downloadedText).toContain("page_size=");
-    await expect(exportDialog.getByText("已导出 成本统计_全部期间_按时间统计.xlsx")).toBeVisible();
     expect(api.count("GET /api/cost-statistics/export-preview")).toBe(1);
     expect(api.count("GET /api/cost-statistics/export")).toBe(1);
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps redesigned view buttons and range controls usable", async ({ page }) => {
+  test("keeps redesigned view buttons and range controls usable", async ({ page }, testInfo) => {
     const browserErrors = collectBrowserErrors(page);
     await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const recordLatency = createCostStatisticsLatencyRecorder(page, testInfo);
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
@@ -296,64 +338,137 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
 
     const refreshResponse = waitForCostStatisticsExplorer(page, "2026-03", "active");
-    await page.getByRole("button", { name: "刷新成本统计" }).click();
+    await recordLatency({
+      operationId: "cost-statistics.refresh-time-view",
+      visibleLabel: "刷新成本统计",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "刷新成本统计" }).click();
+      await mark("apiLatencyMs", refreshResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-001" })).toBeVisible());
+    });
     expect((await refreshResponse).status()).toBe(200);
 
     const aprilResponse = waitForCostStatisticsExplorer(page, "2026-04", "active");
-    await page.getByRole("button", { name: "时间统计时间范围：2026年3月" }).click();
     const timePicker = page.getByRole("dialog", { name: "时间统计时间范围选择器" });
-    await expect(timePicker).toBeVisible();
-    await timePicker.getByRole("button", { name: "四月" }).click();
+    await recordLatency({
+      operationId: "cost-statistics.set-time-view-april",
+      visibleLabel: "时间统计时间范围：2026年3月 -> 四月",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "时间统计时间范围：2026年3月" }).click();
+      await expect(timePicker).toBeVisible();
+      await timePicker.getByRole("button", { name: "四月" }).click();
+      await mark("apiLatencyMs", aprilResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-101" })).toBeVisible());
+    });
     expect((await aprilResponse).status()).toBe(200);
-    await expect(page.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-101" })).toBeVisible();
 
-    await page.getByRole("button", { name: "按项目" }).click();
-    await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
-    await page.getByRole("button", { name: "项目统计时间范围：全部时间" }).click();
+    await recordLatency({
+      operationId: "cost-statistics.switch-project-view",
+      visibleLabel: "按项目",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "按项目" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "项目统计时间范围：全部时间" })).toBeVisible());
+    });
     const projectPicker = page.getByRole("dialog", { name: "项目统计时间范围选择器" });
-    await expect(projectPicker).toBeVisible();
-    await projectPicker.getByRole("button", { name: "2026年" }).click();
-    await expect(page.getByRole("button", { name: "项目统计时间范围：2026年" })).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.set-project-view-year",
+      visibleLabel: "项目统计时间范围：全部时间 -> 2026年",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "项目统计时间范围：全部时间" }).click();
+      await expect(projectPicker).toBeVisible();
+      await projectPicker.getByRole("button", { name: "2026年" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "项目统计时间范围：2026年" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "项目统计时间范围：2026年" })).toBeVisible());
+    });
 
-    await page.getByRole("button", { name: "按银行" }).click();
-    await expect(page.getByRole("heading", { name: "按银行统计" })).toBeVisible();
-    await page.getByRole("button", { name: "银行统计时间范围：全部时间" }).click();
+    await recordLatency({
+      operationId: "cost-statistics.switch-bank-view",
+      visibleLabel: "按银行",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "按银行" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按银行统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "银行统计时间范围：全部时间" })).toBeVisible());
+    });
     const bankPicker = page.getByRole("dialog", { name: "银行统计时间范围选择器" });
-    await expect(bankPicker).toBeVisible();
-    await bankPicker.getByRole("button", { name: "四月" }).click();
-    await expect(page.getByRole("button", { name: "银行统计时间范围：2026年4月" })).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.set-bank-view-april",
+      visibleLabel: "银行统计时间范围：全部时间 -> 四月",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "银行统计时间范围：全部时间" }).click();
+      await expect(bankPicker).toBeVisible();
+      await bankPicker.getByRole("button", { name: "四月" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "银行统计时间范围：2026年4月" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /平安银行 账户 8821/ })).toBeVisible());
+    });
     await expect(page.getByRole("button", { name: /平安银行 账户 8821/ })).toBeVisible();
 
-    await page.getByRole("button", { name: "按费用类型" }).click();
-    await expect(page.getByRole("heading", { name: "按费用类型统计" })).toBeVisible();
-    await page.getByRole("button", { name: "费用类型统计时间范围：2026年3月" }).click();
+    await recordLatency({
+      operationId: "cost-statistics.switch-expense-view",
+      visibleLabel: "按费用类型",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "按费用类型" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按费用类型统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "费用类型统计时间范围：2026年3月" })).toBeVisible());
+    });
     const expensePicker = page.getByRole("dialog", { name: "费用类型统计时间范围选择器" });
-    await expect(expensePicker).toBeVisible();
-    await expensePicker.getByRole("button", { name: "2026年" }).click();
-    await expect(page.getByRole("button", { name: "费用类型统计时间范围：2026年" })).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.set-expense-view-year",
+      visibleLabel: "费用类型统计时间范围：2026年3月 -> 2026年",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "费用类型统计时间范围：2026年3月" }).click();
+      await expect(expensePicker).toBeVisible();
+      await expensePicker.getByRole("button", { name: "2026年" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "费用类型统计时间范围：2026年" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "费用类型统计时间范围：2026年" })).toBeVisible());
+    });
 
-    await page.getByRole("button", { name: "按流水标签类型" }).click();
-    await expect(page.getByRole("heading", { name: "按流水标签类型统计" })).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.switch-bank-tag-view",
+      visibleLabel: "按流水标签类型",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "按流水标签类型" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按流水标签类型统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeVisible());
+    });
     await expect(page.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeVisible();
-    await page
-      .locator(".cost-explorer-lane")
-      .filter({ has: page.getByRole("heading", { name: "主标签" }) })
-      .getByRole("button")
-      .first()
-      .click();
-    await page
-      .locator(".cost-explorer-lane")
-      .filter({ has: page.getByRole("heading", { name: "子标签" }) })
-      .getByRole("button")
-      .first()
-      .click();
-    await expect(page.getByRole("grid", { name: "流水标签对应流水表" })).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.drilldown-bank-tag",
+      visibleLabel: "主标签 / 子标签",
+      actionType: "click",
+    }, async (mark) => {
+      await page
+        .locator(".cost-explorer-lane")
+        .filter({ has: page.getByRole("heading", { name: "主标签" }) })
+        .getByRole("button")
+        .first()
+        .click();
+      await page
+        .locator(".cost-explorer-lane")
+        .filter({ has: page.getByRole("heading", { name: "子标签" }) })
+        .getByRole("button")
+        .first()
+        .click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("grid", { name: "流水标签对应流水表" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "流水标签对应流水表" })).toBeVisible());
+    });
     expect(browserErrors).toEqual([]);
   });
 
-  test("drills into project cost rows and surfaces export row-limit feedback", async ({ page }) => {
+  test("drills into project cost rows and surfaces export row-limit feedback", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const recordLatency = createCostStatisticsLatencyRecorder(page, testInfo);
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
@@ -361,56 +476,104 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-003" })).toBeVisible();
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThanOrEqual(1);
 
-    await page.getByRole("button", { name: "按项目" }).click();
-    await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.open-project-view",
+      visibleLabel: "按项目",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "按项目" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByText("云南溯源科技")).toBeVisible());
+    });
     await expect(page.getByText("云南溯源科技")).toBeVisible();
     await expect(page.getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
 
-    await page.getByRole("button", { name: /云南溯源科技/ }).first().click();
-    await page.getByRole("button", { name: /设备货款及材料费/ }).click();
-
     const projectRows = page.getByRole("grid", { name: "项目对应流水表" });
-    await expect(projectRows).toBeVisible();
-    await expect(projectRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" })).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.drilldown-project-expense",
+      visibleLabel: "云南溯源科技 / 设备货款及材料费",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: /云南溯源科技/ }).first().click();
+      await page.getByRole("button", { name: /设备货款及材料费/ }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(projectRows).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(projectRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" })).toBeVisible());
+    });
 
     const detailRequest = page.waitForRequest((request) =>
       requestPath(request.url()).endsWith("/api/cost-statistics/transactions/cost-txn-e2e-001"),
     );
-    await projectRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" }).click();
-    expect(new URL((await detailRequest).url()).searchParams.get("project_scope")).toBe("active");
+    const detailResponse = page.waitForResponse(getResponse("/api/cost-statistics/transactions/cost-txn-e2e-001"));
     const detailDialog = page.getByRole("dialog", { name: "流水详情" });
-    await expect(detailDialog).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.open-project-transaction-detail",
+      visibleLabel: "查看流水 cost-txn-e2e-001",
+      actionType: "click",
+    }, async (mark) => {
+      await projectRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" }).click();
+      await mark("apiLatencyMs", detailResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(detailDialog).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(detailDialog.getByText("浏览器成本统计明细").first()).toBeVisible());
+    });
+    expect(new URL((await detailRequest).url()).searchParams.get("project_scope")).toBe("active");
     await expect(detailDialog.getByText("PLC 模块采购").first()).toBeVisible();
-    await expect(detailDialog.getByText("浏览器成本统计明细").first()).toBeVisible();
-    await detailDialog.getByRole("button", { name: "关闭" }).click();
-    await expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0);
+    await recordLatency({
+      operationId: "cost-statistics.close-transaction-detail",
+      visibleLabel: "关闭",
+      actionType: "click",
+    }, async (mark) => {
+      await detailDialog.getByRole("button", { name: "关闭" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0));
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0));
+    });
 
-    await page.getByRole("button", { name: "导出中心" }).click();
     const exportDialog = page.getByRole("dialog", { name: "导出中心" });
-    await expect(exportDialog).toBeVisible();
-    await expect(exportDialog.getByText("项目选择")).toBeVisible();
+    await recordLatency({
+      operationId: "cost-statistics.open-project-export-center",
+      visibleLabel: "导出中心",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "导出中心" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(exportDialog).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(exportDialog.getByText("项目选择")).toBeVisible());
+    });
 
     const previewRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
       return url.pathname.endsWith("/api/cost-statistics/export-preview")
         && url.searchParams.get("view") === "project";
     });
-    await exportDialog.getByRole("button", { name: "仅预览" }).click();
+    const previewResponse = page.waitForResponse(getResponse("/api/cost-statistics/export-preview"));
+    await recordLatency({
+      operationId: "cost-statistics.preview-project-export",
+      visibleLabel: "仅预览",
+      actionType: "click",
+    }, async (mark) => {
+      await exportDialog.getByRole("button", { name: "仅预览" }).click();
+      await mark("apiLatencyMs", previewResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(exportDialog.getByRole("table", { name: "导出预览表" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(exportDialog.getByText("预计导出 3 条流水")).toBeVisible());
+    });
     const previewUrl = new URL((await previewRequest).url());
     expect(previewUrl.searchParams.get("project_scope")).toBe("active");
     expect(previewUrl.searchParams.getAll("project_name")).toContain("云南溯源科技");
     expect(previewUrl.searchParams.getAll("expense_type")).toContain("设备货款及材料费");
-    await expect(exportDialog.getByRole("table", { name: "导出预览表" })).toBeVisible();
-    await expect(exportDialog.getByText("预计导出 3 条流水")).toBeVisible();
-
     const exportResponse = page.waitForResponse((response) =>
       response.url().includes("/api/cost-statistics/export")
         && response.request().method() === "GET",
     );
-    await exportDialog.getByRole("button", { name: "导出" }).click();
+    await recordLatency({
+      operationId: "cost-statistics.project-export-row-limit",
+      visibleLabel: "导出",
+      actionType: "click",
+    }, async (mark) => {
+      await exportDialog.getByRole("button", { name: "导出" }).click();
+      await mark("apiLatencyMs", exportResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(exportDialog.getByText("导出结果超过 20000 行，请缩小筛选范围后重试。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(exportDialog.getByText("导出结果超过 20000 行，请缩小筛选范围后重试。")).toBeVisible());
+    });
     expect((await exportResponse).status()).toBe(400);
-    await expect(exportDialog.getByText("导出结果超过 20000 行，请缩小筛选范围后重试。")).toBeVisible();
     expect(api.count("GET /api/cost-statistics/export-preview")).toBe(1);
     expect(api.count("GET /api/cost-statistics/export")).toBe(1);
   });

@@ -655,13 +655,23 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         with (
             patch.object(self.app, "_invalidate_cost_statistics_read_models") as invalidate_all,
-            patch.object(self.app, "_invalidate_cost_statistics_read_model_scopes") as invalidate_scopes,
+            patch.object(self.app, "_execute_derived_data_lifecycle_event", return_value={}) as lifecycle_event,
         ):
             response = self.app.handle_request("POST", "/imports/confirm", json.dumps({"batch_id": batch_id}))
 
         self.assertEqual(response.status_code, 200)
         invalidate_all.assert_not_called()
-        invalidate_scopes.assert_called_once_with(["2026-03"], reason="import_state_changed")
+        lifecycle_event.assert_called_once()
+        self.assertEqual(lifecycle_event.call_args.args, ("import_state_changed",))
+        self.assertEqual(lifecycle_event.call_args.kwargs["scope_keys"], ["2026-03"])
+        self.assertFalse(lifecycle_event.call_args.kwargs["include_all"])
+        self.assertEqual(
+            lifecycle_event.call_args.kwargs["domain_scope_keys"]["cost_statistics_read_model"],
+            ["2026-03"],
+        )
+        payload = json.loads(response.body)
+        self.assertIn({"read_model_key": "cost_statistics", "scope_key": "active:2026-03"}, payload["operation_barrier_targets"])
+        self.assertIn({"read_model_key": "cost_statistics", "scope_key": "all:2026-03"}, payload["operation_barrier_targets"])
 
     def test_get_cost_statistics_routes_return_expected_shapes(self) -> None:
         from fin_ops_platform.domain.enums import BatchType

@@ -8,6 +8,8 @@ import {
   type Request,
 } from "@playwright/test";
 
+export type { Download, TestInfo } from "@playwright/test";
+
 type BrowserDiagnostic = {
   category: string;
   detail: string;

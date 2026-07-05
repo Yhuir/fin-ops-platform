@@ -28,7 +28,7 @@
 
 ## 当前边界
 
-`bank_account_balance` 是 Bank Details accounts 视图使用的独立 read model。余额金额、余额 freshness 和 balance read model status 不能由 `bank_detail` rows 替代；交易数量可以在页面筛选范围内参考 bank detail rows。
+`bank_account_balance` 是 Bank Details accounts 视图使用的独立 read model。余额金额、余额 freshness 和 balance read model status 不能由 `bank_detail` rows 替代；交易数量可以在页面筛选范围内参考 bank detail rows。Worker 重建使用账户级 SQL 投影和批量写入，不允许恢复为 Python 全量流水聚合。
 
 当前 worker、storage 和 gateway scope policy 只支持 `bank_account_balance:all`。后续不能直接引入 month/account scope，除非先完成新的 scope contract 设计、worker/storage/operation-barrier/test 更新。
 
@@ -40,8 +40,8 @@
 - Derived lifecycle response assembly 已通过 `BankAccountBalanceDerivedLifecycleExecutor` 移出 Application。
 - `bank_account_balance:all` 是当前唯一 publish scope；`ReadModelRefreshGateway` 已通过 all-only scope policy 拒绝 month/account/active scope。
 - dedicated `bank_account_balance:all` operation barrier regression 已补齐。
-- 本地实现支持已通过 closure audit accounted；未发现剩余本地 implementation gap。
-- 真实 PostgreSQL/worker/App Status/high-row/browser evidence 尚未闭环。
+- 2026-07-05 性能修复已把 projection 改为账户级 SQL 聚合、repository 批量写入，并为 stale source-version event 增加 skip；PostgreSQL hot-path index 由 `0089_read_model_performance_hot_paths.sql` 提供。
+- 真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍需发布后复测闭环。
 
 ## 本目录文件
 

@@ -2442,6 +2442,7 @@ export default function EtcTicketManagementPage() {
                     ? `金额 ${formatMoney(rowAmount)} 元`
                     : `${batch.invoiceCount} 张 / ${formatMoney(batch.totalAmount)} 元`;
                   const displayTitle = batchDisplayTitle(batch);
+                  const rowExternalBatchId = businessBatch?.externalEtcBatchId || batch.externalBatchId;
                   const titleEditable = Boolean(canMutateData && activeStatus === "unsubmitted" && businessBatch);
                   const titleEditing = Boolean(businessBatch && editingBatchTitleId === businessBatch.businessBatchId);
                   const titleSaving = Boolean(businessBatch && titleSavingBatchId === businessBatch.businessBatchId);
@@ -2533,6 +2534,7 @@ export default function EtcTicketManagementPage() {
                           </StatusChip>
                         </span>
                         <span className="etc-batch-fields">
+                          {rowExternalBatchId ? <span>批次号 {rowExternalBatchId}</span> : null}
                           <span>{rowCountText}</span>
                           <span>{rowAmountText}</span>
                           {businessBatch?.importAttempts.length ? <span>导入记录 {businessBatch.importAttempts.length} 次</span> : <span>{batch.plateCount} 个车牌</span>}

@@ -15,6 +15,10 @@
 | `APP-SHELL-E2E-009` | `covered` | `web/src/test/PageSessionStateContext.test.tsx`、`web/src/test/useFinanceTableSession.test.tsx` | 覆盖 page/state/user/version/TTL/session storage fallback 和 table session 恢复。 |
 | `APP-SHELL-E2E-010` | `covered` | `web/src/test/App.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/app-shell.spec.ts` | 覆盖 shell 中 App Status 展示和 route 切换不替代页面 freshness。 |
 
+## Operation latency baseline
+
+`web/e2e/app-shell.spec.ts` 和 `web/e2e/app-shell-responsive.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的 shell 操作覆盖：admin/read-export/forbidden/expired 进入系统状态 route、移动视口打开 `主导航菜单`、从抽屉点击 `设置` 后导航并关闭抽屉、打开 `?embedded=oa` embedded shell，以及点击 `展开菜单` 后显示折叠菜单。
+
 ## 缺口分类
 
 | 缺口 | 分类 | 处理方式 |

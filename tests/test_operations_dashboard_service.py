@@ -247,6 +247,43 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(payload["data_inventory"]["import_events"], [])
         self.assertIn("import_events_unknown", payload["freshness"]["warnings"])
 
+    def test_default_dashboard_runtime_metrics_do_not_block_on_rabbitmq_management(self) -> None:
+        class RuntimeOnlyConnection(FakeDashboardConnection):
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized and "pending_count" in normalized:
+                    return {
+                        "pending_count": 0,
+                        "publishing_count": 0,
+                        "failed_count": 0,
+                        "publish_failed_count": 0,
+                        "oldest_pending_age_seconds": None,
+                    }
+                if "from read_model.workbench_generations" in normalized and "consistency_status" in normalized:
+                    return {"inconsistent_count": 0}
+                return super().fetch_one(sql, params)
+
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "metric_windows(window_name" in normalized:
+                    return []
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return []
+                if "from job.runtime_worker_heartbeats" in normalized:
+                    return []
+                return super().fetch_all(sql, params)
+
+        service = OperationsDashboardService(
+            RuntimeOnlyConnection(),
+            api_performance_recorder=ApiPerformanceRecorder(),
+        )
+
+        payload = service.build_payload()
+
+        self.assertTrue(payload["runtime_performance"]["queues"])
+        self.assertEqual(payload["runtime_performance"]["queues"][0]["status"], "unknown")
+        self.assertIn("rabbitmq_metrics_unavailable", payload["freshness"]["warnings"])
+
     def test_runtime_repository_outputs_unknown_queue_rows_when_rabbitmq_metrics_unavailable(self) -> None:
         class EmptyConnection:
             def fetch_one(self, sql: str, params: tuple[object, ...] = ()):

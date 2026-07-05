@@ -14,6 +14,10 @@
 | `IMPORT-BANK-E2E-008` | `covered` | `web/e2e/permissions-role-matrix.spec.ts`、`web/src/test/ImportCenterPage.test.tsx` | Browser role matrix 覆盖 read-export 用户不能上传/预览/确认。 |
 | `IMPORT-BANK-E2E-009` | `external-risk` | `tests/test_write_operation_slo_audit.py`、`fin_ops_platform.tools.write_operation_slo_audit --operation bank_import_confirmed` staging gate | 本地契约测试已保护银行导入后 `import_state_changed` 产生 Workbench、Workbench relation、invoice lifecycle、search、待找发票、OA 待付款、银行账户余额和成本统计 refresh scopes，并保护银行明细真实 `bank_detail.read_model.refresh`。银行导入不命中进项/销项发票方向页时，`input_invoice_usage` / `output_invoice_collection` 在审计中允许为 `skipped`。真实 PostgreSQL/RabbitMQ/Redis/systemd import worker、账户余额 API fresh gate、真实大文件和真实 Workbench matching 仍需 staging 或生产只读 smoke。 |
 
+## Operation latency baseline
+
+`web/e2e/imports-bank-transactions-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的操作覆盖：打开银行流水导入页、选择银行流水文件、选择银行账户映射、开始预览、打开银行账户冲突确认、取消冲突确认、再次确认冲突导入、普通确认导入、损坏文件未导入项 tab、损坏文件混合导入确认、慢预览首个禁用反馈、preview stale 确认错误、confirm server error、导入后进入银行明细 fresh 账户余额，以及进入成本统计并切换项目/费用类型验证导入成本证据。
+
 ## 下一轮补测建议
 
 1. 在 staging 跑真实基础设施 smoke：真实 worker drain、`FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`、银行明细 `bank_detail.read_model.refresh` drain、银行账户余额 `bank_account_balance.read_model.refresh` drain、账户余额 API fresh gate、job retry/crash、Workbench matching、银行明细/账户余额 fresh，以及成本统计真实 worker 完成后的 fresh 结果。

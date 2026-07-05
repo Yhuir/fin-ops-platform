@@ -706,9 +706,10 @@ def test_bank_flow_rule_batch_read_model_queries_dedicated_table_without_relatio
         {"month": "2026-03", "relation_mode": "bank_flow_rule_batch"}
     )
 
-    read_sql = [sql for sql, _ in connection.fetched_all]
+    read_sql = [*(sql for sql, _ in connection.fetched_all), *(sql for sql, _ in connection.fetched_one)]
     assert any("from read_model.bank_flow_rule_batch_rows" in sql for sql in read_sql)
     assert any("batch_id = %s" in sql for sql in read_sql)
+    assert any("count(distinct source_versions)" in sql for sql in read_sql)
     assert not any("from read_model.no_oa_bank_batch_rows" in sql for sql in read_sql)
     assert not any("payload->>'relation_mode'" in sql for sql in read_sql)
 

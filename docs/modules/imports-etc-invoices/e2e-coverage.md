@@ -16,6 +16,10 @@
 | `IMPORT-ETC-E2E-010` | `covered` | `web/e2e/imports-etc-invoices-flow.spec.ts`、`tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、下游模块 API/read model tests | Browser 覆盖 ETC confirm 后 ETC 票据批次、税金抵扣和成本统计下游页面以 fresh read model 展示导入证据，并在下游成功节点检查没有导入失败、后台导入失败或 read model 失败等可见错误残留；后端覆盖 lifecycle scope、Workbench/search/historical repair scope 和 worker registry。search 当前无独立前端 route；真实 worker drain、对象存储和历史修复最终 fresh 归入 `IMPORT-ETC-E2E-011` 的 external-risk。 |
 | `IMPORT-ETC-E2E-011` | `external-risk` | `tests/test_write_operation_slo_audit.py`、`fin_ops_platform.tools.write_operation_slo_audit --operation etc_import_confirmed` staging gate | 本地契约测试已保护 ETC 导入后 `etc_invoice_import_confirm` 产生 Workbench、Workbench relation、invoice lifecycle、tax offset 和 cost statistics refresh scopes。真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实对象存储、真实 OA 草稿、真实大 zip、search cache clear 和下游 read model freshness 仍需 staging 或生产只读 smoke。 |
 
+## Operation latency baseline
+
+`web/e2e/imports-etc-invoices-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的操作覆盖：打开 ETC 发票导入页、选择 ready ETC 对账任务、选择 zip 文件、开始预览、确认导入 background job、preview stale 确认错误、stale reconciliation task preview 清空、confirm server error，以及导入后进入 ETC 票据管理、税金抵扣和成本统计 fresh 页面；成本统计继续记录按项目、打开 ETC 成本项目和打开通行费费用类型的响应耗时。
+
 ## 下一轮补测建议
 
 1. 在 staging 跑真实基础设施 smoke：真实 ETC zip -> confirm job -> import worker -> `write_operation_slo_audit --operation etc_import_confirmed` -> derived lifecycle worker -> Workbench/tax/cost/search fresh。

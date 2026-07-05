@@ -461,29 +461,24 @@ class WorkbenchWriteFacade:
             )
 
         try:
-            requested_row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        except KeyError as exc:
-            row_id = str(exc.args[0] if exc.args else "").strip()
-            return WorkbenchWriteResult(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "workbench_row_not_found",
-                    "message": f"所选关联台记录不可用，请刷新后重试。{f' row_id={row_id}' if row_id else ''}",
-                    "row_id": row_id,
-                },
-            )
-        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=requested_row_types, month=month):
-            return WorkbenchWriteResult(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_confirm_link_request",
-                    "message": "confirm link requires rows from at least two panes.",
-                },
-            )
-        try:
+            selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
+            rows_by_type = self._rows_by_type(selected_rows)
+            requested_row_types = self._row_types_from_rows(row_ids, selected_rows, month=month)
+            amount_check = self._amount_check_for_rows_by_type(rows_by_type)
+            if not self._can_confirm_link_resolved_selection(row_types=requested_row_types, amount_check=amount_check):
+                return WorkbenchWriteResult(
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "error": "invalid_confirm_link_request",
+                        "message": "confirm link requires rows from at least two panes.",
+                    },
+                )
             row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
-            row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-            amount_check = self._amount_check_for_row_ids(row_ids, month=month, allow_direct=False)
+            if set(row_ids) != {str(row.get("id") or "") for row in selected_rows}:
+                selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
+                rows_by_type = self._rows_by_type(selected_rows)
+                amount_check = self._amount_check_for_rows_by_type(rows_by_type)
+            row_types = self._row_types_from_rows(row_ids, selected_rows, month=month)
         except KeyError as exc:
             row_id = str(exc.args[0] if exc.args else "").strip()
             return WorkbenchWriteResult(
@@ -515,18 +510,6 @@ class WorkbenchWriteFacade:
 
         resolved_case_id = case_id or self._next_case_id()
         before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
-        try:
-            selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=False)
-        except KeyError as exc:
-            row_id = str(exc.args[0] if exc.args else "").strip()
-            return WorkbenchWriteResult(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "workbench_row_not_found",
-                    "message": f"所选关联台记录不可用，请刷新后重试。{f' row_id={row_id}' if row_id else ''}",
-                    "row_id": row_id,
-                },
-            )
         internal_transfer_status = self._bank_only_internal_transfer_confirm_status(
             row_ids=row_ids,
             row_types=row_types,
@@ -3608,6 +3591,31 @@ class WorkbenchWriteFacade:
             if row_type in rows_by_type:
                 rows_by_type[row_type].append(row)
         return rows_by_type
+
+    def _row_types_from_rows(
+        self,
+        row_ids: list[str],
+        rows: list[dict[str, object]],
+        *,
+        month: str,
+    ) -> list[str]:
+        rows_by_id = {str(row.get("id") or ""): row for row in rows}
+        row_types = [str(rows_by_id.get(row_id, {}).get("type") or "unknown") for row_id in row_ids]
+        if "unknown" not in row_types:
+            return row_types
+        fallback_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+        return [fallback_types[index] if row_type == "unknown" and index < len(fallback_types) else row_type for index, row_type in enumerate(row_types)]
+
+    @staticmethod
+    def _can_confirm_link_resolved_selection(
+        *,
+        row_types: list[str],
+        amount_check: dict[str, object],
+    ) -> bool:
+        known_types = {str(row_type).strip() for row_type in row_types if str(row_type).strip() and row_type != "unknown"}
+        if len(known_types) >= 2:
+            return True
+        return known_types == {"bank"} and str(amount_check.get("status") or "") == "matched" and not amount_check.get("requires_note")
 
     def _personal_advance_repayment_amount_summary(self, rows: list[dict[str, object]]) -> dict[str, str]:
         oa_total = Decimal("0.00")

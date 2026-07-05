@@ -13,6 +13,12 @@
 | `OA-PENDING-E2E-007` | `covered` | `web/e2e/oa-pending-payments-bank-link-flow.spec.ts`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`tests/test_oa_pending_payment_command_service.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_workbench_relation_sql_projection.py` | Browser 已覆盖进行中 OA 勾选、关联支出流水抽屉已配对/已关联进行中 OA 禁选、relation_status 筛选、提交 body、rows/read model 重新请求后 `已写回`、无人工写回按钮，以及 409 失败可见且不半写；Vitest/API/command 测试锁定抽屉候选请求携带已选 `oa_row_ids`，后端返回全部支出流水候选池并按全部、未配对、已配对、已关联进行中 OA 分类筛选；Vitest 锁定候选超过首屏时可分页浏览且翻页不丢 `oa_row_ids` / relation status；后端测试锁定 link-bank 创建 OA 待付款独立 pending relation 和 bank claim，不写 Workbench active relation，并锁定 Workbench active generation 和 relation projection 排除 active pending bank claim；Vitest 锁定 link-bank 成功后等待 `oa_pending_payment` operation barrier 再刷新 rows。真实 worker drain 仍归入 staging documented-risk。 |
 | `OA-PENDING-E2E-008` | `covered` | `web/e2e/oa-pending-payments-nonfresh-flow.spec.ts`、`web/e2e/oa-pending-payments-flow.spec.ts`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`tests/test_oa_pending_payment_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | Browser 已覆盖 rows `refreshing` 不显示真实空态、不泄露 stale reason，以及 detail 202 时 drawer 显示“详情暂不可用”；也覆盖 rows 暂时 503 时错误态不伪空态、手动刷新恢复 fresh rows。真实 worker drain 仍归入 staging documented-risk。 |
 
+## Operation latency baseline
+
+本轮已为 `web/e2e/oa-pending-payments-flow.spec.ts`、`web/e2e/oa-pending-payments-confirm-paid-flow.spec.ts`、`web/e2e/oa-pending-payments-bank-link-flow.spec.ts`、`web/e2e/oa-pending-payments-nonfresh-flow.spec.ts` 和 `web/e2e/workbench-relations-oa-pending-fanout.spec.ts` 接入 Playwright `operation-latency-*.json` 附件。
+
+当前记录的操作覆盖：rows 加载失败后的刷新重试、搜索、支付状态/项目/发票方筛选打开和应用、交易时间排序、OA/流水/发票详情打开关闭、规则 drawer 打开、切换进行中 OA、逐行写回成功/失败、进行中 OA 勾选、关联支出流水 drawer、候选 relation_status 筛选、候选勾选、确认关联成功/失败、失败后关闭 drawer、rows/detail non-fresh 诊断页面打开、detail unavailable 打开，以及 Workbench confirm 后回到 OA 待付款刷新。
+
 ## 下一轮补测建议
 
 1. 补真实基础设施 smoke：真实 OA Mongo/MySQL、PostgreSQL、RabbitMQ/Redis 和 `invoice-usage-collection` worker drain 下的 rows/detail non-fresh 恢复、逐行 `writeback-paid` 写回、link-bank 自动写回闭环。

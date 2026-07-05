@@ -4,7 +4,7 @@
 
 | Spec ID | 状态 | 当前覆盖 | 缺口/说明 |
 | --- | --- | --- | --- |
-| `APP-HEALTH-E2E-001` | `covered` | `web/e2e/app-shell.spec.ts`、`web/src/test/AppHealthOperationsPage.test.tsx`、`tests/test_app_health_api.py` | Browser 覆盖 admin shell、主导航、系统状态 active link、dashboard 标题、数据/请求区、刷新按钮和 dashboard API 调用；组件/API 覆盖 dashboard payload shape。 |
+| `APP-HEALTH-E2E-001` | `covered` | `web/e2e/app-shell.spec.ts`、`web/src/test/AppHealthOperationsPage.test.tsx`、`tests/test_app_health_api.py` | Browser 覆盖 admin shell、主导航、系统状态 active link、dashboard 标题、数据/请求区、刷新按钮、点击刷新后的 dashboard API 调用和后台区稳定渲染；组件/API 覆盖 dashboard payload shape。 |
 | `APP-HEALTH-E2E-002` | `covered` | `web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`web/src/test/AppHealthOperationsPage.test.tsx`、`tests/test_app_health_api.py` | Browser 覆盖 read-export 用户看到 admin-only 提示、dashboard 不渲染、protected dashboard API 零调用；后端/API 覆盖 admin-only contract。 |
 | `APP-HEALTH-E2E-003` | `covered` | `web/e2e/app-shell.spec.ts`、`web/src/test/SessionGate.test.tsx`、session/auth API tests | Browser 覆盖 forbidden 和 expired session gate、dashboard 不渲染和 protected dashboard API 零调用。 |
 | `APP-HEALTH-E2E-004` | `covered` | `web/e2e/app-shell.spec.ts` | 四条 Browser 路径均捕获 `pageerror`、`console.error`、非 abort `requestfailed` 和未预期 dialog。 |
@@ -14,6 +14,10 @@
 | `APP-HEALTH-E2E-008` | `covered` | `tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 registry-derived worker/domain/read model/job/dependency、deploy examples 和 runtime boundary guards；新增 registry 项必须补测试。 |
 | `APP-HEALTH-E2E-009` | `covered` | `web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/AppHealthBroadcast.test.tsx` | 覆盖 dashboard refresh failure stale payload、App Status route independence、SSE/轮询和 BroadcastChannel sync。 |
 | `APP-HEALTH-E2E-010` | `external-risk` | `bash scripts/verify.sh infra-smoke` staging gate、runtime/read-model/write-operation/RabbitMQ tool tests；当前生产 release 已补 health ready、runtime health、critical read model direct apply、user-level session 和 SSE 证据。 | 本地 contract 覆盖 API/UI/gate 语义；真实 RabbitMQ/Redis broker 采样、admin dashboard auth、user-level HTTP 4 个慢项和 controlled write-operation E2E 仍必须在 staging/runtime smoke 验证。 |
+
+## Operation latency baseline
+
+`web/e2e/app-shell.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的系统状态操作覆盖：admin 打开 `/operations/app-health` 并等待 dashboard API/标题/请求区、点击 `刷新` 并等待 dashboard API 和后台区稳定、`read_export_only` 进入 admin-only gate、forbidden session gate，以及 expired session gate。真实生产 admin dashboard、SSE、RabbitMQ/Redis/systemd 和 controlled write-operation 仍归 `APP-HEALTH-E2E-010` 的 external-risk。
 
 ## 下一轮补测建议
 

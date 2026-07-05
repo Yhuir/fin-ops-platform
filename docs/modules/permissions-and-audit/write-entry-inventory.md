@@ -75,6 +75,7 @@
 | `重置数据` | settings data reset |
 | `提交OA` | ETC OA draft submit |
 | `提交 OA` | ETC OA draft submit |
+| `提交审批` | ETC approval submit |
 | `提交批次` | no-OA/batch submit |
 | `人工提交` | ETC manual submit |
 
@@ -124,7 +125,7 @@
 | `etc/api.ts` | `etc-tickets`, `imports-etc-invoices` | ETC 票据管理、ETC 导入、对账和业务批次写入口。 |
 | `imports/api.ts` | `imports-bank-transactions`, `imports-invoices`, `imports-etc-invoices` | 通用导入 preview/confirm/template 写链路。 |
 | `inputInvoiceUsage/api.ts` | `input-invoice-usage` | 支付规则、OA reverse 草稿/批次/状态写入口。 |
-| `noOaBankBatches/api.ts` | `bank-flow-rule-batches` | 流水规则批量处理标签规则、提交、撤回和内部往来迁移底座写入口。 |
+| `bankFlowRuleBatches/api.ts` | `bank-flow-rule-batches` | 流水规则批量处理标签规则、提交、撤回和内部往来迁移底座写入口。 |
 | `oaPendingPayments/api.ts` | `oa-pending-payments` | OA 待付款确认写回和关联支出流水。 |
 | `operationBarrier/api.ts` | `app-health-operations` | 写操作后置 freshness barrier，用于运维/写安全闭环。 |
 | `outputInvoiceCollections/api.ts` | `output-invoice-collections` | 销项收款状态、红蓝票、收据和编号设置写入口。 |

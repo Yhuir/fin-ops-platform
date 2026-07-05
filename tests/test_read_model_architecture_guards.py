@@ -73,11 +73,6 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "read_model_status=fresh",
     ): (1, "worker rebuild publishes a freshly generated payload before writing a fresh cache envelope."),
     (
-        "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
-        "CostStatisticsRuntimeService._cache_fresh_explorer_payload",
-        "read_model_status=fresh",
-    ): (1, "runtime helper caches only freshly built cost-statistics explorer payloads."),
-    (
         "backend/src/fin_ops_platform/services/cost_tax_sql_projection.py",
         "CostStatisticsSqlProjectionBuilder._publish_cost_statistics_scope",
         "dict read_model_status=fresh",
@@ -285,12 +280,20 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
     ): "legacy HTTP/app wrapper delegates to TaxOffsetRuntimeService, which uses ReadModelRefreshGateway.",
     (
         "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
-        "CostStatisticsQueryService.get_explorer",
-    ): "production SQL repository miss delegates to CostStatisticsRuntimeService gateway wrapper.",
+        "CostStatisticsQueryService._refreshing_explorer_payload",
+    ): "production SQL explorer miss delegates to CostStatisticsRuntimeService gateway wrapper.",
+    (
+        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
+        "CostStatisticsQueryService._refreshing_month_payload",
+    ): "production SQL month miss delegates to CostStatisticsRuntimeService gateway wrapper.",
     (
         "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
         "CostStatisticsRuntimeService.enqueue_refresh_for_months",
     ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",
+    (
+        "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
+        "CostStatisticsRuntimeService.enqueue_refresh_for_scope_keys",
+    ): "runtime scope invalidation wrapper normalizes scope keys and calls same-service gateway boundary after deleting fresh-gated cache.",
     (
         "backend/src/fin_ops_platform/services/tax_offset_query_service.py",
         "TaxOffsetQueryService.get_month_payload",

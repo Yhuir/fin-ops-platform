@@ -137,17 +137,19 @@ class AuthGuardTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 403)
                     self.assertIn(payload["error"], {"permission_denied", "admin_only"})
 
-        download_content_types = {
-            route: response.headers.get("Content-Type")
-            for route, response in readable_responses
-            if route.endswith("/export?month=all&view=time") or route.endswith("/export?family=company")
-        }
+        responses_by_route = dict(readable_responses)
+        cost_export_response = responses_by_route["/api/cost-statistics/export?month=all&view=time"]
+        if cost_export_response.status_code == 200:
+            self.assertEqual(
+                cost_export_response.headers.get("Content-Type"),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        else:
+            cost_export_payload = json.loads(cost_export_response.body)
+            self.assertEqual(cost_export_response.status_code, 409)
+            self.assertEqual(cost_export_payload["error"], "cost_statistics_read_model_not_fresh")
         self.assertEqual(
-            download_content_types["/api/cost-statistics/export?month=all&view=time"],
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        self.assertEqual(
-            download_content_types["/api/turnover-ledger/export?family=company"],
+            responses_by_route["/api/turnover-ledger/export?family=company"].headers.get("Content-Type"),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 

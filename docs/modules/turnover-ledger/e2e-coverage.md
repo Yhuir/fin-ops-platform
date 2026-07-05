@@ -15,6 +15,10 @@
 | `TURNOVER-E2E-009` | `covered` | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/TurnoverLedgerApi.test.ts`、`tests/test_turnover_ledger_export_service.py`、`tests/test_turnover_ledger_api.py`、权限/session API tests | 组件/API/后端覆盖 export-preview、blob download 不 JSON parse、当前 family 参数、row-limit 结构化错误、权限拒绝和 read/export/mutation gate；真实 XLSX 打开和大文件耗时仍归 staging 风险。 |
 | `TURNOVER-E2E-010` | `external-risk` | `bash scripts/verify.sh infra-smoke` staging gate、runtime worker/read model tests、write-operation SLO audit profiles | 本地 contract 已覆盖 registry、durable queue、dirty scope、worker handler、scope policy 和 App Status；真实 PostgreSQL/RabbitMQ/Redis/systemd turnover-ledger/workbench-relation/cost/search worker drain、生产历史数据和真实网络恢复必须在 staging/runtime smoke 验证。 |
 
+## Operation latency baseline
+
+本轮已为 `web/e2e/turnover-ledger-flow.spec.ts` 接入 Playwright `operation-latency-*.json` 附件。当前记录的操作覆盖：页面打开、首屏加载失败后的刷新重试、stale 诊断下展开 group 和选择流水、标签设置 drawer 打开/勾选/保存、同组流水展开、两条流水选择、确认闭环 drawer、确认闭环 API 与 operation barrier、进入成本统计下游 fresh read model、成本统计项目下钻、回到外部往来、已闭环 group 展开、选择已闭环流水和撤回闭环 API/barrier/reload。
+
 ## 下一轮补测建议
 
 1. staging 运行真实基础设施 smoke：tag-selection、manual closure confirm、withdraw、extra 后 turnover-ledger、workbench relation、cost statistics 和 search read model drain 到 fresh。

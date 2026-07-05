@@ -1,6 +1,7 @@
-import { expect, test, type Page } from "./fixtures/strictTest";
+import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
 import { gotoAndExpectPageReady, startPageDiagnostics } from "./fixtures/pageReady";
 
 function startStrictBrowserErrorCapture(page: Page) {
@@ -27,16 +28,33 @@ function startStrictBrowserErrorCapture(page: Page) {
   return errors;
 }
 
+function createOaPendingLatencyRecorder(page: Page, testInfo: TestInfo) {
+  return createOperationLatencyRecorder(page, testInfo, {
+    route: "/oa-pending-payments",
+    pageKey: "oa-pending-payments",
+    module: "oa-pending-payments",
+  });
+}
+
 test.describe("OA pending payments read model freshness browser flow", () => {
-  test("shows rows refreshing diagnostics instead of a true empty state", async ({ page }) => {
+  test("shows rows refreshing diagnostics instead of a true empty state", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentReadModelStatus: "refreshing",
       sessionMode: "full_access",
     });
+    const recordLatency = createOaPendingLatencyRecorder(page, testInfo);
 
-    await gotoAndExpectPageReady(page, "/oa-pending-payments", "oa-pending-payments-page", { diagnostics });
+    await recordLatency({
+      operationId: "oa-pending-payments.open-refreshing-rows",
+      visibleLabel: "OA待付款核对",
+      actionType: "navigate",
+    }, async (mark) => {
+      await gotoAndExpectPageReady(page, "/oa-pending-payments", "oa-pending-payments-page", { diagnostics });
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("OA 待付款核对数据正在刷新")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeVisible());
+    });
 
     await expect(page.getByText("OA 待付款核对数据正在刷新")).toBeVisible();
     await expect(page.getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeVisible();
@@ -48,20 +66,40 @@ test.describe("OA pending payments read model freshness browser flow", () => {
     diagnostics.dispose();
   });
 
-  test("shows detail unavailable state while the detail read model refreshes", async ({ page }) => {
+  test("shows detail unavailable state while the detail read model refreshes", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentDetailReadModelRefreshing: true,
       sessionMode: "full_access",
     });
+    const recordLatency = createOaPendingLatencyRecorder(page, testInfo);
 
-    await gotoAndExpectPageReady(page, "/oa-pending-payments", "oa-pending-payments-page", { diagnostics });
+    await recordLatency({
+      operationId: "oa-pending-payments.open-detail-refreshing-page",
+      visibleLabel: "OA待付款核对",
+      actionType: "navigate",
+    }, async (mark) => {
+      await gotoAndExpectPageReady(page, "/oa-pending-payments", "oa-pending-payments-page", { diagnostics });
+      await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /浏览器付款申请人/ })).toBeVisible());
+    });
 
     const row = page.getByRole("row", { name: /浏览器付款申请人/ });
     await expect(row).toBeVisible();
-    await row.getByRole("button", { name: "查看 OA 浏览器付款申请人 详情" }).click();
-    await expect(page.getByRole("heading", { name: "OA详情" })).toBeVisible();
+    await recordLatency({
+      operationId: "oa-pending-payments.open-unavailable-oa-detail",
+      visibleLabel: "查看 OA 浏览器付款申请人 详情",
+      actionType: "click",
+    }, async (mark) => {
+      const detailResponse = page.waitForResponse((response) =>
+        response.request().method() === "GET"
+        && new URL(response.url()).pathname.endsWith("/api/oa-pending-payments/oa/oa-payment-e2e-001/detail"),
+      );
+      await row.getByRole("button", { name: "查看 OA 浏览器付款申请人 详情" }).click();
+      await mark("apiLatencyMs", detailResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "OA详情" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByText("详情暂不可用")).toBeVisible());
+    });
     await expect(page.getByText("详情暂不可用")).toBeVisible();
     await expect(page.getByText("详情数据正在刷新，请稍后重试。")).toBeVisible();
     expect(api.count("GET /api/oa-pending-payments/oa/oa-payment-e2e-001/detail")).toBe(1);

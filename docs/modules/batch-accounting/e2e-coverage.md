@@ -15,6 +15,10 @@
 | `BATCH-E2E-009` | `covered` | `web/e2e/batch-accounting-flow.spec.ts`、`web/src/test/BatchAccountingPage.test.tsx` | Browser 覆盖 1180px 窄桌面下银行 rail header、标题、说明、年份输入、分页控件不溢出且无隐藏浏览器错误；组件/CSS contract 覆盖更多布局细节。真实超大年份仍归 staging 风险。 |
 | `BATCH-E2E-010` | `external-risk` | `bash scripts/verify.sh infra-smoke` staging gate、runtime worker/read model tests、write-operation SLO audit profiles | 本地 contract 已覆盖 registry、durable queue、dirty scope、worker handler、scope policy 和 App Status；真实 PostgreSQL/RabbitMQ/Redis/systemd workbench-relation/search/cost worker drain、生产历史数据和真实网络恢复必须在 staging/runtime smoke 验证。 |
 
+## Operation latency baseline
+
+本轮已为 `web/e2e/batch-accounting-flow.spec.ts` 接入 Playwright `operation-latency-*.json` 附件。当前记录的操作覆盖：页面打开、首屏加载失败后的刷新重试、stale 诊断下选择 OA、未提交 bucket 选择两条 OA、提交批量账务 relation、`workbench_relation` operation barrier、切换已提交 bucket、打开撤回弹窗、填写撤回原因、确认撤回、撤回后的 barrier/reload，以及切回未提交 bucket。
+
 ## 下一轮补测建议
 
 1. staging 运行真实基础设施 smoke：submit/withdraw 后 workbench relation、search、cost 和下游页面 read model drain 到 fresh。

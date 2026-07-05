@@ -14,6 +14,10 @@
 | `IMPORT-INVOICE-E2E-008` | `covered` | `web/e2e/imports-invoices-flow.spec.ts`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_import_job_queue.py`、下游模块 API/read model tests | 后端覆盖 lifecycle scope；Browser 已在 confirm 后继续打开销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计，断言下游 API `read_model_status=fresh` 且页面展示导入影响行，并在每个成功节点检查没有导入失败、后台导入失败或 read model 失败等可见错误残留。search 当前无独立前端 route，由 API/runtime 证据覆盖；真实 worker drain 归入 `IMPORT-INVOICE-E2E-009` 的 external-risk。 |
 | `IMPORT-INVOICE-E2E-009` | `external-risk` | `tests/test_write_operation_slo_audit.py`、`fin_ops_platform.tools.write_operation_slo_audit --operation invoice_import_confirmed` staging gate | 本地契约测试已保护发票文件确认后的真实 durable refresh scope 期望：`import_state_changed` 覆盖 Workbench、Workbench relation、invoice lifecycle、search、待找发票、进项使用、销项收款、OA 待付款和成本统计，`invoice_file_import_confirm` 覆盖税金抵扣。真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实大文件、真实下游 read model freshness 和 App Status 进度仍需 staging 或生产只读 smoke。 |
 
+## Operation latency baseline
+
+`web/e2e/imports-invoices-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的操作覆盖：打开发票导入页、选择发票文件、选择每文件进/销项方向、开始预览、确认导入并等待 Workbench summary 刷新、损坏文件未导入项 tab、损坏文件混合导入确认、慢预览首个禁用反馈、preview stale 确认错误、confirm server error，以及导入后进入销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计 fresh 页面并继续切换项目/费用类型验证导入成本证据。
+
 ## 下一轮补测建议
 
 1. 在 staging 跑真实基础设施 smoke：真实 import worker、derived lifecycle worker、`write_operation_slo_audit --operation invoice_import_confirmed`、下游 read model drain、App Status 导入进度。

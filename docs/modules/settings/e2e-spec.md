@@ -18,7 +18,7 @@
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
 | `SETTINGS-E2E-001` | 页面 ready 和配置边界 | P0 | 进入 `/settings` 后显示设置标题、分类树和可访问 section；普通 settings payload 不包含 OA 密码、token、密文或银行自动标签写字段。 |
-| `SETTINGS-E2E-002` | 项目范围保存到成本统计 fresh fan-out | P0 | 用户把项目标记完成并保存后，请求必须包含 `completed_project_ids`；进入成本统计时 active scope 通过 fresh read model 排除已完成项目，all scope 通过 fresh read model 保留该项目和金额。 |
+| `SETTINGS-E2E-002` | 项目范围保存到成本统计 fresh fan-out | P0 | 用户把项目标记完成并保存后，请求必须包含 `completed_project_ids`；进入成本统计时页面固定 active scope 通过 fresh read model 排除已完成项目，且不暴露项目范围切换 UI。`project_scope=all` 保留为成本统计 API/read model 合同，不作为当前 settings Browser 页面入口。 |
 | `SETTINGS-E2E-003` | 数据重置双确认和 job polling | P0 | admin 选择数据重置目标后必须先确认影响，再输入 OA 密码；POST job 返回 202 后页面显示进度、轮询 job、重新读取 settings 并显示成功反馈；不得出现隐藏浏览器错误或未预期 dialog。 |
 | `SETTINGS-E2E-004` | 数据重置安全边界 | P0 | data reset 必须 admin/password gate、protected targets、active job reentry、并发 409、失败不清数据、不泄露密码；重置后旧 read model/cache 不得伪装 fresh。 |
 | `SETTINGS-E2E-005` | OA 申请人凭据独立事实源 | P0 | admin 可维护 OA 申请人凭据；settings GET/POST 和凭据列表不得回显密码、token 或密文；目标 OA token provider 只通过 credential service 取密。 |

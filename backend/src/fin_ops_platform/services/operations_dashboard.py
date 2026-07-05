@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import os
 from typing import Any, Callable
 
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder
@@ -32,7 +33,7 @@ class OperationsDashboardService:
     ) -> None:
         self._connection = connection
         self._api_performance_recorder = api_performance_recorder
-        self._runtime_repository = runtime_repository or RuntimeMonitoringRepository(connection)
+        self._runtime_repository = runtime_repository or _default_runtime_repository(connection)
 
     def build_payload(self) -> dict[str, Any]:
         warnings: list[str] = []
@@ -435,6 +436,23 @@ def _endpoint_sort_key(row: dict[str, Any]) -> tuple[int, float | str]:
     if isinstance(last_status_code, int) and last_status_code >= 400:
         return (1, -last_status_code)
     return (2, str(row.get("endpoint") or ""))
+
+
+def _default_runtime_repository(connection: Any) -> RuntimeMonitoringRepository:
+    if os.getenv("FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return RuntimeMonitoringRepository(connection)
+    return RuntimeMonitoringRepository(
+        connection,
+        rabbitmq_metrics_provider=_DashboardRabbitMqMetricsUnavailable(),
+    )
+
+
+class _DashboardRabbitMqMetricsUnavailable:
+    def summary(self) -> dict[str, Any]:
+        return {
+            "rabbitmq_management_configured": False,
+            "rabbitmq_metric_error": "dashboard_rabbitmq_metrics_skipped",
+        }
 
 
 def _inventory_block(

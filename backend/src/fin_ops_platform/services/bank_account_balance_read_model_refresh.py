@@ -17,6 +17,13 @@ class BankAccountBalanceReadModelRefreshService:
         scope_key = str(event.scope_key or event.payload.get("scope_key") or event.aggregate_id or "").strip()
         if scope_type != "bank_account_balance" or scope_key != "all":
             raise ValueError("Bank account balance refresh requires scope_type='bank_account_balance' and scope_key='all'.")
+        if not self._event_source_version_is_current(event):
+            return {
+                "scope_key": "all",
+                "skipped": True,
+                "skip_reason": "stale_source_version",
+                "source_version": event.source_version or event.payload.get("source_version"),
+            }
         rebuild = getattr(self._projection_builder, "rebuild_bank_account_balance_read_model", None)
         if not callable(rebuild):
             raise RuntimeError("Projection builder does not expose rebuild_bank_account_balance_read_model.")
@@ -30,3 +37,16 @@ class BankAccountBalanceReadModelRefreshService:
                 source_version=event.source_version or event.payload.get("source_version"),
             )
         return result if isinstance(result, dict) else {"scope_key": "all"}
+
+    def _event_source_version_is_current(self, event: RuntimeQueueEvent) -> bool:
+        is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)
+        if not callable(is_current):
+            return True
+        return bool(
+            is_current(
+                tenant_id=event.tenant_id,
+                scope_type="bank_account_balance",
+                scope_key="all",
+                source_version=event.source_version or event.payload.get("source_version"),
+            )
+        )

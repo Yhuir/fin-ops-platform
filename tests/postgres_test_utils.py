@@ -96,6 +96,11 @@ EXPECTED_MIGRATION_FILES = [
     "0082_bank_flow_rule_batch_storage.sql",
     "0083_bank_flow_rule_batch_tag_rules.sql",
     "0084_runtime_queue_history_retention.sql",
+    "0085_pending_invoice_trade_date_nulls_last_index.sql",
+    "0086_runtime_queue_claim_hot_path.sql",
+    "0087_oa_pending_payment_claim_hot_path.sql",
+    "0088_app_health_dashboard_current_effective_hot_path.sql",
+    "0089_read_model_performance_hot_paths.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
