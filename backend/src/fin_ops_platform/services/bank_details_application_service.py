@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
-from decimal import Decimal
-from enum import Enum
 import hashlib
 import json
 import re
@@ -16,7 +13,6 @@ from fin_ops_platform.services.bank_details_export_service import (
     BankDetailsExportResult,
     BankDetailsExportService,
 )
-from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
@@ -45,8 +41,6 @@ class BankDetailsApplicationService:
     def __init__(
         self,
         *,
-        import_service: Any,
-        bank_details_service: BankDetailsService,
         app_settings_service: AppSettingsService,
         bank_transaction_category_service: BankTransactionCategoryService,
         bank_transaction_auto_category_service: BankTransactionAutoCategoryService,
@@ -55,7 +49,6 @@ class BankDetailsApplicationService:
         bank_detail_sql_read_repository: Any | None,
         bank_account_balance_read_model_repository: Any | None = None,
         runtime_repositories: Any | None,
-        requires_sql_read_model_runtime: Callable[[], bool],
         affected_months_provider: Callable[[list[str]], list[str]],
         invalidate_after_category_mutation: Callable[[list[str]], bool],
         execute_derived_data_lifecycle_event: Callable[..., Any],
@@ -65,10 +58,9 @@ class BankDetailsApplicationService:
         enqueue_bank_account_balance_refresh: Callable[..., bool],
         enqueue_turnover_ledger_refresh: Callable[..., bool] | None = None,
         suggestion_provider: Callable[[str], dict[str, object] | None] | None = None,
+        bank_transaction_tags_provider: Callable[[], dict[str, object]] | None = None,
         category_mutation_side_effects: BankDetailCategoryMutationSideEffectPort | None = None,
     ) -> None:
-        self._import_service = import_service
-        self._bank_details_service = bank_details_service
         self._app_settings_service = app_settings_service
         self._bank_transaction_category_service = bank_transaction_category_service
         self._bank_transaction_auto_category_service = bank_transaction_auto_category_service
@@ -81,7 +73,6 @@ class BankDetailsApplicationService:
         self._bank_detail_sql_read_repository = bank_detail_sql_read_repository
         self._bank_account_balance_read_model_repository = bank_account_balance_read_model_repository
         self._runtime_repositories = runtime_repositories
-        self._requires_sql_read_model_runtime = requires_sql_read_model_runtime
         self._affected_months_provider = affected_months_provider
         self._invalidate_after_category_mutation = invalidate_after_category_mutation
         self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
@@ -91,14 +82,11 @@ class BankDetailsApplicationService:
         self._enqueue_bank_account_balance_refresh = enqueue_bank_account_balance_refresh
         self._enqueue_turnover_ledger_refresh = enqueue_turnover_ledger_refresh
         self._suggestion_provider = suggestion_provider
+        self._bank_transaction_tags_provider = bank_transaction_tags_provider
         self._category_mutation_side_effects = category_mutation_side_effects
 
     def accounts_payload(self, *, date_from: str | None, date_to: str | None) -> dict[str, object]:
-        if self._requires_sql_read_model_runtime():
-            sql_payload = self._accounts_from_sql_read_model(date_from=date_from, date_to=date_to)
-            if sql_payload is not None:
-                return sql_payload
-        return self._bank_details_service.list_accounts(date_from=date_from, date_to=date_to)
+        return self._accounts_from_sql_read_model(date_from=date_from, date_to=date_to)
 
     def transactions_payload(
         self,
@@ -114,22 +102,7 @@ class BankDetailsApplicationService:
         page: int,
         page_size: int,
     ) -> dict[str, object]:
-        if self._requires_sql_read_model_runtime():
-            sql_payload = self._transactions_from_sql_read_model(
-                account_key=account_key,
-                date_from=date_from,
-                date_to=date_to,
-                keyword=keyword,
-                category_code=category_code,
-                category_primary_label=category_primary_label,
-                category_sub_label=category_sub_label,
-                category_third_label=category_third_label,
-                page=page,
-                page_size=page_size,
-            )
-            if sql_payload is not None:
-                return sql_payload
-        return self._bank_details_service.list_transactions(
+        return self._transactions_from_sql_read_model(
             account_key=account_key,
             date_from=date_from,
             date_to=date_to,
@@ -736,14 +709,7 @@ class BankDetailsApplicationService:
     def _latest_auto_category_suggestion(self, transaction_id: str) -> dict[str, object] | None:
         if callable(self._suggestion_provider):
             return self._suggestion_provider(transaction_id)
-        normalized_transaction_id = str(transaction_id or "").strip()
-        transaction = self._import_service.get_transaction(normalized_transaction_id)
-        row = self._serialize_value(transaction)
-        if not isinstance(row, dict):
-            row = dict(row or {})
-        row["id"] = normalized_transaction_id
-        input_row = self._bank_details_service.auto_category_input_row(row)
-        return self._bank_transaction_auto_category_service.suggest_for_rows([input_row]).get(normalized_transaction_id)
+        return None
 
     def _scope_keys_for_range(self, *, date_from: str | None, date_to: str | None) -> list[str]:
         scope_key_loader = getattr(self._bank_detail_sql_read_repository, "bank_detail_scope_keys_for_range", None)
@@ -898,9 +864,8 @@ class BankDetailsApplicationService:
         )
 
     def _with_tag_dictionary(self, payload: dict[str, object]) -> dict[str, object]:
-        tag_loader = getattr(self._bank_details_service, "_bank_transaction_tags_payload", None)
-        if callable(tag_loader):
-            payload.setdefault("bank_transaction_tags", tag_loader())
+        if callable(self._bank_transaction_tags_provider):
+            payload.setdefault("bank_transaction_tags", self._bank_transaction_tags_provider())
         return payload
 
     def _export_accounts(self, *, date_from: str | None, date_to: str | None) -> dict[str, object]:
@@ -1054,17 +1019,3 @@ class BankDetailsApplicationService:
             return int(value)
         except (TypeError, ValueError):
             return None
-
-    @staticmethod
-    def _serialize_value(value: object) -> object:
-        if is_dataclass(value):
-            return {key: BankDetailsApplicationService._serialize_value(val) for key, val in asdict(value).items()}
-        if isinstance(value, dict):
-            return {str(key): BankDetailsApplicationService._serialize_value(val) for key, val in value.items()}
-        if isinstance(value, list):
-            return [BankDetailsApplicationService._serialize_value(item) for item in value]
-        if isinstance(value, Decimal):
-            return f"{value:.2f}"
-        if isinstance(value, Enum):
-            return value.value
-        return value

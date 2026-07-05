@@ -2,6 +2,14 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-05 - page read model-only close
+
+- 变更类型：旧代码删除 / 模块边界收口。
+- 新增/更新测试：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary`、`tests/test_bank_details_sql_runtime.py::BankDetailSqlRepositoryTests::test_application_transactions_missing_sql_scope_enqueues_refresh_without_legacy_scan`、`tests/test_turnover_workbench_integration.py::TurnoverWorkbenchIntegrationTests::test_sql_bank_detail_turnover_rows_keep_legacy_source_ids_for_manual_closure`、`tests/test_workbench_v2_api.py` 的银行明细 API/export/relation 局部回归。
+- 覆盖点：`BankDetailsApplicationService` 不得重新接收 `import_service`、`bank_details_service`、`requires_sql_read_model_runtime` 或调用 `BankDetailsService.list_accounts/list_transactions/auto_category_input_row`；页面读缺失 SQL scope 时只返回 refresh/status payload 并入队 `bank_detail` refresh；turnover 下游月份来源通过 `BankDetailAvailableMonthScopeProvider`/repository port，不允许恢复 `_bank_detail_available_month_scope_keys` 动态兼容入口；旧 workbench_v2 银行明细 HTTP 回归已迁移到显式 `bank_detail` read-model fixture，不再依赖本地 legacy fallback。
+- 验证命令：见本轮最终说明。
+- 未测风险：本轮未执行真实 PostgreSQL/RabbitMQ/Redis worker drain，也未跑浏览器 E2E；现有前端 unknown-status fail-closed、非 fresh 导出和 Browser bank-details specs 保持为既有回归入口。
+
 ## 2026-07-04 - relation tag raw Workbench fallback 删除
 
 - 变更类型：旧代码删除 / 模块边界收口。

@@ -203,6 +203,9 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
 
     def test_sql_bank_detail_turnover_rows_keep_legacy_source_ids_for_manual_closure(self) -> None:
         class SqlBankDetailRepository:
+            def bank_detail_scope_keys_for_range(self, *, date_from: str | None = None, date_to: str | None = None) -> list[str]:
+                return ["2026-02", "2026-03"]
+
             def list_bank_detail_tagged_rows_by_month(
                 self,
                 month: str,
@@ -295,7 +298,6 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             repository = SqlBankDetailRepository()
             app._bank_detail_sql_read_repository = repository
             app._requires_sql_read_model_runtime = lambda: True  # type: ignore[method-assign]
-            app._bank_detail_available_month_scope_keys = lambda: ["2026-02", "2026-03"]  # type: ignore[method-assign]
             app._app_settings_service.turnover_ledger_selected_tag_codes = lambda: ["custom_borrow_in", "custom_repaid"]  # type: ignore[method-assign]
 
             rows = app._turnover_bank_transaction_rows()

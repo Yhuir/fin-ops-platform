@@ -1733,8 +1733,7 @@ class Application:
         ]
         if not selected_codes:
             return []
-        legacy_scope_loader = getattr(self, "_bank_detail_available_month_scope_keys", None)
-        raw_scope_keys = legacy_scope_loader() if callable(legacy_scope_loader) else self._bank_detail_available_month_scope_provider().scope_keys()
+        raw_scope_keys = self._bank_detail_available_month_scope_provider().scope_keys()
         scope_keys = [str(scope_key).strip() for scope_key in list(raw_scope_keys or []) if SEARCH_MONTH_RE.match(str(scope_key).strip())]
         if not scope_keys:
             return []
@@ -9211,18 +9210,18 @@ class Application:
             ),
             audit_service=getattr(self, "_audit_service", SimpleNamespace(record_action=lambda **_kwargs: None)),
         )
+        category_store = getattr(self, "_state_store", None)
+        if not callable(getattr(category_store, "save_bank_transaction_categories", None)):
+            category_store = None
         return BankDetailsApplicationService(
-            import_service=getattr(self, "_import_service", SimpleNamespace(get_transaction=lambda transaction_id: (_ for _ in ()).throw(KeyError(transaction_id)))),
-            bank_details_service=getattr(self, "_bank_details_service", SimpleNamespace(list_accounts=lambda **_kwargs: {}, list_transactions=lambda **_kwargs: {}, _bank_transaction_tags_payload=lambda: {})),
             app_settings_service=getattr(self, "_app_settings_service", SimpleNamespace(get_bank_auto_tag_rules_payload=lambda **_kwargs: {"version": 1, "active_rules": []})),
             bank_transaction_category_service=getattr(self, "_bank_transaction_category_service", SimpleNamespace(snapshot=lambda: {})),
             bank_transaction_auto_category_service=getattr(self, "_bank_transaction_auto_category_service", SimpleNamespace(current_rule_version=lambda: 1, suggest_for_rows=lambda _rows: {})),
             audit_service=getattr(self, "_audit_service", SimpleNamespace(record_action=lambda **_kwargs: None)),
-            bank_transaction_category_store=self._state_store,
+            bank_transaction_category_store=category_store,
             bank_detail_sql_read_repository=getattr(self, "_bank_detail_sql_read_repository", None),
             bank_account_balance_read_model_repository=getattr(self, "_bank_account_balance_sql_read_repository", None),
             runtime_repositories=getattr(self, "_runtime_repositories", None),
-            requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
             affected_months_provider=getattr(self, "_bank_transaction_category_affected_months", lambda _transaction_ids: []),
             invalidate_after_category_mutation=getattr(self, "_invalidate_workbench_after_bank_transaction_categories", lambda _affected_months: False),
             execute_derived_data_lifecycle_event=getattr(self, "_execute_derived_data_lifecycle_event", lambda *_args, **_kwargs: None),
@@ -9240,6 +9239,11 @@ class Application:
             enqueue_bank_account_balance_refresh=self._bank_account_balance_read_model_refresh_producer().enqueue_all,
             enqueue_turnover_ledger_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
+            bank_transaction_tags_provider=getattr(
+                getattr(self, "_bank_details_service", None),
+                "_bank_transaction_tags_payload",
+                lambda: {},
+            ),
             category_mutation_side_effects=category_mutation_side_effects,
         )
 

@@ -2252,6 +2252,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         server_tree = _parse(server_path)
         service_source = (SERVICES_ROOT / "bank_details_application_service.py").read_text(encoding="utf-8")
         service_tree = _parse(SERVICES_ROOT / "bank_details_application_service.py")
+        service_class = _class_source(service_tree, service_source, "BankDetailsApplicationService")
         violations: list[str] = []
 
         removed_application_helpers = {
@@ -2289,6 +2290,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for helper_name in sorted(required_service_helpers):
             if not _function_source(service_tree, service_source, helper_name):
                 violations.append(f"BankDetailsApplicationService is missing bank detail read/cache owner {helper_name}")
+        for forbidden_snippet in (
+            "import_service:",
+            "_import_service",
+            "bank_details_service:",
+            "_bank_details_service",
+            "BankDetailsService",
+            "requires_sql_read_model_runtime",
+            ".list_accounts(",
+            ".list_transactions(",
+            ".auto_category_input_row(",
+        ):
+            if forbidden_snippet in service_class:
+                violations.append(f"BankDetailsApplicationService still owns legacy bank detail I/O fallback {forbidden_snippet}")
 
         producer_source = (SERVICES_ROOT / "bank_detail_read_model_refresh_producer.py").read_text(encoding="utf-8")
         producer_tree = _parse(SERVICES_ROOT / "bank_detail_read_model_refresh_producer.py")
@@ -2353,6 +2367,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("BankDetailsApplicationService factory does not build the explicit bank detail suggestion provider")
         if "BankDetailAvailableMonthScopeProvider(" not in server_source:
             violations.append("server.py does not build the explicit bank detail available-month scope provider")
+        if 'getattr(self, "_bank_detail_available_month_scope_keys"' in server_source:
+            violations.append("server.py still allows the removed bank detail available-month scope helper")
         if "BankDetailDerivedLifecycleExecutor(" not in server_source:
             violations.append("server.py does not build the explicit bank detail derived lifecycle executor")
         if '"bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute' not in server_source:

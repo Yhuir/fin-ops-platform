@@ -5,6 +5,7 @@
 
 ## 当前决策
 
+- 银行明细模块化状态为 closed：页面读只走 read model/query port，缺失或非 fresh 统一 fail-closed 返回 freshness/status，不再同步扫描导入事实或 `BankDetailsService`。
 - 银行明细测试覆盖 P0 的自动标签规则、候选确认、人工补分类、read model freshness、账户余额独立 read model、relation tag 投影、API contract 和前端交互；真实基础设施/真实历史数据 smoke 仍归入发布验证风险。
 - 账户余额 read model 与银行明细 rows read model 必须保持独立。标签规则保存、重应用、关键字/分类/日期筛选不能用 stale account payload 覆盖已有 fresh balance。
 - 银行明细前端 domain event 只负责刷新提示和 refetch；跨页面一致性的事实源仍是后端 dirty scope、outbox、worker 和 read model freshness。
@@ -26,6 +27,17 @@
 ```
 
 ## 历史记录
+
+## 2026-07-05 - 页面读链路 read model-only close
+
+- 目标：继续完成银行明细页面各功能模块化 close，删除会污染新链路的旧非 fresh-gated 查询 fallback，并让应用服务只暴露清晰 I/O。
+- 影响范围：`BankDetailsApplicationService` 页面读/导出内部 loader、server 组装、turnover 下游 bank detail SQL scope 来源、平台边界守卫、银行明细模块文档；不改变 HTTP route shape、前端请求协议、自动标签 response envelope、read model schema 或 worker event type。
+- 关键决策：`accounts_payload(...)` 和 `transactions_payload(...)` 只读取 read model/query port；repository 缺失、missing、stale、schema mismatch 只能返回 refresh/status payload。应用服务不再接收 `import_service`、`bank_details_service` 或 `requires_sql_read_model_runtime`，候选推断与标签字典通过显式 provider 注入。`_turnover_bank_transaction_rows_from_sql_read_model(...)` 不再动态读取已删除的 `_bank_detail_available_month_scope_keys` helper，统一走 `BankDetailAvailableMonthScopeProvider`。
+- 文档影响：更新 `README.md`、`boundary-io.md`、`tests.md` 和本实施记录，将模块化状态改为 `closed` 并记录已删除旧链路。
+- 测试覆盖：更新平台 guard 防止应用服务恢复宽 I/O/fallback；更新 SQL runtime 单测证明 missing scope 不查询旧行、不同步扫描；更新 turnover 集成测试使用 repository scope port 作为月份输入；迁移 workbench_v2 中银行明细 API/export/relation 回归到显式 `bank_detail` read-model fixture。
+- 验证命令：见本轮最终说明。
+- 未测风险：本轮未连接真实 PostgreSQL/RabbitMQ/Redis，也未执行银行明细 Browser E2E；真实 worker drain、生产数据量和浏览器完整 smoke 仍属于发布验证风险。
+- 后续事项：若未来要清理 `BankDetailsService` 本身，需要先迁移/确认其作为投影格式化、自动分类输入和 legacy/local helper 的剩余调用，不得在页面 API 读链路重新接回。
 
 ## 2026-06-30 - auto-tag rule persistence readback retry
 

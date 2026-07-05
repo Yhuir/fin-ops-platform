@@ -1,14 +1,14 @@
 # 银行明细模块边界与 I/O
 
-日期：2026-07-04
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：medium
+- 状态：closed
+- 当前边界可信度：high
 - 目标边界：银行明细页面读取 `bank_detail` read model；标签、分类、自动规则等写操作通过 service/UoW 触发 scoped dirty refresh。
-- 当前缺口：模块 README 只登记了前端入口，后端 service/read model 文件已在本文件补齐，后续应同步回 README。关系标签投影已确认只读 `WorkbenchRelationReadFacade` / relation distribution；`Application._bank_details_relation_tag_workbench_read_model(...)` 旧 raw Workbench payload helper 已删除，禁止重新接回银行明细标签链路。
-- 旧代码删除条件：没有 API 或页面继续走旧的非 fresh-gated 查询路径。
+- 当前缺口：无。模块 README 已登记前端、route、application service、read model/query port、refresh producer 和测试入口；页面读、导出、自动标签规则、分类写入、关系标签展示和下游 tagged-row 读取均有明确 owner 与 I/O。
+- 旧代码删除状态：已删除 API/page 旧非 fresh-gated 查询 fallback；`BankDetailsApplicationService` 不再持有宽 `import_service` / `BankDetailsService` 做页面读或候选推断；`Application._bank_detail_available_month_scope_keys(...)` 动态兼容入口已从下游 turnover SQL scope 读取链路移除；关系标签 raw Workbench payload fallback 已删除。
 
 ## 职责边界
 
@@ -29,18 +29,19 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面过滤、月份、账号、标签操作 | `BankDetailsPage.tsx`、`features/bankDetails/api.ts` | API 入参必须映射到明确查询/filter contract |
+| 页面过滤、月份、账号、标签操作 | `BankDetailsPage.tsx`、`features/bankDetails/api.ts` | API 入参必须映射到明确查询/filter contract；后端只通过 read model/query port 返回页面数据 |
 | 标签/分类写操作 | route/service | 通过 write UoW 触发受影响 month scope |
 | 自动标签规则保存/重跑 | `BankDetailsApplicationService` | 返回 `bank_detail` operation barrier targets；无明确范围时按现有月份 fan-out，不把 `all` 当作页面 fresh 结果 |
 | 关系标签投影 | `BankDetailsRelationTagProjectionService` -> `WorkbenchRelationReadFacade.get_by_row_ids(...)` | 只允许按银行流水 row id 读取 relation distribution；可作为展示标签降级读，但不得作为写前事实源、freshness proof 或 raw Workbench payload fallback |
-| 可用月份 scope 枚举 | `BankDetailAvailableMonthScopeProvider` | PostgreSQL read-model runtime 下优先从 `BankDetailReadModelRepositoryPort.bank_detail_scope_keys_for_range(...)` 读取 scope；只有非 SQL/local runtime 才允许回退导入服务扫描 |
+| 可用月份 scope 枚举 | `BankDetailAvailableMonthScopeProvider` | PostgreSQL read-model runtime 下只从 `BankDetailReadModelRepositoryPort.bank_detail_scope_keys_for_range(...)` 读取 scope；只有非 SQL/local runtime 才允许回退导入服务扫描，生产/API 页面读不得使用导入扫描证明 fresh |
+| 自动分类候选推断 | `BankDetailAutoCategorySuggestionProvider` | 作为显式 provider 注入 `BankDetailsApplicationService`；应用服务本身不直接读取 import service 或 `BankDetailsService.auto_category_input_row(...)` |
 | Refresh scope | `bank_detail` manifest | month or `all`；`all` 只允许 fan-out 到 month shards |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 银行明细列表/账户/标签 payload | 前端页面 | 必须带 freshness/status |
+| 银行明细列表/账户/标签 payload | 前端页面 | 必须来自 read model/query port 并带 freshness/status；read model 缺失或非 fresh 时返回 `refreshing/stale/schema_mismatch/missing` 诊断，不回退同步导入扫描 |
 | 自动标签规则写入结果 | 前端页面 | 前端优先等待服务端返回的 `operation_barrier_targets`；缺少/未知 read model status 默认按 `refreshing` 处理 |
 | 标签/分类事实写入 | canonical store | `BankDetailsApplicationService` 只依赖显式 `BankTransactionCategoryStorePort.save_bank_transaction_categories(...)`；禁止通过宽 `state_store` 在业务 service 内散写 |
 | 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播；`bank-flow-rule-batches` 只能读取 active 标签并维护自身 OA/发票规则 |
@@ -70,9 +71,9 @@
 
 ## 依赖方向
 
-- 允许依赖：read model repository、bank transaction identity/category service、runtime queue。
+- 允许依赖：read model repository、bank account balance read model repository、bank transaction identity/category service、runtime queue、显式 tag dictionary/suggestion provider。
 - 必须通过：BankDetailsApplicationService 和 write UoW。
-- 禁止绕过：直接写 read model 表、直接从前端推断 fresh、在导入模块里改银行明细页面投影、为关系标签重新构建 raw Workbench payload。
+- 禁止绕过：直接写 read model 表、直接从前端推断 fresh、API/page 同步扫描 import service、应用服务重新持有宽 `BankDetailsService` 读页面数据、在导入模块里改银行明细页面投影、为关系标签重新构建 raw Workbench payload。
 
 ## 测试与验证
 
@@ -84,9 +85,11 @@
 
 ## 当前缺口和删除条件
 
-- 将本文件补齐的后端入口同步到模块 README。
-- 删除旧查询路径前，必须验证写标签、自动规则、导出和 stale/refreshing UI。
-- 后续删除旧路径时，不得删除自动规则 response envelope 或前端 unknown-status fail-closed 断言。
+- 当前缺口：无。
+- 已删除旧查询路径：`accounts_payload(...)`、`transactions_payload(...)` 不再在 SQL payload 缺失或非 SQL runtime 时调用 `BankDetailsService.list_accounts(...)` / `list_transactions(...)`；缺失 repository 或非 fresh scope 统一返回 refresh/status payload。
+- 已删除旧宽依赖：`BankDetailsApplicationService` 构造函数不再接收 `import_service`、`bank_details_service` 或 `requires_sql_read_model_runtime`；候选推断和标签字典分别通过显式 provider 注入。
+- 已删除旧 scope 兼容：`Application._turnover_bank_transaction_rows_from_sql_read_model(...)` 不再动态读取 `_bank_detail_available_month_scope_keys`，统一通过 `BankDetailAvailableMonthScopeProvider.scope_keys()`。
+- 不得删除自动规则 response envelope、前端 unknown-status fail-closed 断言、非 fresh 导出保护和 relation distribution guard。
 
 ## Canonical facts ownership
 
@@ -98,3 +101,4 @@
 - Forbidden paths: turnover、no-OA 或前端不得直接写银行分类表；read model rows 不得反向成为分类事实源。
 - Old code deletion: 旧 snapshot 分类、前端推断分类和直接跨模块分类写入必须删除；migration/audit/rollback 工具保留不算 closure。
 - 2026-07-04 删除项：`Application._bank_details_relation_tag_workbench_read_model(...)` 无调用且会绕过 relation distribution/freshness 边界，已删除并由 `test_bank_details_relation_tags_only_read_relation_distribution_facade` 防回归。
+- 2026-07-05 删除项：`BankDetailsApplicationService` 页面读 fallback、内置 import/BankDetailsService 候选 fallback、`requires_sql_read_model_runtime` 读路径开关，以及 server 的 `_bank_detail_available_month_scope_keys` 动态兼容入口已删除；由 `test_bank_detail_server_read_cache_helpers_stay_on_application_service_boundary`、`test_application_transactions_missing_sql_scope_enqueues_refresh_without_legacy_scan` 和 turnover SQL scope 测试防回归。

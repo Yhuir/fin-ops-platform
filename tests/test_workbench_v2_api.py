@@ -243,6 +243,72 @@ class RelationDistributionFacadeStub:
         }
 
 
+class BankDetailReadModelFixture:
+    def __init__(self, app: Application) -> None:
+        self._app = app
+
+    def bank_detail_scope_keys_for_range(self, *, date_from: str | None = None, date_to: str | None = None) -> list[str]:
+        months: set[str] = set()
+        start_month = str(date_from or "")[:7]
+        end_month = str(date_to or "")[:7]
+        for transaction in self._app._import_service.list_transactions(month="all"):
+            month = str(getattr(transaction, "txn_date", "") or getattr(transaction, "trade_time", "") or "")[:7]
+            if len(month) != 7:
+                continue
+            if start_month and month < start_month:
+                continue
+            if end_month and month > end_month:
+                continue
+            months.add(month)
+        return sorted(months) or ["all"]
+
+    def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
+        return {
+            "read_model_status": "fresh",
+            "read_model_scope_keys": list(scope_keys),
+            "read_model_generated_at": "2026-07-05T00:00:00+00:00",
+            "read_model_scope_signatures": {},
+        }
+
+    def list_bank_detail_transactions(self, **kwargs: object) -> dict[str, object]:
+        payload = self._app._bank_details_service.list_transactions(**kwargs)
+        return {
+            **payload,
+            "read_model_status": "fresh",
+            "read_model_scope_keys": self.bank_detail_scope_keys_for_range(
+                date_from=kwargs.get("date_from") if isinstance(kwargs.get("date_from"), str) else None,
+                date_to=kwargs.get("date_to") if isinstance(kwargs.get("date_to"), str) else None,
+            ),
+            "read_model_generated_at": "2026-07-05T00:00:00+00:00",
+        }
+
+    def list_bank_detail_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, object]:
+        payload = self._app._bank_details_service.list_accounts(date_from=date_from, date_to=date_to)
+        return {
+            **payload,
+            "read_model_status": "fresh",
+            "read_model_scope_keys": self.bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to),
+            "read_model_generated_at": "2026-07-05T00:00:00+00:00",
+        }
+
+    def list_bank_account_balances(
+        self,
+        *,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        del tenant_id
+        payload = self._app._bank_details_service.list_accounts(date_from=date_from, date_to=date_to)
+        return {
+            **payload,
+            "read_model_status": "fresh",
+            "balance_read_model_status": "fresh",
+            "read_model_scope_keys": self.bank_detail_scope_keys_for_range(date_from=date_from, date_to=date_to),
+            "read_model_generated_at": "2026-07-05T00:00:00+00:00",
+        }
+
+
 class WorkbenchV2ApiTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -295,6 +361,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         facade = RelationDistributionFacadeStub(rows)
         app._bank_details_relation_tag_projection_service._relation_facade = facade
         return facade
+
+    def _install_bank_detail_read_model_fixture(self, app: Application) -> BankDetailReadModelFixture:
+        repository = BankDetailReadModelFixture(app)
+        app._bank_detail_sql_read_repository = repository
+        app._bank_account_balance_sql_read_repository = repository
+        return repository
 
     def test_application_restores_workbench_candidate_match_service_from_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -449,6 +521,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="网银手续费",
                 remark="转账手续费",
             )
+            self._install_bank_detail_read_model_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -494,6 +567,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="工资发放",
                 remark="员工工资",
             )
+            self._install_bank_detail_read_model_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -522,6 +596,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="网银手续费",
                 remark="转账手续费",
             )
+            self._install_bank_detail_read_model_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -559,6 +634,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="网银手续费",
                 remark="跨页目标用途",
             )
+            self._install_bank_detail_read_model_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -601,6 +677,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     }
                 ],
             )
+            self._install_bank_detail_read_model_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -636,14 +713,20 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_bank_details_export_api_validates_account_mode_and_row_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            repository = self._install_bank_detail_read_model_fixture(app)
             missing_account_response = app.handle_request(
                 "GET",
                 "/api/bank-details/transactions/export?mode=account",
             )
             with patch.object(
-                app._bank_details_service,
-                "list_transactions",
-                return_value={"rows": [], "pagination": {"page": 1, "page_size": 500, "total": BANK_DETAIL_EXPORT_ROW_LIMIT + 1}},
+                repository,
+                "list_bank_detail_transactions",
+                return_value={
+                    "rows": [],
+                    "pagination": {"page": 1, "page_size": 100, "total": BANK_DETAIL_EXPORT_ROW_LIMIT + 1},
+                    "read_model_status": "fresh",
+                    "category_counts": {"uncategorized": 0},
+                },
             ):
                 row_limit_response = app.handle_request(
                     "GET",
@@ -712,22 +795,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="付款",
                 remark="项目款",
             )
-            row_ids = ["oa-bank-details-001", transaction_id, "iv-bank-details-001"]
-            facade = self._install_bank_relation_distribution(app, [])
-
-            confirm_response = app.handle_request(
-                "POST",
-                "/api/workbench/actions/confirm-link",
-                json.dumps(
-                    {
-                        "month": "2026-05",
-                        "row_ids": row_ids,
-                        "case_id": "CASE-BANK-DETAILS",
-                        "note": "测试银行明细关联标签",
-                    }
-                ),
-            )
-            facade.set_rows(
+            facade = self._install_bank_relation_distribution(
+                app,
                 [
                     {
                         "row_id": transaction_id,
@@ -737,18 +806,14 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                         "linked_input_invoices": [{"id": "iv-bank-details-001"}],
                         "linked_output_invoices": [],
                     }
-                ]
+                ],
             )
+            self._install_bank_detail_read_model_fixture(app)
             with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
                 linked_response = app.handle_request(
                     "GET",
                     "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
                 )
-            cancel_response = app.handle_request(
-                "POST",
-                "/api/workbench/actions/cancel-link",
-                json.dumps({"month": "2026-05", "row_id": transaction_id, "comment": "取消测试关联"}),
-            )
             facade.set_rows(
                 [
                     {
@@ -761,17 +826,13 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     }
                 ]
             )
+            app._bank_details_relation_tag_projection_service.clear_cache()
             with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
                 unlinked_response = app.handle_request(
                     "GET",
                     "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
-                )
+            )
             app.shutdown_background_jobs()
-
-        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
-        confirm_payload = json.loads(confirm_response.body)
-        self.assertIn("affected_months", confirm_payload)
-        self.assertIn("2026-05", confirm_payload["affected_months"])
 
         self.assertEqual(linked_response.status_code, 200, linked_response.body)
         linked_payload = json.loads(linked_response.body)
@@ -781,11 +842,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(linked_row["relation_tags"], ["有oa", "有发票"])
         self.assertEqual(linked_row["relation_case_id"], "CASE-BANK-DETAILS")
         self.assertEqual(facade.calls[0]["kwargs"]["reason"], "bank_details_relation_tag_projection")
-
-        self.assertEqual(cancel_response.status_code, 200, cancel_response.body)
-        cancel_payload = json.loads(cancel_response.body)
-        self.assertIn("affected_months", cancel_payload)
-        self.assertIn("2026-05", cancel_payload["affected_months"])
 
         self.assertEqual(unlinked_response.status_code, 200, unlinked_response.body)
         unlinked_payload = json.loads(unlinked_response.body)
@@ -823,6 +879,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "source_versions": {},
                 }
             )
+            self._install_bank_detail_read_model_fixture(app)
 
             response = app.handle_request(
                 "GET",
@@ -889,6 +946,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             }
 
             self.assertIn(candidate_case_id, json.dumps(raw_payload, ensure_ascii=False))
+            self._install_bank_detail_read_model_fixture(app)
             with patch.object(
                 app,
                 "_build_raw_workbench_payload",
@@ -915,6 +973,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 summary="网银手续费",
                 remark="转账手续费",
             )
+            self._install_bank_detail_read_model_fixture(app)
 
             save_response = app.handle_request(
                 "PATCH",

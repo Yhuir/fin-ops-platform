@@ -16,6 +16,14 @@
 
 - `web/src/pages/BankDetailsPage.tsx`
 - `web/src/features/bankDetails/*`
+- `backend/src/fin_ops_platform/app/routes_bank_details.py`
+- `backend/src/fin_ops_platform/services/bank_details_application_service.py`
+- `backend/src/fin_ops_platform/services/bank_detail_read_model_repository.py`
+- `backend/src/fin_ops_platform/services/bank_account_balance_read_model_repository.py`
+- `backend/src/fin_ops_platform/services/bank_detail_available_month_scope_provider.py`
+- `backend/src/fin_ops_platform/services/bank_detail_read_model_refresh.py`
+- `backend/src/fin_ops_platform/services/bank_detail_read_model_refresh_producer.py`
+- `backend/src/fin_ops_platform/services/bank_detail_derived_lifecycle_executor.py`
 
 ## 当前边界
 
@@ -24,6 +32,8 @@
 银行明细 read model 的 `bank_detail:all` 是 refresh fan-out 控制 scope，用于枚举月份 shard；页面无界查询不能等待 `bank_detail:all` parent proof。无日期筛选的交易列表和账户列表必须解析为当前已存在的月份 scope 集合，并用这些 month shards 的 freshness/source versions 证明页面数据 fresh；只有没有任何月份 shard 时才保留 `all` 作为 empty/missing 判断入口。
 
 `bank_detail:<YYYY-MM>` 投影以月份为 partition。每次 refresh 必须先计算稳定 source signature：银行流水规范化行、自动分类上下文行、人工分类/确认，以及 workbench relation read model source versions。若 row count 与除 `source_version` 外的 source versions 完全一致，projection 只推进 scope source version 并跳过重写 `read_model.bank_detail_rows` 与自动分类重算；若任一输入变化，必须完整重投影该月份并重新发布 fresh scope。该跳过路径只允许在已有 scope signature 可证明一致时使用，不能把 missing/schema mismatch/stale 伪装成 fresh。
+
+2026-07-05 起，本模块页面读链路已 close：`BankDetailsApplicationService.accounts_payload(...)` / `transactions_payload(...)` 只读取 read model/query port，不再回退 `BankDetailsService.list_accounts(...)` / `list_transactions(...)` 或导入服务扫描；缺失 repository、missing、stale、schema mismatch 均通过 freshness/status payload fail-closed。分类候选推断和标签字典只通过显式 provider 注入，应用服务不持有宽 `import_service` / `BankDetailsService`。
 
 ## 维护触发器
 

@@ -1065,8 +1065,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
     def test_application_cache_key_includes_bank_detail_schema_version(self) -> None:
         service = BankDetailsApplicationService(
-            import_service=SimpleNamespace(),
-            bank_details_service=SimpleNamespace(),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(),
             bank_transaction_auto_category_service=SimpleNamespace(),
@@ -1074,7 +1072,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_category_store=None,
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(),
-            requires_sql_read_model_runtime=lambda: True,
             affected_months_provider=lambda _transaction_ids: [],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
@@ -1123,8 +1120,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         account_balance_repository = AccountBalanceRepository()
         service = BankDetailsApplicationService(
-            import_service=SimpleNamespace(),
-            bank_details_service=SimpleNamespace(list_accounts=lambda **_kwargs: {"accounts": []}),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(),
             bank_transaction_auto_category_service=SimpleNamespace(),
@@ -1133,7 +1128,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=BankDetailRepository(),
             bank_account_balance_read_model_repository=account_balance_repository,
             runtime_repositories=SimpleNamespace(),
-            requires_sql_read_model_runtime=lambda: True,
             affected_months_provider=lambda _transaction_ids: [],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
@@ -1179,18 +1173,9 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
                 self.enqueued.append((scope_type, scope_key, reason))
 
-        class LegacyBankDetailsService:
-            def list_transactions(self, **_kwargs):
-                raise AssertionError("missing SQL read model must not synchronously scan legacy transactions")
-
-            def _bank_transaction_tags_payload(self) -> dict[str, object]:
-                return {"version": 1, "definitions": []}
-
         repository = SqlReadRepository()
         queue = Queue()
         service = BankDetailsApplicationService(
-            import_service=SimpleNamespace(),
-            bank_details_service=LegacyBankDetailsService(),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(),
             bank_transaction_auto_category_service=SimpleNamespace(),
@@ -1198,7 +1183,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_category_store=None,
             bank_detail_sql_read_repository=repository,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
-            requires_sql_read_model_runtime=lambda: True,
             affected_months_provider=lambda _transaction_ids: [],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
@@ -1206,6 +1190,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+            bank_transaction_tags_provider=lambda: {"version": 1, "definitions": []},
         )
 
         payload = service.transactions_payload(
@@ -1237,8 +1222,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         queue = Queue()
         service = BankDetailsApplicationService(
-            import_service=SimpleNamespace(),
-            bank_details_service=SimpleNamespace(),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
             bank_transaction_auto_category_service=SimpleNamespace(),
@@ -1246,7 +1229,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_category_store=None,
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
-            requires_sql_read_model_runtime=lambda: True,
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
@@ -1277,8 +1259,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                 saved_snapshots.append(dict(snapshot))
 
         service = BankDetailsApplicationService(
-            import_service=SimpleNamespace(),
-            bank_details_service=SimpleNamespace(),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {"categories": {"txn-apr": {"version": 2}}}),
             bank_transaction_auto_category_service=SimpleNamespace(),
@@ -1286,7 +1266,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_category_store=CategoryStore(),
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=SimpleNamespace(enqueue_read_model_refresh=lambda **_kwargs: None)),
-            requires_sql_read_model_runtime=lambda: True,
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
@@ -1317,8 +1296,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         queue = Queue()
         service = BankDetailsApplicationService(
-            import_service=SimpleNamespace(),
-            bank_details_service=SimpleNamespace(),
             app_settings_service=SimpleNamespace(
                 get_bank_auto_tag_rules_payload=lambda **_kwargs: {
                     "version": 1,
@@ -1334,7 +1311,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_category_store=None,
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
-            requires_sql_read_model_runtime=lambda: True,
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
@@ -1374,8 +1350,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         port_calls: list[dict[str, object]] = []
         side_effect_port = SimpleNamespace(after_mutation=lambda **kwargs: port_calls.append(dict(kwargs)))
         service = BankDetailsApplicationService(
-            import_service=SimpleNamespace(),
-            bank_details_service=SimpleNamespace(),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
             bank_transaction_auto_category_service=SimpleNamespace(),
@@ -1383,7 +1357,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_category_store=None,
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
-            requires_sql_read_model_runtime=lambda: True,
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda affected_months: invalidated.append(list(affected_months)),
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
@@ -1436,8 +1409,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         side_effect_port = SimpleNamespace(after_mutation=failing_callback)
 
         service = BankDetailsApplicationService(
-            import_service=SimpleNamespace(),
-            bank_details_service=SimpleNamespace(),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
             bank_transaction_auto_category_service=SimpleNamespace(),
@@ -1445,7 +1416,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_category_store=None,
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
-            requires_sql_read_model_runtime=lambda: True,
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda affected_months: invalidated.append(list(affected_months)),
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
@@ -1481,8 +1451,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         cleared: list[str] = []
         lifecycle_events: list[dict[str, object]] = []
         service = BankDetailsApplicationService(
-            import_service=SimpleNamespace(),
-            bank_details_service=SimpleNamespace(),
             app_settings_service=SimpleNamespace(),
             bank_transaction_category_service=SimpleNamespace(),
             bank_transaction_auto_category_service=SimpleNamespace(),
@@ -1490,7 +1458,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_category_store=None,
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
-            requires_sql_read_model_runtime=lambda: True,
             affected_months_provider=lambda _transaction_ids: [],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda event_type, **kwargs: lifecycle_events.append(
