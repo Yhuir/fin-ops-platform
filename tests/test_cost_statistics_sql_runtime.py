@@ -542,7 +542,18 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 "generated_at": "2026-05-21T09:00:00+00:00",
                 "entry_count": 1,
                 "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-                "payload": {"month": "2026-05", "time_rows": [{"transaction_id": "stale-json"}]},
+                "payload": {
+                    "month": "2026-05",
+                    "time_rows": [{"transaction_id": "stale-json"}],
+                    "bank_accounts": [
+                        {
+                            "bank_name": "工商银行",
+                            "account_last4": "0001",
+                            "payment_account_label": "工商银行 账户 0001",
+                            "source": "settings",
+                        }
+                    ],
+                },
             },
             cost_rows=[
                 {
@@ -565,6 +576,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         view = repository.get_cost_statistics_view(scope_key="active:2026-05")
 
         self.assertEqual(view["payload"]["time_rows"][0]["transaction_id"], "txn-1")
+        self.assertEqual(view["payload"]["bank_accounts"][0]["payment_account_label"], "工商银行 账户 0001")
         self.assertEqual(view["payload"]["summary"]["total_amount"], "10.00")
         self.assertEqual(view["payload"]["project_rows"][0]["expense_type_count"], 1)
 

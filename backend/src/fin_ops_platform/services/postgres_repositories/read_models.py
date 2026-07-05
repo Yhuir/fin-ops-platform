@@ -9902,6 +9902,7 @@ def _cost_statistics_payload_from_rows(
     rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     parent_model_payload = parent_payload.get("payload") if isinstance(parent_payload.get("payload"), dict) else parent_payload
+    bank_accounts = parent_model_payload.get("bank_accounts")
     project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=parent_model_payload)
     if rows:
         scope_month_text = text(rows[0].get("scope_month")) or scope_month_text
@@ -9958,6 +9959,7 @@ def _cost_statistics_payload_from_rows(
             "total_amount": _format_decimal(total_amount),
         },
         "time_rows": time_rows,
+        "bank_accounts": deepcopy(bank_accounts) if isinstance(bank_accounts, list) else [],
         "project_rows": [
             {
                 "project_name": bucket["project_name"],
