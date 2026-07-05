@@ -110,6 +110,12 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(group["display_mode"], "collapsed_summary")
         self.assertTrue(group["default_collapsed"])
         self.assertEqual(len(group["collapsed_rows"]["bank"]), 4)
+        summary_row = group["summary_row"]
+        self.assertEqual(summary_row["id"], f"bank_flow_rule_summary:{batch_id}")
+        self.assertEqual(summary_row["source_kind"], "bank_flow_rule_batch_summary")
+        self.assertEqual(summary_row["invoice_relation"]["code"], "bank_flow_rule_batch")
+        self.assertIn("流水规则", summary_row["display_tags"])
+        self.assertNotIn("免OA", summary_row["display_tags"])
 
         three_row_payload = service.group_payload("2026-05", oa_rows=[], bank_rows=rows[:3], invoice_rows=[])
         three_row_group = three_row_payload["paired"]["groups"][0]
@@ -2411,7 +2417,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(payload["paired"]["groups"], [])
         group = payload["open"]["groups"][0]
         self.assertEqual(group["group_id"], "case:CASE-CONFIRMED-OA-BANK")
-        self.assertEqual(group["group_type"], "manual_confirmed")
+        self.assertEqual(group["group_type"], "candidate")
         self.assertEqual(group["relation_mode"], "manual_confirmed")
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-confirmed-001"])
         self.assertCountEqual(

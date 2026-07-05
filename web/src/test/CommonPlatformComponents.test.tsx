@@ -18,7 +18,7 @@ function renderWithProject(ui: React.ReactElement) {
   return render(ui);
 }
 
-describe("common MUI components", () => {
+describe("common platform components", () => {
   const appDrawerSource = readFileSync("src/components/common/AppDrawer.tsx", "utf8");
   const appStyles = readFileSync("src/app/styles.css", "utf8");
 

@@ -30,6 +30,7 @@
 
 - 没有银行账户映射时禁止预览银行流水文件。
 - 任一 selected file 缺少银行映射时禁止预览。
+- 银行流水页面禁止使用旧 `/imports/preview`、`/imports/confirm` JSON 状态流；页面 I/O 只能进入 file/session 状态机。
 - `preview_stale` 后禁止继续确认旧 session；必须重新预览。
 - unknown selected file id 必须返回 404，不得静默跳过。
 - 已有 idempotency key 的 confirm 不得创建重复 import job。
@@ -86,3 +87,4 @@ Refresh / fan-out 来源：
 | --- | --- | --- | --- |
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确文件/session/job/worker/read model 状态和禁止流转 | `tests/test_import_*`、`tests/test_import_job_queue.py`、`web/src/test/ImportCenterPage.test.tsx` |
 | 2026-06-16 | 修复银行流水导入 job 的 App Status 域 | 银行流水文件确认后的 background job 不再误归到发票导入页；generic import fallback 覆盖全部导入域 | `tests.test_import_file_api`、`tests.test_app_status_overview_service` |
+| 2026-07-05 | 模块边界 close 与旧 wrapper 删除 | 银行流水页面 file/session 状态机锁定；`server.py` 不再保留 import confirm processor wrapper | `tests.test_platform_runtime_boundary_guards` |

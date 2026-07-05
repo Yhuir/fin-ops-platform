@@ -11,7 +11,7 @@
 | `FIN-TABLE-E2E-005` | `covered` | `web/e2e/bank-details-export-download.spec.ts`、`web/e2e/pending-invoices-export-download.spec.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/input-invoice-usage-flow.spec.ts`、`web/e2e/cost-statistics-flow.spec.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 覆盖当前筛选导出、不受分页限制、row-limit 和非 fresh 禁用/失败反馈。 |
 | `FIN-TABLE-E2E-006` | `covered` | `web/e2e/bank-details-stale-refreshing.spec.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/input-invoice-usage-flow.spec.ts`、`web/e2e/tax-offset-flow.spec.ts`、`web/e2e/cost-statistics-flow.spec.ts`、`web/e2e/oa-pending-payments-nonfresh-flow.spec.ts`、`web/e2e/workbench-stale-error-flow.spec.ts` | 覆盖 non-fresh 防 false-empty、防旧 rows、防导出或写入伪成功。 |
 | `FIN-TABLE-E2E-007` | `covered` | `web/e2e/input-invoice-usage-flow.spec.ts`、`web/e2e/cost-statistics-flow.spec.ts`、`web/e2e/oa-pending-payments-nonfresh-flow.spec.ts`、页面级 Vitest | 覆盖详情 drawer/dialog fresh 与 non-fresh 不可用诊断。 |
-| `FIN-TABLE-E2E-008` | `covered` | `web/src/test/useFinanceTableSession.test.tsx`、`web/src/test/PageSessionStateContext.test.tsx` | 覆盖 table session 保存/恢复、columnsVersion 清理、user/page/state 隔离。 |
+| `FIN-TABLE-E2E-008` | `covered` | `web/src/test/useFinanceTableSession.test.tsx`、`web/src/test/PageSessionStateContext.test.tsx`、`web/src/test/MuiContainment.test.ts` | 覆盖 table session 保存/恢复、columnsVersion 清理、user/page/state 隔离，并防止旧 MUI/DataGrid session hook/test 回归。 |
 | `FIN-TABLE-E2E-009` | `covered` | `web/e2e/finance-table-system-flow.spec.ts`、页面级 Playwright smoke | 覆盖真实 Chromium 代表性宽表和严格 console/page error 捕获。 |
 | `FIN-TABLE-E2E-010` | `covered` | 各页面 `e2e-coverage.md`、页面级 Vitest / Playwright | 页面 wrapper 的业务差异由页面模块覆盖；本模块记录共享边界而不替代页面 Spec。 |
 

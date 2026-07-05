@@ -26,7 +26,7 @@ class _TaskService:
 
 
 class EtcBusinessBatchDeleteServiceTests(unittest.TestCase):
-    def test_unsubmitted_business_batch_delete_removes_canonical_invoices_and_returns_refresh_event(self) -> None:
+    def test_unsubmitted_business_batch_delete_uses_etc_boundaries_and_returns_refresh_event(self) -> None:
         batch = SimpleNamespace(
             business_batch_id="business-1",
             status="draft",
@@ -36,7 +36,6 @@ class EtcBusinessBatchDeleteServiceTests(unittest.TestCase):
         )
         task = SimpleNamespace(task_id="task-1")
         cleanup = _Cleanup()
-        removed_import_batches: list[str] = []
 
         class EtcService:
             def get_business_batch(self, batch_id: str) -> object:
@@ -59,9 +58,6 @@ class EtcBusinessBatchDeleteServiceTests(unittest.TestCase):
 
         service = EtcBusinessBatchDeleteService(
             etc_service=EtcService(),
-            import_service=SimpleNamespace(
-                remove_etc_invoices_by_import_batch_id=lambda batch_id: removed_import_batches.append(batch_id) or 1
-            ),
             reconciliation_task_service=_TaskService(task),
             cleanup_service=cleanup,
             existing_etc_invoices_by_ids=lambda invoice_ids: (
@@ -78,7 +74,6 @@ class EtcBusinessBatchDeleteServiceTests(unittest.TestCase):
         self.assertEqual(result.delete_result["kind"], "business_batch")
         self.assertEqual(result.delete_result["expectedVersion"], 3)
         self.assertEqual(result.delete_result["reason"], "delete")
-        self.assertEqual(removed_import_batches, ["import-1"])
         self.assertEqual(cleanup.deleted_tasks, [task])
         self.assertEqual(len(result.refresh_events), 1)
         self.assertEqual(result.refresh_events[0].changed_months, ["2026-02"])
@@ -121,7 +116,6 @@ class EtcBusinessBatchDeleteServiceTests(unittest.TestCase):
 
         service = EtcBusinessBatchDeleteService(
             etc_service=EtcService(),
-            import_service=SimpleNamespace(remove_etc_invoices_by_import_batch_id=lambda _batch_id: 0),
             reconciliation_task_service=_TaskService(task),
             cleanup_service=cleanup,
             existing_etc_invoices_by_ids=lambda invoice_ids: [invoice] if invoice_ids == ["invoice-1"] else [],
@@ -166,7 +160,6 @@ class EtcBusinessBatchDeleteServiceTests(unittest.TestCase):
         cleanup = _Cleanup()
         service = EtcBusinessBatchDeleteService(
             etc_service=EtcService(),
-            import_service=SimpleNamespace(remove_etc_invoices_by_import_batch_id=lambda _batch_id: 0),
             reconciliation_task_service=_TaskService(None),
             cleanup_service=cleanup,
             existing_etc_invoices_by_ids=lambda _invoice_ids: [],

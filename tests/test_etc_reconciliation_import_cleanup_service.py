@@ -34,11 +34,6 @@ class EtcReconciliationImportCleanupServiceTests(unittest.TestCase):
                 assert reason == "reconciliation_task_import_removed"
                 return {"deleted": True, "kind": "submitted_business_batch_reset"}
 
-        class FakeImportService:
-            def remove_etc_invoices_by_import_batch_id(self, import_batch_id: str) -> int:
-                calls.append(f"remove_canonical:{import_batch_id}")
-                return 2
-
         def existing_etc_invoices_by_ids(invoice_ids: list[str]) -> list[object]:
             self.assertEqual(invoice_ids, ["invoice-1"])
             return [SimpleNamespace(month="2026-02")]
@@ -61,7 +56,6 @@ class EtcReconciliationImportCleanupServiceTests(unittest.TestCase):
 
         service = EtcReconciliationImportCleanupService(
             etc_service=FakeEtcService(),
-            import_service=FakeImportService(),
             reconciliation_task_service=SimpleNamespace(),
             existing_etc_invoices_by_ids=existing_etc_invoices_by_ids,
             etc_invoice_changed_months=changed_months,
@@ -73,11 +67,10 @@ class EtcReconciliationImportCleanupServiceTests(unittest.TestCase):
 
         result = service.delete_task_import_batch_sources(task)
 
-        self.assertEqual(calls[:3], ["remove_canonical:import-1", "preflight", "delete_business_batch"])
+        self.assertEqual(calls[:2], ["preflight", "delete_business_batch"])
         self.assertIn("cancel_summary", calls)
         self.assertIn("link_existing", calls)
         self.assertEqual(result.delete_result, {"deleted": True, "kind": "submitted_business_batch_reset"})
-        self.assertEqual(result.canonical_deleted, 2)
         self.assertEqual(result.changed_months, ["2026-02", "2026-03", "2026-04"])
 
 

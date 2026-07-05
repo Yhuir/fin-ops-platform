@@ -1154,6 +1154,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         service_source = (SERVICES_ROOT / "import_processing_service.py").read_text(encoding="utf-8")
         forbidden_server_snippets = {
+            "def _execute_file_import_confirm_job",
+            "def _execute_general_import_confirm",
+            "def _file_import_job_label",
+            "def _process_etc_invoice_import_confirm_job",
+            "def _process_file_import_confirm_job",
+            "def _process_general_import_confirm_job",
+            "def _process_tax_certified_import_confirm_job",
             "self._import_service.confirm_import(",
             "self._tax_certified_import_service.confirm_session(",
             "self._file_import_service.confirm_session(",
@@ -1165,6 +1172,31 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertIn("class ImportProcessingService", service_source)
         self.assertIn("def execute_file_import_confirm_job", service_source)
         self.assertIn("def execute_etc_invoice_import_confirm_job", service_source)
+
+    def test_bank_transaction_import_frontend_uses_file_session_api_only(self) -> None:
+        page_source = (WEB_SRC_ROOT / "pages" / "imports" / "ImportBankTransactionsPage.tsx").read_text(encoding="utf-8")
+        api_source = (WEB_SRC_ROOT / "features" / "imports" / "api.ts").read_text(encoding="utf-8")
+        runtime_files = [
+            WEB_SRC_ROOT / "pages" / "imports" / "ImportBankTransactionsPage.tsx",
+            WEB_SRC_ROOT / "components" / "imports" / "ImportWorkflowPage.tsx",
+            WEB_SRC_ROOT / "features" / "imports" / "api.ts",
+            WEB_SRC_ROOT / "features" / "imports" / "importRoutes.ts",
+            WEB_SRC_ROOT / "contexts" / "ImportWorkflowDraftContext.tsx",
+        ]
+        violations: list[str] = []
+
+        if '<ImportWorkflowPage mode="bank_transaction" />' not in page_source:
+            violations.append("bank transaction import page no longer uses the shared bank_transaction workflow mode")
+        for endpoint in ('"/imports/files/preview"', '"/imports/files/confirm"', "/imports/files/sessions/"):
+            if endpoint not in api_source:
+                violations.append(f"imports API is missing file/session endpoint {endpoint}")
+        for path in runtime_files:
+            source = path.read_text(encoding="utf-8")
+            for legacy_endpoint in ('"/imports/preview"', '"/imports/confirm"', "'/imports/preview'", "'/imports/confirm'"):
+                if legacy_endpoint in source:
+                    violations.append(f"{_relative(path)} references legacy JSON import endpoint {legacy_endpoint}")
+
+        self.assertEqual(violations, [])
 
     def test_server_route_owner_inventory_stays_registered(self) -> None:
         server_path = APP_ROOT / "server.py"
@@ -3464,13 +3496,36 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "export async function markEtcBatchNotSubmitted",
             "export async function deleteEtcBatch",
             "export async function fetchEtcBatchDetail",
+            "export async function revokeEtcSubmittedInvoices",
             '"/api/etc/batches/draft"',
+            '"/api/etc/invoices/revoke-submitted"',
             '`/api/etc/batches?${params.toString()}`',
             '`/api/etc/batches/${encodeURIComponent(batchId)}`',
             '`/api/etc/batches/${encodeURIComponent(batchId)}/confirm-submitted`',
             '`/api/etc/batches/${encodeURIComponent(batchId)}/mark-not-submitted`',
         )
         violations = [marker for marker in forbidden_markers if marker in api_source]
+
+        self.assertEqual(violations, [])
+
+    def test_web_etc_test_mock_does_not_reintroduce_legacy_etc_routes(self) -> None:
+        mock_source = (REPO_ROOT / "web" / "src" / "test" / "apiMock.ts").read_text(encoding="utf-8")
+        forbidden_markers = (
+            '"/api/etc/batches"',
+            '"/api/etc/batches/draft"',
+            '"/api/etc/invoices/revoke-submitted"',
+            "latestEtcDraftInvoiceIds",
+            "latestEtcDraftBatchId",
+            "listBatches(",
+            "batchDetail(",
+            "markBatchSubmitted(",
+            "markBatchUnsubmitted(",
+            "markSubmitted(",
+            "markUnsubmitted(",
+            'segment === "oa-status" && trailing === "refresh"',
+            "^\\/api\\/etc\\/batches\\/",
+        )
+        violations = [marker for marker in forbidden_markers if marker in mock_source]
 
         self.assertEqual(violations, [])
 
@@ -3481,13 +3536,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_path = APP_ROOT / "routes_etc_invoices.py"
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
+        service_source = (SERVICES_ROOT / "etc_service.py").read_text(encoding="utf-8")
 
         handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
         route_factory = _function_source(server_tree, server_source, "_etc_invoice_routes")
         route_owner_init = _function_source(route_tree, route_source, "__init__")
         route_owner_route = _function_source(route_tree, route_source, "route")
         route_owner_list = _function_source(route_tree, route_source, "list_invoices")
-        route_owner_revoke = _function_source(route_tree, route_source, "revoke_submitted")
 
         violations: list[str] = []
         if "EtcInvoiceApiRoutes" not in server_source:
@@ -3499,27 +3554,36 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for required_port in (
             "etc_service=self._etc_service",
             "json_response=self._json_response",
-            "load_json_body=self._load_json_body",
             "serialize_invoice=self._serialize_etc_invoice",
-            "link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices",
-            "refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link",
         ):
             if required_port not in route_factory:
                 violations.append(f"ETC invoice route owner lacks explicit port {required_port}")
+        for forbidden_port in (
+            "load_json_body=self._load_json_body",
+            "link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices",
+            "refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link",
+        ):
+            if forbidden_port in route_factory:
+                violations.append(f"ETC invoice route owner still receives write-side port {forbidden_port}")
         if "Application" in route_owner_init:
             violations.append("ETC invoice route owner accepts the whole Application")
-        for required_route in (
-            'route_path == "/api/etc/invoices"',
-            'route_path == "/api/etc/invoices/revoke-submitted"',
+        if 'route_path == "/api/etc/invoices"' not in route_owner_route:
+            violations.append("ETC invoice route owner missing list dispatch branch")
+        if '"/api/etc/invoices/revoke-submitted"' in route_source or '"/api/etc/invoices/revoke-submitted"' in server_source:
+            violations.append("ETC invoice revoke-submitted route was reintroduced")
+        if "def revoke_submitted(" in route_source:
+            violations.append("ETC invoice route owner kept legacy revoke handler")
+        if "def revoke_submitted(" in service_source:
+            violations.append("ETC service kept legacy invoice-id revoke method")
+        for forbidden_write_port in (
+            "_load_json_body",
+            "_link_etc_invoices_to_existing_invoices",
+            "_refresh_after_etc_invoice_link",
         ):
-            if required_route not in route_owner_route:
-                violations.append(f"ETC invoice route owner missing dispatch branch {required_route}")
+            if forbidden_write_port in route_owner_init:
+                violations.append(f"ETC invoice route owner constructor kept write-side port {forbidden_write_port}")
         if "list_invoices(" not in route_owner_list:
             violations.append("ETC invoice list route does not delegate to ETC service")
-        if "revoke_submitted(invoice_ids)" not in route_owner_revoke:
-            violations.append("ETC invoice revoke route does not delegate status mutation to ETC service")
-        if "list_invoices_by_ids(invoice_ids)" not in route_owner_revoke:
-            violations.append("ETC invoice revoke route does not reload changed invoices for link refresh")
         for removed_handler in (
             "_handle_api_etc_invoices(",
             "_handle_api_etc_revoke_submitted(",
@@ -8137,6 +8201,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_sync_etc_import_result_to_canonical_invoices",
             "_sync_etc_invoices_to_canonical_invoices",
             "_refresh_after_etc_invoice_sync",
+            "remove_etc_invoices_by_import_batch_id",
         }
         violations: list[str] = []
 

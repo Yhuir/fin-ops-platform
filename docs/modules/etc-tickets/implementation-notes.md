@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-05 - ETC旧入口删除与模块边界close
+
+- 目标：完成 ETC 票据管理模块边界与 I/O 收口，移除仍会污染新 business-batch 链路或测试环境的旧入口。
+- 影响范围：`EtcInvoiceApiRoutes`、`Application` ETC invoice dispatch/readiness、`EtcService` 状态回退方法、前端 ETC API client、测试 API mock、runtime boundary guard 和 ETC 模块文档。
+- 关键决策：`/api/etc/invoices` 只保留只读列表 I/O，route owner 只接收 `etc_service`、`json_response`、`serialize_invoice`；invoice-id 级 `/api/etc/invoices/revoke-submitted` 和 `EtcService.revoke_submitted(...)` 删除，提交状态回退必须走 business batch `manual-oa-status`、`oa-draft/revoke` 或 delete/reset 状态机；前端测试 mock 不再模拟已删除的 `/api/etc/batches*`、`/api/etc/invoices/revoke-submitted` 或 ETC `oa-status/refresh`。
+- 文档影响：更新 `boundary-io.md`、`README.md`、`state-machine.md`、`tests.md`、`e2e-coverage.md`、`docs/dev/api-contracts.md` 和 `docs/dev/testing-closure-dependency-map.md`，将 ETC 页面/API 主链路状态标记为 close；historical repair/backfill 工具继续按 owner/dry-run/deletion 条件单独治理。
+- 测试覆盖：扩展 `tests/test_platform_runtime_boundary_guards.py`，禁止旧前端 API、旧 mock、旧 revoke route/service 和 write-side port 回归；更新 `tests/test_etc_backend.py` 的状态机回归到 `mark_not_submitted(batch_id)`；更新 `web/src/test/EtcApi.test.ts` 删除旧 revoke API client 期望。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：未执行真实 OA、生产 admin write smoke、大 ZIP、对象存储或 worker drain；这些仍是发布窗口/staging 验证项，不影响本地模块边界 close 判定。
+
 ## 2026-07-01 - ETC批次移除月份选择器并支持标题编辑
 
 - 目标：ETC 票据管理页直接展示全部业务批次，只分未提交/已提交两个 bucket；未提交业务批次在提交前可内联修改标题，并让 ETC 发票导入下拉同步显示新标题。

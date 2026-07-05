@@ -48,43 +48,43 @@ const ordinaryBankFlowRuleCheckboxCases = [
     primaryButton: "费用 1批 · 1条",
     subButton: "手续费 1批 · 1条",
     tableName: "建设银行8106流水",
-    transactionId: "no-oa-bank-e2e-fee",
+    transactionId: "bank-flow-rule-e2e-fee",
   },
   {
     primaryButton: "人工成本 1批 · 1条",
     subButton: "工资 1批 · 1条",
     tableName: "工商银行6386流水",
-    transactionId: "no-oa-bank-e2e-salary",
+    transactionId: "bank-flow-rule-e2e-salary",
   },
   {
     primaryButton: "薪资社保福利 3批 · 3条",
     subButton: "过节费 1批 · 1条",
     tableName: "中国银行7001流水",
-    transactionId: "no-oa-bank-e2e-holiday_bonus",
+    transactionId: "bank-flow-rule-e2e-holiday_bonus",
   },
   {
     primaryButton: "薪资社保福利 3批 · 3条",
     subButton: "奖金 1批 · 1条",
     tableName: "招商银行9988流水",
-    transactionId: "no-oa-bank-e2e-bonus",
+    transactionId: "bank-flow-rule-e2e-bonus",
   },
   {
     primaryButton: "税款 2批 · 2条",
     subButton: "税款 1批 · 1条",
     tableName: "农业银行2211流水",
-    transactionId: "no-oa-bank-e2e-tax_payment",
+    transactionId: "bank-flow-rule-e2e-tax_payment",
   },
   {
     primaryButton: "税款 2批 · 2条",
     subButton: "国库税款 1批 · 1条",
     tableName: "交通银行3344流水",
-    transactionId: "no-oa-bank-e2e-treasury_tax_collection",
+    transactionId: "bank-flow-rule-e2e-treasury_tax_collection",
   },
   {
     primaryButton: "薪资社保福利 3批 · 3条",
     subButton: "社保 1批 · 1条",
     tableName: "民生银行5566流水",
-    transactionId: "no-oa-bank-e2e-social_security",
+    transactionId: "bank-flow-rule-e2e-social_security",
   },
 ];
 
@@ -292,7 +292,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     const draftTable = page.getByRole("table", { name: "建设银行8106流水" });
     await expect(draftTable).toBeVisible();
-    await draftTable.getByLabel("选择流水 no-oa-bank-e2e-001").check();
+    await draftTable.getByLabel("选择流水 bank-flow-rule-e2e-001").check();
     await page.getByRole("button", { name: "提交批次" }).click();
     await expect(page.getByText("选中流水已提交")).toBeVisible();
     await expect(page.getByRole("button", { name: "已提交 1" })).toBeVisible();
@@ -396,7 +396,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
-    await draftTable.getByLabel("选择流水 no-oa-bank-e2e-001").check();
+    await draftTable.getByLabel("选择流水 bank-flow-rule-e2e-001").check();
     await expect(page.getByText("已选 1 条")).toBeVisible();
 
     const submitRequest = page.waitForRequest((request) =>
@@ -415,7 +415,7 @@ test.describe("bank flow rule batches browser flow", () => {
     const submitBody = JSON.parse((await submitRequest).postData() ?? "{}") as {
       transaction_ids?: string[];
     };
-    expect(submitBody.transaction_ids).toEqual(["no-oa-bank-e2e-001"]);
+    expect(submitBody.transaction_ids).toEqual(["bank-flow-rule-e2e-001"]);
     expect((await submitResponse).status()).toBe(200);
     expect((await submitBarrierResponse).status()).toBe(200);
     expect(api.count("POST /api/bank-flow-rule-batches/submit-selection")).toBe(1);
@@ -432,7 +432,7 @@ test.describe("bank flow rule batches browser flow", () => {
     const costPayload = await (await costExplorerResponse).json() as { read_model_status?: string };
     expect(costPayload.read_model_status).toBe("fresh");
     await page.getByRole("button", { name: "按项目" }).click();
-    const bankFlowRuleCostProject = page.getByRole("button", { name: /免OA手续费成本项目/ });
+    const bankFlowRuleCostProject = page.getByRole("button", { name: /流水规则手续费成本项目/ });
     await expect(bankFlowRuleCostProject).toBeVisible();
     await expect(bankFlowRuleCostProject).toContainText("8.80");
     await bankFlowRuleCostProject.click();
@@ -457,11 +457,11 @@ test.describe("bank flow rule batches browser flow", () => {
     await withdrawDialog.getByLabel("撤回原因").fill("浏览器 e2e 复核撤回");
 
     const withdrawRequest = page.waitForRequest((request) =>
-      request.url().endsWith("/api/bank-flow-rule-batches/no-oa-batch-e2e-001/withdraw")
+      request.url().endsWith("/api/bank-flow-rule-batches/bank-flow-rule-batch-e2e-001/withdraw")
         && request.method() === "POST",
     );
     const withdrawResponse = page.waitForResponse((response) =>
-      response.url().endsWith("/api/bank-flow-rule-batches/no-oa-batch-e2e-001/withdraw")
+      response.url().endsWith("/api/bank-flow-rule-batches/bank-flow-rule-batch-e2e-001/withdraw")
         && response.request().method() === "POST",
     );
     await withdrawDialog.getByRole("button", { name: "确认撤回" }).click();
@@ -471,7 +471,7 @@ test.describe("bank flow rule batches browser flow", () => {
     };
     expect(withdrawBody).toEqual({ expected_version: 2, reason: "浏览器 e2e 复核撤回" });
     expect((await withdrawResponse).status()).toBe(200);
-    expect(api.count("POST /api/bank-flow-rule-batches/no-oa-batch-e2e-001/withdraw")).toBe(1);
+    expect(api.count("POST /api/bank-flow-rule-batches/bank-flow-rule-batch-e2e-001/withdraw")).toBe(1);
     await expect(page.getByText("批次已撤回")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 

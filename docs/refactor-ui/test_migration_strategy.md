@@ -49,10 +49,10 @@ Last updated: 2026-06-07
 | 测试 | 迁移风险 | 必须保留的行为 |
 | --- | --- | --- |
 | `App.test.tsx` | high | 侧栏分组顺序、页面 label、route、workbench all-time view、税金抵扣月份入口、OA embedded 行为。 |
-| `CommonMuiComponents.test.tsx` | high | StatePanel role、ConfirmActionDialog 确认/取消、FileDropzone drop 行为。 |
+| `CommonPlatformComponents.test.tsx` | high | StatePanel role、ConfirmActionDialog 确认/取消、FileDropzone drop 行为。 |
 | `MonthPicker.test.tsx` | high | 普通 month picker、inline month picker、`YYYY-MM`、`formatMonthLabel`、可访问名称。 |
 | `TableAlignmentStyles.test.ts` | high | 从“全居中”改为“列角色对齐”。 |
-| `useMuiDataGridPageSession.test.tsx` | high | 分页、排序、筛选、选择、列宽、列顺序、滚动 session；若新表格不支持某项，必须证明旧页面没有用户可见入口。 |
+| `useFinanceTableSession.test.tsx` | high | 分页、排序、选择、滚动 session、columnsVersion 清理和 page/user/state 隔离；旧 `useMuiDataGridPageSession` hook/test 已删除并由 `MuiContainment.test.ts` 防回归。 |
 | `BankDetailsPage.test.tsx` | high | 银行明细表格、分页、导出菜单、日期筛选、自动标签规则右侧抽屉。 |
 | `AutoTagRulesDrawer.test.tsx` | high | 右侧抽屉、规则行编辑、条件字段、拖拽/展开/删除、保存。 |
 | `InputInvoiceUsagePage.test.tsx` | high | 刷新、筛选、tag、详情右侧抽屉、导出右侧抽屉、规则右侧抽屉。 |

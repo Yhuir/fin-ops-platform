@@ -31,7 +31,8 @@
 | `input-invoice-usage` | `/input-invoice-usage` | `web/src/pages/InputInvoiceUsagePage.tsx` | `web/src/features/inputInvoiceUsage/api.ts` | `server.py` `/api/input-invoice-usage*` | `input_invoice_usage`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_input_invoice_usage_*`、`tests/test_invoice_usage_collection_*`、`web/src/test/InputInvoiceUsage*.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` |
 | `oa-pending-payments` | `/oa-pending-payments` | `web/src/pages/OaPendingPaymentsPage.tsx` | `web/src/features/oaPendingPayments/api.ts` | `routes_oa_pending_payments.py`、`server.py` `/api/oa-pending-payments*` | `oa_pending_payment`、`invoice_lifecycle`、`invoice-usage-collection`、`oa-sync` | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` |
 | `output-invoice-collections` | `/output-invoice-collections` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `web/src/features/outputInvoiceCollections/api.ts` | `routes_output_invoice_collections.py`、`server.py` `/api/output-invoice-collections*` | `output_invoice_collection`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_output_invoice_collection_*`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts` |
-| `no-oa-bank-batches` | `/no-oa-bank-batches` | `web/src/pages/BankFlowRuleBatchPage.tsx` | `web/src/features/bankFlowRuleBatches/api.ts` | `routes_no_oa_bank_batches.py`、`server.py` `/api/no-oa-bank-batches*` | `no_oa_bank_batch`、`no-oa-bank-batch` | `tests/test_no_oa_bank_batch_*`、`web/src/test/BankFlowRuleBatch*.test.tsx`、`web/e2e/bank-flow-rule-batches-flow.spec.ts` |
+| `bank-flow-rule-batches` | `/bank-flow-rule-batches` | `web/src/pages/BankFlowRuleBatchPage.tsx` | `web/src/features/bankFlowRuleBatches/api.ts` | `routes_bank_flow_rule_batches.py`、`server.py` `/api/bank-flow-rule-batches*` | `bank_flow_rule_batch`、`bank-flow-rule-batch` | `tests/test_bank_flow_rule_batch_*`、`web/src/test/BankFlowRuleBatch*.test.tsx`、`web/e2e/bank-flow-rule-batches-flow.spec.ts` |
+| `no-oa-bank-batches` | legacy `/api/no-oa-bank-batches/*` | 无当前页面 | 无当前 no-OA feature；当前页面归 `bank-flow-rule-batches` | `routes_no_oa_bank_batches.py`、`server.py` `/api/no-oa-bank-batches*` | `no_oa_bank_batch`、`no-oa-bank-batch` | `tests/test_no_oa_bank_batch_*`、legacy no-OA regression via bank-flow/workbench tests |
 | `batch-accounting` | `/batch-accounting` | `web/src/pages/BatchAccountingPage.tsx` | `web/src/features/batchAccounting/api.ts` | `server.py` `/api/batch-accounting*` | `workbench_relation`、`workbench-relation` | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、`web/e2e/batch-accounting-flow.spec.ts` |
 | `turnover-ledger` | `/turnover-ledger` | `web/src/pages/TurnoverLedgerPage.tsx` | `web/src/features/turnoverLedger/api.ts` | `routes_turnover_ledger.py`、`server.py` `/api/turnover-ledger*` | `turnover_ledger`、`turnover-ledger` | `tests/test_turnover_*`、`web/src/test/TurnoverLedger*.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` |
 | `etc-tickets` | `/etc-tickets` | `web/src/pages/EtcTicketManagementPage.tsx` | `web/src/features/etc/api.ts` | `routes_etc.py`、`server.py` `/api/etc*` | `import` worker、ETC import/business batch state | `tests/test_etc_*`、`web/src/test/Etc*.test.tsx`、`web/e2e/etc-tickets-flow.spec.ts` |
@@ -56,7 +57,7 @@
 
 - `web/e2e/cost-statistics-flow.spec.ts`：真实 Chromium 中进入成本统计页，验证 read model `refreshing` / `stale` / `failed` 不显示最终空态或旧数据，`read_export_only` time-view 导出中心可成功触发 download event 且请求/文件字段正确；同时验证按时间首屏，切到按项目并切换 `project_scope=all`，从项目到费用类型再到流水详情下钻，打开导出中心执行 project preview，并断言同步导出行数上限错误能在弹窗内显示；另有 390px 窄屏 120+ 行长字段 smoke，等待 explorer `read_model_status=fresh` 后验证按时间表和项目下钻表均可横向/纵向滚动、右侧列在 viewport 内、导出入口和选择器未被遮挡且无浏览器错误。
 - `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中确认 ETC 导入后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示 ETC 导入通行成本项目、通行费和服务商，证明 ETC import 子链路不是只停留在导入页 job feedback。
-- `web/e2e/bank-flow-rule-batches-flow.spec.ts`：真实 Chromium 中 no-OA selected-row submit 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示免 OA 手续费成本项目、费用类型和银行流水字段，证明 no-OA submit 子链路不是只停留在本页 bucket 状态。
+- `web/e2e/bank-flow-rule-batches-flow.spec.ts`：真实 Chromium 中 bank-flow selected-row submit 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示流水规则手续费成本项目、费用类型和银行流水字段，证明 bank-flow submit 子链路不是只停留在本页 bucket 状态。
 - `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中外部往来 manual closure confirm 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示外部往来闭环成本项目、费用类型和银行流水字段，证明 turnover closure 子链路不是只停留在周转页闭环 chip 状态。
 - `web/e2e/settings-data-reset-flow.spec.ts`：真实 Chromium 中设置页项目标记完成并保存后进入成本统计，等待 active/all `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，active scope 排除已完成项目，all scope 保留该项目和金额，证明 settings project scope 子链路不是只停留在设置页保存成功反馈。
 
@@ -136,12 +137,12 @@
 
 ## 模块细化：no-oa-bank-batches
 
-本节记录 `2026-06-11` 首轮 CodeGraph 审计后的免 OA 流水批量处理调用链。业务事实源仍以 `docs/product-specs/bank-turnover-and-no-oa.md` 和 `docs/modules/no-oa-bank-batches/` 为准。
+本节记录 legacy 免 OA 流水批量处理调用链。当前 Browser 页面、前端 feature 和生产用户入口已经迁移到 `bank-flow-rule-batches`；本节只描述 `/api/no-oa-bank-batches/*`、`no_oa_bank_batch` read model 和 legacy no-OA 事实。业务事实源仍以 `docs/product-specs/bank-turnover-and-no-oa.md` 和 `docs/modules/no-oa-bank-batches/` 为准。
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/BankFlowRuleBatchPage.tsx` | stale polling、route unmount cleanup、跨账户选择保护、internal_transfer batch submit、withdraw dialog |
-| Frontend API mapper | `web/src/features/bankFlowRuleBatches/api.ts` | snake_case/camelCase、read_model_status、summary categories、detail rows、mutation errors、affected months |
+| Frontend page | 无当前 no-OA 页面 | 当前页面归 `bank-flow-rule-batches`；新增 no-OA 前端入口必须重新做边界评审。 |
+| Frontend API mapper | 无当前 no-OA feature | 当前 `web/src/features/bankFlowRuleBatches/api.ts` 归 `bank-flow-rule-batches`；legacy no-OA API regression 主要由后端/API tests 覆盖。 |
 | Route facade | `routes_no_oa_bank_batches.py` | HTTP status、version conflict、actor mapping、partial failure aggregation、unknown batch/error shape |
 | Application service | `NoOaBankBatchApplicationService` | read model missing/stale 不同步 rebuild、after_mutation、durable queue enqueue、Workbench scope expansion |
 | Business core | `NoOaBankBatchService` | draft/submitted/withdrawn/stale/conflict、internal_transfer pairing、active relation exclusion、legacy relation migration |
@@ -162,7 +163,7 @@
 
 当前 Browser e2e：
 
-- `web/e2e/bank-flow-rule-batches-flow.spec.ts`：真实 Chromium 中进入免 OA 流水批量处理页，选择未提交手续费流水，断言 `submit-selection` 请求体和 operation barrier fresh，进入成本统计验证 downstream fresh read model 与免 OA 成本行，回到已提交 bucket 撤回批次并确认撤回请求体，最后进入历史 bucket 验证已撤回只读。
+- 无当前 no-OA 页面级 Browser 入口；与用户页面相关的真实 Chromium 覆盖归 `bank-flow-rule-batches`。legacy no-OA 的 API/read model/worker 和 Workbench relation 回归由 `tests/test_no_oa_bank_batch*.py`、`tests/test_bankdetail_write_uow_contract.py` 和受影响 Workbench tests 覆盖。
 
 ## 模块细化：batch-accounting
 
@@ -202,10 +203,10 @@
 | Frontend page | `web/src/pages/imports/ImportBankTransactionsPage.tsx` | 只传 `mode="bank_transaction"`，真实行为都在共享 `ImportWorkflowPage`；共享改动会影响发票/ETC 导入 |
 | Shared workflow | `web/src/components/imports/ImportWorkflowPage.tsx` | 银行账户映射加载、每文件选择、preview stale、session restore、job feedback、route unmount cleanup |
 | Frontend API mapper | `web/src/features/imports/api.ts` | multipart `file_overrides`、snake_case/camelCase、duplicate groups、skipped rows、`preview_stale` 错误映射 |
-| HTTP routes | `server.py` `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/retry`、`/imports/files/sessions/{session_id}`、legacy `/imports/preview`、`/imports/confirm` | files/session API 与 legacy JSON API 并存；confirm 必须防 stale/idempotent |
+| HTTP routes | `server.py` `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/retry`、`/imports/files/sessions/{session_id}`、legacy `/imports/preview`、`/imports/confirm` | 银行流水页面只走 files/session API；legacy JSON API 是共享程序化/回归入口；confirm 必须防 stale/idempotent |
 | File import service | `FileImportService` | 损坏文件 file-level error、模板识别、银行映射冲突、session/file/batch id、selected files confirm |
 | Normalization core | `ImportNormalizationService` | 银行流水 identity、账号维度唯一键、原始文本字段、重复/疑似重复、缺失秒级时间 |
-| Import processing | `ImportProcessingService` | confirm 后 enqueue Workbench matching、invalidate tax/cost/workbench；job 成功不代表下游 fresh |
+| Import processing | `ImportProcessingService` | confirm processor 业务边界归 service；`server.py` 只做 route/job 组装；job 成功不代表下游 fresh |
 | Import worker | `ImportJobRepository`、`ImportJobWorker`、`runtime_worker_handlers.py` | `import.process.requested` small envelope、processor registry、failed processor 不吞错 |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py` | `imports_bank_transactions` 绑定 `import` worker 和 `bank_transaction_import`；`import.process.requested` affected domain 当前偏向 invoices，需后续专项校准 |
 
@@ -222,6 +223,7 @@
 当前 Browser e2e：
 
 - `web/e2e/imports-bank-transactions-flow.spec.ts`：真实 Chromium 中上传两份银行流水 XLSX、选择银行账户、预览 audit/重复项、处理银行账户冲突弹窗、confirm 后触发 `/api/workbench` 刷新，再进入银行明细验证导入流水可见。
+- `tests/test_platform_runtime_boundary_guards.py`：静态保护银行流水前端不调用旧 JSON import API，并保护 `server.py` 不重新持有 import confirm processor wrapper。
 
 ## 模块细化：imports-invoices
 
@@ -255,18 +257,19 @@
 
 ## 模块细化：imports-etc-invoices
 
-本节记录 `2026-06-11` 首轮 CodeGraph 审计后的 ETC 发票导入调用链。业务事实源仍以 `docs/product-specs/imports-and-etc.md`、`docs/operations/etc-business-batches.md` 和 `docs/modules/imports-etc-invoices/` 为准。
+本节记录 ETC 发票导入调用链；2026-07-05 已完成 runtime canonical cleanup surface 移除。业务事实源仍以 `docs/product-specs/imports-and-etc.md`、`docs/operations/etc-business-batches.md` 和 `docs/modules/imports-etc-invoices/` 为准。
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
 | Frontend page | `web/src/pages/imports/ImportEtcInvoicesPage.tsx` | 只传 `mode="etc_invoice"`，共享 `ImportWorkflowPage` 改动会影响银行流水和发票导入 |
 | Shared workflow | `web/src/components/imports/ImportWorkflowPage.tsx` | zip-only 上传、ready task selector、unavailable task reason、preview stale、job feedback、route unmount cleanup |
 | Frontend API mapper | `web/src/features/etc/api.ts` | `/api/etc/import/preview` multipart、长超时、`task_id`、snake_case/camelCase、background job payload、stale error 映射 |
-| HTTP routes | `server.py` `/api/etc/import/preview`、`/api/etc/import/confirm`、reconciliation task 和 business batch routes | task version/hash 校验、structured error、idempotent job、queue unavailable、legacy import route |
+| HTTP routes | `server.py` `/api/etc/import/preview`、`/api/etc/import/confirm`、reconciliation task 和 business batch routes | task version/hash 校验、structured error、idempotent job、queue unavailable、旧 `POST /api/etc/import` 410 guard 不持久化 |
 | Reconciliation task service | `EtcReconciliationTaskService` | ready/importing/imported/closed、confirmed item set hash、missing requirements、source files、delete/reopen invalidating preview |
 | Zip parser/filter | `etc_document_parsers.py`、`etc_reconciliation_zip_filter.py` | corrupted zip、重复发票、组合金额匹配、多 requirement 分配、非 ETC evidence |
 | ETC service | `EtcService` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success、delete/release |
 | Import processing | `ImportProcessingService` | `etc_invoice_import.confirm` 创建/复用 task-scoped business batch、progress、mark imported/failed、保存 ETC metadata/PDF/XML 附件关系并只关联已存在 canonical invoice |
+| Import cleanup | `EtcReconciliationImportCleanupService`、`EtcBusinessBatchDeleteService` | 删除/重导只清理 ETC 自有 facts 和 changed months，不调用通用 import service 删除或改写 canonical invoice |
 | Derived lifecycle | `DerivedDataLifecycleService`、`runtime_worker_handlers.py` | `etc_import_confirmed` 刷新 Workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `imports_etc_invoices` 绑定 `import` worker 和 `etc_invoice_import` job；共享 `import.process.requested` envelope 仍需后续专项校准 |
 
@@ -279,7 +282,7 @@
 | confirm queued | `etc_invoice_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
 | confirm processed | ETC business batch、ETC invoice metadata/附件关系、已存在 canonical invoice 关联、task imported/failed | ETC 票据管理、关联台 summary、税金抵扣、成本统计、search |
 | lifecycle refresh | `etc_import_confirmed` -> workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search | 关联台、税金抵扣、成本统计、ETC 票据管理、App Health |
-| task/business batch delete | `etc_reconciliation_task_deleted` 或 business batch reset | ETC 票据管理、关联台 summary row、税金/成本、search |
+| task/business batch delete | `etc_reconciliation_task_deleted` 或 business batch reset；不触碰 canonical invoice pool | ETC 票据管理、关联台 summary row、税金/成本、search |
 | preview stale | API `409 stale_reconciliation_task_preview` 或 `409 preview_stale`，前端清空 preview | 当前导入页 |
 
 当前 Browser e2e：
@@ -333,9 +336,9 @@
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
 | Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` | unsubmitted/submitted tab、业务批次筛选计数、workflow detail、delete dialog、OA 草稿、manual OA status、source file 上传 |
-| Frontend API mapper | `web/src/features/etc/api.ts` | business batch envelope、legacy `/api/etc/batches*` fallback、multipart upload、HTML/proxy error、stale preview error |
+| Frontend API mapper | `web/src/features/etc/api.ts` | business batch envelope、旧 `/api/etc/batches*` 与 `/api/etc/invoices/revoke-submitted` 防回归、multipart upload、HTML/proxy error、stale preview error |
 | Workbench UI | `CandidateGroupGrid` | `etc_invoice_summary` 折叠/展开、open/paired 区显示、已提交删除后 summary 释放和已存在 canonical invoice 可见性 |
-| HTTP routes | `server.py` `/api/etc*` | business batch、reconciliation task、legacy batch、import preview/confirm、source files、manual status、delete/reset 的 contract |
+| HTTP routes | `server.py` `/api/etc*` | business batch、reconciliation task、只读 invoice list、import preview/confirm、source files、manual status、delete/reset 的 contract；旧 `/api/etc/batches*`、ETC `oa-status/refresh` 和 `/api/etc/invoices/revoke-submitted` 不得回归 |
 | Business service | `EtcService` | 业务批次幂等、状态流转、ETC metadata/附件占用释放、已存在 canonical invoice 关联、历史 batch 迁移、删除 audit |
 | Application service | `EtcBusinessBatchApplicationService` | OA 草稿、manual OA status、source file、绑定 task 恢复、Workbench invalidation |
 | Reconciliation service | `EtcReconciliationTaskService` | task ready/importing/imported/closed/deleted、source files、version、deleted tombstone、重启 hydrate |
@@ -553,6 +556,7 @@
 - `web/src/test/FinanceTable.test.tsx` 保护共享分页和 shared cell primitives。
 - `web/src/test/TableLayoutTokens.test.ts`、`web/src/test/TableAlignmentStyles.test.ts` 保护表格 token、列角色对齐、tag 稳定尺寸和 motion。
 - `web/src/test/useFinanceTableSession.test.tsx`、`web/src/test/PageSessionStateContext.test.tsx` 保护轻量表格 session 与 page/user/session storage 边界。
+- `web/src/test/MuiContainment.test.ts` 保护非 workbench runtime 无旧 MUI/DataGrid/provider/theme，并防止旧 `useMuiDataGridPageSession` hook/test 回归。
 - `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/PendingInvoicesPage.test.tsx`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/CostStatisticsPage.test.tsx`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/ImportCenterPage.test.tsx`、`web/src/test/AppHealthOperationsPage.test.tsx` 保护页面级表格行为。
 
 ## 模块细化：oa-integration

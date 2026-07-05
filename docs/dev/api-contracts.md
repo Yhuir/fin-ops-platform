@@ -172,7 +172,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ## Bank Transaction Paired Policy / 流水规则批量处理 API
 
-状态：implemented-global-paired-policy。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。迁移 `0082_bank_flow_rule_batch_storage.sql` 从历史 no-OA 表回填旧 bank-flow rows；迁移 `0083_bank_flow_rule_batch_tag_rules.sql` 只在缺失新规则 key 时一次性从历史 no-OA settings 复制初始值。运行时不再把 no-OA 物理表、no-OA settings family、旧 `selected_tag_codes` 或旧 no-OA 历史重算作为 bank-flow source of truth。legacy `/api/no-oa-bank-batches/*` 仅作为 no-OA 兼容路径保留，不承接 bank-flow 新链路。
+状态：close。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。迁移 `0082_bank_flow_rule_batch_storage.sql` 从历史 no-OA 表回填旧 bank-flow rows；迁移 `0083_bank_flow_rule_batch_tag_rules.sql` 只在缺失新规则 key 时一次性从历史 no-OA settings 复制初始值。运行时不再把 no-OA 物理表、no-OA settings family、旧 `selected_tag_codes`、旧 no-OA HTTP 错误码、旧 `no_oa_bank_batch_summary` Workbench source kind 或旧 no-OA 历史重算作为 bank-flow source of truth。legacy `/api/no-oa-bank-batches/*` 仅作为 no-OA 兼容路径保留，不承接 bank-flow 新链路。
 
 `GET /api/bank-flow-rule-batches/tag-rules`
 
@@ -222,6 +222,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 只能提交当前 `active_tags` 中存在且可用的标签 code；未知、停用、重复 code 返回业务错误。
 - 成功后返回与 GET 相同结构，写审计动作 `bank_flow_rule_batch_tag_rules_updated`。
 - 保存后触发独立 `bank_flow_rule_batch`、`workbench`、`workbench_relation` 等受影响 read model refresh；不能递增 `bank_transaction_tags.version`。
+- HTTP 输出边界只返回 `bank_flow_rule_batch_*` 错误码。共享 bank-batch core 仍可能抛出的 legacy `no_oa_bank_batch_*` selection/relation/version/persistence 错误必须在 `routes_bank_flow_rule_batches.py` 翻译，不能泄露给前端 API client。
 
 `GET /api/bank-flow-rule-batches`
 
@@ -258,6 +259,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 提交前必须重查银行流水、标签、active relation 占用和规则版本。
 - 成功后写入 `relation_mode=bank_flow_rule_batch`，并在 relation `special_metadata` 写入 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`。
 - 关联台按 metadata 判断 open/paired；`source_row_count > 3` 时默认折叠。
+- Workbench 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、summary id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag；不得输出 `no_oa_bank_batch_summary` 或 `免OA` tag 作为 bank-flow 摘要 I/O。
 - 成功响应返回 `batch_id`、`case_id`、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。
 
 `POST /api/bank-flow-rule-batches/reset-submitted`
@@ -913,7 +915,7 @@ SSE 事件流。支持事件：
 
 ## ETC 业务批次 API
 
-ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-batches*` 作为新增契约层。它取代前端直接拼接 `EtcImportBatch` 和 `EtcBatch` 的展示口径，旧 `/api/etc/batches*` 只作为过渡兼容入口，不应继续扩展。
+ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-batches*` 作为契约层。它取代前端直接拼接 `EtcImportBatch` 和 `EtcBatch` 的展示口径；旧 `/api/etc/batches*` 已删除，不得作为兼容或测试 mock 入口恢复。
 
 契约要求：
 
@@ -928,6 +930,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - dry-run、迁移和人工确认动作要返回 affected batches、affected invoices、affected months 和审计信息。
 - ETC 页面创建 OA 草稿后，业务批次状态为 `oa_confirmation_pending`，使用 `POST /api/etc/business-batches/{id}/manual-oa-status` 确认 `submitted` 或 `not_submitted`。
 - ETC 专用 OA 自动检测入口已移除：后端不再提供 `/api/etc/business-batches/{id}/oa-status/refresh`，不再输出 `oaDetection*` 字段，也不再注册 ETC OA 检测 worker 或 detector adapter。
+- ETC invoice list 只保留 `GET /api/etc/invoices` 读侧入口；旧 `/api/etc/invoices/revoke-submitted` 已删除，不得通过 invoice id 直接回退 submitted 状态。提交状态回退必须走 business batch `manual-oa-status`、`oa-draft/revoke` 或 delete/reset 状态机。
 - `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务，并在关联台 open 区投影一条 `source_kind=etc_invoice_summary` 的折叠汇总发票行。该行金额优先使用业务批次上报金额，不使用散票合计覆盖；散票继续作为折叠明细，不直接散落展示。
 - `etc_invoice_summary` 在没有 OA 和银行流水三项完全匹配前必须保持 open/pending 状态，关系标签显示待匹配 OA/流水；只有关联台普通配对逻辑确认三项关系后，才进入已配对区。
 - `DELETE /api/etc/business-batches/{id}` 对任意阶段业务批次执行本地删除/reset，不撤销 OA。请求可带 `expectedVersion` 做并发保护，不要求删除原因；成功响应至少包含 `deleted=true`、`businessBatchId`、`kind`、`releasedInvoiceCount` 和关联删除结果。后端必须删除该批次本地创建/导入的 ETC 对账任务、导入来源、核对结果、提交批次元数据和 ETC 发票；若已提交批次存在 `etc_invoice_summary`，必须释放 ETC 发票合并关系并刷新 Workbench，使原 `etc_invoice_summary` 消失。若该 summary 已参与 active relation，删除时通过 canonical relation command 取消包含该 summary 的 relation，OA 和银行流水不得恢复成二栏 active relation。`workbench_relation` distribution/read model 非 fresh 不得阻断该删除/reset；写安全以权限、expected version、canonical relation 状态、持久化和 outbox/refresh enqueue 为准，失败时返回对应稳定错误码。

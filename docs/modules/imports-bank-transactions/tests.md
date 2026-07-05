@@ -15,6 +15,7 @@
 | Import worker / queue | idempotency key、small RabbitMQ envelope、unknown processor failure、registered processor success、worker check、RabbitMQ confirm queue | `tests/test_import_job_queue.py`、`tests/test_runtime_worker_registry.py` |
 | 下游 fan-out | bank import confirmed -> bank detail/balance、Workbench/relation/matching、invoice lifecycle、cost/search | `tests/test_derived_data_lifecycle_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_bank_account_balance_read_model.py`、`tests/test_bank_details_sql_runtime.py` |
 | App Status/App Health | imports bank domain route、import worker/job、file import explicit affected domain、generic import job fallback 不误指发票页、global status plane | `tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
+| 边界/旧代码 guard | 银行流水前端只走 `/imports/files/*`；`server.py` 不重新持有 import confirm processor wrapper | `tests/test_platform_runtime_boundary_guards.py` |
 
 ## 关键场景覆盖
 
@@ -31,6 +32,7 @@
 | preview stale 时拒绝 confirm | covered | `test_confirm_session_rejects_stale_preview_when_existing_records_change`、`test_import_file_confirm_returns_preview_stale_when_existing_records_change` |
 | confirm 只导入 selected files | covered | `test_confirm_files_imports_only_selected_files_from_session` |
 | RabbitMQ/import worker 模式下 confirm 入队并可被 import processor 执行 | covered | `test_general_import_confirm_queues_import_job_in_rabbitmq_mode`、`test_application_import_processor_registry_runs_general_import_confirm` |
+| 银行流水页面禁止回到旧 JSON import API，server confirm processor wrapper 保持删除 | covered | `test_bank_transaction_import_frontend_uses_file_session_api_only`、`test_server_no_longer_owns_import_confirm_processors` |
 | 银行导入确认后 Workbench read model invalidated | covered | `test_bank_import_confirm_invalidates_workbench_read_model` |
 | bank import lifecycle fan-out 到银行明细/账户余额、Workbench、relation、matching、invoice lifecycle、cost/search | covered | `test_bank_import_confirmed_maps_workbench_candidate_cost_and_search_domains` |
 | Browser e2e 上传/预览/慢预览防重复提交/重复/损坏文件混合/冲突取消零提交/冲突确认/preview stale/confirm 失败/下游银行明细 | covered | `web/e2e/imports-bank-transactions-flow.spec.ts` |
@@ -42,11 +44,11 @@
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_import_service.py`、`tests/test_import_api.py`、`tests/test_import_preview_audit.py` | 覆盖银行流水 direction、金额、identity、重复/疑似重复、缺失秒级时间、账号维度唯一键、原始文本字段。 |
 | 2. Service-layer tests | 适用 | `tests/test_import_file_service.py`、`tests/test_import_job_queue.py`、`tests/test_import_formalization_api.py` | 覆盖 session/file/batch 生命周期、preview stale、confirm 持久化、job idempotency、worker processor。 |
-| 3. API contract tests | 适用 | `tests/test_import_file_api.py`、`tests/test_import_api.py`、`web/src/test/ImportsApi.test.ts` | 覆盖 `/imports/files/preview`、`confirm`、`retry`、`sessions`、legacy preview/confirm、错误 shape 和 mapper。 |
+| 3. API contract tests | 适用 | `tests/test_import_file_api.py`、`tests/test_import_api.py`、`web/src/test/ImportsApi.test.ts`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `/imports/files/preview`、`confirm`、`retry`、`sessions`、legacy preview/confirm、错误 shape 和 mapper；boundary guard 锁定银行流水前端不调用旧 JSON API。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_bank_account_balance_read_model.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_bank_detail_for_transaction_month_scopes`、`tests/test_app_status_overview_service.py`、`tests/test_write_operation_slo_audit.py` | 覆盖 import worker、dirty fan-out、银行余额/明细 projection、App Status，并用 `bank_import_confirmed` write-operation profile 防止真实银行确认少刷新通用下游 read model、银行账户余额 `bank_account_balance.read_model.refresh` 或银行明细真实 `bank_detail.read_model.refresh` 时仍被判定闭环；进项/销项发票方向页未命中时允许 `skipped`，账户余额 API fresh gate 仍需 staging/browser smoke 观察。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖独立路由、上传/预览/确认、错误、session restore、job feedback、App Status popover；Browser e2e 覆盖真实文件 input、账户 select、慢预览期间禁用预览/清空/确认动作、audit/重复明细、损坏文件 file-level error、未导入项明细、冲突 dialog、取消冲突零提交、preview stale、confirm 失败、确认后 dialog close、银行明细账户余额 fresh gate、成本统计下游 fresh read model、成功后无导入失败/后台导入失败/read model 失败可见残留和 read-only 禁用上传/预览/确认。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_import_formalization_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖 preview -> confirm -> persisted import -> Workbench refresh / stale preview；Browser e2e 覆盖慢预览单次提交且预览中不能清空或确认、confirm 后刷新 Workbench、进入银行明细看到账户余额 fresh gate 和导入行，并进入成本统计以 fresh read model 看到导入流水成本证据，也覆盖损坏文件不阻断正常文件确认、冲突取消不提交、preview stale / confirm 失败时不刷新 Workbench、不误报成功；confirm、银行明细和成本统计成功节点都会检查无错误残留。真实 worker drain 仍是 documented-risk。 |
-| 7. Existing feature regression tests | 适用 | `tests/test_import_file_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_derived_data_lifecycle_service.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖旧 JSON import、文件导入、发票/ETC 共享工作流、损坏文件 file-level error、下游页面 refresh、preview stale、confirm 失败，以及冲突确认弹窗取消不提交、成功提交后不会继续挡住导航。 |
+| 7. Existing feature regression tests | 适用 | `tests/test_import_file_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_platform_runtime_boundary_guards.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖旧 JSON import 兼容、文件导入、发票/ETC 共享工作流、损坏文件 file-level error、下游页面 refresh、preview stale、confirm 失败、旧 wrapper 删除防回归，以及冲突确认弹窗取消不提交、成功提交后不会继续挡住导航。 |
 
 ## 历史 Bug 回归库
 
@@ -60,6 +62,7 @@
 | 光大/建行官方导出表头别名 | 光大 `借方金额（支出）` / `贷方金额（收入）`、光大负数支出/收入列回退行、建行 `客户账号` / `凭证号码` 必须识别为既有银行流水模板，不得做模糊猜列。 | fixed 2026-06-22 |
 | RabbitMQ confirm | 异步 confirm 只能传小 envelope，processor 由 worker 拉取事实 | covered |
 | App Status job mapping | 银行流水文件确认必须写入 `imports_bank_transactions` affected domain；generic `file_import` / `import.process.requested` fallback 不能误指发票页 | fixed 2026-06-16 |
+| 2026-07-05 边界 close | 银行流水页面不得回退旧 `/imports/preview`、`/imports/confirm` JSON API；`server.py` 不得重新拥有 import confirm processor wrapper | fixed by `tests/test_platform_runtime_boundary_guards.py` |
 | 大重复组 | 合成 240 行同文件银行流水重复组必须只产生一个 confirmable representative，避免大文件 preview 把重复项全部当作可确认 | fixed 2026-06-16 |
 | 2026-06-17 Browser e2e | 银行账户冲突弹窗里确认导入成功后未关闭，modal backdrop 阻塞用户导航到银行明细或其他页面。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 银行账户冲突弹窗取消必须只关闭弹窗，不能提交 confirm、不能刷新 Workbench、不能显示导入成功；用户随后仍可重新确认导入。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
@@ -95,6 +98,8 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_bank_account_balance_read_model \
   tests.test_bank_details_sql_runtime \
   tests.test_write_operation_slo_audit \
+  tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_no_longer_owns_import_confirm_processors \
+  tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_transaction_import_frontend_uses_file_session_api_only \
   tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_import_file_confirm_returns_preview_stale_when_existing_records_change \
   tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_bank_import_confirm_invalidates_workbench_read_model \
   -v

@@ -77,4 +77,5 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-05 | 补强旧 MUI/DataGrid session 删除防回归，并将 common primitive 测试从 MUI 命名改为 platform 命名 | table session 边界、旧 provider/theme/DataGrid hook 删除条件、common platform primitive 测试命名 | `cd web && npx vitest run MuiContainment.test.ts CommonPlatformComponents.test.tsx useFinanceTableSession.test.tsx` |
 | 2026-06-11 | 补齐 Finance Table System 状态机 | shared primitive、页面级表格、table session、导出、read model 状态展示 | `cd web && npm test -- --run src/test/FinanceTable.test.tsx` |

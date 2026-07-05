@@ -1,14 +1,14 @@
 # Finance Table System 模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：medium
+- 状态：close
+- 当前边界可信度：high
 - 目标边界：Finance Table 只提供通用表格布局、列、滚动、选择和 session 行为，不承载业务数据解释。
-- 当前缺口：多个页面仍各自维护表格配置，迁移时必须保证视觉/交互回归。
-- 旧代码删除条件：旧页面表格样式或重复 hook 被替换且 e2e 覆盖。
+- 当前缺口：无共享 Finance Table 主链路缺口；多个页面仍各自维护表格配置属于页面模块责任，不阻断本模块 close。
+- 旧代码删除条件：旧 MUI/DataGrid runtime、provider/theme、`useMuiDataGridPageSession` hook/test 和旧 `CommonMuiComponents` 活跃测试命名已移除；历史 refactor 执行日志保留为历史记录，不作为当前架构事实。
 
 ## 职责边界
 
@@ -28,7 +28,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | Rows/columns/actions | 页面模块 | 页面负责业务数据和权限 |
-| Session state | `useFinanceTableSession` | key 必须按页面隔离 |
+| Session state | `useFinanceTableSession` | key 必须按页面隔离；只保存 pagination/sort/selection/scroll，不保存 rows/read model payload |
 | Layout tokens | CSS/design docs | 不破坏响应式和可访问性 |
 
 ## 输出 I/O
@@ -54,20 +54,21 @@
 | Styles | `web/src/app/styles.css` |
 | Consumers | `web/src/pages/*Page.tsx`、`web/src/components/*Table*` |
 | Docs | `docs/refactor-ui/table_layout_system.md` |
-| Tests | `web/src/test/FinanceTable.test.tsx`、`TableLayoutTokens.test.ts`、`TableAlignmentStyles.test.ts`、`web/e2e/finance-table-system-flow.spec.ts` |
+| Tests | `web/src/test/FinanceTable.test.tsx`、`TableLayoutTokens.test.ts`、`TableAlignmentStyles.test.ts`、`useFinanceTableSession.test.tsx`、`MuiContainment.test.ts`、`web/e2e/finance-table-system-flow.spec.ts` |
 
 ## 依赖方向
 
 - 允许依赖：React/UI primitives, page-provided callbacks。
 - 必须通过：typed props and page session hook。
-- 禁止绕过：FinanceTable import business API; table component infer permission/read model state.
+- 禁止绕过：FinanceTable import business API；table component infer permission/read model state；恢复 MUI/DataGrid runtime、provider/theme 或旧 `useMuiDataGridPageSession`。
 
 ## 测试与验证
 
 - `web/src/test/FinanceTable.test.tsx`
 - `web/src/test/useFinanceTableSession.test.tsx`
+- `web/src/test/MuiContainment.test.ts`
 - `web/e2e/finance-table-system-flow.spec.ts`
 
 ## 当前缺口和删除条件
 
-- 页面迁移到 FinanceTable 时必须保留该页面 API/read model 边界，不把业务逻辑推入通用组件。
+- 页面迁移到 FinanceTable 时必须保留该页面 API/read model 边界，不把业务逻辑推入通用组件。旧 MUI/DataGrid session/provider 文件已由 `MuiContainment.test.ts` 防回归。

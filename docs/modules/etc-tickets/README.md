@@ -52,8 +52,8 @@
 - “新建批次”入口调用 `POST /api/etc/business-batches`；前端不直接把空 reconciliation task 当作批次展示，后端 application service 负责编排 task + active business batch 并返回统一 business batch payload。
 - 未提交业务批次标题由 business batch `title` 持久化；页面允许点击批次标题内联编辑，保存走 `PATCH /api/etc/business-batches/{id}` 并使用 `expectedVersion`。保存成功后必须同步 linked reconciliation task title，确保 `/imports/etc-invoices` ready task 下拉显示最新标题；已提交/closed 批次标题锁定。
 - 没有 active business batch 绑定的 task-only 记录不得进入左侧批次列表或 tab 计数；只可作为 workflow 内部状态、异常恢复线索或运维清理对象处理。
-- 旧 `/api/etc/batches*` 后端兼容入口已删除；页面、测试和运维入口不得重新依赖它。
-- ETC 专用 OA 自动检测链路已移除；创建 OA 草稿后只允许用户通过 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
+- 旧 `/api/etc/batches*` 后端兼容入口、前端测试 mock 假后端、invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口和 ETC `oa-status/refresh` 入口已删除；页面、测试和运维入口不得重新依赖它们。
+- ETC 专用 OA 自动检测链路已移除；创建 OA 草稿后只允许用户通过 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`，不得通过 invoice id 直接回退提交状态。
 - `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；Workbench open 区必须生成折叠 `etc_invoice_summary`，等待 OA 和银行流水进入后通过普通配对闭环。
 - ETC 发票本质上是进项发票；统一发票池只保留 `app.invoices` 内的正式进/销项发票。ETC 专用导入保存 ZIP 内命中本批次的 PDF/XML 和 ETC metadata，用于 OA 附件和 summary 展示；不得因为 ETC ZIP 中出现一张票就在统一发票池创建新发票。
 - 业务批次任意阶段允许本地删除/reset；删除不得撤销真实 OA 草稿或 OA 流程，已提交批次删除必须释放 ETC 发票合并关系，并取消包含 summary row 的 active relation。

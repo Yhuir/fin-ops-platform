@@ -1,14 +1,14 @@
 # 银行流水导入模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：medium
+- 状态：close
+- 当前边界可信度：high
 - 目标边界：银行流水导入通过 import file/service/job queue 进入预览、确认、后台处理和 derived lifecycle，不直接写页面 read model。
-- 当前缺口：导入服务影响 bank detail、workbench、search 等多个下游 scope，变更必须同步 fan-out 测试。
-- 旧代码删除条件：旧同步导入路径不再被页面/API/脚本引用。
+- 当前缺口：无阻塞缺口。导入服务影响 bank detail、workbench、search 等多个下游 scope，变更仍必须同步 fan-out 测试。
+- 旧代码删除状态：银行流水页面和前端 runtime 只走 `/imports/files/*` file/session I/O，已用 boundary guard 禁止回到旧 `/imports/preview`、`/imports/confirm` JSON 入口；`server.py` 中旧 import confirm processor wrapper 已删除，confirm 执行边界统一归 `ImportProcessingService`；`FileImportService.snapshot/from_snapshot` 保留为当前 file/session 与 import worker 跨进程恢复 I/O，不属于旧 snapshot 事实源 fallback。
 
 ## 职责边界
 
@@ -30,7 +30,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportBankTransactionsPage.tsx` | 文件只进入 import API/service |
-| 预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 确认后创建可追踪 job |
+| 预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水页面只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；确认后创建可追踪 job |
 | Job event | runtime worker handlers | 后台处理必须可恢复 |
 
 ## 输出 I/O
@@ -64,14 +64,16 @@
 ## 依赖方向
 
 - 允许依赖：import job queue, background job service, derived lifecycle。
-- 必须通过：import service and job queue。
-- 禁止绕过：导入确认时直接写 read model；长任务直接跑在 HTTP request 中。
+- 必须通过：`ImportWorkflowPage` file/session API、`FileImportService`、`ImportProcessingService`、import job queue。
+- 禁止绕过：银行流水页面回到 `/imports/preview` / `/imports/confirm` JSON 入口；导入确认时直接写 read model；长任务直接跑在 HTTP request 中；`server.py` 重新持有 import confirm processor 业务逻辑。
 
 ## 测试与验证
 
 - `tests/test_import_api.py`
 - `tests/test_import_job_queue.py`
 - `tests/test_import_processing_service.py`
+- `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_server_no_longer_owns_import_confirm_processors`
+- `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_transaction_import_frontend_uses_file_session_api_only`
 - `web/src/test/BackgroundJobProgress.test.tsx`
 - `web/src/test/ImportsApi.test.ts`
 - `web/e2e/imports-bank-transactions-flow.spec.ts`
@@ -79,7 +81,8 @@
 ## 当前缺口和删除条件
 
 - 模板识别变更必须覆盖预览、确认、失败恢复和 downstream freshness。
-- 删除旧同步导入路径前，必须证明确认响应/job result 仍能给出 bank detail + account balance 的 operation barrier targets。
+- 当前无 closure blocker。旧 JSON import API 作为共享程序化/回归入口仍存在，不是银行流水页面 I/O；若未来删除该兼容入口，必须先迁移跨模块 fixture 和 legacy `/imports/preview`、`/imports/confirm` 回归。
+- 删除任何 file/session snapshot 持久化前，必须先提供 import worker 跨进程恢复替代方案；不能把 `FileImportService.snapshot/from_snapshot` 误判为旧 full snapshot fallback。
 
 ## Canonical facts ownership
 
@@ -87,5 +90,5 @@
 - Allowed writes: bank transaction import preview/confirm/job、import processing service、受控去重/正式化 repository。
 - Allowed reads: bank transaction repository/query ports、bank detail/import API。
 - Downstream outputs: bank_detail、bank_account_balance、workbench、turnover_ledger、no_oa_bank_batch、search read model dirty scopes 或 owner producer 输出。
-- Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或前端 payload 直接补写银行流水。
-- Old code deletion: 旧同步银行流水导入、snapshot 银行流水 fallback 和直接跨模块写银行事实路径必须删除；migration/audit/rollback 工具保留不算 closure。
+- Forbidden paths: 银行流水页面不得调用旧 JSON `/imports/preview`、`/imports/confirm`；production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或前端 payload 直接补写银行流水。
+- Old code deletion: 已删除 `server.py` 中旧 import confirm processor wrapper；snapshot 银行流水 fallback、直接跨模块写银行事实路径、前端旧 JSON 页面入口必须保持删除。migration/audit/rollback 工具保留不算 closure。

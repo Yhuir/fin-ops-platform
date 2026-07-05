@@ -948,64 +948,6 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(created.source_links[0]["source_type"], "manual_invoice_import")
         self.assertEqual(created.source_links[0]["batch_id"], preview.id)
 
-    def test_remove_etc_import_batch_keeps_formal_canonical_invoice_and_removes_etc_source_link(self) -> None:
-        formal_invoice = Invoice(
-            id="inv_formal_etc_001",
-            invoice_type=InvoiceType.INPUT,
-            invoice_no="26537911470300077680",
-            digital_invoice_no="26537911470300077680",
-            counterparty=self.counterparty,
-            amount=Decimal("9.23"),
-            signed_amount=Decimal("9.23"),
-            invoice_date="2026-03-31",
-            total_with_tax=Decimal("9.50"),
-            source_unique_key="26537911470300077680",
-            invoice_source="增值税发票综合服务平台",
-            invoice_kind="数电发票",
-            etc_import_batch_id="etc_import_batch_legacy",
-            source_links=[
-                {"source_type": "manual_invoice_import", "batch_id": "formal_excel_batch"},
-                {"source_type": "etc_invoice_import", "batch_id": "etc_import_batch_legacy"},
-            ],
-        )
-        service = ImportNormalizationService(existing_invoices=[formal_invoice])
-
-        affected = service.remove_etc_invoices_by_import_batch_id("etc_import_batch_legacy")
-
-        self.assertEqual(affected, 1)
-        remaining = service.get_invoice("inv_formal_etc_001")
-        self.assertIs(remaining, formal_invoice)
-        self.assertIsNone(remaining.etc_import_batch_id)
-        self.assertEqual(remaining.source_batch_id, None)
-        self.assertEqual(
-            remaining.source_links,
-            [{"source_type": "manual_invoice_import", "batch_id": "formal_excel_batch"}],
-        )
-
-    def test_remove_etc_import_batch_deletes_only_legacy_etc_created_canonical_invoice(self) -> None:
-        polluted_invoice = Invoice(
-            id="inv_legacy_etc_created",
-            invoice_type=InvoiceType.INPUT,
-            invoice_no="ETC-LEGACY-001",
-            counterparty=self.counterparty,
-            amount=Decimal("9.23"),
-            signed_amount=Decimal("9.23"),
-            invoice_date="2026-03-31",
-            total_with_tax=Decimal("9.50"),
-            invoice_source="ETC导入",
-            invoice_kind="ETC发票",
-            etc_import_batch_id="etc_import_batch_legacy",
-            source_links=[
-                {"source_type": "etc_invoice_import", "batch_id": "etc_import_batch_legacy"},
-            ],
-        )
-        service = ImportNormalizationService(existing_invoices=[polluted_invoice])
-
-        affected = service.remove_etc_invoices_by_import_batch_id("etc_import_batch_legacy")
-
-        self.assertEqual(affected, 1)
-        self.assertEqual(service.list_invoices(), [])
-
     def test_oa_attachment_invoice_upsert_creates_canonical_invoice_with_source_context(self) -> None:
         invoice = self.service.upsert_oa_attachment_invoice(
             {

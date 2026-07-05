@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 from fin_ops_platform.services.imports import normalize_name
-from fin_ops_platform.services.no_oa_bank_batch_service import (
+from fin_ops_platform.services.bank_batch_service import (
     BANK_FLOW_RULE_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_RELATION_MODE,
 )
@@ -33,7 +33,17 @@ MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
 OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
 OA_BANK_SETTLEMENT_PAIRED_CODES = {"personal_advance_repayment_settlement"}
 NO_OA_BANK_BATCH_PAIRED_CODES = {NO_OA_BANK_BATCH_RELATION_MODE, BANK_FLOW_RULE_BATCH_RELATION_MODE}
+BANK_TRANSACTION_PAIRED_POLICY_CODES = {
+    *SINGLE_BANK_AUTO_PAIRED_CODES,
+    *MULTI_BANK_AUTO_PAIRED_CODES,
+    *OA_BANK_SETTLEMENT_PAIRED_CODES,
+    *NO_OA_BANK_BATCH_PAIRED_CODES,
+    TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+}
+BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND = "bank_flow_rule_batch_summary"
+NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
 BATCH_ACCOUNTING_RELATION_MODE = "batch_accounting"
+DEMOTED_PAIRED_ROW_MARKER = "_workbench_demoted_from_paired"
 AUTO_PAIRED_CODES = {
     *SINGLE_BANK_AUTO_PAIRED_CODES,
     *MULTI_BANK_AUTO_PAIRED_CODES,
@@ -284,6 +294,7 @@ class WorkbenchCandidateGroupingService:
     def _open_context_row(row: dict[str, Any]) -> dict[str, Any]:
         cloned = deepcopy(row)
         cloned["status"] = "open"
+        cloned[DEMOTED_PAIRED_ROW_MARKER] = True
         return cloned
 
     def _build_case_or_temp_groups(
@@ -1083,8 +1094,8 @@ class WorkbenchCandidateGroupingService:
         if processed_summary:
             payload["processed_exception_summary"] = processed_summary
         self._apply_etc_invoice_summary_collapsed_details(payload)
-        if section == "paired" and self._should_collapse_no_oa_bank_batch_group(group):
-            self._apply_no_oa_bank_batch_collapsed_summary(payload)
+        if section == "paired" and self._should_collapse_bank_batch_group(group):
+            self._apply_bank_batch_collapsed_summary(payload)
         return payload
 
     @staticmethod
@@ -1111,7 +1122,7 @@ class WorkbenchCandidateGroupingService:
         payload["collapsed_row_counts"] = {"invoice": len(detail_rows)}
         payload["invoice_rows"] = [summary_row]
 
-    def _should_collapse_no_oa_bank_batch_group(self, group: CandidateGroup) -> bool:
+    def _should_collapse_bank_batch_group(self, group: CandidateGroup) -> bool:
         if group.oa_rows or group.invoice_rows or not group.bank_rows:
             return False
         if len(group.bank_rows) < 2:
@@ -1124,27 +1135,42 @@ class WorkbenchCandidateGroupingService:
         source_batch_ids = {
             source_batch_id
             for row in group.bank_rows
-            if (source_batch_id := self._no_oa_source_batch_id(row))
+            if (source_batch_id := self._bank_batch_source_batch_id(row))
         }
         return len(source_batch_ids) == 1 and len(source_batch_ids) == len(
-            {self._no_oa_source_batch_id(row) for row in group.bank_rows}
+            {self._bank_batch_source_batch_id(row) for row in group.bank_rows}
         )
 
-    def _apply_no_oa_bank_batch_collapsed_summary(self, payload: dict[str, Any]) -> None:
+    def _apply_bank_batch_collapsed_summary(self, payload: dict[str, Any]) -> None:
         bank_rows = [row for row in list(payload.get("bank_rows") or []) if isinstance(row, dict)]
-        summary_row = self._no_oa_bank_batch_summary_row(bank_rows)
-        payload["relation_mode"] = self._relation_code(bank_rows[0]) or NO_OA_BANK_BATCH_RELATION_MODE
+        relation_mode = self._relation_code(bank_rows[0]) or NO_OA_BANK_BATCH_RELATION_MODE
+        summary_row = self._bank_batch_summary_row(bank_rows, relation_mode=relation_mode)
+        payload["relation_mode"] = relation_mode
         payload["display_mode"] = "collapsed_summary"
         payload["default_collapsed"] = True
         payload["summary_row"] = summary_row
         payload["collapsed_rows"] = {"bank": bank_rows}
         payload["bank_rows"] = [deepcopy(summary_row)]
 
-    def _no_oa_bank_batch_summary_row(self, bank_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def _bank_batch_summary_row(
+        self,
+        bank_rows: list[dict[str, Any]],
+        *,
+        relation_mode: str,
+    ) -> dict[str, Any]:
         first_row = bank_rows[0]
-        metadata = self._no_oa_summary_metadata(bank_rows)
+        metadata = self._bank_batch_summary_metadata(bank_rows)
         source_batch_id = str(metadata.get("source_batch_id") or "")
-        batch_label = str(metadata.get("batch_label") or "免OA流水")
+        is_bank_flow_rule_batch = relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
+        default_label = "流水规则批次" if is_bank_flow_rule_batch else "免OA流水"
+        source_kind = (
+            BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND
+            if is_bank_flow_rule_batch
+            else NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND
+        )
+        id_prefix = "bank_flow_rule_summary" if is_bank_flow_rule_batch else "no_oa_summary"
+        label_prefix = "流水规则" if is_bank_flow_rule_batch else "免OA"
+        batch_label = str(metadata.get("batch_label") or default_label)
         total_amount = str(metadata.get("total_amount") or "0.00")
         account_label = self._first_non_empty(
             first_row.get("payment_account_label"),
@@ -1157,24 +1183,24 @@ class WorkbenchCandidateGroupingService:
             self._month_from_value(first_row.get("trade_time")),
             self._month_from_value(first_row.get("pay_receive_time")),
         )
-        display_tags = self._no_oa_display_tags(bank_rows, batch_label)
+        display_tags = self._bank_batch_display_tags(bank_rows, batch_label, primary_tag=label_prefix)
         relation_payload = {
-            "code": NO_OA_BANK_BATCH_RELATION_MODE,
-            "label": f"已匹配：{batch_label}" if batch_label else "已匹配：免OA流水",
+            "code": relation_mode,
+            "label": f"已匹配：{batch_label}" if batch_label else f"已匹配：{default_label}",
             "tone": "success",
         }
         actions = ["detail"]
         if source_batch_id and bool(metadata.get("withdrawable")):
             actions.append("withdraw_no_oa_batch")
         return {
-            "id": f"no_oa_summary:{source_batch_id or self._string_value(first_row.get('case_id')) or 'unknown'}",
+            "id": f"{id_prefix}:{source_batch_id or self._string_value(first_row.get('case_id')) or 'unknown'}",
             "type": "bank",
-            "source_kind": "no_oa_bank_batch_summary",
-            "label": f"免OA · {batch_label}" if batch_label else "免OA流水",
+            "source_kind": source_kind,
+            "label": f"{label_prefix} · {batch_label}" if batch_label else default_label,
             "amount": total_amount,
             "debit_amount": total_amount,
             "credit_amount": "",
-            "counterparty_name": account_label or "免OA流水",
+            "counterparty_name": account_label or default_label,
             "trade_time": trade_month or "",
             "tags": display_tags,
             "display_tags": display_tags,
@@ -1183,7 +1209,7 @@ class WorkbenchCandidateGroupingService:
             "available_actions": actions,
         }
 
-    def _no_oa_summary_metadata(self, bank_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def _bank_batch_summary_metadata(self, bank_rows: list[dict[str, Any]]) -> dict[str, Any]:
         metadata_by_key: dict[str, Any] = {}
         for row in bank_rows:
             row_metadata = row.get("special_metadata")
@@ -1209,7 +1235,7 @@ class WorkbenchCandidateGroupingService:
         metadata_by_key["batch_label"] = str(metadata_by_key.get("batch_label") or "")
         metadata_by_key["row_count"] = len(bank_rows)
         metadata_by_key["total_amount"] = self._format_decimal_amount(
-            self._no_oa_summary_total_amount(bank_rows, metadata_by_key)
+            self._bank_batch_summary_total_amount(bank_rows, metadata_by_key)
         )
         if "withdrawable" in metadata_by_key:
             metadata_by_key["withdrawable"] = bool(metadata_by_key["withdrawable"])
@@ -1217,7 +1243,7 @@ class WorkbenchCandidateGroupingService:
             metadata_by_key["withdrawable"] = bool(metadata_by_key["source_batch_id"])
         return metadata_by_key
 
-    def _no_oa_summary_total_amount(self, bank_rows: list[dict[str, Any]], metadata: dict[str, Any]) -> Decimal:
+    def _bank_batch_summary_total_amount(self, bank_rows: list[dict[str, Any]], metadata: dict[str, Any]) -> Decimal:
         metadata_total = self._amount_from_value(metadata.get("total_amount"))
         if metadata_total is not None:
             return metadata_total
@@ -1245,12 +1271,14 @@ class WorkbenchCandidateGroupingService:
         amounts = [amount for row in bank_rows if (amount := self._amount(row)) is not None]
         return sum(amounts, ZERO) if amounts else ZERO
 
-    def _no_oa_display_tags(self, bank_rows: list[dict[str, Any]], batch_label: str) -> list[str]:
+    def _bank_batch_display_tags(self, bank_rows: list[dict[str, Any]], batch_label: str, *, primary_tag: str = "免OA") -> list[str]:
         tags: list[str] = []
         seen: set[str] = set()
 
         def add(value: Any) -> None:
             text = str(value or "").strip()
+            if primary_tag != "免OA" and text == "免OA":
+                return
             if text and text not in seen:
                 seen.add(text)
                 tags.append(text)
@@ -1258,11 +1286,11 @@ class WorkbenchCandidateGroupingService:
         for row in bank_rows:
             for tag in list(row.get("display_tags") or row.get("tags") or []):
                 add(tag)
-        add("免OA")
+        add(primary_tag)
         add(batch_label)
         return tags
 
-    def _no_oa_source_batch_id(self, row: dict[str, Any]) -> str:
+    def _bank_batch_source_batch_id(self, row: dict[str, Any]) -> str:
         metadata = row.get("special_metadata")
         if not isinstance(metadata, dict):
             return ""
@@ -1289,6 +1317,7 @@ class WorkbenchCandidateGroupingService:
 
     def _serialize_row_for_group(self, row: dict[str, Any], group: CandidateGroup, *, section: str) -> dict[str, Any]:
         payload = dict(row)
+        payload.pop(DEMOTED_PAIRED_ROW_MARKER, None)
         if section != "paired":
             return payload
 
@@ -1302,14 +1331,14 @@ class WorkbenchCandidateGroupingService:
         if (
             str(row.get("type") or "") == "bank"
             and self._relation_code(row) == NO_OA_BANK_BATCH_RELATION_MODE
-            and self._no_oa_source_batch_id(row)
-            and self._no_oa_row_is_withdrawable(row)
+            and self._bank_batch_source_batch_id(row)
+            and self._bank_batch_row_is_withdrawable(row)
         ):
             actions.append("withdraw_no_oa_batch")
         return actions
 
     @staticmethod
-    def _no_oa_row_is_withdrawable(row: dict[str, Any]) -> bool:
+    def _bank_batch_row_is_withdrawable(row: dict[str, Any]) -> bool:
         metadata = row.get("special_metadata")
         if not isinstance(metadata, dict):
             return False
@@ -1370,8 +1399,10 @@ class WorkbenchCandidateGroupingService:
         if any(self._is_processed_exception_projection_row(row) for row in rows):
             return True
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
-        if group.bank_rows:
+        if group.bank_rows and self._uses_bank_transaction_paired_policy(group):
             return self._bank_transaction_paired_policy_satisfied(group)
+        if group.bank_rows and any(self._is_batch_accounting_relation_row(row) for row in rows):
+            return bool(group.oa_rows)
         if row_type_count == 2 and group.oa_rows and group.invoice_rows and not group.bank_rows:
             relation_codes = {
                 self._relation_code(row)
@@ -1380,6 +1411,14 @@ class WorkbenchCandidateGroupingService:
             if relation_codes and relation_codes.issubset(OA_INVOICE_AUTO_PAIRED_CODES):
                 return True
         return row_type_count >= 3
+
+    def _uses_bank_transaction_paired_policy(self, group: CandidateGroup) -> bool:
+        relation_codes = {
+            self._relation_code(row)
+            for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+            if self._relation_code(row)
+        }
+        return bool(relation_codes) and relation_codes.issubset(BANK_TRANSACTION_PAIRED_POLICY_CODES)
 
     def _bank_transaction_paired_policy_satisfied(self, group: CandidateGroup) -> bool:
         if not group.bank_rows:
@@ -1399,6 +1438,12 @@ class WorkbenchCandidateGroupingService:
             "paired_requires_invoice",
             "requires_invoice",
         )
+        if (
+            self._relation_code(row) == NO_OA_BANK_BATCH_RELATION_MODE
+            and requires_oa is None
+            and requires_invoice is None
+        ):
+            return {"requires_oa": False, "requires_invoice": False}
         return {
             "requires_oa": True if requires_oa is None else requires_oa,
             "requires_invoice": True if requires_invoice is None else requires_invoice,
@@ -1565,6 +1610,8 @@ class WorkbenchCandidateGroupingService:
         if any(self._is_legacy_exception_row(row) for row in rows):
             return "legacy_exception"
         if self._rows_are_manual_confirmed_relation(rows):
+            if any(row.get(DEMOTED_PAIRED_ROW_MARKER) for row in rows) and any(row.get("type") == "bank" for row in rows):
+                return "candidate"
             return "manual_confirmed"
         if any(self._is_open_reconciliation_decision_row(row) for row in rows):
             return "open"

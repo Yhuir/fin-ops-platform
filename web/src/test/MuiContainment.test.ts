@@ -52,5 +52,7 @@ describe("MUI containment", () => {
     expect(existsSync(resolve(sourceRoot, "app/MuiProviders.tsx"))).toBe(false);
     expect(existsSync(resolve(sourceRoot, "app/muiTheme.ts"))).toBe(false);
     expect(existsSync(resolve(sourceRoot, "test/legacyWorkbenchMuiProvider.tsx"))).toBe(false);
+    expect(existsSync(resolve(sourceRoot, "hooks/useMuiDataGridPageSession.ts"))).toBe(false);
+    expect(existsSync(resolve(sourceRoot, "test/useMuiDataGridPageSession.test.tsx"))).toBe(false);
   });
 });

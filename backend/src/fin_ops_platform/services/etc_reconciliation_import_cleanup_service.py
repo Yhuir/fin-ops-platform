@@ -10,7 +10,6 @@ from fin_ops_platform.services.etc_service import ETC_BUSINESS_BATCH_SUBMITTED_S
 class EtcImportedInvoicesRemovalResult:
     updated_task: object
     delete_result: dict[str, object]
-    canonical_deleted: int
     changed_months: list[str]
 
 
@@ -19,14 +18,12 @@ class EtcTaskImportCleanupResult:
     task: object
     removed_import_batch: dict[str, object] | None
     removed_submission_batch: dict[str, object] | None
-    canonical_deleted: int
     changed_months: list[str]
 
 
 @dataclass(frozen=True)
 class EtcImportBatchCleanupResult:
     delete_result: dict[str, object]
-    canonical_deleted: int
     changed_months: list[str]
 
 
@@ -42,7 +39,6 @@ class EtcReconciliationImportCleanupService:
         self,
         *,
         etc_service: Any,
-        import_service: Any,
         reconciliation_task_service: Any,
         existing_etc_invoices_by_ids: Callable[[list[str]], list[object]],
         etc_invoice_changed_months: Callable[[list[object]], list[str]],
@@ -52,7 +48,6 @@ class EtcReconciliationImportCleanupService:
         cancel_etc_summary_relations_for_batch: Callable[[object], list[str]],
     ) -> None:
         self._etc_service = etc_service
-        self._import_service = import_service
         self._reconciliation_task_service = reconciliation_task_service
         self._existing_etc_invoices_by_ids = existing_etc_invoices_by_ids
         self._etc_invoice_changed_months = etc_invoice_changed_months
@@ -94,7 +89,6 @@ class EtcReconciliationImportCleanupService:
         return EtcImportedInvoicesRemovalResult(
             updated_task=updated_task,
             delete_result=import_cleanup.delete_result,
-            canonical_deleted=import_cleanup.canonical_deleted,
             changed_months=changed_months,
         )
 
@@ -113,14 +107,12 @@ class EtcReconciliationImportCleanupService:
                 task=task,
                 removed_import_batch=import_cleanup.delete_result,
                 removed_submission_batch=removed_submission_batch,
-                canonical_deleted=import_cleanup.canonical_deleted,
                 changed_months=sorted(set(changed_months)),
             )
         return EtcTaskImportCleanupResult(
             task=task,
             removed_import_batch=None,
             removed_submission_batch=None,
-            canonical_deleted=0,
             changed_months=[],
         )
 
@@ -225,9 +217,6 @@ class EtcReconciliationImportCleanupService:
         ]
         invoice_ids = [str(value) for value in list(getattr(business_batch, "invoice_ids", []) or [])]
         changed_months = self._etc_invoice_changed_months(self._existing_etc_invoices_by_ids(invoice_ids))
-        canonical_deleted = 0
-        for linked_import_batch_id in import_batch_ids:
-            canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(linked_import_batch_id)
         if str(getattr(business_batch, "status", "") or "") in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
             self._assert_etc_summary_relation_write_precondition_for_batch(business_batch)
         delete_result = self._etc_service.delete_business_batch(
@@ -247,7 +236,6 @@ class EtcReconciliationImportCleanupService:
                     self._etc_service.delete_import_batch_sources(linked_import_batch_id)
         return EtcImportBatchCleanupResult(
             delete_result=delete_result,
-            canonical_deleted=canonical_deleted,
             changed_months=sorted(set(changed_months)),
         )
 
@@ -261,10 +249,8 @@ class EtcReconciliationImportCleanupService:
             etc_invoices = self._etc_service.list_invoices_by_import_batch_id(import_batch_id)
         changed_months = self._etc_invoice_changed_months(etc_invoices)
         delete_result = self._etc_service.delete_import_batch_sources(import_batch_id)
-        canonical_deleted = self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)
         return EtcImportBatchCleanupResult(
             delete_result=delete_result,
-            canonical_deleted=canonical_deleted,
             changed_months=changed_months,
         )
 

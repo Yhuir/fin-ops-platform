@@ -50,6 +50,8 @@ ETC 发票导入必须绑定一个已经确认且可导入的 ETC 对账任务�
 
 ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入 ETC import batch 和 ETC invoice metadata / PDF / XML 附件关系，再触发 `etc_import_confirmed` 派生生命周期。ETC ZIP 不再直接创建统一发票池事实；统一发票池 `app.invoices` 只由正式进/销项发票导入，或 OA 附件识别 service 判定为正式发票且池内不存在时受控创建。业务批次后续的 OA 草稿创建、人工确认“已提交/未提交”、删除和 summary row 释放属于 ETC 票据管理模块，但本导入模块必须把这些 fan-out 风险写入测试矩阵。
 
+ETC 导入 runtime 删除链路只清理 ETC task、import batch、business batch 和 ETC metadata 自有事实，不再调用通用 import service 删除或改写 canonical invoice。历史版本造成的 `app.invoices` ETC-created canonical 污染只能通过 `docs/operations/invoice-pool-cleanup.md` 的备份/dry-run/确认流程处理。旧 `POST /api/etc/import` 只保留 410 boundary guard，用于证明直导入口不会持久化记录。
+
 核心 fan-out：
 
 | 动作 | 事实源 / 事件 | 影响 |

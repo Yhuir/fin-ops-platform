@@ -378,17 +378,11 @@ class ActiveAllWorkbenchSnapshotConnection(WorkbenchSqlReadConnection):
 
 class ReadModelRefreshTransactionConnection:
     def __init__(self) -> None:
-        self.fetch_one_params: list[tuple] = []
-        self.execute_params: list[tuple] = []
-        self._source_version = 0
+        self.fetch_all_params: list[tuple] = []
 
-    def fetch_one(self, _sql: str, params: tuple = ()) -> dict:
-        self.fetch_one_params.append(params)
-        self._source_version += 1
-        return {"source_version": self._source_version}
-
-    def execute(self, _sql: str, params: tuple = ()) -> None:
-        self.execute_params.append(params)
+    def fetch_all(self, _sql: str, params: tuple = ()) -> list[dict]:
+        self.fetch_all_params.append(params)
+        return []
 
 
 class WorkbenchAllRowsPageConnection(WorkbenchSqlReadConnection):
@@ -1480,22 +1474,24 @@ class FakeWorkbenchReadModelService:
 class WorkbenchSqlRuntimeTests(unittest.TestCase):
     def test_transactional_cost_statistics_enqueue_expands_workbench_month_scope(self) -> None:
         from fin_ops_platform.services.postgres_repositories.workbench_relation import (
-            _enqueue_read_model_refresh_in_transaction,
+            _append_read_model_refresh,
+            _enqueue_read_model_refreshes_in_transaction,
         )
 
         connection = ReadModelRefreshTransactionConnection()
+        refreshes: list[dict[str, object]] = []
 
-        _enqueue_read_model_refresh_in_transaction(
-            connection,
+        _append_read_model_refresh(
+            refreshes,
             scope_type="cost_statistics",
             scope_key="2026-05",
             reason="workbench_relation_changed",
         )
+        _enqueue_read_model_refreshes_in_transaction(connection, refreshes)
 
-        dirty_scope_keys = [params[2] for params in connection.fetch_one_params]
-        outbox_scope_keys = [params[4] for params in connection.execute_params]
-        self.assertEqual(dirty_scope_keys, ["active:2026-05", "all:2026-05"])
-        self.assertEqual(outbox_scope_keys, ["active:2026-05", "all:2026-05"])
+        params = connection.fetch_all_params[0]
+        scope_keys = [params[index + 3] for index in range(0, len(params), 9)]
+        self.assertEqual(scope_keys, ["active:2026-05", "all:2026-05"])
 
     def test_workbench_sql_source_versions_include_matching_rules_version_for_freshness(self) -> None:
         app = object.__new__(Application)
@@ -3611,7 +3607,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             any(
                 "coalesce(r.row_role, '') <> 'summary'" in sql
                 and
-                "coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'" in sql
+                "coalesce(r.source_kind, '') not in" in sql
+                and "no_oa_bank_batch_summary" in sql
+                and "bank_flow_rule_batch_summary" in sql
                 for sql, _params in connection.fetch_one_calls
             )
         )
@@ -5192,6 +5190,72 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             if "insert into read_model.workbench_group_rows" in sql and params[4] == "case:NO-OA-BATCH"
         ]
         self.assertIn(("bank", "no_oa_summary:batch-1", "summary", "no_oa_bank_batch_summary"), group_row_roles)
+        self.assertIn(("bank", "bank-1", "collapsed", "bank"), group_row_roles)
+
+    def test_repository_treats_bank_flow_rule_batch_summary_source_kind_as_display_only(self) -> None:
+        connection = WorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {
+                            "paired": {
+                                "groups": [
+                                    {
+                                        "group_id": "case:BANK-FLOW-BATCH",
+                                        "group_type": "auto_closed",
+                                        "match_confidence": "high",
+                                        "reason": "流水规则批次",
+                                        "oa_rows": [],
+                                        "bank_rows": [
+                                            {
+                                                "id": "bank_flow_rule_summary:batch-1",
+                                                "type": "bank",
+                                                "source_kind": "bank_flow_rule_batch_summary",
+                                                "summary": "流水规则批次摘要",
+                                            }
+                                        ],
+                                        "invoice_rows": [],
+                                        "collapsed_rows": {
+                                            "bank": [
+                                                {"id": "bank-1", "type": "bank", "source_kind": "bank"},
+                                                {"id": "bank-2", "type": "bank"},
+                                            ]
+                                        },
+                                    }
+                                ]
+                            },
+                            "open": {"groups": []},
+                        },
+                        "source_versions": {"source_version": 7},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        group_insert = next(
+            params
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and params[1] == "case:BANK-FLOW-BATCH"
+        )
+        group_payload = group_insert[19].obj
+        self.assertEqual(group_insert[8], 2)
+        self.assertEqual(group_payload["row_counts"], {"oa": 0, "bank": 2, "invoice": 0, "rows": 2})
+        self.assertEqual(group_payload["display_row_counts"], {"oa": 0, "bank": 1, "invoice": 0, "rows": 1})
+
+        group_row_roles = [
+            (params[5], params[6], params[7], params[9])
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_group_rows" in sql and params[4] == "case:BANK-FLOW-BATCH"
+        ]
+        self.assertIn(
+            ("bank", "bank_flow_rule_summary:batch-1", "summary", "bank_flow_rule_batch_summary"),
+            group_row_roles,
+        )
         self.assertIn(("bank", "bank-1", "collapsed", "bank"), group_row_roles)
 
     def test_repository_treats_row_role_summary_as_display_only_even_with_bank_source_kind(self) -> None:

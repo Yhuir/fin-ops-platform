@@ -30,7 +30,6 @@ class EtcBusinessBatchDeleteService:
         self,
         *,
         etc_service: Any,
-        import_service: Any,
         reconciliation_task_service: Any,
         cleanup_service: EtcReconciliationImportCleanupService,
         existing_etc_invoices_by_ids: Callable[[list[str]], list[object]],
@@ -40,7 +39,6 @@ class EtcBusinessBatchDeleteService:
         cancel_etc_summary_relations_for_batch: Callable[[object], list[str]],
     ) -> None:
         self._etc_service = etc_service
-        self._import_service = import_service
         self._reconciliation_task_service = reconciliation_task_service
         self._cleanup_service = cleanup_service
         self._existing_etc_invoices_by_ids = existing_etc_invoices_by_ids
@@ -69,11 +67,6 @@ class EtcBusinessBatchDeleteService:
             return EtcBusinessBatchDeleteResult(delete_result=delete_result, refresh_events=[])
 
         invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
-        import_batch_ids = [
-            str(import_batch_id).strip()
-            for import_batch_id in list(getattr(batch, "import_batch_ids", []) or [])
-            if str(import_batch_id).strip()
-        ]
         task = self._task_for_batch(batch)
         changed_months = self._etc_invoice_changed_months(self._existing_etc_invoices_by_ids(invoice_ids))
         if str(getattr(batch, "status", "") or "") in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
@@ -106,9 +99,6 @@ class EtcBusinessBatchDeleteService:
                 ),
             )
 
-        canonical_deleted = 0
-        for import_batch_id in import_batch_ids:
-            canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)
         self._cleanup_service.delete_reconciliation_task_after_business_batch_delete(task)
         return EtcBusinessBatchDeleteResult(
             delete_result=delete_result,
@@ -120,7 +110,7 @@ class EtcBusinessBatchDeleteService:
                         persist_required=True,
                     )
                 ]
-                if canonical_deleted or changed_months
+                if changed_months
                 else []
             ),
         )

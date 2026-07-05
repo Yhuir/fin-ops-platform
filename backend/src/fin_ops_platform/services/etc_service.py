@@ -1607,21 +1607,6 @@ class EtcService:
             invoice.updated_at = now
         self._persist()
 
-    def revoke_submitted(self, invoice_ids: list[str]) -> dict[str, int]:
-        if not invoice_ids:
-            raise EtcInvoiceRequestError("invoiceIds must not be empty.")
-        updated = 0
-        now = datetime.now(UTC)
-        for invoice_id in invoice_ids:
-            invoice = self._get_invoice(invoice_id)
-            if invoice.status == EtcInvoiceStatus.SUBMITTED:
-                updated += 1
-            invoice.status = EtcInvoiceStatus.UNSUBMITTED
-            invoice.current_batch_id = None
-            invoice.updated_at = now
-        self._persist()
-        return {"updated": updated}
-
     def import_missing_invoices_from_zips(
         self,
         *,

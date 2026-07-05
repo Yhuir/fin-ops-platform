@@ -4308,9 +4308,9 @@ const bankImportCostRow: CostBrowserProjectRow = {
   counterparty_name: "导入浏览器测试客户",
   payment_account_label: "建设银行 8826",
 };
-const bankFlowRuleCostProjectName = "免OA手续费成本项目";
+const bankFlowRuleCostProjectName = "流水规则手续费成本项目";
 const bankFlowRuleCostRow: CostBrowserProjectRow = {
-  transaction_id: "no-oa-bank-e2e-001",
+  transaction_id: "bank-flow-rule-e2e-001",
   trade_time: "2026-05-03 10:20:00",
   direction: "支出",
   expense_type: "手续费",
@@ -4764,7 +4764,7 @@ function bankFlowRuleBatchVersion(status: BankFlowRuleBrowserBatchStatus) {
 
 function bankFlowRuleBatch(status: BankFlowRuleBrowserBatchStatus, overrides: Record<string, unknown> = {}) {
   return {
-    batch_id: "no-oa-batch-e2e-001",
+    batch_id: "bank-flow-rule-batch-e2e-001",
     batch_type: "fee",
     batch_label: "手续费",
     category_primary_label: "费用",
@@ -4805,7 +4805,7 @@ const bankFlowRuleOrdinaryDraftMatrixDefinitions = [
 
 function bankFlowRuleOrdinaryDraftMatrixBatches() {
   return bankFlowRuleOrdinaryDraftMatrixDefinitions.map((definition) => bankFlowRuleBatch("draft", {
-    batch_id: `no-oa-batch-e2e-${definition.batchType}`,
+    batch_id: `bank-flow-rule-batch-e2e-${definition.batchType}`,
     batch_type: definition.batchType,
     batch_label: definition.batchLabel,
     category_primary_label: definition.primaryLabel,
@@ -4967,13 +4967,13 @@ function bankFlowRuleBatchesPayload(
       total: visibleBatches.length,
     },
     read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`no_oa_bank_batch_${readModelStatus}`],
+    read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`bank_flow_rule_batch_${readModelStatus}`],
   };
 }
 
 function bankFlowRuleBatchDetailPayload(
   status: BankFlowRuleBrowserBatchStatus,
-  batchId = "no-oa-batch-e2e-001",
+  batchId = "bank-flow-rule-batch-e2e-001",
   scenario: BankFlowRuleBatchMockScenario = "single",
 ) {
   const batch = bankFlowRuleBatchesForScenario(status, scenario)
@@ -4982,8 +4982,9 @@ function bankFlowRuleBatchDetailPayload(
   if (scenario === "internalTransferPairs") {
     return bankFlowRuleInternalTransferDetailPayload(batch, status);
   }
-  const transactionId = String(batch.batch_id ?? "no-oa-batch-e2e-001").replace("no-oa-batch", "no-oa-bank");
-  const isDefaultFee = batch.batch_id === "no-oa-batch-e2e-001";
+  const transactionId = String(batch.batch_id ?? "bank-flow-rule-batch-e2e-001")
+    .replace("bank-flow-rule-batch", "bank-flow-rule");
+  const isDefaultFee = batch.batch_id === "bank-flow-rule-batch-e2e-001";
   return {
     batch,
     tag_counts: { fee: 1 },
@@ -5009,7 +5010,7 @@ function bankFlowRuleBatchDetailPayload(
         category_label_path: [String(batch.category_primary_label ?? ""), String(batch.category_sub_label ?? "")].filter(Boolean),
         category_source: "auto",
         relation_status: status === "draft" ? "" : "linked",
-        relation_case_ids: status === "draft" ? [] : ["no-oa-relation-e2e-001"],
+        relation_case_ids: status === "draft" ? [] : ["bank-flow-rule-relation-e2e-001"],
         linked_oa_count: 0,
         linked_invoice_count: 0,
       },
@@ -5118,7 +5119,7 @@ function bankFlowRuleBatchResetSubmittedPayload() {
   return {
     ...bankFlowRuleBatchMutationPayload("withdrawn"),
     batch: null,
-    results: [{ batch_id: "no-oa-batch-e2e-001", status: "withdrawn" }],
+    results: [{ batch_id: "bank-flow-rule-batch-e2e-001", status: "withdrawn" }],
   };
 }
 
@@ -8781,7 +8782,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (bankFlowRuleBatchFailuresRemaining > 0) {
         bankFlowRuleBatchFailuresRemaining -= 1;
         return json(route, {
-          error: "no_oa_bank_batch_temporarily_unavailable",
+          error: "bank_flow_rule_batch_temporarily_unavailable",
           message: "流水规则批次加载暂时失败，请刷新后重试。",
         }, 503);
       }
@@ -8832,7 +8833,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       ));
     }
 
-    if (path === "/api/bank-flow-rule-batches/no-oa-batch-e2e-001/withdraw") {
+    if (path === "/api/bank-flow-rule-batches/bank-flow-rule-batch-e2e-001/withdraw") {
       bankFlowRuleBatchStatus = "withdrawn";
       return json(route, bankFlowRuleBatchMutationPayload(
         bankFlowRuleBatchStatus,

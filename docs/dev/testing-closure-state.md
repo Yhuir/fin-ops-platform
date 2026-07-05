@@ -295,6 +295,8 @@
 
 ## 模块状态
 
+2026-07-05 校准：流水规则批量处理页面的当前 Browser 入口、selected-row submit、成本统计 fan-out、withdraw/history 证据归 `bank-flow-rule-batches`；测试 fixture 使用 `bank-flow-rule-e2e-*` transaction id、`bank-flow-rule-batch-e2e-*` batch id 和 `流水规则手续费成本项目`。下方历史行中出现的 no-OA submit/免 OA 成本行仅代表旧阶段上下文，不能作为当前 bank-flow 页面 I/O 或 legacy no-OA 页面入口依据。
+
 | Priority | Module | 状态 | 已有测试入口概览 | 当前缺口 | 下一步 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `read-models` | spec-first-partial | `docs/modules/read-models/e2e-spec.md`、`docs/modules/read-models/e2e-coverage.md`、`tests/test_read_model_freshness.py`、`tests/test_read_model_query_gateway.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_readiness_reporter.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py`、`tests/test_runtime_queue.py`、`tests/test_platform_runtime_boundary_guards.py`、`web/e2e/bank-flow-rule-batches-flow.spec.ts`、`web/e2e/batch-accounting-flow.spec.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | Spec ID 已建立；fresh/non-fresh/barrier/direct apply/write-operation audit 分层清楚。当前 release direct critical `--apply` 已复验 15/15 pass；本轮补 no-OA Browser `stale -> fresh` false-empty 防护、batch accounting relation stale 时保留当前银行/OA rows 且零 mutation、turnover Browser stale grouped ledger 禁写保护。剩余风险为真实业务写入口样本、认证态 HTTP/SSE、真实 Redis/RabbitMQ 外部 broker 采样和逐页面消费态全组合 | 下一步提供真实认证和审批 ticket 后执行一条低风险 write-operation apply |

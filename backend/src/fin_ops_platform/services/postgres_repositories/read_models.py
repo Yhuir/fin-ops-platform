@@ -40,6 +40,10 @@ WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggrega
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
+BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND = "bank_flow_rule_batch_summary"
+WORKBENCH_BANK_BATCH_SUMMARY_SOURCE_KINDS = frozenset(
+    {NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND, BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND}
+)
 WORKBENCH_GENERATION_RETENTION_KEEP_RECENT = 1
 WORKBENCH_GENERATION_RETENTION_KEEP_DAYS = 0
 WORKBENCH_GENERATION_RETENTION_LIMIT = 500
@@ -6388,7 +6392,10 @@ class PostgresReadModelRepository:
                     count(distinct r.row_id) filter (
                         where r.pane = 'bank'
                           and coalesce(r.row_role, '') <> 'summary'
-                          and coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'
+                          and coalesce(r.source_kind, '') not in (
+                              'no_oa_bank_batch_summary',
+                              'bank_flow_rule_batch_summary'
+                          )
                           {bank_row_filter_sql}
                     )::bigint as bank_count,
                     count(distinct r.row_id) filter (
@@ -10740,7 +10747,7 @@ def _workbench_row_id(row: dict[str, Any]) -> str | None:
 def _is_workbench_summary_display_row(row: dict[str, Any], pane: str) -> bool:
     return pane == "bank" and (
         text(row.get("row_role")) == "summary"
-        or text(row.get("source_kind")) == NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND
+        or text(row.get("source_kind")) in WORKBENCH_BANK_BATCH_SUMMARY_SOURCE_KINDS
     )
 
 

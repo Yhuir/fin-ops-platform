@@ -21,7 +21,6 @@ import {
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
   revokeEtcBusinessBatchOaDraft,
-  revokeEtcSubmittedInvoices,
   updateEtcBusinessBatchTitle,
   uploadEtcCreditCardStatement,
   uploadEtcSupplementEvidenceForCard,
@@ -375,7 +374,6 @@ describe("etc api", () => {
 
     const draftResult = await createEtcBusinessBatchOaDraft("etc_business_batch_001", { expectedVersion: 7 });
     await deleteEtcBusinessBatch("etc_business_batch_001", { expectedVersion: 8, reason: "测试删除" });
-    await revokeEtcSubmittedInvoices(["etc-inv-002"]);
     await deleteEtcReconciliationTask("etc-recon-task-001", 3);
     await deleteEtcReconciliationTaskImportedInvoices("etc-recon-task-001", 4);
 
@@ -400,15 +398,6 @@ describe("etc api", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      "/api/etc/invoices/revoke-submitted",
-      expect.objectContaining({
-        method: "POST",
-        credentials: "include",
-        body: JSON.stringify({ invoiceIds: ["etc-inv-002"] }),
-      }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
       "/api/etc/reconciliation-tasks/etc-recon-task-001",
       expect.objectContaining({
         method: "DELETE",
@@ -417,7 +406,7 @@ describe("etc api", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      5,
+      4,
       "/api/etc/reconciliation-tasks/etc-recon-task-001/imported-invoices",
       expect.objectContaining({
         method: "DELETE",

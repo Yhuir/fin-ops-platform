@@ -247,18 +247,19 @@ function createWorkbenchZoneServerPageQueriesKey(
   return JSON.stringify(createWorkbenchZoneServerPageQueryKeys(queries));
 }
 
-function isNoOaSummaryRow(row: WorkbenchRecord) {
-  return row.sourceKind === "no_oa_bank_batch_summary" || Boolean(noOaSourceBatchId(row));
+function isBankFlowRuleBatchSummaryRow(row: WorkbenchRecord) {
+  return row.sourceKind === "bank_flow_rule_batch_summary"
+    || readStringMetadata(row.specialMetadata, "relation_mode") === "bank_flow_rule_batch";
 }
 
-function noOaSourceBatchId(row: WorkbenchRecord) {
+function bankFlowRuleBatchSourceBatchId(row: WorkbenchRecord) {
   return readStringMetadata(row.specialMetadata, "source_batch_id");
 }
 
-function uniqueNoOaBatchRows(rows: WorkbenchRecord[]) {
+function uniqueBankFlowRuleBatchRows(rows: WorkbenchRecord[]) {
   const byBatchId = new Map<string, WorkbenchRecord>();
   rows.forEach((row) => {
-    const sourceBatchId = noOaSourceBatchId(row);
+    const sourceBatchId = bankFlowRuleBatchSourceBatchId(row);
     if (sourceBatchId && !byBatchId.has(sourceBatchId)) {
       byBatchId.set(sourceBatchId, row);
     }
@@ -759,10 +760,10 @@ export default function ReconciliationWorkbenchPage() {
     previousOaSyncStatusRef.current = status;
   }, [oaSyncScopesAffectWorkbench, scheduleOaSyncWorkbenchRefresh]);
 
-  const withdrawNoOaSummaryRow = useCallback(async (row: WorkbenchRecord) => {
+  const withdrawBankFlowRuleBatchSummaryRow = useCallback(async (row: WorkbenchRecord) => {
     const sourceBatchId = readStringMetadata(row.specialMetadata, "source_batch_id");
     if (!sourceBatchId) {
-      throw new Error("免OA批次来源缺失，无法撤回。");
+      throw new Error("流水规则批次来源缺失，无法撤回。");
     }
 
     let expectedVersion = readNumberMetadata(row.specialMetadata, "batch_version");
@@ -771,13 +772,13 @@ export default function ReconciliationWorkbenchPage() {
       expectedVersion = typeof detail.batch.version === "number" ? detail.batch.version : null;
     }
     if (expectedVersion === null) {
-      throw new Error("免OA批次版本缺失，无法撤回。");
+      throw new Error("流水规则批次版本缺失，无法撤回。");
     }
 
     const result = await withdrawBankFlowRuleBatch({
       batchId: sourceBatchId,
       expectedVersion,
-      reason: "由关联台撤回免OA批次",
+      reason: "由关联台撤回流水规则批次",
     });
     const affectedMonths = result.affectedMonths.length > 0
       ? result.affectedMonths
@@ -786,10 +787,10 @@ export default function ReconciliationWorkbenchPage() {
         : [];
     emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
       affectedMonths,
-      source: "workbench_no_oa_withdraw",
+      source: "workbench_bank_flow_rule_batch_withdraw",
     });
     clearPairedSelection();
-    return "已撤回免OA批次。";
+    return "已撤回流水规则批次。";
   }, [clearPairedSelection]);
 
   async function loadWorkbenchAuxiliaryData(month: string, signal?: AbortSignal) {
@@ -1723,10 +1724,10 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (action === "unlink") {
-      if (isNoOaSummaryRow(row)) {
+      if (isBankFlowRuleBatchSummaryRow(row)) {
         await runBlockingAction({
-          loadingMessage: "正在撤回免OA批次...",
-          action: () => withdrawNoOaSummaryRow(row),
+          loadingMessage: "正在撤回流水规则批次...",
+          action: () => withdrawBankFlowRuleBatchSummaryRow(row),
         });
         return;
       }
@@ -1757,7 +1758,7 @@ export default function ReconciliationWorkbenchPage() {
     openWorkbenchExceptionDialog,
     refreshWorkbenchDataInBackground,
     runBlockingAction,
-    withdrawNoOaSummaryRow,
+    withdrawBankFlowRuleBatchSummaryRow,
     sourceAllRows,
     openRelationPreviewErrorDialog,
   ]);
@@ -2002,15 +2003,19 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("一次只能处理一个关联组。");
       return;
     }
-    const selectedNoOaSummaryRows = uniqueNoOaBatchRows(selectedPairedRows.filter(isNoOaSummaryRow));
-    if (selectedNoOaSummaryRows.length > 0) {
+    const selectedBankFlowRuleBatchRows = uniqueBankFlowRuleBatchRows(
+      selectedPairedRows.filter(isBankFlowRuleBatchSummaryRow),
+    );
+    if (selectedBankFlowRuleBatchRows.length > 0) {
       await runBlockingAction({
-        loadingMessage: "正在撤回免OA批次...",
+        loadingMessage: "正在撤回流水规则批次...",
         action: async () => {
-          for (const row of selectedNoOaSummaryRows) {
-            await withdrawNoOaSummaryRow(row);
+          for (const row of selectedBankFlowRuleBatchRows) {
+            await withdrawBankFlowRuleBatchSummaryRow(row);
           }
-          return selectedNoOaSummaryRows.length === 1 ? "已撤回免OA批次。" : `已撤回 ${selectedNoOaSummaryRows.length} 个免OA批次。`;
+          return selectedBankFlowRuleBatchRows.length === 1
+            ? "已撤回流水规则批次。"
+            : `已撤回 ${selectedBankFlowRuleBatchRows.length} 个流水规则批次。`;
         },
       });
       return;

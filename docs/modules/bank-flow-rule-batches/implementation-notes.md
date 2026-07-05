@@ -403,3 +403,27 @@
 剩余风险：
 
 - 本地优化尚未部署到生产；2026-07-02 生产 1s 高性能 baseline 中 `bank_flow_rule_batch` enqueue-to-fresh `5322.643ms`、handler `4543.139ms`，仍需部署后复测，并继续分析非写入阶段长尾。
+
+## 2026-07-05 模块化 close 审计
+
+目标：
+
+- 使用 Grill me / Ponytail 对流水规则批量处理页面和上下游 I/O 做全量收口，移除 bank-flow 新链路里继续泄露的旧 no-OA 命名、source kind、错误码和文案。
+- 不扩大到 no-OA legacy 模块自身退休；`/api/no-oa-bank-batches/*`、`no_oa_bank_batch` read model 和 legacy tests 仍归 `no-oa-bank-batches` 边界。
+
+关键决策：
+
+- `routes_bank_flow_rule_batches.py` 在 HTTP 输出边界翻译共享 bank-batch core 仍可能抛出的 legacy `no_oa_bank_batch_*` selection/relation/version/persistence 错误，公开 API 只返回 `bank_flow_rule_batch_*`。
+- `workbench_candidate_grouping.py` 不再让 bank-flow 折叠摘要复用 no-OA 输出：bank-flow summary 使用 `source_kind=bank_flow_rule_batch_summary`、id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，并过滤旧 `免OA` tag。
+- `workbench_candidate_grouping.py` 的 Bank Transaction Paired Policy 保留 legacy `no_oa_bank_batch` 在缺失 explicit requirement metadata 时的无需 OA/发票合同；若 legacy no-OA 已写 `requires_oa` / `requires_invoice` 则仍按显式 requirement 判定。该保留只服务 no-OA legacy，bank-flow 缺失 requirement metadata 仍 fail closed 为需要 OA+发票。
+- `postgres_repositories/read_models.py` 把 `bank_flow_rule_batch_summary` 纳入 Workbench summary display-only source kind，避免摘要行污染真实银行明细计数、筛选和 read model I/O。
+- `web/src/features/workbench/api.ts` 与 `ReconciliationWorkbenchPage.tsx` 按 bank-flow source kind / relation metadata 识别撤回链路，用户可见文案和撤回 reason 改为“流水规则批次”。
+- `web/e2e/bank-flow-rule-batches-flow.spec.ts` 与 deterministic `apiMocks.ts` 移除 bank-flow 浏览器链路里的旧 no-OA fixture I/O：transaction id 改为 `bank-flow-rule-e2e-*`，batch id 改为 `bank-flow-rule-batch-e2e-*`，relation case id 改为 `bank-flow-rule-relation-e2e-*`，成本统计 fan-out 项目名改为 `流水规则手续费成本项目`，read model stale reason 改为 `bank_flow_rule_batch_*`。
+- `docs/dev/testing-closure-dependency-map.md` 从旧 no-OA 页面入口改为 bank-flow 页面入口；no-OA 只登记 legacy API/read-model。
+
+验证：
+
+- `PYTHONPATH=backend/src:. python3 -m pytest tests/test_bank_flow_rule_batch_routes.py tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_bank_flow_rule_batch_collapses_only_when_more_than_three_bank_rows tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_treats_bank_flow_rule_batch_summary_source_kind_as_display_only -q`
+- `python3 -m ruff check backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py backend/src/fin_ops_platform/services/workbench_candidate_grouping.py backend/src/fin_ops_platform/services/postgres_repositories/read_models.py tests/test_bank_flow_rule_batch_routes.py tests/test_workbench_candidate_grouping.py tests/test_workbench_sql_runtime.py`
+- `cd web && npm test -- --run BankFlowRuleBatchApi.test.ts CandidateGroupGrid.test.tsx`
+- `cd web && npm exec tsc -- --noEmit`

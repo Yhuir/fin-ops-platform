@@ -1,14 +1,14 @@
 # ETC发票导入模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：medium
+- 状态：close
+- 当前边界可信度：high
 - 目标边界：ETC 发票导入通过 ETC parsers/import job/reconciliation services 进入 ETC 批次和发票附件识别链路。
-- 当前缺口：ETC 导入与 ETC 票据管理、发票附件、关联台候选和历史批次修复耦合较多。
-- 旧代码删除条件：旧 ETC zip/parse/repair 路径不再被导入页面或工具引用。
+- 当前缺口：无阻断 close 的模块边界缺口；真实大 zip、对象存储、真实 worker drain 和 OA 草稿仍是发布前 smoke 风险。
+- 旧代码删除状态：生产主链路已删除旧 ETC ZIP 直接创建/清理 canonical invoice 的 runtime cleanup surface；历史污染清理由 `docs/operations/invoice-pool-cleanup.md` 和独立工具负责。旧 `POST /api/etc/import` 仅保留 410 boundary guard，不解析、不持久化、不进入导入链路。
 
 ## 职责边界
 
@@ -44,6 +44,7 @@
 | Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |
 | Dirty scope | lifecycle/runtime queue | 影响 workbench/invoice/search 等下游 |
 | Job completion target envelope | background job result summary / ETC 票据页 | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`operation_barrier_targets`，消费 completed job 的页面必须先等待 barrier 再刷新最终列表 |
+| Imported-invoices removal | ETC reconciliation/business batch service | 只清理 ETC task/import batch/business batch 自有事实并返回 changed months；不得返回或执行 canonical invoice 删除计数 |
 
 ## 持久化与投影
 
@@ -58,7 +59,7 @@
 | Frontend page | `web/src/pages/imports/ImportEtcInvoicesPage.tsx` |
 | Frontend components | `web/src/components/imports/ImportWorkflowPage.tsx` |
 | Frontend feature | `web/src/features/etc/api.ts`、`features/etc/types.ts`、`features/imports/importRoutes.ts` |
-| Backend route | `routes_etc_import.py`、`routes_etc_invoices.py`、ETC import endpoints in `server.py` |
+| Backend route | `routes_etc_import.py`、`routes_etc_reconciliation.py`、ETC import dispatch in `server.py` |
 | Backend service | `etc_service.py`、`etc_reconciliation_service.py`、`etc_reconciliation_zip_filter.py`、`etc_document_parsers.py`、`import_processing_service.py` |
 | Recognition/lifecycle | `invoice_attachment_recognition_service.py`、`derived_data_lifecycle_service.py`、`runtime_worker_handlers.py` |
 | Tests | `tests/test_etc_*.py`、`tests/test_import*.py`、`web/e2e/imports-etc-invoices-flow.spec.ts` |
@@ -67,7 +68,7 @@
 
 - 允许依赖：ETC parsers, import job queue, reconciliation service, attachment recognition。
 - 必须通过：ETC import/reconciliation service。
-- 禁止绕过：导入流程直接写 workbench relation；把 repair 工具作为常规 API。
+- 禁止绕过：导入流程直接写 workbench relation；把 repair 工具作为常规 API；删除/重导链路调用通用 import service 清理 `app.invoices` 里的 legacy ETC canonical 污染。
 
 ## 测试与验证
 
@@ -81,6 +82,7 @@
 ## 当前缺口和删除条件
 
 - ETC zip parser/filter 变更必须覆盖导入、票据管理和关联台候选回归。
+- 旧 ETC canonical 污染清理不再属于本模块 runtime I/O；如果生产历史数据仍有污染，只能按 `docs/operations/invoice-pool-cleanup.md` 在备份、dry-run 和用户确认后处理。
 
 ## Canonical facts ownership
 
@@ -90,4 +92,4 @@
 - Allowed reads: ETC import/query ports、canonical invoice existing-link ports。
 - Downstream outputs: ETC tickets、workbench、workbench_relation、tax/cost/search read model dirty scopes 或 owner producer 输出。
 - Forbidden paths: `app.etc_invoices` 不得被当作 canonical invoice pool；ETC metadata 不得绕过 invoice owner 直接写 `app.invoices`。
-- Old code deletion: 旧 ETC 导入 fallback、pickle/import snapshot 写事实路径必须删除；historical repair 工具保留不算 closure。
+- Old code deletion: 旧 ETC 导入 fallback、pickle/import snapshot 写事实路径、runtime canonical cleanup surface 已删除；historical repair / invoice-pool cleanup 工具保留不算页面/API closure 阻断。

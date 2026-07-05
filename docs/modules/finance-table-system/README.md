@@ -45,6 +45,8 @@
 - `web/src/test/TableLayoutTokens.test.ts`
 - `web/src/test/TableAlignmentStyles.test.ts`
 - `web/src/test/useFinanceTableSession.test.tsx`
+- `web/src/test/MuiContainment.test.ts`
+- `web/src/test/CommonPlatformComponents.test.tsx`
 - 页面级表格测试：`BankDetailsPage.test.tsx`、`TaxOffsetPage.test.tsx`、`InputInvoiceUsagePage.test.tsx`、`PendingInvoicesPage.test.tsx`、`OutputInvoiceCollectionsPage.test.tsx`、`OaPendingPaymentsPage.test.tsx`、`CostStatisticsPage.test.tsx`、`TurnoverLedgerPage.test.tsx`、`AppHealthOperationsPage.test.tsx`、`ImportCenterPage.test.tsx`。
 
 ## 维护触发器

@@ -25,7 +25,7 @@ ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches
 | `ETC-TICKET-E2E-006` | source file/object storage 和大 ZIP 预览 | P0 | source file 上传必须先落对象存储再追加 metadata；对象存储失败返回结构化错误且不留下半写；大 ZIP preview 不应被普通 API timeout 截断。 |
 | `ETC-TICKET-E2E-007` | task-only、新建批次和 durable import recovery | P0 | 新建批次可省略 `taskId`，后端创建 linked task + active business batch；创建失败 tombstone 新 task；durable import restart 后创建 OA 草稿前必须补齐 linked task 状态。 |
 | `ETC-TICKET-E2E-008` | Workbench summary fan-out | P0 | 人工已提交业务批次必须在 Workbench open 区形成折叠 `etc_invoice_summary`；已存在 active relation 时 open 区过滤陈旧 summary；delete/reset 后 summary 消失且散票恢复。 |
-| `ETC-TICKET-E2E-009` | 权限、旧入口和 regression | P0 | read-only 用户不得触发 OA 草稿、人工确认、删除/reset、source file/upload/import mutation；旧 `/api/etc/batches*` 后端兼容入口不得回归；已移除 ETC OA 自动检测入口和字段不得回归。 |
+| `ETC-TICKET-E2E-009` | 权限、旧入口和 regression | P0 | read-only 用户不得触发 OA 草稿、人工确认、删除/reset、source file/upload/import mutation；旧 `/api/etc/batches*` 后端兼容入口、测试 mock 假后端、invoice-id 级 `/api/etc/invoices/revoke-submitted` 和 ETC `oa-status/refresh` 不得回归；已移除 ETC OA 自动检测入口和字段不得回归。 |
 | `ETC-TICKET-E2E-010` | 真实基础设施 worker drain | P1 | 真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储/Nginx 环境下，导入、source file、OA 草稿、人工确认、delete/reset、Workbench summary、税金/成本/search 最终页面收敛；该项必须在 staging/runtime smoke 验证。 |
 
 ## 不属于本地 deterministic E2E 的风险

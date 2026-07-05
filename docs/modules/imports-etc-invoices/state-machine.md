@@ -50,7 +50,7 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 - `oa_confirmation_pending`：已创建 OA 草稿，等待用户人工确认。
 - `manually_marked_submitted` / submitted：生成 folded `etc_invoice_summary`，散票隐藏，等待关联台普通配对。
 - `not_submitted`：释放本地 ETC 发票占用，回到未提交链路。
-- `deleted`：本地业务批次、导入事实、summary row 或散票占用被清理；不删除真实 OA。
+- `deleted`：本地业务批次、导入事实、summary row 或散票占用被清理；不删除真实 OA，也不删除或改写 canonical invoice。历史 ETC-created canonical 污染必须走 invoice-pool cleanup 运维链路。
 
 ## 禁止流转
 
@@ -61,6 +61,7 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 - `queued` / `processing` 不得让 ETC、关联台、税金或成本页面显示 fresh。
 - business batch 已创建 OA 草稿后不得追加补充导入，除非先 revoke 回未提交链路。
 - 删除 submitted business batch 不得删除真实 OA 草稿或 OA 已提交事实。
+- 删除导入结果或 business batch 不得调用旧 ETC canonical cleanup helper，不得返回 canonical 删除计数。
 
 ## UI 状态
 
@@ -101,3 +102,4 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 | --- | --- | --- | --- |
 | 2026-06-16 | 补齐 ETC 导入 confirm job 的 App Status metadata contract | `etc_invoice_import` job source 保留 task/domain/route，导入页和 ETC 票据页都能被全局状态标记为受影响域 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_returns_background_job_and_imports_asynchronously`、`tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 2026-06-11 | 首轮补齐 ETC 发票导入状态机 | 明确 task/zip preview/confirm job/business batch/read model 状态边界 | `tests/test_etc_backend.py`、`tests/test_etc_reconciliation_service.py`、`web/src/test/ImportCenterPage.test.tsx`、`bash scripts/verify.sh docs` |
+| 2026-07-05 | 移除 runtime canonical cleanup surface | 删除/重导链路只清理 ETC 自有事实，历史 canonical 污染改走 invoice-pool cleanup 运维链路 | `tests/test_etc_reconciliation_import_cleanup_service.py`、`tests/test_etc_business_batch_delete_service.py`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_etc_paths_do_not_call_legacy_canonical_sync_helpers` |

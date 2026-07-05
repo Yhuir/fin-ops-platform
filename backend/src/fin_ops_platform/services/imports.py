@@ -766,49 +766,6 @@ class ImportNormalizationService:
         self._register_invoice(invoice)
         return invoice
 
-    def remove_etc_invoices_by_import_batch_id(self, import_batch_id: str) -> int:
-        """Remove legacy ETC-import source links without deleting formal invoices.
-
-        Older ETC ZIP flows could create canonical ETC invoices directly. New ETC
-        ZIP imports only save attachment metadata, so this method is retained as
-        cleanup compatibility for historical polluted rows.
-        """
-        normalized_batch_id = str(import_batch_id or "").strip()
-        if not normalized_batch_id:
-            return 0
-        removed_or_updated = 0
-        for invoice_id, invoice in list(self._invoices_by_id.items()):
-            if (
-                str(getattr(invoice, "etc_import_batch_id", "") or "").strip() != normalized_batch_id
-                and str(getattr(invoice, "source_batch_id", "") or "").strip() != normalized_batch_id
-            ):
-                continue
-            source_links = list(getattr(invoice, "source_links", []) or [])
-            remaining_links = [
-                link
-                for link in source_links
-                if not (
-                    isinstance(link, dict)
-                    and str(link.get("source_type") or "").strip() == "etc_invoice_import"
-                    and str(link.get("batch_id") or "").strip() == normalized_batch_id
-                )
-            ]
-            created_by_etc_import = (
-                str(getattr(invoice, "invoice_source", "") or "").strip() == "ETC导入"
-                and str(getattr(invoice, "invoice_kind", "") or "").strip() == "ETC发票"
-                and not remaining_links
-            )
-            if created_by_etc_import:
-                self._remove_invoice(invoice_id)
-            else:
-                invoice.source_links = remaining_links
-                if str(getattr(invoice, "etc_import_batch_id", "") or "").strip() == normalized_batch_id:
-                    invoice.etc_import_batch_id = None
-                if str(getattr(invoice, "source_batch_id", "") or "").strip() == normalized_batch_id:
-                    invoice.source_batch_id = None
-            removed_or_updated += 1
-        return removed_or_updated
-
     def revert_import(self, batch_id: str) -> ImportedBatch:
         preview = self._batches[batch_id]
         if preview.batch.status == BatchStatus.REVERTED:

@@ -194,7 +194,6 @@ class EtcReconciliationTaskApiRoutes:
         self._persist_state()
         response_payload = self._task_payload(cleanup_result.updated_task)
         response_payload["removedImportBatch"] = cleanup_result.delete_result
-        response_payload["removedCanonicalInvoiceCount"] = cleanup_result.canonical_deleted
         return self._json_response(HTTPStatus.OK, response_payload)
 
     def delete_task(self, task_id: str, body: str | bytes | None) -> Any:

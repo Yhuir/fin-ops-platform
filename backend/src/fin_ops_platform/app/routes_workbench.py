@@ -44,6 +44,14 @@ class WorkbenchRowDetailApiRoutes:
             return {"row": self._apply_row_override(etc_summary_row)}
 
         month_hint = str(month).strip() if month not in (None, "") else self._row_month_scope_from_row_id(row_id)
+        live_checked = False
+        if month_hint is None and self._legacy_route_fallback_allowed(row_id):
+            live_checked = True
+            try:
+                return {"row": self._apply_row_override(self._live_row_detail(row_id))}
+            except KeyError:
+                pass
+
         cached_rows = self._cached_rows_resolver([row_id], month_hint=month_hint)
         if row_id in cached_rows:
             payload = {"row": cached_rows[row_id]}
@@ -52,10 +60,13 @@ class WorkbenchRowDetailApiRoutes:
         elif month_hint is None and self._looks_like_oa_row_id(row_id):
             raise KeyError(row_id)
         elif self._legacy_route_fallback_allowed(row_id):
-            try:
-                payload = {"row": self._live_row_detail(row_id)}
-            except KeyError:
+            if live_checked:
                 payload = self._legacy_row_detail(row_id)
+            else:
+                try:
+                    payload = {"row": self._live_row_detail(row_id)}
+                except KeyError:
+                    payload = self._legacy_row_detail(row_id)
         else:
             raise KeyError(row_id)
         row = payload.get("row")

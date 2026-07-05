@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-07-05 - 银行流水导入边界 close 与旧 wrapper 删除
+
+- 目标：完成银行流水导入模块边界与 I/O 收口，确认页面主链路只走 files/session API，移除会让 `server.py` 继续拥有 import confirm 处理职责的旧 wrapper。
+- 影响范围：`server.py` import endpoints、`ImportProcessingService` 委托边界、银行流水导入前端 API guard、本模块 boundary/tests/state-machine 文档。
+- 关键决策：`/imports/preview`、`/imports/confirm` 仍作为共享程序化导入和旧回归入口保留，不能在本轮顺手删除并拖动跨模块 fixture；银行流水页面不是该入口的调用方。`FileImportService.snapshot/from_snapshot` 是当前 file/session 与 import worker 跨进程恢复 I/O，不是旧 full snapshot 事实源 fallback。
+- 删除项：移除 `server.py` 中无调用的 `_process_general_import_confirm_job`、`_process_tax_certified_import_confirm_job`、`_process_file_import_confirm_job`、`_process_etc_invoice_import_confirm_job`，以及单调用委托 `_execute_general_import_confirm`、`_execute_file_import_confirm_job`、`_file_import_job_label`。
+- 文档影响：更新 `boundary-io.md` 为 `close`，并同步 README、state-machine、tests 和全局测试依赖地图。
+- 测试覆盖：新增/扩展 `tests/test_platform_runtime_boundary_guards.py`，防止银行流水前端回退旧 JSON import API，防止 `server.py` 重新持有 import confirm processor wrapper。
+- 验证命令：`python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/import_processing_service.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_no_longer_owns_import_confirm_processors tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_transaction_import_frontend_uses_file_session_api_only -v`；后续本轮还需跑模块窄范围后端/前端和 docs/lint。
+- 未测风险：未删除共享 legacy JSON import API；其删除需要先迁移跨模块造数 fixture 和旧回归。真实银行大文件、真实 import worker drain、RabbitMQ/Redis/systemd、生产账户余额 fresh gate 仍按测试矩阵走 staging/infra-smoke。
+
 ## 2026-07-03 - 导入文件事实列表摘要化
 
 - 目标：修复生产 HTTP SLO 中 `/api/import-facts/files?page=1&page_size=50` 返回约 15MB 导致导入页探针超时的问题。

@@ -1,6 +1,6 @@
 # 流水规则批量处理 E2E 覆盖映射
 
-状态：covered-independent-storage-and-rule-family-io。当前实现使用 `web/e2e/bank-flow-rule-batches-flow.spec.ts` 覆盖流水规则入口；后端用 `tests/test_bank_flow_rule_batch_backend_boundary.py`、`tests/test_bank_flow_rule_batch_application_service.py`、`tests/test_app_settings_service.py`、`tests/test_operation_freshness_barrier.py`、`tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_postgres_migrations.py` 和 `tests/test_postgres_repositories_boundaries.py` 保护独立 route/application service/persistence IO/read model/worker/freshness/physical storage/tag-rule settings family 边界。真实 pending-invoice/invoice attach 跨页补票入口和前端模块拆分仍列为后续风险。
+状态：covered-close。当前实现使用 `web/e2e/bank-flow-rule-batches-flow.spec.ts` 覆盖流水规则入口；后端用 `tests/test_bank_flow_rule_batch_backend_boundary.py`、`tests/test_bank_flow_rule_batch_application_service.py`、`tests/test_app_settings_service.py`、`tests/test_operation_freshness_barrier.py`、`tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_postgres_migrations.py` 和 `tests/test_postgres_repositories_boundaries.py` 保护独立 route/application service/persistence IO/read model/worker/freshness/physical storage/tag-rule settings family 边界。Browser deterministic fixture 已切到 `bank-flow-rule-e2e-*` / `bank-flow-rule-batch-e2e-*` / `流水规则手续费成本项目`，不再用旧 no-OA I/O 表示 bank-flow 链路。真实 pending-invoice/invoice attach 跨页补票入口仍列为后续风险。
 
 | Spec ID | 业务场景 | 当前覆盖 | 缺口 |
 | --- | --- | --- | --- |

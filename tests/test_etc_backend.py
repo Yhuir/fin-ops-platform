@@ -1210,7 +1210,7 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(batch.invoice_count, 2)
         self.assertEqual(batch.total_amount, Decimal("26.14"))
 
-    def test_batch_status_revoke_and_draft_creation_with_fake_oa_client(self) -> None:
+    def test_batch_status_mark_not_submitted_and_draft_creation_with_fake_oa_client(self) -> None:
         with TemporaryDirectory() as temp_dir:
             fake_oa = FakeEtcOAClient()
             service = EtcService(data_dir=Path(temp_dir), oa_client=fake_oa)
@@ -1219,7 +1219,6 @@ class EtcServiceTests(unittest.TestCase):
             draft = service.create_oa_draft(["etc_invoice_0001", "etc_invoice_0002"])
             after_draft, _total, _counts = service.list_invoices(page=1, page_size=20)
             confirmed = service.confirm_submitted(draft.batch_id)
-            revoked = service.revoke_submitted(["etc_invoice_0001", "etc_invoice_0002"])
             not_submitted = service.mark_not_submitted(draft.batch_id)
 
         self.assertEqual(draft.oa_draft_id, "oa-draft-001")
@@ -1248,7 +1247,6 @@ class EtcServiceTests(unittest.TestCase):
             ],
         )
         self.assertEqual(confirmed.status, "submitted_confirmed")
-        self.assertEqual(revoked["updated"], 2)
         self.assertEqual(not_submitted.status, "not_submitted")
 
     def test_draft_creation_rejects_partial_import_batch_submission(self) -> None:
@@ -4084,6 +4082,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertIsNone(removed_payload["importBatchId"])
         self.assertFalse(removed_payload["hasImportedInvoices"])
         self.assertEqual(removed_payload["importedInvoiceCount"], 0)
+        self.assertNotIn("removedCanonicalInvoiceCount", removed_payload)
         self.assertEqual(invoices_after_remove["total"], 0)
         self.assertEqual(canonical_etc_after_remove, [])
         self.assertEqual(reimport_preview_response.status_code, 200)

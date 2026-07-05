@@ -519,14 +519,32 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function mockWorkbenchPageFetch() {
+  function buildBankFlowRuleWorkbenchPayload() {
+    const payload = buildNoOaWorkbenchPayload();
+    const group = payload.paired.groups[0];
+    group.group_id = "bank-flow-rule-batch:BANKFLOW-202603-FEE";
+    group.reason = "流水规则手续费批次";
+    group.relation_mode = "bank_flow_rule_batch";
+    const summaryRow = group.bank_rows[0];
+    summaryRow.id = "bank-flow-summary-BANKFLOW-202603-FEE";
+    summaryRow.source_kind = "bank_flow_rule_batch_summary";
+    summaryRow.counterparty_name = "流水规则手续费批次";
+    summaryRow.invoice_relation = { code: "bank_flow_rule_batch", label: "流水规则批次", tone: "success" };
+    summaryRow.special_metadata = {
+      source_batch_id: "BANKFLOW-202603-FEE",
+      batch_version: 7,
+      relation_mode: "bank_flow_rule_batch",
+    };
+    return payload;
+  }
+
+  function mockWorkbenchPageFetch(payload = buildNoOaWorkbenchPayload()) {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = new URL(String(input), "http://localhost");
       if (url.pathname === "/api/workbench") {
-        return new Response(JSON.stringify(buildNoOaWorkbenchPayload()), { status: 200 });
+        return new Response(JSON.stringify(payload), { status: 200 });
       }
       if (url.pathname === "/api/workbench/summary") {
-        const payload = buildNoOaWorkbenchPayload();
         return new Response(
           JSON.stringify({
             month: payload.month,
@@ -540,7 +558,6 @@ describe("Workbench candidate grouping layout", () => {
         );
       }
       if (url.pathname === "/api/workbench/groups") {
-        const payload = buildNoOaWorkbenchPayload();
         const zone = url.searchParams.get("zone") === "open" ? "open" : "paired";
         const groups = payload[zone].groups;
         return new Response(
@@ -588,11 +605,11 @@ describe("Workbench candidate grouping layout", () => {
           { status: 200 },
         );
       }
-      if (url.pathname === "/api/bank-flow-rule-batches/NOOA-202603-FEE/withdraw") {
+      if (url.pathname === "/api/bank-flow-rule-batches/BANKFLOW-202603-FEE/withdraw") {
         expect(init?.method).toBe("POST");
         expect(JSON.parse(String(init?.body))).toEqual({
           expected_version: 7,
-          reason: "由关联台撤回免OA批次",
+          reason: "由关联台撤回流水规则批次",
         });
         return new Response(
           JSON.stringify({
@@ -605,7 +622,7 @@ describe("Workbench candidate grouping layout", () => {
         );
       }
       if (url.pathname === "/api/workbench/actions/cancel-link") {
-        throw new Error("ordinary cancel-link must not be called for no-OA summaries");
+        throw new Error("ordinary cancel-link must not be called for bank-flow rule summaries");
       }
       return new Response(JSON.stringify({}), { status: 200 });
     });
@@ -1090,8 +1107,8 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getAllByRole("button", { name: "展开免OA批次明细，1 条" })).toHaveLength(2);
   });
 
-  test("withdraws no-OA summaries through the bank flow rule batch API instead of ordinary cancel-link", async () => {
-    const fetchMock = mockWorkbenchPageFetch();
+  test("withdraws bank-flow summaries through the bank flow rule batch API instead of ordinary cancel-link", async () => {
+    const fetchMock = mockWorkbenchPageFetch(buildBankFlowRuleWorkbenchPayload());
     const relationListener = vi.fn();
     window.addEventListener("workbenchRelationUpdated", relationListener);
 
@@ -1099,13 +1116,13 @@ describe("Workbench candidate grouping layout", () => {
       renderWorkbenchPage();
 
       const pairedZone = await screen.findByTestId("zone-paired");
-      const groupRow = await screen.findByTestId("candidate-group-paired-no-oa-bank-batch:NOOA-202603-FEE");
-      fireEvent.click(within(groupRow).getByRole("row", { name: /免OA手续费批次.*30/ }));
+      const groupRow = await screen.findByTestId("candidate-group-paired-bank-flow-rule-batch:BANKFLOW-202603-FEE");
+      fireEvent.click(within(groupRow).getByRole("row", { name: /流水规则手续费批次.*30/ }));
       fireEvent.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
       await waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith(
-          "/api/bank-flow-rule-batches/NOOA-202603-FEE/withdraw",
+          "/api/bank-flow-rule-batches/BANKFLOW-202603-FEE/withdraw",
           expect.objectContaining({ method: "POST" }),
         );
       });

@@ -1672,13 +1672,3 @@ export async function confirmEtcImportSession(sessionId: string, taskId?: string
   });
   return mapEtcImportConfirmResult(payload);
 }
-
-export async function revokeEtcSubmittedInvoices(invoiceIds: string[]): Promise<void> {
-  await requestJson("/api/etc/invoices/revoke-submitted", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ invoiceIds }),
-  });
-}

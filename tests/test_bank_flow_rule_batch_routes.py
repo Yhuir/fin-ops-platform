@@ -5,6 +5,7 @@ from http import HTTPStatus
 from types import SimpleNamespace
 
 from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes
+from fin_ops_platform.services.bank_batch_application_service import BankBatchPersistenceError
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 
@@ -209,6 +210,29 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(payload["summary"]["reset_count"], 2)
         self.assertEqual(service.calls, [("reset", {"actor": "finance-user", "reason": "全部重新过规则"})])
+
+    def test_http_boundary_translates_shared_legacy_error_codes_to_bank_flow_codes(self) -> None:
+        conflict_status, conflict_payload = BankFlowRuleBatchApiRoutes._value_error_response(
+            ValueError("no_oa_bank_batch_version_conflict")
+        )
+        invalid_status, invalid_payload = BankFlowRuleBatchApiRoutes._value_error_response(
+            ValueError("no_oa_bank_batch_selection_internal_transfer_requires_pair")
+        )
+        persistence_status, persistence_payload = BankFlowRuleBatchApiRoutes._persistence_error_response(
+            BankBatchPersistenceError("免OA流水批次保存失败，请稍后重试。")
+        )
+
+        self.assertEqual(conflict_status, HTTPStatus.CONFLICT)
+        self.assertEqual(conflict_payload["error"], "bank_flow_rule_batch_version_conflict")
+        self.assertEqual(conflict_payload["message"], "bank_flow_rule_batch_version_conflict")
+        self.assertEqual(invalid_status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(
+            invalid_payload["error"],
+            "bank_flow_rule_batch_selection_internal_transfer_requires_pair",
+        )
+        self.assertEqual(persistence_status, HTTPStatus.INTERNAL_SERVER_ERROR)
+        self.assertEqual(persistence_payload["error"], "bank_flow_rule_batch_persistence_failed")
+        self.assertEqual(persistence_payload["message"], "流水规则批次保存失败，请稍后重试。")
 
 
 if __name__ == "__main__":

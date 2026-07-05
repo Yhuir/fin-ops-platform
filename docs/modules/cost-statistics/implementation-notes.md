@@ -200,9 +200,9 @@
 
 - 目标：完成 `cost-statistics` 本地 Spec-first E2E Audit 校准，把剩余 `COST-E2E-007`、`COST-E2E-009` 和 `COST-E2E-010` 从 partial 收敛为 covered。
 - 影响范围：成本统计 Spec-first 覆盖矩阵、全局 Spec-first inventory、testing closure state 和本实施记录；不改产品逻辑。
-- 关键决策：成本页当前无写入口，页面权限风险集中在 read/export，`read_export_only` 当前筛选下载、forbidden/expired/API auth 与全局 role matrix/API contract 足以覆盖 `COST-E2E-007`；导出 Browser download event、文件名、请求筛选和内容字段已覆盖，真实 workbook 打开归 staging/manual 风险，不阻塞 `COST-E2E-009`；银行/发票/ETC 导入、no-OA、turnover、settings 和 Workbench relation 已有成本统计 fresh read model 或下游影响行 Browser 证据，search 目前无独立前端 route，由 API/runtime 证据覆盖，因此 `COST-E2E-010` 本地闭环。
+- 关键决策：成本页当前无写入口，页面权限风险集中在 read/export，`read_export_only` 当前筛选下载、forbidden/expired/API auth 与全局 role matrix/API contract 足以覆盖 `COST-E2E-007`；导出 Browser download event、文件名、请求筛选和内容字段已覆盖，真实 workbook 打开归 staging/manual 风险，不阻塞 `COST-E2E-009`；银行/发票/ETC 导入、bank-flow、turnover、settings 和 Workbench relation 已有成本统计 fresh read model 或下游影响行 Browser 证据，search 目前无独立前端 route，由 API/runtime 证据覆盖，因此 `COST-E2E-010` 本地闭环。
 - 文档影响：`docs/modules/cost-statistics/e2e-coverage.md` 将 `COST-E2E-007/009/010` 标记为 `covered`；`docs/dev/spec-first-e2e-inventory.md` 将 `cost-statistics` 页面状态更新为 `covered`。
-- 测试覆盖：未新增测试；本轮是基于现有 `cost-statistics-flow`、`cost-statistics-relation-fanout`、导入/no-OA/turnover/settings Browser specs 和后端 read model/API 证据做覆盖校准。
+- 测试覆盖：未新增测试；本轮是基于现有 `cost-statistics-flow`、`cost-statistics-relation-fanout`、导入/bank-flow/turnover/settings Browser specs 和后端 read model/API 证据做覆盖校准。
 - 验证命令：待本轮运行 `bash scripts/verify.sh docs`、成本统计相关 Playwright specs 和 `git diff --check`。
 - 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实 XLSX workbook 打开、真实大文件/历史模板、生产 scope cleanup `--apply`、未来独立 search Browser UI 和新增成本页写入口仍需 staging 或后续功能轮次。
 - 后续事项：按全局队列继续推进其他 `spec-first-partial` 页面，优先 import、pending invoices、no-OA/turnover/batch-accounting 或真实 infra smoke。
@@ -293,6 +293,12 @@
 - 验证命令：`cd web && npx playwright test e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium`。
 - 未测风险：未连接真实 PostgreSQL/RabbitMQ/Redis/systemd `no-oa-bank-batch` 与 `cost-statistics` worker；真实 enqueue-to-fresh drain、生产历史 no-OA 批次和大数据页面性能仍需 staging/production smoke。
 - 后续事项：继续补真实基础设施 worker drain、更多导入变体或 `COST-E2E-008` 大数据宽表/视觉稳定性。
+
+## 2026-07-05 - bank-flow submit 到成本统计 Browser fan-out 校准
+
+- 目标：配合 `bank-flow-rule-batches` 模块 close，把 `COST-E2E-010` 的当前页面级 Browser 证据从历史 no-OA 入口校准为 bank-flow selected-row submit。
+- 关键决策：`web/e2e/bank-flow-rule-batches-flow.spec.ts` 和 deterministic `apiMocks.ts` 使用 `bank-flow-rule-e2e-*` transaction id、`bank-flow-rule-batch-e2e-*` batch id、`bank_flow_rule_batch_*` stale reason 与 `流水规则手续费成本项目`，不再用旧 `no-oa-*` id 或“免OA”成本项目名表示 bank-flow 行为。
+- 文档影响：更新 `e2e-coverage.md`、`tests.md`、`docs/dev/testing.md` 和 `docs/modules/bank-flow-rule-batches/*`；上方 2026-06-19 记录作为历史上下文保留，不再代表当前 Browser 入口。
 
 ## 2026-06-19 - ETC 导入到成本统计 Browser fan-out 文档校准
 

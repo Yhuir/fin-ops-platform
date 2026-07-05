@@ -595,24 +595,24 @@ describe("bank flow rule batch API", () => {
 
   test("preserves bank flow rule selection and persistence error codes", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      error: "no_oa_bank_batch_selection_internal_transfer_requires_pair",
+      error: "bank_flow_rule_batch_selection_internal_transfer_requires_pair",
       message: "internal transfer selection requires a matched pair",
     }), { status: 400, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(submitBankFlowRuleBatchSelection({ transactionIds: ["row-1"] })).rejects.toMatchObject({
-      code: "no_oa_bank_batch_selection_internal_transfer_requires_pair",
+      code: "bank_flow_rule_batch_selection_internal_transfer_requires_pair",
       message: "internal transfer selection requires a matched pair",
     });
 
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-      error: "no_oa_bank_batch_persistence_failed",
-      message: "免OA流水批次保存失败，请稍后重试。",
+      error: "bank_flow_rule_batch_persistence_failed",
+      message: "流水规则批次保存失败，请稍后重试。",
     }), { status: 500, headers: { "Content-Type": "application/json" } }));
 
     await expect(submitBankFlowRuleBatch({ batchId: "batch-fee", expectedVersion: 1 })).rejects.toMatchObject({
-      code: "no_oa_bank_batch_persistence_failed",
-      message: "免OA流水批次保存失败，请稍后重试。",
+      code: "bank_flow_rule_batch_persistence_failed",
+      message: "流水规则批次保存失败，请稍后重试。",
     });
   });
 

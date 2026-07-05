@@ -557,48 +557,6 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         },
       };
     },
-    listBatches({ status, month, plate, keyword }: { status?: string | null; month?: string | null; plate?: string | null; keyword?: string | null }) {
-      const normalizedKeyword = String(keyword ?? "").trim();
-      const normalizedPlate = String(plate ?? "").trim();
-      const rows = batches
-        .filter((batch) => {
-          if (status && batch.status !== status) {
-            return false;
-          }
-          const items = invoicesForBatch(batch);
-          if (month && !items.some((invoice) => invoice.issue_date.startsWith(month))) {
-            return false;
-          }
-          if (normalizedPlate && !items.some((invoice) => invoice.plate_number.includes(normalizedPlate))) {
-            return false;
-          }
-          if (normalizedKeyword) {
-            const rawBatch = batch as Record<string, unknown>;
-            const searchable = [
-              textField(rawBatch, "title", "name"),
-              "etc_batch_id" in batch ? batch.etc_batch_id : batch.etcBatchId,
-              "external_batch_id" in batch ? batch.external_batch_id : batch.externalBatchId,
-              "linked_oa_row_id" in batch ? batch.linked_oa_row_id : batch.linkedOaRowId,
-              "linked_oa_applicant" in batch ? batch.linked_oa_applicant : batch.linkedOaApplicant,
-              ...items.map((invoice) => `${invoice.invoice_number} ${invoice.seller_name} ${invoice.plate_number}`),
-            ].join(" ");
-            if (!searchable.includes(normalizedKeyword)) {
-              return false;
-            }
-          }
-          return true;
-        })
-        .map((batch) => hydrateBatch(batch));
-      return {
-        counts: batchCounts(),
-        items: cloneJson(rows),
-        pagination: {
-          page: 1,
-          page_size: 100,
-          total: rows.length,
-        },
-      };
-    },
     listBusinessBatches({ status, month, plate, keyword }: { status?: string | null; month?: string | null; plate?: string | null; keyword?: string | null }) {
       const normalizedStatus = status === "active" ? "unsubmitted" : status === "submitted" ? "submitted" : null;
       const normalizedKeyword = String(keyword ?? "").trim().toLowerCase();
@@ -731,10 +689,6 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
           error: null,
         },
       };
-    },
-    batchDetail(batchId: string) {
-      const batch = batches.find((item) => item.id === batchId);
-      return batch ? cloneJson(hydrateBatch(batch, true)) : null;
     },
     businessBatchDetail(batchId: string) {
       const batch = findBatchByBusinessId(batchId);
@@ -872,54 +826,6 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
           },
         ],
       };
-    },
-    markSubmitted(invoiceIds: string[]) {
-      invoices = invoices.map((invoice) =>
-        invoiceIds.includes(invoice.id)
-          ? { ...invoice, status: "submitted" as const }
-          : invoice,
-      );
-    },
-    markUnsubmitted(invoiceIds: string[]) {
-      invoices = invoices.map((invoice) =>
-        invoiceIds.includes(invoice.id)
-          ? { ...invoice, status: "unsubmitted" as const }
-          : invoice,
-      );
-    },
-    markBatchSubmitted(batchId: string) {
-      const batch = batches.find((item) => item.id === batchId);
-      if (!batch) {
-        return;
-      }
-      const invoiceIds = getBatchInvoiceIds(batch);
-      invoices = invoices.map((invoice) =>
-        invoiceIds.includes(invoice.id)
-          ? { ...invoice, status: "submitted" as const }
-          : invoice,
-      );
-      batches = batches.map((item) =>
-        item.id === batchId
-          ? { ...item, status: "submitted" as const }
-          : item,
-      );
-    },
-    markBatchUnsubmitted(batchId: string) {
-      const batch = batches.find((item) => item.id === batchId);
-      if (!batch) {
-        return;
-      }
-      const invoiceIds = getBatchInvoiceIds(batch);
-      invoices = invoices.map((invoice) =>
-        invoiceIds.includes(invoice.id)
-          ? { ...invoice, status: "unsubmitted" as const }
-          : invoice,
-      );
-      batches = batches.map((item) =>
-        item.id === batchId
-          ? { ...item, status: "unsubmitted" as const }
-          : item,
-      );
     },
   };
 }
@@ -4627,8 +4533,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   const etcReconciliationTaskStore = createEtcReconciliationTaskStore();
   const turnoverExtraStore = new Map<string, Record<string, unknown>>();
   let latestEtcImportPreview = etcInvoiceStore.previewZip([]);
-  let latestEtcDraftInvoiceIds: string[] = [];
-  let latestEtcDraftBatchId = "";
   let bankDetailAutoTagRulesSaved = false;
   let bankDetailPostSaveAccountRequestCount = 0;
   let bankDetailPostSaveTransactionRequestCount = 0;
@@ -5589,14 +5493,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         keyword: url.searchParams.get("keyword"),
       }),
     }),
-    "/api/etc/batches": ({ url }) => ({
-      body: etcInvoiceStore.listBatches({
-        status: url.searchParams.get("status"),
-        month: url.searchParams.get("month"),
-        plate: url.searchParams.get("plate"),
-        keyword: url.searchParams.get("keyword"),
-      }),
-    }),
     "/api/etc/business-batches": ({ url, init, jsonBody }) => {
       if (init?.method === "POST") {
         const title = String(jsonBody?.title ?? "新建ETC批次").trim() || "新建ETC批次";
@@ -5676,28 +5572,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return {
         status: 202,
         body: etcInvoiceStore.confirmImport(),
-      };
-    },
-    "/api/etc/batches/draft": ({ jsonBody }) => {
-      latestEtcDraftInvoiceIds = Array.isArray(jsonBody?.invoiceIds)
-        ? (jsonBody.invoiceIds as string[])
-        : [];
-      return {
-        body: {
-          batchId: "etc_batch_001",
-          etcBatchId: "etc_20260503_001",
-          oaDraftId: "oa_draft_001",
-          oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
-        },
-      };
-    },
-    "/api/etc/invoices/revoke-submitted": ({ jsonBody }) => {
-      const invoiceIds = Array.isArray(jsonBody?.invoiceIds) ? (jsonBody.invoiceIds as string[]) : [];
-      etcInvoiceStore.markUnsubmitted(invoiceIds);
-      return {
-        body: {
-          ok: true,
-        },
       };
     },
     "/api/bank-details/accounts": ({ url }) => {
@@ -7541,12 +7415,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ? jsonResponse({ body: { ok: true, data: { businessBatch: batch }, error: null } })
           : jsonResponse({ status: 404, body: { ok: false, data: null, error: { message: "ETC业务批次不存在。" } } });
       }
-      if (method === "POST" && segment === "oa-status" && trailing === "refresh") {
-        const batch = etcInvoiceStore.businessBatchDraft(businessBatchId);
-        return batch
-          ? jsonResponse({ body: { ok: true, data: { businessBatch: batch }, error: null } })
-          : jsonResponse({ status: 404, body: { ok: false, data: null, error: { message: "ETC业务批次不存在。" } } });
-      }
       if (method === "POST" && segment === "oa-draft" && trailing === "revoke") {
         const batch = etcInvoiceStore.businessBatchDetail(businessBatchId);
         return batch
@@ -7625,53 +7493,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ? jsonResponse({ body: task })
           : jsonResponse({ status: 404, body: { message: "ETC对账任务不存在。" } });
       }
-    }
-    const etcBatchDeleteMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)$/);
-    if (etcBatchDeleteMatch && method === "DELETE") {
-      const deleted = etcInvoiceStore.deleteBatch(decodeURIComponent(etcBatchDeleteMatch[1] ?? ""));
-      return deleted
-        ? jsonResponse({ body: { deleted: true } })
-        : jsonResponse({ status: 409, body: { error: "etc_batch_delete_conflict", message: "ETC批次不能删除。" } });
-    }
-    const etcBatchDetailMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)$/);
-    if (etcBatchDetailMatch && method === "GET") {
-      const batch = etcInvoiceStore.batchDetail(decodeURIComponent(etcBatchDetailMatch[1] ?? ""));
-      return batch
-        ? jsonResponse({ body: batch })
-        : jsonResponse({ status: 404, body: { message: "ETC批次不存在。" } });
-    }
-    const etcBatchDraftMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)\/draft$/);
-    if (etcBatchDraftMatch) {
-      latestEtcDraftBatchId = decodeURIComponent(etcBatchDraftMatch[1] ?? "");
-      const batch = etcInvoiceStore.batchDetail(latestEtcDraftBatchId);
-      return jsonResponse({
-        body: {
-          batch_id: latestEtcDraftBatchId,
-          etc_batch_id: batch?.external_batch_id ?? batch?.externalBatchId ?? "ETC-2026-03-A",
-          oa_draft_id: "oa_draft_001",
-          oa_draft_url: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
-        },
-      });
-    }
-    const etcBatchConfirmMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)\/confirm-submitted$/);
-    if (etcBatchConfirmMatch) {
-      etcInvoiceStore.markBatchSubmitted(decodeURIComponent(etcBatchConfirmMatch[1] ?? ""));
-      return jsonResponse({ body: { ok: true } });
-    }
-    const etcBatchMarkNotSubmittedMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)\/mark-not-submitted$/);
-    if (etcBatchMarkNotSubmittedMatch) {
-      const batchId = decodeURIComponent(etcBatchMarkNotSubmittedMatch[1] ?? "");
-      if (batchId !== latestEtcDraftBatchId) {
-        etcInvoiceStore.markBatchUnsubmitted(batchId);
-      }
-      return jsonResponse({ body: { ok: true } });
-    }
-    if (url.pathname === "/api/etc/batches/etc_batch_001/confirm-submitted") {
-      etcInvoiceStore.markSubmitted(latestEtcDraftInvoiceIds);
-      return jsonResponse({ body: { ok: true } });
-    }
-    if (url.pathname === "/api/etc/batches/etc_batch_001/mark-not-submitted") {
-      return jsonResponse({ body: { ok: true } });
     }
     if (url.pathname.startsWith("/imports/batches/") && url.pathname.endsWith("/revert")) {
       const batchId = url.pathname.split("/")[3] ?? "";

@@ -25,6 +25,7 @@
 - 禁止流转：
   - ETC 页面不得提供自动 OA 检测、刷新检测或异常检测入口。
   - ETC 后端不得保留专用 OA 检测 refresh API、detector adapter 或 worker；批次已人工确认后不得被后台检测覆盖。
+  - ETC 后端和前端不得保留 `/api/etc/invoices/revoke-submitted` 或 invoice-id 级直接回退 submitted 的入口；提交状态回退只能通过 business batch `manual-oa-status` / `oa-draft/revoke` / delete-reset 状态机完成。
   - 已提交、人工确认已提交或 closed 业务批次不得继续修改标题。
   - 关联台未找到 OA 和银行流水三项匹配前，`etc_invoice_summary` 不得直接进入已配对区。
 
@@ -54,6 +55,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-05 | 删除 ETC invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口、旧 `/api/etc/batches*` 前端测试 mock 假后端和 ETC `oa-status/refresh` mock | ETC invoice list route owner 变为只读 I/O；提交状态回退只允许走 business batch 状态机；测试 mock 不再支持线上已删除旧入口 | `tests.test_platform_runtime_boundary_guards`；`tests.test_etc_backend.EtcServiceTests.test_batch_status_mark_not_submitted_and_draft_creation_with_fake_oa_client`；`web/src/test/EtcApi.test.ts` |
 | 2026-07-01 | ETC 页面移除月份选择器，未提交业务批次支持提交前内联编辑标题并同步 linked task title | ETC 页面 UI 状态、business batch `title` payload、ETC 发票导入 ready task 下拉标题 | `tests.test_etc_backend.EtcServiceTests.test_business_batch_title_update_persists_and_locks_submitted`；`tests.test_etc_backend.EtcApiTests.test_business_batch_title_patch_updates_linked_task_title`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts` |
 | 2026-06-17 | 补充 ETC 票据管理 Browser e2e，覆盖未提交业务批次、发票明细、OA 草稿创建、人工已提交确认和已提交 bucket 展示 | ETC 页面 UI 状态、business batch `imported -> oa_confirmation_pending -> manually_marked_submitted` 可见链路、Playwright smoke | `cd web && npx playwright test e2e/etc-tickets-flow.spec.ts` |
 | 2026-06-12 | 删除 ETC repair/link/migration service 的 direct pair relation 写 fallback，缺少 Workbench relation command service 时 fail fast 且不先写本地批次 | 历史 repair、historical business batch migration、existing batch link、Workbench relation command 边界 | `tests/test_etc_backend.py`；`tests/test_historical_etc_business_batch_migration_service.py`；`tests/test_platform_runtime_boundary_guards.py` |

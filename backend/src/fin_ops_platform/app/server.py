@@ -2048,7 +2048,7 @@ class Application:
             return self._handle_api_etc_business_batches_route(method, query, body, headers)
         if route_path.startswith("/api/etc/business-batches/"):
             return self._route_api_etc_business_batch_v2(method, route_path, body, headers)
-        if route_path == "/api/etc/invoices" or route_path == "/api/etc/invoices/revoke-submitted":
+        if route_path == "/api/etc/invoices":
             return self._etc_invoice_routes().route(method, route_path, query, body)
         if method == "GET" and route_path == "/api/session/me":
             return self._handle_api_session_me(headers)
@@ -2366,7 +2366,6 @@ class Application:
                 "/api/etc/import/preview",
                 "/api/etc/import/confirm",
                 "/api/etc/invoices",
-                "/api/etc/invoices/revoke-submitted",
                 "/api/etc/reconciliation-tasks/{task_id}",
                 "/api/etc/reconciliation-tasks/{task_id}/ticket-root-texts",
                 "/api/etc/reconciliation-tasks/{task_id}/ticket-root-files",
@@ -4421,10 +4420,7 @@ class Application:
         routes = EtcInvoiceApiRoutes(
             etc_service=self._etc_service,
             json_response=self._json_response,
-            load_json_body=self._load_json_body,
             serialize_invoice=self._serialize_etc_invoice,
-            link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
-            refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
         )
         self._etc_invoice_api_routes = routes
         return routes
@@ -4492,7 +4488,6 @@ class Application:
             return service
         service = EtcReconciliationImportCleanupService(
             etc_service=self._etc_service,
-            import_service=self._import_service,
             reconciliation_task_service=self._etc_reconciliation_task_service,
             existing_etc_invoices_by_ids=self._existing_etc_invoices_by_ids,
             etc_invoice_changed_months=self._etc_invoice_changed_months,
@@ -4510,7 +4505,6 @@ class Application:
             return service
         service = EtcBusinessBatchDeleteService(
             etc_service=self._etc_service,
-            import_service=self._import_service,
             reconciliation_task_service=self._etc_reconciliation_task_service,
             cleanup_service=self._etc_reconciliation_import_cleanup_service(),
             existing_etc_invoices_by_ids=self._existing_etc_invoices_by_ids,
@@ -9977,7 +9971,7 @@ class Application:
                 },
             )
         try:
-            result = self._execute_general_import_confirm(str(batch_id))
+            result = self._import_processing_service.execute_general_import_confirm(str(batch_id))
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -9991,27 +9985,12 @@ class Application:
     def build_import_job_processors(self) -> dict[str, Callable[[ImportJob], dict[str, object]]]:
         return self._import_processing_service.build_import_job_processors()
 
-    def _process_general_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        return self._import_processing_service.process_general_import_confirm_job(import_job)
-
-    def _process_tax_certified_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        return self._import_processing_service.process_tax_certified_import_confirm_job(import_job)
-
-    def _process_file_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        return self._import_processing_service.process_file_import_confirm_job(import_job)
-
-    def _process_etc_invoice_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        return self._import_processing_service.process_etc_invoice_import_confirm_job(import_job)
-
     def _process_oa_manual_import_create_job(self, import_job: ImportJob) -> dict[str, object]:
         row_ids = import_job.payload.get("row_ids")
         if not isinstance(row_ids, list):
             raise ValueError("import job payload.row_ids is required.")
         actor_id = str(import_job.payload.get("actor_id") or import_job.created_by or "workbench_settings").strip()
         return self._execute_oa_manual_import_create([str(row_id) for row_id in row_ids], actor_id=actor_id)
-
-    def _execute_general_import_confirm(self, batch_id: str) -> dict[str, object]:
-        return self._import_processing_service.execute_general_import_confirm(batch_id)
 
     def _handle_import_batch(self, batch_id: str) -> Response:
         try:
@@ -10222,7 +10201,7 @@ class Application:
                 },
             )
         total = len(normalized_selected_file_ids)
-        label = self._file_import_job_label(session, normalized_selected_file_ids)
+        label = ImportProcessingService.file_import_job_label(session, normalized_selected_file_ids)
         owner_user_id = self._resolve_background_job_owner(headers)
         selected_key = ",".join(sorted(normalized_selected_file_ids))
         affected_import_domains, import_route = self._file_import_job_status_scope(
@@ -10276,7 +10255,7 @@ class Application:
                 )
         if created:
             def run_file_import(running_job):
-                return self._execute_file_import_confirm_job(
+                return self._import_processing_service.execute_file_import_confirm_job(
                     session_id=normalized_session_id,
                     selected_file_ids=normalized_selected_file_ids,
                     owner_user_id=running_job.owner_user_id,
@@ -10301,10 +10280,6 @@ class Application:
         return self._json_response(HTTPStatus.ACCEPTED, response_payload)
 
     @staticmethod
-    def _file_import_job_label(session, selected_file_ids: list[str]) -> str:
-        return ImportProcessingService.file_import_job_label(session, selected_file_ids)
-
-    @staticmethod
     def _file_import_job_status_scope(session, selected_file_ids: list[str]) -> tuple[list[str], str]:
         selected = {str(file_id) for file_id in list(selected_file_ids or []) if str(file_id)}
         domains: list[str] = []
@@ -10327,21 +10302,6 @@ class Application:
         }
         route = route_by_domain.get(domains[0], "/operations/app-health") if len(domains) == 1 else "/operations/app-health"
         return domains, route
-
-    def _execute_file_import_confirm_job(
-        self,
-        *,
-        session_id: str,
-        selected_file_ids: list[str],
-        owner_user_id: str,
-        background_job_id: str,
-    ) -> dict[str, object]:
-        return self._import_processing_service.execute_file_import_confirm_job(
-            session_id=session_id,
-            selected_file_ids=selected_file_ids,
-            owner_user_id=owner_user_id,
-            background_job_id=background_job_id,
-        )
 
     def _handle_import_file_retry(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)

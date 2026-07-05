@@ -1203,9 +1203,19 @@ function isNoOaSummaryRow(row: ApiWorkbenchRow) {
   return row.source_kind === "no_oa_bank_batch_summary";
 }
 
+function isBankFlowRuleBatchSummaryRow(row: ApiWorkbenchRow) {
+  return row.source_kind === "bank_flow_rule_batch_summary"
+    || row.special_metadata?.relation_mode === "bank_flow_rule_batch";
+}
+
 function isNoOaBatchRow(row: ApiWorkbenchRow) {
   return isNoOaSummaryRow(row)
     || (row.type === "bank" && rowRelation(row)?.code === "no_oa_bank_batch" && hasNoOaSourceBatchId(row));
+}
+
+function isBankFlowRuleBatchRow(row: ApiWorkbenchRow) {
+  return isBankFlowRuleBatchSummaryRow(row)
+    || (row.type === "bank" && rowRelation(row)?.code === "bank_flow_rule_batch" && hasNoOaSourceBatchId(row));
 }
 
 function hasNoOaSourceBatchId(row: ApiWorkbenchRow) {
@@ -1215,7 +1225,7 @@ function hasNoOaSourceBatchId(row: ApiWorkbenchRow) {
 
 function normalizeRowAvailableActions(row: ApiWorkbenchRow) {
   const actions = row.available_actions ?? [];
-  if (!isNoOaBatchRow(row)) {
+  if (!isNoOaBatchRow(row) && !isBankFlowRuleBatchRow(row)) {
     return actions;
   }
   if (!hasNoOaSourceBatchId(row)) {
@@ -1268,6 +1278,9 @@ function rowLabel(row: ApiWorkbenchRow) {
   }
   if (row.source_kind === "no_oa_bank_batch_summary") {
     return "免OA批次";
+  }
+  if (row.source_kind === "bank_flow_rule_batch_summary") {
+    return "流水规则批次";
   }
   if (row.type === "bank") {
     return row.debit_amount ? "支取" : "收入";

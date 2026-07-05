@@ -125,6 +125,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.invoice_pool_cleanup \
 
 历史版本可能已经在 `app.invoices` 中留下 ETC-created canonical 污染。执行清理时只能把 `invoice_source='ETC导入'`、`invoice_kind='ETC发票'` 且没有非 ETC source link 的行视为 legacy 污染候选；通过正式 Excel 导入或 OA 附件受控创建的 canonical invoice 必须保留，最多移除旧 ETC source link / batch id。
 
+该历史污染清理不属于 ETC 发票导入 runtime I/O。`/imports/etc-invoices`、ETC reconciliation task 删除和 ETC business batch 删除链路不得调用通用 import service 删除或改写 `app.invoices`；需要处理历史污染时，必须在本 runbook 下先备份、dry-run、确认，再执行独立清理工具。
+
 ## 执行当天备份
 
 即使已经存在 `.runtime/backups/invoice-pool-audit/20260621031938`，正式 destructive reset 前仍必须生成执行当天新备份。推荐目录：

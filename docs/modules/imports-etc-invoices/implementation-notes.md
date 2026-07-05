@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-07-05 - runtime canonical cleanup surface 移出 ETC 导入主链路
+
+- 目标：完成 ETC 发票导入模块边界 close，移除旧 ETC ZIP 直接创建 canonical invoice 后留下的 runtime cleanup surface，避免当前导入、删除或重导链路继续携带旧 `app.invoices` 清理 I/O。
+- 影响范围：`EtcReconciliationImportCleanupService`、`EtcBusinessBatchDeleteService`、reconciliation imported-invoices 删除响应、`ImportNormalizationService` 和对应边界 guard；不改变 `/api/etc/import/preview`、`/api/etc/import/confirm`、`etc_invoice_import.confirm`、ETC metadata/附件持久化或下游 read model fan-out。
+- 关键决策：ETC 导入模块只拥有 ETC task/import batch/business batch/metadata/PDF/XML 附件和 existing canonical invoice link 边界；删除导入结果时只返回 ETC 自有删除结果和 changed months，不返回 canonical 删除计数。历史 ETC-created canonical 污染不再挂在 runtime service 上，改由 `docs/operations/invoice-pool-cleanup.md` 的备份、dry-run、确认后清理流程处理。
+- 文档影响：更新本模块 `README.md`、`boundary-io.md`、`state-machine.md`、`tests.md`、全局 testing closure dependency map 和本实施记录。
+- 测试覆盖：更新 `tests/test_etc_reconciliation_import_cleanup_service.py`、`tests/test_etc_business_batch_delete_service.py`，删除旧 import service cleanup 单测，并扩展 `tests/test_platform_runtime_boundary_guards.py` 防止旧 canonical cleanup helper 回归。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：未执行真实生产污染清理；如生产仍存在历史 ETC-created canonical 污染，必须按 invoice-pool cleanup runbook 单独备份、dry-run 和确认后处理。
+- 后续事项：无模块 close 阻断；真实大 zip、对象存储、真实 worker drain 和 OA 草稿仍走 staging/发布前 smoke。
+
 ## 2026-07-03 - 导入文件事实列表摘要化
 
 - 目标：修复生产 HTTP SLO 中 `/api/import-facts/files?page=1&page_size=50` 返回约 15MB 导致导入页探针超时的问题。
@@ -62,7 +73,7 @@
 
 - 目标：固定 ETC ZIP 只保存当前 reconciliation task 命中的 PDF/XML 附件和 metadata，防止 ZIP 内额外发票进入 `EtcService` state 或被误认为第二发票池。
 - 影响范围：`EtcService._process_import_zips` 内部持久化入口、ETC import preview/confirm API 回归测试。
-- 关键决策：route 层 `filter_uploads_by_allowlist` 负责裁剪 ZIP session；`EtcService` 内部持久化方法命名收缩为 `_upsert_attachment_metadata_from_import`，表达它只保存附件 metadata，不创建统一发票池事实。历史 `ImportNormalizationService.remove_etc_invoices_by_import_batch_id` 仍保留为污染数据清理前的兼容逻辑，不代表新链路会创建 ETC canonical invoice。
+- 关键决策：route 层 `filter_uploads_by_allowlist` 负责裁剪 ZIP session；`EtcService` 内部持久化方法命名收缩为 `_upsert_attachment_metadata_from_import`，表达它只保存附件 metadata，不创建统一发票池事实。2026-07-05 起，历史污染清理不再挂在 runtime import service 上，改由 invoice-pool cleanup 运维链路处理。
 - 文档影响：本实施记录补充合同；长期业务口径已在 `README.md`、`docs/product-specs/imports-and-etc.md` 和 `docs/operations/invoice-pool-cleanup.md` 维护。
 - 测试覆盖：新增 `test_etc_import_drops_extra_zip_invoices_not_selected_by_current_task`，证明 task 只要求 `ETC001` 时，混合 ZIP 里的 `ETC999` 只出现在 preview exclusion 中，confirm 后不进入 ETC metadata，也不创建 canonical invoice。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py -k "drops_extra_zip_invoices or partial_success_when_some_items_fail or without_creating_canonical_invoices or confirmed_etc_submission_replaces_scatter_invoice" -q`；`PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/services/etc_service.py tests/test_etc_backend.py`。

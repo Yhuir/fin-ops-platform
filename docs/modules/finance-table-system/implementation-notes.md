@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-07-05 - Finance Table System边界close与旧DataGrid残留防回归
+
+- 目标：完成 Finance Table System 模块边界与 I/O close，确认共享表格不承载业务 I/O，并移除活跃测试中的旧 MUI 命名残留。
+- 影响范围：`CommonMuiComponents.test.tsx` 改名为 `CommonPlatformComponents.test.tsx`、`MuiContainment.test.ts`、本模块 README/boundary/state/tests 和测试迁移策略文档。
+- 关键决策：不迁移所有页面表格 wrapper；页面 wrapper 的筛选、排序、分页、导出、read model freshness 和 drawer/dialog 继续归页面模块。运行时代码中旧 MUI/DataGrid/provider/theme 和 `useMuiDataGridPageSession` 已不存在，本轮用最小 guard 防回归，并把 boundary 状态改为 close。
+- 文档影响：更新本模块 `README.md`、`boundary-io.md`、`state-machine.md`、`tests.md` 和 `docs/refactor-ui/test_migration_strategy.md`。
+- 测试覆盖：`MuiContainment.test.ts` 新增旧 `useMuiDataGridPageSession` hook/test 不存在断言；`CommonPlatformComponents.test.tsx` 保留 StatePanel、AppDialog/AppDrawer、ConfirmActionDialog、FileDropzone、PageScaffold/PageToolbar 等 common primitive 行为覆盖。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：未跑完整页面级表格矩阵和真实 Chromium finance-table-system e2e；本轮没有改页面表格 runtime，页面级风险仍由对应模块测试和发布 smoke 承担。
+
 ## 2026-06-19 - 共享 column filter 小屏定位修复
 
 - 目标：修复共享 `WorkbenchColumnFilterMenu` 在 tax-offset 390px 窄屏场景下可能把选项渲染到 viewport 外，导致筛选项无法真实点击的问题。
