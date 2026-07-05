@@ -22,7 +22,7 @@
 | `BATCH-E2E-003` | 金额不一致差额说明 | P0 | 金额不一致时必须填写 trim 后非空差额说明；空白说明不得提交；提交后保留差额说明和 relation history。 |
 | `BATCH-E2E-004` | 撤回 relation freshness closure | P0 | 已提交 bucket 中只能撤回 active batch accounting relation；用户必须填写撤回原因；成功后等待 `workbench_relation` barrier fresh，再重读并回到未提交状态。 |
 | `BATCH-E2E-005` | read model stale/missing/refreshing 防 false-empty | P0 | `workbench_relation` non-fresh 时 API 和页面必须展示 freshness 诊断，不能把空关系当真实未提交；GET 路径只通过 facade/gateway 入队刷新，不同步 rebuild 或写 durable queue。 |
-| `BATCH-E2E-006` | canonical command boundary | P0 | submit、withdraw 和 legacy collision repair 必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation fallback 或半写。 |
+| `BATCH-E2E-006` | canonical command boundary | P0 | submit 和 withdraw 必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation fallback 或半写。旧 legacy collision repair 入口必须不存在，不能重新接入 batch-accounting 页面/API/worker 主链路。 |
 | `BATCH-E2E-007` | relation fan-out 和旧功能回归 | P0 | batch relation 变化必须通过 `workbenchRelationUpdated`、dirty/outbox 和 relation read model 影响关联台、银行明细、成本统计、搜索及发票 lifecycle 相关页面；前端事件不能替代事实源。 |
 | `BATCH-E2E-008` | 权限 gate | P0 | `read_export_only` 用户可读但不能触发提交/撤回 durable mutation；forbidden/expired session 不应调用 protected API。 |
 | `BATCH-E2E-009` | 窄屏/长文本/表格稳定性 | P1 | 窄桌面下银行 rail 标题、说明、年份输入和分页控件不得互相挤压或溢出；高行数、超长 OA 描述和长备注不应破坏可读性。 |

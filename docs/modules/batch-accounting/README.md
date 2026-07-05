@@ -43,7 +43,7 @@
 - 前端未提交 bucket 首屏默认以 200 行页大小分别请求银行流水和可关联 OA 项，并提供独立分页控件；切换 bucket 或流水年份会重置页码、选择和差额说明，避免跨页旧选择误提交。右侧 OA 不按年份过滤，只展示没有关联银行流水的日常报销 OA 主单；仅发票关系或无流水候选关系不应把该 OA 排除。已提交 bucket 只分页银行关系列表，OA 明细来自当前可见 relation bucket。
 - `POST /api/batch-accounting/submit` 必须优先通过 Workbench SQL active read model 的窄读口读取本次选中银行流水、OA 主单和对应 OA 附件发票，并通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`，`special_metadata.affected_scope_keys` 必须记录本次关系涉及的具体月份；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注；撤回必须通过 durable relation command repository 取消当前 batch relation，记录 `withdraw_link` history。它不走旧 snapshot restore，也不得把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation。
-- `repair_legacy_case_id_collisions(...)` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 恢复历史 batch relation；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
+- 旧 `repair_legacy_case_id_collisions(...)` service-level 修复入口已删除；批量账务生产 API/worker 主链路不得再提供 legacy case-id collision repair 写入口。
 - 前端提交/撤回成功后发送 `workbenchRelationUpdated`，作为同浏览器会话刷新提示；事实源仍以后端 dirty scope、read model freshness 和 worker readiness 为准。
 
 ## 当前边界
@@ -58,7 +58,7 @@
 - read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。
 - 批量账务 GET 必须保持只读；不能在列表读取路径执行 legacy relation repair。
 - 批量账务显式分页的 `page_size` 上限为 200，超限必须返回 `invalid_paging`，不能为了首屏性能静默全量返回或把 stale relation distribution 伪装成 fresh。
-- 批量账务 SQL 读路径分三类 I/O：未提交列表可用全量候选 loader；submit command 只能用 `bank_row_id + oa_row_ids` 窄 loader；已提交 bucket 必须用年份级 batch-accounting relation DTO 和银行行窄 payload。三者不能相互复用来图省事，否则会重新引入全量扫描、12 个月循环和读侧刷新竞争。
+- 批量账务 SQL 读路径分三类 I/O：未提交列表可用全量候选 loader；submit command 只能用 `bank_row_id + oa_row_ids` 窄 loader；已提交 bucket 必须用年份级 batch-accounting relation DTO 和银行行窄 payload。三者不能相互复用来图省事，否则会重新引入全量扫描、12 个月循环和读侧刷新竞争；缺少年份级 submitted relation reader 时必须 fail closed 为 unavailable，不能回退 `list_by_month`。
 
 ## 影响面清单
 

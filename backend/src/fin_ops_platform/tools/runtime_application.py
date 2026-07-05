@@ -31,8 +31,7 @@ def invoice_etc_metadata_persister(app: Any) -> Callable[[Any], Any] | None:
 
 
 def bank_auto_tag_rules_runtime(data_dir: Path | None) -> Any:
-    app = build_application(data_dir=data_dir) if data_dir is not None else build_application()
-    return tool_runtime_ports(app)
+    return tool_runtime_ports(build_tool_runtime_application(data_dir))
 
 
 def tool_runtime_ports(app: Any) -> Any:

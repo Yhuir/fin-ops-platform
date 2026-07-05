@@ -1,5 +1,15 @@
 # 批量账务 实施记录
 
+## 2026-07-05 - 模块化 close 与旧 submitted/repair 链路删除
+
+- 目标：完成批量账务页面模块化 close，确保页面/API/service/read model 依赖边界清晰，旧读写链路不再污染当前批量账务链路。
+- 影响范围：`BatchAccountingService._submitted_relations(...)`、批量账务 API 回归测试、runtime boundary guard、模块 README / boundary I/O / state-machine / tests 文档；不改变 HTTP endpoint 或 submit/withdraw response shape。
+- 关键决策：批量账务没有独立 read model 是设计边界，已提交 bucket 的关系明细必须走 `WorkbenchRelationReadFacade.list_batch_accounting_relations_by_year(...)` 年份级 I/O；缺少年份级 reader 时 fail closed 为 `read_model_status=unavailable`，不能回退 12 个月 `list_by_month` 扫描。历史 `BatchAccountingService.repair_legacy_case_id_collisions(...)` 没有生产 app/service 调用者，按旧代码删除要求直接移除，不再作为页面模块内置兼容能力保留。
+- 旧链路删除：删除 `_submitted_relations(...)` 的 12 个月 `list_by_month` fallback；删除 service-level legacy case-id repair 入口及其只服务 repair 的 `_relation_history`、`_active_relations`、`_batch_relation_bank_row_id` helper；删除对应历史 repair 行为测试，改为静态 guard 断言旧入口不得回归。
+- 测试覆盖：新增 `test_submitted_list_fails_closed_without_year_relation_reader`；更新 `test_batch_accounting_route_handlers_do_not_bypass_service_boundaries` 禁止 submitted month scan fallback；新增/改造 `test_batch_accounting_legacy_repair_entrypoint_is_removed` 保护旧 repair 入口删除。
+- 验证命令：见本轮最终说明。
+- 未测风险：真实 PostgreSQL 历史数据如仍存在 legacy collision，需要 owner 批准的独立迁移/repair runbook；当前批量账务页面模块不再提供内置 repair 入口。生产 worker drain 和 1273.06 撤回->重提->关联台 paired smoke 仍属于环境验证，不影响本地模块边界 close。
+
 ## 2026-07-02 - route duplicate lifecycle fan-out 删除
 
 - 目标：修复 1273.06 生产 smoke 中 submit/withdraw command 已成功但 HTTP 请求仍被旧 lifecycle fan-out 拖慢，导致用户看到 load 很久、偶发 timeout/blocked 后误判失败的问题。
@@ -116,11 +126,11 @@
 
 - 目标：删除没有运行时调用者的 `Application._repair_batch_accounting_relation_case_ids(...)`，避免 `server.py` 保留一个可写 pair relation persist、derived lifecycle event 和 Workbench read model persist 的旧兼容入口。
 - 影响范围：`server.py`、`tests/test_batch_accounting_api.py` 的 GET 只读回归、`tests/test_platform_runtime_boundary_guards.py` 的 batch-accounting route/repair guard、相关 refactor 架构文档。
-- 关键决策：删除 app-level wrapper，不删除 `BatchAccountingService.repair_legacy_case_id_collisions(...)`；service-level repair 仍由 command service 边界和现有历史修复测试保护。
+- 关键决策：当时删除 app-level wrapper，service-level repair 临时保留并由 command service 边界保护；该临时保留状态已由 2026-07-05 close slice 删除，不再作为当前能力。
 - 文档影响：新增 `.planning/refactors/modular-io-boundaries/analysis/batch-accounting-repair-compat-removal.md`；更新长期 backend-refactor 文档，移除 `server.py` repair helper 仍存在的旧事实。
-- 测试覆盖：静态 guard 防止 `def _repair_batch_accounting_relation_case_ids` 回归；GET 回归改为证明 app-level repair helper 不存在且列表仍正常；service repair tests 继续覆盖 command-service delegation 和 fail-fast。
-- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_route_handlers_do_not_bypass_service_boundaries tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_batch_accounting_repair_has_no_direct_pair_write_fallback -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_does_not_run_legacy_relation_repair tests.test_batch_accounting_api.BatchAccountingApiTests.test_repair_legacy_case_id_collision_delegates_relation_write_to_command_service tests.test_batch_accounting_api.BatchAccountingApiTests.test_repair_legacy_case_id_collision_requires_relation_command_service_without_direct_pair_fallback tests.test_batch_accounting_api.BatchAccountingApiTests.test_repair_legacy_case_id_collision_restores_lost_batch_relation_from_history -v`。
-- 未测风险：未执行真实生产历史 collision dry-run；service-level repair 能力仍保留，生产写入型 repair 仍需人工审批和 runbook。
+- 测试覆盖：静态 guard 防止 `def _repair_batch_accounting_relation_case_ids` 回归；GET 回归改为证明 app-level repair helper 不存在且列表仍正常；2026-07-05 后静态 guard 进一步要求 service-level repair 入口也不存在。
+- 验证命令：历史命令已由 2026-07-05 close slice 的 guard/API 回归替代。
+- 未测风险：未执行真实生产历史 collision dry-run；如仍需处理历史 collision，必须走 owner 批准的独立迁移/repair runbook。
 - 后续事项：推进 `batch-accounting:module-closure-audit-and-production-evidence-defer`，审计 batch-accounting 是否只剩生产证据/长期外部环境风险。
 
 ## 2026-06-24 - Submit/withdraw route side-effect port 抽取

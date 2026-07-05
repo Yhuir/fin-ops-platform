@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 from threading import RLock
@@ -15,7 +14,6 @@ from fin_ops_platform.services.workbench_row_identity import row_type_for_workbe
 
 BATCH_ACCOUNTING_SOURCE = "batch_accounting"
 BATCH_ACCOUNTING_COUNTERPARTY_NAME = "批量账务集中处理"
-BATCH_ACCOUNTING_RELATION_REPAIR_ACTOR = "batch_accounting_relation_repair"
 
 _READ_MODEL_STATUS_PRIORITY = {
     "fresh": 0,
@@ -144,10 +142,6 @@ class BatchAccountingService:
             if isinstance(relation, dict)
         ]
 
-    def _active_relation_by_row_id(self, row_id: str) -> dict[str, Any] | None:
-        relations = self._active_relations_for_row_ids([row_id])
-        return deepcopy(relations[0]) if relations else None
-
     def _active_bank_relation_by_row_id(self, row_id: str) -> dict[str, Any] | None:
         for relation in self._active_relations_for_row_ids([row_id]):
             if self._relation_has_bank_row(relation):
@@ -169,34 +163,6 @@ class BatchAccountingService:
                 return None
             raise BatchAccountingError(exc.error_code, exc.message, payload=exc.payload) from exc
         return deepcopy(relation) if isinstance(relation, dict) else None
-
-    def _active_relations(self) -> list[dict[str, Any]]:
-        command_service = self._require_relation_command_service()
-        list_active = getattr(command_service, "list_active_relations", None)
-        if not callable(list_active):
-            raise BatchAccountingError(
-                "batch_accounting_relation_command_unavailable",
-                "批量账务关联读取服务不可用，请稍后重试。",
-            )
-        return [
-            deepcopy(relation)
-            for relation in list(list_active() or [])
-            if isinstance(relation, dict)
-        ]
-
-    def _relation_history(self) -> list[dict[str, Any]]:
-        command_service = self._require_relation_command_service()
-        list_history = getattr(command_service, "list_history", None)
-        if not callable(list_history):
-            raise BatchAccountingError(
-                "batch_accounting_relation_command_unavailable",
-                "批量账务关联历史读取服务不可用，请稍后重试。",
-            )
-        return [
-            deepcopy(history)
-            for history in list(list_history() or [])
-            if isinstance(history, dict)
-        ]
 
     def build_payload(
         self,
@@ -470,117 +436,6 @@ class BatchAccountingService:
             "affected_scope_keys": affected_scope_keys,
             "amount_check": amount_check,
             "message": f"已关联批量账务流水与 {len(normalized_oa_row_ids)} 项 OA。",
-        }
-
-    def repair_legacy_case_id_collisions(
-        self,
-        *,
-        actor: str = BATCH_ACCOUNTING_RELATION_REPAIR_ACTOR,
-    ) -> dict[str, Any]:
-        latest_relations_by_bank_row_id: dict[str, dict[str, Any]] = {}
-        for history in self._relation_history():
-            if not isinstance(history, dict):
-                continue
-            for relation in list(history.get("before_relations") or []):
-                bank_row_id = self._batch_relation_bank_row_id(relation)
-                if bank_row_id:
-                    latest_relations_by_bank_row_id.pop(bank_row_id, None)
-            for relation in list(history.get("after_relations") or []):
-                bank_row_id = self._batch_relation_bank_row_id(relation)
-                if bank_row_id:
-                    latest_relations_by_bank_row_id[bank_row_id] = deepcopy(relation)
-
-        if not latest_relations_by_bank_row_id:
-            return {"changed": False, "changed_case_ids": [], "affected_row_ids": [], "affected_months": []}
-
-        active_row_ids = {
-            str(row_id).strip()
-            for relation in self._active_relations()
-            for row_id in list(relation.get("row_ids") or [])
-            if str(row_id).strip()
-        }
-        repaired_case_ids: list[str] = []
-        affected_row_ids: list[str] = []
-        affected_months: list[str] = []
-        repaired_at = datetime.now(UTC).isoformat()
-        repair_note = "修复批量账务关系号复用导致的关联丢失"
-
-        for bank_row_id, relation in sorted(latest_relations_by_bank_row_id.items()):
-            if bank_row_id in active_row_ids:
-                continue
-            target_case_id = self._case_id_provider(bank_row_id)
-            existing_target_relation = self._active_relation_by_case_id(target_case_id)
-            if isinstance(existing_target_relation, dict):
-                continue
-            row_ids = self._dedupe(str(row_id) for row_id in list(relation.get("row_ids") or []))
-            if not row_ids:
-                continue
-            row_types = [
-                str(row_type).strip()
-                for row_type in list(relation.get("row_types") or [])
-                if str(row_type).strip()
-            ]
-            if len(row_types) != len(row_ids):
-                row_types = [self._row_type_for_row_id(row_id) for row_id in row_ids]
-            metadata = deepcopy(relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {})
-            legacy_case_id = str(relation.get("case_id") or "").strip()
-            metadata.update(
-                {
-                    "source": BATCH_ACCOUNTING_SOURCE,
-                    "bank_row_id": bank_row_id,
-                    "legacy_case_id": legacy_case_id,
-                    "repair_source": "batch_accounting_case_id_collision",
-                    "repaired_at": repaired_at,
-                }
-            )
-            if self._relation_command_service is None:
-                raise BatchAccountingError(
-                    "batch_accounting_relation_command_unavailable",
-                    "批量账务关联写入服务不可用，请稍后重试。",
-                    payload={"case_id": target_case_id, "row_ids": row_ids},
-                )
-            try:
-                command_result = self._relation_command_service.confirm_relation(
-                    case_id=target_case_id,
-                    row_ids=row_ids,
-                    row_types=row_types,
-                    relation_mode=str(relation.get("relation_mode") or "manual_confirmed"),
-                    actor_id=actor,
-                    month_scope=str(relation.get("month_scope") or "all"),
-                    note=repair_note,
-                    amount_check=deepcopy(relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else {}),
-                    special_metadata=metadata,
-                    exception_case_id=str(relation.get("exception_case_id") or ""),
-                    rule_version=str(relation.get("rule_version") or ""),
-                    evidence=deepcopy(relation.get("evidence") if isinstance(relation.get("evidence"), dict) else {}),
-                    oa_exemption=deepcopy(relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None),
-                    display_tags=[
-                        str(tag).strip()
-                        for tag in list(relation.get("display_tags") or [])
-                        if str(tag).strip()
-                    ],
-                    occurred_at=repaired_at,
-                    history_operation_type="repair_batch_accounting_relation_id_collision",
-                )
-            except WorkbenchRelationCommandError as exc:
-                raise self._command_error(exc) from exc
-            repaired_relation = dict(command_result.get("relation") or {})
-            repaired_case_ids.extend(
-                str(case_id)
-                for case_id in list(command_result.get("changed_case_ids") or [target_case_id])
-                if str(case_id).strip()
-            )
-            affected_row_ids.extend(row_ids)
-            month_scope = str(repaired_relation.get("month_scope") or "").strip()
-            if month_scope:
-                affected_months.append(month_scope)
-
-        changed_case_ids = self._dedupe(repaired_case_ids)
-        return {
-            "changed": bool(changed_case_ids),
-            "changed_case_ids": changed_case_ids,
-            "affected_row_ids": self._dedupe(affected_row_ids),
-            "affected_months": self._dedupe(affected_months),
         }
 
     def withdraw(
@@ -1017,35 +872,14 @@ class BatchAccountingService:
                 for relation in relation_dicts_from_distribution_payload(payload)
                 if self._is_batch_accounting_relation(relation)
             ]
-        list_by_month = getattr(self._relation_facade, "list_by_month", None)
-        if not callable(list_by_month):
-            return []
-        relations: list[dict[str, Any]] = []
-        seen_case_ids: set[str] = set()
-        for month in self._month_scope_keys_for_year(year):
-            try:
-                payload = list_by_month(
-                    month,
-                    row_types=["bank_transaction"],
-                    require_fresh=True,
-                    reason="batch_accounting_submitted_relations",
-                )
-            except TypeError:
-                payload = list_by_month(month)
-            context.relation_read_model_status.record(payload if isinstance(payload, dict) else None)
-            for relation in relation_dicts_from_distribution_payload(payload):
-                case_id = str(relation.get("case_id") or "").strip()
-                if not case_id or case_id in seen_case_ids or not self._is_batch_accounting_relation(relation):
-                    continue
-                metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
-                bank_row_id = str(metadata.get("bank_row_id") or "").strip() or self._bank_row_id_for_relation(relation)
-                bank_row = context.rows_by_id.get(bank_row_id)
-                if str(metadata.get("year") or metadata.get("bank_year") or "").strip() == year or (
-                    isinstance(bank_row, dict) and self._row_year_matches(bank_row, year, keys=("trade_time", "pay_receive_time", "txn_date"))
-                ):
-                    relations.append(relation)
-                    seen_case_ids.add(case_id)
-        return relations
+        context.relation_read_model_status.record(
+            {
+                "status": "unavailable",
+                "read_model_scope_keys": self._month_scope_keys_for_year(year),
+                "stale_reasons": ["batch_accounting_relation_list_unavailable"],
+            }
+        )
+        return []
 
     @staticmethod
     def _month_scope_keys_for_year(year: str) -> list[str]:
@@ -1419,26 +1253,6 @@ class BatchAccountingService:
         if not safe_bank_row_id:
             raise BatchAccountingError("invalid_batch_accounting_bank_row", "银行流水 ID 不能为空。")
         return f"CASE-BATCH-{safe_bank_row_id[:96]}"
-
-    @classmethod
-    def _batch_relation_bank_row_id(cls, relation: Any) -> str:
-        if not isinstance(relation, dict):
-            return ""
-        metadata = relation.get("special_metadata")
-        if not isinstance(metadata, dict) or metadata.get("source") != BATCH_ACCOUNTING_SOURCE:
-            return ""
-        relation_row_ids = [cls._clean_text(row_id) for row_id in list(relation.get("row_ids") or []) if cls._clean_text(row_id)]
-        relation_bank_row_ids = [
-            row_id
-            for row_id in relation_row_ids
-            if cls._row_type_for_row_id(row_id) == "bank"
-        ]
-        bank_row_id = cls._clean_text(metadata.get("bank_row_id"))
-        if bank_row_id and bank_row_id in relation_row_ids:
-            return bank_row_id
-        if len(relation_bank_row_ids) == 1:
-            return relation_bank_row_ids[0]
-        return ""
 
     @classmethod
     def _relation_has_bank_row(cls, relation: Any) -> bool:

@@ -1,14 +1,14 @@
 # 批量账务模块边界与 I/O
 
-日期：2026-07-02
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：medium
+- 状态：closed
+- 当前边界可信度：high
 - 目标边界：批量账务页面通过 BatchAccounting service 操作批量关系和账务候选，关系事实写入必须走 workbench relation 边界。
-- 当前缺口：批量账务依赖 workbench relation read/write 和 runtime worker fan-out，模块本身没有独立 read model manifest。
-- 旧代码删除条件：旧 server.py 批量账务入口不再承载业务逻辑，所有关系写入走 command service；submit/withdraw route 不得再调用旧 pair relation persist、snapshot restore、旧 lifecycle 或旧 workbench read model persist 链路。
+- 当前缺口：无本地模块化 closure blocker。批量账务不拥有独立 read model，依赖 `workbench_relation` read/write 和 runtime worker fan-out 是设计边界，不作为 partial 原因。
+- 旧代码删除状态：旧 server.py 批量账务入口不再承载业务逻辑；所有关系写入走 command service；submit/withdraw route 不再调用旧 pair relation persist、snapshot restore、旧 lifecycle 或旧 workbench read model persist 链路；已提交 bucket 不再回退 12 个月 `list_by_month` 扫描；service-level `repair_legacy_case_id_collisions(...)` 旧修复入口已删除并由静态 guard 防回归。
 
 ## 职责边界
 
@@ -37,7 +37,7 @@
 | list context | `BatchAccountingService._build_list_context` | 仅列表读取使用，先构造 Workbench row context，再通过候选级 relation distribution 产出 eligible bank/OA |
 | unsubmitted relation context | `BatchAccountingService._context_with_candidate_relation_distribution` | 未提交列表只把批量账务银行候选和日常报销 OA 候选传入 `workbench_relation` facade；禁止把 Workbench 全量 open OA 当作 relation lookup 输入 |
 | submitted relation count | `WorkbenchRelationReadFacade.count_batch_accounting_relations_by_year` | 未提交列表 summary 只读取年份级 batch-accounting relation count；不能为了 `submitted_count` 扫描 12 个月完整 relation DTO |
-| submitted relation DTO | `WorkbenchRelationReadFacade.list_batch_accounting_relations_by_year` | 已提交 bucket 需要关系明细时，必须一次读取年份内 batch-accounting relation groups，并透出 freshness/status；禁止回退到 12 个月循环读取污染已提交页加载 |
+| submitted relation DTO | `WorkbenchRelationReadFacade.list_batch_accounting_relations_by_year` | 已提交 bucket 需要关系明细时，必须一次读取年份内 batch-accounting relation groups，并透出 freshness/status；缺少年份级 reader 时 fail closed 为 `read_model_status=unavailable`，禁止回退到 12 个月循环读取污染已提交页加载 |
 | submit context | `BatchAccountingService._build_submit_context` | 仅提交使用，禁止读取整页 relation distribution；写前 active relation 冲突只通过 command service 按本次 row ids 查询，不再把 relation read model freshness 作为普通写阻断 |
 | 关系写入请求 | `BatchAccountingService` | 必须委托 workbench relation command boundary。PostgreSQL 运行态必须通过 durable `PostgresWorkbenchRelationRepository` load/save `app.workbench_pair_relations` 与 history；禁止只使用进程内 `WorkbenchPairRelationService` snapshot。 |
 | affected scope keys | `BatchAccountingService` | submit 必须基于本次银行/OA/附件发票 row payload 日期输出真实 `affected_scope_keys` 并写入 relation `special_metadata`；withdraw 优先读取 metadata，旧关系缺 metadata 时必须用 SQL 窄 submit context 反查 row 日期；没有窄 loader 时不能退回全量 Workbench loader，只能按 relation month/all fallback；只有完全无法解析具体月份时才允许回退 `all` |
@@ -93,4 +93,5 @@
 ## 当前缺口和删除条件
 
 - 如果新增独立 read model，必须先登记 manifest/scope policy/worker/tests/docs。
-- 批量账务 submit/withdraw 的生产 smoke 必须验证 durable relation 表、`workbench_relation` read model 和关联台 `workbench` active generation 同时收敛；单看 API `success=true` 不足以证明闭环。
+- 已删除旧链路：旧 app-level repair helper、service-level legacy case-id repair、submit/withdraw direct pair fallback、route duplicate lifecycle fan-out、旧 pair persist/snapshot restore、旧 workbench read model persist、已提交 bucket 12 个月 relation scan fallback。
+- 批量账务 submit/withdraw 的生产 smoke 必须验证 durable relation 表、`workbench_relation` read model 和关联台 `workbench` active generation 同时收敛；单看 API `success=true` 不足以证明运行时外部收敛，但不影响本地模块边界 closed。

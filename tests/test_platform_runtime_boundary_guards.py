@@ -174,7 +174,6 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
             },
             "backend/src/fin_ops_platform/services/batch_accounting_service.py": {
                 "BatchAccountingService._submit_unlocked",
-                "BatchAccountingService.repair_legacy_case_id_collisions",
                 "BatchAccountingService.withdraw",
                 "BatchAccountingService._withdraw_unlocked",
             },
@@ -579,6 +578,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Application.tool_runtime_ports exposes the full state_store")
         if "def tool_runtime_state_snapshot" not in server_source:
             violations.append("Application missing dedicated tool runtime state snapshot port")
+
+        runtime_path = TOOLS_ROOT / "runtime_application.py"
+        runtime_source = runtime_path.read_text(encoding="utf-8")
+        runtime_tree = _parse(runtime_path)
+        builder_source = _function_source(runtime_tree, runtime_source, "build_tool_runtime_application")
+        bank_runtime_source = _function_source(runtime_tree, runtime_source, "bank_auto_tag_rules_runtime")
+        if 'bootstrap_mode="lightweight"' not in builder_source:
+            violations.append("tool runtime application builder no longer uses lightweight bootstrap")
+        if "build_tool_runtime_application(data_dir)" not in bank_runtime_source:
+            violations.append("bank auto-tag restore runtime no longer enters the shared tool runtime builder")
+        if "build_application(" in bank_runtime_source:
+            violations.append("bank auto-tag restore runtime directly builds the Application")
 
         self.assertEqual(violations, [])
 
@@ -3805,23 +3816,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_batch_accounting_repair_has_no_direct_pair_write_fallback(self) -> None:
+    def test_batch_accounting_legacy_repair_entrypoint_is_removed(self) -> None:
         path = SERVICES_ROOT / "batch_accounting_service.py"
         source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        repair_source = _function_source(tree, source, "repair_legacy_case_id_collisions")
 
         violations: list[str] = []
-        if "confirm_relation" not in repair_source:
-            violations.append("BatchAccountingService.repair does not delegate relation repair to command service")
-        if "batch_accounting_relation_command_unavailable" not in repair_source:
-            violations.append("BatchAccountingService.repair does not fail fast when relation command service is unavailable")
-        for forbidden in (
-            "_pair_relation_service.create_active_relation",
-            "_pair_relation_service.record_history",
-        ):
-            if forbidden in repair_source:
-                violations.append(f"BatchAccountingService.repair keeps direct pair write fallback {forbidden}")
+        if "def repair_legacy_case_id_collisions" in source:
+            violations.append("BatchAccountingService keeps removed legacy repair entrypoint")
+        if "BATCH_ACCOUNTING_RELATION_REPAIR_ACTOR" in source:
+            violations.append("BatchAccountingService keeps removed legacy repair actor")
+        for helper in ("def _relation_history(", "def _active_relations(", "def _batch_relation_bank_row_id("):
+            if helper in source:
+                violations.append(f"BatchAccountingService keeps legacy repair-only helper {helper}")
 
         self.assertEqual(violations, [])
 
@@ -3838,6 +3844,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_list_source = _function_source(routes_tree, routes_source, "list_payload")
         route_submit_source = _function_source(routes_tree, routes_source, "submit")
         route_withdraw_source = _function_source(routes_tree, routes_source, "withdraw")
+        service_path = SERVICES_ROOT / "batch_accounting_service.py"
+        service_source = service_path.read_text(encoding="utf-8")
+        service_tree = _parse(service_path)
+        submitted_relations_source = _function_source(service_tree, service_source, "_submitted_relations")
 
         violations: list[str] = []
         if "def _repair_batch_accounting_relation_case_ids" in source:
@@ -3863,6 +3873,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"GET /api/batch-accounting bypasses read-only route boundary via {forbidden}")
             if forbidden in route_list_source:
                 violations.append(f"BatchAccountingApiRoutes list bypasses read-only route boundary via {forbidden}")
+        if "list_batch_accounting_relations_by_year" not in submitted_relations_source:
+            violations.append("submitted batch accounting list no longer uses the year-level relation DTO boundary")
+        if "list_by_month" in submitted_relations_source:
+            violations.append("submitted batch accounting list keeps legacy 12-month relation scan fallback")
 
         mutation_handlers = (
             (
@@ -3888,9 +3902,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if service_call not in route_source:
                 violations.append(f"BatchAccountingApiRoutes {name} no longer delegates mutation to BatchAccountingService")
             if name == "submit":
-                service_path = SERVICES_ROOT / "batch_accounting_service.py"
-                service_source = service_path.read_text(encoding="utf-8")
-                service_tree = _parse(service_path)
                 submit_unlocked_source = _function_source(service_tree, service_source, "_submit_unlocked")
                 if "_build_submit_context(" not in submit_unlocked_source:
                     violations.append("BatchAccountingService submit no longer uses the submit context boundary")
@@ -5790,8 +5801,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if forbidden in row_detail_route_source:
                 violations.append(f"row-detail legacy fallback quarantine gained write/runtime side effect: {forbidden}")
 
-        if "def repair_legacy_case_id_collisions" not in batch_service_source:
-            violations.append("batch accounting legacy repair method is missing from quarantine inventory")
+        if "def repair_legacy_case_id_collisions" in batch_service_source:
+            violations.append("batch accounting legacy repair method still exists after removal")
         active_repair_callers: list[str] = []
         for path in _python_files(APP_ROOT, SERVICES_ROOT):
             if path == SERVICES_ROOT / "batch_accounting_service.py":
@@ -5806,7 +5817,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             )
         for marker in (
             "WorkbenchRowDetailApiRoutes.legacy_row_detail",
-            "BatchAccountingService.repair_legacy_case_id_collisions",
             "CodeGraph caller evidence",
             "Stop condition",
         ):

@@ -100,5 +100,5 @@
 - 状态：closed。
 - 已完成：owner matrix 和分层规则已建立；App Mongo/full snapshot/`app.app_settings state:*` 生产 fallback、旧 shadow/dual/cutover/export/staging/reconcile 工具、Turnover legacy fallback、legacy ETC batch API、`file_object.gridfs_migration` worker 等旧事实源路径已删除或由 static guard 锁定；工具侧直接 `Application` 私有访问已收口到 `tools/runtime_application.py`。
 - 未完成：无 final closure blocker；后续仅保留 owner 模块常规维护，以及 retained bank/ETC 运维工具在 runbook 退休后的删除或归并。
-- 运维工具边界：`tools/runtime_application.py` 只作为 retained bank/ETC operational tools 的 public app tool-port adapter；工具文件不得直接访问 `Application._*`、`_state_store` 或 `_initialize_runtime_services`；`tool_runtime_ports()` 不得暴露完整 `state_store`，工具初始化只能通过 `Application.tool_runtime_state_snapshot()` 取得最小 state。
+- 运维工具边界：`tools/runtime_application.py` 只作为 retained bank/ETC operational tools 的 lightweight public app tool-port adapter；工具文件不得直接访问 `Application._*`、`_state_store` 或 `_initialize_runtime_services`；`tool_runtime_ports()` 不得暴露完整 `state_store`，工具初始化只能通过 `Application.tool_runtime_state_snapshot()` 取得最小 state。
 - 已接受边界：`ApplicationStateStore` / local pickle 只作为非生产 fixture/tooling I/O 保留，不是业务事实源；生产 factory 必须使用 PostgreSQL，生产 app/service/tool 路径不得 import local `state_store.py`。

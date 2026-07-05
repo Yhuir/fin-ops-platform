@@ -1,5 +1,32 @@
 # Canonical Facts 实施记录
 
+## 2026-07-05 - Bank auto-tag tool runtime lightweight closure
+
+目标：
+
+- 复核 Canonical Facts closed 状态下仍保留的 owner-runbook 工具是否存在旧 source-of-truth 污染。
+- 不删除仍被 ETC、银行明细和关联台模块登记的受控 runbook 工具。
+- 删除 bank auto-tag restore 工具绕过 shared tool runtime builder 的默认完整 app bootstrap 路径。
+
+变更：
+
+- `bank_auto_tag_rules_runtime(...)` 改为复用 `build_tool_runtime_application(...)`，与 ETC historical migration/link/cleanup 工具一致走 lightweight bootstrap、`tool_runtime_state_snapshot()` 和 public app tool ports。
+- `test_canonical_fact_tools_use_runtime_application_state_io_boundary` 新增 guard：tool runtime builder 必须保持 `bootstrap_mode="lightweight"`，bank auto-tag restore runtime 不得直接 `build_application(...)`。
+- 新增 `test_bank_auto_tag_rules_runtime_uses_lightweight_tool_runtime_builder`，锁定 bank auto-tag restore 工具的 runtime I/O 边界。
+- `boundary-io.md` 和 `tests.md` 更新为 high-confidence closed：retained bank/ETC 工具是 owner-runbook I/O，不是 canonical facts source-of-truth。
+
+结果：
+
+- Canonical Facts 生产 API/worker/source-of-truth 链路无 legacy full snapshot、local pickle、`state:*` JSON、App Mongo snapshot、GridFS fallback 或 direct app-private tool I/O。
+- 保留工具仍可由 owner runbook 使用；删除条件转为 owner 模块常规维护，不再阻塞 Canonical Facts closure。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/tools/runtime_application.py tests/test_restore_bank_auto_tag_rules_tool.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_restore_bank_auto_tag_rules_tool.RestoreBankAutoTagRulesToolTests.test_bank_auto_tag_rules_runtime_uses_lightweight_tool_runtime_builder tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_canonical_fact_tools_use_runtime_application_state_io_boundary -v
+```
+
 ## 2026-06-29 - Tool runtime state port closure
 
 目标：

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from io import StringIO
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
-from io import StringIO
 from unittest.mock import patch
 
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+from fin_ops_platform.tools import runtime_application
 from fin_ops_platform.tools.restore_bank_auto_tag_rules import (
     build_restore_plan,
     build_restore_summary,
@@ -18,6 +20,22 @@ from fin_ops_platform.tools.restore_bank_auto_tag_rules import (
 
 
 class RestoreBankAutoTagRulesToolTests(unittest.TestCase):
+    def test_bank_auto_tag_rules_runtime_uses_lightweight_tool_runtime_builder(self) -> None:
+        calls: list[Path | None] = []
+        app = SimpleNamespace(tool_runtime_ports=lambda: "ports")
+        data_dir = Path("/tmp/fin-ops-bank-auto-tag-runtime-test")
+
+        original_builder = runtime_application.build_tool_runtime_application
+        try:
+            runtime_application.build_tool_runtime_application = lambda value: calls.append(value) or app
+
+            result = runtime_application.bank_auto_tag_rules_runtime(data_dir)
+        finally:
+            runtime_application.build_tool_runtime_application = original_builder
+
+        self.assertEqual(result, "ports")
+        self.assertEqual(calls, [data_dir])
+
     def test_restore_summary_reports_recovered_external_turnover_codes_and_critical_status(self) -> None:
         source = [
             ["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命重", "不包含字样"],

@@ -5,9 +5,9 @@
 ## 模块化状态
 
 - 状态：closed
-- 当前边界可信度：medium-high
+- 当前边界可信度：high
 - 目标边界：每类 PostgreSQL canonical fact 都有唯一业务 owner、明确写入口、明确读入口、明确下游输出和禁止绕过路径。
-- 当前缺口：owner matrix 已建立；旧生产 source-of-truth 路径已删除或 guard。`file_object.gridfs_migration` worker 已随 07-owned registry 同切片删除；retained bank/ETC 运维工具只剩非阻塞 owner-runbook maintenance。
+- 当前缺口：无 final closure blocker。owner matrix 已建立；旧生产 source-of-truth 路径已删除或 guard；`file_object.gridfs_migration` worker 已随 07-owned registry 同切片删除；retained bank/ETC 运维工具是 owner-runbook I/O，必须经过 lightweight tool runtime/public app ports，不得成为业务事实源。
 - 旧代码删除条件：生产 API/worker 不再依赖 legacy full snapshot、local pickle、`state:*` JSON、direct cross-module SQL write 或旧 fallback 来读写 canonical facts。
 
 ## 职责边界
@@ -63,7 +63,7 @@
 | Repository | `backend/src/fin_ops_platform/services/postgres_repositories/` |
 | Business owner | 各 `*_service.py`、`*_application_service.py`、`*_command_service.py`、`*_write_*.py` |
 | Downstream refresh | `derived_data_lifecycle_service.py`、module-specific refresh producers、`ReadModelRefreshGateway` 边界 |
-| Tool runtime I/O | `backend/src/fin_ops_platform/tools/runtime_application.py` |
+| Tool runtime I/O | `backend/src/fin_ops_platform/tools/runtime_application.py`，只允许 retained owner-runbook 工具通过 lightweight app bootstrap 和 public app tool ports 访问所需 I/O。 |
 | Tests | owner 模块 API/service/read model tests、architecture guards、runtime queue/read model tests |
 
 ## 依赖方向
@@ -84,9 +84,9 @@
 
 ## 当前缺口和删除条件
 
-- 首版 matrix 需要随着代码重构逐模块校准。
+- owner matrix 后续只随 owner 模块常规维护校准；不再是 Canonical Facts final closure blocker。
 - shared repository 仍是过渡期 SQL owner；业务 owner 必须由模块文档和 service boundary 决定。
 - 旧生产 source-of-truth 路径必须删除。migration/shadow/audit/rollback 工具保留时，必须写明保留理由、禁止生产主路径调用和删除条件，且不算 closure。
-- 当前仍保留的 ETC historical migration/link/cleanup 和 bank auto-tag restore 运维工具必须通过 `tools/runtime_application.py` 取得 public app tool ports；业务工具文件不得直接调用 `build_application(...)`、访问 `Application._*`、`Application._state_store` 或 `_initialize_runtime_services`。`tool_runtime_ports()` 不得暴露完整 `state_store`，工具初始化只能通过 `Application.tool_runtime_state_snapshot()` 取得最小 state。该边界不是新的长期业务事实源，可在工具退休或归并 owner module CLI 后删除。
+- 当前仍保留的 ETC historical migration/link/cleanup 和 bank auto-tag restore 运维工具必须通过 `tools/runtime_application.py` 的 lightweight tool runtime builder 取得 public app tool ports；业务工具文件不得直接调用 `build_application(...)`、访问 `Application._*`、`Application._state_store` 或 `_initialize_runtime_services`。`tool_runtime_ports()` 不得暴露完整 `state_store`，工具初始化只能通过 `Application.tool_runtime_state_snapshot()` 取得最小 state。该边界不是新的长期业务事实源，可在工具退休或归并 owner module CLI 后删除。
 - `file_object.gridfs_migration` final closure blocker 已删除：registry registration、worker flag/handler、legacy GridFS service/config、deploy env examples 和 RabbitMQ dispatch event 已同切片移除，guard 禁止回归。
 - `ApplicationStateStore` / local pickle 只保留为非生产 fixture/tooling I/O；它不是 canonical facts owner，也不得通过 production factory、app、service、worker 或 tool 主路径成为业务事实源。
