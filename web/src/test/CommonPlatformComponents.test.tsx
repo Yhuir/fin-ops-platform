@@ -158,6 +158,32 @@ describe("common platform components", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  test("can expose drawer busy state and disable the close button", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderWithProject(
+      <AppDrawer
+        ariaBusy
+        closeDisabled
+        closeLabel="关闭处理抽屉"
+        onClose={onClose}
+        open
+        title="处理抽屉"
+      >
+        <p>正在处理</p>
+      </AppDrawer>,
+    );
+
+    const drawer = screen.getByRole("dialog", { name: "处理抽屉" });
+    expect(drawer).toHaveAttribute("aria-busy", "true");
+    const closeButton = screen.getByRole("button", { name: "关闭处理抽屉" });
+    expect(closeButton).toBeDisabled();
+
+    await user.click(closeButton);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   test("keeps persistent app drawer mounted for its exit motion", () => {
     vi.useFakeTimers();
     const onClose = vi.fn();

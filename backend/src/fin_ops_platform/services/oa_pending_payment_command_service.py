@@ -57,79 +57,6 @@ class OaPendingPaymentCommandService:
         self._enqueue_workbench_refresh = enqueue_workbench_refresh
         self._enqueue_oa_pending_payment_refresh = enqueue_oa_pending_payment_refresh
 
-    def confirm_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
-        oa_row_id = _payload_text(payload, "oa_row_id", "oaRowId")
-        if not oa_row_id:
-            raise OaPendingPaymentError("oa_row_id_required", "oa_row_id is required.")
-        actor = clean_string(actor_id) or "system"
-        bank_transaction_ids = _payload_list(payload, "bank_transaction_ids", "bankTransactionIds")
-        single_bank_transaction_id = _payload_text(payload, "bank_transaction_id", "bankTransactionId")
-        if single_bank_transaction_id and single_bank_transaction_id not in bank_transaction_ids:
-            bank_transaction_ids.append(single_bank_transaction_id)
-        note = _payload_text(payload, "note")
-        idempotency_key = _payload_text(payload, "idempotency_key", "idempotencyKey") or None
-        record = self._oa_record(oa_row_id)
-        self._assert_in_progress(record)
-        if self._payment_status_repository is None:
-            raise OaPendingPaymentError(
-                "oa_payment_status_repository_unavailable",
-                "OA payment status writeback is not configured.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            )
-        flow_id = self._resolve_oa_flow_id(record)
-
-        relation_result: dict[str, Any]
-        if bank_transaction_ids:
-            bank_transactions = [self._bank_transaction(bank_transaction_id) for bank_transaction_id in bank_transaction_ids]
-            amount_check = self._assert_paid_by_banks(record, bank_transactions)
-            active_relation = self._active_relation_for_oa_or_none(record.id)
-            if active_relation is not None and _relation_contains_bank_ids(active_relation, bank_transaction_ids):
-                relation_result = {
-                    "status": "already_confirmed",
-                    "relation": active_relation,
-                    "affected_months": [record.month] if record.month else [],
-                }
-            else:
-                relation_result = self._confirm_pending_relation(
-                    [record],
-                    bank_transactions,
-                    actor_id=actor,
-                    note=note,
-                    amount_check=amount_check,
-                    idempotency_key=idempotency_key,
-                    case_id=_payload_text(payload, "case_id", "caseId") or None,
-                    history_operation_type="oa_pending_payment_confirm_paid",
-                    history_note=note or "OA 待付款确认已支付",
-                    source_action="confirm_paid",
-                )
-        else:
-            active_relation = self._active_relation_for_oa(record.id)
-            bank_transactions = self._bank_transactions_from_relation(active_relation)
-            amount_check = self._assert_paid_by_banks(record, bank_transactions)
-            relation_result = {
-                "status": "already_confirmed",
-                "relation": active_relation,
-                "affected_months": [record.month] if record.month else [],
-            }
-
-        writeback = self._mark_oa_paid(flow_id)
-        refresh = self._enqueue_refreshes(record)
-        return {
-            "success": True,
-            "action": "oa_pending_payment_confirm_paid",
-            "oaRowId": record.id,
-            "bankTransactionIds": [transaction.id for transaction in bank_transactions],
-            "paymentStatus": {
-                "code": "paid",
-                "label": "已支付",
-                "reason": amount_check.get("reason", "支出流水合计等于OA金额"),
-            },
-            "oaPaymentWriteback": writeback,
-            "relation": relation_result,
-            "readModelRefresh": refresh,
-            **_oa_pending_payment_write_target_envelope(refresh),
-        }
-
     def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         oa_row_ids = _payload_list(payload, "oa_row_ids", "oaRowIds")
         bank_transaction_ids = _payload_list(payload, "bank_transaction_ids", "bankTransactionIds")
@@ -265,7 +192,6 @@ class OaPendingPaymentCommandService:
                 "relationStatus": status_filter,
                 "keyword": keyword,
                 "oaRowIds": oa_row_ids,
-                "monthScopes": [],
             },
         }
 
@@ -343,28 +269,6 @@ class OaPendingPaymentCommandService:
                 status_code=HTTPStatus.NOT_FOUND,
             ) from exc
 
-    def _active_relation_for_oa(self, oa_row_id: str) -> dict[str, Any]:
-        relation = self._active_relation_for_oa_or_none(oa_row_id)
-        if relation is None:
-            raise OaPendingPaymentError(
-                "bank_transaction_id_required",
-                "bank_transaction_id is required when the OA row has no active bank relation.",
-            )
-        return relation
-
-    def _active_relation_for_oa_or_none(self, oa_row_id: str) -> dict[str, Any] | None:
-        relations = self._active_relations_for_row_ids([oa_row_id])
-        if not relations:
-            return None
-        if len(relations) > 1:
-            raise OaPendingPaymentError(
-                "oa_multiple_active_relations",
-                "OA row has multiple active relations and cannot be written back automatically.",
-                status_code=HTTPStatus.CONFLICT,
-                details={"oa_row_id": oa_row_id, "case_ids": [clean_string(item.get("case_id") or "") for item in relations]},
-            )
-        return relations[0]
-
     def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         relations: list[dict[str, Any]] = []
         for relation_source in (self._relation_command_service, self._pending_relation_service):
@@ -439,7 +343,7 @@ class OaPendingPaymentCommandService:
             "bank_paid_total": _money(paid_total),
             "bank_transaction_count": len(bank_transactions),
             "reason": status.get("reason", "支出流水合计等于OA金额"),
-            "source": "oa_pending_payment_confirm_paid",
+            "source": "oa_pending_payment_auto_reconcile",
         }
 
     def _relation_amount_check(
@@ -487,7 +391,7 @@ class OaPendingPaymentCommandService:
         try:
             return dict(
                 create_relation(
-                    relation_id=case_id or _confirm_paid_case_id(oa_ids, bank_ids),
+                    relation_id=case_id or _pending_payment_relation_id(oa_ids, bank_ids),
                     oa_row_ids=oa_ids,
                     bank_transaction_ids=bank_ids,
                     actor_id=actor_id,
@@ -563,32 +467,6 @@ class OaPendingPaymentCommandService:
         if status_record is not None and status_record.pay_status == PAY_STATUS_PAID:
             return None
         return self._mark_oa_paid(flow_id)
-
-    def _enqueue_refreshes(self, record: OAApplicationRecord) -> dict[str, Any]:
-        scope_keys = _refresh_scope_keys(record.month)
-        metadata = {"oa_row_id": record.id, "reason": "oa_pending_payment_confirm_paid"}
-        refreshed: list[str] = []
-        for scope_key in scope_keys:
-            if callable(self._enqueue_workbench_refresh):
-                self._enqueue_workbench_refresh(
-                    scope_key,
-                    reason="oa_pending_payment_confirm_paid",
-                    metadata=metadata,
-                )
-                refreshed.append(f"workbench:{scope_key}")
-            if callable(self._enqueue_oa_pending_payment_refresh):
-                self._enqueue_oa_pending_payment_refresh(
-                    scope_key,
-                    reason="oa_pending_payment_confirm_paid",
-                    metadata=metadata,
-                )
-                refreshed.append(f"oa_pending_payment:{scope_key}")
-        return {
-            "scopeKeys": scope_keys,
-            "targets": refreshed,
-            "enqueued": bool(refreshed),
-            "targetSeconds": 2,
-        }
 
     def _enqueue_refreshes_for_records(
         self,
@@ -887,11 +765,6 @@ def _relation_text_list(relation: dict[str, Any], *keys: str) -> list[str]:
     return values
 
 
-def _relation_contains_bank_ids(relation: dict[str, Any], bank_transaction_ids: list[str]) -> bool:
-    relation_bank_ids = set(_relation_bank_ids(relation))
-    return all(bank_transaction_id in relation_bank_ids for bank_transaction_id in bank_transaction_ids)
-
-
 def _relation_is_oa_pending_in_progress(relation: dict[str, Any]) -> bool:
     relation_mode = clean_string(relation.get("relation_mode") or relation.get("relationMode") or "")
     if relation_mode == "oa_pending_payment_in_progress":
@@ -1082,7 +955,7 @@ def _oa_pending_payment_write_target_envelope(refresh: dict[str, Any]) -> dict[s
     return write_target_envelope(scope_keys=scope_keys, targets=targets, fallback_scope_key="all")
 
 
-def _confirm_paid_case_id(oa_row_ids: list[str], bank_transaction_ids: list[str]) -> str:
+def _pending_payment_relation_id(oa_row_ids: list[str], bank_transaction_ids: list[str]) -> str:
     digest = sha1("|".join([*oa_row_ids, *bank_transaction_ids]).encode("utf-8")).hexdigest()[:16]
     return f"OA-PAY-{digest}"
 

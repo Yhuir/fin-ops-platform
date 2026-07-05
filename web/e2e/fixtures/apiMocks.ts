@@ -120,9 +120,6 @@ type ApiMockOptions = {
   oaPendingPaymentAutoReconcileDelayMs?: number;
   oaPendingPaymentAutoReconcileError?: boolean;
   oaPendingPaymentAutoReconcileFlow?: boolean;
-  oaPendingPaymentConfirmPaidDelayMs?: number;
-  oaPendingPaymentConfirmPaidError?: boolean;
-  oaPendingPaymentConfirmPaidFlow?: boolean;
   oaPendingPaymentDetailReadModelRefreshing?: boolean;
   oaPendingPaymentReadModelStatus?: OaPendingPaymentReadModelMockStatus;
   oaPendingPaymentRowsFailOnce?: boolean;
@@ -3578,14 +3575,14 @@ function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceI
   };
 }
 
-function oaPendingPaymentConfirmPaidRowsPayload(confirmed: boolean) {
+function oaPendingPaymentAutoReconcileRowsPayload(confirmed: boolean) {
   return {
     rows: [
       {
-        id: "oa-confirm-paid-row-e2e-001",
+        id: "oa-auto-reconcile-row-e2e-001",
         oa: {
-          id: "oa-confirm-paid-e2e-001",
-          primaryOaId: "oa-confirm-paid-e2e-001",
+          id: "oa-auto-reconcile-e2e-001",
+          primaryOaId: "oa-auto-reconcile-e2e-001",
           applicantName: "进行中付款申请人",
           applicationType: "付款申请",
           projectName: "进行中写回项目",
@@ -3604,14 +3601,14 @@ function oaPendingPaymentConfirmPaidRowsPayload(confirmed: boolean) {
           severity: "success",
         },
         oaPaymentWriteback: confirmed
-          ? { code: "written", label: "已写回", flowIds: ["flow-confirm-paid-e2e-001"], syncStatus: "ready" }
-          : { code: "not_written", label: "未写回", flowIds: ["flow-confirm-paid-e2e-001"], syncStatus: "ready" },
+          ? { code: "written", label: "已写回", flowIds: ["flow-auto-reconcile-e2e-001"], syncStatus: "ready" }
+          : { code: "not_written", label: "未写回", flowIds: ["flow-auto-reconcile-e2e-001"], syncStatus: "ready" },
         bankTransaction: {
-          primaryBankTransactionId: "bank-confirm-paid-e2e-001",
-          accountDetailNo: "bank-detail-confirm-paid-e2e-001",
-          enterpriseSerialNo: "E2E-CONFIRM-PAID-SERIAL-001",
+          primaryBankTransactionId: "bank-auto-reconcile-e2e-001",
+          accountDetailNo: "bank-detail-auto-reconcile-e2e-001",
+          enterpriseSerialNo: "E2E-AUTO-RECONCILE-SERIAL-001",
           voucherKind: "电子转账凭证",
-          voucherNo: "E2E-CONFIRM-PAID-001",
+          voucherNo: "E2E-AUTO-RECONCILE-001",
           bankName: "招商银行",
           accountNo: "6222000000006789",
           accountLast4: "6789",
@@ -7818,7 +7815,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let oaPendingPaymentRowsFailuresRemaining =
     options.oaPendingPaymentRowsFailuresBeforeSuccess ?? (options.oaPendingPaymentRowsFailOnce ? 1 : 0);
   let oaPendingPaymentBankLinked = false;
-  let oaPendingPaymentConfirmPaidConfirmed = false;
+  let oaPendingPaymentAutoReconcileConfirmed = false;
   let etcBusinessBatchStatus: EtcBusinessBatchStatus = options.etcTicketInitialBusinessBatchStatus ?? "imported";
   let etcBusinessBatchDeleted = false;
   let etcWorkflowSourceFileDeleted = false;
@@ -8445,8 +8442,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.oaPendingPaymentBankLinkFlow && url.searchParams.get("view_mode") === "in_progress") {
         return json(route, oaPendingPaymentBankLinkRowsPayload(oaPendingPaymentBankLinked));
       }
-      if ((options.oaPendingPaymentAutoReconcileFlow ?? options.oaPendingPaymentConfirmPaidFlow) && url.searchParams.get("view_mode") === "in_progress") {
-        return json(route, oaPendingPaymentConfirmPaidRowsPayload(oaPendingPaymentConfirmPaidConfirmed));
+      if (options.oaPendingPaymentAutoReconcileFlow && url.searchParams.get("view_mode") === "in_progress") {
+        return json(route, oaPendingPaymentAutoReconcileRowsPayload(oaPendingPaymentAutoReconcileConfirmed));
       }
       if (options.oaPendingPaymentRelationFanout) {
         return json(route, oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed));
@@ -8500,8 +8497,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/oa-pending-payments/auto-reconcile-bank-transactions") {
-      await delay(Math.max(0, options.oaPendingPaymentAutoReconcileDelayMs ?? options.oaPendingPaymentConfirmPaidDelayMs ?? 0));
-      if (options.oaPendingPaymentAutoReconcileError ?? options.oaPendingPaymentConfirmPaidError) {
+      await delay(Math.max(0, options.oaPendingPaymentAutoReconcileDelayMs ?? 0));
+      if (options.oaPendingPaymentAutoReconcileError) {
         return json(route, {
           error: "oa_pending_payment_auto_reconcile_rejected",
           message: "OA 自动匹配和写回校验失败，未写入支付状态。",
@@ -8510,8 +8507,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           read_model_refresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
         }, 409);
       }
-      if (options.oaPendingPaymentAutoReconcileFlow ?? options.oaPendingPaymentConfirmPaidFlow) {
-        oaPendingPaymentConfirmPaidConfirmed = true;
+      if (options.oaPendingPaymentAutoReconcileFlow) {
+        oaPendingPaymentAutoReconcileConfirmed = true;
         return json(route, {
           success: true,
           action: "oa_pending_payment_auto_reconcile_bank_transactions",
@@ -8520,8 +8517,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           writebackCount: 1,
           autoMatchedRelations: [
             {
-              oaRowIds: ["oa-confirm-paid-e2e-001"],
-              bankTransactionIds: ["bank-confirm-paid-e2e-001"],
+              oaRowIds: ["oa-auto-reconcile-e2e-001"],
+              bankTransactionIds: ["bank-auto-reconcile-e2e-001"],
               ruleCode: "oa_bank_exact_amount",
             },
           ],
@@ -8529,7 +8526,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             {
               code: "written",
               label: "已写回",
-              flowIds: ["flow-confirm-paid-e2e-001"],
+              flowIds: ["flow-auto-reconcile-e2e-001"],
               syncStatus: "ready",
             },
           ],
@@ -8545,39 +8542,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         autoMatchedRelations: [],
         oaPaymentWritebacks: [],
         readModelRefresh: { scopeKeys: ["all"], enqueued: false, targetSeconds: 2 },
-      });
-    }
-
-    if (path === "/api/oa-pending-payments/confirm-paid") {
-      await delay(Math.max(0, options.oaPendingPaymentConfirmPaidDelayMs ?? 0));
-      if (options.oaPendingPaymentConfirmPaidError) {
-        return json(route, {
-          error: "oa_pending_payment_confirm_paid_rejected",
-          message: "OA 写回校验失败，未写入支付状态。",
-          affected_oa_row_ids: [],
-          affected_bank_transaction_ids: [],
-          read_model_refresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
-        }, 409);
-      }
-      oaPendingPaymentConfirmPaidConfirmed = true;
-      return json(route, {
-        success: true,
-        action: "confirm_paid",
-        oaRowId: "oa-confirm-paid-e2e-001",
-        bankTransactionIds: ["bank-confirm-paid-e2e-001"],
-        paymentStatus: {
-          code: "paid",
-          label: "已支付",
-          reason: "已确认支出流水",
-          severity: "success",
-        },
-        oaPaymentWriteback: {
-          code: "written",
-          label: "已写回",
-          flowIds: ["flow-confirm-paid-e2e-001"],
-          syncStatus: "ready",
-        },
-        readModelRefresh: { scopeKeys: ["oa_pending_payment:in_progress", "workbench:all"], enqueued: true, targetSeconds: 2 },
       });
     }
 

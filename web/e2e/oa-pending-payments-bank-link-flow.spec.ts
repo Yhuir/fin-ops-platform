@@ -61,37 +61,38 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
 
     const rowsBeforeLink = api.count(ROWS_PATH);
     await page.getByRole("button", { name: "关联支出流水" }).click();
-    await expect(page.getByRole("heading", { name: "关联支出流水" })).toBeVisible();
+    const drawer = page.getByLabel("关联支出流水抽屉", { exact: true });
+    await expect(drawer.getByRole("heading", { name: "关联支出流水" })).toBeVisible();
     await expect.poll(() => api.count(CANDIDATES_PATH)).toBe(1);
     expect(new URL(page.url()).pathname).toBe("/oa-pending-payments");
 
-    await expect(page.getByText("显示 3 / 3 条")).toBeVisible();
-    await expect(page.getByText("进行中关联供应商")).toBeVisible();
-    await expect(page.getByRole("checkbox", { name: /已配对供应商/ })).toBeDisabled();
-    await expect(page.getByRole("checkbox", { name: /已关联进行中供应商/ })).toBeDisabled();
+    await expect(drawer.getByText("显示 3 / 3 条")).toBeVisible();
+    await expect(drawer.getByText("进行中关联供应商")).toBeVisible();
+    await expect(drawer.getByRole("checkbox", { name: /已配对供应商/ })).toBeDisabled();
+    await expect(drawer.getByRole("checkbox", { name: /已关联进行中供应商/ })).toBeDisabled();
 
     const linkedFilterRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
       return url.pathname.endsWith("/api/oa-pending-payments/bank-transaction-candidates")
         && url.searchParams.get("relation_status") === "linked_in_progress";
     });
-    await page.getByRole("button", { name: "已关联进行中OA" }).click();
+    await drawer.getByRole("button", { name: "已关联进行中OA" }).click();
     await linkedFilterRequest;
-    await expect(page.getByText("显示 1 / 1 条")).toBeVisible();
-    await expect(page.getByText("已关联进行中供应商")).toBeVisible();
+    await expect(drawer.getByText("显示 1 / 1 条")).toBeVisible();
+    await expect(drawer.getByText("已关联进行中供应商")).toBeVisible();
 
     const allFilterRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
       return url.pathname.endsWith("/api/oa-pending-payments/bank-transaction-candidates")
         && url.searchParams.get("relation_status") === "all";
     });
-    await page.getByRole("button", { name: "全部" }).click();
+    await drawer.getByRole("button", { name: "全部" }).click();
     await allFilterRequest;
-    await expect(page.getByText("显示 3 / 3 条")).toBeVisible();
+    await expect(drawer.getByText("显示 3 / 3 条")).toBeVisible();
 
-    await page.getByRole("checkbox", { name: /进行中关联供应商/ }).check();
-    await page.getByRole("button", { name: "确认关联 1 条流水" }).click();
-    await expect(page.getByRole("button", { name: "关联中" })).toBeDisabled();
+    await drawer.getByRole("checkbox", { name: /进行中关联供应商/ }).check();
+    await drawer.getByRole("button", { name: "确认关联 1 条流水" }).click();
+    await expect(drawer.getByRole("button", { name: "关联中" })).toBeDisabled();
     await expect.poll(() => api.count(LINK_BANK_PATH)).toBe(1);
     expect(api.lastBody(LINK_BANK_PATH)).toMatchObject({
       oa_row_ids: ["oa-bank-link-e2e-001"],
@@ -128,12 +129,13 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
     const rowsBeforeLink = api.count(ROWS_PATH);
 
     await page.getByRole("button", { name: "关联支出流水" }).click();
-    await expect(page.getByRole("heading", { name: "关联支出流水" })).toBeVisible();
-    await page.getByRole("checkbox", { name: /进行中关联供应商/ }).check();
-    await page.getByRole("button", { name: "确认关联 1 条流水" }).click();
+    const drawer = page.getByLabel("关联支出流水抽屉", { exact: true });
+    await expect(drawer.getByRole("heading", { name: "关联支出流水" })).toBeVisible();
+    await drawer.getByRole("checkbox", { name: /进行中关联供应商/ }).check();
+    await drawer.getByRole("button", { name: "确认关联 1 条流水" }).click();
 
     await expect(page.getByRole("alert")).toContainText("支出流水关联校验失败，未创建关联关系。");
-    await expect(page.getByRole("button", { name: "确认关联 1 条流水" })).toBeEnabled();
+    await expect(drawer.getByRole("button", { name: "确认关联 1 条流水" })).toBeEnabled();
     expect(api.count(LINK_BANK_PATH)).toBe(1);
     expect(api.lastBody(LINK_BANK_PATH)).toMatchObject({
       oa_row_ids: ["oa-bank-link-e2e-001"],

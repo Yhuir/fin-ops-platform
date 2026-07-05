@@ -69,6 +69,7 @@ describe("AppSidebar shell contract", () => {
     const paperRule = appStyles.match(/\.app-sidebar-paper\s*\{[^}]*\}/s)?.[0] ?? "";
     const brandRule = appStyles.match(/\.app-sidebar-brand\s*\{[^}]*\}/s)?.[0] ?? "";
     const itemRule = appStyles.match(/\.app-sidebar-item\s*\{[^}]*\}/s)?.[0] ?? "";
+    const groupTitleRule = appStyles.match(/\.app-sidebar-group-title\s*\{[^}]*\}/s)?.[0] ?? "";
     const linkRule = appStyles.match(/\.app-sidebar-link\s*\{[^}]*\}/s)?.[0] ?? "";
     const iconRule = appStyles.match(/\.app-sidebar-link-icon\s*\{[^}]*\}/s)?.[0] ?? "";
     const iconSvgRule = appStyles.match(/\.app-sidebar-link-icon svg\s*\{[^}]*\}/s)?.[0] ?? "";
@@ -76,9 +77,10 @@ describe("AppSidebar shell contract", () => {
     expect(sidebarRule).toMatch(/position:\s*sticky;/);
     expect(sidebarRule).toMatch(/top:\s*0;/);
     expect(sidebarRule).toMatch(/height:\s*100dvh;/);
-    expect(paperRule).toMatch(/background:\s*#0f2447;/);
+    expect(paperRule).toMatch(/background:\s*#334154;/);
     expect(paperRule).toMatch(/color:\s*#e6f0ff;/);
     expect(brandRule).toMatch(/min-height:\s*52px;/);
+    expect(groupTitleRule).toMatch(/color:\s*#b8cce5;/);
     expect(itemRule).toMatch(/min-height:\s*30px;/);
     expect(linkRule).toMatch(/min-height:\s*30px;/);
     expect(linkRule).toMatch(/font-size:\s*13px;/);

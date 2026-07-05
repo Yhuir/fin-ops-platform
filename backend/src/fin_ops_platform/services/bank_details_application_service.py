@@ -52,7 +52,6 @@ class BankDetailsApplicationService:
         affected_months_provider: Callable[[list[str]], list[str]],
         invalidate_after_category_mutation: Callable[[list[str]], bool],
         execute_derived_data_lifecycle_event: Callable[..., Any],
-        clear_turnover_ledger_read_model: Callable[[], Any],
         clear_relation_tag_projection_cache: Callable[[], Any],
         available_month_scope_keys_provider: Callable[[], list[str]],
         enqueue_bank_account_balance_refresh: Callable[..., bool],
@@ -76,7 +75,6 @@ class BankDetailsApplicationService:
         self._affected_months_provider = affected_months_provider
         self._invalidate_after_category_mutation = invalidate_after_category_mutation
         self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
-        self._clear_turnover_ledger_read_model = clear_turnover_ledger_read_model
         self._clear_relation_tag_projection_cache = clear_relation_tag_projection_cache
         self._available_month_scope_keys_provider = available_month_scope_keys_provider
         self._enqueue_bank_account_balance_refresh = enqueue_bank_account_balance_refresh
@@ -355,7 +353,6 @@ class BankDetailsApplicationService:
 
     def finalize_auto_tag_rules_update(self, event: dict[str, object]) -> None:
         self._clear_relation_tag_projection_cache()
-        self._clear_turnover_ledger_read_model()
         self._enqueue_turnover_ledger_read_model_refreshes(["all"], reason="bank_auto_tag_rules_changed")
         priority_scope_keys = [
             str(scope_key).strip()

@@ -40,6 +40,17 @@ class QueueRecorder:
         self.completed.append((tenant_id, scope_type, scope_key))
 
 
+class _PendingInvoiceRowsTestResponse:
+    def __init__(self, *, status_code: HTTPStatus, payload: dict[str, object]) -> None:
+        self.status_code = int(status_code)
+        self.body = json.dumps(payload)
+
+
+def _pending_invoice_rows_response(app: Application, query: dict[str, list[str]]) -> _PendingInvoiceRowsTestResponse:
+    status_code, payload = app._pending_invoice_routes().rows(query)
+    return _PendingInvoiceRowsTestResponse(status_code=status_code, payload=payload)
+
+
 class SearchRefreshGatewayRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str, str]] = []
@@ -1675,7 +1686,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("pending invoice API miss must not scan in-memory state"))},
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -1715,7 +1726,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("pending invoice SQL hit must not scan in-memory state"))},
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -1753,7 +1764,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy SQL shape must not scan in-memory state"))},
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -1798,7 +1809,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("source-version stale pending invoice API must not scan in-memory state"))},
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -1857,7 +1868,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("bank-detail stale pending invoice API must not scan in-memory state"))},
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -1922,7 +1933,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -1984,7 +1995,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -2007,7 +2018,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("all-direction pending invoice API miss must not scan in-memory state"))},
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["all"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["all"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -2055,7 +2066,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -2174,7 +2185,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        response = _pending_invoice_rows_response(app, {"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))

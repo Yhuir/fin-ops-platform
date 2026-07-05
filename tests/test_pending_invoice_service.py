@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from decimal import Decimal
+import json
 from typing import Any, Callable
 import unittest
 
@@ -16,6 +17,7 @@ from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceError,
     PendingInvoiceQueryService,
 )
+from fin_ops_platform.services.pending_invoice_status import pending_invoice_status_matches_filter
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,
@@ -78,6 +80,206 @@ class StalePendingInvoiceRelationCommandService:
 
     def confirm_relation(self, **_kwargs: object) -> dict[str, object]:
         raise AssertionError("stale relation writes must fail before confirm_relation")
+
+
+def _pending_invoice_query_rows(
+    service: PendingInvoiceQueryService,
+    *,
+    direction: str,
+    filter: str = "all",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    keyword: str | None = None,
+    filters: str | list[dict[str, Any]] | None = None,
+    sort_field: str | None = None,
+    sort_direction: str | None = None,
+    page: int | str | None = 1,
+    page_size: int | str | None = 50,
+) -> dict[str, Any]:
+    normalized_direction = service._normalize_direction(direction)
+    normalized_filter = service._normalize_filter(filter)
+    if normalized_direction == "all" and normalized_filter != "all":
+        raise PendingInvoiceError("invalid_filter_for_all", "All pending invoice rows only support filter=all.")
+    if normalized_direction == "income" and normalized_filter not in {"all", "requires_invoice", "no_invoice_required", "cash_income"}:
+        raise PendingInvoiceError(
+            "invalid_filter_for_income",
+            "Income pending invoice rows support all, requires_invoice, no_invoice_required or cash_income filters.",
+        )
+    if normalized_direction == "expense" and normalized_filter not in {"all", "requires_invoice", "bank_statement_as_invoice", "no_invoice_required"}:
+        raise PendingInvoiceError(
+            "invalid_filter_for_expense",
+            "Expense pending invoice rows support all, requires_invoice, bank_statement_as_invoice or no_invoice_required filters.",
+        )
+    page_number = max(_optional_int(page, default=1), 1)
+    page_limit = min(max(_optional_int(page_size, default=50), 1), 200)
+    all_transactions = [
+        transaction
+        for transaction in service._import_service.list_transactions(month="all")
+        if _matches_date_range(transaction, date_from=date_from, date_to=date_to)
+    ]
+    rows: list[dict[str, Any]] = []
+    emitted_relation_groups: set[str] = set()
+    for transaction in all_transactions:
+        if not service._transaction_matches_direction(transaction, normalized_direction):
+            continue
+        transaction_direction = service.direction_for_transaction(transaction)
+        row = service.row_for_transaction(transaction.id, direction=transaction_direction)
+        relation_group_key = service._multi_bank_relation_group_key(row)
+        if relation_group_key and relation_group_key in emitted_relation_groups:
+            continue
+        if _row_matches_filter(row, direction=transaction_direction, filter_name=normalized_filter):
+            rows.append(row)
+            if relation_group_key:
+                emitted_relation_groups.add(relation_group_key)
+    if keyword:
+        normalized_keyword = str(keyword).strip().lower()
+        rows = [row for row in rows if normalized_keyword in str(row).lower()]
+    rows = _apply_filters(rows, filters)
+    rows = _apply_sort(rows, sort_field=sort_field, sort_direction=sort_direction)
+    total = len(rows)
+    start = (page_number - 1) * page_limit
+    return {
+        "direction": normalized_direction,
+        "filter": normalized_filter,
+        "rows": rows[start : start + page_limit],
+        "pagination": {"page": page_number, "page_size": page_limit, "total": total},
+        "summary": {
+            "total_rows": total,
+            "missing_invoice_rows": sum(1 for row in rows if not row["invoices"]),
+            "create_invoice_available_rows": sum(1 for row in rows if row["can_create_invoice"]),
+            "source_summary": _source_summary_for_transactions(all_transactions, direction=normalized_direction),
+        },
+    }
+
+
+def _source_summary_for_transactions(
+    transactions: list[BankTransaction],
+    *,
+    direction: str,
+) -> dict[str, int]:
+    expense_rows = sum(1 for transaction in transactions if transaction.txn_direction == TransactionDirection.OUTFLOW)
+    income_rows = sum(1 for transaction in transactions if transaction.txn_direction == TransactionDirection.INFLOW)
+    total_rows = expense_rows + income_rows
+    current_rows = total_rows if direction == "all" else (expense_rows if direction == "expense" else income_rows)
+    return {
+        "bank_transaction_rows": total_rows,
+        "expense_rows": expense_rows,
+        "income_rows": income_rows,
+        "current_direction_rows": current_rows,
+        "excluded_direction_rows": max(total_rows - current_rows, 0),
+    }
+
+
+def _matches_date_range(
+    transaction: BankTransaction,
+    *,
+    date_from: str | None,
+    date_to: str | None,
+) -> bool:
+    txn_date = str(transaction.txn_date or transaction.trade_time or "")[:10]
+    if date_from and txn_date < str(date_from):
+        return False
+    if date_to and txn_date > str(date_to):
+        return False
+    return True
+
+
+def _row_matches_filter(row: dict[str, Any], *, direction: str, filter_name: str) -> bool:
+    if filter_name == "all":
+        return True
+    status_payload = row.get("invoice_acquisition_status") if isinstance(row, dict) else {}
+    status_code = str(status_payload.get("code") or "").strip() if isinstance(status_payload, dict) else ""
+    return pending_invoice_status_matches_filter(
+        direction=direction,
+        filter_name=filter_name,
+        status_code=status_code,
+    )
+
+
+def _apply_filters(rows: list[dict[str, Any]], filters: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    filter_items = _parse_filters(filters)
+    if not filter_items:
+        return rows
+    return [row for row in rows if all(_row_matches_filter_item(row, item) for item in filter_items)]
+
+
+def _parse_filters(filters: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if filters in (None, ""):
+        return []
+    if isinstance(filters, str):
+        parsed = json.loads(filters)
+    else:
+        parsed = filters
+    return [item for item in parsed if isinstance(item, dict)] if isinstance(parsed, list) else []
+
+
+def _row_matches_filter_item(row: dict[str, Any], item: dict[str, Any]) -> bool:
+    field = str(item["field"])
+    operator = str(item["operator"])
+    value = PendingInvoiceQueryService._row_field_value(row, field)
+    if operator == "contains":
+        needle = str(item.get("value") or "").strip().lower()
+        return not needle or needle in str(value or "").lower()
+    if operator == "in":
+        accepted = {str(candidate).strip().lower() for candidate in list(item.get("values") or []) if str(candidate).strip()}
+        return not accepted or str(value or "").strip().lower() in accepted
+    if operator == "between":
+        bounds = item.get("value") if isinstance(item.get("value"), dict) else {}
+        if field in {"amount", "invoice_total"}:
+            parsed = _decimal_from_text(value)
+            minimum = _decimal_or_none(bounds.get("min"))
+            maximum = _decimal_or_none(bounds.get("max"))
+            return (minimum is None or parsed >= minimum) and (maximum is None or parsed <= maximum)
+        text_value = str(value or "")
+        start = str(bounds.get("from") or "").strip()
+        end = str(bounds.get("to") or "").strip()
+        return (not start or text_value >= start) and (not end or text_value <= end)
+    if operator == "eq":
+        return _decimal_from_text(value) == _decimal_from_text(item.get("value"))
+    return True
+
+
+def _apply_sort(
+    rows: list[dict[str, Any]],
+    *,
+    sort_field: str | None,
+    sort_direction: str | None,
+) -> list[dict[str, Any]]:
+    field = str(sort_field or "").strip()
+    if not field:
+        return rows
+    direction = str(sort_direction or "asc").strip().lower() or "asc"
+    return sorted(rows, key=lambda row: _query_sort_key(row, field), reverse=direction == "desc")
+
+
+def _query_sort_key(row: dict[str, Any], field: str) -> tuple[int, Any]:
+    value = PendingInvoiceQueryService._row_field_value(row, field)
+    if field in {"amount", "invoice_total"}:
+        return (0, _decimal_from_text(value))
+    return (0, str(value or ""))
+
+
+def _decimal_or_none(value: object) -> Decimal | None:
+    try:
+        if value in (None, ""):
+            return None
+        return Decimal(str(value).replace(",", ""))
+    except Exception:
+        return None
+
+
+def _decimal_from_text(value: object) -> Decimal:
+    parsed = _decimal_or_none(value)
+    return parsed if parsed is not None else Decimal("0")
+
+
+def _optional_int(value: object, *, default: int) -> int:
+    try:
+        if value in (None, ""):
+            return default
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
 
 
 class PairServiceWorkbenchRelationRepository:
@@ -389,7 +591,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual([row["bank_transaction"]["bank_short_name"] for row in normalized], ["中行", "中行", "中行"])
         self.assertNotIn("bank_short_name", rows[0]["bank_transaction"])
 
-    def test_list_rows_collapses_multi_bank_relation_into_one_grouped_row(self) -> None:
+    def test_transaction_rows_collapse_multi_bank_relation_into_one_grouped_row(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
         txn_1 = self._bank_transaction("txn_group_1", TransactionDirection.OUTFLOW, "Vendor A", "120.00")
         txn_2 = self._bank_transaction("txn_group_2", TransactionDirection.OUTFLOW, "Vendor A", "80.00")
@@ -436,7 +638,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             relation_facade=relation_facade,
         )
 
-        payload = service.list_rows(direction="expense", filter="all")
+        payload = _pending_invoice_query_rows(service, direction="expense", filter="all")
 
         self.assertEqual(payload["pagination"]["total"], 1)
         row = payload["rows"][0]
@@ -471,7 +673,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             pair_service=pair_service,
         )
 
-        payload = service.list_rows(direction="expense", filter="all")
+        payload = _pending_invoice_query_rows(service, direction="expense", filter="all")
 
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["rows"][0]["id"], txn.id)
@@ -499,8 +701,8 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         ]
         service = self._query_service(transactions=transactions)
 
-        first_page = service.list_rows(direction="expense", filter="all", page=1, page_size=500)
-        second_page = service.list_rows(direction="expense", filter="all", page=2, page_size=500)
+        first_page = _pending_invoice_query_rows(service, direction="expense", filter="all", page=1, page_size=500)
+        second_page = _pending_invoice_query_rows(service, direction="expense", filter="all", page=2, page_size=500)
 
         self.assertEqual(first_page["pagination"], {"page": 1, "page_size": 200, "total": 250})
         self.assertEqual(len(first_page["rows"]), 200)
@@ -558,7 +760,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             oa_projection=oa_projection,
         )
 
-        rows_payload = service.list_rows(direction="expense", filter="all")
+        rows_payload = _pending_invoice_query_rows(service, direction="expense", filter="all")
         detail_payload = service.oa_detail("oa-pay-2048")
 
         self.assertEqual(rows_payload["rows"][0]["oa"]["primary"]["applicant"], "杨丽萍")
@@ -717,7 +919,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             oa_projection=oa_projection,
         )
 
-        payload = service.list_rows(direction="expense", filter="all")
+        payload = _pending_invoice_query_rows(service, direction="expense", filter="all")
         row = payload["rows"][0]
 
         self.assertEqual(row["oa"]["primary"]["id"], "oa-pay-2048")
@@ -784,7 +986,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             pair_service=pair_service,
         )
 
-        payload = service.list_rows(direction="income", filter="all")
+        payload = _pending_invoice_query_rows(service, direction="income", filter="all")
 
         self.assertEqual([invoice["id"] for invoice in payload["rows"][0]["invoices"]], ["inv_output"])
         self.assertEqual(payload["rows"][0]["oa_applicant"], "—")
@@ -889,7 +1091,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             relation_facade=relation_facade,
         )
 
-        row = service.list_rows(direction="expense", filter="all")["rows"][0]
+        row = _pending_invoice_query_rows(service, direction="expense", filter="all")["rows"][0]
         detail = service.relation_detail(transaction_id=txn.id, direction="expense")
         candidates = service.invoice_candidates(transaction_id=txn.id)
 
@@ -928,11 +1130,11 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             },
         )
 
-        requires_payload = service.list_rows(direction="expense", filter="requires_invoice")
-        statement_payload = service.list_rows(direction="expense", filter="bank_statement_as_invoice")
-        no_invoice_payload = service.list_rows(direction="expense", filter="no_invoice_required")
-        all_payload = service.list_rows(direction="expense", filter="all")
-        income_payload = service.list_rows(direction="income", filter="all")
+        requires_payload = _pending_invoice_query_rows(service, direction="expense", filter="requires_invoice")
+        statement_payload = _pending_invoice_query_rows(service, direction="expense", filter="bank_statement_as_invoice")
+        no_invoice_payload = _pending_invoice_query_rows(service, direction="expense", filter="no_invoice_required")
+        all_payload = _pending_invoice_query_rows(service, direction="expense", filter="all")
+        income_payload = _pending_invoice_query_rows(service, direction="income", filter="all")
 
         self.assertEqual([row["id"] for row in requires_payload["rows"]], ["txn_requires", "txn_unmapped"])
         self.assertTrue(requires_payload["rows"][0]["can_create_invoice"])
@@ -957,7 +1159,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         income_txn = self._bank_transaction("txn_income_all", TransactionDirection.INFLOW, "Customer", "20.00")
         service = self._query_service(transactions=[expense_txn, income_txn])
 
-        payload = service.list_rows(direction="all", filter="all")
+        payload = _pending_invoice_query_rows(service, direction="all", filter="all")
 
         self.assertEqual([row["id"] for row in payload["rows"]], ["txn_expense_all", "txn_income_all"])
         self.assertEqual(payload["summary"]["source_summary"]["current_direction_rows"], 2)
@@ -996,7 +1198,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             ),
         )
 
-        payload = service.list_rows(direction="income", filter="all", page_size=10)
+        payload = _pending_invoice_query_rows(service, direction="income", filter="all", page_size=10)
 
         statuses = {row["id"]: row["invoice_acquisition_status"]["code"] for row in payload["rows"]}
         self.assertEqual(statuses[invoiced_txn.id], "income_invoiced")
@@ -1040,9 +1242,9 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             },
         )
 
-        requires_payload = service.list_rows(direction="income", filter="requires_invoice", page_size=10)
-        no_invoice_payload = service.list_rows(direction="income", filter="no_invoice_required", page_size=10)
-        cash_payload = service.list_rows(direction="income", filter="cash_income", page_size=10)
+        requires_payload = _pending_invoice_query_rows(service, direction="income", filter="requires_invoice", page_size=10)
+        no_invoice_payload = _pending_invoice_query_rows(service, direction="income", filter="no_invoice_required", page_size=10)
+        cash_payload = _pending_invoice_query_rows(service, direction="income", filter="cash_income", page_size=10)
 
         self.assertEqual([row["id"] for row in requires_payload["rows"]], [invoiced_txn.id, pending_txn.id])
         self.assertEqual(requires_payload["rows"][0]["invoice_acquisition_status"]["code"], "income_invoiced")
@@ -1101,7 +1303,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             },
         )
 
-        payload = service.list_rows(direction="expense", filter="requires_invoice")
+        payload = _pending_invoice_query_rows(service, direction="expense", filter="requires_invoice")
 
         self.assertEqual(
             [row["id"] for row in payload["rows"]],
@@ -1152,8 +1354,8 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             },
         )
 
-        payload = service.list_rows(direction="expense", filter="all", page_size=10)
-        requires_payload = service.list_rows(direction="expense", filter="requires_invoice", page_size=10)
+        payload = _pending_invoice_query_rows(service, direction="expense", filter="all", page_size=10)
+        requires_payload = _pending_invoice_query_rows(service, direction="expense", filter="requires_invoice", page_size=10)
 
         statuses = {row["id"]: row["invoice_acquisition_status"]["code"] for row in payload["rows"]}
         self.assertEqual(statuses[partial_txn.id], "invoice_not_fully_paid")
@@ -1191,7 +1393,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             tag_groups={"no_invoice_required": ["tax_payment"]},
         )
 
-        payload = service.list_rows(direction="expense", filter="no_invoice_required")
+        payload = _pending_invoice_query_rows(service, direction="expense", filter="no_invoice_required")
 
         self.assertEqual([row["id"] for row in payload["rows"]], ["txn_auto_no_invoice"])
         self.assertFalse(payload["rows"][0]["can_create_invoice"])
@@ -1247,7 +1449,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             tag_groups={"bank_statement_as_invoice": ["equipment_purchase"]},
         )
 
-        payload = service.list_rows(direction="expense", filter="bank_statement_as_invoice")
+        payload = _pending_invoice_query_rows(service, direction="expense", filter="bank_statement_as_invoice")
 
         self.assertEqual([row["id"] for row in payload["rows"]], ["txn_equipment_purchase"])
         row = payload["rows"][0]
@@ -1312,9 +1514,9 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             income_tag_groups={"no_invoice_required": ["income_internal_transfer"], "cash_income": ["cash_sale"]},
         )
 
-        no_invoice_payload = service.list_rows(direction="income", filter="no_invoice_required", page_size=10)
-        cash_payload = service.list_rows(direction="income", filter="cash_income", page_size=10)
-        requires_payload = service.list_rows(direction="income", filter="requires_invoice", page_size=10)
+        no_invoice_payload = _pending_invoice_query_rows(service, direction="income", filter="no_invoice_required", page_size=10)
+        cash_payload = _pending_invoice_query_rows(service, direction="income", filter="cash_income", page_size=10)
+        requires_payload = _pending_invoice_query_rows(service, direction="income", filter="requires_invoice", page_size=10)
 
         self.assertEqual([row["id"] for row in no_invoice_payload["rows"]], [no_invoice_txn.id])
         self.assertEqual([row["id"] for row in cash_payload["rows"]], [cash_txn.id])
@@ -1338,7 +1540,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             bank_account_mappings=[{"id": "mapping-8106", "bank_name": "建设银行", "short_name": "建行", "last4": "8106"}],
         )
 
-        row = service.list_rows(direction="expense", filter="all")["rows"][0]["bank_transaction"]
+        row = _pending_invoice_query_rows(service, direction="expense", filter="all")["rows"][0]["bank_transaction"]
 
         self.assertEqual(row["bank_name"], "建设银行")
         self.assertEqual(row["bank_short_name"], "建行")
@@ -1353,7 +1555,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             import_service=ImportNormalizationService(fact_repository=repository),
         )
 
-        payload = service.list_rows(direction="expense", filter="all")
+        payload = _pending_invoice_query_rows(service, direction="expense", filter="all")
 
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["rows"][0]["id"], "txn_repository")
@@ -1422,7 +1624,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             pair_service=pair_service,
         )
 
-        payload = service.list_rows(
+        payload = _pending_invoice_query_rows(service,
             direction="expense",
             filter="all",
             filters='[{"field":"seller_name","operator":"contains","value":"Seller"},{"field":"invoice_total","operator":"between","value":{"min":"200","max":"400"}}]',
@@ -1583,7 +1785,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         service = self._query_service(transactions=[])
 
         with self.assertRaises(PendingInvoiceError) as context:
-            service.list_rows(direction="income", filter="bank_statement_as_invoice")
+            _pending_invoice_query_rows(service, direction="income", filter="bank_statement_as_invoice")
 
         self.assertEqual(context.exception.error_code, "invalid_filter_for_income")
 

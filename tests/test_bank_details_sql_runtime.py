@@ -1075,7 +1075,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             affected_months_provider=lambda _transaction_ids: [],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_turnover_ledger_read_model=lambda: None,
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
@@ -1131,7 +1130,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             affected_months_provider=lambda _transaction_ids: [],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_turnover_ledger_read_model=lambda: None,
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
@@ -1186,7 +1184,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             affected_months_provider=lambda _transaction_ids: [],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_turnover_ledger_read_model=lambda: None,
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
@@ -1232,7 +1229,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_turnover_ledger_read_model=lambda: None,
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
@@ -1269,7 +1265,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_turnover_ledger_read_model=lambda: None,
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
@@ -1314,7 +1309,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda _affected_months: False,
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_turnover_ledger_read_model=lambda: None,
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04", "2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
@@ -1360,7 +1354,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda affected_months: invalidated.append(list(affected_months)),
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_turnover_ledger_read_model=lambda: None,
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
@@ -1419,7 +1412,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
             invalidate_after_category_mutation=lambda affected_months: invalidated.append(list(affected_months)),
             execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_turnover_ledger_read_model=lambda: None,
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
@@ -1463,7 +1455,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             execute_derived_data_lifecycle_event=lambda event_type, **kwargs: lifecycle_events.append(
                 {"event_type": event_type, **kwargs}
             ),
-            clear_turnover_ledger_read_model=lambda: cleared.append("turnover"),
             clear_relation_tag_projection_cache=lambda: cleared.append("relation_tag_projection"),
             available_month_scope_keys_provider=lambda: ["2026-04", "2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
@@ -1476,7 +1467,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(cleared, ["relation_tag_projection", "turnover"])
+        self.assertEqual(cleared, ["relation_tag_projection"])
         self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("bank_detail", "2026-04", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
         self.assertIn(("bank_detail", "2026-05", "bank_auto_tag_rules_changed_priority"), queue.enqueued)

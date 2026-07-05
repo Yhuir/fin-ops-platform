@@ -72,8 +72,10 @@ describe("WorkbenchExceptionModal", () => {
     expect(within(dialog).getByText("收入流水合计")).toBeInTheDocument();
     expect(within(dialog).getByText("进项发票合计")).toBeInTheDocument();
     expect(within(dialog).getByText("销项发票合计")).toBeInTheDocument();
-    expect(within(dialog).getByText("oa_equals_bank_missing_invoice")).toBeInTheDocument();
-    expect(within(dialog).getByText("命中候选分组 CASE-202603-101")).toBeInTheDocument();
+    expect(within(dialog).getByText("OA与流水一致，缺少进项发票")).toBeInTheDocument();
+    expect(within(dialog).getByText("命中候选分组")).toBeInTheDocument();
+    expect(within(dialog).queryByText("CASE-202603-101")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("处理提示")).toBeInTheDocument();
     expect(within(dialog).getByText("已存在补票候选，提交前请复核发票归属。")).toBeInTheDocument();
     expect(within(dialog).getByText("系统自动动作")).toBeInTheDocument();
     expect(within(dialog).getByText("人工可选动作")).toBeInTheDocument();

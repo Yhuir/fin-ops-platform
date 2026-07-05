@@ -11,6 +11,7 @@
 - `requires_invoice` 作为列表 filter 是最终状态桶；支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`，收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只解释规则命中，不能作为 rows/filter-options/export 的父筛选可见性条件。
 - rows、filter-options、export-preview 和 export 必须先经过 `PendingInvoiceReadModelService` 的 freshness gate；非 fresh 时不能把空 rows 当真实结果。
 - filter-options 在 fresh gate 通过后应优先走 SQL 聚合读取选项，不再为生成筛选项拉取全量 rows；这属于页面首屏性能路径，不能回退到伪 fresh。
+- `PendingInvoiceQueryService` 不再暴露同步 `list_rows`、同步 filter-options 或同步 export/export-preview；该 service 只保留 transaction-scoped detail/candidate、row payload normalization 和 read-model rows 的纯格式化能力，防止旧直查链路绕过 freshness gate。
 - rows 首屏默认排序合同是 `trade_date desc nulls last, row_id`；PostgreSQL 热路径索引必须显式匹配 `nulls last`，不能通过取消 `nulls last` 或回退同步扫描来换取性能。
 - rows 新写入的规范 payload 只写 `payload`；`raw_payload` 不再复制同一 JSON。查询端只在 legacy 行 `payload = '{}'::jsonb` 时读取 `raw_payload` fallback，避免首屏按行重复读取和解码无用 JSONB。
 - rows payload normalization 只能按页读取一次 `bank_account_mappings` 并复用于每行银行身份补全；不得在 `_apply_bank_identity` 中按行重复读取 settings。
@@ -38,6 +39,17 @@
 ```
 
 ## 历史记录
+
+## 2026-07-05 - pending invoice boundary close
+
+- 目标：关闭待找发票模块剩余旧同步读链路，确保 rows、filter-options、export-preview 和 export 只能通过 `pending_invoice` read model freshness gate，旧 handler 或 QueryService 同步直查不能污染当前页面链路。
+- 影响范围：`backend/src/fin_ops_platform/app/server.py`、`backend/src/fin_ops_platform/services/pending_invoice_service.py`、`tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_invoice_lifecycle_page_integration.py`、`tests/test_search_pending_sql_runtime.py`、本模块 `boundary-io.md` / `tests.md`。
+- 关键决策：删除 `Application.__getattr__` 中 `_handle_api_pending_invoice_rows` 兼容映射和 `_compat_pending_invoice_rows_response`；删除 `PendingInvoiceQueryService.list_rows`、旧同步 `filter_options`、旧同步 `export_preview/export`、旧 rows-only filter/sort/date/source-summary helper；测试改为 route owner helper 或 test-local row builder，生产 QueryService 不再提供页面 rows 直查入口。
+- 文档影响：`boundary-io.md` 状态改为 `closed`，记录旧代码删除结果；`tests.md` 补充 2026-07-05 close 测试入口和旧符号删除状态。
+- 测试覆盖：`tests/test_pending_invoice_service.py` 覆盖 transaction-scoped row payload、relation detail、candidate、manual/attach/income status；`tests/test_pending_invoice_api.py` 覆盖 rows/read-model miss、filter-options/export refreshing、manual endpoint removal；`tests/test_search_pending_sql_runtime.py` 覆盖 API miss/source/schema stale 和 `PendingInvoiceReadModelService.all_rows()` fail-closed；route owner guard 继续禁止 pending invoice callback 回归。
+- 验证命令：`PYTHONPATH=backend/src:. python3 -m pytest tests/test_pending_invoice_service.py tests/test_pending_invoice_api.py tests/test_invoice_lifecycle_page_integration.py <selected pending search runtime tests> -q`。
+- 未测风险：本轮未跑前端 Vitest/Playwright、真实 PostgreSQL/RabbitMQ/Redis worker drain 或生产大数据 EXPLAIN；这些仍按本模块测试矩阵的 documented-risk 处理，不影响本地模块边界和旧同步链路删除结论。
+- 后续事项：若未来新增 pending invoice rows/filter/export 行为，必须从 `PendingInvoiceReadModelService` 和 `PendingInvoiceReadModelRepositoryPort` 扩展，不得恢复 QueryService 同步全量扫描或 `server.py` callback。
 
 ## 2026-07-02 - pending invoice 首屏排序索引对齐
 

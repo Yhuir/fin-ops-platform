@@ -1,5 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
+import AppDrawer from "../components/common/AppDrawer";
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
@@ -2533,103 +2534,99 @@ function RelationPreviewDialog({
     setSubmitState({ phase: "idle", message: "", committed: false });
   }, [preview.previewId]);
 
-  return (
-    <div className="detail-modal-backdrop">
-      <button
-        aria-label="关闭关联预览"
-        className="detail-modal-backdrop-foreground"
-        disabled={isBusy}
-        type="button"
-        onClick={closePreview}
-      />
-      <section
-        aria-busy={isBusy}
-        aria-label="关联预览"
-        aria-modal="true"
-        className={`detail-modal relation-preview-modal${isBusy ? " relation-preview-modal-busy" : ""}`}
-        role="dialog"
-      >
-        <header className="detail-modal-header">
-          <div className="relation-preview-title-block">
-            <div className="modal-eyebrow">关联预览</div>
-            <h2>{operationCopy.title}</h2>
-            <div className="relation-preview-subtitle">
-              <span>OA {rowCounts.oa}</span>
-              <span>流水 {rowCounts.bank}</span>
-              <span>发票 {rowCounts.invoice}</span>
-            </div>
-          </div>
-          <div className="relation-preview-header-actions">
-            <span className={`relation-preview-phase-pill relation-preview-phase-${submitState.phase}`}>
-              {isBusy || submitState.phase === "error" ? relationPreviewPhaseLabel(submitState.phase) : operationCopy.statusLabel}
-            </span>
-            <button aria-label="关闭关联预览" className="detail-close-btn" disabled={isBusy} type="button" onClick={closePreview}>
-              ×
-            </button>
-          </div>
-        </header>
-        <div className="relation-preview-body">
-          {preview.message ? <div className={`relation-preview-message ${preview.requiresNote ? "warning" : ""}`}>{preview.message}</div> : null}
-          {submitState.phase !== "idle" ? (
-            <div
-              className={`relation-preview-progress-panel relation-preview-progress-${submitState.phase}`}
-              role={submitState.phase === "error" ? "alert" : "status"}
-            >
-              {isBusy ? <span aria-hidden="true" className="relation-preview-spinner" /> : null}
-              <div>
-                <strong>{relationPreviewPhaseLabel(submitState.phase)}</strong>
-                <span>{submitState.message}</span>
-              </div>
-            </div>
-          ) : null}
-          <div className="relation-preview-stack">
-            <RelationPreviewTriPane
-              title="操作前"
-              testId="relation-preview-before"
-              groups={preview.before.groups}
-              totals={preview.amountSummary.before}
-              status={preview.amountSummary.status}
-              mismatchFields={preview.amountSummary.mismatchFields}
-              columnLayouts={columnLayouts}
-            />
-            <RelationPreviewTriPane
-              title="操作后"
-              testId="relation-preview-after"
-              groups={preview.after.groups}
-              totals={preview.amountSummary.after}
-              status={preview.amountSummary.status}
-              mismatchFields={preview.amountSummary.mismatchFields}
-              columnLayouts={columnLayouts}
-            />
-          </div>
-          <label className="relation-preview-note">
-            <span>备注{noteRequired ? "（必填）" : ""}</span>
-            <textarea
-              aria-label="备注"
-              disabled={isBusy || isCommittedError || isNonRetryableError}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </label>
-        </div>
-        <footer className="detail-modal-actions relation-preview-actions">
-          {isCommittedError || isNonRetryableError ? (
-            <button className="secondary-btn" type="button" onClick={closePreview}>
-              关闭
-            </button>
-          ) : (
-            <>
-              <button className="secondary-btn" disabled={isBusy} type="button" onClick={closePreview}>
-                取消
-              </button>
-              <button className="primary-action-btn" disabled={primaryDisabled} type="button" onClick={handleSubmitClick}>
-                {submitState.phase === "error" ? "重试" : operationCopy.submitLabel}
-              </button>
-            </>
-          )}
-        </footer>
-      </section>
+  const headerAside = (
+    <span className={`relation-preview-phase-pill relation-preview-phase-${submitState.phase}`}>
+      {isBusy || submitState.phase === "error" ? relationPreviewPhaseLabel(submitState.phase) : operationCopy.statusLabel}
+    </span>
+  );
+  const subtitle = (
+    <div className="relation-preview-title-block">
+      <span className="relation-preview-operation-title">{operationCopy.title}</span>
+      <span className="relation-preview-subtitle">
+        <span>OA {rowCounts.oa}</span>
+        <span>流水 {rowCounts.bank}</span>
+        <span>发票 {rowCounts.invoice}</span>
+      </span>
     </div>
+  );
+  const footer = (
+    <div className="detail-modal-actions relation-preview-actions">
+      {isCommittedError || isNonRetryableError ? (
+        <button className="secondary-btn" type="button" onClick={closePreview}>
+          关闭
+        </button>
+      ) : (
+        <>
+          <button className="secondary-btn" disabled={isBusy} type="button" onClick={closePreview}>
+            取消
+          </button>
+          <button className="primary-action-btn" disabled={primaryDisabled} type="button" onClick={handleSubmitClick}>
+            {submitState.phase === "error" ? "重试" : operationCopy.submitLabel}
+          </button>
+        </>
+      )}
+    </div>
+  );
+
+  return (
+    <AppDrawer
+      ariaBusy={isBusy}
+      className={`relation-preview-drawer${isBusy ? " relation-preview-drawer-busy" : ""}`}
+      closeDisabled={isBusy}
+      closeLabel="关闭关联预览"
+      footer={footer}
+      headerAside={headerAside}
+      open
+      subtitle={subtitle}
+      title="关联预览"
+      width="min(1080px, 100vw)"
+      onClose={closePreview}
+    >
+      <div className="relation-preview-body">
+        {preview.message ? <div className={`relation-preview-message ${preview.requiresNote ? "warning" : ""}`}>{preview.message}</div> : null}
+        {submitState.phase !== "idle" ? (
+          <div
+            className={`relation-preview-progress-panel relation-preview-progress-${submitState.phase}`}
+            role={submitState.phase === "error" ? "alert" : "status"}
+          >
+            {isBusy ? <span aria-hidden="true" className="relation-preview-spinner" /> : null}
+            <div>
+              <strong>{relationPreviewPhaseLabel(submitState.phase)}</strong>
+              <span>{submitState.message}</span>
+            </div>
+          </div>
+        ) : null}
+        <div className="relation-preview-stack">
+          <RelationPreviewTriPane
+            title="操作前"
+            testId="relation-preview-before"
+            groups={preview.before.groups}
+            totals={preview.amountSummary.before}
+            status={preview.amountSummary.status}
+            mismatchFields={preview.amountSummary.mismatchFields}
+            columnLayouts={columnLayouts}
+          />
+          <RelationPreviewTriPane
+            title="操作后"
+            testId="relation-preview-after"
+            groups={preview.after.groups}
+            totals={preview.amountSummary.after}
+            status={preview.amountSummary.status}
+            mismatchFields={preview.amountSummary.mismatchFields}
+            columnLayouts={columnLayouts}
+          />
+        </div>
+        <label className="relation-preview-note">
+          <span>备注{noteRequired ? "（必填）" : ""}</span>
+          <textarea
+            aria-label="备注"
+            disabled={isBusy || isCommittedError || isNonRetryableError}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+          />
+        </label>
+      </div>
+    </AppDrawer>
   );
 }
 

@@ -854,13 +854,13 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - `relation_status=all|unmatched|matched|linked_in_progress`，默认 `all`。
 - `keyword`，可选，按候选 payload 做关键字筛选。
 - `page` / `page_size`，默认 `1` / `100`，`page_size` 上限为 `200`。
-- repeated `oa_row_ids`，可选。抽屉从已选 OA 打开时必须传入；后端按这些 OA 的 `month` 限定候选支出流水月份并去重。没有 OA 上下文的旧调用才保留全部支出流水语义；有 OA id 但无法解析月份时返回空候选，不得退回全量历史扫描。
+- repeated `oa_row_ids`，可选。抽屉从已选 OA 打开时必须传入；后端不使用这些 OA id 推导候选月份，候选池始终读取全部支出流水。`oa_row_ids` 只作为后续提交关联的目标 OA 上下文和诊断回显；有 OA id 但无法解析月份时也不得返回空候选。
 
-响应 `filters` 必须回显 `relationStatus`、`keyword`、`oaRowIds` 和 `monthScopes`，便于诊断候选池是否按 OA 月份收敛。
+响应 `filters` 必须回显 `relationStatus`、`keyword` 和 `oaRowIds`。不得再输出 `monthScopes` 或其它暗示候选池按 OA 月份收敛的字段。
 
 `POST /api/oa-pending-payments/link-bank-transactions`
 
-该接口是自动匹配失败后的人工兜底。请求仍由前端传入选中的 `oa_row_ids` 和 `bank_transaction_ids`，后端只允许未配对支出流水创建 Workbench active relation。关联成功后必须沿用同一写回校验；支出合计等于 OA 金额且可解析 `flow_id` 时，响应必须携带 `autoWriteback` 和 `oaPaymentWritebacks`，并把 `t_payment_simple.pay_status` 写为已支付。前端不再提供人工 `confirm-paid` 写回按钮。
+该接口是自动匹配失败后的人工兜底。请求由前端传入选中的 `oa_row_ids` 和 `bank_transaction_ids`，后端只允许未配对支出流水创建 OA 待付款独立 active pending relation，并写入 `app.bank_transaction_relation_claims` 独占该支出流水；不得写 `app.workbench_pair_relations` 或普通 Workbench active relation。关联成功后必须沿用同一写回校验；支出合计等于 OA 金额且可解析 `flow_id` 时，响应必须携带 `autoWriteback` 和 `oaPaymentWritebacks`，并把 `t_payment_simple.pay_status` 写为已支付。前端和后端都不再提供人工 `confirm-paid` 写回入口。
 
 ### 工作台 row detail
 

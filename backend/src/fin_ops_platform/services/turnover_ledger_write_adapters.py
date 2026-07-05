@@ -817,31 +817,6 @@ class TurnoverLedgerLocalRelationExtraAdapterSet:
             )
 
 
-class TurnoverLedgerRelationMutationInvalidationLegacyAdapter:
-    def __init__(
-        self,
-        *,
-        persist_relations: Callable[..., None],
-        invalidate_workbench_after_category_mutation: Callable[[list[str]], bool],
-        clear_read_model: Callable[[], None],
-        enqueue_refresh: Callable[..., bool],
-    ) -> None:
-        self._persist_relations = persist_relations
-        self._invalidate_workbench_after_category_mutation = invalidate_workbench_after_category_mutation
-        self._clear_read_model = clear_read_model
-        self._enqueue_refresh = enqueue_refresh
-
-    def after_relation_mutation(self, affected_months: list[str]) -> None:
-        self._persist_relations(operation="turnover_relation_mutation_pre_invalidation")
-        self._invalidate_workbench_after_category_mutation(list(affected_months or []))
-        self._persist_relations(operation="turnover_relation_mutation")
-        self._clear_read_model()
-        self._enqueue_refresh(
-            ["all"],
-            reason="turnover_relation_changed",
-        )
-
-
 def _turnover_closure_visibility_freshness_targets(affected_months: list[str]) -> list[dict[str, str]]:
     normalized_months: list[str] = []
     for month in list(affected_months or []):

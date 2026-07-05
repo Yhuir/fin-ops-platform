@@ -23,7 +23,6 @@ from fin_ops_platform.services.pending_invoice_rules import (
 )
 from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
-    pending_invoice_status_matches_filter,
     pending_invoice_status_payload,
 )
 from fin_ops_platform.services.pending_invoice_relation_identity import (
@@ -62,18 +61,6 @@ PENDING_INVOICE_FILTER_FIELDS: dict[str, set[str]] = {
     "oa_application_type": {"contains", "in"},
     "project_name": {"contains", "in"},
 }
-PENDING_INVOICE_SORT_FIELDS = {
-    "trade_date",
-    "amount",
-    "counterparty_name",
-    "status_code",
-    "seller_name",
-    "invoice_total",
-    "oa_applicant",
-    "project_name",
-}
-
-
 def _with_pending_invoice_write_targets(result: dict[str, Any]) -> dict[str, Any]:
     affected_months = result.get("affected_months")
     result.update(
@@ -193,110 +180,6 @@ class PendingInvoiceQueryService:
     def clear_cache(self) -> None:
         return None
 
-    def list_rows(
-        self,
-        *,
-        direction: str,
-        filter: str = "all",
-        date_from: str | None = None,
-        date_to: str | None = None,
-        keyword: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        sort_field: str | None = None,
-        sort_direction: str | None = None,
-        page: int | str | None = 1,
-        page_size: int | str | None = 50,
-    ) -> dict[str, Any]:
-        normalized_direction = self._normalize_direction(direction)
-        normalized_filter = self._normalize_filter(filter)
-        if normalized_direction == "all" and normalized_filter != "all":
-            raise PendingInvoiceError(
-                "invalid_filter_for_all",
-                "All pending invoice rows only support filter=all.",
-                status_code=HTTPStatus.BAD_REQUEST,
-            )
-        if normalized_direction == "income" and normalized_filter not in {"all", *INCOME_FILTERS}:
-            raise PendingInvoiceError(
-                "invalid_filter_for_income",
-                "Income pending invoice rows support all, requires_invoice, no_invoice_required or cash_income filters.",
-                status_code=HTTPStatus.BAD_REQUEST,
-            )
-        if normalized_direction == "expense" and normalized_filter not in {"all", *EXPENSE_FILTERS}:
-            raise PendingInvoiceError(
-                "invalid_filter_for_expense",
-                "Expense pending invoice rows support all, requires_invoice, bank_statement_as_invoice or no_invoice_required filters.",
-                status_code=HTTPStatus.BAD_REQUEST,
-            )
-        page_number = max(_optional_int(page, default=1), 1)
-        page_limit = min(max(_optional_int(page_size, default=50), 1), 200)
-
-        all_transactions = [
-            transaction
-            for transaction in self._import_service.list_transactions(month="all")
-            if self._matches_date_range(transaction, date_from=date_from, date_to=date_to)
-        ]
-        transactions = [
-            transaction
-            for transaction in all_transactions
-            if self._transaction_matches_direction(transaction, normalized_direction)
-        ]
-        categories = self._effective_categories(transactions)
-        tag_groups_by_direction = {
-            "expense": self._pending_invoice_tag_groups(direction="expense"),
-            "income": self._pending_invoice_tag_groups(direction="income"),
-        }
-        rows: list[dict[str, Any]] = []
-        emitted_relation_groups: set[str] = set()
-        for transaction in transactions:
-            transaction_direction = self.direction_for_transaction(transaction)
-            row = self._row_payload(
-                transaction,
-                direction=transaction_direction,
-                category=categories.get(transaction.id, {}),
-                tag_groups=tag_groups_by_direction[transaction_direction],
-            )
-            relation_group_key = self._multi_bank_relation_group_key(row)
-            if relation_group_key and relation_group_key in emitted_relation_groups:
-                continue
-            if self._row_matches_filter(row, direction=transaction_direction, filter_name=normalized_filter):
-                rows.append(row)
-                if relation_group_key:
-                    emitted_relation_groups.add(relation_group_key)
-        if keyword:
-            normalized_keyword = str(keyword).strip().lower()
-            rows = [row for row in rows if normalized_keyword in str(row).lower()]
-        rows = self._apply_filters(rows, filters)
-        rows = self._apply_sort(rows, sort_field=sort_field, sort_direction=sort_direction)
-
-        total = len(rows)
-        start = (page_number - 1) * page_limit
-        paged_rows = rows[start : start + page_limit]
-        missing_invoice_rows = sum(1 for row in rows if not row["invoices"])
-        create_invoice_available_rows = sum(1 for row in rows if row["can_create_invoice"])
-        return {
-            "direction": normalized_direction,
-            "filter": normalized_filter,
-            "rows": paged_rows,
-            "pagination": {
-                "page": page_number,
-                "page_size": page_limit,
-                "total": total,
-            },
-            "summary": {
-                "total_rows": total,
-                "missing_invoice_rows": missing_invoice_rows,
-                "create_invoice_available_rows": create_invoice_available_rows,
-                "source_summary": self._source_summary_for_transactions(
-                    all_transactions,
-                    direction=normalized_direction,
-                ),
-            },
-            "bank_transaction_tags": self._app_settings_provider().get("bank_transaction_tags") or {},
-            "bank_transaction_tags_version": int(
-                (self._app_settings_provider().get("bank_transaction_tags") or {}).get("version") or 1
-            ),
-        }
-
     def _effective_categories(self, transactions: list[BankTransaction]) -> dict[str, dict[str, Any]]:
         if self._effective_category_provider is not None:
             bulk_get_for_rows = getattr(self._effective_category_provider, "bulk_get_for_rows", None)
@@ -379,57 +262,12 @@ class PendingInvoiceQueryService:
             return "income"
         raise PendingInvoiceError("invalid_direction", "Unsupported bank transaction direction.")
 
-    @classmethod
-    def _source_summary_for_transactions(
-        cls,
-        transactions: list[BankTransaction],
-        *,
-        direction: str,
-    ) -> dict[str, int]:
-        expense_rows = sum(1 for transaction in transactions if cls._transaction_matches_direction(transaction, "expense"))
-        income_rows = sum(1 for transaction in transactions if cls._transaction_matches_direction(transaction, "income"))
-        total_rows = expense_rows + income_rows
-        current_rows = total_rows if direction == "all" else (expense_rows if direction == "expense" else income_rows)
-        return {
-            "bank_transaction_rows": total_rows,
-            "expense_rows": expense_rows,
-            "income_rows": income_rows,
-            "current_direction_rows": current_rows,
-            "excluded_direction_rows": max(total_rows - current_rows, 0),
-        }
-
-    @staticmethod
-    def _matches_date_range(
-        transaction: BankTransaction,
-        *,
-        date_from: str | None,
-        date_to: str | None,
-    ) -> bool:
-        txn_date = str(transaction.txn_date or transaction.trade_time or "")[:10]
-        if date_from and txn_date < str(date_from):
-            return False
-        if date_to and txn_date > str(date_to):
-            return False
-        return True
-
     def _pending_invoice_tag_groups(self, *, direction: str) -> dict[str, set[str]]:
         return pending_invoice_tag_group_sets(self._app_settings_provider(), direction=direction)
 
     @staticmethod
     def _group_for_category(category_code: str | None, tag_groups: dict[str, set[str]], *, direction: str) -> str | None:
         return pending_invoice_group_for_category(category_code, tag_groups, direction=direction)
-
-    @staticmethod
-    def _row_matches_filter(row: dict[str, Any], *, direction: str, filter_name: str) -> bool:
-        if filter_name == "all":
-            return True
-        status_payload = row.get("invoice_acquisition_status") if isinstance(row, dict) else {}
-        status_code = str(status_payload.get("code") or "").strip() if isinstance(status_payload, dict) else ""
-        return pending_invoice_status_matches_filter(
-            direction=direction,
-            filter_name=filter_name,
-            status_code=status_code,
-        )
 
     def _bank_account_mappings_by_last4(self) -> dict[str, dict[str, str]]:
         settings = self._app_settings_provider()
@@ -1034,90 +872,6 @@ class PendingInvoiceQueryService:
                 return value
         return ""
 
-    def _apply_filters(self, rows: list[dict[str, Any]], filters: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-        filter_items = self._parse_filters(filters)
-        if not filter_items:
-            return rows
-        return [row for row in rows if all(self._row_matches_filter_item(row, item) for item in filter_items)]
-
-    @staticmethod
-    def _parse_filters(filters: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-        if filters in (None, ""):
-            return []
-        if isinstance(filters, str):
-            try:
-                parsed = json.loads(filters)
-            except json.JSONDecodeError as exc:
-                raise PendingInvoiceError("invalid_filters", "filters must be a JSON array.") from exc
-        else:
-            parsed = filters
-        if not isinstance(parsed, list):
-            raise PendingInvoiceError("invalid_filters", "filters must be a JSON array.")
-        result: list[dict[str, Any]] = []
-        for item in parsed:
-            if not isinstance(item, dict):
-                raise PendingInvoiceError("invalid_filters", "Each filter must be an object.")
-            field = str(item.get("field") or "").strip()
-            operator = str(item.get("operator") or "").strip()
-            if field not in PENDING_INVOICE_FILTER_FIELDS:
-                raise PendingInvoiceError("invalid_filter_field", f"Unsupported filter field: {field}", details={"field": field})
-            if operator not in PENDING_INVOICE_FILTER_FIELDS[field]:
-                raise PendingInvoiceError(
-                    "invalid_filter_operator",
-                    f"Unsupported filter operator: {operator}",
-                    details={"field": field, "operator": operator},
-                )
-            result.append({"field": field, "operator": operator, "value": item.get("value"), "values": item.get("values")})
-        return result
-
-    def _row_matches_filter_item(self, row: dict[str, Any], item: dict[str, Any]) -> bool:
-        field = str(item["field"])
-        operator = str(item["operator"])
-        value = self._row_field_value(row, field)
-        if operator == "contains":
-            needle = str(item.get("value") or "").strip().lower()
-            return not needle or needle in str(value or "").lower()
-        if operator == "in":
-            accepted = {str(candidate).strip().lower() for candidate in list(item.get("values") or []) if str(candidate).strip()}
-            return not accepted or str(value or "").strip().lower() in accepted
-        if operator == "between":
-            bounds = item.get("value") if isinstance(item.get("value"), dict) else {}
-            if field in {"amount", "invoice_total"}:
-                parsed = _decimal_from_text(value)
-                minimum = _decimal_or_none(bounds.get("min"))
-                maximum = _decimal_or_none(bounds.get("max"))
-                return (minimum is None or parsed >= minimum) and (maximum is None or parsed <= maximum)
-            text_value = str(value or "")
-            start = str(bounds.get("from") or "").strip()
-            end = str(bounds.get("to") or "").strip()
-            return (not start or text_value >= start) and (not end or text_value <= end)
-        if operator == "eq":
-            return _decimal_from_text(value) == _decimal_from_text(item.get("value"))
-        return True
-
-    def _apply_sort(
-        self,
-        rows: list[dict[str, Any]],
-        *,
-        sort_field: str | None,
-        sort_direction: str | None,
-    ) -> list[dict[str, Any]]:
-        field = str(sort_field or "").strip()
-        if not field:
-            return rows
-        if field not in PENDING_INVOICE_SORT_FIELDS:
-            raise PendingInvoiceError("invalid_sort_field", f"Unsupported sort field: {field}", details={"field": field})
-        direction = str(sort_direction or "asc").strip().lower() or "asc"
-        if direction not in {"asc", "desc"}:
-            raise PendingInvoiceError("invalid_sort_direction", "sort_direction must be asc or desc.")
-        return sorted(rows, key=lambda row: self._sort_key(row, field), reverse=direction == "desc")
-
-    def _sort_key(self, row: dict[str, Any], field: str) -> tuple[int, Any]:
-        value = self._row_field_value(row, field)
-        if field in {"amount", "invoice_total"}:
-            return (0, _decimal_from_text(value))
-        return (0, str(value or ""))
-
     @staticmethod
     def _row_field_value(row: dict[str, Any], field: str) -> Any:
         bank = row.get("bank_transaction") if isinstance(row.get("bank_transaction"), dict) else {}
@@ -1331,41 +1085,6 @@ class PendingInvoiceQueryService:
             "rows": rows[start : start + page_limit],
             "pagination": {"page": page_number, "page_size": page_limit, "total": len(rows)},
         }
-
-    def filter_options(
-        self,
-        *,
-        direction: str,
-        filter: str = "all",
-        keyword: str | None = None,
-        date_from: str | None = None,
-        date_to: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        payload = self.list_rows(
-            direction=direction,
-            filter=filter,
-            keyword=keyword,
-            date_from=date_from,
-            date_to=date_to,
-            filters=filters,
-            page=1,
-            page_size=200,
-        )
-        rows = list(payload.get("rows") or [])
-        fields = self._filter_option_fields()
-        options: dict[str, list[dict[str, Any]]] = {}
-        for field in PENDING_INVOICE_FILTER_FIELDS:
-            counts: dict[str, int] = {}
-            for row in rows:
-                value = str(self._row_field_value(row, field) or "").strip()
-                if value:
-                    counts[value] = counts.get(value, 0) + 1
-            options[field] = [
-                {"value": value, "label": value, "count": count}
-                for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:50]
-            ]
-        return {"direction": payload["direction"], "filter": payload["filter"], "fields": fields, "options": options}
 
     def filter_options_for_rows(
         self,
@@ -1693,10 +1412,6 @@ class PendingInvoiceQueryService:
                 return text
         return ""
 
-    def export_preview(self, **kwargs: Any) -> dict[str, Any]:
-        rows = self._all_rows_for_export(**kwargs)
-        return self.export_preview_for_rows(rows=rows, filters={key: value for key, value in kwargs.items() if value not in (None, "")})
-
     def export_preview_for_rows(
         self,
         *,
@@ -1713,10 +1428,6 @@ class PendingInvoiceQueryService:
             "pagination": {"preview_count": min(len(rows), 20), "total": len(rows), "limit": 20},
             "filters": dict(filters or {}),
         }
-
-    def export(self, **kwargs: Any) -> tuple[str, bytes]:
-        rows = self._all_rows_for_export(**kwargs)
-        return self.export_for_rows(rows=rows)
 
     def export_for_rows(self, *, rows: list[dict[str, Any]]) -> tuple[str, bytes]:
         from io import BytesIO
@@ -1742,48 +1453,6 @@ class PendingInvoiceQueryService:
         workbook.save(buffer)
         filename = f"待找发票-{datetime.now(UTC).date().isoformat()}.xlsx"
         return filename, buffer.getvalue()
-
-    def _all_rows_for_export(self, **kwargs: Any) -> list[dict[str, Any]]:
-        payload = self.list_rows(
-            direction=str(kwargs.get("direction") or "expense"),
-            filter=str(kwargs.get("filter") or "all"),
-            date_from=kwargs.get("date_from"),
-            date_to=kwargs.get("date_to"),
-            keyword=kwargs.get("keyword"),
-            filters=kwargs.get("filters"),
-            sort_field=kwargs.get("sort_field"),
-            sort_direction=kwargs.get("sort_direction"),
-            page=1,
-            page_size=200,
-        )
-        total = int((payload.get("pagination") or {}).get("total") or len(payload.get("rows") or []))
-        if total > PENDING_INVOICE_EXPORT_ROW_LIMIT:
-            raise PendingInvoiceError(
-                "pending_invoice_export_row_limit_exceeded",
-                f"当前筛选命中 {total} 行，超过 {PENDING_INVOICE_EXPORT_ROW_LIMIT} 行导出上限，请缩小筛选范围。",
-                details={"total": total, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT},
-            )
-        rows = list(payload.get("rows") or [])
-        page = 2
-        while len(rows) < total:
-            next_payload = self.list_rows(
-                direction=str(kwargs.get("direction") or "expense"),
-                filter=str(kwargs.get("filter") or "all"),
-                date_from=kwargs.get("date_from"),
-                date_to=kwargs.get("date_to"),
-                keyword=kwargs.get("keyword"),
-                filters=kwargs.get("filters"),
-                sort_field=kwargs.get("sort_field"),
-                sort_direction=kwargs.get("sort_direction"),
-                page=page,
-                page_size=200,
-            )
-            page_rows = list(next_payload.get("rows") or [])
-            if not page_rows:
-                break
-            rows.extend(page_rows)
-            page += 1
-        return rows
 
     @staticmethod
     def _export_row(index: int, row: dict[str, Any]) -> dict[str, Any]:

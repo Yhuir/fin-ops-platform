@@ -506,20 +506,6 @@ function installOaPendingPaymentsFetch(overrides?: {
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (url.pathname === "/api/oa-pending-payments/confirm-paid") {
-      return new Response(JSON.stringify({
-        success: true,
-        action: "confirm_paid",
-        oaRowId: "oa-candidate",
-        bankTransactionIds: ["bank-candidate-004"],
-        paymentStatus: { code: "paid", label: "已支付", reason: "已确认支出流水" },
-        oaPaymentWriteback: { code: "written", label: "已写回", flowIds: ["proc-candidate"], syncStatus: "ready" },
-        readModelRefresh: { scopeKeys: ["2026-05", "all"], enqueued: true, targetSeconds: 2 },
-      }), {
-        status: init?.method === "POST" ? 200 : 405,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
     if (url.pathname === "/api/oa-pending-payments/auto-reconcile-bank-transactions") {
       const scriptedResponse = autoReconcileResponses.shift();
       const status = scriptedResponse?.status ?? (init?.method === "POST" ? 200 : 405);

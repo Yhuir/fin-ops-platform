@@ -276,7 +276,7 @@
 
 - 目标：执行 `read-models:turnover-ledger-refresh-producer-clear-port-extraction`，把外部往来台账 read model refresh/clear 行为从 `Application` helper 收敛到显式 producer 边界。
 - 影响范围：`TurnoverLedgerReadModelRefreshProducer`、`Application` turnover/bank-detail callback wiring、turnover API regression tests 和 platform boundary guard；不改变 turnover API shape、业务规则、worker event、queue schema、权限、审计或前端行为。
-- 关键决策：`TurnoverLedgerReadModelRefreshProducer.enqueue(...)` 继续通过 `ReadModelRefreshGateway` 和 `turnover_ledger` month/all scope policy 入队；`clear_best_effort()` 只通过 turnover-specific repository port 调用 `clear_turnover_ledger_rows()`，不再从 broad workbench SQL repository 清理 turnover rows。旧 app-owned enqueue/clear helper 已删除。
+- 关键决策：`TurnoverLedgerReadModelRefreshProducer.enqueue(...)` 继续通过 `ReadModelRefreshGateway` 和 `turnover_ledger` month/all scope policy 入队。该阶段曾保留 producer direct clear port；2026-07-05 已删除 `clear_best_effort()` 和 read repository provider，producer 只保留 enqueue I/O。
 - 文档影响：新增 modular IO analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 read-models/turnover-ledger 实施记录与测试矩阵。
 - 测试覆盖：新增 `tests/test_turnover_ledger_read_model_refresh_producer.py`；更新 turnover API、bank auto-tag side-effect 和 platform boundary guard。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-producer-clear-port-extraction.md`。
@@ -286,12 +286,20 @@
 
 - 目标：执行 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit`，审计外部往来台账 fresh gate、force refresh、all scope、Workbench relation source-version、operation barrier 和旧链路污染风险。
 - 影响范围：`TurnoverLedgerQueryService`、`TurnoverLedgerSqlProjectionBuilder`、`TurnoverLedgerReadModelRefreshService`、scope policy、manifest、App Status/worker registry、`Application` turnover clear/refresh helpers 和 modular IO state；不改变运行时代码。
-- 关键决策：已有本地证据证明 SQL fresh gate、month/all scope policy、manifest/App Status/worker 注册、Workbench relation source-version proof 和 operation barrier blocking 行为。但 `Application._enqueue_turnover_ledger_read_model_refreshes(...)` 仍拥有 refresh producer 行为，`Application._clear_turnover_ledger_read_model_best_effort(...)` 仍通过 broad `_workbench_sql_read_repository` 清理 turnover rows，因此不能进入 local closure/defer。
+- 关键决策：已有本地证据证明 SQL fresh gate、month/all scope policy、manifest/App Status/worker 注册、Workbench relation source-version proof 和 operation barrier blocking 行为。该阶段发现的 app-owned enqueue/clear helper gap 已在后续 producer extraction 和 2026-07-05 direct clear removal 中关闭。
 - 文档影响：新增 freshness/barrier audit analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt 和 read-models/turnover-ledger 实施记录。
 - 测试覆盖：本轮是 analysis/accounting only；下一轮实现必须新增/更新 producer/clear boundary guard。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-turnover-ledger-refresh-freshness-operation-barrier-audit.md`。
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；但不能用生产证据缺口绕过本地 app-owned clear/refresh gap。
 - 后续事项：执行 `read-models:turnover-ledger-refresh-producer-clear-port-extraction`；Go admission 继续 blocked。
+
+## 2026-07-05 - Turnover ledger refresh producer direct clear removal
+
+- 目标：执行外部往来款管理模块化 close，删除仍可污染新链路的 producer direct clear I/O、app read forwarding facade 和 relation mutation legacy invalidation adapter。
+- 影响范围：`TurnoverLedgerReadModelRefreshProducer`、`Application` composition root、`BankDetailsApplicationService` bank-auto-tag finalizer wiring、turnover API/boundary tests 和 turnover/read-models 文档；不改变 HTTP response shape、queue event type、projection schema 或前端 UI。
+- 关键决策：`TurnoverLedgerReadModelRefreshProducer` 只保留 `enqueue(...)`，不再接收 read repository provider，也不再暴露 `clear_best_effort()`；银行明细模块不再注入 `clear_turnover_ledger_read_model`，只通过 explicit refresh producer 请求 `turnover_ledger` refresh。
+- 测试覆盖：更新 `tests/test_turnover_ledger_read_model_refresh_producer.py`、`tests/test_turnover_ledger_api.py`、`tests/test_platform_runtime_boundary_guards.py` 和 `tests/test_bank_details_sql_runtime.py`，防止 app read facade、legacy invalidation adapter 和 producer clear I/O 恢复。
+- 未测风险：本轮不连接真实 PostgreSQL/RabbitMQ/Redis/systemd，不验证生产 worker drain 或真实大数据 refresh；这些仍归 staging/infra smoke。
 
 ## 2026-06-24 - Turnover ledger repository port extraction
 

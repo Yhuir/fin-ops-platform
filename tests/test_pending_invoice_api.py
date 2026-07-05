@@ -3,15 +3,124 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
 from tests.app_test_support import build_local_state_application as build_application
-from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.domain.enums import BatchType, TransactionDirection
 from fin_ops_platform.services.pending_invoice_read_model_service import pending_invoice_source_versions
 from fin_ops_platform.services.pending_invoice_service import PENDING_INVOICE_EXPORT_ROW_LIMIT
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.pending_invoice_rules import pending_invoice_rules_payload
+from fin_ops_platform.services.pending_invoice_status import pending_invoice_status_matches_filter
+
+
+def _optional_int(value: object, *, default: int) -> int:
+    try:
+        if value in (None, ""):
+            return default
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _matches_date_range(transaction: object, *, date_from: object, date_to: object) -> bool:
+    txn_date = str(getattr(transaction, "txn_date", "") or getattr(transaction, "trade_time", "") or "")[:10]
+    if date_from and txn_date < str(date_from):
+        return False
+    if date_to and txn_date > str(date_to):
+        return False
+    return True
+
+
+def _row_matches_filter(row: dict[str, object], *, direction: str, filter_name: str) -> bool:
+    if filter_name == "all":
+        return True
+    status_payload = row.get("invoice_acquisition_status") if isinstance(row, dict) else {}
+    status_code = str(status_payload.get("code") or "").strip() if isinstance(status_payload, dict) else ""
+    return pending_invoice_status_matches_filter(direction=direction, filter_name=filter_name, status_code=status_code)
+
+
+def _source_summary_for_transactions(transactions: list[object], *, direction: str) -> dict[str, int]:
+    expense_rows = sum(1 for transaction in transactions if getattr(transaction, "txn_direction", None) == TransactionDirection.OUTFLOW)
+    income_rows = sum(1 for transaction in transactions if getattr(transaction, "txn_direction", None) == TransactionDirection.INFLOW)
+    total_rows = expense_rows + income_rows
+    current_rows = total_rows if direction == "all" else (expense_rows if direction == "expense" else income_rows)
+    return {
+        "bank_transaction_rows": total_rows,
+        "expense_rows": expense_rows,
+        "income_rows": income_rows,
+        "current_direction_rows": current_rows,
+        "excluded_direction_rows": max(total_rows - current_rows, 0),
+    }
+
+
+def _apply_filters(rows: list[dict[str, object]], filters: object) -> list[dict[str, object]]:
+    if filters in (None, ""):
+        return rows
+    parsed = json.loads(filters) if isinstance(filters, str) else filters
+    if not isinstance(parsed, list):
+        return rows
+    result = rows
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field") or "")
+        operator = str(item.get("operator") or "")
+        if operator == "contains":
+            needle = str(item.get("value") or "").lower()
+            result = [row for row in result if needle in str(_row_field_value(row, field) or "").lower()]
+        elif operator == "in":
+            accepted = {str(value).lower() for value in list(item.get("values") or [])}
+            result = [row for row in result if str(_row_field_value(row, field) or "").lower() in accepted]
+        elif operator == "between":
+            bounds = item.get("value") if isinstance(item.get("value"), dict) else {}
+            if field in {"amount", "invoice_total"}:
+                minimum = _decimal_or_none(bounds.get("min"))
+                maximum = _decimal_or_none(bounds.get("max"))
+                result = [
+                    row
+                    for row in result
+                    if (minimum is None or _decimal_from_text(_row_field_value(row, field)) >= minimum)
+                    and (maximum is None or _decimal_from_text(_row_field_value(row, field)) <= maximum)
+                ]
+    return result
+
+
+def _apply_sort(rows: list[dict[str, object]], *, sort_field: object, sort_direction: object) -> list[dict[str, object]]:
+    field = str(sort_field or "").strip()
+    if not field:
+        return rows
+    direction = str(sort_direction or "asc").strip().lower()
+    return sorted(rows, key=lambda row: _query_sort_key(row, field), reverse=direction == "desc")
+
+
+def _query_sort_key(row: dict[str, object], field: str) -> tuple[int, object]:
+    value = _row_field_value(row, field)
+    if field in {"amount", "invoice_total"}:
+        return (0, _decimal_from_text(value))
+    return (0, str(value or ""))
+
+
+def _row_field_value(row: dict[str, object], field: str) -> object:
+    from fin_ops_platform.services.pending_invoice_service import PendingInvoiceQueryService
+
+    return PendingInvoiceQueryService._row_field_value(row, field)
+
+
+def _decimal_or_none(value: object) -> Decimal | None:
+    try:
+        if value in (None, ""):
+            return None
+        return Decimal(str(value).replace(",", ""))
+    except Exception:
+        return None
+
+
+def _decimal_from_text(value: object) -> Decimal:
+    parsed = _decimal_or_none(value)
+    return parsed if parsed is not None else Decimal("0")
 
 
 class PendingInvoiceApiTests(unittest.TestCase):
@@ -312,11 +421,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
             queue_repository = QueueRepository()
             app._pending_invoice_sql_read_repository = MissingPendingInvoiceSqlReadRepository()
             app._runtime_repositories = SimpleNamespace(queue_repository=queue_repository)
-
-            def fail_sync_scan(**_kwargs: object) -> dict[str, object]:
-                raise AssertionError("Pending invoice API must not synchronously scan facts on read model miss.")
-
-            app._pending_invoice_query_service.list_rows = fail_sync_scan
+            self.assertFalse(hasattr(app._pending_invoice_query_service, "list_rows"))
 
             rows_response = app.handle_request("GET", "/api/pending-invoices/rows?direction=expense&filter=all")
             filter_options_response = app.handle_request("GET", "/api/pending-invoices/filter-options?direction=expense")
@@ -406,11 +511,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             self._create_bank_transaction(app, counterparty_name="Vendor No Repository")
-
-            def fail_sync_scan(**_kwargs: object) -> dict[str, object]:
-                raise AssertionError("Pending invoice API must not use PendingInvoiceQueryService.list_rows.")
-
-            app._pending_invoice_query_service.list_rows = fail_sync_scan
+            self.assertFalse(hasattr(app._pending_invoice_query_service, "list_rows"))
 
             response = app.handle_request("GET", "/api/pending-invoices/rows?direction=expense&filter=all")
 
@@ -1014,9 +1115,65 @@ class PendingInvoiceApiTests(unittest.TestCase):
 
     @staticmethod
     def _install_pending_invoice_sql_read_model(app: object) -> None:
+        def query_rows(**kwargs: object) -> dict[str, object]:
+            query_service = app._pending_invoice_query_service
+            direction = str(kwargs.get("direction") or "expense")
+            filter_name = str(kwargs.get("filter") or "all")
+            page = max(_optional_int(kwargs.get("page"), default=1), 1)
+            page_size = min(max(_optional_int(kwargs.get("page_size"), default=50), 1), 200)
+            transactions = [
+                transaction
+                for transaction in query_service._import_service.list_transactions(month="all")
+                if _matches_date_range(
+                    transaction,
+                    date_from=kwargs.get("date_from"),
+                    date_to=kwargs.get("date_to"),
+                )
+                and query_service._transaction_matches_direction(transaction, direction)
+            ]
+            rows = []
+            emitted_relation_groups = set()
+            for transaction in transactions:
+                transaction_direction = query_service.direction_for_transaction(transaction)
+                row = query_service.row_for_transaction(transaction.id, direction=transaction_direction)
+                relation_group_key = query_service._multi_bank_relation_group_key(row)
+                if relation_group_key and relation_group_key in emitted_relation_groups:
+                    continue
+                if _row_matches_filter(row, direction=transaction_direction, filter_name=filter_name):
+                    rows.append(row)
+                    if relation_group_key:
+                        emitted_relation_groups.add(relation_group_key)
+            keyword = str(kwargs.get("keyword") or "").strip().lower()
+            if keyword:
+                rows = [row for row in rows if keyword in str(row).lower()]
+            rows = _apply_filters(rows, kwargs.get("filters"))
+            rows = _apply_sort(
+                rows,
+                sort_field=kwargs.get("sort_field"),
+                sort_direction=kwargs.get("sort_direction"),
+            )
+            total = len(rows)
+            start = (page - 1) * page_size
+            return {
+                "direction": direction,
+                "filter": filter_name,
+                "rows": rows[start : start + page_size],
+                "pagination": {"page": page, "page_size": page_size, "total": total},
+                "summary": {
+                    "total_rows": total,
+                    "missing_invoice_rows": sum(1 for row in rows if not row["invoices"]),
+                    "create_invoice_available_rows": sum(1 for row in rows if row["can_create_invoice"]),
+                    "source_summary": _source_summary_for_transactions(transactions, direction=direction),
+                },
+                "bank_transaction_tags": app._app_settings_service.get_settings_payload().get("bank_transaction_tags") or {},
+                "bank_transaction_tags_version": int(
+                    (app._app_settings_service.get_settings_payload().get("bank_transaction_tags") or {}).get("version") or 1
+                ),
+            }
+
         class PendingInvoiceSqlReadRepository:
             def list_pending_invoice_rows(self, **kwargs: object) -> dict[str, object]:
-                payload = app._pending_invoice_query_service.list_rows(**kwargs)
+                payload = query_rows(**kwargs)
                 result = dict(payload)
                 result["refresh_status"] = "fresh"
                 result["source_versions"] = pending_invoice_source_versions(
@@ -1033,7 +1190,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 date_from: str | None = None,
                 date_to: str | None = None,
             ) -> dict[str, int]:
-                payload = app._pending_invoice_query_service.list_rows(
+                payload = query_rows(
                     direction=direction,
                     filter="all",
                     date_from=date_from,

@@ -1,14 +1,14 @@
 # 待找发票模块边界与 I/O
 
-日期：2026-07-02
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
+- 状态：closed
 - 当前边界可信度：high
 - 目标边界：待找发票页面读取 `pending_invoice` scoped read model，规则保存和关联变更触发精确 scope refresh。
-- 当前缺口：pending invoice 同时依赖 search、invoice lifecycle、workbench relation，变更时必须同时核验 fan-out。
-- 旧代码删除条件：旧 API 直查路径不再被前端或 tests 引用。
+- 当前结论：rows、filter-options、export-preview 和 export 只允许通过 `PendingInvoiceReadModelService` freshness gate 读取 `pending_invoice` read model；候选、详情和导出格式化只接受明确输入 rows 或 scoped id，不再暴露同步全量 rows 直查入口。
+- 旧代码删除结果：`Application._handle_api_pending_invoice_rows` 兼容入口、`PendingInvoiceQueryService.list_rows`、旧同步 `filter_options`、旧同步 `export_preview/export` 和旧 rows-only filter/sort helper 已删除；tests 不再引用旧 handler 或旧 query-service rows API。
 
 ## 职责边界
 
@@ -80,14 +80,14 @@
 ## 当前缺口和删除条件
 
 - 修改规则或 scope policy 时必须同步 manifest/scope tests。
-- 删除旧路径前必须覆盖 expense/income、规则保存、关联、导出和 fan-out。
+- 已删除旧路径后仍需保持覆盖：expense/income、规则保存、关联、导出和 fan-out。
 
 ## Canonical facts ownership
 
 - Owned facts: `app.pending_invoice_manual_invoice_commands`。
 - Shared facts: `app.invoices` 由 canonical invoice pool owner 管理；关系事实由 `workbench-relations` owner 管理。
 - Allowed writes: pending invoice manual invoice command service、pending invoice application boundary。
-- Allowed reads: pending invoice application/query services、manual command repository/read ports。
+- Allowed reads: `PendingInvoiceReadModelService`、transaction-scoped pending invoice query/detail/candidate services、manual command repository/read ports。
 - Downstream outputs: pending_invoice、invoice_lifecycle、search、workbench_relation dirty scopes 或 owner producer 输出。
 - Forbidden paths: pending invoice 页面或 service 不得直接创建第二发票池、直接写 relation facts 或绕过 command 状态机。
-- Old code deletion: manual invoice command snapshot fallback、direct invoice/relation write fallback 和 bare all refresh 旧路径必须删除；migration/audit/rollback 工具保留不算 closure。
+- Old code deletion: manual invoice command snapshot fallback、direct invoice/relation write fallback、bare all refresh、旧 API handler 和同步 rows/filter/export 直查路径已关闭；migration/audit/rollback 工具保留不算污染。

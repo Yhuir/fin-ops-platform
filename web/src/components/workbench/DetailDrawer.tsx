@@ -1,9 +1,9 @@
-import { useEffect } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, type ReactNode } from "react";
 
 import BankAccountValue from "../BankAccountValue";
+import AppDrawer from "../common/AppDrawer";
 import DirectionTag from "../DirectionTag";
-import type { WorkbenchRecord } from "../../features/workbench/types";
+import type { WorkbenchDetailField, WorkbenchRecord } from "../../features/workbench/types";
 import { workbenchColumns } from "../../features/workbench/tableConfig";
 
 type DetailDrawerProps = {
@@ -17,6 +17,14 @@ const drawerTitles: Record<WorkbenchRecord["recordType"], string> = {
   oa: "OA详情",
   bank: "银行流水详情",
   invoice: "发票详情",
+};
+
+type DetailTableSection = {
+  title: string;
+  fields: Array<{
+    label: string;
+    value: ReactNode;
+  }>;
 };
 
 export default function DetailDrawer({ row, loading, error, onClose }: DetailDrawerProps) {
@@ -35,87 +43,85 @@ export default function DetailDrawer({ row, loading, error, onClose }: DetailDra
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [row, onClose]);
 
-  if (!row) {
-    return null;
-  }
+  const open = Boolean(row);
+  const title = row ? drawerTitles[row.recordType] : "详情";
+  const sections = row ? detailTableSections(row, loading, error) : [];
 
-  const summaryColumns = workbenchColumns[row.recordType];
-  const content = (
-    <div
-      aria-label="详情弹窗"
-      aria-modal="true"
-      className="detail-modal-backdrop detail-modal-backdrop-foreground"
-      role="dialog"
-      onClick={onClose}
+  return (
+    <AppDrawer
+      className="workbench-detail-drawer"
+      closeLabel="关闭详情抽屉"
+      open={open}
+      subtitle={row?.status}
+      title={title}
+      width="min(720px, 100vw)"
+      onClose={onClose}
     >
-      <div className="detail-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="detail-drawer-header">
-          <div>
-            <div className="detail-drawer-title">{drawerTitles[row.recordType]}</div>
-            <div className="detail-drawer-subtitle">
-              记录编号：{row.id}
-              {row.caseId ? ` ｜ 案例：${row.caseId}` : ""}
-            </div>
-          </div>
-          <button className="detail-close-btn" type="button" onClick={onClose} aria-label="关闭详情">
-            关闭
-          </button>
-        </div>
-
-        <div className="detail-drawer-body">
-          {loading ? <div className="detail-state-panel">正在加载详情...</div> : null}
-          {error ? <div className="detail-state-panel error">{error}</div> : null}
-          <div className="detail-summary">
-            <div className="detail-summary-label">主表字段</div>
-            <dl className="detail-list">
-              <div>
-                <dt>记录类型</dt>
-                <dd>{row.label}</dd>
-              </div>
-              <div>
-                <dt>当前状态</dt>
-                <dd>{row.status}</dd>
-              </div>
-              {summaryColumns.map((column) => (
-                <div key={column.key}>
-                  <dt>{column.label}</dt>
-                  <dd>{renderSummaryValue(row, column.key)}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-
-          <div className="detail-summary">
-            <div className="detail-summary-label">详情字段</div>
-            <dl className="detail-list">
-              {row.detailFields.length === 0 ? (
-                <div>
-                  <dt>详情状态</dt>
-                  <dd>{loading ? "详情加载中" : error ? "详情加载失败" : "暂无更多详情"}</dd>
-                </div>
-              ) : (
-                row.detailFields.map((field) => (
-                  <div key={field.label}>
-                    <dt>{field.label}</dt>
-                    <dd>{renderDetailFieldValue(field.label, field.value)}</dd>
-                  </div>
-                ))
-              )}
-            </dl>
-          </div>
-        </div>
+      <div className="workbench-detail-drawer__body">
+        {loading ? <div className="workbench-detail-state">正在加载详情...</div> : null}
+        {error ? <div className="workbench-detail-state workbench-detail-state--error">{error}</div> : null}
+        <DetailTable sections={sections} title={title} />
       </div>
-    </div>
+    </AppDrawer>
   );
-
-  if (typeof document === "undefined") {
-    return content;
-  }
-
-  return createPortal(content, document.body);
 }
 
-function renderSummaryValue(row: WorkbenchRecord, key: string) {
+function detailTableSections(row: WorkbenchRecord, loading: boolean, error: string | null): DetailTableSection[] {
+  const summaryFields = [
+    { label: "记录类型", value: row.label },
+    { label: "当前状态", value: row.status },
+    ...workbenchColumns[row.recordType].map((column) => ({
+      label: column.label,
+      value: renderSummaryValue(row, column.key),
+    })),
+  ];
+  const detailFields = visibleDetailFields(row.detailFields).map((field) => ({
+    label: field.label,
+    value: renderDetailFieldValue(field.label, field.value),
+  }));
+
+  return [
+    { title: "主表字段", fields: summaryFields },
+    {
+      title: "详情字段",
+      fields: detailFields.length > 0
+        ? detailFields
+        : [{ label: "详情状态", value: loading ? "详情加载中" : error ? "详情加载失败" : "暂无更多详情" }],
+    },
+  ];
+}
+
+function DetailTable({ sections, title }: { sections: DetailTableSection[]; title: string }) {
+  return (
+    <div className="workbench-detail-table-shell">
+      <table aria-label={`${title}明细表`} className="workbench-detail-table">
+        <tbody>
+          {sections.map((section) => (
+            <TableSection key={section.title} section={section} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TableSection({ section }: { section: DetailTableSection }) {
+  return (
+    <>
+      <tr className="workbench-detail-table__section-row">
+        <th colSpan={2} scope="colgroup">{section.title}</th>
+      </tr>
+      {section.fields.map((field) => (
+        <tr key={`${section.title}-${field.label}`}>
+          <th scope="row">{field.label}</th>
+          <td>{field.value}</td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function renderSummaryValue(row: WorkbenchRecord, key: string): ReactNode {
   const value = row.tableValues[key] ?? "--";
   if (row.recordType === "bank" && key === "amount") {
     const direction = resolveDirectionForMoneyCell(row.tableValues.direction ?? "", value);
@@ -143,11 +149,59 @@ function renderSummaryValue(row: WorkbenchRecord, key: string) {
   return value;
 }
 
-function renderDetailFieldValue(label: string, value: string) {
+function visibleDetailFields(fields: WorkbenchDetailField[]) {
+  return fields.filter((field) => isVisibleDetailField(field.label, field.value));
+}
+
+function isVisibleDetailField(label: string, value: string) {
+  const trimmedLabel = label.trim();
+  if (!trimmedLabel) {
+    return false;
+  }
+  if (/[A-Za-z_]/.test(trimmedLabel)) {
+    return false;
+  }
+  if (
+    /Mongo|文档ID|流程.*ID|实例ID|请求ID|内部|UUID|Key|记录编号|付款项ID|附件.*识别情况|附件.*闭环状态|账户明细编号|企业流水号|交易流水号/.test(
+      trimmedLabel,
+    )
+  ) {
+    return false;
+  }
+  if (/^\s*(?:已解析\s*)?\d+\s*[-/]\s*\d+\s*$/.test(value)) {
+    return false;
+  }
+  if (/付款(?:凭证)?金额与附件发票金额一致/.test(value)) {
+    return false;
+  }
+  return !looksLikeInternalId(value);
+}
+
+function looksLikeInternalId(value: string) {
+  const text = value.trim();
+  if (!text || text === "--" || text === "—") {
+    return false;
+  }
+  return /^[0-9a-f]{24}$/i.test(text)
+    || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text)
+    || /^OA[A-Za-z]+\d+$/i.test(text)
+    || /^(?:oa|bk|iv|case)-/i.test(text)
+    || /^(?:det|corp|vch)-/i.test(text);
+}
+
+function renderDetailFieldValue(label: string, value: string): ReactNode {
   if (label === "支付账户" || label === "收款账户") {
     return <BankAccountValue value={value} variant="tag" />;
   }
-  return value;
+  return formatDetailValue(value);
+}
+
+function formatDetailValue(value: string) {
+  const text = value.trim();
+  if (!text || text === "--" || text === "—") {
+    return "-";
+  }
+  return text.replace(/\s*[（(][0-9a-f]{16,}\.(?:png|jpg|jpeg|pdf)[）)]/gi, "");
 }
 
 function resolveDirectionForMoneyCell(direction: string, value: string) {

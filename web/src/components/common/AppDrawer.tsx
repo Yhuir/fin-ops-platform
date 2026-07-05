@@ -1,13 +1,15 @@
 import { Button, Drawer } from "@heroui/react";
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 type AppDrawerProps = {
   open: boolean;
   title: string;
+  ariaBusy?: boolean;
   subtitle?: ReactNode;
   headerAside?: ReactNode;
   className?: string;
   children: ReactNode;
+  closeDisabled?: boolean;
   closeLabel?: string;
   footer?: ReactNode;
   modal?: boolean;
@@ -24,10 +26,12 @@ const persistentDrawerExitMs = 180;
 export default function AppDrawer({
   open,
   title,
+  ariaBusy,
   subtitle,
   headerAside,
   className,
   children,
+  closeDisabled = false,
   closeLabel,
   footer,
   modal = true,
@@ -41,6 +45,22 @@ export default function AppDrawer({
   const drawerStyle: AppDrawerStyle = {
     "--finance-drawer-width": typeof width === "number" ? `${width}px` : width,
   };
+
+  useLayoutEffect(() => {
+    if (!open && !persistentMounted) {
+      return;
+    }
+    const heading = document.getElementById(titleId);
+    const dialog = heading?.closest<HTMLElement>("[role='dialog'], [role='presentation']");
+    if (!dialog) {
+      return;
+    }
+    if (ariaBusy) {
+      dialog.setAttribute("aria-busy", "true");
+      return;
+    }
+    dialog.removeAttribute("aria-busy");
+  }, [ariaBusy, open, persistentMounted, titleId]);
 
   useEffect(() => {
     if (modal) {
@@ -91,7 +111,12 @@ export default function AppDrawer({
         data-exiting={persistentClosing ? true : undefined}
         data-placement="right"
       >
-        <section className={`finance-drawer${className ? ` ${className}` : ""}`} role="presentation" style={drawerStyle}>
+        <section
+          aria-busy={ariaBusy ? "true" : undefined}
+          className={`finance-drawer${className ? ` ${className}` : ""}`}
+          role="presentation"
+          style={drawerStyle}
+        >
           <header className="finance-drawer__header">
             <div className="finance-drawer__heading">
               <h2 className="finance-drawer__title" id={titleId}>
@@ -100,7 +125,14 @@ export default function AppDrawer({
               {subtitle ? <div className="finance-drawer__subtitle">{subtitle}</div> : null}
             </div>
             {headerAside ? <div className="finance-drawer__header-aside">{headerAside}</div> : null}
-            <Button aria-label={closeLabel ?? "关闭抽屉"} isIconOnly onPress={onClose} size="sm" variant="tertiary">
+            <Button
+              aria-label={closeLabel ?? "关闭抽屉"}
+              isDisabled={closeDisabled}
+              isIconOnly
+              onPress={onClose}
+              size="sm"
+              variant="tertiary"
+            >
               <span aria-hidden="true">×</span>
             </Button>
           </header>
@@ -121,7 +153,12 @@ export default function AppDrawer({
       }}
     >
       <Drawer.Content className="finance-drawer__content" data-placement="right" placement="right">
-        <Drawer.Dialog aria-labelledby={titleId} className={`finance-drawer${className ? ` ${className}` : ""}`} style={drawerStyle}>
+        <Drawer.Dialog
+          aria-busy={ariaBusy ? "true" : undefined}
+          aria-labelledby={titleId}
+          className={`finance-drawer${className ? ` ${className}` : ""}`}
+          style={drawerStyle}
+        >
           <Drawer.Header className="finance-drawer__header">
             <div className="finance-drawer__heading">
               <Drawer.Heading className="finance-drawer__title" id={titleId}>
@@ -130,7 +167,14 @@ export default function AppDrawer({
               {subtitle ? <div className="finance-drawer__subtitle">{subtitle}</div> : null}
             </div>
             {headerAside ? <div className="finance-drawer__header-aside">{headerAside}</div> : null}
-            <Button aria-label={closeLabel ?? "关闭抽屉"} isIconOnly onPress={onClose} size="sm" variant="tertiary">
+            <Button
+              aria-label={closeLabel ?? "关闭抽屉"}
+              isDisabled={closeDisabled}
+              isIconOnly
+              onPress={onClose}
+              size="sm"
+              variant="tertiary"
+            >
               <span aria-hidden="true">×</span>
             </Button>
           </Drawer.Header>

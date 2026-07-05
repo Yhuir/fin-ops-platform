@@ -52,7 +52,7 @@
 - 禁止把 relation case id 当 OA id、bank transaction id 或 invoice id 请求详情。
 - 禁止用单条 OA 金额和同一 relation 下多条支出流水/发票逐行交叉展开，造成“支付多了”或重复显示同一发票。
 - 禁止只因为出现候选流水、自动决策或未确认 relation 就写回 OA 支付状态；写回必须基于 completed Workbench active relation、in-progress active pending relation 或自动匹配命令刚确认的 pending relation，并通过 outflow、金额相等和 `flow_id` 校验。
-- 禁止前端暴露人工 `confirm-paid` 写回入口；写回必须由自动匹配/写回命令或支出流水关联成功后的自动写回路径触发。
+- 禁止前端和后端暴露人工 `confirm-paid` 写回入口；写回必须由自动匹配/写回命令或支出流水关联成功后的自动写回路径触发。
 - 禁止把 Flowable 流程实例 ID、流程请求 ID 或 relation case id 当 `t_payment_simple.flow_id`；写回 key 必须来自 OA Mongo `form_data._id`（投影中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀）。
 - 禁止用销项发票字段渲染进项发票详情。
 - 禁止把 App Status / domain event 当成付款事实源。
@@ -135,6 +135,7 @@ Worker 流程：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-05 | OA 待付款模块边界 closed，移除旧人工 `confirm-paid` 后端入口 | 后端 route owner 不再注册 `/api/oa-pending-payments/confirm-paid`，`OaPendingPaymentCommandService` 不再暴露 `confirm_paid(...)`，测试 mock 不再提供旧 handler；写回 I/O 只剩 `auto-reconcile-bank-transactions` 与 `link-bank-transactions` 成功后的自动写回。`bank-transaction-candidates` filters 不再输出 `monthScopes`，避免旧“按 OA 月份收敛”语义污染当前全量支出流水候选池。 | `tests.test_oa_pending_payment_api`、`tests.test_oa_pending_payment_command_service`、`tests.test_platform_runtime_boundary_guards`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-30 | 右侧抽屉候选流水增加分页入口 | 候选接口返回超过 100 条时，抽屉显示当前页/总页数并支持上一页/下一页；翻页保留已选 OA 与 relation status 上下文，筛选/搜索变更回到第 1 页。 | `web/src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-30 | 右侧抽屉候选流水改为全量支出流水池 | 进行中 OA 勾选后打开“关联支出流水”抽屉时，前端仍传 `oa_row_ids`，但候选接口不再按 OA 月份收敛；全部、未配对、已配对、已关联进行中 OA 四个筛选分类继续由后端 relation status 输出。 | `tests.test_oa_pending_payment_command_service`、`tests.test_oa_pending_payment_api`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
 | 2026-06-23 | 补 `pending_invoice` / `oa_pending_payment` manifest 合同守卫 | 不改变状态机；锁定 OA 待付款 `all` fan-out command、标准 force refresh、与待找发票 repository port 隔离，防止默认 all 查询或 detail lookup 回退旧 live path | `tests.test_read_model_manifest.ReadModelManifestTests.test_pending_invoice_and_oa_payment_manifest_preserve_page_scope_contracts` |

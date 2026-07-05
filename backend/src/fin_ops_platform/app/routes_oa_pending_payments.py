@@ -80,8 +80,6 @@ class OaPendingPaymentApiRoutes:
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/rows/") and route_path.endswith("/relation-details"):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._json_read(headers, lambda: self._detail_response(self.relation_details(row_id, query)))
-        if method == "POST" and route_path == "/api/oa-pending-payments/confirm-paid":
-            return self._json_write(body, headers, lambda payload, actor_id: self.confirm_paid(payload, actor_id=actor_id))
         if method == "POST" and route_path == "/api/oa-pending-payments/auto-reconcile-bank-transactions":
             return self._json_write(body, headers, lambda payload, actor_id: self.auto_reconcile_bank_transactions(payload, actor_id=actor_id))
         if method == "POST" and route_path == "/api/oa-pending-payments/link-bank-transactions":
@@ -106,11 +104,6 @@ class OaPendingPaymentApiRoutes:
 
     def relation_details(self, row_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
         return self._read_model_service_required().relation_details(row_id, kind=query.get("kind", [""])[0])
-
-    def confirm_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
-        if self._command_service is None:
-            raise RuntimeError("OA pending payment command service is not configured.")
-        return self._command_service.confirm_paid(payload, actor_id=actor_id)
 
     def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         if self._command_service is None:

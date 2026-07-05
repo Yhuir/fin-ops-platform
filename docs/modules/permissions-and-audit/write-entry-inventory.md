@@ -98,9 +98,6 @@
 | `创建 OA 草稿` | `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx` | 进项发票反提 OA 草稿创建。 |
 | `关联支出流水` | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending 关联支出流水。 |
 | `关联OA项` | `web/src/pages/BatchAccountingPage.tsx` | 批量账务关联 OA 项与流水。 |
-| `确认闭环` | `web/src/components/workbench/OaBankExceptionModal.tsx` | 关联台异常直接闭环。 |
-| `继续报异常` | `web/src/components/workbench/OaBankExceptionModal.tsx` | 关联台异常提交。 |
-| `提交异常` | `web/src/components/workbench/OaBankExceptionModal.tsx` | 关联台异常提交。 |
 | `确认为过账` | `web/src/components/workbench/RowActions.tsx` | 关联台现金过账行级菜单。 |
 | `确认为买票` | `web/src/components/workbench/RowActions.tsx` | 关联台现金买票行级菜单。 |
 | `取消现金处理` | `web/src/components/workbench/RowActions.tsx` | 关联台现金特殊处理回滚行级菜单。 |

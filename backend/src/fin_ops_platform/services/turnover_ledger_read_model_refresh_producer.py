@@ -8,10 +8,8 @@ class TurnoverLedgerReadModelRefreshProducer:
         self,
         *,
         refresh_gateway_provider: Callable[[], Any],
-        read_repository_provider: Callable[[], Any | None],
     ) -> None:
         self._refresh_gateway_provider = refresh_gateway_provider
-        self._read_repository_provider = read_repository_provider
 
     def enqueue(
         self,
@@ -25,16 +23,6 @@ class TurnoverLedgerReadModelRefreshProducer:
             return False
         target_scope_keys = self._normalize_scope_keys(scope_keys)
         return bool(refresh_gateway.enqueue_many("turnover_ledger", target_scope_keys, reason=reason, metadata=metadata))
-
-    def clear_best_effort(self) -> None:
-        repository = self._read_repository_provider()
-        clear_rows = getattr(repository, "clear_turnover_ledger_rows", None)
-        if not callable(clear_rows):
-            return
-        try:
-            clear_rows()
-        except Exception:
-            pass
 
     @staticmethod
     def _normalize_scope_keys(scope_keys: list[str]) -> list[str]:

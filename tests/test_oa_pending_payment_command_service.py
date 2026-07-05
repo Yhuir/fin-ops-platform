@@ -129,113 +129,8 @@ class FakePendingRelationService:
 
 
 class OaPendingPaymentCommandServiceTests(unittest.TestCase):
-    def test_confirm_paid_creates_relation_then_writes_mysql_payment_status(self) -> None:
-        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439011")
-        relation_command = FakeRelationCommandService()
-        pending_relation_service = FakePendingRelationService()
-        refresh_calls: list[tuple[str, str, str]] = []
-        service = _service(
-            oa_records=[_oa("oa-pay-2047", "100.00", workflow_status="in_progress")],
-            transactions=[_bank("bank-100", "100.00")],
-            relation_command=relation_command,
-            pending_relation_service=pending_relation_service,
-            payment_repository=payment_repository,
-            refresh_calls=refresh_calls,
-        )
-
-        payload = service.confirm_paid(
-            {"oaRowId": "oa-pay-2047", "bankTransactionId": "bank-100", "idempotencyKey": "idem-1"},
-            actor_id="tester",
-        )
-
-        self.assertTrue(payload["success"])
-        self.assertEqual(payload["paymentStatus"]["code"], "paid")
-        self.assertEqual(payload["oaPaymentWriteback"]["code"], "written")
-        self.assertEqual(payload["oaPaymentWriteback"]["flowId"], "507f1f77bcf86cd799439011")
-        self.assertEqual(payment_repository.resolved_records, ["oa-pay-2047"])
-        self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439011"])
-        self.assertEqual(relation_command.confirm_calls, [])
-        self.assertEqual(len(pending_relation_service.create_calls), 1)
-        create_call = pending_relation_service.create_calls[0]
-        self.assertEqual(create_call["oa_row_ids"], ["oa-pay-2047"])
-        self.assertEqual(create_call["bank_transaction_ids"], ["bank-100"])
-        self.assertEqual(create_call["source_action"], "confirm_paid")
-        self.assertEqual(create_call["idempotency_key"], "idem-1")
-        self.assertEqual(create_call["amount_check"]["matched"], True)
-        self.assertEqual(
-            refresh_calls,
-            [
-                ("workbench", "2026-06", "oa_pending_payment_confirm_paid"),
-                ("oa_pending_payment", "2026-06", "oa_pending_payment_confirm_paid"),
-                ("workbench", "all", "oa_pending_payment_confirm_paid"),
-                ("oa_pending_payment", "all", "oa_pending_payment_confirm_paid"),
-            ],
-        )
-        self.assertEqual(payload["affected_scope_keys"], ["2026-06", "all"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [
-                {"read_model_key": "oa_pending_payment", "scope_key": "2026-06"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-06"},
-                {"read_model_key": "oa_pending_payment", "scope_key": "all"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
-            ],
-        )
-
-    def test_confirm_paid_without_bank_uses_existing_active_relation(self) -> None:
-        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439012")
-        relation_command = FakeRelationCommandService(
-            [
-                {
-                    "case_id": "case-active",
-                    "row_ids": ["oa-active", "bank-active"],
-                    "row_types": ["oa", "bank"],
-                    "relation_mode": "manual_confirmed",
-                    "amount_check": {"matched": True},
-                    "month_scope": "2026-06",
-                }
-            ]
-        )
-        service = _service(
-            oa_records=[_oa("oa-active", "100.00", workflow_status="in_progress")],
-            transactions=[_bank("bank-active", "100.00")],
-            relation_command=relation_command,
-            payment_repository=payment_repository,
-        )
-
-        payload = service.confirm_paid({"oa_row_id": "oa-active"}, actor_id="tester")
-
-        self.assertEqual(payload["relation"]["status"], "already_confirmed")
-        self.assertEqual(payload["bankTransactionIds"], ["bank-active"])
-        self.assertEqual(relation_command.confirm_calls, [])
-        self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439012"])
-
-    def test_confirm_paid_with_bank_reuses_existing_active_relation(self) -> None:
-        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439012")
-        relation_command = FakeRelationCommandService(
-            [
-                {
-                    "case_id": "case-active",
-                    "row_ids": ["oa-active", "bank-active"],
-                    "row_types": ["oa", "bank"],
-                    "relation_mode": "manual_confirmed",
-                    "amount_check": {"matched": True},
-                    "month_scope": "2026-06",
-                }
-            ]
-        )
-        service = _service(
-            oa_records=[_oa("oa-active", "100.00", workflow_status="in_progress")],
-            transactions=[_bank("bank-active", "100.00")],
-            relation_command=relation_command,
-            payment_repository=payment_repository,
-        )
-
-        payload = service.confirm_paid({"oa_row_id": "oa-active", "bank_transaction_id": "bank-active"}, actor_id="tester")
-
-        self.assertEqual(payload["relation"]["status"], "already_confirmed")
-        self.assertEqual(relation_command.confirm_calls, [])
-        self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439012"])
+    def test_manual_confirm_paid_command_is_not_exposed(self) -> None:
+        self.assertFalse(hasattr(OaPendingPaymentCommandService, "confirm_paid"))
 
     def test_link_bank_transactions_creates_relation_then_auto_writes_mysql_when_amount_matches(self) -> None:
         payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439015")
@@ -668,7 +563,7 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
 
         self.assertEqual([row["id"] for row in payload["rows"]], ["bank-june", "bank-may"])
         self.assertEqual(payload["filters"]["oaRowIds"], ["oa-june"])
-        self.assertEqual(payload["filters"]["monthScopes"], [])
+        self.assertNotIn("monthScopes", payload["filters"])
 
     def test_bank_transaction_candidates_with_selected_oa_missing_month_still_returns_all(self) -> None:
         service = _service(
@@ -685,58 +580,7 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
 
         self.assertEqual([row["id"] for row in payload["rows"]], ["bank-history"])
         self.assertEqual(payload["filters"]["oaRowIds"], ["oa-no-month"])
-        self.assertEqual(payload["filters"]["monthScopes"], [])
-
-    def test_amount_mismatch_does_not_confirm_relation_or_write_mysql(self) -> None:
-        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439013")
-        relation_command = FakeRelationCommandService()
-        service = _service(
-            oa_records=[_oa("oa-mismatch", "100.00", workflow_status="in_progress")],
-            transactions=[_bank("bank-90", "90.00")],
-            relation_command=relation_command,
-            payment_repository=payment_repository,
-        )
-
-        with self.assertRaises(OaPendingPaymentError) as context:
-            service.confirm_paid({"oa_row_id": "oa-mismatch", "bank_transaction_id": "bank-90"}, actor_id="tester")
-
-        self.assertEqual(context.exception.error_code, "oa_payment_status_not_paid")
-        self.assertEqual(relation_command.confirm_calls, [])
-        self.assertEqual(payment_repository.marked_flow_ids, [])
-
-    def test_completed_oa_is_rejected_before_resolving_flow_id(self) -> None:
-        payment_repository = FakePaymentStatusRepository(flow_id="507f1f77bcf86cd799439014")
-        relation_command = FakeRelationCommandService()
-        service = _service(
-            oa_records=[_oa("oa-completed", "100.00", workflow_status="completed")],
-            transactions=[_bank("bank-100", "100.00")],
-            relation_command=relation_command,
-            payment_repository=payment_repository,
-        )
-
-        with self.assertRaises(OaPendingPaymentError) as context:
-            service.confirm_paid({"oa_row_id": "oa-completed", "bank_transaction_id": "bank-100"}, actor_id="tester")
-
-        self.assertEqual(context.exception.error_code, "oa_workflow_status_not_in_progress")
-        self.assertEqual(payment_repository.resolved_records, [])
-        self.assertEqual(relation_command.confirm_calls, [])
-
-    def test_missing_flow_id_is_rejected_before_confirming_candidate_relation(self) -> None:
-        payment_repository = FakePaymentStatusRepository(flow_id=None)
-        relation_command = FakeRelationCommandService()
-        service = _service(
-            oa_records=[_oa("oa-no-flow", "100.00", workflow_status="in_progress")],
-            transactions=[_bank("bank-100", "100.00")],
-            relation_command=relation_command,
-            payment_repository=payment_repository,
-        )
-
-        with self.assertRaises(OaPendingPaymentError) as context:
-            service.confirm_paid({"oa_row_id": "oa-no-flow", "bank_transaction_id": "bank-100"}, actor_id="tester")
-
-        self.assertEqual(context.exception.error_code, "oa_flow_id_not_found")
-        self.assertEqual(relation_command.confirm_calls, [])
-        self.assertEqual(payment_repository.marked_flow_ids, [])
+        self.assertNotIn("monthScopes", payload["filters"])
 
 
 def _service(

@@ -27,23 +27,11 @@ class _RefreshGateway:
         return list(scope_keys)
 
 
-class _Repository:
-    def __init__(self, *, fail_clear: bool = False) -> None:
-        self.fail_clear = fail_clear
-        self.clear_calls = 0
-
-    def clear_turnover_ledger_rows(self) -> None:
-        self.clear_calls += 1
-        if self.fail_clear:
-            raise RuntimeError("clear unavailable")
-
-
 class TurnoverLedgerReadModelRefreshProducerTests(unittest.TestCase):
     def test_enqueue_normalizes_to_month_or_all_and_uses_gateway_boundary(self) -> None:
         gateway = _RefreshGateway()
         producer = TurnoverLedgerReadModelRefreshProducer(
             refresh_gateway_provider=lambda: gateway,
-            read_repository_provider=lambda: _Repository(),
         )
 
         enqueued = producer.enqueue(
@@ -69,7 +57,6 @@ class TurnoverLedgerReadModelRefreshProducerTests(unittest.TestCase):
         gateway = _RefreshGateway()
         producer = TurnoverLedgerReadModelRefreshProducer(
             refresh_gateway_provider=lambda: gateway,
-            read_repository_provider=lambda: _Repository(),
         )
 
         self.assertTrue(producer.enqueue(["", "invalid"], reason="fallback"))
@@ -80,33 +67,13 @@ class TurnoverLedgerReadModelRefreshProducerTests(unittest.TestCase):
         gateway = _RefreshGateway(can_enqueue=False)
         producer = TurnoverLedgerReadModelRefreshProducer(
             refresh_gateway_provider=lambda: gateway,
-            read_repository_provider=lambda: _Repository(),
         )
 
         self.assertFalse(producer.enqueue(["2026-02"], reason="runtime_unavailable"))
         self.assertEqual(gateway.enqueued, [])
 
-    def test_clear_uses_turnover_repository_port_best_effort(self) -> None:
-        repository = _Repository()
-        producer = TurnoverLedgerReadModelRefreshProducer(
-            refresh_gateway_provider=lambda: _RefreshGateway(),
-            read_repository_provider=lambda: repository,
-        )
-
-        producer.clear_best_effort()
-
-        self.assertEqual(repository.clear_calls, 1)
-
-    def test_clear_swallows_repository_failure(self) -> None:
-        repository = _Repository(fail_clear=True)
-        producer = TurnoverLedgerReadModelRefreshProducer(
-            refresh_gateway_provider=lambda: _RefreshGateway(),
-            read_repository_provider=lambda: repository,
-        )
-
-        producer.clear_best_effort()
-
-        self.assertEqual(repository.clear_calls, 1)
+    def test_refresh_producer_does_not_expose_direct_clear_io(self) -> None:
+        self.assertFalse(hasattr(TurnoverLedgerReadModelRefreshProducer, "clear_best_effort"))
 
 
 if __name__ == "__main__":

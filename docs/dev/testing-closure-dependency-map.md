@@ -114,7 +114,7 @@
 | --- | --- | --- |
 | Frontend page | `web/src/pages/TurnoverLedgerPage.tsx` | `readModelStatus !== "fresh"` 必须禁用确认、撤回、流水选择和 extra 保存；domain event 只能作为刷新提示 |
 | Frontend API mapper | `web/src/features/turnoverLedger/api.ts` | snake_case/camelCase、grouped shape、extra、closure、withdraw、blob export shape 不能漂移 |
-| Read facade/API routes | `TurnoverLedgerReadFacade`、`TurnoverLedgerApiRoutes` | grouped/legacy flat 兼容、导出、detail/extra contract |
+| API routes / query service | `TurnoverLedgerApiRoutes`、`TurnoverLedgerQueryService` | grouped/legacy flat 兼容、导出、detail/extra contract、fresh/stale/missing 不伪装 fresh |
 | Query service | `TurnoverLedgerQueryService` | stale/missing SQL read model 不能伪装 fresh；必须 enqueue `api_stale` / `api_miss` |
 | Business core | `TurnoverLedgerService`、`TurnoverRelationService`、`TurnoverLedgerExtraService` | deterministic 不是已闭环；人工闭环必须同组、同对方、同语义、一收一支、零差额 |
 | Write boundary | `TurnoverLedgerWriteFacade`、`TurnoverLedgerWriteUnitOfWork`、write adapters | stale precondition、idempotency、rollback、dirty/outbox 必须在同一写边界内被保护 |

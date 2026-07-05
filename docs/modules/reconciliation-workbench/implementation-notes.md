@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-07-05 - 详情抽屉与内部字段展示收敛
+
+- 目标：将关联台 OA、银行流水、发票详情从居中弹窗改为右侧抽屉，并让详情内容按 OA 待付款核对同类详情的表格样式展示。
+- 影响范围：`web/src/components/workbench/DetailDrawer.tsx`、`web/src/app/styles.css`、关联台详情相关 Vitest 和大数据 Playwright smoke。
+- 关键决策：复用项目公共 `AppDrawer`，不新增 drawer 框架；详情字段仅在前端展示层过滤 Mongo 文档 ID、流程 ID、记录编号、source row id、附件识别/闭环状态等内部字段，后端/API/read model 仍保留这些字段供 OA 附件归属、支付状态和 source binding 使用。
+- 文档影响：本次不改变模块边界、API contract、read model、worker、权限或业务状态机；只更新本实施记录。
+- 测试覆盖：更新 `DetailDrawer.test.tsx` 覆盖表格式抽屉与内部字段隐藏；更新 `WorkbenchSelection.test.tsx` 覆盖详情抽屉打开、关闭、Escape 和 OA 附件来源字段过滤；更新 `workbench-large-scroll-flow.spec.ts` 覆盖真实浏览器下详情抽屉打开/关闭后选择状态仍可用。
+- 验证命令：`cd web && npm test -- --run src/test/DetailDrawer.test.tsx src/test/WorkbenchSelection.test.tsx`；`cd web && npm run build`；`cd web && npm run e2e -- e2e/workbench-large-scroll-flow.spec.ts --project=chromium`。
+- 未测风险：未跑完整 `npm run e2e:smoke`；真实生产数据中混合发票摘要可能仍包含用户不想看的附件文件哈希，当前仅移除独立内部字段和括号内长 hash 文件名。
+- 后续事项：如业务确认某些银行流水号或凭证号也应隐藏，可继续把对应中文字段加入展示层过滤列表，不改后端事实源。
+
 ## 2026-07-05 - legacy `/workbench` HTTP compat 删除
 
 - 目标：删除旧 `/workbench` 页面读入口、旧静态 prototype 和旧 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP 包装层，避免旧 `ManualReconciliationService` + ledger sync 链路继续作为关联台 action 入口污染现代 `/api/workbench/actions/*` relation/read-model 链路。
@@ -998,3 +1009,15 @@
 - 发布后证据：release `pscip-l4-workbench-raw-51cba11e8` 上 `/health/ready` ready，runtime release 指向新路径；scope contract default/invalid-scope 均 `ok=true`。critical 5s SLO `16/16` pass，max enqueue-to-fresh `3581.490ms`；targeted `workbench:all` 1s SLO pass，enqueue-to-fresh `397.159ms`、handler `352.381ms`。
 - 生产 raw payload 证明：active `workbench:all` generation 的 snapshot、summary、`1701` rows、`960` groups、`1941` group_rows 全部 `raw_payload={}`、`raw_has_normalized=0` 且 canonical `payload` 非空；active `workbench:2026-02` 同样满足该合同。
 - 未闭合：当前 release 后没有真实 Workbench relation confirm/withdraw、bank-invoice/bank-turnover confirm/withdraw 或 no-OA withdraw 写样本；关联撤回和跨页面 fan-out SLO 仍需 Admin Token/authenticated HTTP 或受控真实写样本验证，不能只用 read model smoke 声明 full external PSCIP-L4 closed。
+
+## 2026-07-05 - 关联操作与异常处理右侧抽屉改造
+
+- 目标：把关联台“确认关联”“撤回关联”和“统一异常处理”的居中弹窗改为右侧抽屉，并让详情内容更紧凑、减少内部英文 code 和业务无关 ID 展示。
+- 影响范围：`ReconciliationWorkbenchPage` 的 `RelationPreviewDialog`、`WorkbenchExceptionModal`、共用 `AppDrawer`、关联台前端样式和相关前端测试；不改变后端 API payload、relation 写入、read model scope 或 worker 合同。
+- 关键决策：复用项目现有 `AppDrawer`/HeroUI Drawer，而不是新增平行抽屉壳；`AppDrawer` 增加 `ariaBusy` 与 `closeDisabled` 支持，保证提交中的确认/撤回抽屉不能误关闭，且忙碌态仍落在实际 dialog 元素上。
+- UI 决策：关联预览抽屉保留“操作前/操作后”三栏核对表，标题区压缩为操作类型、OA/流水/发票计数和状态标签；统一异常处理抽屉把选择计数放入 header，金额摘要、识别依据、处理提示、动作和必填字段使用紧凑卡片。
+- 字段口径：统一异常处理不再展示 `oa_equals_bank_missing_invoice`、`CASE-...`、`Warnings`、规则版本或 action code 这类内部英文标识；未知后端 code 在 UI 中降级为中文“待确认”类文案。
+- 旧链路清理：删除未挂载的旧 `OaBankExceptionModal`、旧 `oaBankExceptionOptions`、旧前端 `submitOaBankException` client、旧测试 mock 分支、旧组件测试和旧 modal 样式；保留后端 `/api/workbench/actions/oa-bank-exception` 兼容 endpoint，因为它仍有独立后端合同测试，不属于本次前端抽屉链路。
+- 测试覆盖：更新 `CommonPlatformComponents.test.tsx` 覆盖共用抽屉 busy/close disabled；更新 `WorkbenchExceptionModal.test.tsx` 覆盖中文关系展示、候选分组 ID 隐藏和抽屉提交；更新 `WorkbenchSelection.test.tsx` 覆盖确认/撤回抽屉忙碌态、模态抽屉背景不可访问语义、异常处理抽屉提交后已处理异常链路；更新 `workbench-exception-flow.spec.ts` 覆盖浏览器异常处理抽屉不展示内部 case id。
+- 验证命令：`cd web && npm test -- --run src/test/CommonPlatformComponents.test.tsx src/test/WorkbenchExceptionModal.test.tsx src/test/WorkbenchSelection.test.tsx`；`cd web && npm run build`；`cd web && npm run e2e -- e2e/workbench-candidate-split-flow.spec.ts e2e/workbench-withdraw-flow.spec.ts e2e/workbench-exception-flow.spec.ts --project=chromium`；`bash scripts/verify.sh docs`。
+- 未测风险：尚未人工验收所有屏宽下的视觉密度；E2E 已覆盖核心确认、撤回和异常处理流程，但未跑完整 `npm run e2e:smoke`。

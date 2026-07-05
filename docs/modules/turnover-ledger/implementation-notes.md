@@ -586,3 +586,19 @@ git diff --check
 - 测试覆盖：`tests/test_postgres_repositories_boundaries.py::test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables` 覆盖 turnover rows bulk path；复跑 `tests/test_turnover_ledger_read_model_refresh.py`。
 - 发布后证据：release `pscip-l4-bulk-persistence-abcca6f78` 中 `turnover_ledger:all` 5s run enqueue-to-fresh `849.545ms`、handler `313.264ms`；1s run enqueue-to-fresh `495.031ms`、handler `215.518ms`，已达到当前 read model 1s SLO。
 - 未闭合：真实 turnover manual closure/withdraw 写操作在 24h write-operation audit 中仍为 missing sample；本 slice 只证明 direct read model refresh 性能，不证明真实写操作后的 operation barrier 和 downstream fan-out 闭环。
+
+## 2026-07-05 - 模块化 close：旧 app/read/clear 链路删除
+
+- 目标：按 Grill me / Ponytail 审计外部往来款管理边界与 I/O，关闭仍可能污染新链路的旧代码逻辑。
+- 影响范围：`Application` composition root、`TurnoverLedgerReadModelRefreshProducer`、`TurnoverLedgerWriteAdapters`、`BankDetailsApplicationService` auto-tag finalizer wiring、turnover API/read-model producer/boundary tests 和模块文档。
+- 关键决策：
+  - 删除 `backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py`；read path 由 `TurnoverLedgerApiRoutes` route owner 直接进入 `TurnoverLedgerQueryService` / read model。
+  - 删除 `TurnoverLedgerRelationMutationInvalidationLegacyAdapter`、`Application._after_turnover_relation_mutation(...)` 和 `_turnover_ledger_relation_mutation_invalidation_adapter(...)`，不再保留旧的 persist -> clear -> enqueue side-effect order。
+  - `TurnoverLedgerReadModelRefreshProducer` 只保留 `enqueue(...)`，移除 `read_repository_provider` 和 `clear_best_effort()`；银行明细模块不再注入 `clear_turnover_ledger_read_model`，仅通过 refresh producer enqueue 外部往来 read model refresh。
+  - relation-extra stale precondition 的 current reader 从旧 read facade 改为 `self._turnover_ledger_api_routes.get_relation_extra`，I/O 边界保持在 route owner/request-boundary facade。
+- 测试覆盖：
+  - 更新 `tests/test_turnover_ledger_api.py`，把旧 mutation invalidation 行为测试替换为删除防线，并更新 relation-extra current reader contract。
+  - 更新 `tests/test_turnover_ledger_read_model_refresh_producer.py`，覆盖 producer enqueue-only contract。
+  - 更新 `tests/test_platform_runtime_boundary_guards.py`，禁止 read facade 文件、producer direct clear、legacy invalidation adapter 和 server 旧 helper 恢复。
+  - 更新 `tests/test_bank_details_sql_runtime.py`，证明 bank auto-tag finalizer 不再直接清外部往来 read model，只保留明确 refresh enqueue。
+- 未测风险：本轮不连接真实 PostgreSQL/RabbitMQ/Redis/systemd，不验证生产历史数据、真实 worker drain、真实 XLSX 下载或大数据浏览器性能；这些仍归 staging/infra smoke。

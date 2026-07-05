@@ -1,14 +1,14 @@
 # 外部往来款管理模块边界与 I/O
 
-日期：2026-06-30
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
+- 状态：closed
 - 当前边界可信度：high
 - 目标边界：外部往来款页面读取 `turnover_ledger` read model；写操作通过 write facade/UoW/adapters 进入 scoped dirty projection。
-- 当前缺口：read facade 位于 `app/` 下，历史 fallback adapters 仍需继续收敛；正常 write facade/UoW 路径不得再使用 `turnover_ledger:all` 作为默认刷新范围。
-- 旧代码删除条件：旧 direct write/read paths 不再被 API、测试或工具引用，confirm/withdraw/recovery 全链路通过。
+- 当前闭环：read path 由 `TurnoverLedgerApiRoutes` route owner 进入 `TurnoverLedgerQueryService` / read model；write path 由 request-boundary facade 进入 `TurnoverLedgerWriteFacade` / UoW / explicit adapters；refresh producer 只负责通过 `ReadModelRefreshGateway` enqueue，不再暴露 direct clear I/O。
+- 旧代码删除状态：`TurnoverLedgerReadFacade` app 转发壳、`TurnoverLedgerRelationMutationInvalidationLegacyAdapter`、`Application._after_turnover_relation_mutation(...)` 与 refresh producer `clear_best_effort()` 已删除；边界 guard 防止恢复。
 
 ## 职责边界
 
@@ -28,7 +28,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面查询/筛选 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | 进入 query service/read facade |
+| 页面查询/筛选 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | 进入 `TurnoverLedgerApiRoutes` route owner，再由 `TurnoverLedgerQueryService` 读取 read model |
 | 确认/撤回写操作 | write facade/UoW | 已知 affected months 的写路径触发 turnover/workbench/workbench_relation/cost/search affected month scopes；未知月份例外才允许 `all` fan-out |
 | Workbench relation requirement | `TurnoverLedgerWorkbenchPairPort` | 创建 `turnover_manual_closure` 时必须写入 `requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`；这些字段是关联台分区的唯一输入，不能由关联台查询当前设置兜底 |
 | Refresh scope | `turnover_ledger` manifest | month or `all`；`all` 是 fan-out command，不是普通写操作默认 scope |
@@ -57,7 +57,7 @@
 | --- | --- |
 | Frontend page | `web/src/pages/TurnoverLedgerPage.tsx` |
 | Frontend feature/components | `web/src/features/turnoverLedger/*`、`web/src/components/turnoverLedger/*` |
-| Backend route | `backend/src/fin_ops_platform/app/routes_turnover_ledger.py`、`backend/src/fin_ops_platform/app/turnover_ledger_read_facade.py` |
+| Backend route | `backend/src/fin_ops_platform/app/routes_turnover_ledger.py` |
 | Backend service | `turnover_ledger_service.py`、`turnover_relation_service.py`、`turnover_ledger_query_service.py`、`turnover_ledger_write_facade.py`、`turnover_ledger_write_uow.py`、`turnover_ledger_write_adapters.py` |
 | Repository / SQL | `turnover_ledger_read_model_repository.py`、`turnover_ledger_sql_projection.py` |
 | Worker/read model | `turnover_ledger_read_model_refresh.py`、`turnover_ledger_read_model_refresh_producer.py`、`turnover_ledger_source_versions.py` |
@@ -80,7 +80,7 @@
 
 ## 当前缺口和删除条件
 
-- 读 facade 从 `app/` 下继续迁移前，先补测试保护。
+- 本地模块化边界已 close；后续若新增写入口，必须先明确 affected scopes，不能恢复 default direct clear、route forwarding shell 或 legacy invalidation adapter。
 - 方式 B 可控样本验证优先通过业务操作恢复；若生产样本没有业务恢复路径，可按用户批准的 bounded DB restore protocol 使用精确 predicate 恢复到操作前快照，不得通过 DB 伪造 read model freshness。
 
 ## Canonical facts ownership
@@ -90,5 +90,5 @@
 - Allowed writes: turnover write facade、write UoW、turnover relation service。
 - Allowed reads: turnover query service/read ports、turnover ledger read model boundary。
 - Downstream outputs: turnover_ledger、workbench_relation、workbench、cost、search dirty scopes 或 owner producer 输出。
-- Forbidden paths: legacy fallback facade 不得进入 production normal write path；不能直接写 workbench relation 或 bank category facts。
-- Old code deletion: turnover legacy fallback adapters、direct relation fallback 和 snapshot bank-row source fallback 必须删除；migration/audit/rollback 工具保留不算 closure。
+- Forbidden paths: legacy fallback facade 不得进入 production normal write path；不能直接写 workbench relation 或 bank category facts；不能从银行明细或 Application helper 直接清 `turnover_ledger` read model。
+- Old code deletion: app read forwarding facade、relation mutation legacy invalidation adapter、producer direct clear I/O、direct relation fallback 和 snapshot bank-row source fallback 已删除；migration/audit/rollback 工具保留不算 closure。

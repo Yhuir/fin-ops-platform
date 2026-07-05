@@ -32,8 +32,8 @@
 - `tests/test_turnover_ledger_api.py`
 - `tests/test_turnover_ledger_uow_contract.py`
 - `tests/test_turnover_ledger_query_service.py`
-- `tests/test_turnover_ledger_read_facade.py`
 - `tests/test_turnover_ledger_read_model_refresh.py`
+- `tests/test_turnover_ledger_read_model_refresh_producer.py`
 - `tests/test_turnover_workbench_integration.py`
 - `tests/test_workbench_turnover_grouping.py`
 - `tests/test_app_status_overview_service.py`
@@ -54,8 +54,8 @@
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_turnover_relation_service.py`、`tests/test_turnover_ledger_service.py`、`tests/test_turnover_ledger_extra_service.py` | 已覆盖四类 family、候选/确定候选、人工闭环、重复/跨对方/非零差额/同方向拒绝、撤回、内部转账排除、extra 字段校验、分组金额和利息。 |
 | 2. Service-layer tests | 适用 | `tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_ledger_api.py`、`tests/test_turnover_workbench_integration.py`、`tests/test_workbench_pair_relation_service.py` | 已覆盖 UoW transaction、rollback、dirty/outbox、stale precondition、idempotency、settings/extra/bankdetail/relation ports、Workbench relation command service 委托、缺 command fail-fast、既有 OA-bank relation 合并进外部往来闭环、撤回闭环恢复旧 OA-bank relation 和 Workbench pair relation、`cash_closure_case_id` 撤回不回退 legacy pair service。 |
-| 3. API contract tests | 适用 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_read_facade.py` | 已覆盖列表/grouped/tag-selection/bank-row-tags/extra/confirm/withdraw/export、权限、错误、版本冲突、idempotency replay/conflict、stale conflict、relation freshness 诊断、导出上限结构化错误、HTML response routing error。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_source_versions.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 stale SQL read model 不伪装 fresh、missing required SQL read model 返回 refreshing、legacy fallback、source versions、projection 保存、Workbench relation fresh 状态写入 grouped payload、Workbench relation non-fresh 不保存半成品、worker handler、registry/App Status 登记。 |
+| 3. API contract tests | 适用 | `tests/test_turnover_ledger_api.py` | 已覆盖 route owner、列表/grouped/tag-selection/bank-row-tags/extra/confirm/withdraw/export、权限、错误、版本冲突、idempotency replay/conflict、stale conflict、relation freshness 诊断、导出上限结构化错误、HTML response routing error。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_read_model_refresh_producer.py`、`tests/test_turnover_ledger_source_versions.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 stale SQL read model 不伪装 fresh、missing required SQL read model 返回 refreshing、legacy fallback、source versions、projection 保存、Workbench relation fresh 状态写入 grouped payload、Workbench relation non-fresh 不保存半成品、worker handler、refresh producer 只 enqueue 不 direct clear、registry/App Status 登记。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 API mapper、首屏 grouped GET 暂时失败后的错误态/刷新恢复/防 false-empty、tag drawer 保存、grouped table、正向 chip（“已关联 OA”“已关联 发票”“收支闭环”）、移除旧负向/泛化 chip、manual closure、仅已关联 OA 的 flow row 不禁用确认闭环、同一 `cash_closure_case_id` flow-row toolbar 撤回、提交前 affected-month fresh/rebind 最新 flow row versions、刷新后所选流水消失时不发 POST、跨组/非零差额禁用、extra drawer、detail missing error、stale 阻断 manual closure、operation overlay、导出、domain event；真实 Chromium 覆盖首屏 503 后手动刷新台账恢复、标签准入保存、`turnover_ledger:all` barrier、台账重读、同组两条 flow rows 确认闭环、成本统计 fresh read model fan-out、toolbar 撤回，并在恢复/成功节点检查无可见错误残留。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_turnover_workbench_integration.py`、`tests/test_workbench_turnover_grouping.py`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 deterministic 不进入 Workbench、manual zero-difference closure 写 Workbench pair relation、canonical write safety 不通过时不半写入、legacy relation 不污染 Workbench grouping、前端闭环前重刷台账且闭环后刷新关联台可见性；Browser e2e 覆盖 tag-selection -> barrier -> reload、confirm 后等待 operation barrier、进入成本统计断言 fresh explorer 和闭环成本行，再回周转页 withdraw 后重读 grouped payload，且成功后没有操作失败/同步失败/read model 失败等可见错误残留。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_turnover_grouping.py`、`web/src/test/domainEvents.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已保护旧 grouped shape、legacy flat/read model 兼容、标签准入 selected codes、导出字段、Workbench open grouping、Bankdetail tag batch、旧 relation/system relation 拒绝、domain event contract、成本统计下游 fresh read model 展示，以及真实浏览器里 tag selection、closure/recovery 不破坏表格选择、toolbar 状态和“成功但报错提示仍显示”的回归。 |
@@ -268,7 +268,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 `server-py:turnover-ledger-read-export-route-callback-collapse` 已完成：
 
 - Business core unit tests：不适用；本 slice 不改外部往来金额、标签准入、闭环、撤回、extra 或分组业务规则。
-- Service-layer tests：适用；复跑 `tests/test_turnover_ledger_read_facade.py`，证明 read facade 仍代理到 route/service boundary。
+- Service-layer tests：适用；复跑 `tests/test_turnover_ledger_api.py` 和 `tests/test_platform_runtime_boundary_guards.py`，证明 route owner 直接承担 read/write HTTP 边界且旧 read facade 不得恢复。
 - API contract tests：适用；复跑 `tests/test_turnover_ledger_api.py` 140 个用例，覆盖列表/grouped、tag-selection、extra、export、权限/error、idempotency/stale 和写路径回归。更新 `test_export_limit_returns_structured_error`，把导出上限错误注入点改到新的 `TurnoverLedgerApiRoutes` route-owner boundary。
 - Read model/cache/background job tests：间接适用；本 slice 未改 worker、dirty/outbox 或 read model writer，但 API 回归继续覆盖 grouped metadata、stale refresh enqueue 和 read model freshness 诊断。
 - Frontend component and interaction tests：不适用；未改前端 API mapper、页面交互、operation overlay 或 Browser flow。
@@ -279,7 +279,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 
 ```bash
 PYTHONPATH=backend/src python3 -m py_compile backend/src/fin_ops_platform/app/routes_turnover_ledger.py backend/src/fin_ops_platform/app/server.py tests/test_platform_runtime_boundary_guards.py
-PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_facade -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_model_refresh_producer -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_turnover_ledger_read_export_routes_use_route_owner tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_route_owner_inventory_stays_registered -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 ```
@@ -306,7 +306,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 
 - 复用现有 turnover query/read model refresh/API/UoW/operation barrier 测试作为 fresh gate、source-version proof、worker complete dirty scope、write response target 和 outbox-blocking 证据。
 - 未新增测试，因为本轮不改运行时代码。
-- 审计发现下一轮必须补 producer/clear boundary 测试：`Application._enqueue_turnover_ledger_read_model_refreshes(...)` 与 `_clear_turnover_ledger_read_model_best_effort(...)` 不能继续作为 app-owned authoritative behavior，且 clear 不应再经 broad workbench SQL repository。
+- 2026-07-05 已关闭 producer/clear boundary gap：旧 app-owned clear helper、producer direct clear I/O 和 relation mutation legacy invalidation adapter 已删除；`tests/test_turnover_ledger_read_model_refresh_producer.py` 与 `tests/test_platform_runtime_boundary_guards.py` 防止恢复。
 
 ## 2026-06-24 - refresh producer and clear port extraction test note
 
@@ -355,7 +355,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 - Business core unit tests：不适用；本 slice 不改外部往来分组、金额、标签、闭环、撤回或 extra 业务规则。
 - Service-layer tests：适用；新增 `tests/test_turnover_ledger_read_model_refresh.py::TurnoverLedgerReadModelRefreshServiceTests::test_projection_source_versions_are_captured_before_relation_rebuild_side_effects`，证明 projection 保存的 top-level 和 row-level `source_versions` 在 grouped ledger 内存重建副作用前捕获，和 API expected source version 合同对齐。
 - API contract tests：适用为回归；复跑 `tests/test_turnover_ledger_api.py`，证明 grouped metadata/API shape 不因 source-version 捕获时序变化而改变。
-- Read model/cache/background job tests：适用；复跑 `tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_facade.py`，保护 projection save、fresh/stale gateway 和 read facade 合同。
+- Read model/cache/background job tests：适用；复跑 `tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh_producer.py`，保护 projection save、fresh/stale gateway 和 refresh producer enqueue-only 合同。
 - Frontend component and interaction tests：不适用；本 slice 不改前端展示、操作 overlay、API mapper 或交互。
 - End-to-end business-flow integration tests：不适用；本 slice 不改 confirm/withdraw/tag-selection/extra 写链路。
 - Existing feature regression tests：适用；`tests/test_turnover_ledger_api.py` 和 read facade/query service 全量回归继续保护旧 grouped shape、metadata、stale/missing 行为。
@@ -448,7 +448,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 后端目标验证：
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_facade tests.test_turnover_ledger_read_model_refresh tests.test_turnover_ledger_uow_contract tests.test_turnover_workbench_integration -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_service tests.test_turnover_ledger_api tests.test_turnover_ledger_export_service tests.test_turnover_relation_service tests.test_turnover_ledger_extra_service tests.test_workbench_turnover_grouping tests.test_turnover_ledger_source_versions tests.test_turnover_ledger_read_model_refresh tests.test_turnover_ledger_read_model_refresh_producer tests.test_turnover_ledger_uow_contract tests.test_turnover_workbench_integration -v
 ```
 
 前端目标验证：

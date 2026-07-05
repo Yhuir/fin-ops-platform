@@ -266,8 +266,7 @@ Business core、API contract、frontend interaction 和 E2E tests 在 repository
 `read-models:turnover-ledger-refresh-freshness-operation-barrier-audit` 已完成为 analysis-only slice。结论：
 
 - 已有证据：SQL fresh gate、month/all scope policy、manifest/App Status/worker registry、Workbench relation source-version proof 和 operation barrier blocking。
-- 发现 gap：`Application._enqueue_turnover_ledger_read_model_refreshes(...)` 与 `_clear_turnover_ledger_read_model_best_effort(...)` 仍是 app-owned refresh/clear helper，且 clear 仍通过 broad workbench SQL repository。
-- 下一实现 slice `read-models:turnover-ledger-refresh-producer-clear-port-extraction` 必须新增/更新 service-layer/read-model regression guard，证明 refresh producer 行为在显式边界内，clear 使用 turnover-specific port，旧 app helper 不再重新拥有 authoritative behavior。
+- 2026-07-05 状态：旧 app-owned clear helper、producer `clear_best_effort()`、read repository provider 和 relation mutation legacy invalidation adapter 已删除；`tests/test_turnover_ledger_read_model_refresh_producer.py` 与 `tests/test_platform_runtime_boundary_guards.py` 保护 refresh producer 只通过 gateway enqueue，不暴露 direct clear I/O。
 
 ## 2026-06-24 - turnover ledger local implementation closure audit note
 

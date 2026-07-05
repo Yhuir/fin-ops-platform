@@ -78,12 +78,13 @@ test.describe("workbench large dataset browser flow", () => {
     await expectVisibleAndUncovered(confirmButton, "open zone confirm button after filtering");
 
     await targetGroup.getByRole("button", { name: "查看银行流水 长列表供应商065有限公司 详情" }).click();
-    const detailDrawer = page.getByRole("dialog", { name: "详情弹窗" });
+    const detailDrawer = page.getByRole("dialog", { name: "银行流水详情" });
     await expect(detailDrawer.getByText("银行流水详情", { exact: true })).toBeVisible();
     await expect(detailDrawer.getByText("第65组银行流水详情")).toBeVisible();
-    await expectVisibleAndUncovered(detailDrawer.getByRole("button", { name: "关闭详情" }), "detail drawer close button");
-    await detailDrawer.getByRole("button", { name: "关闭详情" }).click();
+    await expectVisibleAndUncovered(detailDrawer.getByRole("button", { name: "关闭详情抽屉" }), "detail drawer close button");
+    await detailDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
     await expect(detailDrawer).toHaveCount(0);
+    await expect(page.locator(".finance-drawer__content")).toHaveCount(0);
     await expect(openZone.getByText("已选 1")).toBeVisible();
     await expect(openZone.getByText("带入 2")).toBeVisible();
     await expect(confirmButton).toBeEnabled();

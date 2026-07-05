@@ -2382,11 +2382,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def enqueue(",
             "refresh_gateway = self._refresh_gateway_provider()",
             'refresh_gateway.enqueue_many("turnover_ledger"',
-            "def clear_best_effort(",
-            "clear_turnover_ledger_rows",
         ):
             if snippet not in turnover_producer_class:
                 violations.append(f"turnover ledger refresh producer is missing boundary behavior {snippet}")
+        for forbidden in (
+            "def clear_best_effort(",
+            "clear_turnover_ledger_rows",
+            "read_repository_provider",
+        ):
+            if forbidden in turnover_producer_class:
+                violations.append(f"turnover ledger refresh producer still exposes direct clear I/O {forbidden}")
         direct_job_writes = _sql_write_table_references(turnover_producer_class)
         if direct_job_writes:
             violations.append(f"turnover ledger refresh producer writes job queue tables directly: {direct_job_writes}")
@@ -2396,6 +2401,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("server.py still owns removed turnover ledger refresh enqueue helper")
         if _function_source(server_tree, server_source, "_clear_turnover_ledger_read_model_best_effort"):
             violations.append("server.py still owns removed turnover ledger read model clear helper")
+        if _function_source(server_tree, server_source, "_after_turnover_relation_mutation"):
+            violations.append("server.py still owns removed turnover relation mutation invalidation helper")
+        if _function_source(server_tree, server_source, "_turnover_ledger_relation_mutation_invalidation_adapter"):
+            violations.append("server.py still owns removed turnover relation mutation invalidation adapter factory")
         if _function_source(server_tree, server_source, "_latest_bank_detail_auto_category_suggestion"):
             violations.append("server.py still owns removed bank detail suggestion provider callback")
         if _function_source(server_tree, server_source, "_bank_detail_available_month_scope_keys"):
@@ -2640,11 +2649,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_turnover_ledger_read_export_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         route_path = APP_ROOT / "routes_turnover_ledger.py"
+        removed_read_facade_path = APP_ROOT / "turnover_ledger_read_facade.py"
         server_source = server_path.read_text(encoding="utf-8")
         route_source = route_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
         violations: list[str] = []
 
+        if removed_read_facade_path.exists():
+            violations.append("turnover_ledger_read_facade.py must stay deleted")
+        for forbidden in (
+            "TurnoverLedgerReadFacade",
+            "_turnover_ledger_read_facade",
+            "turnover_ledger_read_facade",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py still references removed turnover read facade {forbidden}")
         if "def route(" not in route_source:
             violations.append("TurnoverLedgerApiRoutes does not own read/export route dispatch")
         for snippet in (
@@ -2936,7 +2955,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/oa-pending-payments/bank-transactions/",
             "/api/oa-pending-payments/invoices/",
             "/api/oa-pending-payments/rows/",
-            "/api/oa-pending-payments/confirm-paid",
             "/api/oa-pending-payments/auto-reconcile-bank-transactions",
             "/api/oa-pending-payments/link-bank-transactions",
             "def _json_read(",
@@ -2960,6 +2978,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden_fallback in route_class:
                 violations.append(f"OA pending payment route owner still has live read fallback {forbidden_fallback}")
+        for removed_write_path in (
+            "/api/oa-pending-payments/confirm-paid",
+            "def confirm_paid(",
+            ".confirm_paid(",
+        ):
+            if removed_write_path in route_class:
+                violations.append(f"OA pending payment route owner still exposes removed manual write path {removed_write_path}")
         for removed_handler in (
             "_handle_api_oa_pending_payments_rows",
             "_handle_api_oa_pending_payments_filter_options",
@@ -4006,6 +4031,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         port_source = _class_source(tree, source, "TurnoverLedgerWorkbenchPairPort")
 
         violations: list[str] = []
+        if "TurnoverLedgerRelationMutationInvalidationLegacyAdapter" in source:
+            violations.append("turnover write adapters still expose removed relation mutation invalidation legacy adapter")
         for forbidden in (
             "pair_relation_service",
             "_pair_relation_service",

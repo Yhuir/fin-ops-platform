@@ -139,21 +139,8 @@ class OaPendingPaymentReadModelRepositoryPortTests(unittest.TestCase):
 
 class FakeCommandService:
     def __init__(self) -> None:
-        self.calls: list[tuple[dict[str, Any], str]] = []
         self.link_calls: list[tuple[dict[str, Any], str]] = []
         self.candidate_queries: list[dict[str, list[str]]] = []
-
-    def confirm_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
-        self.calls.append((dict(payload), actor_id))
-        return {
-            "success": True,
-            "action": "oa_pending_payment_confirm_paid",
-            "oaRowId": payload.get("oa_row_id") or payload.get("oaRowId"),
-            "bankTransactionIds": [payload.get("bank_transaction_id") or payload.get("bankTransactionId")],
-            "paymentStatus": {"code": "paid", "label": "已支付", "reason": "支出流水合计等于OA金额"},
-            "oaPaymentWriteback": {"code": "written", "label": "已写回", "flowId": "proc-api"},
-            "readModelRefresh": {"scopeKeys": ["2026-05", "all"], "enqueued": True},
-        }
 
     def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         self.link_calls.append((dict(payload), actor_id))
@@ -309,32 +296,35 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(json.loads(relation_response.body)["kind"], "bank")
         self.assertEqual(json.loads(oa_relation_response.body)["kind"], "oa")
 
-    def test_confirm_paid_route_delegates_to_command_service_with_write_actor(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            service = OaPendingPaymentQueryService(
+    def test_confirm_paid_route_is_removed_from_route_owner(self) -> None:
+        routes = OaPendingPaymentApiRoutes(
+            OaPendingPaymentQueryService(
                 import_service=ImportNormalizationService(),
                 oa_projection=StaticOAProjection([]),
-            )
-            command_service = FakeCommandService()
-            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(
-                service,
-                command_service=command_service,
-            )
-            app._workbench_write_auth_context = lambda _headers: ("tester", "default")  # type: ignore[method-assign]
+            ),
+            command_service=FakeCommandService(),
+        )
 
-            response = app.handle_request(
+        response = routes.route(
+            "POST",
+            "/api/oa-pending-payments/confirm-paid",
+            {},
+            json.dumps({"oa_row_id": "oa-api", "bank_transaction_id": "bank-api"}),
+            {},
+        )
+
+        self.assertIsNone(response)
+        self.assertFalse(hasattr(routes, "confirm_paid"))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app_response = app.handle_request(
                 "POST",
                 "/api/oa-pending-payments/confirm-paid",
                 body=json.dumps({"oa_row_id": "oa-api", "bank_transaction_id": "bank-api"}),
             )
 
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.body)
-        self.assertTrue(payload["success"])
-        self.assertEqual(payload["paymentStatus"]["code"], "paid")
-        self.assertEqual(payload["oaPaymentWriteback"]["label"], "已写回")
-        self.assertEqual(command_service.calls, [({"oa_row_id": "oa-api", "bank_transaction_id": "bank-api"}, "tester")])
+        self.assertEqual(app_response.status_code, 404)
 
     def test_link_bank_transactions_route_delegates_to_command_service_with_write_actor(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -506,7 +496,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual([row["id"] for row in payload["rows"]], ["bank-candidate-june", "bank-candidate-may"])
         self.assertEqual(payload["filters"]["oaRowIds"], ["oa-pay-candidate-source"])
-        self.assertEqual(payload["filters"]["monthScopes"], [])
+        self.assertNotIn("monthScopes", payload["filters"])
 
     def test_auto_reconcile_persists_relation_and_reload_is_noop(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

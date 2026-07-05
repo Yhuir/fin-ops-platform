@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import AppDrawer from "../common/AppDrawer";
 import { usePageSessionState } from "../../contexts/PageSessionStateContext";
 import { applyWorkbenchException, previewWorkbenchException } from "../../features/workbench/api";
 import type {
@@ -140,6 +141,14 @@ export default function WorkbenchExceptionModal({
     && !isBusy
     && !isCommittedError,
   );
+  const selectedCounts = useMemo(
+    () => ({
+      oa: rows.filter((row) => row.recordType === "oa").length,
+      bank: rows.filter((row) => row.recordType === "bank").length,
+      invoice: rows.filter((row) => row.recordType === "invoice").length,
+    }),
+    [rows],
+  );
 
   const updateDraft = useCallback((patch: Partial<WorkbenchExceptionDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -239,124 +248,134 @@ export default function WorkbenchExceptionModal({
     }
   };
 
-  return (
-    <div
-      aria-busy={isBusy}
-      aria-label="统一异常处理"
-      aria-modal="true"
-      className="detail-modal-backdrop"
-      role="dialog"
-    >
-      <div
-        aria-busy={isBusy}
-        className={`detail-modal workbench-exception-modal${isBusy ? " workbench-exception-modal-busy" : ""}`}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="detail-modal-header">
-          <div>
-            <div className="modal-eyebrow">统一异常处理</div>
-            <h2>统一异常处理</h2>
-          </div>
-          <button
-            aria-label="关闭统一异常处理"
-            className="detail-close-btn"
-            disabled={isBusy}
-            type="button"
-            onClick={closeIfIdle}
-          >
-            关闭
+  const subtitle = (
+    <span className="workbench-exception-drawer-summary">
+      <span>已选 {rows.length}</span>
+      <span>OA {selectedCounts.oa}</span>
+      <span>流水 {selectedCounts.bank}</span>
+      <span>发票 {selectedCounts.invoice}</span>
+    </span>
+  );
+  const footer = (
+    <div className="detail-modal-footer workbench-exception-drawer-actions">
+      {isCommittedError ? (
+        <button className="secondary-button" type="button" onClick={closeIfIdle}>
+          关闭
+        </button>
+      ) : (
+        <>
+          <button className="secondary-button" disabled={isBusy} type="button" onClick={closeIfIdle}>
+            取消
           </button>
-        </header>
-
-        <div className="detail-modal-body">
-          <div className="oa-bank-exception-summary">
-            <span className="zone-selection-pill">已选 {rows.length}</span>
-            <span className="zone-selection-pill">OA {rows.filter((row) => row.recordType === "oa").length}</span>
-            <span className="zone-selection-pill">流水 {rows.filter((row) => row.recordType === "bank").length}</span>
-            <span className="zone-selection-pill">发票 {rows.filter((row) => row.recordType === "invoice").length}</span>
-          </div>
-
-          {isPreviewLoading ? <div className="state-panel">正在加载异常预览</div> : null}
-          {previewError ? (
-            <div className="state-panel error">
-              <strong>异常预览加载失败</strong>
-              <div>{previewError}</div>
-            </div>
+          {preview && !preview.canApply ? <span className="state-panel">当前预览不可提交。</span> : null}
+          {preview && submitActions.length > 0 ? (
+            <button className="primary-button" disabled={!canSubmit} type="button" onClick={handleSubmit}>
+              {isSubmitting ? "提交中..." : "提交处理"}
+            </button>
           ) : null}
-          {preview ? (
-            <>
-              <section className="oa-bank-equation-card">
-                <div className="oa-bank-equation-row">
-                  <span>业务线</span>
-                  <strong>{businessLineLabel(preview.scenario.businessLine)}</strong>
-                </div>
-                <div className="oa-bank-equation-row">
-                  <span>场景</span>
-                  <strong>{preview.scenario.scenarioLabel || preview.scenario.scenarioCode}</strong>
-                </div>
-                <div className="oa-bank-equation-row">
-                  <span>规则版本</span>
-                  <strong>{preview.ruleVersion || "—"}</strong>
-                </div>
-              </section>
+        </>
+      )}
+    </div>
+  );
 
-              <section className="oa-bank-equation-card">
-                <h3>金额摘要</h3>
-                <AmountRow label="OA合计" value={preview.amountSummary.oaTotal} />
-                <AmountRow label="支出流水合计" value={preview.amountSummary.bankExpenseTotal} />
-                <AmountRow label="收入流水合计" value={preview.amountSummary.bankIncomeTotal} />
-                <AmountRow label="进项发票合计" value={preview.amountSummary.inputInvoiceTotal} />
-                <AmountRow label="销项发票合计" value={preview.amountSummary.outputInvoiceTotal} />
-                <div className="oa-bank-equation-row">
-                  <span>差异关系</span>
-                  <strong>{preview.amountSummary.relation}</strong>
-                </div>
-              </section>
+  return (
+    <AppDrawer
+      ariaBusy={isBusy}
+      className={`workbench-exception-drawer${isBusy ? " workbench-exception-modal-busy" : ""}`}
+      closeDisabled={isBusy}
+      closeLabel="关闭统一异常处理"
+      footer={footer}
+      open
+      subtitle={subtitle}
+      title="统一异常处理"
+      width="min(760px, 100vw)"
+      onClose={closeIfIdle}
+    >
+      <div className="detail-modal-body workbench-exception-drawer-body">
+        {isPreviewLoading ? <div className="state-panel">正在加载异常预览</div> : null}
+        {previewError ? (
+          <div className="state-panel error">
+            <strong>异常预览加载失败</strong>
+            <div>{previewError}</div>
+          </div>
+        ) : null}
+        {preview ? (
+          <>
+            <section className="oa-bank-equation-card">
+              <div className="oa-bank-equation-row">
+                <span>业务线</span>
+                <strong>{businessLineLabel(preview.scenario.businessLine)}</strong>
+              </div>
+              <div className="oa-bank-equation-row">
+                <span>场景</span>
+                <strong>{cleanInternalDisplayText(preview.scenario.scenarioLabel) || "待确认场景"}</strong>
+              </div>
+            </section>
 
-              {preview.candidateEvidence.length > 0 ? (
-                <section className="oa-bank-equation-card">
-                  <h3>系统自动识别证据</h3>
-                  <div className="exception-evidence-list">
-                    {preview.candidateEvidence.map((evidence, index) => (
+            <section className="oa-bank-equation-card">
+              <h3>金额摘要</h3>
+              <AmountRow label="OA合计" value={preview.amountSummary.oaTotal} />
+              <AmountRow label="支出流水合计" value={preview.amountSummary.bankExpenseTotal} />
+              <AmountRow label="收入流水合计" value={preview.amountSummary.bankIncomeTotal} />
+              <AmountRow label="进项发票合计" value={preview.amountSummary.inputInvoiceTotal} />
+              <AmountRow label="销项发票合计" value={preview.amountSummary.outputInvoiceTotal} />
+              <div className="oa-bank-equation-row">
+                <span>差异关系</span>
+                <strong>{amountRelationLabel(preview.amountSummary.relation)}</strong>
+              </div>
+            </section>
+
+            {preview.candidateEvidence.length > 0 ? (
+              <section className="oa-bank-equation-card">
+                <h3>系统识别依据</h3>
+                <div className="exception-evidence-list">
+                  {preview.candidateEvidence.map((evidence, index) => {
+                    const evidenceLabel = cleanInternalDisplayText(evidence.label) || "识别依据";
+                    const evidenceDetail = cleanInternalDisplayText(evidence.detail);
+                    return (
                       <div key={evidence.id ?? `${evidence.label}-${index}`} className="exception-evidence-item">
-                        <strong>{evidence.label}</strong>
-                        {evidence.detail ? <span>{evidence.detail}</span> : null}
+                        <strong>{evidenceLabel}</strong>
+                        {evidenceDetail ? <span>{evidenceDetail}</span> : null}
                       </div>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
 
-              {preview.warnings.length > 0 ? (
-                <section className="oa-bank-equation-card">
-                  <h3>Warnings</h3>
-                  {preview.warnings.map((warning, index) => (
-                    <div key={warning.code || index} className={`state-panel ${warning.severity === "error" ? "error" : ""}`}>
-                      {warning.message || warning.code}
-                    </div>
-                  ))}
-                </section>
-              ) : null}
-
-              <ActionSection
-                actions={automaticActions}
-                selectedActionCode={selectedAction?.actionCode ?? ""}
-                title="系统自动动作"
-                tone="automatic"
-                disabled={isBusy || isCommittedError}
-                onSelect={(actionCode) => updateDraft({ actionCode })}
-              />
-
+            {preview.warnings.length > 0 ? (
               <section className="oa-bank-equation-card">
-                <h3>人工可选动作</h3>
-                {availableActions.length === 0 ? (
-                  <div className="state-panel">后端未返回可执行人工动作。</div>
-                ) : (
-                  <div className="exception-action-list">
-                    {availableActions.map((action) => (
+                <h3>处理提示</h3>
+                {preview.warnings.map((warning, index) => (
+                  <div key={warning.code || index} className={`state-panel ${warning.severity === "error" ? "error" : ""}`}>
+                    {cleanInternalDisplayText(warning.message) || "请复核后处理。"}
+                  </div>
+                ))}
+              </section>
+            ) : null}
+
+            <ActionSection
+              actions={automaticActions}
+              selectedActionCode={selectedAction?.actionCode ?? ""}
+              title="系统自动动作"
+              tone="automatic"
+              disabled={isBusy || isCommittedError}
+              onSelect={(actionCode) => updateDraft({ actionCode })}
+            />
+
+            <section className="oa-bank-equation-card">
+              <h3>人工可选动作</h3>
+              {availableActions.length === 0 ? (
+                <div className="state-panel">暂无可执行人工动作。</div>
+              ) : (
+                <div className="exception-action-list">
+                  {availableActions.map((action) => {
+                    const actionLabel = actionDisplayLabel(action);
+                    const actionDescription = cleanInternalDisplayText(action.description);
+                    return (
                       <label key={action.actionCode} className="exception-action-option manual">
                         <input
-                          aria-label={`${action.label} ${resultStatusLabel(action.resultStatus)}`}
+                          aria-label={`${actionLabel} ${resultStatusLabel(action.resultStatus)}`}
                           checked={draft.actionCode === action.actionCode}
                           disabled={isBusy || isCommittedError}
                           name="workbench-exception-action"
@@ -365,71 +384,51 @@ export default function WorkbenchExceptionModal({
                           onChange={() => updateDraft({ actionCode: action.actionCode })}
                         />
                         <span>
-                          <strong>{action.label || action.actionCode}</strong>
+                          <strong>{actionLabel}</strong>
                           <span>{resultStatusLabel(action.resultStatus)}</span>
-                          {action.description ? <small>{action.description}</small> : null}
+                          {actionDescription ? <small>{actionDescription}</small> : null}
                         </span>
                       </label>
-                    ))}
-                  </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {selectedAction ? (
+              <section className="oa-bank-equation-card">
+                <h3>必填字段</h3>
+                {selectedAction.requiredFields.length === 0 ? (
+                  <div className="state-panel">当前动作无需补充信息。</div>
+                ) : (
+                  selectedAction.requiredFields.map((field) => (
+                    <RequiredField
+                      key={field}
+                      field={field}
+                      disabled={isBusy || isCommittedError}
+                      value={fieldValue(field, draft, extraPayload)}
+                      onChange={(value) => handleFieldChange(field, value)}
+                    />
+                  ))
                 )}
               </section>
-
-              {selectedAction ? (
-                <section className="oa-bank-equation-card">
-                  <h3>必填字段</h3>
-                  {selectedAction.requiredFields.length === 0 ? (
-                    <div className="state-panel">当前动作没有后端声明的必填字段。</div>
-                  ) : (
-                    selectedAction.requiredFields.map((field) => (
-                      <RequiredField
-                        key={field}
-                        field={field}
-                        disabled={isBusy || isCommittedError}
-                        value={fieldValue(field, draft, extraPayload)}
-                        onChange={(value) => handleFieldChange(field, value)}
-                      />
-                    ))
-                  )}
-                </section>
-              ) : null}
-            </>
-          ) : null}
-          {applyError ? (
-            <div className="state-panel error">
-              <strong>异常处理提交失败</strong>
-              <div>{applyError}</div>
-            </div>
-          ) : null}
-          {submitState.phase !== "idle" && submitState.phase !== "error" ? (
-            <div className="state-panel" role="status">
-              <strong>{exceptionSubmitPhaseLabel(submitState.phase)}</strong>
-              <div>{submitState.message}</div>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="detail-modal-footer">
-          {isCommittedError ? (
-            <button className="secondary-button" type="button" onClick={closeIfIdle}>
-              关闭
-            </button>
-          ) : (
-            <>
-              <button className="secondary-button" disabled={isBusy} type="button" onClick={closeIfIdle}>
-                取消
-              </button>
-              {preview && !preview.canApply ? <span className="state-panel">当前预览不可提交。</span> : null}
-              {preview && submitActions.length > 0 ? (
-                <button className="primary-button" disabled={!canSubmit} type="button" onClick={handleSubmit}>
-                  {isSubmitting ? "提交中..." : "提交处理"}
-                </button>
-              ) : null}
-            </>
-          )}
-        </div>
+            ) : null}
+          </>
+        ) : null}
+        {applyError ? (
+          <div className="state-panel error">
+            <strong>异常处理提交失败</strong>
+            <div>{applyError}</div>
+          </div>
+        ) : null}
+        {submitState.phase !== "idle" && submitState.phase !== "error" ? (
+          <div className="state-panel" role="status">
+            <strong>{exceptionSubmitPhaseLabel(submitState.phase)}</strong>
+            <div>{submitState.message}</div>
+          </div>
+        ) : null}
       </div>
-    </div>
+    </AppDrawer>
   );
 }
 
@@ -500,27 +499,31 @@ function ActionSection({
     <section className="oa-bank-equation-card">
       <h3>{title}</h3>
       <div className="exception-action-list">
-        {actions.map((action) => (
-          <label key={action.actionCode} className={`exception-action-option ${tone}`}>
-            {onSelect ? (
-              <input
-                aria-label={`${action.label} ${resultStatusLabel(action.resultStatus)}`}
-                checked={selectedActionCode === action.actionCode}
-                disabled={disabled}
-                name="workbench-exception-action"
-                type="radio"
-                value={action.actionCode}
-                onChange={() => onSelect(action.actionCode)}
-              />
-            ) : null}
-            <span className="exception-action-source">{tone === "automatic" ? "自动识别" : "人工确认"}</span>
-            <span>
-              <strong>{action.label || action.actionCode}</strong>
-              <span>{resultStatusLabel(action.resultStatus)}</span>
-              {action.description ? <small>{action.description}</small> : null}
-            </span>
-          </label>
-        ))}
+        {actions.map((action) => {
+          const actionLabel = actionDisplayLabel(action);
+          const actionDescription = cleanInternalDisplayText(action.description);
+          return (
+            <label key={action.actionCode} className={`exception-action-option ${tone}`}>
+              {onSelect ? (
+                <input
+                  aria-label={`${actionLabel} ${resultStatusLabel(action.resultStatus)}`}
+                  checked={selectedActionCode === action.actionCode}
+                  disabled={disabled}
+                  name="workbench-exception-action"
+                  type="radio"
+                  value={action.actionCode}
+                  onChange={() => onSelect(action.actionCode)}
+                />
+              ) : null}
+              <span className="exception-action-source">{tone === "automatic" ? "自动识别" : "人工确认"}</span>
+              <span>
+                <strong>{actionLabel}</strong>
+                <span>{resultStatusLabel(action.resultStatus)}</span>
+                {actionDescription ? <small>{actionDescription}</small> : null}
+              </span>
+            </label>
+          );
+        })}
       </div>
     </section>
   );
@@ -578,7 +581,7 @@ function fieldLabel(field: string) {
   if (field === "due_date") {
     return "到期日期";
   }
-  return field;
+  return cleanInternalDisplayText(field) || "补充信息";
 }
 
 function fieldValue(field: string, draft: WorkbenchExceptionDraft, extraPayload: Record<string, string>) {
@@ -604,7 +607,7 @@ function businessLineLabel(value: string) {
   if (value === "data_anomaly") {
     return "数据异常";
   }
-  return value || "—";
+  return cleanInternalDisplayText(value) || "待确认";
 }
 
 function resultStatusLabel(value: string) {
@@ -614,7 +617,47 @@ function resultStatusLabel(value: string) {
   if (value === "open") {
     return "进入待处理";
   }
-  return value || "待后端确认";
+  return cleanInternalDisplayText(value) || "待后端确认";
+}
+
+const AMOUNT_RELATION_LABELS: Record<string, string> = {
+  all_equal: "金额一致",
+  not_applicable: "不适用",
+  oa_bank_amount_mismatch: "OA与流水金额不一致",
+  oa_bank_invoice_equal: "OA、流水、发票一致",
+  oa_equals_bank_missing_invoice: "OA与流水一致，缺少进项发票",
+  income_should_not_have_oa: "收入侧不应包含 OA",
+  unknown: "待确认",
+};
+
+function amountRelationLabel(value: string) {
+  const directLabel = AMOUNT_RELATION_LABELS[value];
+  if (directLabel) {
+    return directLabel;
+  }
+  return cleanInternalDisplayText(value) || "待确认";
+}
+
+function actionDisplayLabel(action: WorkbenchExceptionAction) {
+  return cleanInternalDisplayText(action.label) || "待确认动作";
+}
+
+function cleanInternalDisplayText(value?: string | null) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  return text
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "")
+    .replace(/\b[a-f0-9]{24}\b/gi, "")
+    .replace(/\bOAExpense\d+\b/g, "")
+    .replace(/\b(?:CASE|REL|ROW|DOC|BATCH)-[A-Za-z0-9-]+\b/g, "")
+    .replace(/\b[a-z]+(?:_[a-z0-9]+)+\b/gi, "")
+    .replace(/[（(]\s*[）)]/g, "")
+    .replace(/\s+([，。；：、])/g, "$1")
+    .replace(/[:：,，;；-]\s*$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function formatAmount(value: string) {

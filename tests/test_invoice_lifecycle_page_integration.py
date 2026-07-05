@@ -87,7 +87,7 @@ class InvoiceLifecyclePageIntegrationTests(unittest.TestCase):
             lifecycle_policy=policy,
         )
 
-        row = service.list_rows(direction="expense")["rows"][0]
+        row = service.row_for_transaction(transaction.id, direction="expense")
 
         self.assertEqual(row["invoice_acquisition_status"]["code"], "policy_pending_invoice")
         self.assertEqual(policy.pending_calls, 1)

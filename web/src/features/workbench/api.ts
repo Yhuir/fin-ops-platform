@@ -738,14 +738,6 @@ type UpdateBankExceptionPayload = {
   comment?: string;
 };
 
-type OaBankExceptionPayload = {
-  month: string;
-  rowIds: string[];
-  exceptionCode: string;
-  exceptionLabel: string;
-  comment?: string;
-};
-
 type ConfirmPersonalAdvanceRepaymentPayload = {
   month: string;
   rowIds: string[];
@@ -3322,21 +3314,6 @@ export async function updateWorkbenchBankException(payload: UpdateBankExceptionP
       row_id: payload.rowId,
       relation_code: payload.relationCode,
       relation_label: payload.relationLabel,
-      comment: payload.comment,
-    }),
-  });
-  return mapWorkbenchActionResult(result);
-}
-
-export async function submitOaBankException(payload: OaBankExceptionPayload): Promise<WorkbenchActionResult> {
-  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/oa-bank-exception", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: payload.month,
-      row_ids: payload.rowIds,
-      exception_code: payload.exceptionCode,
-      exception_label: payload.exceptionLabel,
       comment: payload.comment,
     }),
   });

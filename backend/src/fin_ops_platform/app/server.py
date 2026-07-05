@@ -62,7 +62,6 @@ from fin_ops_platform.app.routes_turnover_ledger import (
     InMemoryTurnoverLedgerExtraService,
     TurnoverLedgerApiRoutes,
 )
-from fin_ops_platform.app.turnover_ledger_read_facade import TurnoverLedgerReadFacade
 from fin_ops_platform.app.routes_workbench import (
     WorkbenchApiRoutes,
     WorkbenchEventsApiRoutes,
@@ -426,7 +425,6 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerTagSelectionRequestBoundaryFacade,
     TurnoverLedgerConfirmRequestBoundaryFacade,
     TurnoverLedgerConfirmPrimaryWriteFacadeBuilder,
-    TurnoverLedgerRelationMutationInvalidationLegacyAdapter,
     TurnoverLedgerRelationWritePort,
     TurnoverLedgerTagSelectionSettingsAdapter,
     TurnoverLedgerWritePreconditionError,
@@ -677,7 +675,6 @@ class Application:
             "_handle_api_input_invoice_usage_rows": self._compat_input_invoice_usage_rows_response,
             "_handle_api_input_invoice_usage_relation_details": self._compat_input_invoice_usage_relation_details_response,
             "_handle_api_output_invoice_collections_rows": self._compat_output_invoice_collections_rows_response,
-            "_handle_api_pending_invoice_rows": self._compat_pending_invoice_rows_response,
             "_handle_api_tax_offset": self._compat_tax_offset_response,
             "_handle_api_tax_offset_summary": self._compat_tax_offset_summary_response,
             "_handle_api_tax_offset_calculate": self._compat_tax_offset_calculate_response,
@@ -1361,10 +1358,6 @@ class Application:
             withdraw_request_boundary_provider=self._turnover_ledger_withdraw_request_boundary_facade,
             write_precondition_error_payload=self._turnover_write_precondition_error_payload,
         )
-        self._turnover_ledger_read_facade = TurnoverLedgerReadFacade(
-            routes=self._turnover_ledger_api_routes,
-        )
-
     def _configure_tax_offset_application_services(self) -> None:
         runtime_repositories = getattr(self, "_runtime_repositories", None)
         tax_offset_service = getattr(self, "_tax_offset_service", None)
@@ -3094,7 +3087,7 @@ class Application:
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             extra_service=self._turnover_ledger_extra_service,
             row_provider=self._turnover_ledger_relation_extra_row_provider,
-            current_extra_reader=self._turnover_ledger_read_facade.get_relation_extra,
+            current_extra_reader=self._turnover_ledger_api_routes.get_relation_extra,
             tenant_id=self._workbench_reconciliation_tenant_id(),
             postgres_extra_repository_factory=PostgresWorkbenchRepository,
             postgres_idempotency_store_factory=self._turnover_ledger_relation_extra_postgres_idempotency_store,
@@ -6950,10 +6943,6 @@ class Application:
         self._pending_invoice_api_routes = routes
         return routes
 
-    def _compat_pending_invoice_rows_response(self, query: dict[str, list[str]]) -> Response:
-        status, payload = self._pending_invoice_routes().rows(query)
-        return self._json_response(status, payload)
-
     def _pending_invoice_export_response(
         self,
         session: OARequestSession | None,
@@ -9100,7 +9089,6 @@ class Application:
             affected_months_provider=getattr(self, "_bank_transaction_category_affected_months", lambda _transaction_ids: []),
             invalidate_after_category_mutation=getattr(self, "_invalidate_workbench_after_bank_transaction_categories", lambda _affected_months: False),
             execute_derived_data_lifecycle_event=getattr(self, "_execute_derived_data_lifecycle_event", lambda *_args, **_kwargs: None),
-            clear_turnover_ledger_read_model=self._turnover_ledger_read_model_refresh_producer().clear_best_effort,
             clear_relation_tag_projection_cache=getattr(
                 getattr(self, "_bank_details_relation_tag_projection_service", None),
                 "clear_cache",
@@ -9156,7 +9144,6 @@ class Application:
     def _turnover_ledger_read_model_refresh_producer(self) -> TurnoverLedgerReadModelRefreshProducer:
         return TurnoverLedgerReadModelRefreshProducer(
             refresh_gateway_provider=self._read_model_refresh_gateway,
-            read_repository_provider=lambda: getattr(self, "_turnover_ledger_sql_read_repository", None),
         )
 
     def _bank_detail_available_month_scope_provider(self) -> BankDetailAvailableMonthScopeProvider:
@@ -9394,7 +9381,7 @@ class Application:
     def _turnover_ledger_relation_extra_request_boundary_facade(self) -> TurnoverLedgerRelationExtraRequestBoundaryFacade:
         return TurnoverLedgerRelationExtraRequestBoundaryFacade(
             facade_provider=self._turnover_ledger_relation_extra_write_facade,
-            current_extra_reader=self._turnover_ledger_read_facade.get_relation_extra,
+            current_extra_reader=self._turnover_ledger_api_routes.get_relation_extra,
         )
 
     @staticmethod
@@ -9431,19 +9418,6 @@ class Application:
                 {"error": "permission_denied", "message": "当前账户没有操作往来款关系的权限。"},
             )
         return session
-
-    def _after_turnover_relation_mutation(self, affected_months: list[str]) -> None:
-        self._turnover_ledger_relation_mutation_invalidation_adapter().after_relation_mutation(affected_months)
-
-    def _turnover_ledger_relation_mutation_invalidation_adapter(
-        self,
-    ) -> TurnoverLedgerRelationMutationInvalidationLegacyAdapter:
-        return TurnoverLedgerRelationMutationInvalidationLegacyAdapter(
-            persist_relations=self._persist_turnover_relations_best_effort,
-            invalidate_workbench_after_category_mutation=self._invalidate_workbench_after_bank_transaction_categories,
-            clear_read_model=self._turnover_ledger_read_model_refresh_producer().clear_best_effort,
-            enqueue_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
-        )
 
     def _bank_transaction_category_affected_months(self, transaction_ids: list[str]) -> list[str]:
         months: set[str] = set()

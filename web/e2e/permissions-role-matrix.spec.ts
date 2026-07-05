@@ -661,7 +661,7 @@ test.describe("permissions browser role matrix", () => {
       bankDetailsClassificationMode: "needs_confirmation",
       etcTicketReconciliationWorkflow: true,
       oaPendingPaymentBankLinkFlow: true,
-      oaPendingPaymentConfirmPaidFlow: true,
+      oaPendingPaymentAutoReconcileFlow: true,
       pendingInvoiceAttachExistingBatchRows: true,
       pendingInvoiceIncomeBatchRows: true,
       sessionMode: "read_export_only",

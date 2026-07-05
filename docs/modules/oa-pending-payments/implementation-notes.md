@@ -3,6 +3,14 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-07-05 - 模块边界 close 与旧写入口删除
+
+- 目标：完成 OA 待付款核对模块的模块化 close，确认页面读路径、写路径、候选抽屉和 read model refresh 都有清晰边界和 I/O，删除会污染当前链路的旧模块代码。
+- 关键决策：保留当前两个写入口：`auto-reconcile-bank-transactions` 负责显式自动匹配/写回，`link-bank-transactions` 负责人工选择支出流水并在校验通过后自动写回。删除旧人工 `/api/oa-pending-payments/confirm-paid` route 和 `OaPendingPaymentCommandService.confirm_paid(...)`，避免前端已移除的手工确认按钮在后端继续形成隐藏写入口。
+- I/O 清理：`bank-transaction-candidates` 继续返回全部支出流水候选池并回显 `oaRowIds`，不再输出 `monthScopes`；API 合同同步删除“按 OA 月份收敛”和“写 Workbench active relation”的旧说法，明确 link-bank 写 OA 待付款独立 pending relation 与 bank claim。
+- 测试覆盖：更新 API/command/runtime boundary guard，锁定旧 confirm-paid route/command 不可回流；更新候选 filters 断言，锁定不再输出 `monthScopes`；删除前端 Vitest 和 Playwright fixture 中的旧 confirm-paid handler。
+- 验证命令：见本轮最终说明。
+
 ## 2026-06-30 - 月份选择器合并全部视图
 
 - 目标：在 OA 待付款核对页顶部月份筛选中提供用户可见的“全部”视图，并把“全部”与原生月份选择合并成同一个控件。

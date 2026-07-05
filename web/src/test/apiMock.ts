@@ -6936,56 +6936,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         message: "已更新银行异常分类。",
       },
     }),
-    "/api/workbench/actions/oa-bank-exception": ({ jsonBody }) => {
-      const month = String(jsonBody?.month ?? "");
-      const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
-      const exceptionCode = String(jsonBody?.exception_code ?? "");
-      const exceptionLabel = String(jsonBody?.exception_label ?? "");
-      const comment = typeof jsonBody?.comment === "string" ? jsonBody.comment : exceptionLabel;
-      const touchedMonths = new Set(
-        rowIds.map((rowId) => (month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) : month)).filter(Boolean) as string[],
-      );
-
-      for (const resolvedMonth of touchedMonths) {
-        const payload = workbenchStateStore.get(resolvedMonth);
-        for (const pane of ["oa", "bank", "invoice"] as const) {
-          payload.open[pane] = payload.open[pane].map((row) => {
-            if (!rowIds.includes(String(row.id))) {
-              return row;
-            }
-            if (row.type === "oa") {
-              return {
-                ...row,
-                handled_exception: true,
-                oa_bank_relation: { code: exceptionCode, label: exceptionLabel, tone: "danger" },
-                available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
-              };
-            }
-            if (row.type === "bank") {
-              return {
-                ...row,
-                handled_exception: true,
-                invoice_relation: { code: exceptionCode, label: exceptionLabel, tone: "danger" },
-                available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
-                remark: comment,
-              };
-            }
-            return row;
-          });
-        }
-      }
-
-      return {
-        body: {
-          success: true,
-          action: "oa_bank_exception",
-          month,
-          affected_row_ids: rowIds,
-          updated_rows: rowIds.map((id) => ({ id })),
-          message: `已对 ${rowIds.length} 条记录执行 OA/流水异常处理。`,
-        },
-      };
-    },
     "/api/workbench/actions/cancel-exception": ({ jsonBody }) => {
       const month = String(jsonBody?.month ?? "");
       const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];

@@ -35,7 +35,8 @@ test.describe("workbench exception browser flow", () => {
     const exceptionDialog = page.getByRole("dialog", { name: "统一异常处理" });
     await expect(exceptionDialog).toBeVisible();
     await expect(exceptionDialog.getByText("OA和支出流水一致，缺进项发票")).toBeVisible();
-    await expect(exceptionDialog.getByText("命中候选分组 CASE-202603-101")).toBeVisible();
+    await expect(exceptionDialog.getByText("命中候选分组")).toBeVisible();
+    await expect(exceptionDialog.getByText("CASE-202603-101")).toHaveCount(0);
 
     await exceptionDialog.getByRole("radio", { name: /追进项发票/ }).click();
     await exceptionDialog.getByRole("textbox", { name: "备注" }).fill("浏览器异常备注");
@@ -47,7 +48,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(exceptionDialog).toHaveAttribute("aria-busy", "true");
     await expect(exceptionDialog.getByRole("button", { name: "提交中..." })).toBeDisabled();
     await expect(exceptionDialog.getByRole("button", { name: "取消" })).toBeDisabled();
-    await expect(exceptionDialog.getByRole("button", { name: "关闭" })).toBeDisabled();
+    await expect(exceptionDialog.getByRole("button", { name: "关闭统一异常处理" })).toBeDisabled();
     await expect(exceptionDialog.getByRole("textbox", { name: "备注" })).toBeDisabled();
     await expect(openGroup).toBeVisible();
 
