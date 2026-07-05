@@ -823,26 +823,26 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - `filterConfig`/`filter-options` 至少包含 OA 申请人、项目名称、支付状态、对方户名、银行账户、收支、发票方和开票日期等表头筛选/排序字段；银行账户字段使用“银行名称 + 账号后四位”，收支字段使用 `outflow`/`inflow` 值并显示“支出”/“收入”。
 - 外部依赖或 read model 不可用时返回明确业务错误或 stale 状态，不返回 HTML 或空 body。
 
-### OA 自动匹配和自动写回
+### OA 已支付行写回
 
-`POST /api/oa-pending-payments/auto-reconcile-bank-transactions`
+`POST /api/oa-pending-payments/writeback-paid`
 
 请求 body：
 
 ```json
 {
-  "month": "2026-06"
+  "oa_row_ids": ["oa-pay-..."]
 }
 ```
 
 契约要求：
 
 - 后端必须用写权限校验 actor，不接受前端仅隐藏按钮作为权限事实。
-- `month` 可省略，省略时按当前页面 all scope 扫描；有值时必须是 `YYYY-MM`。
-- 自动匹配只用于 `workflowStatus=in_progress` 的 OA 与未配对支出流水，规则必须复用关联台 OA-bank 精确金额/精确合计规则。不得在该接口中新增模糊匹配、名称相似度猜测或收入流水匹配。
-- completed 和 in-progress 只要已经存在有效 Workbench active 支出流水 relation，且支出流水合计等于 OA 金额，也必须由该接口自动写回。
+- `oa_row_ids` 必填，至少一条；前端只对 `paymentStatus=paid` 且 `oaPaymentWriteback.code != written` 的行展示按钮，但后端必须重新校验。
+- 该接口不做自动匹配，不创建 OA-bank relation，不读取候选流水池；它只处理已经存在有效 relation 的 OA。
+- completed 行必须存在 Workbench active 支出流水 relation；in-progress 行必须存在 OA 待付款 active pending relation。候选流水、自动 decision、未确认 relation 或收入流水都不能触发写回。
 - 写回前必须校验银行流水存在且方向为支出、支出合计等于 OA 金额、可解析 OA Mongo 文档 ID，并将 `t_payment_simple.flow_id` 对应记录写成 `pay_status=1`；缺记录时可插入一条已支付记录。Flowable 流程实例 ID 和流程请求 ID 不作为 `t_payment_simple.flow_id` 写回 key。
-- 成功响应返回 `success`、`action`、`month`、`autoMatchedCount`、`writebackCount`、`autoMatchedRelations`、`oaPaymentWritebacks` 和 `readModelRefresh`；refresh 至少覆盖 Workbench 与 `oa_pending_payment`，目标刷新窗口为 2 秒级。
+- 成功响应返回 `success`、`action=oa_pending_payment_writeback_paid`、`oaRowIds`、`writebackCount`、`oaPaymentWriteback` 或 `oaPaymentWritebacks` 和 `readModelRefresh`；refresh 至少覆盖 `oa_pending_payment`，目标刷新窗口为 2 秒级。
 - 失败时返回可展示业务错误；金额、方向或 `flow_id` 校验失败不得半写 `t_payment_simple`。
 
 `GET /api/oa-pending-payments/bank-transaction-candidates`
@@ -860,7 +860,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 `POST /api/oa-pending-payments/link-bank-transactions`
 
-该接口是自动匹配失败后的人工兜底。请求由前端传入选中的 `oa_row_ids` 和 `bank_transaction_ids`，后端只允许未配对支出流水创建 OA 待付款独立 active pending relation，并写入 `app.bank_transaction_relation_claims` 独占该支出流水；不得写 `app.workbench_pair_relations` 或普通 Workbench active relation。关联成功后必须沿用同一写回校验；支出合计等于 OA 金额且可解析 `flow_id` 时，响应必须携带 `autoWriteback` 和 `oaPaymentWritebacks`，并把 `t_payment_simple.pay_status` 写为已支付。前端和后端都不再提供人工 `confirm-paid` 写回入口。
+该接口是进行中 OA 显式关联支出流水入口。请求由前端传入选中的 `oa_row_ids` 和 `bank_transaction_ids`，后端只允许未配对支出流水创建 OA 待付款独立 active pending relation，并写入 `app.bank_transaction_relation_claims` 独占该支出流水；不得写 `app.workbench_pair_relations` 或普通 Workbench active relation。关联成功后必须沿用同一写回校验；支出合计等于 OA 金额且可解析 `flow_id` 时，响应必须携带 `autoWriteback` 和 `oaPaymentWritebacks`，并把 `t_payment_simple.pay_status` 写为已支付。前端和后端都不再提供人工 `confirm-paid` 写回入口。
 
 ### 工作台 row detail
 

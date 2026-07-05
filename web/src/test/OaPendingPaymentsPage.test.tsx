@@ -461,11 +461,11 @@ function installOaPendingPaymentsFetch(overrides?: {
   detailPayloads?: Record<string, { status: number; payload: Record<string, unknown> }>;
   operationBarrierDelay?: Promise<void>;
   rulesCanSave?: boolean;
-  autoReconcilePayload?: Record<string, unknown>;
-  autoReconcileResponses?: Array<{ status: number; payload: Record<string, unknown> }>;
+  writebackPaidPayload?: Record<string, unknown>;
+  writebackPaidResponses?: Array<{ status: number; payload: Record<string, unknown> }>;
   bankCandidatesPayload?: (url: URL) => Record<string, unknown>;
 }) {
-  const autoReconcileResponses = [...(overrides?.autoReconcileResponses ?? [])];
+  const writebackPaidResponses = [...(overrides?.writebackPaidResponses ?? [])];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const detailPayload = overrides?.detailPayloads?.[url.pathname];
@@ -506,14 +506,15 @@ function installOaPendingPaymentsFetch(overrides?: {
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (url.pathname === "/api/oa-pending-payments/auto-reconcile-bank-transactions") {
-      const scriptedResponse = autoReconcileResponses.shift();
+    if (url.pathname === "/api/oa-pending-payments/writeback-paid") {
+      const scriptedResponse = writebackPaidResponses.shift();
       const status = scriptedResponse?.status ?? (init?.method === "POST" ? 200 : 405);
-      return new Response(JSON.stringify(scriptedResponse?.payload ?? overrides?.autoReconcilePayload ?? {
+      return new Response(JSON.stringify(scriptedResponse?.payload ?? overrides?.writebackPaidPayload ?? {
         success: true,
-        action: "oa_pending_payment_auto_reconcile_bank_transactions",
-        autoMatchedCount: 0,
+        action: "oa_pending_payment_writeback_paid",
+        oaRowIds: [],
         writebackCount: 0,
+        oaPaymentWritebacks: [],
         readModelRefresh: { scopeKeys: ["all"], enqueued: false, targetSeconds: 2 },
       }), {
         status,
@@ -734,10 +735,10 @@ function rulesSaveRequests(fetchMock: ReturnType<typeof installOaPendingPayments
   });
 }
 
-function autoReconcileRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
+function writebackPaidRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
   return fetchMock.mock.calls.filter(([input]) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-    return url.pathname === "/api/oa-pending-payments/auto-reconcile-bank-transactions";
+    return url.pathname === "/api/oa-pending-payments/writeback-paid";
   });
 }
 
@@ -1228,15 +1229,32 @@ describe("OA pending payments page", () => {
     });
   });
 
-  test("waits for the OA pending payment barrier before reloading after auto reconcile", async () => {
+  test("shows row writeback only for paid rows that are not written", async () => {
+    const fetchMock = installOaPendingPaymentsFetch();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+
+    expect(within(page).getByRole("button", { name: "写回 OA 王五" })).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "写回 OA 刘际涛" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "自动匹配并写回 OA 待付款" })).not.toBeInTheDocument();
+    expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
+  });
+
+  test("waits for the OA pending payment barrier before reloading after paid writeback", async () => {
     const barrier = deferred();
     const fetchMock = installOaPendingPaymentsFetch({
       operationBarrierDelay: barrier.promise,
-      autoReconcilePayload: {
+      writebackPaidPayload: {
         success: true,
-        action: "oa_pending_payment_auto_reconcile_bank_transactions",
-        autoMatchedCount: 1,
+        action: "oa_pending_payment_writeback_paid",
+        oaRowIds: ["oa-003"],
         writebackCount: 1,
+        oaPaymentWritebacks: [
+          { code: "written", label: "已写回", flowIds: ["flow-003"], syncStatus: "ready" },
+        ],
         readModelRefresh: { scopeKeys: ["2026-05", "all"], enqueued: true, targetSeconds: 2 },
       },
     });
@@ -1246,10 +1264,12 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
     const rowsBeforeMutation = rowsRequests(fetchMock).length;
-    expect(autoReconcileRequests(fetchMock)).toHaveLength(0);
+    expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
 
-    await userEvent.click(within(page).getByRole("button", { name: "自动匹配并写回 OA 待付款" }));
-    await waitFor(() => expect(autoReconcileRequests(fetchMock)).toHaveLength(1));
+    await userEvent.click(within(page).getByRole("button", { name: "写回 OA 王五" }));
+    await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(1));
+    const [, writebackInit] = writebackPaidRequests(fetchMock)[0];
+    expect(JSON.parse(String(writebackInit?.body))).toEqual({ oa_row_ids: ["oa-003"] });
     await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
     const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
     expect(JSON.parse(String(barrierInit?.body))).toEqual({
@@ -1264,23 +1284,26 @@ describe("OA pending payments page", () => {
     });
   });
 
-  test("retries auto reconcile after a failed attempt when the user refreshes rows", async () => {
+  test("allows paid writeback retry after a failed attempt", async () => {
     const fetchMock = installOaPendingPaymentsFetch({
-      autoReconcileResponses: [
+      writebackPaidResponses: [
         {
           status: 503,
           payload: {
             error: "temporary_api_error",
-            message: "自动匹配和写回暂不可用。",
+            message: "写回暂不可用。",
           },
         },
         {
           status: 200,
           payload: {
             success: true,
-            action: "oa_pending_payment_auto_reconcile_bank_transactions",
-            autoMatchedCount: 0,
-            writebackCount: 0,
+            action: "oa_pending_payment_writeback_paid",
+            oaRowIds: ["oa-003"],
+            writebackCount: 1,
+            oaPaymentWritebacks: [
+              { code: "written", label: "已写回", flowIds: ["flow-003"], syncStatus: "ready" },
+            ],
             readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 2 },
           },
         },
@@ -1292,20 +1315,19 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
-    expect(autoReconcileRequests(fetchMock)).toHaveLength(0);
+    expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
 
-    await user.click(within(page).getByRole("button", { name: "自动匹配并写回 OA 待付款" }));
-    await waitFor(() => expect(autoReconcileRequests(fetchMock)).toHaveLength(1));
-    expect(await within(page).findByText("自动匹配和写回暂不可用。")).toBeInTheDocument();
+    await user.click(within(page).getByRole("button", { name: "写回 OA 王五" }));
+    await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(1));
+    expect(await within(page).findByText("写回暂不可用。")).toBeInTheDocument();
 
-    await user.click(within(page).getByRole("button", { name: "刷新 OA 待付款核对" }));
-    await user.click(within(page).getByRole("button", { name: "自动匹配并写回 OA 待付款" }));
+    await user.click(within(page).getByRole("button", { name: "写回 OA 王五" }));
 
-    await waitFor(() => expect(autoReconcileRequests(fetchMock)).toHaveLength(2));
-    await waitFor(() => expect(within(page).queryByText("自动匹配和写回暂不可用。")).not.toBeInTheDocument());
+    await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(2));
+    await waitFor(() => expect(within(page).queryByText("写回暂不可用。")).not.toBeInTheDocument());
   });
 
-  test("does not auto reconcile while OA pending payment read model is still refreshing", async () => {
+  test("does not show paid writeback while OA pending payment read model is still refreshing", async () => {
     const fetchMock = installOaPendingPaymentsFetch({
       rowsPayload: {
         rows: [],
@@ -1320,7 +1342,8 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(await within(page).findByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
-    expect(autoReconcileRequests(fetchMock)).toHaveLength(0);
+    expect(within(page).queryByRole("button", { name: /写回 OA/ })).not.toBeInTheDocument();
+    expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
   });
 
   test("waits for the OA pending payment barrier before reloading after bank link", async () => {

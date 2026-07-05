@@ -16,7 +16,6 @@ from tests.app_test_support import build_local_state_application as build_applic
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID, PAY_STATUS_PENDING
@@ -155,23 +154,14 @@ class FakeCommandService:
             "readModelRefresh": {"scopeKeys": ["2026-05", "all"], "enqueued": True},
         }
 
-    def auto_reconcile_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
-        self.link_calls.append(({"auto_reconcile": dict(payload)}, actor_id))
+    def writeback_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
+        self.link_calls.append(({"writeback_paid": dict(payload)}, actor_id))
         return {
             "success": True,
-            "action": "oa_pending_payment_auto_reconcile_bank_transactions",
-            "month": payload.get("month") or "all",
-            "autoMatchedCount": 1,
+            "action": "oa_pending_payment_writeback_paid",
+            "oaRowIds": payload.get("oa_row_ids") or payload.get("oaRowIds") or [],
             "writebackCount": 1,
-            "autoMatchedRelations": [{"oaRowIds": ["oa-api"], "bankTransactionIds": ["bank-api"]}],
-            "skippedAutoMatches": [
-                {
-                    "oaRowIds": ["oa-skipped"],
-                    "bankTransactionIds": ["bank-skipped"],
-                    "ruleCode": "oa_bank_exact_amount",
-                    "errorCode": "oa_flow_id_not_found",
-                }
-            ],
+            "oaPaymentWriteback": {"code": "written", "label": "已写回", "flowId": "proc-api"},
             "oaPaymentWritebacks": [{"code": "written", "label": "已写回", "flowId": "proc-api"}],
             "readModelRefresh": {"scopeKeys": ["2026-05", "all"], "enqueued": True},
         }
@@ -353,7 +343,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(payload["autoWriteback"]["label"], "已写回")
         self.assertEqual(command_service.link_calls, [({"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]}, "tester")])
 
-    def test_auto_reconcile_route_delegates_to_command_service_with_write_actor(self) -> None:
+    def test_writeback_paid_route_delegates_to_command_service_with_write_actor(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             service = OaPendingPaymentQueryService(
@@ -369,81 +359,17 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
             response = app.handle_request(
                 "POST",
-                "/api/oa-pending-payments/auto-reconcile-bank-transactions",
-                body=json.dumps({"month": "2026-06"}),
+                "/api/oa-pending-payments/writeback-paid",
+                body=json.dumps({"oa_row_ids": ["oa-api"]}),
             )
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
         self.assertTrue(payload["success"])
-        self.assertEqual(payload["autoMatchedCount"], 1)
+        self.assertEqual(payload["action"], "oa_pending_payment_writeback_paid")
         self.assertEqual(payload["writebackCount"], 1)
-        self.assertEqual(payload["skippedAutoMatches"][0]["errorCode"], "oa_flow_id_not_found")
-        self.assertEqual(command_service.link_calls, [({"auto_reconcile": {"month": "2026-06"}}, "tester")])
-
-    def test_auto_reconcile_uses_payment_admitted_source_after_completed_projection_cache(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir), bootstrap_mode="lightweight")
-            target_oa = self._oa(
-                "oa-pay-flow-auto",
-                "陈秀云",
-                "163000.00",
-                workflow_status="in_progress",
-            )
-            target_bank = BankTransaction(
-                id="bank-flow-auto",
-                account_no="622200001234",
-                txn_direction=TransactionDirection.OUTFLOW,
-                counterparty_name_raw="API供应商",
-                amount=Decimal("163000.00"),
-                signed_amount=Decimal("-163000.00"),
-                txn_date="2026-05-21",
-                trade_time="2026-05-21 10:00:00",
-            )
-            relation_command = FakeRelationCommandService()
-            payment_repository = FakePaymentStatusRepository(flow_id="flow-auto")
-            refresh_calls: list[tuple[str, str, str]] = []
-
-            app._import_service = ImportNormalizationService(existing_transactions=[target_bank])
-            app._oa_payment_status_repository_instance = payment_repository
-            app._oa_pending_payment_source_projection_override = StaticOAProjection([target_oa])
-            app._postgres_oa_projection_repository = lambda: StaticOAProjection([])  # type: ignore[method-assign]
-            app._workbench_relation_command_service = lambda **_kwargs: relation_command  # type: ignore[method-assign]
-            app._invoice_lifecycle_policy = lambda: InvoiceLifecyclePolicy()  # type: ignore[method-assign]
-            app._enqueue_workbench_read_model_refresh = (  # type: ignore[method-assign]
-                lambda scope_key, *, reason, **_kwargs: refresh_calls.append(("workbench", scope_key, reason)) or True
-            )
-            app._enqueue_oa_pending_payment_read_model_refresh = (  # type: ignore[method-assign]
-                lambda scope_key, *, reason, **_kwargs: refresh_calls.append(("oa_pending_payment", scope_key, reason)) or True
-            )
-
-            app._oa_pending_payment_projection(
-                source_adapter=StaticOAProjection([]),
-                use_lazy_source=False,
-            )
-
-            payload = app._oa_pending_payment_command_service().auto_reconcile_bank_transactions(
-                {"month": "2026-05"},
-                actor_id="tester",
-            )
-            pending_snapshot = app._state_store.load_oa_pending_payment_bank_relations()
-
-        self.assertEqual(payload["autoMatchedCount"], 1)
-        self.assertEqual(payload["writebackCount"], 1)
-        self.assertEqual(payload["autoMatchedRelations"][0]["oaRowIds"], ["oa-pay-flow-auto"])
-        self.assertEqual(payload["autoMatchedRelations"][0]["bankTransactionIds"], ["bank-flow-auto"])
-        self.assertEqual(payment_repository.marked_flow_ids, ["flow-auto"])
-        self.assertEqual(relation_command.confirm_calls, [])
-        pending_relations = list((pending_snapshot.get("relations") or {}).values())
-        self.assertTrue(
-            any(
-                set(relation.get("oa_row_ids") or []) == {"oa-pay-flow-auto"}
-                and set(relation.get("bank_transaction_ids") or []) == {"bank-flow-auto"}
-                and (relation.get("amount_check") or {}).get("rule_code") == "oa_bank_exact_amount"
-                for relation in pending_relations
-                if isinstance(relation, dict)
-            )
-        )
+        self.assertEqual(payload["oaPaymentWriteback"]["flowId"], "proc-api")
+        self.assertEqual(command_service.link_calls, [({"writeback_paid": {"oa_row_ids": ["oa-api"]}}, "tester")])
 
     def test_bank_transaction_candidates_use_in_progress_projection_from_query_service(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -497,80 +423,6 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in payload["rows"]], ["bank-candidate-june", "bank-candidate-may"])
         self.assertEqual(payload["filters"]["oaRowIds"], ["oa-pay-candidate-source"])
         self.assertNotIn("monthScopes", payload["filters"])
-
-    def test_auto_reconcile_persists_relation_and_reload_is_noop(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            target_oa = self._oa(
-                "oa-pay-flow-persist",
-                "陈秀云",
-                "163000.00",
-                workflow_status="in_progress",
-            )
-            target_bank = BankTransaction(
-                id="bank-flow-persist",
-                account_no="622200001234",
-                txn_direction=TransactionDirection.OUTFLOW,
-                counterparty_name_raw="API供应商",
-                amount=Decimal("163000.00"),
-                signed_amount=Decimal("-163000.00"),
-                txn_date="2026-05-21",
-                trade_time="2026-05-21 10:00:00",
-            )
-
-            app = build_application(data_dir=data_dir)
-            payment_repository = FakePaymentStatusRepository(flow_id="flow-persist")
-            app._import_service = ImportNormalizationService(existing_transactions=[target_bank])
-            app._oa_payment_status_repository_instance = payment_repository
-            app._oa_pending_payment_source_projection_override = StaticOAProjection([target_oa])
-            app._postgres_oa_projection_repository = lambda: StaticOAProjection([])  # type: ignore[method-assign]
-            app._enqueue_workbench_read_model_refresh = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
-            app._enqueue_oa_pending_payment_read_model_refresh = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
-
-            first_payload = app._oa_pending_payment_command_service().auto_reconcile_bank_transactions(
-                {"month": "2026-05"},
-                actor_id="tester",
-            )
-            persisted_snapshot = app._state_store.load_oa_pending_payment_bank_relations()
-            persisted_workbench_snapshot = app._state_store.load_workbench_pair_relations()
-
-            reloaded = build_application(data_dir=data_dir)
-            reloaded_payment_repository = FakePaymentStatusRepository(
-                flow_id="flow-persist",
-                pay_status=PAY_STATUS_PAID,
-            )
-            reloaded._import_service = ImportNormalizationService(existing_transactions=[target_bank])
-            reloaded._oa_payment_status_repository_instance = reloaded_payment_repository
-            reloaded._oa_pending_payment_source_projection_override = StaticOAProjection([target_oa])
-            reloaded._postgres_oa_projection_repository = lambda: StaticOAProjection([])  # type: ignore[method-assign]
-            reloaded._enqueue_workbench_read_model_refresh = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
-            reloaded._enqueue_oa_pending_payment_read_model_refresh = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
-
-            second_payload = reloaded._oa_pending_payment_command_service().auto_reconcile_bank_transactions(
-                {"month": "2026-05"},
-                actor_id="tester",
-            )
-
-        pair_relations = persisted_workbench_snapshot.get("pair_relations")
-        self.assertFalse(pair_relations)
-        pending_relations = persisted_snapshot.get("relations")
-        self.assertIsInstance(pending_relations, dict)
-        persisted_relations = list(pending_relations.values()) if isinstance(pending_relations, dict) else []
-        self.assertEqual(first_payload["autoMatchedCount"], 1)
-        self.assertEqual(first_payload["writebackCount"], 1)
-        self.assertTrue(
-            any(
-                set(relation.get("oa_row_ids") or []) == {"oa-pay-flow-persist"}
-                and set(relation.get("bank_transaction_ids") or []) == {"bank-flow-persist"}
-                for relation in persisted_relations
-                if isinstance(relation, dict)
-            )
-        )
-        self.assertEqual(payment_repository.marked_flow_ids, ["flow-persist"])
-        self.assertEqual(second_payload["autoMatchedCount"], 0)
-        self.assertEqual(second_payload["writebackCount"], 0)
-        self.assertEqual(second_payload["readModelRefresh"]["enqueued"], False)
-        self.assertEqual(reloaded_payment_repository.marked_flow_ids, [])
 
     def test_bank_transaction_candidates_route_delegates_to_command_service(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -162,9 +162,6 @@ def _relation_month_scope(
 
 
 def _promotion_relation_mode(relation: dict[str, Any]) -> str:
-    source_action = text(relation.get("source_action") or relation.get("sourceAction"))
-    if source_action == "auto_reconcile_bank_transactions":
-        return "normal_match"
     return "manual_confirmed"
 
 

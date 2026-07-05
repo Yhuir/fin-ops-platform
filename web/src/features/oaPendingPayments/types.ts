@@ -211,25 +211,16 @@ export type OaPendingPaymentQuery = {
   viewMode: OaPendingPaymentViewMode;
 };
 
-export type AutoReconcileOaPendingPaymentBankTransactionsRequest = {
-  month?: string;
+export type WritebackOaPendingPaymentPaidRequest = {
+  oaRowIds: string[];
 };
 
-export type AutoReconcileOaPendingPaymentBankTransactionsResponse = {
+export type WritebackOaPendingPaymentPaidResponse = {
   success: boolean;
   action?: string;
-  month?: string;
-  autoMatchedCount?: number;
   writebackCount?: number;
-  autoMatchedRelations?: Array<Record<string, unknown>>;
-  skippedAutoMatches?: Array<{
-    oaRowIds?: string[];
-    bankTransactionIds?: string[];
-    ruleCode?: string;
-    errorCode?: string;
-    message?: string;
-    details?: Record<string, unknown>;
-  }>;
+  oaRowIds?: string[];
+  oaPaymentWriteback?: OaPendingPaymentWritebackStatus | null;
   oaPaymentWritebacks?: OaPendingPaymentWritebackStatus[];
   readModelRefresh?: {
     scopeKeys?: string[];

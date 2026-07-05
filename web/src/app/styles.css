@@ -2556,6 +2556,29 @@ textarea {
   font-weight: 750;
 }
 
+.oa-pending-payments-writeback-button {
+  border: 1px solid color-mix(in srgb, var(--fp-border-strong) 72%, transparent);
+  border-radius: 6px;
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.1;
+  padding: 3px 7px;
+}
+
+.oa-pending-payments-writeback-button:hover:not(:disabled),
+.oa-pending-payments-writeback-button:focus-visible {
+  border-color: var(--fp-focus);
+  color: var(--fp-accent);
+  outline: none;
+}
+
+.oa-pending-payments-writeback-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .oa-pending-payments-empty-bank-cell {
   display: flex;
   min-height: 44px;

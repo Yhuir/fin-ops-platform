@@ -7,8 +7,8 @@ import type {
   OaPendingPaymentQuery,
   OaPendingPaymentRowsResponse,
   OaPendingPaymentSortDirection,
-  AutoReconcileOaPendingPaymentBankTransactionsRequest,
-  AutoReconcileOaPendingPaymentBankTransactionsResponse,
+  WritebackOaPendingPaymentPaidRequest,
+  WritebackOaPendingPaymentPaidResponse,
   LinkOaPendingPaymentBankTransactionsRequest,
   LinkOaPendingPaymentBankTransactionsResponse,
   OaPendingPaymentBankCandidateRelationStatus,
@@ -78,16 +78,16 @@ export async function fetchOaPendingPaymentDetail(
   );
 }
 
-export async function autoReconcileOaPendingPaymentBankTransactions(
-  request: AutoReconcileOaPendingPaymentBankTransactionsRequest = {},
-): Promise<AutoReconcileOaPendingPaymentBankTransactionsResponse> {
-  return apiRequestJson<AutoReconcileOaPendingPaymentBankTransactionsResponse>(
-    "/api/oa-pending-payments/auto-reconcile-bank-transactions",
+export async function writebackOaPendingPaymentPaid(
+  request: WritebackOaPendingPaymentPaidRequest,
+): Promise<WritebackOaPendingPaymentPaidResponse> {
+  return apiRequestJson<WritebackOaPendingPaymentPaidResponse>(
+    "/api/oa-pending-payments/writeback-paid",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        month: request.month,
+        oa_row_ids: request.oaRowIds,
       }),
     },
   );

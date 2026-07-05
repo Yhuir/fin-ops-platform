@@ -6,15 +6,15 @@
 
 - 状态：closed
 - 当前边界可信度：high
-- 目标边界：OA 待付款页面读取 `oa_pending_payment` read model；自动匹配/写回、银行关联、OA 状态同步通过 command/service 边界触发 scoped refresh。
+- 目标边界：OA 待付款页面读取 `oa_pending_payment` read model；已支付行写回、银行关联、OA 状态同步通过 command/service 边界触发 scoped refresh。
 - 当前缺口：无模块化边界缺口；真实 OA Mongo/MySQL、PostgreSQL/RabbitMQ/Redis/systemd worker drain 仍属于 staging/生产 smoke 风险，不作为模块边界未闭合项。
-- 旧代码删除状态：旧 `Application` rebuild/live read helper 已移除；生产 rows/filter/detail 不再回退 live query；后端手工 `/api/oa-pending-payments/confirm-paid` route 与 `OaPendingPaymentCommandService.confirm_paid(...)` 已移除；候选接口不再输出 `monthScopes` 旧月份收敛诊断字段。
+- 旧代码删除状态：旧 `Application` rebuild/live read helper 已移除；生产 rows/filter/detail 不再回退 live query；后端手工 `/api/oa-pending-payments/confirm-paid` route 与 `OaPendingPaymentCommandService.confirm_paid(...)` 已移除；旧 `/api/oa-pending-payments/auto-reconcile-bank-transactions` route、前端 toolbar 按钮和 command service 自动匹配写回逻辑已移除；候选接口不再输出 `monthScopes` 旧月份收敛诊断字段。
 
 ## 职责边界
 
 ### 负责
 
-- OA 待付款核对页面、自动匹配/写回、银行关联、状态展示和 OA projection read model。
+- OA 待付款核对页面、已支付未写回行的写回、银行关联、状态展示和 OA projection read model。
 - `oa_pending_payment` read model。
 - OA 付款关系 promotion 和银行流水匹配入口。
 
@@ -30,7 +30,7 @@
 | --- | --- | --- |
 | 页面查询/过滤 | `OaPendingPaymentsPage.tsx`、`features/oaPendingPayments/api.ts` | 必须进入 `OaPendingPaymentReadModelService` fresh gate；read model service 未配置或 payload 不 fresh 时 fail closed，不回退 live query |
 | 关联支出流水候选查询 | `GET /api/oa-pending-payments/bank-transaction-candidates` | `oa_row_ids` 只作为后续提交关联的目标 OA 上下文；候选读取全部支出流水，不按 OA 月份收敛 |
-| 自动匹配/银行关联 | command service | 写操作必须审计并触发 read model scopes；写回只能由 `auto-reconcile-bank-transactions` 或 `link-bank-transactions` 成功后的自动写回触发 |
+| 已支付写回/银行关联 | command service | 写操作必须审计并触发 read model scopes；逐行写回只能由 `writeback-paid` 触发，且后端必须重新校验已存在的 Workbench active relation 或 in-progress active pending relation、outflow、金额合计和 `flow_id`；`link-bank-transactions` 成功创建关系后仍可自动写回 |
 | OA projection sync | OA sync/projection services | 输入必须带 source version |
 | Refresh scope | `oa_pending_payment` manifest | month or `all`；`all` 是 fan-out command；SQL all 读取跨月物理行时必须按 `row_id` 去重后再计算 rows/summary/viewCounts |
 

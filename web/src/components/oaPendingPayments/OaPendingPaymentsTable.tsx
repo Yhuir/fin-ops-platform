@@ -39,6 +39,8 @@ type OaPendingPaymentsTableProps = {
   onOpenDetail: (target: OaPendingPaymentDetailTarget) => void;
   selectedOaRowIds?: Set<string>;
   onToggleOaSelection?: (row: OaPendingPaymentRow) => void;
+  onWritebackPaid?: (row: OaPendingPaymentRow) => void;
+  writingBackOaRowIds?: Set<string>;
   emptyStateMessage?: string;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
@@ -133,6 +135,8 @@ export default function OaPendingPaymentsTable({
   onOpenDetail,
   selectedOaRowIds = new Set(),
   onToggleOaSelection,
+  onWritebackPaid,
+  writingBackOaRowIds = new Set(),
   emptyStateMessage = "暂无 OA 待付款核对数据",
   tableWrapRef,
 }: OaPendingPaymentsTableProps) {
@@ -211,6 +215,8 @@ export default function OaPendingPaymentsTable({
               const selectable = Boolean(onToggleOaSelection) && canSelectOa(row);
               const rowOaIds = oaRowIds(row);
               const selected = rowOaIds.length > 0 && rowOaIds.every((oaId) => selectedOaRowIds.has(oaId));
+              const canWriteback = Boolean(onWritebackPaid) && canWritebackPaid(row);
+              const writingBack = rowOaIds.some((oaId) => writingBackOaRowIds.has(oaId));
               return (
                 <tr className="oa-pending-payments-table-row" key={row.id}>
                   <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--oa" data-column-role="identity">
@@ -285,6 +291,17 @@ export default function OaPendingPaymentsTable({
                       </span>
                       <span className="oa-pending-payments-writeback-line">
                         <TableTag>{writebackLabel(row)}</TableTag>
+                        {canWriteback ? (
+                          <button
+                            aria-label={`写回 OA ${row.oa.applicantName || row.oa.id}`}
+                            className="oa-pending-payments-writeback-button"
+                            disabled={writingBack}
+                            onClick={() => onWritebackPaid?.(row)}
+                            type="button"
+                          >
+                            {writingBack ? "写回中" : "写回"}
+                          </button>
+                        ) : null}
                       </span>
                     </span>
                   </td>
@@ -998,6 +1015,10 @@ function oaCounterpartyDisplay(row: OaPendingPaymentRow): string {
 
 function writebackWritten(row: OaPendingPaymentRow): boolean {
   return row.oaPaymentWriteback?.code === "written";
+}
+
+function canWritebackPaid(row: OaPendingPaymentRow): boolean {
+  return row.paymentStatus.code === "paid" && !writebackWritten(row);
 }
 
 function canSelectOa(row: OaPendingPaymentRow): boolean {

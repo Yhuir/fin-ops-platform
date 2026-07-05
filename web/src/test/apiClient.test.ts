@@ -64,13 +64,13 @@ describe("apiClient", () => {
 
     const { apiRequestJson } = await import("../features/apiClient");
 
-    await expect(apiRequestJson<{ ok: boolean }>("/api/oa-pending-payments/auto-reconcile-bank-transactions", {
+    await expect(apiRequestJson<{ ok: boolean }>("/api/oa-pending-payments/writeback-paid", {
       method: "POST",
       body: "{}",
     })).resolves.toEqual({ ok: true });
     expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
-      "/api/oa-pending-payments/auto-reconcile-bank-transactions",
-      "/fin-ops-api/api/oa-pending-payments/auto-reconcile-bank-transactions",
+      "/api/oa-pending-payments/writeback-paid",
+      "/fin-ops-api/api/oa-pending-payments/writeback-paid",
     ]);
   });
 
@@ -120,13 +120,13 @@ describe("apiClient", () => {
 
     const { apiRequestJson } = await import("../features/apiClient");
 
-    await expect(apiRequestJson<{ ok: boolean }>("/api/oa-pending-payments/auto-reconcile-bank-transactions", {
+    await expect(apiRequestJson<{ ok: boolean }>("/api/oa-pending-payments/writeback-paid", {
       method: "POST",
       body: "{}",
     })).resolves.toEqual({ ok: true });
     expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
-      "/fin-ops/api/oa-pending-payments/auto-reconcile-bank-transactions",
-      "/fin-ops-api/api/oa-pending-payments/auto-reconcile-bank-transactions",
+      "/fin-ops/api/oa-pending-payments/writeback-paid",
+      "/fin-ops-api/api/oa-pending-payments/writeback-paid",
     ]);
   });
 

@@ -2961,7 +2961,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/oa-pending-payments/bank-transactions/",
             "/api/oa-pending-payments/invoices/",
             "/api/oa-pending-payments/rows/",
-            "/api/oa-pending-payments/auto-reconcile-bank-transactions",
+            "/api/oa-pending-payments/writeback-paid",
             "/api/oa-pending-payments/link-bank-transactions",
             "def _json_read(",
             "def _json_write(",
@@ -2986,8 +2986,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"OA pending payment route owner still has live read fallback {forbidden_fallback}")
         for removed_write_path in (
             "/api/oa-pending-payments/confirm-paid",
+            "/api/oa-pending-payments/auto-reconcile-bank-transactions",
             "def confirm_paid(",
             ".confirm_paid(",
+            "def auto_reconcile_bank_transactions(",
+            ".auto_reconcile_bank_transactions(",
         ):
             if removed_write_path in route_class:
                 violations.append(f"OA pending payment route owner still exposes removed manual write path {removed_write_path}")

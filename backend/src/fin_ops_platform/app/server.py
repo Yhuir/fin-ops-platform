@@ -6518,7 +6518,6 @@ class Application:
             relation_command_service=self._workbench_relation_command_service(repository=getattr(self, "_state_store", None)),
             pending_relation_service=self._oa_pending_payment_relation_repository(),
             payment_status_repository=self._oa_payment_status_repository(),
-            lifecycle_policy=self._invoice_lifecycle_policy(),
             enqueue_workbench_refresh=self._enqueue_workbench_read_model_refresh,
             enqueue_oa_pending_payment_refresh=self._enqueue_oa_pending_payment_read_model_refresh,
         )

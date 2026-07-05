@@ -689,7 +689,7 @@ class OaPendingRelationCleanupConnection(EmptyTransactionConnection):
                 "scope_month": "2026-05-01",
                 "oa_row_ids": ["oa-pay-missing-admission"],
                 "bank_transaction_ids": ["bank-missing-admission"],
-                "source_action": "auto_reconcile_bank_transactions",
+                "source_action": "link_bank_transactions",
                 "note": None,
                 "amount_check": {},
                 "writeback_status": {},

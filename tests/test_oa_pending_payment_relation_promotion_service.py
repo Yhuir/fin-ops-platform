@@ -18,7 +18,7 @@ class OaPendingPaymentRelationPromotionServiceTests(unittest.TestCase):
                     "month_scope": "2026-02",
                     "oa_row_ids": ["oa-completed"],
                     "bank_transaction_ids": ["bank-paid"],
-                    "source_action": "auto_reconcile_bank_transactions",
+                    "source_action": "link_bank_transactions",
                     "amount_check": {"matched": True},
                     "migrated_from_workbench_case_id": "legacy-case-id",
                 }
@@ -40,7 +40,7 @@ class OaPendingPaymentRelationPromotionServiceTests(unittest.TestCase):
         self.assertEqual(confirm["case_id"], "legacy-case-id")
         self.assertEqual(confirm["row_ids"], ["oa-completed", "bank-paid"])
         self.assertEqual(confirm["row_types"], ["oa", "bank"])
-        self.assertEqual(confirm["relation_mode"], "normal_match")
+        self.assertEqual(confirm["relation_mode"], "manual_confirmed")
         self.assertEqual(confirm["month_scope"], "2026-02")
         self.assertEqual(confirm["special_metadata"]["origin"], "oa_pending_payment_promotion")
         self.assertEqual(confirm["special_metadata"]["pending_relation_id"], "pending-oa-bank")

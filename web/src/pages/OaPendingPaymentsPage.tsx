@@ -9,13 +9,13 @@ import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPay
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
-  autoReconcileOaPendingPaymentBankTransactions,
   fetchOaPendingPaymentBankCandidates,
   fetchOaPendingPaymentDetail,
   fetchOaPendingPaymentFilterOptions,
   fetchOaPendingPaymentRows,
   linkOaPendingPaymentBankTransactions,
   nextOaPendingPaymentSortDirection,
+  writebackOaPendingPaymentPaid,
 } from "../features/oaPendingPayments/api";
 import type {
   OaPendingPaymentBankCandidate,
@@ -29,8 +29,8 @@ import type {
   OaPendingPaymentSortDirection,
   OaPendingPaymentSummary,
   OaPendingPaymentViewMode,
-  AutoReconcileOaPendingPaymentBankTransactionsResponse,
   LinkOaPendingPaymentBankTransactionsResponse,
+  WritebackOaPendingPaymentPaidResponse,
 } from "../features/oaPendingPayments/types";
 import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import { fetchPendingInvoiceRules, savePendingInvoiceRules } from "../features/pendingInvoices/api";
@@ -168,19 +168,14 @@ export default function OaPendingPaymentsPage() {
   const [detailTarget, setDetailTarget] = useState<OaPendingPaymentDetailTarget | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [bankLinkDrawerOpen, setBankLinkDrawerOpen] = useState(false);
+  const [writingBackOaRowIds, setWritingBackOaRowIds] = useState<Set<string>>(() => new Set());
   const requestIdRef = useRef(0);
-  const autoReconcileCompletedKeysRef = useRef<Set<string>>(new Set()).current;
-  const autoReconcileFailedKeysRef = useRef<Set<string>>(new Set()).current;
-  const autoReconcilePromisesRef = useRef<Map<string, Promise<AutoReconcileOaPendingPaymentBankTransactionsResponse>>>(new Map()).current;
   const loadRowsRef = useRef<(mode: "reset" | "refresh", signal?: AbortSignal) => void>(() => undefined);
   const selectedOaRowIdList = useMemo(() => [...selectedOaRowIds], [selectedOaRowIds]);
 
   const loadRows = useCallback((mode: "reset" | "refresh", signal?: AbortSignal) => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    if (mode === "refresh") {
-      autoReconcileFailedKeysRef.delete(query.month || "all");
-    }
     if (mode === "reset") {
       setLoading(true);
     } else {
@@ -227,7 +222,7 @@ export default function OaPendingPaymentsPage() {
           setRefreshing(false);
         }
       });
-  }, [autoReconcileFailedKeysRef, query]);
+  }, [query]);
 
   useEffect(() => {
     loadRowsRef.current = loadRows;
@@ -238,57 +233,6 @@ export default function OaPendingPaymentsPage() {
     loadRows("reset", controller.signal);
     return () => controller.abort();
   }, [loadRows]);
-
-  const runAutoReconcileForVisibleScope = useCallback(async () => {
-    if (!canMutateData) {
-      return;
-    }
-    if (loading || refreshing || error || !isReadModelFresh(readModelStatus)) {
-      return;
-    }
-    const scopeKey = query.month || "all";
-    if (autoReconcileCompletedKeysRef.has(scopeKey) || autoReconcileFailedKeysRef.has(scopeKey)) {
-      return;
-    }
-    let reconcilePromise = autoReconcilePromisesRef.get(scopeKey);
-    if (!reconcilePromise) {
-      setActionError(null);
-      reconcilePromise = autoReconcileOaPendingPaymentBankTransactions({
-        month: query.month || undefined,
-      }).finally(() => {
-        autoReconcilePromisesRef.delete(scopeKey);
-      });
-      autoReconcilePromisesRef.set(scopeKey, reconcilePromise);
-    }
-    try {
-      const result = await reconcilePromise;
-      autoReconcileCompletedKeysRef.add(scopeKey);
-      setActionError(null);
-      if (!autoReconcileChanged(result)) {
-        return;
-      }
-      const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, scopeKey);
-      if (synced) {
-        setFeedback(autoReconcileFeedback(result));
-        loadRowsRef.current("refresh");
-      } else {
-        setFeedback("自动匹配和写回已提交，后台同步尚未完成，请稍后刷新。");
-      }
-    } catch (caught: unknown) {
-      autoReconcileFailedKeysRef.add(scopeKey);
-      setActionError(caught instanceof Error ? caught.message : "自动匹配和写回失败。");
-    }
-  }, [
-    autoReconcileCompletedKeysRef,
-    autoReconcileFailedKeysRef,
-    autoReconcilePromisesRef,
-    canMutateData,
-    error,
-    loading,
-    query.month,
-    readModelStatus,
-    refreshing,
-  ]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({ ...current, page: 1, keyword: keywordDraft.trim() }));
@@ -357,6 +301,36 @@ export default function OaPendingPaymentsPage() {
     }
   }, [loadRows, query.month]);
 
+  const handleWritebackPaid = useCallback(async (row: OaPendingPaymentRow) => {
+    if (!canMutateData) {
+      return;
+    }
+    const oaRowIds = rowOaIdsForWriteback(row);
+    if (oaRowIds.length === 0) {
+      return;
+    }
+    setActionError(null);
+    setWritingBackOaRowIds((current) => new Set([...current, ...oaRowIds]));
+    try {
+      const result = await writebackOaPendingPaymentPaid({ oaRowIds });
+      const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, query.month || "all");
+      if (synced) {
+        setFeedback(writebackPaidFeedback(result));
+        loadRows("refresh");
+      } else {
+        setFeedback("写回已提交，后台同步尚未完成，请稍后刷新。");
+      }
+    } catch (caught: unknown) {
+      setActionError(caught instanceof Error ? caught.message : "写回失败。");
+    } finally {
+      setWritingBackOaRowIds((current) => {
+        const next = new Set(current);
+        oaRowIds.forEach((oaRowId) => next.delete(oaRowId));
+        return next;
+      });
+    }
+  }, [canMutateData, loadRows, query.month]);
+
   const loadExpensePendingInvoiceRules = useCallback(() => fetchPendingInvoiceRules("expense"), []);
 
   const saveExpensePendingInvoiceRules = useCallback(
@@ -384,17 +358,6 @@ export default function OaPendingPaymentsPage() {
       >
         刷新
       </button>
-      {canMutateData ? (
-        <button
-          aria-label="自动匹配并写回 OA 待付款"
-          className="oa-pending-payments-button"
-          disabled={loading || refreshing || !!error || !isReadModelFresh(readModelStatus)}
-          onClick={() => void runAutoReconcileForVisibleScope()}
-          type="button"
-        >
-          自动匹配/写回
-        </button>
-      ) : null}
       {query.viewMode === "in_progress" ? (
         <button
           aria-label="关联支出流水"
@@ -418,7 +381,7 @@ export default function OaPendingPaymentsPage() {
         支出流水无需开票规则设置
       </button>
     </div>
-  ), [canMutateData, error, loadRows, loading, query.viewMode, readModelStatus, refreshing, runAutoReconcileForVisibleScope, selectedOaRowIds.size]);
+  ), [canMutateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
   const visibleError = error ?? actionError;
   const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
   const showReadModelState = isEmpty && !isReadModelFresh(readModelStatus);
@@ -526,6 +489,8 @@ export default function OaPendingPaymentsPage() {
                   onOpenDetail={setDetailTarget}
                   selectedOaRowIds={selectedOaRowIds}
                   onToggleOaSelection={canMutateData && query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
+                  onWritebackPaid={canMutateData ? (row) => void handleWritebackPaid(row) : undefined}
+                  writingBackOaRowIds={writingBackOaRowIds}
                   emptyStateMessage={
                     error
                       ? "OA 待付款核对加载失败，请点击刷新重试。"
@@ -570,20 +535,12 @@ function formatViewCount(count: number | null | undefined): string {
   return typeof count === "number" && Number.isFinite(count) ? `${count}条` : "";
 }
 
-function autoReconcileChanged(result: AutoReconcileOaPendingPaymentBankTransactionsResponse): boolean {
-  return Number(result.autoMatchedCount ?? 0) > 0 || Number(result.writebackCount ?? 0) > 0;
-}
-
-function autoReconcileFeedback(result: AutoReconcileOaPendingPaymentBankTransactionsResponse): string {
-  const matched = Number(result.autoMatchedCount ?? 0);
+function writebackPaidFeedback(result: WritebackOaPendingPaymentPaidResponse): string {
   const written = Number(result.writebackCount ?? 0);
-  if (matched > 0 && written > 0) {
-    return `已自动匹配 ${matched} 组支出流水并写回 ${written} 条 OA。`;
-  }
   if (written > 0) {
-    return `已自动写回 ${written} 条 OA。`;
+    return `已写回 ${written} 条 OA。`;
   }
-  return `已自动匹配 ${matched} 组支出流水。`;
+  return "OA 已经写回。";
 }
 
 function linkBankSuccessMessage(result: LinkOaPendingPaymentBankTransactionsResponse): string {
@@ -598,6 +555,10 @@ function linkBankSuccessMessage(result: LinkOaPendingPaymentBankTransactionsResp
 }
 
 function selectableOaRowIds(row: OaPendingPaymentRow): string[] {
+  return rowOaIdsForWriteback(row);
+}
+
+function rowOaIdsForWriteback(row: OaPendingPaymentRow): string[] {
   if (row.oaPaymentWriteback?.code === "written") {
     return [];
   }
