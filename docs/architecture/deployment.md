@@ -25,7 +25,9 @@ https://oa.company.com/fin-ops-api/  -> Python 后端
 
 ## 环境变量
 
-部署环境变量集中在 `deploy/oa/fin_ops.env.example`。生产环境不要把真实密钥提交到仓库。
+部署环境变量按职责拆分在 `deploy/oa/env/*.env.example`。生产服务器应落到
+`/etc/fin-ops/fin-ops.common.env`、`fin-ops.secrets.env`、migration-only env 和 worker/dispatcher
+env；不要恢复旧单文件 `deploy/oa/fin_ops.env.example` 或把真实密钥提交到仓库。
 
 ## 发布顺序
 

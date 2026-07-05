@@ -1,14 +1,14 @@
 # 部署模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-05
 
 ## 模块化状态
 
-- 状态：partial
+- 状态：closed
 - 当前边界可信度：high
 - 目标边界：部署模块负责发布、runtime worker/systemd/env/nginx/verify，不承载业务逻辑。
-- 当前缺口：新增 read model/worker 时必须同步 deploy examples 和 runtime worker manifest。
-- 旧代码删除条件：旧部署脚本或 systemd example 无引用且 README/operations 已迁移。
+- 当前缺口：无 P0/P1 模块化缺口；新增 read model/worker 仍必须同步 deploy examples 和 runtime worker manifest。
+- 旧代码删除状态：`legacy-current` 覆盖式发布入口、旧单文件 `deploy/oa/fin_ops.env.example` 和 systemd 示例中的 current/backend runtime 路径已移除；release helper 只保留历史 `/opt/fin-ops/current` 归档/guard，不作为旧发布 I/O。
 
 ## 职责边界
 
@@ -30,6 +30,7 @@
 | Deploy command | `scripts/deploy-oa.sh` | 使用明确 release/remote/env |
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
+| Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |
 
 ## 输出 I/O
 
@@ -71,3 +72,6 @@
 ## 当前缺口和删除条件
 
 - 新增 worker/read model 是 deploy-impacting change，必须同步 examples、docs、tests。
+- 禁止恢复 `--mode legacy-current`、`build_legacy_remote_deploy_script`、`create_legacy_release_archive` 或 `deploy/oa/fin_ops.env.example`。
+- 禁止在 systemd examples 或发布脚本中恢复 `/opt/fin-ops/current/backend` 作为运行目录。
+- `finops-deploy-control` 对 legacy current 的归档只用于 release 激活前清理历史 runtime，不得重新变成覆盖式发布入口。

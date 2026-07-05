@@ -51,6 +51,11 @@
 5. 发布脚本等待本机 `/health/ready`，再检查公网 `/fin-ops-api/api/session/me` 和 `/fin-ops/api/session/me` 都作为 JSON API 被代理。
 6. 旧 release 默认保留最近 4 个，并保护 active release references。
 
+旧覆盖式 `legacy-current` deploy mode 已移除；`scripts/deploy-oa.sh` 不再接受 `--mode`，
+也不再生成覆盖 `/www/wwwroot/fin-ops/dist` 或 `/opt/fin-ops/current/backend` 的 payload。
+runtime env 事实源是 `deploy/oa/env/*.env.example` 和生产 `/etc/fin-ops/*` split env，
+不再维护仓库根部单文件 `deploy/oa/fin_ops.env.example`。
+
 Nightly CI 入口是：
 
 ```bash

@@ -55,10 +55,16 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
 
 ## 单一事实源
 
+生产运维命令默认先读取当前 active release：
+
+```bash
+release_src="$(systemctl show fin-ops.service -P WorkingDirectory)"
+```
+
 Worker manifest 的唯一事实源是：
 
 ```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_worker_manifest --json
 ```
 
@@ -341,7 +347,7 @@ set -a
 . /etc/fin-ops/fin-ops.common.env
 . /etc/fin-ops/fin-ops.secrets.env
 set +a
-PYTHONPATH=/opt/fin-ops/current/backend/src /opt/fin-ops/venv/bin/python \
+PYTHONPATH="$release_src/backend/src" /opt/fin-ops/venv/bin/python \
   -m fin_ops_platform.tools.prune_workbench_generations \
   --execute \
   --keep-recent-generations-per-scope 1 \
@@ -421,11 +427,12 @@ sudo systemctl restart fin-ops-worker@workbench.service
 重启前先跑对应 check：
 
 ```bash
-cd /opt/fin-ops/current
+release_src="$(systemctl show fin-ops.service -P WorkingDirectory)"
+cd "$release_src"
 set -a
 source /etc/fin-ops/fin-ops.worker.workbench.env
 set +a
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.app.worker \
     --registration workbench \
     --worker-instance workbench \
@@ -482,12 +489,13 @@ PostgreSQL durable queue 和 readiness 为准：
 3. 执行 required-only preflight：
 
    ```bash
-   cd /opt/fin-ops/current
+   release_src="$(systemctl show fin-ops.service -P WorkingDirectory)"
+cd "$release_src"
    set -a
    source /etc/fin-ops/fin-ops.api.env
    source /etc/fin-ops/fin-ops.rabbitmq-monitoring.env
    set +a
-   PYTHONPATH=/opt/fin-ops/current/backend/src \
+   PYTHONPATH="$release_src/backend/src" \
      /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.run_rabbitmq_staging_preflight \
        --json \
        --output /tmp/finops-rabbitmq-staging-preflight.json
@@ -548,11 +556,12 @@ PostgreSQL done/fresh。
 2. 执行 dry-run：
 
    ```bash
-   cd /opt/fin-ops/current
+   release_src="$(systemctl show fin-ops.service -P WorkingDirectory)"
+cd "$release_src"
    set -a
    source /etc/fin-ops/fin-ops.api.env
    set +a
-   PYTHONPATH=/opt/fin-ops/current/backend/src \
+   PYTHONPATH="$release_src/backend/src" \
      /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.app_status_readiness_backfill --dry-run
    ```
 
@@ -560,7 +569,7 @@ PostgreSQL done/fresh。
 4. dry-run 判定合理后再 apply：
 
    ```bash
-   PYTHONPATH=/opt/fin-ops/current/backend/src \
+   PYTHONPATH="$release_src/backend/src" \
      /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.app_status_readiness_backfill --apply
    ```
 
@@ -674,10 +683,10 @@ limit 50;
 修复代码或配置后重放：
 
 ```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops inspect --event-id <uuid>
 
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops requeue \
     --event-id <uuid> \
     --reason operator_repair
@@ -688,7 +697,7 @@ dedupe event 覆盖的旧 `processing`，再释放仍需真实重跑的 stale `p
 superseded resolution 只清理旧重复事件，release 只会重新 publish/处理，不会伪造 readiness：
 
 ```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-superseded-processing \
     --dry-run \
     --stale-after-seconds 300 \
@@ -696,7 +705,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
     --limit 100 \
     --reason rabbitmq_stale_processing_superseded
 
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-superseded-processing \
     --execute \
     --stale-after-seconds 300 \
@@ -708,7 +717,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 随后释放仍需重跑的 stale processing：
 
 ```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops release-stale-processing \
     --dry-run \
     --stale-after-seconds 300 \
@@ -716,7 +725,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
     --limit 100 \
     --reason rabbitmq_stale_processing_repair
 
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops release-stale-processing \
     --execute \
     --stale-after-seconds 300 \
@@ -730,7 +739,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 已经通过真实 readiness convergence 证明同一 scope 已被覆盖，可以使用受控 resolve：
 
 ```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-dead-letter \
     --event-id <uuid> \
     --reason readiness_converged_obsolete_invalid_scope
@@ -739,7 +748,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 批量归档前必须先 dry-run：
 
 ```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-covered-dead-letters \
     --dry-run \
     --limit 100 \
@@ -750,7 +759,7 @@ dry-run 中 `eligible_count` 必须等于准备归档的候选数，且每条 ev
 `fresh_readiness` 或 `later_done`。确认后才能执行：
 
 ```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-covered-dead-letters \
     --execute \
     --limit 100 \

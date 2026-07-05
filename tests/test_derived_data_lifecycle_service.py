@@ -101,6 +101,32 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         )
         self.assertNotIn("tax_offset_read_model", [domain["domain"] for domain in plan["domains"]])
 
+    def test_import_state_changed_maps_runtime_import_refresh_domains(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("import_state_changed", scope_keys=["2026-03"], include_all=False)
+
+        self.assertEqual(plan["affected_scopes"], ["2026-03"])
+        self.assertEqual(
+            [domain["domain"] for domain in plan["domains"]],
+            [
+                "workbench_read_model",
+                "workbench_relation_read_model",
+                "invoice_lifecycle_read_model",
+                "pending_invoice_read_model",
+                "input_invoice_usage_read_model",
+                "output_invoice_collection_read_model",
+                "oa_pending_payment_read_model",
+                "bank_account_balance_read_model",
+                "bank_detail_read_model",
+                "cost_statistics_read_model",
+                "search_cache",
+            ],
+        )
+        self.assertIn("input_invoice_usage.read_model.refresh", plan["will_enqueue_jobs"])
+        self.assertIn("output_invoice_collection.read_model.refresh", plan["will_enqueue_jobs"])
+        self.assertIn("oa_pending_payment.read_model.refresh", plan["will_enqueue_jobs"])
+
     def test_bank_transaction_category_changed_maps_workbench_pending_cost_and_search_domains(self) -> None:
         service = DerivedDataLifecycleService()
 
@@ -138,6 +164,9 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
                 "pending_invoice_read_model",
+                "input_invoice_usage_read_model",
+                "output_invoice_collection_read_model",
+                "oa_pending_payment_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "cost_statistics_read_model",
@@ -162,6 +191,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in exception_plan["domains"]])
         self.assertIn("workbench_relation_read_model", [domain["domain"] for domain in pair_plan["domains"]])
         self.assertIn("workbench_relation_read_model", [domain["domain"] for domain in exception_plan["domains"]])
+        self.assertIn("input_invoice_usage_read_model", [domain["domain"] for domain in pair_plan["domains"]])
+        self.assertNotIn("input_invoice_usage_read_model", [domain["domain"] for domain in exception_plan["domains"]])
         self.assertIn("workbench_matching", pair_plan["will_enqueue_jobs"])
         self.assertIn("workbench_matching", exception_plan["will_enqueue_jobs"])
 
@@ -215,6 +246,9 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
                 "pending_invoice_read_model",
+                "input_invoice_usage_read_model",
+                "output_invoice_collection_read_model",
+                "oa_pending_payment_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "cost_statistics_read_model",
@@ -284,6 +318,9 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
+                "input_invoice_usage_read_model",
+                "output_invoice_collection_read_model",
+                "oa_pending_payment_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "cost_statistics_read_model",
@@ -372,6 +409,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             (
                 "invoice_import_confirmed",
                 "bank_import_confirmed",
+                "import_state_changed",
                 "etc_import_confirmed",
                 "etc_oa_submitted",
                 "etc_oa_revoked",
@@ -410,6 +448,9 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "pending_invoice_read_model",
+                "input_invoice_usage_read_model",
+                "output_invoice_collection_read_model",
+                "oa_pending_payment_read_model",
                 "bank_account_balance_read_model",
                 "bank_detail_read_model",
                 "no_oa_bank_batch_read_model",

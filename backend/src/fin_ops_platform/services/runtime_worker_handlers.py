@@ -317,23 +317,7 @@ class _RuntimeWorkerDerivedLifecycle:
         reason = str((metadata or {}).get("reason") or event).strip()
         return self._lifecycle.execute_plan(
             plan,
-            executors={
-                "workbench_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench", reason),
-                "workbench_relation_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench_relation", reason),
-                "workbench_candidate_matches": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
-                "workbench_matching_dirty_scopes": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
-                "invoice_lifecycle_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "invoice_lifecycle", reason),
-                "cost_statistics_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "cost_statistics", reason),
-                "tax_offset_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "tax_offset", reason),
-                "tax_offset_month_cache": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
-                "pending_invoice_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "pending_invoice", reason),
-                "bank_account_balance_read_model": lambda domain_plan: self._enqueue_bank_account_balance_domain(domain_plan, reason),
-                "bank_detail_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "bank_detail", reason),
-                "no_oa_bank_batch_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "no_oa_bank_batch", reason),
-                "search_cache": lambda domain_plan: self._clear_search_cache(domain_plan),
-                "oa_adapter_records_cache": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
-                "historical_etc_repair_state": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
-            },
+            executors=self._executors_for_reason(reason),
         )
 
     def schedule_workbench_matching(self, scope_months: list[str], *, reason: str, **_kwargs: object) -> dict[str, object]:
@@ -401,7 +385,6 @@ class _RuntimeWorkerDerivedLifecycle:
         output_invoice_collection_scope_keys: list[str] | None = None,
         invalidate_cost_statistics: bool = True,
     ) -> None:
-        self._search_service.clear_cache()
         payload = {
             "imports": import_service.snapshot(),
             "file_imports": file_import_service.snapshot(),
@@ -420,44 +403,134 @@ class _RuntimeWorkerDerivedLifecycle:
         save_tax_certified_imports = getattr(self._state_store, "save_tax_certified_imports", None)
         if callable(save_tax_certified_imports):
             save_tax_certified_imports(tax_certified_import_service.snapshot())
-        self._enqueue_scopes(
-            "workbench",
-            _workbench_read_model_scope_keys_for_import_state(cost_statistics_scope_keys),
-            reason="import_state_changed",
+        self._execute_import_state_changed(
+            cost_statistics_scope_keys=cost_statistics_scope_keys,
+            bank_detail_scope_keys=bank_detail_scope_keys,
+            input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
+            output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
+            invalidate_cost_statistics=invalidate_cost_statistics,
         )
-        self._enqueue_scopes("workbench_relation", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        self._enqueue_scopes("invoice_lifecycle", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        self._search_read_model_refresh_producer.enqueue(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        self._enqueue_scopes(
-            "pending_invoice",
-            pending_invoice_read_model_scope_keys_for_import_state(
+
+    def _executors_for_reason(self, reason: str) -> dict[str, Callable[[dict[str, object]], dict[str, object] | None]]:
+        return {
+            "workbench_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench", reason),
+            "workbench_relation_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench_relation", reason),
+            "workbench_candidate_matches": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
+            "workbench_matching_dirty_scopes": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
+            "invoice_lifecycle_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "invoice_lifecycle", reason),
+            "cost_statistics_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "cost_statistics", reason),
+            "tax_offset_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "tax_offset", reason),
+            "tax_offset_month_cache": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
+            "pending_invoice_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "pending_invoice", reason),
+            "input_invoice_usage_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "input_invoice_usage", reason),
+            "output_invoice_collection_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "output_invoice_collection", reason),
+            "oa_pending_payment_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "oa_pending_payment", reason),
+            "bank_account_balance_read_model": lambda domain_plan: self._enqueue_bank_account_balance_domain(domain_plan, reason),
+            "bank_detail_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "bank_detail", reason),
+            "no_oa_bank_batch_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "no_oa_bank_batch", reason),
+            "bank_flow_rule_batch_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "bank_flow_rule_batch", reason),
+            "search_cache": lambda domain_plan: self._clear_search_cache(domain_plan),
+            "oa_adapter_records_cache": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
+            "historical_etc_repair_state": lambda domain_plan: {"invalidated_scopes": self._scope_keys(domain_plan)},
+        }
+
+    def _execute_import_state_changed(
+        self,
+        *,
+        cost_statistics_scope_keys: list[str] | None,
+        bank_detail_scope_keys: list[str] | None,
+        input_invoice_usage_scope_keys: list[str] | None,
+        output_invoice_collection_scope_keys: list[str] | None,
+        invalidate_cost_statistics: bool,
+    ) -> dict[str, object]:
+        reason = "import_state_changed"
+        plan = self._lifecycle.plan_event(
+            reason,
+            scope_keys=cost_statistics_scope_keys or ["all"],
+            include_all=False,
+            dry_run=False,
+            metadata={"source": "runtime_import_state", "reason": reason},
+        )
+        domain_scope_keys = self._import_state_domain_scope_keys(
+            cost_statistics_scope_keys=cost_statistics_scope_keys,
+            bank_detail_scope_keys=bank_detail_scope_keys,
+            input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
+            output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
+            invalidate_cost_statistics=invalidate_cost_statistics,
+        )
+        plan["domains"] = self._domains_with_scope_overrides(plan, domain_scope_keys)
+        executors = self._executors_for_reason(reason)
+        executors["bank_detail_read_model"] = lambda domain_plan: self._enqueue_domain(
+            domain_plan,
+            "bank_detail",
+            "import_facts_changed",
+        )
+        executors["search_cache"] = lambda domain_plan: self._refresh_import_search(domain_plan, reason)
+        return self._lifecycle.execute_plan(plan, executors=executors)
+
+    @staticmethod
+    def _import_state_domain_scope_keys(
+        *,
+        cost_statistics_scope_keys: list[str] | None,
+        bank_detail_scope_keys: list[str] | None,
+        input_invoice_usage_scope_keys: list[str] | None,
+        output_invoice_collection_scope_keys: list[str] | None,
+        invalidate_cost_statistics: bool,
+    ) -> dict[str, list[str]]:
+        cost_scope_keys = list(cost_statistics_scope_keys or ["all"])
+        bank_scope_keys = list(bank_detail_scope_keys or [])
+        input_scope_keys = list(input_invoice_usage_scope_keys) if input_invoice_usage_scope_keys is not None else cost_scope_keys
+        output_scope_keys = (
+            list(output_invoice_collection_scope_keys)
+            if output_invoice_collection_scope_keys is not None
+            else cost_scope_keys
+        )
+        return {
+            "workbench_read_model": _workbench_read_model_scope_keys_for_import_state(cost_statistics_scope_keys),
+            "workbench_relation_read_model": cost_scope_keys,
+            "invoice_lifecycle_read_model": cost_scope_keys,
+            "pending_invoice_read_model": pending_invoice_read_model_scope_keys_for_import_state(
                 cost_statistics_scope_keys,
                 bank_detail_scope_keys,
             ),
-            reason="import_state_changed",
-        )
-        if input_invoice_usage_scope_keys is None:
-            input_invoice_usage_scope_keys = cost_statistics_scope_keys or ["all"]
-        if output_invoice_collection_scope_keys is None:
-            output_invoice_collection_scope_keys = cost_statistics_scope_keys or ["all"]
-        if input_invoice_usage_scope_keys:
-            self._enqueue_scopes(
-                "input_invoice_usage",
-                input_invoice_usage_scope_keys,
-                reason="import_state_changed",
-            )
-        if output_invoice_collection_scope_keys:
-            self._enqueue_scopes(
-                "output_invoice_collection",
-                output_invoice_collection_scope_keys,
-                reason="import_state_changed",
-            )
-        self._enqueue_scopes("oa_pending_payment", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
-        if bank_detail_scope_keys:
-            self._enqueue_scopes("bank_detail", bank_detail_scope_keys, reason="import_facts_changed")
-            self._bank_account_balance_read_model_refresh_producer.enqueue_all(reason="import_state_changed")
-        if invalidate_cost_statistics:
-            self._enqueue_scopes("cost_statistics", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
+            "input_invoice_usage_read_model": input_scope_keys,
+            "output_invoice_collection_read_model": output_scope_keys,
+            "oa_pending_payment_read_model": cost_scope_keys,
+            "bank_account_balance_read_model": ["all"] if bank_scope_keys else [],
+            "bank_detail_read_model": bank_scope_keys,
+            "cost_statistics_read_model": cost_scope_keys if invalidate_cost_statistics else [],
+            "search_cache": cost_scope_keys,
+        }
+
+    @staticmethod
+    def _domains_with_scope_overrides(
+        plan: dict[str, object],
+        domain_scope_keys: dict[str, list[str]],
+    ) -> list[dict[str, object]]:
+        domains: list[dict[str, object]] = []
+        for domain_plan in list(plan.get("domains") or []):
+            if not isinstance(domain_plan, dict):
+                continue
+            domain_name = str(domain_plan.get("domain") or "").strip()
+            next_plan = dict(domain_plan)
+            if domain_name in domain_scope_keys:
+                scope_keys = _dedupe_text(domain_scope_keys[domain_name])
+                if not scope_keys:
+                    continue
+                next_plan["scope_keys"] = scope_keys
+                next_plan["estimated_count"] = len(scope_keys)
+            domains.append(next_plan)
+        return domains
+
+    def _refresh_import_search(self, domain_plan: dict[str, object], reason: str) -> dict[str, object]:
+        self._search_service.clear_cache()
+        scope_keys = self._scope_keys(domain_plan) or ["all"]
+        enqueued = self._search_read_model_refresh_producer.enqueue(scope_keys, reason=reason)
+        return {
+            "deleted_counts": {"search_cache": 1},
+            "invalidated_scopes": scope_keys,
+            "enqueued_jobs": ["search.read_model.refresh"] if enqueued else [],
+        }
 
     def _enqueue_bank_account_balance_domain(self, domain_plan: dict[str, object], reason: str) -> dict[str, object]:
         enqueued_scope_keys = self._bank_account_balance_read_model_refresh_producer.enqueue_scope_keys(

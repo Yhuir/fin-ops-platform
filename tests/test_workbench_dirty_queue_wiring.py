@@ -261,6 +261,36 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertFalse(any(scope_type == "cost_statistics" for scope_type, _scope_key in refreshes))
         self.assertFalse(any(scope_type == "tax_offset" for scope_type, _scope_key in refreshes))
 
+    def test_import_state_persistence_uses_lifecycle_domain_scope_overrides(self) -> None:
+        app = build_application()
+        queue = RecordingReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+
+        app._persist_import_state_with_read_model_invalidation(
+            cost_statistics_scope_keys=["2026-05"],
+            bank_detail_scope_keys=["2026-06"],
+            input_invoice_usage_scope_keys=["2026-04"],
+            output_invoice_collection_scope_keys=[],
+            invalidate_cost_statistics=False,
+        )
+
+        refreshes = [
+            (call.get("scope_type"), call.get("scope_key"), call.get("reason"))
+            for call in queue.calls
+        ]
+        self.assertIn(("workbench", "2026-05", "workbench_scope_invalidated"), refreshes)
+        self.assertIn(("workbench_relation", "2026-05", "import_state_changed"), refreshes)
+        self.assertIn(("invoice_lifecycle", "2026-05", "import_state_changed"), refreshes)
+        self.assertIn(("pending_invoice", "expense:all", "import_state_changed"), refreshes)
+        self.assertIn(("pending_invoice", "income:all", "import_state_changed"), refreshes)
+        self.assertIn(("input_invoice_usage", "2026-04", "import_state_changed"), refreshes)
+        self.assertIn(("oa_pending_payment", "2026-05", "import_state_changed"), refreshes)
+        self.assertIn(("bank_account_balance", "all", "import_state_changed"), refreshes)
+        self.assertIn(("bank_detail", "2026-06", "import_facts_changed"), refreshes)
+        self.assertIn(("search", "2026-05", "import_state_changed"), refreshes)
+        self.assertNotIn(("output_invoice_collection", "2026-05", "import_state_changed"), refreshes)
+        self.assertFalse(any(scope_type == "cost_statistics" for scope_type, _scope_key, _reason in refreshes))
+
     def test_dirty_scope_worker_claims_db_queue_and_completes_with_lease_identity(self) -> None:
         app = build_application()
         queue = RecordingDirtyQueue(claim_months=["2026-05"])

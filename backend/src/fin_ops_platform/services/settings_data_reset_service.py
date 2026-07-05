@@ -129,17 +129,9 @@ class SettingsDataResetService:
             removed_batch_types={BatchType.BANK_TRANSACTION.value}
         )
         self._emit_progress(progress_callback, "persist_state", "正在写入银行流水重置结果。", 2, 4)
-        self._state_store.save(
-            {
-                "imports": imports_snapshot,
-                "file_imports": file_imports_snapshot,
-                "matching": {},
-                "workbench_overrides": {},
-                "workbench_pair_relations": {},
-                "workbench_read_models": {},
-                "workbench_candidate_matches": {},
-                "workbench_matching_dirty_scopes": {},
-            }
+        self._persist_import_reset_state(
+            imports_snapshot=imports_snapshot,
+            file_imports_snapshot=file_imports_snapshot,
         )
         self._emit_progress(progress_callback, "delete_import_files", "正在删除银行流水导入文件。", 3, 4)
         deleted_blob_count = self._state_store.delete_import_files(removed_file_paths)
@@ -195,17 +187,9 @@ class SettingsDataResetService:
         self._emit_progress(progress_callback, "prepare_tax_certified_imports", "正在统计税金认证记录。", 2, 5)
         tax_deleted_counts = self._tax_import_deleted_counts()
         self._emit_progress(progress_callback, "persist_state", "正在写入发票重置结果。", 3, 5)
-        self._state_store.save(
-            {
-                "imports": imports_snapshot,
-                "file_imports": file_imports_snapshot,
-                "matching": {},
-                "workbench_overrides": {},
-                "workbench_pair_relations": {},
-                "workbench_read_models": {},
-                "workbench_candidate_matches": {},
-                "workbench_matching_dirty_scopes": {},
-            }
+        self._persist_import_reset_state(
+            imports_snapshot=imports_snapshot,
+            file_imports_snapshot=file_imports_snapshot,
         )
         self._state_store.save_tax_certified_imports({})
         self._emit_progress(progress_callback, "delete_import_files", "正在删除发票导入文件。", 4, 5)
@@ -317,6 +301,20 @@ class SettingsDataResetService:
     ) -> None:
         if progress_callback is not None:
             progress_callback(phase, message, current, total)
+
+    def _persist_import_reset_state(self, *, imports_snapshot: dict[str, Any], file_imports_snapshot: dict[str, Any]) -> None:
+        self._state_store.save(
+            {
+                "imports": imports_snapshot,
+                "file_imports": file_imports_snapshot,
+                "matching": {},
+            }
+        )
+        self._state_store.save_workbench_overrides({})
+        self._state_store.save_workbench_pair_relations({})
+        self._state_store.save_workbench_read_models({})
+        self._state_store.save_workbench_candidate_matches({})
+        self._state_store.save_workbench_matching_dirty_scopes({})
 
     def _build_filtered_imports_snapshot(
         self,

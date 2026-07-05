@@ -638,41 +638,6 @@ class Response:
     )
 
 
-@dataclass(slots=True)
-class DataResetJob:
-    job_id: str
-    action: str
-    status: str
-    phase: str
-    message: str
-    current: int
-    total: int
-    percent: int
-    created_at: str
-    updated_at: str
-    result: dict[str, object] | None = None
-    error: str | None = None
-
-    def to_payload(self) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "job_id": self.job_id,
-            "action": self.action,
-            "status": self.status,
-            "phase": self.phase,
-            "message": self.message,
-            "current": self.current,
-            "total": self.total,
-            "percent": self.percent,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
-        if self.result is not None:
-            payload["result"] = self.result
-        if self.error:
-            payload["error"] = self.error
-        return payload
-
-
 class StatePersistenceError(RuntimeError):
     """Raised when critical workbench state cannot be durably persisted."""
 
@@ -727,8 +692,6 @@ class Application:
         self._api_performance_recorder = ApiPerformanceRecorder()
         self._state_store = build_state_store(data_dir)
         self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)
-        self._data_reset_jobs: dict[str, DataResetJob] = {}
-        self._data_reset_jobs_lock = Lock()
         self._app_health_dashboard_cache_lock = Lock()
         self._app_health_dashboard_cache: tuple[float, dict[str, object]] | None = None
         self._workbench_matching_dirty_worker_lock = Lock()
@@ -8029,13 +7992,6 @@ class Application:
         payload["derived_data_lifecycle"] = lifecycle_summary
         return payload
 
-    def _active_data_reset_job(self) -> DataResetJob | None:
-        with self._data_reset_jobs_lock:
-            for job in self._data_reset_jobs.values():
-                if job.status in {"queued", "running"}:
-                    return job
-        return None
-
     def _active_data_reset_background_job(self, owner_user_id: str):
         for job in self._background_job_service.list_active_jobs(owner_user_id, include_system=True):
             if job.type == "settings_data_reset" and job.status in {"queued", "running"}:
@@ -8083,81 +8039,6 @@ class Application:
             result.setdefault("job_id", job.job_id)
             payload["result"] = result
         return payload
-
-    def _run_settings_data_reset_job(self, job_id: str) -> None:
-        def update(phase: str, message: str, percent: int) -> None:
-            self._update_data_reset_job(
-                job_id,
-                status="running",
-                phase=phase,
-                message=message,
-                current=max(0, min(int(percent), 100)),
-                total=100,
-                percent=max(0, min(int(percent), 100)),
-            )
-
-        with self._data_reset_jobs_lock:
-            job = self._data_reset_jobs.get(job_id)
-            action = job.action if job is not None else ""
-        if not action:
-            return
-        update("start", "数据重置任务已开始。", 1)
-        try:
-            result = self._execute_settings_data_reset(action, progress=update)
-        except Exception as exc:
-            self._update_data_reset_job(
-                job_id,
-                status="failed",
-                phase="failed",
-                message="数据重置失败。",
-                current=100,
-                total=100,
-                percent=100,
-                error=str(exc),
-            )
-            return
-
-        failed = str(result.get("status") or "") == "partial" or str(result.get("rebuild_status") or "") == "failed"
-        self._update_data_reset_job(
-            job_id,
-            status="failed" if failed else "completed",
-            phase="failed" if failed else "complete",
-            message=str(result.get("message") or ("数据重置失败。" if failed else "数据重置已完成。")),
-            current=100,
-            total=100,
-            percent=100,
-            result=result,
-            error=str(result.get("message") or "") if failed else None,
-        )
-
-    def _update_data_reset_job(
-        self,
-        job_id: str,
-        *,
-        status: str,
-        phase: str,
-        message: str,
-        current: int,
-        total: int,
-        percent: int,
-        result: dict[str, object] | None = None,
-        error: str | None = None,
-    ) -> None:
-        with self._data_reset_jobs_lock:
-            job = self._data_reset_jobs.get(job_id)
-            if job is None:
-                return
-            job.status = status
-            job.phase = phase
-            job.message = message
-            job.current = current
-            job.total = total
-            job.percent = percent
-            job.updated_at = datetime.now().isoformat()
-            if result is not None:
-                job.result = result
-            if error is not None:
-                job.error = error
 
     def _parse_oa_attachment_invoices_for_reset_rebuild(
         self,
@@ -11469,47 +11350,14 @@ class Application:
         output_invoice_collection_scope_keys: list[str] | None = None,
         invalidate_cost_statistics: bool = True,
     ) -> None:
-        self._search_service.clear_cache()
-        self._invalidate_workbench_read_models(invalidate_cost_statistics=False)
-        self._search_read_model_refresh_producer().invalidate(
-            cost_statistics_scope_keys or ["all"],
-            reason="import_state_changed",
+        self._execute_import_state_changed_lifecycle(
+            cost_statistics_scope_keys=cost_statistics_scope_keys,
+            bank_detail_scope_keys=bank_detail_scope_keys,
+            input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
+            output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
+            invalidate_cost_statistics=invalidate_cost_statistics,
+            source="application_state_persist",
         )
-        self._invalidate_pending_invoice_read_model_scopes(reason="import_state_changed")
-        input_scope_keys = input_invoice_usage_scope_keys
-        if input_scope_keys is None:
-            input_scope_keys = cost_statistics_scope_keys or ["all"]
-        output_scope_keys = output_invoice_collection_scope_keys
-        if output_scope_keys is None:
-            output_scope_keys = cost_statistics_scope_keys or ["all"]
-        if input_scope_keys:
-            self._invalidate_invoice_usage_collection_read_model_scopes(
-                input_scope_keys,
-                reason="import_state_changed",
-                scope_types=["input_invoice_usage"],
-            )
-        if output_scope_keys:
-            self._invalidate_invoice_usage_collection_read_model_scopes(
-                output_scope_keys,
-                reason="import_state_changed",
-                scope_types=["output_invoice_collection"],
-            )
-        self._invalidate_invoice_usage_collection_read_model_scopes(
-            cost_statistics_scope_keys or ["all"],
-            reason="import_state_changed",
-            scope_types=["oa_pending_payment"],
-        )
-        if bank_detail_scope_keys:
-            self._bank_detail_read_model_refresh_producer().enqueue(bank_detail_scope_keys, reason="import_facts_changed")
-            self._bank_account_balance_read_model_refresh_producer().enqueue_all(reason="import_state_changed")
-        if invalidate_cost_statistics:
-            if cost_statistics_scope_keys is None:
-                self._invalidate_cost_statistics_read_models()
-            else:
-                self._invalidate_cost_statistics_read_model_scopes(
-                    cost_statistics_scope_keys,
-                    reason="import_state_changed",
-                )
         self._persist_state()
 
     def _persist_import_preview_state(self) -> None:
@@ -11551,56 +11399,80 @@ class Application:
             if callable(save_tax_certified_imports):
                 save_tax_certified_imports(self._tax_certified_import_service.snapshot())
 
-        for scope_key in self._import_state_workbench_scope_keys(cost_statistics_scope_keys):
-            self._enqueue_workbench_read_model_refresh(scope_key, reason="import_state_changed")
-        self._enqueue_generic_read_model_refreshes(
-            "workbench_relation",
-            cost_statistics_scope_keys or ["all"],
-            reason="import_state_changed",
-        )
-        self._enqueue_generic_read_model_refreshes(
-            "invoice_lifecycle",
-            cost_statistics_scope_keys or ["all"],
-            reason="import_state_changed",
-        )
-        self._search_read_model_refresh_producer().invalidate(
-            cost_statistics_scope_keys or ["all"],
-            reason="import_state_changed",
-        )
-        self._invalidate_pending_invoice_read_model_scopes(
-            scope_keys=self._import_state_pending_invoice_scope_keys(cost_statistics_scope_keys, bank_detail_scope_keys),
-            reason="import_state_changed",
+        self._execute_import_state_changed_lifecycle(
+            cost_statistics_scope_keys=cost_statistics_scope_keys,
+            bank_detail_scope_keys=bank_detail_scope_keys,
+            input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
+            output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
+            invalidate_cost_statistics=invalidate_cost_statistics,
+            source="application_import_state",
         )
 
-        if input_invoice_usage_scope_keys is None:
-            input_invoice_usage_scope_keys = cost_statistics_scope_keys or ["all"]
-        if output_invoice_collection_scope_keys is None:
-            output_invoice_collection_scope_keys = cost_statistics_scope_keys or ["all"]
-        if input_invoice_usage_scope_keys:
-            self._invalidate_invoice_usage_collection_read_model_scopes(
-                input_invoice_usage_scope_keys,
-                reason="import_state_changed",
-                scope_types=["input_invoice_usage"],
-            )
-        if output_invoice_collection_scope_keys:
-            self._invalidate_invoice_usage_collection_read_model_scopes(
-                output_invoice_collection_scope_keys,
-                reason="import_state_changed",
-                scope_types=["output_invoice_collection"],
-            )
-        self._invalidate_invoice_usage_collection_read_model_scopes(
-            cost_statistics_scope_keys or ["all"],
-            reason="import_state_changed",
-            scope_types=["oa_pending_payment"],
+    def _execute_import_state_changed_lifecycle(
+        self,
+        *,
+        cost_statistics_scope_keys: list[str] | None,
+        bank_detail_scope_keys: list[str] | None,
+        input_invoice_usage_scope_keys: list[str] | None,
+        output_invoice_collection_scope_keys: list[str] | None,
+        invalidate_cost_statistics: bool,
+        source: str,
+    ) -> dict[str, object]:
+        return self._execute_derived_data_lifecycle_event(
+            "import_state_changed",
+            scope_keys=cost_statistics_scope_keys or ["all"],
+            include_all=False,
+            metadata={"source": source, "reason": "import_state_changed"},
+            executor_overrides={
+                "bank_detail_read_model": self._import_state_bank_detail_lifecycle_executor,
+            },
+            domain_scope_keys=self._import_state_lifecycle_domain_scope_keys(
+                cost_statistics_scope_keys=cost_statistics_scope_keys,
+                bank_detail_scope_keys=bank_detail_scope_keys,
+                input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
+                output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
+                invalidate_cost_statistics=invalidate_cost_statistics,
+            ),
         )
-        if bank_detail_scope_keys:
-            self._bank_detail_read_model_refresh_producer().enqueue(bank_detail_scope_keys, reason="import_facts_changed")
-            self._bank_account_balance_read_model_refresh_producer().enqueue_all(reason="import_state_changed")
-        if invalidate_cost_statistics:
-            self._invalidate_cost_statistics_read_model_scopes(
-                cost_statistics_scope_keys or ["all"],
-                reason="import_state_changed",
-            )
+
+    @staticmethod
+    def _import_state_lifecycle_domain_scope_keys(
+        *,
+        cost_statistics_scope_keys: list[str] | None,
+        bank_detail_scope_keys: list[str] | None,
+        input_invoice_usage_scope_keys: list[str] | None,
+        output_invoice_collection_scope_keys: list[str] | None,
+        invalidate_cost_statistics: bool,
+    ) -> dict[str, list[str]]:
+        cost_scope_keys = list(cost_statistics_scope_keys or ["all"])
+        bank_scope_keys = list(bank_detail_scope_keys or [])
+        input_scope_keys = list(input_invoice_usage_scope_keys) if input_invoice_usage_scope_keys is not None else cost_scope_keys
+        output_scope_keys = (
+            list(output_invoice_collection_scope_keys)
+            if output_invoice_collection_scope_keys is not None
+            else cost_scope_keys
+        )
+        return {
+            "workbench_read_model": Application._import_state_workbench_scope_keys(cost_statistics_scope_keys),
+            "workbench_relation_read_model": cost_scope_keys,
+            "invoice_lifecycle_read_model": cost_scope_keys,
+            "pending_invoice_read_model": Application._import_state_pending_invoice_scope_keys(
+                cost_statistics_scope_keys,
+                bank_detail_scope_keys,
+            ),
+            "input_invoice_usage_read_model": input_scope_keys,
+            "output_invoice_collection_read_model": output_scope_keys,
+            "oa_pending_payment_read_model": cost_scope_keys,
+            "bank_account_balance_read_model": ["all"] if bank_scope_keys else [],
+            "bank_detail_read_model": bank_scope_keys,
+            "cost_statistics_read_model": cost_scope_keys if invalidate_cost_statistics else [],
+            "search_cache": cost_scope_keys,
+        }
+
+    def _import_state_bank_detail_lifecycle_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        next_plan = dict(domain_plan)
+        next_plan["reason"] = "import_facts_changed"
+        return self._bank_detail_derived_lifecycle_executor().execute(next_plan)
 
     @staticmethod
     def _import_state_workbench_scope_keys(scope_keys: list[str] | None) -> list[str]:
@@ -13770,6 +13642,7 @@ class Application:
         schedule_cost_warmup: bool = True,
         excluded_domains: set[str] | list[str] | tuple[str, ...] | None = None,
         executor_overrides: dict[str, object] | None = None,
+        domain_scope_keys: dict[str, list[str]] | None = None,
     ) -> dict[str, object]:
         plan = self._derived_data_lifecycle_service.plan_event(
             event,
@@ -13800,6 +13673,11 @@ class Application:
                     and str(domain_plan.get("domain") or "").strip() in excluded_domain_names
                 )
             ]
+        if domain_scope_keys:
+            plan["domains"] = self._apply_lifecycle_domain_scope_overrides(
+                list(plan.get("domains") or []),
+                domain_scope_keys=domain_scope_keys,
+            )
         for domain_plan in list(plan.get("domains") or []):
             if isinstance(domain_plan, dict):
                 domain_plan["reason"] = reason
@@ -13821,6 +13699,18 @@ class Application:
             "tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model,
             "tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache,
             "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
+            "input_invoice_usage_read_model": lambda domain_plan: self._derived_lifecycle_invoice_usage_collection_executor(
+                domain_plan,
+                "input_invoice_usage",
+            ),
+            "output_invoice_collection_read_model": lambda domain_plan: self._derived_lifecycle_invoice_usage_collection_executor(
+                domain_plan,
+                "output_invoice_collection",
+            ),
+            "oa_pending_payment_read_model": lambda domain_plan: self._derived_lifecycle_invoice_usage_collection_executor(
+                domain_plan,
+                "oa_pending_payment",
+            ),
             "bank_account_balance_read_model": self._bank_account_balance_derived_lifecycle_executor().execute,
             "bank_detail_read_model": self._bank_detail_derived_lifecycle_executor().execute,
             "no_oa_bank_batch_read_model": self._no_oa_bank_batch_derived_lifecycle_executor().execute,
@@ -13870,14 +13760,6 @@ class Application:
                 snapshot=self._workbench_read_model_service.snapshot(),
                 changed_scope_keys=deleted_scope_keys,
                 operation="derived_lifecycle_workbench_read_model",
-            )
-        invoice_usage_scope_types = self._invoice_usage_scope_types_from_domain_plan(domain_plan)
-        if invoice_usage_scope_types is None or invoice_usage_scope_types:
-            self._invalidate_invoice_usage_collection_read_model_scopes(
-                scope_keys or deleted_scope_keys or ["all"],
-                reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_read_model"),
-                metadata=refresh_metadata,
-                scope_types=invoice_usage_scope_types,
             )
         return {
             "deleted_counts": {"workbench_read_models": len(deleted_scope_keys)},
@@ -13952,6 +13834,26 @@ class Application:
         return {
             "deleted_counts": {"pending_invoice_read_models": len(invalidated_scope_keys)},
             "invalidated_scopes": invalidated_scope_keys,
+        }
+
+    def _derived_lifecycle_invoice_usage_collection_executor(
+        self,
+        domain_plan: dict[str, object],
+        scope_type: str,
+    ) -> dict[str, object]:
+        if not self._invoice_usage_domain_enabled(domain_plan, scope_type):
+            return {"deleted_counts": {f"{scope_type}_read_models": 0}, "invalidated_scopes": []}
+        scope_keys = self._domain_plan_scope_keys(domain_plan) or ["all"]
+        invalidated_scope_keys = self._invalidate_invoice_usage_collection_read_model_scopes(
+            scope_keys,
+            reason=str(domain_plan.get("reason") or f"derived_lifecycle_{scope_type}"),
+            metadata=self._read_model_refresh_metadata(domain_plan),
+            scope_types=[scope_type],
+        )
+        return {
+            "deleted_counts": {f"{scope_type}_read_models": len(invalidated_scope_keys)},
+            "invalidated_scopes": invalidated_scope_keys,
+            "enqueued_jobs": [f"{scope_type}.read_model.refresh"] if invalidated_scope_keys else [],
         }
 
     def _bank_detail_derived_lifecycle_executor(self) -> BankDetailDerivedLifecycleExecutor:
@@ -14076,6 +13978,9 @@ class Application:
             "bank_detail_read_model": "bank_detail",
             "invoice_lifecycle_read_model": "invoice_lifecycle",
             "pending_invoice_read_model": "pending_invoice",
+            "input_invoice_usage_read_model": "input_invoice_usage",
+            "output_invoice_collection_read_model": "output_invoice_collection",
+            "oa_pending_payment_read_model": "oa_pending_payment",
             "tax_offset_read_model": "tax_offset",
             "tax_offset_month_cache": "tax_offset",
             "cost_statistics_read_model": "cost_statistics",
@@ -14094,9 +13999,40 @@ class Application:
         return filtered
 
     @staticmethod
+    def _apply_lifecycle_domain_scope_overrides(
+        domain_plans: list[object],
+        *,
+        domain_scope_keys: dict[str, list[str]],
+    ) -> list[dict[str, object]]:
+        filtered: list[dict[str, object]] = []
+        for plan in domain_plans:
+            if not isinstance(plan, dict):
+                continue
+            domain = str(plan.get("domain") or "").strip()
+            next_plan = dict(plan)
+            if domain in domain_scope_keys:
+                scope_keys = [
+                    str(scope_key).strip()
+                    for scope_key in list(domain_scope_keys.get(domain) or [])
+                    if str(scope_key).strip()
+                ]
+                scope_keys = list(dict.fromkeys(scope_keys))
+                if not scope_keys:
+                    continue
+                next_plan["scope_keys"] = scope_keys
+                next_plan["estimated_count"] = len(scope_keys)
+            filtered.append(next_plan)
+        return filtered
+
+    @staticmethod
     def _domain_plan_metadata(domain_plan: dict[str, object]) -> dict[str, object]:
         metadata = domain_plan.get("metadata")
         return dict(metadata) if isinstance(metadata, dict) else {}
+
+    @classmethod
+    def _invoice_usage_domain_enabled(cls, domain_plan: dict[str, object], scope_type: str) -> bool:
+        scope_types = cls._invoice_usage_scope_types_from_domain_plan(domain_plan)
+        return scope_types is None or scope_type in scope_types
 
     @classmethod
     def _invoice_usage_scope_types_from_domain_plan(cls, domain_plan: dict[str, object]) -> list[str] | None:
@@ -14185,11 +14121,6 @@ class Application:
                 metadata=metadata,
             )
             self._invalidate_pending_invoice_read_model_scopes(reason="workbench_scope_invalidated", metadata=metadata)
-            self._invalidate_invoice_usage_collection_read_model_scopes(
-                list(normalized_scope_keys),
-                reason="workbench_scope_invalidated",
-                metadata=metadata,
-            )
         return expanded_scope_keys
 
     @staticmethod

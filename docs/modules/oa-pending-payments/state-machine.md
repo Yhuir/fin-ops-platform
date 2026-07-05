@@ -41,7 +41,7 @@
 - all scope 允许聚合月份 rows/source versions，不要求存在单独 `all` scope row。
 - all scope 有实际 rows 时，source version freshness 优先由 rows 表证明；历史空月份 scope 不得把默认视图污染为 stale。
 - detail lookup 使用 read model native columns：`oa_id`、`bank_transaction_id`、`invoice_id`、`row_id`。
-- pending invoice rules 影响 OA 待付款时，当前执行层通过 workbench invalidation 间接入队 invoice usage collection 三个 read model；该行为由 API 回归保护。
+- pending invoice rules 影响 OA 待付款时，必须通过 `pending_invoice_rules_changed` lifecycle event 的显式 `oa_pending_payment_read_model` domain 入队；不得再依赖 workbench invalidation 的隐藏副作用。
 
 禁止流转：
 

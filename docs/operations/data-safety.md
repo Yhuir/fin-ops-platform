@@ -17,6 +17,7 @@
 - 是否清理 read model、dirty scope、outbox、Redis cache、对象存储引用。
 - 重置前备份和重置后验证命令。
 - 是否需要暂停 worker 或 drain queue。
+- reset job 状态必须进入 `BackgroundJobService` / runtime job 状态面，不能恢复旧内存 `DataResetJob` / `_data_reset_jobs` 路径。
 
 重置后必须确保页面不会把旧缓存或旧 read model 显示为 fresh。
 

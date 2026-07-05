@@ -20,7 +20,6 @@ OA_SYNC_ENQUEUE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-enqueue-oa-sync.ti
 DISPATCHER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example"
 RABBITMQ_WORKER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-worker.env.example"
 COMMON_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.common.env.example"
-LEGACY_ENV = REPO_ROOT / "deploy/oa/fin_ops.env.example"
 WORKER_ENV_DIR = REPO_ROOT / "deploy/oa/env"
 PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh"
 RUNTIME_QUEUE_PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
@@ -67,6 +66,16 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         )
         self.assertNotIn("Environment=FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=1", worker_service)
 
+    def test_systemd_examples_do_not_pin_retired_current_backend_path(self) -> None:
+        systemd_examples = sorted((REPO_ROOT / "deploy/oa/systemd").glob("*.service.example"))
+        violations = [
+            example.name
+            for example in systemd_examples
+            if "/opt/fin-ops/current/backend" in example.read_text(encoding="utf-8")
+        ]
+
+        self.assertEqual([], violations)
+
     def test_required_worker_env_examples_define_max_events_per_iteration(self) -> None:
         missing_examples: list[str] = []
         for registration in RUNTIME_WORKER_REGISTRY:
@@ -80,18 +89,16 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertEqual([], missing_examples)
 
     def test_runtime_env_examples_pin_standard_write_operation_smoke_inputs(self) -> None:
-        for env_example in (COMMON_ENV, LEGACY_ENV):
-            content = env_example.read_text(encoding="utf-8")
-            self.assertIn(
-                "FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json",
-                content,
-                env_example.name,
-            )
-            self.assertIn(
-                "FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702",
-                content,
-                env_example.name,
-            )
+        content = COMMON_ENV.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "FIN_OPS_WRITE_E2E_SCENARIO=/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json",
+            content,
+        )
+        self.assertIn(
+            "FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702",
+            content,
+        )
 
     def test_required_worker_env_examples_do_not_pin_legacy_slow_poll_interval(self) -> None:
         slow_examples: list[str] = []

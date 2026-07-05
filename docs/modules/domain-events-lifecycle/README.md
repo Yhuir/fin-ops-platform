@@ -18,7 +18,9 @@
 
 ## 当前边界
 
-前端 domain event 只做刷新提示，稳定影响必须由后端生命周期表达。
+状态：close。
+
+前端 domain event 只做刷新提示，稳定影响必须由后端生命周期表达。后端导入持久化、关系写入、OA rebuild、pending invoice 写入和运维清理都必须通过 `DerivedDataLifecycleService` 的显式 event/domain/scope contract fan out；禁止在持久化回调或单个 domain executor 中隐藏刷新其它 read model。
 
 ## 维护触发器
 

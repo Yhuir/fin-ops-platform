@@ -244,7 +244,7 @@
 - OA pending `all` scope 的 source version 判定优先从 `read_model.oa_pending_payment_rows` 的实际行聚合；只有完全没有实际行时才退回 scope 表，避免历史空月份 scope 把默认视图误判为 stale。
 - 2026-06-17 生产已通过 release `main-e8de2711-20260617182353` 更新/重启服务器 `invoice-usage-collection` worker；后续不得只用本地手工 rebuild 代替标准 release/worker helper。
 - 生产 OA MySQL 支付状态写回必须显式配置 `FIN_OPS_OA_PAYMENT_STATUS_*`。2026-06-17 已创建最小权限 MySQL 账号 `finops_oa_payment_status` 并写入 root-only 生产 env；该账号仅有 `smart_oa.t_payment_simple` 的 `SELECT`、`INSERT(flow_id, pay_status)`、`UPDATE(pay_status)` 权限。
-- pending invoice rules 对 OA 待付款的刷新当前由执行层 workbench invalidation 间接入队 invoice usage collection，已有 `tests/test_pending_invoice_api.py` 回归保护；dry-run plan 的 domain 名称不直观，暂记为 documented-risk。
+- pending invoice rules 对 OA 待付款的刷新当前由 `pending_invoice_rules_changed` lifecycle event 显式列出 `oa_pending_payment_read_model`，并由 `tests/test_pending_invoice_api.py` 与 `tests/test_derived_data_lifecycle_service.py` 回归保护；不得恢复 workbench invalidation 的隐藏副作用。
 
 ## 记录模板
 

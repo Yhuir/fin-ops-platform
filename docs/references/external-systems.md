@@ -26,7 +26,7 @@ OA 同域部署相关文件在 `deploy/oa/`：
 
 - `README.md`
 - `nginx.fin-ops.conf.example`
-- `fin_ops.env.example`
+- `env/*.env.example`
 - `fin_ops_menu.mysql.sql`
 - `fin_ops_role_binding.mysql.sql`
 - `fin_ops_user_role_sync.mysql.sql`

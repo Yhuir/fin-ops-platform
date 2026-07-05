@@ -42,6 +42,7 @@
 - required worker missing/stale/mismatch 非 0 时标记 workers ready。
 - `/fin-ops/api/*` 被 SPA fallback 返回 HTML 时标记 public routes ready。
 - API/worker unit 直接加载 migrator env 或旧 `/root` runtime env。
+- `scripts/deploy-oa.sh` 恢复 `--mode legacy-current` 或覆盖 `/opt/fin-ops/current/backend` 的发布流。
 - deploy helper 维护硬编码 worker 清单，绕过 `runtime_worker_manifest`。
 - 通过删除测试、skip、放松断言让 nightly 变绿。
 
@@ -82,3 +83,4 @@
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 补齐 deploy 状态机 | 明确 CI、release、migration、readiness、worker、public route 和 rollback 状态 | 待本轮模块验证 |
+| 2026-07-05 | 移除 `legacy-current` 覆盖式发布入口和旧单文件 env 模板 | 发布状态机只保留 versioned release；legacy current 仅可作为 activate 清理对象 | `tests.test_deploy_oa_script`、`tests.test_deploy_runtime_examples`、`tests.test_platform_runtime_boundary_guards` |

@@ -1570,7 +1570,7 @@
 ## 2026-07-02 - 标准 write-operation E2E scenario 与 standing approval
 
 - 目标：固定生产受控写操作 smoke 的 scenario 路径和审批引用，后续 gate 不再临时询问 scenario/ticket。
-- 生产配置：在 `139.155.5.132` 生成 root-only scenario 文件 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，并在 `/opt/fin-ops/fin-ops.env` 设置 `FIN_OPS_WRITE_E2E_SCENARIO` 和 `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`。
+- 生产配置：在 `139.155.5.132` 生成 root-only scenario 文件 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，并在 `/etc/fin-ops/fin-ops.common.env` 设置 `FIN_OPS_WRITE_E2E_SCENARIO` 和 `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`。
 - scenario 来源：复用现有只读 `write_operation_scenario_discovery --limit 1 --scenario-output ...`，最多生成 turnover `1`、Workbench relation withdraw `1`、no-OA withdraw `1` 三类最小候选；业务 ID 不写入仓库。此前 `--limit 10` 会生成过多 scenario，full gate 串行执行时过慢，不作为标准闭合输入。
 - 页面级策略：`write_operation_scenario_discovery` 输出 `standard_inputs` 和 `page_write_scenario_policy`，生成的 scenario JSON 也带同一矩阵。`standing_apply` 页面直接使用三类可逆 withdraw smoke 与 `FINOPS-WRITE-SMOKE-STANDING-20260702`；`fanout_evidence` 页面复用这些上游写场景、direct read model smoke、authenticated HTTP/SSE 和 audit 证明；导入、设置、data reset 标记为 `no_standing_production_apply`，不得使用 standing ticket 自动执行 production mutation。
 - 旧审批语义删除：标准 scenario JSON 不再输出逐次人工审批 flag，也不再生成“逐次 review/人工审批”的旧文案；安全 gate 统一为 `requires_approval_ticket_before_apply=true`、`approval_ticket_policy=standing_ticket_allowed_for_controlled_reversible_smoke` 和固定 `FIN_OPS_WRITE_E2E_APPROVAL_TICKET`。

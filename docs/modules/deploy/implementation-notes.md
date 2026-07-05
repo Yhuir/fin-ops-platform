@@ -4,14 +4,24 @@
 
 ## 当前决策
 
-- 生产发布入口保持 `./scripts/deploy-oa.sh`，默认走 release-based 部署；legacy-current 仅保留兼容路径。
+- 生产发布入口保持 `./scripts/deploy-oa.sh`，只走 release-based 部署；`legacy-current` 覆盖式部署入口已经移除。
 - Nightly CI 的唯一全量入口是 `bash scripts/verify.sh all`；它必须同时运行 clean app check、后端 unittest discovery、前端 Vitest、前端 build、deterministic Playwright browser smoke 和 docs check。clean app check 使用临时 `FIN_OPS_DATA_DIR`，不读取本地 legacy app Mongo；当前配置 runtime check 必须显式运行 `bash scripts/verify.sh runtime-check`。
 - deploy-control helper 必须使用 `/etc/fin-ops/fin-ops.common.env`、`fin-ops.secrets.env` 和 migration-only env；API/worker 不允许直接加载 migrator env 或旧 `/root` env。
 - required worker 矩阵从 `runtime_worker_manifest` / registry 派生；deploy runbook 和 helper 不维护第二份硬编码清单。
 - 发布成功不能只看 systemd active；必须等 `/health/ready`、required worker readiness 和公网 session API JSON proxy。
 - 本地自动化保护脚本、workflow、模板和 registry 契约；真实 SSH/sudo/systemd/PostgreSQL migration/Nginx live config/Redis/RabbitMQ/浏览器缓存必须由 staging 或生产前 smoke 证明。
+- runtime env 事实源是 `deploy/oa/env/*.env.example` 和生产 `/etc/fin-ops/*` split env；旧单文件 `deploy/oa/fin_ops.env.example` 已移除。
 
 ## 历史记录
+
+## 2026-07-05 - 部署模块边界与 I/O close
+
+- 目标：关闭部署模块旧 I/O 污染，确保发布入口、runtime env、worker/helper 合同只服务 release-based 链路。
+- Grill-me 结论：`legacy-current` CLI 分支和 `deploy/oa/fin_ops.env.example` 都没有生产新链路必要性；`finops-deploy-control` 的 legacy current 归档是 release 激活清理，不是旧发布入口。
+- Ponytail 决策：不新增兼容层、不保留隐藏 fallback，直接删除 `--mode legacy-current`、legacy remote script、legacy archive 和旧单文件 env 模板；systemd 示例和运维命令改为 active release 路径，不再指向 `/opt/fin-ops/current/backend`。
+- 影响范围：`scripts/deploy_oa.py`、部署脚本测试、deploy runtime example/guard 测试、`deploy/oa/README.md`、`docs/operations/deployment.md`、部署模块文档和相关长期索引。
+- 测试覆盖：`test_legacy_current_deploy_mode_is_removed` 保护 CLI/function/source 删除；runtime env tests/guards 只扫描 split env，并继续保护 PostgreSQL storage backend 和 write-operation smoke env。
+- 未测风险：本地测试不执行真实 SSH/sudo/systemd/migration/Nginx live config；生产发布前仍需 staging 或生产前 release smoke。
 
 ## 2026-06-19 - Spec-first E2E docs guard
 

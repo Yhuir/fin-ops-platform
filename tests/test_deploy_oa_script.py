@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import importlib.util
 import os
 from pathlib import Path
@@ -32,26 +34,19 @@ class DeployOAScriptTest(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_deploy_module()
 
-    def _deployment_config(self, root_dir: Path, *, mode: str = "release"):
+    def _deployment_config(self, root_dir: Path):
         return self.module.DeploymentConfig(
-            mode=mode,
             host="finops-prod",
             user="finops-deploy",
             domain="www.yn-sourcing.com",
             root_dir=root_dir,
             frontend_base_path="/fin-ops/",
             remote_frontend_dir="/www/wwwroot/fin-ops/dist",
-            remote_backend_dir="/opt/fin-ops/current/backend",
-            remote_data_dir="/opt/fin-ops/data",
-            remote_service_name="fin-ops.service",
-            remote_extract_root="/tmp/fin-ops-release",
             remote_releases_dir="/opt/fin-ops/releases",
             release_name="main-abcdef1-20260524170000",
             deploy_control_path="/usr/local/sbin/finops-deploy-control",
             keep_releases=8,
             skip_build=True,
-            skip_pip=False,
-            reload_nginx=False,
             activate=False,
             allow_dirty=False,
             replace_release=False,
@@ -72,7 +67,6 @@ class DeployOAScriptTest(unittest.TestCase):
         parser = self.module.build_parser()
         args = parser.parse_args([])
 
-        self.assertEqual(args.mode, "release")
         self.assertEqual(args.host, "finops-prod")
         self.assertEqual(args.user, "finops-deploy")
         self.assertEqual(args.domain, "www.yn-sourcing.com")
@@ -82,8 +76,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertEqual(args.keep_releases, 4)
         self.assertEqual(args.remote_min_free_mb, 512)
         self.assertFalse(args.skip_build)
-        self.assertFalse(args.skip_pip)
-        self.assertFalse(args.reload_nginx)
         self.assertFalse(args.no_activate)
         self.assertFalse(args.dry_run)
 
@@ -117,30 +109,9 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertTrue(archive_path.exists())
 
     def test_release_remote_script_uses_versioned_release_and_deploy_control(self) -> None:
-        config = self.module.DeploymentConfig(
-            mode="release",
-            host="finops-prod",
-            user="finops-deploy",
-            domain="www.yn-sourcing.com",
-            root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
-            frontend_base_path="/fin-ops/",
-            remote_frontend_dir="/www/wwwroot/fin-ops/dist",
-            remote_backend_dir="/opt/fin-ops/current/backend",
-            remote_data_dir="/opt/fin-ops/data",
-            remote_service_name="fin-ops.service",
-            remote_extract_root="/tmp/fin-ops-release",
-            remote_releases_dir="/opt/fin-ops/releases",
-            release_name="main-abcdef1-20260524170000",
-            deploy_control_path="/usr/local/sbin/finops-deploy-control",
-            keep_releases=8,
-            skip_build=False,
-            skip_pip=False,
-            reload_nginx=True,
-            activate=True,
-            allow_dirty=False,
-            replace_release=False,
-            dry_run=False,
-        )
+        config = self._deployment_config(Path("/Users/yu/Desktop/fin-ops-platform"))
+        config.skip_build = False
+        config.activate = True
 
         remote_script = self.module.build_release_remote_deploy_script(config)
 
@@ -231,30 +202,9 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("pip install -r", remote_script)
 
     def test_release_remote_script_waits_for_backend_before_public_route_smoke(self) -> None:
-        config = self.module.DeploymentConfig(
-            mode="release",
-            host="finops-prod",
-            user="finops-deploy",
-            domain="www.yn-sourcing.com",
-            root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
-            frontend_base_path="/fin-ops/",
-            remote_frontend_dir="/www/wwwroot/fin-ops/dist",
-            remote_backend_dir="/opt/fin-ops/current/backend",
-            remote_data_dir="/opt/fin-ops/data",
-            remote_service_name="fin-ops.service",
-            remote_extract_root="/tmp/fin-ops-release",
-            remote_releases_dir="/opt/fin-ops/releases",
-            release_name="main-abcdef1-20260524170000",
-            deploy_control_path="/usr/local/sbin/finops-deploy-control",
-            keep_releases=8,
-            skip_build=False,
-            skip_pip=False,
-            reload_nginx=False,
-            activate=True,
-            allow_dirty=False,
-            replace_release=False,
-            dry_run=False,
-        )
+        config = self._deployment_config(Path("/Users/yu/Desktop/fin-ops-platform"))
+        config.skip_build = False
+        config.activate = True
 
         remote_script = self.module.build_release_remote_deploy_script(config)
 
@@ -268,30 +218,7 @@ class DeployOAScriptTest(unittest.TestCase):
         )
 
     def test_release_remote_script_can_upload_without_activation(self) -> None:
-        config = self.module.DeploymentConfig(
-            mode="release",
-            host="finops-prod",
-            user="finops-deploy",
-            domain="www.yn-sourcing.com",
-            root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
-            frontend_base_path="/fin-ops/",
-            remote_frontend_dir="/www/wwwroot/fin-ops/dist",
-            remote_backend_dir="/opt/fin-ops/current/backend",
-            remote_data_dir="/opt/fin-ops/data",
-            remote_service_name="fin-ops.service",
-            remote_extract_root="/tmp/fin-ops-release",
-            remote_releases_dir="/opt/fin-ops/releases",
-            release_name="main-abcdef1-20260524170000",
-            deploy_control_path="/usr/local/sbin/finops-deploy-control",
-            keep_releases=8,
-            skip_build=True,
-            skip_pip=True,
-            reload_nginx=False,
-            activate=False,
-            allow_dirty=False,
-            replace_release=False,
-            dry_run=False,
-        )
+        config = self._deployment_config(Path("/Users/yu/Desktop/fin-ops-platform"))
 
         remote_script = self.module.build_release_remote_deploy_script(config)
 
@@ -304,30 +231,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("assert_finops_release_storage", remote_script)
 
     def test_remote_command_quotes_multiline_script_for_ssh(self) -> None:
-        config = self.module.DeploymentConfig(
-            mode="release",
-            host="finops-prod",
-            user="finops-deploy",
-            domain="www.yn-sourcing.com",
-            root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
-            frontend_base_path="/fin-ops/",
-            remote_frontend_dir="/www/wwwroot/fin-ops/dist",
-            remote_backend_dir="/opt/fin-ops/current/backend",
-            remote_data_dir="/opt/fin-ops/data",
-            remote_service_name="fin-ops.service",
-            remote_extract_root="/tmp/fin-ops-release",
-            remote_releases_dir="/opt/fin-ops/releases",
-            release_name="main-abcdef1-20260524170000",
-            deploy_control_path="/usr/local/sbin/finops-deploy-control",
-            keep_releases=8,
-            skip_build=True,
-            skip_pip=True,
-            reload_nginx=False,
-            activate=False,
-            allow_dirty=False,
-            replace_release=False,
-            dry_run=False,
-        )
+        config = self._deployment_config(Path("/Users/yu/Desktop/fin-ops-platform"))
         remote_script = "set -euo pipefail\necho ok\n"
 
         command = self.module.build_remote_command(config, remote_script)
@@ -339,38 +243,18 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("ControlPersist=600", command)
         self.assertFalse(any("fin_ops_mux" in part for part in command))
 
-    def test_legacy_remote_script_keeps_previous_current_deploy_behavior(self) -> None:
-        config = self.module.DeploymentConfig(
-            mode="legacy-current",
-            host="139.155.5.132",
-            user="root",
-            domain="www.yn-sourcing.com",
-            root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
-            frontend_base_path="/fin-ops/",
-            remote_frontend_dir="/www/wwwroot/fin-ops/dist",
-            remote_backend_dir="/opt/fin-ops/current/backend",
-            remote_data_dir="/opt/fin-ops/data",
-            remote_service_name="fin-ops.service",
-            remote_extract_root="/tmp/fin-ops-release",
-            remote_releases_dir="/opt/fin-ops/releases",
-            release_name="main-abcdef1-20260524170000",
-            deploy_control_path="/usr/local/sbin/finops-deploy-control",
-            keep_releases=8,
-            skip_build=True,
-            skip_pip=True,
-            reload_nginx=False,
-            activate=True,
-            allow_dirty=True,
-            replace_release=False,
-            dry_run=False,
-        )
+    def test_legacy_current_deploy_mode_is_removed(self) -> None:
+        parser = self.module.build_parser()
 
-        remote_script = self.module.build_legacy_remote_deploy_script(config)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(["--mode", "legacy-current"])
 
-        self.assertNotIn("pip install -r", remote_script)
-        self.assertNotIn("nginx -s reload", remote_script)
-        self.assertIn("systemctl restart fin-ops.service", remote_script)
-        self.assertIn("/opt/fin-ops/current/backend", remote_script)
+        source = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertFalse(hasattr(self.module, "build_legacy_remote_deploy_script"))
+        self.assertFalse(hasattr(self.module, "create_legacy_release_archive"))
+        self.assertNotIn("legacy-current", source)
+        self.assertNotIn("/opt/fin-ops/current/backend", source)
+        self.assertNotIn("systemctl restart fin-ops.service", source)
 
     def test_runtime_worker_ensure_script_defaults_to_full_postgres_worker_matrix(self) -> None:
         script = ENSURE_WORKERS_SCRIPT_PATH.read_text()

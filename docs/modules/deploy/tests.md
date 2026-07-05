@@ -27,7 +27,7 @@
 | release remote script 使用 versioned release、deploy-control、worker ensure、storage preflight、cleanup | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | release 激活后先等 `/health/ready`，再检查公网 session API route JSON proxy | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | no-activate 只上传和校验，不激活、不清理、不启动 worker ensure | `tests/test_deploy_oa_script.py` | 已覆盖 |
-| legacy-current 仍保留旧覆盖部署行为 | `tests/test_deploy_oa_script.py` | 已覆盖 |
+| legacy-current 覆盖式发布入口已移除，CLI 不接受 `--mode` 且脚本无 legacy archive/remote script | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | deploy-control helper 使用 `/etc/fin-ops` secret contract、migration env、drop-in reset、worker readiness | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | runtime worker ensure 从 manifest 派生 required workers/env/check command | `tests/test_deploy_oa_script.py`、`tests/test_runtime_worker_registry.py` | 已覆盖 |
 | Nginx SPA fallback、assets 404/cache、index no-store、API proxy 顺序 | `tests/test_deploy_oa_nginx_config.py` | 已覆盖 |
@@ -58,6 +58,7 @@
 | 既有 | release 激活后未等待 `/health/ready` 就检查公网 route | `test_release_remote_script_waits_for_backend_before_public_route_smoke` | 模块后端验证 |
 | 既有 | Nginx 把 `/fin-ops/api/*` 吃成 SPA index.html | `test_fin_ops_relative_api_routes_do_not_fall_back_to_index_html` | 模块后端验证 |
 | 既有 | required worker 清单在 deploy helper 中硬编码，新增 worker 后生产漏启 | `test_required_workers_match_deploy_helper_defaults`、`test_manifest_cli_lists_required_instances_and_env_examples` | 模块后端验证 |
+| 2026-07-05 | `legacy-current` 覆盖式发布、旧单文件 env 模板或 systemd 示例 current/backend 路径继续污染 release-based I/O | `test_legacy_current_deploy_mode_is_removed`、`test_systemd_examples_do_not_pin_retired_current_backend_path`、`test_runtime_env_examples_pin_standard_write_operation_smoke_inputs`、deploy runtime template guards | `PYTHONPATH=backend/src python3 -m unittest tests.test_deploy_oa_script tests.test_deploy_runtime_examples tests.test_platform_runtime_boundary_guards -v` |
 
 ## 关键 smoke flows
 

@@ -58,7 +58,8 @@ git diff --check
 
 ```bash
 sudo -n /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
-PYTHONPATH=/opt/fin-ops/current/backend/src /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_worker_manifest --json
+release_src="$(systemctl show fin-ops.service -P WorkingDirectory)"
+PYTHONPATH="$release_src/backend/src" /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_worker_manifest --json
 ```
 
 ## 只读证据

@@ -172,7 +172,6 @@ VITE_APP_BASE_PATH=/fin-ops/
 
 仓库里已补充一份环境变量模板：
 
-- `deploy/oa/fin_ops.env.example`
 - `deploy/oa/env/fin-ops.common.env.example`
 - `deploy/oa/env/fin-ops.secrets.env.example`
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`
@@ -279,6 +278,11 @@ systemd 模板位于：
 - `deploy/oa/systemd/finops-enqueue-oa-sync.service.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.timer.example`
 
+这些 `.service.example` 中的 `REPLACE_WITH_RELEASE` 只是 bootstrap 占位；标准发布会由
+`finops-deploy-control activate` 写入 `99-deploy-release.conf`，把 API、worker 和 dispatcher 指向
+实际 `/opt/fin-ops/releases/<release>/src`。不要把 systemd unit 重新指回旧
+`/opt/fin-ops/current/backend`。
+
 关联台自动配对必须单独启用 `workbench-matching` worker。它消费
 `job.workbench_matching_dirty_scopes`，生成 `read_model.workbench_reconciliation_decisions`；
 `workbench-read-model` worker 只负责把已有关系和自动决策投影到页面读模型，不能替代自动配对。
@@ -311,7 +315,8 @@ set -a
 source /etc/fin-ops/fin-ops.postgres-migrator.env
 set +a
 
-PYTHONPATH=/opt/fin-ops/current/backend/src \
+release_src="$(systemctl show fin-ops.service -P WorkingDirectory)"
+PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.postgres apply
 ```
 
@@ -509,14 +514,8 @@ sudo /usr/local/sbin/finops-deploy-control check-release <已上传的-release-n
 还必须先执行 schema migration、reset 旧 `EnvironmentFile` 并归档 legacy `/opt/fin-ops/current`；不要手工创建业务表、
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。
-- `--reload-nginx` 只对旧 `legacy-current` 模式有意义；默认 release 模式不修改 nginx 配置，静态文件变更不需要 reload nginx
-- 旧覆盖式部署仍保留为显式模式：
-
-```bash
-./scripts/deploy-oa.sh --mode legacy-current --host 139.155.5.132 --user root --reload-nginx
-```
-
-该模式会覆盖 `/www/wwwroot/fin-ops/dist` 和 `/opt/fin-ops/current/backend`，只用于历史兼容，不作为生产主发布路径。
+覆盖式 `legacy-current` 部署入口已经移除；`scripts/deploy-oa.sh` 只生成 versioned release payload，
+不再提供覆盖 `/www/wwwroot/fin-ops/dist` 或 `/opt/fin-ops/current/backend` 的发布模式。
 
 release 会占用服务器磁盘。生产策略不是无限保留，而是默认保留最近 4 个 release，并保护当前 active release 和 deploy-control status 中仍被引用的 release。旧 root-owned 历史 release 如果当前部署用户没有权限删除，脚本会跳过并输出原因，需要单独做一次 root 清理。
 

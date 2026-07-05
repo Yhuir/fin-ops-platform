@@ -240,6 +240,16 @@ def _bare_application(*, backend: str = "postgres", bootstrap_mode: str = "produ
 
 
 class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
+    def test_workbench_scope_invalidation_does_not_refresh_invoice_usage_domains(self) -> None:
+        source_path = APP_ROOT / "server.py"
+        source = source_path.read_text(encoding="utf-8")
+        function_source = _function_source(_parse(source_path), source, "_invalidate_workbench_read_model_scopes")
+
+        self.assertNotIn("_invalidate_invoice_usage_collection_read_model_scopes", function_source)
+        self.assertNotIn("_enqueue_input_invoice_usage_read_model_refresh", function_source)
+        self.assertNotIn("_enqueue_output_invoice_collection_read_model_refresh", function_source)
+        self.assertNotIn("_enqueue_oa_pending_payment_read_model_refresh", function_source)
+
     def test_explicit_production_guard_rejects_non_postgres_storage_backend(self) -> None:
         app = _bare_application(backend="local_pickle")
 
@@ -377,7 +387,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_deploy_runtime_templates_do_not_enable_postgres_full_state_snapshot(self) -> None:
         deploy_files = [
             *sorted((REPO_ROOT / "deploy" / "oa" / "env").glob("*.env.example")),
-            REPO_ROOT / "deploy" / "oa" / "fin_ops.env.example",
             REPO_ROOT / "deploy" / "oa" / "bin" / "finops-deploy-control.sh",
         ]
         violations = [
@@ -393,7 +402,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_deploy_runtime_templates_keep_app_storage_backend_postgres(self) -> None:
         deploy_files = [
             *sorted((REPO_ROOT / "deploy" / "oa" / "env").glob("*.env.example")),
-            REPO_ROOT / "deploy" / "oa" / "fin_ops.env.example",
         ]
         violations: list[str] = []
         for path in deploy_files:
@@ -7867,8 +7875,50 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("SettingsDataResetService does not read pair relations through the port")
         if "_workbench_pair_snapshot_port.save_pair_relations(kept_pair_relations)" not in service_class_source:
             violations.append("SettingsDataResetService does not save filtered pair relations through the port")
+        if "_persist_import_reset_state(" not in service_class_source:
+            violations.append("SettingsDataResetService import resets no longer share explicit persistence boundary")
+        for snippet in (
+            "self._state_store.save_workbench_overrides({})",
+            "self._state_store.save_workbench_pair_relations({})",
+            "self._state_store.save_workbench_read_models({})",
+            "self._state_store.save_workbench_candidate_matches({})",
+            "self._state_store.save_workbench_matching_dirty_scopes({})",
+        ):
+            if snippet not in service_class_source:
+                violations.append(f"SettingsDataResetService reset persistence no longer uses explicit port {snippet}")
+        for forbidden in (
+            '"workbench_overrides": {}',
+            '"workbench_pair_relations": {}',
+            '"workbench_read_models": {}',
+            '"workbench_candidate_matches": {}',
+            '"workbench_matching_dirty_scopes": {}',
+        ):
+            if forbidden in service_class_source:
+                violations.append(f"SettingsDataResetService still clears workbench state through broad save payload {forbidden}")
         if "workbench_pair_snapshot_port=SettingsDataResetPairSnapshotPort(" not in runtime_init_source:
             violations.append("Application settings reset wiring does not wrap pair service in explicit port")
+
+        self.assertEqual(violations, [])
+
+    def test_settings_data_reset_uses_background_job_service_only(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        for forbidden in (
+            "class DataResetJob",
+            "_data_reset_jobs",
+            "_data_reset_jobs_lock",
+            "def _active_data_reset_job(",
+            "def _run_settings_data_reset_job(",
+            "def _update_data_reset_job(",
+        ):
+            if forbidden in source:
+                violations.append(f"server.py keeps legacy in-memory data reset job path {forbidden}")
+        if "job_type=\"settings_data_reset\"" not in source:
+            violations.append("data reset job create no longer uses BackgroundJobService")
+        if "def _active_data_reset_background_job(" not in source:
+            violations.append("data reset active job lookup no longer uses BackgroundJobService")
 
         self.assertEqual(violations, [])
 

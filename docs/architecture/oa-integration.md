@@ -535,7 +535,7 @@ OA 菜单层仍然负责“看得见 / 看不见”：
 - 权限口径：`../product-specs/settings-and-access-control.md`
 - 部署说明：`../../deploy/oa/README.md`
 - Nginx 示例：`../../deploy/oa/nginx.fin-ops.conf.example`
-- 环境变量模板：`../../deploy/oa/fin_ops.env.example`
+- 环境变量模板：`../../deploy/oa/env/fin-ops.common.env.example`、`../../deploy/oa/env/fin-ops.secrets.env.example`
 - 菜单 SQL 模板：`../../deploy/oa/fin_ops_menu.mysql.sql`
 - 角色绑定 SQL 模板：`../../deploy/oa/fin_ops_role_binding.mysql.sql`
 - 用户角色同步 SQL 模板：`../../deploy/oa/fin_ops_user_role_sync.mysql.sql`

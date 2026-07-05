@@ -8,9 +8,27 @@
 - `protected_targets` 是可执行契约，不只是文档说明；新增或改变目标必须补 service/API 回归。
 - data reset 必须先通过管理员 session 和当前 OA 密码校验；密码不得进入 job payload、result、error、App Health 或前端持久 state。
 - 并发 data reset job 必须互斥。同一 owner 有 active job 时，新的 job create 返回 `409 settings_data_reset_job_running` 并返回当前 job，前端用于恢复进度。
+- data reset job 只能使用 `BackgroundJobService`；旧内存 `DataResetJob` / `_data_reset_jobs` path 已删除，不能回归。
 - 本地自动化覆盖 reset 规则、API/job contract、UI 交互和 App Health attention。旧 App Mongo export 工具已删除；真实 PostgreSQL PITR、对象存储恢复、Redis/RabbitMQ/systemd worker drain 和大生产库收敛归入 `documented-risk`，由 staging/nightly/smoke 补。
 
 ## 历史记录
+
+## 2026-07-05 - 模块边界 close 与旧 reset job path 删除
+
+- 目标：完成 data-safety-reset 模块边界 close，确认危险重置入口只有 `SettingsDataResetService` + `BackgroundJobService`，并删除旧模块代码对新链路的污染。
+- 发现：`server.py` 中仍保留不可达的旧内存 `DataResetJob` / `_data_reset_jobs` / `_run_settings_data_reset_job(...)` 路径；`SettingsDataResetService` 的银行/发票 reset 仍通过 broad `state_store.save({...})` 清理 Workbench relation/read-model state。
+- 变更：删除旧内存 data reset job 实现；银行/发票 reset 继续用 `state_store.save(...)` 保存 imports/file_imports/matching 兼容聚合，但 Workbench overrides、pair relations、read models、candidate matches 和 matching dirty scopes 改走已有显式 save/port。
+- Guard：`test_settings_data_reset_uses_background_job_service_only` 禁止旧内存 job path 回归；`test_settings_data_reset_pair_snapshot_uses_explicit_port` 收紧为禁止通过 broad state payload 清理 Workbench reset state。
+- 结果：模块状态更新为 closed；真实 PostgreSQL/PITR、对象存储恢复、Redis/RabbitMQ/systemd worker drain 和大库最终 fresh 仍按 operations/staging smoke 跟踪，不作为本地模块边界 blocker。
+
+验证：
+
+```bash
+python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/settings_data_reset_service.py tests/test_platform_runtime_boundary_guards.py
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_settings_data_reset_pair_snapshot_uses_explicit_port tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_settings_data_reset_uses_background_job_service_only -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_settings_data_reset_service -v
+bash scripts/verify.sh docs
+```
 
 ## 2026-06-20 - reset 后多页面 fresh Browser contract
 

@@ -73,6 +73,9 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
         self.assertEqual(search_producer.calls, [(["2026-03"], "import_state_changed")])
         self.assertNotIn(("search", "2026-03", "import_state_changed"), queue.refreshes)
         self.assertIn(("workbench_relation", "2026-03", "import_state_changed"), queue.refreshes)
+        self.assertIn(("input_invoice_usage", "2026-03", "import_state_changed"), queue.refreshes)
+        self.assertIn(("output_invoice_collection", "2026-03", "import_state_changed"), queue.refreshes)
+        self.assertIn(("oa_pending_payment", "2026-03", "import_state_changed"), queue.refreshes)
 
     def test_import_state_bank_account_balance_refresh_uses_producer_boundary(self) -> None:
         queue = QueueRecorder()
@@ -115,6 +118,20 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
         self.assertNotIn(("bank_account_balance", "all", "unit_test"), queue.refreshes)
         self.assertIn("bank_account_balance.read_model.refresh", result["enqueued_jobs"])
         self.assertIn("all", result["invalidated_scopes"])
+
+    def test_lifecycle_bank_flow_rule_batch_refresh_has_runtime_executor(self) -> None:
+        queue = QueueRecorder()
+        lifecycle = self._lifecycle(queue)
+
+        result = lifecycle.execute_event(
+            "bank_flow_rule_batch_changed",
+            months=["2026-03"],
+            metadata={"reason": "unit_test"},
+        )
+
+        self.assertIn(("bank_flow_rule_batch", "2026-03", "unit_test"), queue.refreshes)
+        self.assertIn(("bank_flow_rule_batch", "all", "unit_test"), queue.refreshes)
+        self.assertIn("bank_flow_rule_batch.read_model.refresh", result["enqueued_jobs"])
 
     def test_worker_lifecycle_does_not_apply_cost_scope_rules_to_other_read_models(self) -> None:
         queue = QueueRecorder()

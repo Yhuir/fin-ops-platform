@@ -72,11 +72,9 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 ./scripts/deploy-oa.sh --keep-releases 12
 ```
 
-旧 `/opt/fin-ops/current/backend` 覆盖式部署只保留为显式兼容模式，不作为生产主路径：
-
-```bash
-./scripts/deploy-oa.sh --mode legacy-current --host 139.155.5.132 --user root --reload-nginx
-```
+旧 `/opt/fin-ops/current/backend` 覆盖式部署入口已经移除。生产发布只能通过
+`./scripts/deploy-oa.sh` 生成 versioned release，并由 root-owned `finops-deploy-control`
+完成 check-release、activate、readiness 和 cleanup。
 
 ## Worker 进程矩阵
 
@@ -137,6 +135,10 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 - `deploy/oa/env/fin-ops.worker.tax-offset.env.example`
 - `deploy/oa/env/fin-ops.worker.import.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
+
+systemd `.service.example` 中的 `REPLACE_WITH_RELEASE` 只用于 bootstrap 占位；标准发布通过
+`finops-deploy-control activate` 生成 `99-deploy-release.conf`，把 API、worker 和 dispatcher 指向
+实际 `/opt/fin-ops/releases/<release>/src`。
 
 生产 secret 只能放在 `/etc/fin-ops/*.env` 这类 root-only `EnvironmentFile` 中。`RABBITMQ_URL`、`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、Redis、MinIO/S3、OA role sync 密码、OA payment status MySQL 密码都不能写入 systemd inline `Environment=` 或仓库文件。migrator DSN 应单独放在 `/etc/fin-ops/fin-ops.postgres-migrator.env`，仅在执行 schema migration 时手动加载，不要加入 API/worker unit。
 

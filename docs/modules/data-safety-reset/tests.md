@@ -25,7 +25,7 @@
 | OA 重置按保留月份重建、限制表单/状态、复用附件发票缓存 | `tests/test_settings_data_reset_service.py` | 已覆盖 |
 | OA pair relation 删除但纯银行+发票 relation 保留 | `tests/test_settings_data_reset_service.py` | 已覆盖 |
 | 缺失/错误 OA 密码不清数据、不重建、不泄露密码 | `tests/test_settings_data_reset_service.py` | 已覆盖 |
-| 后台 reset job 可创建、查询、恢复 active progress，不保存密码 | `tests/test_settings_data_reset_service.py` | 已覆盖 |
+| 后台 reset job 可创建、查询、恢复 active progress，不保存密码，且不恢复旧内存 job path | `tests/test_settings_data_reset_service.py`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_settings_data_reset_uses_background_job_service_only` | 已覆盖 |
 | 并发 reset job 返回 `409 settings_data_reset_job_running` 且不泄露密码 | `tests/test_settings_data_reset_service.py` | 2026-06-11 新增 |
 | failed/partial/interrupted background job 进入 App Health attention | `tests/test_app_health_api.py`、`tests/test_background_job_service.py` | 已覆盖 |
 | runtime state policy 对 active/attention/background jobs 的镜像写入约束 | `tests/test_runtime_state_policy.py` | 已覆盖 |
@@ -36,7 +36,7 @@
 | 类别 | 是否适用 | 当前测试入口 | 当前结论 | 缺口等级 | 维护要求 |
 | --- | --- | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_settings_data_reset_service.py` | 覆盖 action、protected targets、bank/invoice/OA relation 保留删除规则、unsupported action | 无 P0 | 新增 reset action 或删除规则时必须先补 service 规则测试 |
-| 2. Service-layer tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_background_job_service.py` | 覆盖 state store 清理、文件删除调用、job 进度、payload sanitize | P1 | PostgreSQL PITR/对象存储备份恢复未本地自动化 |
+| 2. Service-layer tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_background_job_service.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 state store 清理、文件删除调用、job 进度、payload sanitize、旧内存 data reset job 删除和 Workbench reset 显式 port | P1 | PostgreSQL PITR/对象存储备份恢复未本地自动化 |
 | 3. API contract tests | 适用 | `tests/test_settings_data_reset_service.py` | 覆盖 admin-only、密码失败、同步 reset、job create/query/active、并发 409、protected_targets、敏感字段不泄露 | 无 P0 | 修改 route/error/status/job shape 时同步补契约断言 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_app_health_api.py`、`tests/test_background_job_service.py`、`tests/test_runtime_state_policy.py` | 覆盖 lifecycle fan-out、cost statistics clear、job attention/active、runtime state policy | P1 | 真 Redis cache、真实 Postgres dirty/outbox/worker drain 需要 staging/nightly smoke |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 覆盖确认、密码弹窗、cancel、错误、progress reentry、权限隐藏；Browser e2e 覆盖真实页面 job polling/reload 和 reset 后跨页读取银行明细/待找发票 fresh contract | P1 | 真实浏览器视觉、长任务 progress、网络断开恢复需 smoke |
@@ -53,6 +53,7 @@
 | 既有 | 错误/缺失 OA 密码后仍清数据或回显密码 | `test_reset_api_rejects_missing_oa_password_without_clearing_data`、`test_reset_api_rejects_wrong_oa_password_without_clearing_data_or_echoing_secret`、`test_reset_api_does_not_leak_oa_password_when_verification_service_fails` | 模块后端验证 |
 | 既有 | OA reset 删除纯银行+发票关系或重复解析附件发票 | `test_reset_oa_and_rebuild_preserves_pure_bank_invoice_pair_relation`、`test_reset_oa_and_rebuild_reuses_cached_attachment_invoices_without_reparsing` | 模块后端验证 |
 | 既有 | failed/partial reset job 不进入运维 attention | `test_app_health_reports_unacknowledged_failed_and_partial_success_jobs_as_attention`、`test_app_health_marks_interrupted_job_without_source_not_retryable_but_acknowledgeable` | 模块后端验证 |
+| 2026-07-05 | 旧内存 `DataResetJob` / `_data_reset_jobs` 或 broad Workbench state payload 回归会绕过当前 background job/service I/O 边界 | `test_settings_data_reset_uses_background_job_service_only`、`test_settings_data_reset_pair_snapshot_uses_explicit_port` | 模块边界 guard |
 
 ## 关键 smoke flows
 

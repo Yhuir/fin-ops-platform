@@ -7,8 +7,8 @@ Wants=network-online.target
 Type=simple
 User=fin-ops
 Group=fin-ops
-WorkingDirectory=/opt/fin-ops/current/backend
-Environment=PYTHONPATH=/opt/fin-ops/current/backend/src
+WorkingDirectory=/opt/fin-ops/releases/REPLACE_WITH_RELEASE/src
+Environment=PYTHONPATH=/opt/fin-ops/releases/REPLACE_WITH_RELEASE/src/backend/src
 Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
 Environment=FIN_OPS_WORKER_ID=%H-%i
 Environment=FIN_OPS_WORKER_INSTANCE=%i

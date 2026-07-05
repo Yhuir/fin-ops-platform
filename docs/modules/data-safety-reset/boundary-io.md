@@ -4,11 +4,11 @@
 
 ## 模块化状态
 
-- 状态：partial
+- 状态：closed
 - 当前边界可信度：high
 - 目标边界：所有数据重置通过 SettingsDataResetService 和 background job 执行，必须可审计、可阻断误用、可验证。
-- 当前缺口：重置会影响所有 read model/worker，变更必须同步 operations 文档。
-- 旧代码删除条件：旧 reset script/API 不再绕过 service。
+- 当前缺口：无 final closure blocker；真实 PostgreSQL/PITR、对象存储恢复、Redis/RabbitMQ/systemd worker drain 和大库收敛仍是 staging/operations smoke 风险，不阻塞模块边界 close。
+- 旧代码删除条件：旧 reset script/API 不再绕过 service；旧内存 data reset job path 不得回归；Workbench reset 清理不得通过 broad state payload 写跨域 state。
 
 ## 职责边界
 
@@ -36,7 +36,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| Reset job | background job service | 可追踪、可失败恢复 |
+| Reset job | `BackgroundJobService` | 可追踪、可失败恢复；禁止恢复 `DataResetJob` / `_data_reset_jobs` 内存 job path。 |
 | Lifecycle event | derived data lifecycle | `settings_reset_completed` 等显式事件 |
 | Read model invalidation | runtime queue/app status | 不留下伪 fresh |
 
@@ -52,7 +52,7 @@
 | --- | --- |
 | Backend service | `backend/src/fin_ops_platform/services/settings_data_reset_service.py` |
 | Backend route | data reset endpoints in `backend/src/fin_ops_platform/app/server.py` |
-| Job | `BackgroundJobService`、`settings_data_reset` |
+| Job | `BackgroundJobService`、`settings_data_reset`；旧 `DataResetJob` / `_data_reset_jobs` 内存路径已删除 |
 | Lifecycle | `derived_data_lifecycle_service.py` |
 | Frontend | `web/src/pages/SettingsPage.tsx`、`web/src/components/workbench/SettingsDataResetDialogs.tsx` |
 | Operations | `scripts/reset_demo_db.sh`、`docs/operations/data-safety.md` |
@@ -60,9 +60,9 @@
 
 ## 依赖方向
 
-- 允许依赖：background job service, lifecycle service, app status。
-- 必须通过：SettingsDataResetService。
-- 禁止绕过：直接数据库清理；绕过权限/审计执行 reset。
+- 允许依赖：`BackgroundJobService`、derived lifecycle service、app status、state store 的显式 save/load ports。
+- 必须通过：`SettingsDataResetService` 和 `BackgroundJobService`。
+- 禁止绕过：直接数据库清理；绕过权限/审计执行 reset；恢复旧内存 job；通过 broad state payload 清理 Workbench relation/read-model state。
 
 ## 测试与验证
 
@@ -72,3 +72,4 @@
 ## 当前缺口和删除条件
 
 - 生产数据操作必须同步 operations 文档和回滚/备份策略。
+- 本地可执行边界已 close；真实基础设施恢复、worker drain 和大库最终 fresh 只能由 staging/production smoke 证明，作为运维风险跟踪。

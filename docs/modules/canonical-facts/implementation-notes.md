@@ -1290,7 +1290,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 变更：
 
 - 新增 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_deploy_runtime_templates_do_not_enable_postgres_full_state_snapshot`。
-- guard 扫描 `deploy/oa/env/*.env.example`、`deploy/oa/fin_ops.env.example` 和 `deploy/oa/bin/finops-deploy-control.sh`，禁止出现 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT`。
+- guard 扫描 `deploy/oa/env/*.env.example` 和 `deploy/oa/bin/finops-deploy-control.sh`，禁止出现 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT`。
 - guard 保留 `scripts/deploy_oa.py` 必须调用 `check-release` 的断言。
 
 验证：
@@ -1504,7 +1504,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_state_store.Postg
 变更：
 
 - 新增 `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_deploy_runtime_templates_keep_app_storage_backend_postgres`。
-- guard 扫描 `deploy/oa/env/*.env.example` 和 `deploy/oa/fin_ops.env.example`；如果出现 `FIN_OPS_APP_STORAGE_BACKEND=`，值必须是 `postgres`。
+- guard 扫描 `deploy/oa/env/*.env.example`；如果出现 `FIN_OPS_APP_STORAGE_BACKEND=`，值必须是 `postgres`。
 - guard 要求 `deploy/oa/env/fin-ops.common.env.example` 显式保留 `FIN_OPS_APP_STORAGE_BACKEND=postgres`。
 
 验证：
