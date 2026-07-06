@@ -159,6 +159,8 @@ class WorkbenchReadModelRefreshService:
     def _enqueue_all_scope_aggregate_after_shard_publish(self, event: RuntimeQueueEvent, scope_key: str) -> bool | None:
         if scope_key == "all":
             return None
+        if not _truthy(event.payload.get("publish_all_aggregate")):
+            return None
         enqueue_event = getattr(self._queue_repository, "enqueue", None)
         enqueue_aggregate = getattr(self._queue_repository, "enqueue_workbench_all_aggregate_refresh", None)
         if not callable(enqueue_aggregate) and not callable(enqueue_event):

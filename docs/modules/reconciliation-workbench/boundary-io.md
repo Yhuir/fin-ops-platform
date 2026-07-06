@@ -39,14 +39,14 @@
 | no-OA relation metadata | `workbench_relation` / no-OA submit | legacy `special_metadata.paired_requires_oa`、`paired_requires_invoice` 决定 no-OA relation 是否具备进入 paired 区的 row type |
 | 写后 target envelope | `WorkbenchWriteFacade` | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；`read_model_key=workbench_relation` |
 | 外部 OA 手工导入影响 | settings/OA manual import API | 不属于 `WorkbenchWriteFacade`，但必须返回并等待 `workbench`/`workbench_relation` 等受影响 read model targets |
-| Refresh scope | `workbench` manifest | month or `all`；`all` 是 active month shard aggregate |
+| Refresh scope | `workbench` manifest | month or `all`；普通写路径只刷新受影响 month shard，`month=all` 查询组合 active 月度 generation；显式 rebuild/repair/backfill 才使用 materialized all aggregate |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 关联台页面 payload | 前端 workbench components | 来自 active generation read model |
-| Summary payload | 前端首屏和 App 状态 | 来自 `read_model.workbench_summary` 物化结果；缺少 `summary` 视为 read model 未完成，不做热路径 repair |
+| Summary payload | 前端首屏和 App 状态 | month scope 来自对应 active generation 的 `read_model.workbench_summary`；`month=all` 从 active 月度 summary 组合，缺少月度 summary 时标记 stale，不回退旧 materialized all summary 或请求线程热修复 |
 | Groups summary page | 前端三栏列表 | 保留 rows、counts、display tags、核心 decision 字段；剔除 `searchable_text`、`source_versions`、`group_metadata`、`object_identity*`、decision evidence/debug 等非首屏 UI 字段 |
 | Generation payload | read_model.workbench_* 新 generation | `workbench_rows.payload` 拥有行详情，但不保存 nested `object_identity` 仲裁对象；canonical identity 由 `workbench_rows` / `workbench_group_rows` 的结构化 `object_identity_*` 列和行 payload 顶层字段承载。`workbench_groups.payload` 只拥有组级 metadata/sort/count/`workbench_group_rows_materialized` marker，不再复制 `oa_rows/bank_rows/invoice_rows/collapsed_rows`；`workbench_group_rows` 只拥有成员关系、过滤、排序、搜索和 object identity 结构化列，`payload` / `raw_payload` / `source_versions` 写 `{}`；`workbench_snapshots.payload` 只保存 metadata/summary shell 和 `workbench_groups_materialized=true` marker。旧 `/api/workbench`、groups page/detail 和下游成本统计需要完整组 payload 时，必须从同一 active generation 的 `workbench_group_rows + workbench_rows` 重建；repository 遍历 rows/groups 时不得 eager serialize 整行/整组，序列化只允许在 JSON 写入 helper 的最终 I/O 边界发生；`raw_payload` 只保留旧数据 fallback 语义，新写入不得再复制 `normalized_payload`、整页 grouped payload、成员行数组、nested identity 或 group-row member payload/source_versions 放大持久化 I/O |
 | paired/open 分区 | 前端 workbench components | policy-managed 银行 relation 先按 Bank Transaction Paired Policy 判定 required row type；缺少 required OA 或发票 row 必须留在 open 区，满足后才进入 paired。普通两栏 `manual_confirmed` 银行 relation 不消费该 policy，缺发票时按普通三栏完整性留在 open candidate。带 immutable binding metadata 的 OA+自带附件发票两栏 active relation不含银行流水时只是不可拆 source binding，也必须留在 open 区。 |
@@ -61,11 +61,8 @@
 
 - Read model：`workbench`
 - Projection：`active_generation_scoped_publish`
-- Partition：month scope active generation；`all` 聚合 active month shards。`all` 聚合必须把可见 paired group 的 row ownership
-  作为 strict claim；同一个 `case:<case_id>` 在部分月份为 paired、部分月份仍残留 open candidate 时，paired 可见 owner
-  必须赢，open 重复行不得发布。只有“没有可见 paired group、仅 canonical active relation 额外 claim”的 same-case open group
-  才允许保留为 partial/open 展示。
-- `all` 聚合输入 shard 的事实源必须包含 canonical 业务源月份和已发布的 active 月度 generation；query freshness/status 必须校验 active 父 generation 与 `all` active generation 的 source_version/row/group 基本一致性。父 generation 有内容而 `all` 缺失或为空时，`summary`/`groups` 必须返回 stale 并入队刷新，不能把空结果标记为 fresh。
+- Partition：month scope active generation；`month=all` 查询组合 active month shards，不再要求 ordinary write 后生成 materialized all generation。composed all 的 groups/rows 必须只读取 active 月度 generation；可合并 group id（如 `case:`）按业务 case 合并，非可合并临时 group id 必须带 source scope 前缀，避免跨月覆盖。
+- materialized `all` aggregate 只作为显式 rebuild/repair/backfill 兼容路径保留，不参与普通写后可见性、summary/groups freshness gate 或 operation barrier。旧 materialized all 缺失、为空或 builder 版本落后，不能污染 query-composed all 读路径。
 - Worker：`workbench`
 - 特殊例外：保留 active generation 原子发布模型，不机械改成普通 read model gateway。
 - Summary 物化合同：`read_model.workbench_summary` 是 summary 读路径唯一事实源；repository 不再用 groups/group_rows/app.invoices 在 API 请求内补算 summary。

@@ -564,6 +564,7 @@ from fin_ops_platform.services.workbench_supplemental_retained_oa_row_selector i
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
+    WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     PostgresReadModelRepository,
 )
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
@@ -10369,7 +10370,7 @@ class Application:
     def _workbench_sql_read_model_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         normalized_scope_key = str(scope_key or "").strip()
         builder_version = (
-            WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
+            WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION
             if normalized_scope_key == "all"
             else WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
         )

@@ -37,6 +37,7 @@ BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
 BANK_DETAIL_NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
 WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.same_case_visible_paired_owner.v1"
+WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = "workbench_sql_projection.composed_active_month_shards.v1"
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
@@ -49,6 +50,61 @@ WORKBENCH_GENERATION_RETENTION_KEEP_DAYS = 0
 WORKBENCH_GENERATION_RETENTION_LIMIT = 500
 WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS = {"object_identity"}
 LOGGER = logging.getLogger(__name__)
+
+
+def _workbench_active_month_groups_sql() -> str:
+    return """
+        (
+            select distinct on (active_groups.zone, active_groups.all_scope_group_id)
+                active_groups.generation_id,
+                active_groups.all_scope_group_id as group_id,
+                active_groups.group_id as source_group_id,
+                active_groups.scope_key,
+                active_groups.scope_month,
+                active_groups.zone,
+                active_groups.status,
+                active_groups.group_type,
+                active_groups.source_kinds,
+                active_groups.row_count,
+                active_groups.searchable_text,
+                active_groups.oa_sort_min,
+                active_groups.oa_sort_max,
+                active_groups.bank_sort_min,
+                active_groups.bank_sort_max,
+                active_groups.invoice_sort_min,
+                active_groups.invoice_sort_max,
+                active_groups.source_versions,
+                active_groups.generated_at,
+                active_groups.cache_status,
+                active_groups.payload,
+                active_groups.raw_payload,
+                active_groups.updated_at
+            from (
+                select
+                    g.*,
+                    case
+                        when left(g.group_id, 5) = 'case:'
+                          or left(g.group_id, 9) = 'turnover:'
+                          or left(g.group_id, 17) = 'batch-accounting:'
+                          or left(g.group_id, 21) = 'source:oa_attachment:'
+                            then g.group_id
+                        else 'scope:' || g.scope_key || ':' || g.group_id
+                    end as all_scope_group_id
+                from read_model.workbench_groups g
+                join read_model.workbench_generations gen
+                  on gen.tenant_id = 'default'
+                 and gen.scope_key = g.scope_key
+                 and gen.generation_id = g.generation_id
+                 and gen.status = 'active'
+                where g.scope_key <> 'all'
+            ) active_groups
+            order by
+                active_groups.zone,
+                active_groups.all_scope_group_id,
+                active_groups.scope_month desc nulls last,
+                active_groups.updated_at desc
+        ) g
+    """
 
 
 def _parse_postgres_timestamp(value: str | None) -> datetime | None:
@@ -5341,6 +5397,71 @@ class PostgresReadModelRepository:
         return dict(source_versions) if isinstance(source_versions, dict) else {}
 
     @staticmethod
+    def _workbench_active_month_generation_version(executor: Any) -> dict[str, Any]:
+        row = executor.fetch_one(
+            """
+            select
+                count(*)::bigint as scope_count,
+                coalesce(
+                    max(
+                        case
+                            when coalesce(source_versions->>'source_version', '') ~ '^[0-9]+$'
+                                then (source_versions->>'source_version')::bigint
+                            else 0
+                        end
+                    ),
+                    0
+                )::bigint as source_version,
+                max(coalesce(activated_at, completed_at, updated_at))::text as generated_at
+            from read_model.workbench_generations
+            where tenant_id = 'default'
+              and status = 'active'
+              and scope_key <> 'all'
+              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            """,
+        )
+        if not isinstance(row, dict):
+            return {}
+        scope_count = int_value(row.get("scope_count"), 0)
+        source_version = int_value(row.get("source_version"), 0)
+        generated_at = text(row.get("generated_at")) or ""
+        if scope_count <= 0:
+            return {}
+        return {
+            "scope_count": scope_count,
+            "source_version": source_version,
+            "generated_at": generated_at,
+            "version": f"workbench:all:active-month-shards:{scope_count}:{source_version}:{generated_at}",
+        }
+
+    def _workbench_all_composed_generation_metadata(self) -> dict[str, Any]:
+        active_month_version = self._workbench_active_month_generation_version(self._connection)
+        active_generation_id = text(active_month_version.get("version"))
+        if not active_generation_id:
+            return {}
+        source_versions = self._workbench_all_active_source_versions()
+        generated_at = text(active_month_version.get("generated_at"))
+        return {
+            "active_generation_id": active_generation_id,
+            "building_generation_id": None,
+            "failed_generation_id": None,
+            "read_model_version": active_generation_id,
+            "generated_at": generated_at,
+            "generation_last_error": None,
+            "failed_generation_is_relevant": False,
+            "generations": [
+                {
+                    "generation_id": active_generation_id,
+                    "status": "active",
+                    "source_versions": source_versions,
+                    "activated_at": generated_at,
+                    "completed_at": generated_at,
+                    "updated_at": generated_at,
+                }
+            ],
+        }
+
+    @staticmethod
     def _workbench_generation_metadata(executor: Any, *, scope_key: str) -> dict[str, Any]:
         rows = executor.fetch_all(
             """
@@ -5737,106 +5858,7 @@ class PostgresReadModelRepository:
         *,
         scope_key: str,
     ) -> list[dict[str, Any]]:
-        if str(scope_key or "").strip() != "all":
-            return []
-        row = executor.fetch_one(
-            """
-            with all_generation as (
-                select
-                    generation_id,
-                    row_count,
-                    group_count,
-                    case
-                        when coalesce(source_versions->>'source_version', '') ~ '^[0-9]+$'
-                            then (source_versions->>'source_version')::bigint
-                        else 0
-                    end as source_version
-                from read_model.workbench_generations
-                where tenant_id = 'default'
-                  and scope_key = 'all'
-                  and status = 'active'
-                order by activated_at desc nulls last, updated_at desc
-                limit 1
-            ),
-            parent_generation_summary as (
-                select
-                    count(*)::bigint as parent_scope_count,
-                    coalesce(sum(row_count), 0)::bigint as parent_row_count,
-                    coalesce(sum(group_count), 0)::bigint as parent_group_count,
-                    coalesce(
-                        max(
-                            case
-                                when coalesce(source_versions->>'source_version', '') ~ '^[0-9]+$'
-                                    then (source_versions->>'source_version')::bigint
-                                else 0
-                            end
-                        ),
-                        0
-                    )::bigint as parent_source_version,
-                    coalesce(array_agg(scope_key order by scope_key desc), array[]::text[]) as parent_scope_keys
-                from read_model.workbench_generations
-                where tenant_id = 'default'
-                  and status = 'active'
-                  and scope_key <> 'all'
-                  and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
-            )
-            select
-                all_generation.generation_id as all_generation_id,
-                coalesce(all_generation.row_count, 0)::bigint as all_row_count,
-                coalesce(all_generation.group_count, 0)::bigint as all_group_count,
-                coalesce(all_generation.source_version, 0)::bigint as all_source_version,
-                parent_generation_summary.parent_scope_count,
-                parent_generation_summary.parent_row_count,
-                parent_generation_summary.parent_group_count,
-                parent_generation_summary.parent_source_version,
-                parent_generation_summary.parent_scope_keys
-            from parent_generation_summary
-            left join all_generation on true
-            """,
-        )
-        if not isinstance(row, dict):
-            return []
-        parent_scope_count = int_value(row.get("parent_scope_count"), 0)
-        parent_row_count = int_value(row.get("parent_row_count"), 0)
-        parent_group_count = int_value(row.get("parent_group_count"), 0)
-        parent_source_version = int_value(row.get("parent_source_version"), 0)
-        if parent_scope_count == 0:
-            return []
-        all_generation_id = text(row.get("all_generation_id"))
-        all_row_count = int_value(row.get("all_row_count"), 0)
-        all_group_count = int_value(row.get("all_group_count"), 0)
-        all_source_version = int_value(row.get("all_source_version"), 0)
-        reasons: list[str] = []
-        if not all_generation_id:
-            reasons.append("all_scope_active_generation_missing")
-        if parent_group_count > 0 and all_group_count == 0:
-            reasons.append(f"all_scope_empty_with_parent_groups parent_group_count={parent_group_count}")
-        if parent_row_count > 0 and all_row_count == 0:
-            reasons.append(f"all_scope_empty_with_parent_rows parent_row_count={parent_row_count}")
-        if parent_source_version > all_source_version:
-            reasons.append(
-                "all_scope_source_version_behind_parent "
-                f"all_source_version={all_source_version} parent_source_version={parent_source_version}"
-            )
-        if not reasons:
-            return []
-        parent_scope_keys = row.get("parent_scope_keys")
-        if not isinstance(parent_scope_keys, list):
-            parent_scope_keys = []
-        return [
-            {
-                "scope_key": "all",
-                "generation_id": all_generation_id,
-                "parent_scope_keys": [str(item) for item in parent_scope_keys if str(item or "").strip()],
-                "all_row_count": all_row_count,
-                "all_group_count": all_group_count,
-                "parent_row_count": parent_row_count,
-                "parent_group_count": parent_group_count,
-                "all_source_version": all_source_version,
-                "parent_source_version": parent_source_version,
-                "reasons": reasons,
-            }
-        ]
+        return []
 
     @staticmethod
     def _lock_workbench_generation_scope(connection: Any, *, scope_key: str) -> None:
@@ -6107,12 +6129,15 @@ class PostgresReadModelRepository:
             group = _read_model_payload(row)
             if not isinstance(group, dict):
                 group = {}
-            group.setdefault("group_id", text(row.get("group_id")))
+            display_group_id = text(row.get("group_id"))
+            if display_group_id:
+                group["group_id"] = display_group_id
+                group["id"] = display_group_id
             group.setdefault("zone", text(row.get("zone")) or "open")
             scope_key = text(row.get("scope_key"))
             generation_id = text(row.get("generation_id"))
             zone = text(row.get("zone")) or text(group.get("zone")) or "open"
-            group_id = text(row.get("group_id")) or text(group.get("group_id"))
+            group_id = text(row.get("source_group_id")) or display_group_id or text(group.get("group_id"))
             if (
                 _workbench_group_payload_requires_row_materialization(group)
                 and scope_key
@@ -6197,13 +6222,112 @@ class PostgresReadModelRepository:
                 text(row.get("scope_key")) or "",
                 text(row.get("generation_id")) or "",
                 text(row.get("zone")) or text(group.get("zone")) or "open",
-                text(row.get("group_id")) or text(group.get("group_id")) or "",
+                text(row.get("source_group_id")) or text(row.get("group_id")) or text(group.get("group_id")) or "",
             )
             materialized.append(_materialize_workbench_group_payload(group, rows_by_group.get(key, [])))
         return materialized
 
+    def _get_workbench_all_summary_from_active_month_shards(self) -> dict[str, Any] | None:
+        rows = self._connection.fetch_all(
+            """
+            select
+                gen.scope_key,
+                gen.generation_id,
+                gen.source_versions as generation_source_versions,
+                coalesce(s.generated_at, gen.activated_at, gen.completed_at, gen.updated_at)::text as generated_at,
+                s.payload,
+                s.raw_payload
+            from read_model.workbench_generations gen
+            left join read_model.workbench_summary s
+              on s.scope_key = gen.scope_key
+             and s.generation_id = gen.generation_id
+            where gen.tenant_id = 'default'
+              and gen.status = 'active'
+              and gen.scope_key <> 'all'
+              and gen.scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            order by gen.scope_key desc
+            """,
+        )
+        if not rows:
+            return None
+        summary = {
+            "oa_count": 0,
+            "bank_count": 0,
+            "invoice_count": 0,
+            "paired_count": 0,
+            "open_count": 0,
+            "exception_count": 0,
+            "zone_counts": _empty_workbench_zone_counts(),
+        }
+        invoice_inventory: dict[str, int] = {}
+        generated_at = ""
+        complete_summary_count = 0
+        source_version_rows: list[dict[str, Any]] = []
+        for row in rows:
+            source_versions = row.get("generation_source_versions")
+            if isinstance(source_versions, dict):
+                source_version_rows.append({"source_versions": source_versions})
+            payload = _read_model_payload(row)
+            if not isinstance(payload, dict) or not isinstance(payload.get("summary"), dict):
+                continue
+            complete_summary_count += 1
+            row_summary = _normalize_workbench_summary_counts(payload["summary"])
+            for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "open_count", "exception_count"):
+                summary[key] += int_value(row_summary.get(key), 0)
+            zone_counts = row_summary.get("zone_counts")
+            if isinstance(zone_counts, dict):
+                for zone in ("paired", "open"):
+                    zone_payload = zone_counts.get(zone)
+                    if not isinstance(zone_payload, dict):
+                        continue
+                    target = summary["zone_counts"][zone]
+                    for key in ("groups", "oa", "bank", "invoice", "rows"):
+                        target[key] += int_value(zone_payload.get(key), 0)
+            inventory = payload.get("invoice_inventory")
+            if isinstance(inventory, dict):
+                for key, value in inventory.items():
+                    invoice_inventory[str(key)] = invoice_inventory.get(str(key), 0) + int_value(value, 0)
+            row_generated_at = text(row.get("generated_at")) or ""
+            if row_generated_at > generated_at:
+                generated_at = row_generated_at
+        read_model_status = self._workbench_summary_read_model_status(scope_key="all")
+        if complete_summary_count < len(rows):
+            read_model_status = "stale"
+        active_month_version = self._workbench_active_month_generation_version(self._connection)
+        return {
+            "month": "all",
+            "scope_key": "all",
+            "summary": _normalize_workbench_summary_counts(summary),
+            "invoice_inventory": invoice_inventory,
+            "read_model_status": read_model_status,
+            "generated_at": generated_at,
+            "source_versions": _workbench_composed_all_source_versions(source_version_rows),
+            "active_generation_id": active_month_version.get("version"),
+            "read_model_version": active_month_version.get("version"),
+        }
+
+    def _workbench_all_active_source_versions(self) -> dict[str, Any]:
+        rows = self._connection.fetch_all(
+            """
+            select source_versions
+            from read_model.workbench_generations
+            where tenant_id = 'default'
+              and status = 'active'
+              and scope_key <> 'all'
+              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            order by scope_key desc
+            """,
+        )
+        return _workbench_composed_all_source_versions(
+            [row for row in rows if isinstance(row, dict)]
+        )
+
     def get_workbench_summary(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
+        if normalized_scope_key == "all":
+            active_month_summary = self._get_workbench_all_summary_from_active_month_shards()
+            if active_month_summary is not None:
+                return active_month_summary
         active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
         active_source_versions = self._workbench_generation_source_versions(
             self._connection,
@@ -6438,20 +6562,13 @@ class PostgresReadModelRepository:
 
     def _workbench_groups_schema_status(self, *, scope_key: str) -> str:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
+        if normalized_scope_key == "all":
+            return "fresh"
         expected_builder = _expected_workbench_groups_builder(normalized_scope_key)
         if not expected_builder:
             return "fresh"
         where_sql, params = self._workbench_scope_filter(normalized_scope_key)
         active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
-        active_source_versions = (
-            self._workbench_generation_source_versions(
-                self._connection,
-                scope_key=normalized_scope_key,
-                generation_id=active_generation_id,
-            )
-            if active_generation_id
-            else {}
-        )
         generation_clause = ""
         generation_params: list[Any] = []
         if active_generation_id:
@@ -6659,20 +6776,36 @@ class PostgresReadModelRepository:
         normalized_page = max(1, int_value(page, 1))
         normalized_page_size = min(200, max(1, int_value(page_size, 50)))
         offset = (normalized_page - 1) * normalized_page_size
-        scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
-        active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
-        active_source_versions = self._workbench_generation_source_versions(
-            self._connection,
-            scope_key=normalized_scope_key,
-            generation_id=active_generation_id,
+        composed_all_scope = normalized_scope_key == "all"
+        if composed_all_scope:
+            groups_from_sql = _workbench_active_month_groups_sql()
+            scope_params: list[Any] = []
+            active_month_version = self._workbench_active_month_generation_version(self._connection)
+            active_generation_id = text(active_month_version.get("version"))
+            active_source_versions = self._workbench_all_active_source_versions()
+        else:
+            groups_from_sql = "read_model.workbench_groups g"
+            scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
+            active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+            active_source_versions = self._workbench_generation_source_versions(
+                self._connection,
+                scope_key=normalized_scope_key,
+                generation_id=active_generation_id,
+            )
+        group_scope_clause = "true" if composed_all_scope else f"g.{scope_where}"
+        group_row_join_id_sql = "coalesce(g.source_group_id, g.group_id)" if composed_all_scope else "g.group_id"
+        group_select_sql = (
+            "group_id, source_group_id, zone, payload, raw_payload, scope_key, generation_id"
+            if composed_all_scope
+            else "group_id, zone, payload, raw_payload, scope_key, generation_id"
         )
         normalized_column_filters = _normalize_workbench_column_filters(column_filters)
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)
         normalized_search_by_pane = _normalize_workbench_search_by_pane(search_by_pane)
         normalized_search_mode = _normalize_workbench_search_mode(search_mode)
-        clauses = [f"g.{scope_where}", "g.zone = %s"]
+        clauses = ["g.zone = %s"] if composed_all_scope else [f"g.{scope_where}", "g.zone = %s"]
         params = [*scope_params, normalized_zone]
-        if active_generation_id:
+        if active_generation_id and not composed_all_scope:
             clauses.append("g.generation_id = %s")
             params.append(active_generation_id)
         if normalized := text(status):
@@ -6683,7 +6816,7 @@ class PostgresReadModelRepository:
             params.append(normalized)
         excludes_linked_etc_summary_groups = normalized_zone == "open"
         if excludes_linked_etc_summary_groups:
-            clauses.append(_workbench_open_linked_etc_summary_group_exclusion_sql())
+            clauses.append(_workbench_open_linked_etc_summary_group_exclusion_sql(group_id_sql=group_row_join_id_sql))
         normalized_search = text(search)
         if (
             normalized_search
@@ -6696,13 +6829,14 @@ class PostgresReadModelRepository:
             pattern = f"%{normalized_search}%"
             params.extend([pattern, pattern])
         if normalized_search and normalized_search_mode == "linked_context":
-            clauses.append(_workbench_linked_search_exists_sql())
+            clauses.append(_workbench_linked_search_exists_sql(group_id_sql=group_row_join_id_sql))
             params.append(f"%{normalized_search}%")
         row_filter_sql, row_filter_params = _workbench_group_row_filter_exists_sql(
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
             search_by_pane=normalized_search_by_pane,
             fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
+            group_id_sql=group_row_join_id_sql,
         )
         if row_filter_sql:
             clauses.append(row_filter_sql)
@@ -6734,7 +6868,7 @@ class PostgresReadModelRepository:
         if not excludes_linked_etc_summary_groups:
             materialized_counts = self._workbench_generation_stats_for_groups_page(
                 scope_key=normalized_scope_key,
-                generation_id=active_generation_id,
+                generation_id=None if composed_all_scope else active_generation_id,
                 zone=normalized_zone,
                 status=status,
                 source_kind=source_kind,
@@ -6748,7 +6882,7 @@ class PostgresReadModelRepository:
             count_row = self._connection.fetch_one(
                 f"""
                 select count(*) as total_count
-                from read_model.workbench_groups g
+                from {groups_from_sql}
                 where {where_sql}
                 """,
                 tuple(params),
@@ -6775,12 +6909,12 @@ class PostgresReadModelRepository:
                           and coalesce(r.row_role, '') <> 'summary'
                           {invoice_row_filter_sql}
                     )::bigint as invoice_count
-                from read_model.workbench_groups g
+                from {groups_from_sql}
                 left join read_model.workbench_group_rows r
                   on r.scope_key = g.scope_key
                  and r.generation_id = g.generation_id
                  and r.zone = g.zone
-                 and r.group_id = g.group_id
+                 and r.group_id = {group_row_join_id_sql}
                 where {where_sql}
                 """,
                 tuple(
@@ -6802,8 +6936,8 @@ class PostgresReadModelRepository:
         page_params = [*params, normalized_page_size + 1, offset]
         rows = self._connection.fetch_all(
             f"""
-            select group_id, zone, payload, raw_payload, scope_key, generation_id
-            from read_model.workbench_groups g
+            select {group_select_sql}
+            from {groups_from_sql}
             where {where_sql}
             order by {order_by_sql}
             limit %s offset %s
@@ -6853,16 +6987,28 @@ class PostgresReadModelRepository:
         normalized_group_id = str(group_id or "").strip()
         if not normalized_zone or not normalized_group_id:
             return None
-        scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
-        active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+        composed_all_scope = normalized_scope_key == "all"
+        if composed_all_scope:
+            groups_from_sql = _workbench_active_month_groups_sql()
+            scope_where, scope_params = "true", []
+            active_generation_id = text(self._workbench_active_month_generation_version(self._connection).get("version"))
+        else:
+            groups_from_sql = "read_model.workbench_groups g"
+            scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
+            active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+        source_group_select_sql = "g.source_group_id," if composed_all_scope else ""
         generation_clause = ""
         generation_params: list[Any] = []
-        if active_generation_id:
+        if active_generation_id and not composed_all_scope:
             generation_clause = "and g.generation_id = %s"
             generation_params.append(active_generation_id)
+        group_scope_clause = "true" if composed_all_scope else f"g.{scope_where}"
+        group_row_join_id_sql = "coalesce(g.source_group_id, g.group_id)" if composed_all_scope else "g.group_id"
         exclusion_clause = ""
         if normalized_zone == "open":
-            exclusion_clause = f"and {_workbench_open_linked_etc_summary_group_exclusion_sql()}"
+            exclusion_clause = (
+                f"and {_workbench_open_linked_etc_summary_group_exclusion_sql(group_id_sql=group_row_join_id_sql)}"
+            )
         row = self._connection.fetch_one(
             f"""
             select
@@ -6870,15 +7016,16 @@ class PostgresReadModelRepository:
               g.zone,
               g.scope_key,
               g.generation_id,
+              {source_group_select_sql}
               g.payload,
               g.raw_payload,
               gen.source_versions
-            from read_model.workbench_groups g
-            left join read_model.workbench_generations gen
-              on gen.tenant_id = 'default'
+              from {groups_from_sql}
+              left join read_model.workbench_generations gen
+                on gen.tenant_id = 'default'
              and gen.scope_key = g.scope_key
              and gen.generation_id = g.generation_id
-            where g.{scope_where}
+            where {group_scope_clause}
               {generation_clause}
               and g.zone = %s
               and g.group_id = %s
@@ -6897,7 +7044,7 @@ class PostgresReadModelRepository:
             group = {"group_id": text(row.get("group_id"))}
         result = _with_workbench_group_counts(_sanitize_workbench_group_invoice_rows(group))
         result["scope_key"] = resolved_scope_key
-        source_versions = row.get("source_versions")
+        source_versions = self._workbench_all_active_source_versions() if composed_all_scope else row.get("source_versions")
         result["source_versions"] = dict(source_versions) if isinstance(source_versions, dict) else {}
         result["active_generation_id"] = active_generation_id
         result["read_model_version"] = active_generation_id
@@ -7052,7 +7199,11 @@ class PostgresReadModelRepository:
             for row in dirty_rows
         ]
         dirty_statuses = {scope["status"] for scope in dirty_scopes}
-        generation_metadata = self._workbench_generation_metadata(self._connection, scope_key=normalized_scope_key)
+        generation_metadata = (
+            self._workbench_all_composed_generation_metadata()
+            if normalized_scope_key == "all"
+            else self._workbench_generation_metadata(self._connection, scope_key=normalized_scope_key)
+        )
         consistency_failures = (
             self._workbench_generation_consistency_failures(
                 self._connection,
@@ -7186,6 +7337,8 @@ class PostgresReadModelRepository:
 
     def workbench_groups_cache_version(self, *, scope_key: str) -> str | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
+        if normalized_scope_key == "all":
+            return text(self._workbench_active_month_generation_version(self._connection).get("version"))
         active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
         if active_generation_id:
             return active_generation_id
@@ -8382,34 +8535,49 @@ class PostgresReadModelRepository:
         normalized_page = max(1, int_value(page, 1))
         normalized_page_size = min(200, max(1, int_value(page_size, 100)))
         offset = (normalized_page - 1) * normalized_page_size
-        active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=scope_key)
-        if scope_key == "all" and active_generation_id:
-            clauses = ["scope_key = %s"]
-            params = ["all"]
-        elif scope_key == "all":
-            clauses = ["scope_key <> 'all'"]
+        if scope_key == "all":
+            row_source_sql = """
+                (
+                    select distinct on (r.row_id)
+                        r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                        r.project_name, r.counterparty_name, r.updated_at
+                    from read_model.workbench_rows r
+                    join read_model.workbench_generations gen
+                      on gen.tenant_id = 'default'
+                     and gen.scope_key = r.scope_key
+                     and gen.generation_id = r.generation_id
+                     and gen.status = 'active'
+                    where r.scope_key <> 'all'
+                    order by r.row_id, r.updated_at desc nulls last
+                ) r
+            """
+            clauses: list[str] = []
             params: list[Any] = []
         else:
-            clauses = ["scope_key = %s"]
+            row_source_sql = "read_model.workbench_rows r"
+            active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=scope_key)
+            clauses = ["r.scope_key = %s"]
             params = [scope_key]
-        if active_generation_id:
-            clauses.append("generation_id = %s")
-            params.append(active_generation_id)
+            if active_generation_id:
+                clauses.append("r.generation_id = %s")
+                params.append(active_generation_id)
+        if not clauses:
+            clauses.append("true")
         if normalized := text(status):
-            clauses.append("status = %s")
+            clauses.append("r.status = %s")
             params.append(normalized)
         if normalized := text(source_kind):
-            clauses.append("source_kind = %s")
+            clauses.append("r.source_kind = %s")
             params.append(normalized)
         if normalized := text(search):
-            clauses.append("(project_name ilike %s or counterparty_name ilike %s or row_id ilike %s)")
+            clauses.append("(r.project_name ilike %s or r.counterparty_name ilike %s or r.row_id ilike %s)")
             pattern = f"%{normalized}%"
             params.extend([pattern, pattern, pattern])
         where_sql = " and ".join(clauses)
         count_row = self._connection.fetch_one(
             f"""
             select count(*) as total_count
-            from read_model.workbench_rows
+            from {row_source_sql}
             where {where_sql}
             """,
             tuple(params),
@@ -8418,9 +8586,9 @@ class PostgresReadModelRepository:
         rows = self._connection.fetch_all(
             f"""
             select row_id, source_kind, status, payload, raw_payload
-            from read_model.workbench_rows
+            from {row_source_sql}
             where {where_sql}
-            order by updated_at desc, row_id
+            order by r.updated_at desc, r.row_id
             limit %s offset %s
             """,
             tuple(params),
@@ -11365,13 +11533,13 @@ def _normalize_workbench_search_mode(value: Any) -> str:
     return "linked_context" if normalized == "linked_context" else "pane"
 
 
-def _workbench_linked_search_exists_sql() -> str:
+def _workbench_linked_search_exists_sql(*, group_id_sql: str = "g.group_id") -> str:
     return (
         "exists (select 1 from read_model.workbench_group_rows r_linked_search "
         "where r_linked_search.scope_key = g.scope_key "
         "and r_linked_search.generation_id = g.generation_id "
         "and r_linked_search.zone = g.zone "
-        "and r_linked_search.group_id = g.group_id "
+        f"and r_linked_search.group_id = {group_id_sql} "
         "and r_linked_search.searchable_text ilike %s)"
     )
 
@@ -11394,6 +11562,7 @@ def _workbench_group_row_filter_exists_sql(
     time_filters: dict[str, dict[str, str]],
     search_by_pane: dict[str, str],
     fallback_search: str | None,
+    group_id_sql: str = "g.group_id",
 ) -> tuple[str, list[Any]]:
     pane_exists: list[str] = []
     params: list[Any] = []
@@ -11412,7 +11581,7 @@ def _workbench_group_row_filter_exists_sql(
             "r.scope_key = g.scope_key",
             "r.generation_id = g.generation_id",
             "r.zone = g.zone",
-            "r.group_id = g.group_id",
+            f"r.group_id = {group_id_sql}",
             *row_match_clauses,
         ]
         pane_exists.append(
@@ -11594,8 +11763,8 @@ def _workbench_groups_order_by(sort: str | None) -> str:
     return f"{prefix}, scope_month desc nulls last, updated_at desc, group_id"
 
 
-def _workbench_open_linked_etc_summary_group_exclusion_sql() -> str:
-    return """
+def _workbench_open_linked_etc_summary_group_exclusion_sql(*, group_id_sql: str = "g.group_id") -> str:
+    return f"""
     not exists (
         select 1
         from read_model.workbench_group_rows gr
@@ -11606,7 +11775,7 @@ def _workbench_open_linked_etc_summary_group_exclusion_sql() -> str:
         where gr.scope_key = g.scope_key
           and gr.generation_id = g.generation_id
           and gr.zone = g.zone
-          and gr.group_id = g.group_id
+          and gr.group_id = {group_id_sql}
           and gr.pane = 'invoice'
           and coalesce(gr.row_role, '') <> 'summary'
           and gr.source_kind = 'etc_invoice_summary'
@@ -12585,6 +12754,29 @@ def _source_version_value(source_versions: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _workbench_composed_all_source_versions(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    source_versions_rows = [
+        row.get("source_versions")
+        for row in list(rows or [])
+        if isinstance(row, dict) and isinstance(row.get("source_versions"), dict)
+    ]
+    result: dict[str, Any] = {
+        "builder": WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
+        "source_version": max((_source_version_value(versions) or 0 for versions in source_versions_rows), default=0),
+    }
+    for key in (
+        "oa_attachment_invoice_parser_version",
+        "bank_auto_tag_rules_version",
+        "oa_projection_sync_version",
+        "workbench_matching_rules_version",
+    ):
+        observed = [text(versions.get(key)) for versions in source_versions_rows]
+        values = {value for value in observed if value}
+        if observed and len(values) == 1 and all(observed):
+            result[key] = next(iter(values))
+    return result
 
 
 def _workbench_source_versions_allow_stale_write_skip(incoming: Any, existing: Any) -> bool:

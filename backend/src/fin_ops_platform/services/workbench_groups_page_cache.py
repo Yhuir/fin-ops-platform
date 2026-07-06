@@ -46,6 +46,10 @@ def workbench_groups_redis_cache_version_from_key(cache_key: str) -> str | None:
     return None
 
 
+def _workbench_groups_cache_version_token(cache_version: str) -> str:
+    return hashlib.sha256(str(cache_version).encode("utf-8")).hexdigest()[:24]
+
+
 def build_workbench_groups_redis_cache_key_from_version(
     *,
     cache_version: str | None,
@@ -66,6 +70,7 @@ def build_workbench_groups_redis_cache_key_from_version(
 ) -> str | None:
     if not cache_version:
         return None
+    version_token = _workbench_groups_cache_version_token(str(cache_version))
     key_payload = {
         "workbench_read_model_schema_version": schema_version,
         "scope": scope_key,
@@ -84,7 +89,7 @@ def build_workbench_groups_redis_cache_key_from_version(
         "filter_semantics": "linked_context_v1",
     }
     digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-    return f"workbench:{cache_version}:groups:{digest}"
+    return f"workbench:{version_token}:groups:{digest}"
 
 
 def workbench_groups_redis_ttl_seconds_from_env() -> int:

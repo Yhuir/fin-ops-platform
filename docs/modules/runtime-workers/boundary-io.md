@@ -7,7 +7,7 @@
 - 状态：closed
 - 当前边界可信度：high
 - 目标边界：所有后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明。
-- 当前闭环：worker 入口使用 registration contract；worker instance、event type、claim scope lane、env example、manifest/check command 和 App Health readiness 均由 `runtime_worker_registry.py` 派生。`workbench.read_model.refresh` 已按 `scope_key` 拆成月份 shard lane 与 `all` aggregate lane，避免慢聚合阻塞首屏月份刷新。部署文档不再维护手写 worker 矩阵或 `sudo systemctl enable --now fin-ops-worker@...` 清单。
+- 当前闭环：worker 入口使用 registration contract；worker instance、event type、claim scope lane、env example、manifest/check command 和 App Health readiness 均由 `runtime_worker_registry.py` 派生。`workbench.read_model.refresh` 已按 `scope_key` 拆成月份 shard lane 与显式 `all` aggregate 维护 lane；普通写后可见性走月份 shard + query-composed all，避免慢聚合阻塞首屏月份刷新。部署文档不再维护手写 worker 矩阵或 `sudo systemctl enable --now fin-ops-worker@...` 清单。
 - 性能证据风险：高性能全域闭环仍需要生产 SLO 复测证明所有页面/读写操作 p95 收敛；该风险属于运行证据，不再代表 Runtime Worker 边界或 I/O open。
 - 旧代码删除状态：旧 `worker_legacy_application` / `RuntimeWorkerApplicationBridge` / GridFS migration worker / 手写生产 worker 矩阵已移除；本轮删除无调用 `_handle_import_fact_changed_event` wrapper 与 `required_worker_dependency(...)` 死 helper。
 
@@ -33,7 +33,7 @@
 | Refresh availability timestamp | `job.outbox_events.available_at` | write-operation / read-model refresh SLO 以 `available_at -> processed_at` 衡量 enqueue-to-done；事务内 writer 必须用 `clock_timestamp()` 写实际入队可处理时间，不能让 transaction-level `now()` 把业务写事务耗时计入 worker drain；同 scope pending refresh 被新 source_version 合并时，active outbox event 的 `created_at`/`updated_at` 也必须重置为当前 enqueue 时间，避免兼容报表继续读到旧 pending 年龄 |
 | Worker instance env | deploy/systemd | 生产 systemd 必须传 `--registration <instance>` 与 `--worker-instance <instance>`；instance name、event types、claim scope filters 与 handler flags 由 registry 派生。PostgreSQL durable queue worker 的默认 idle poll 为 `0.05s`，`workbench` 月分片热 lane 使用 `0.01s`，`workbench-aggregate` 使用 `0.05s` idle poll 与 `FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=4` 小批量 drain；历史 `--poll-interval-seconds 2`、`0.25`、`0.1`、`0.05` 只允许由 deploy helper 精确迁移到当前 release env 示例声明值，不能重新作为 read model worker 默认值 |
 | Claim scope filter | worker registry / worker env | 只用于同一 event type 下拆分 worker lane；`workbench` worker 必须 `--exclude-claim-scope-key all`，`workbench-aggregate` worker 必须 `--claim-scope-key all`。scope contract 仍由 read model scope policy 负责，不能把业务 scope 规则塞进 queue 层 |
-| Workbench all aggregate scheduling | `WorkbenchReadModelRefreshService` | high/urgent 月分片 refresh 可立即投递 `workbench:all` aggregate，并保留 high/urgent priority 让 pending 聚合冲突时拉早 `available_at`；relation 写入产生的 `workbench_relation_changed` 月分片发布后也必须以 0 秒 delay 投递 `all` aggregate 到 `workbench-aggregate` lane，保证跨页面 all 视图快速收敛；普通低优先级月分片仍可使用后台合并窗口，且 all 聚合不得进入写事务或阻塞写后月份 shard、`workbench_relation` 和下游页面 fresh 路径 |
+| Workbench all aggregate scheduling | `WorkbenchReadModelRefreshService` | 普通月分片 refresh 完成后不再自动投递 `workbench:all` aggregate；relation 写入产生的 `workbench_relation_changed` 也只要求受影响 month shard 和下游 read model 收敛。只有 event payload 显式声明 `publish_all_aggregate=true` 的 rebuild/repair/backfill 才可投递 `all` aggregate 到 `workbench-aggregate` lane；该 lane 不得进入写事务，也不得成为普通写后可见性、freshness gate 或 operation barrier 的必要条件 |
 | Claim hot path index | PostgreSQL migration | `job.outbox_events` active queue claim 必须保留 event-type-first 索引 `outbox_events_claim_event_type_priority_idx`，覆盖 `event_type/status/priority rank/available_at/created_at/id`；该索引只优化 worker lane claim I/O，不改变 durable queue 状态机、priority 语义或 freshness/readiness 事实源 |
 | Handler call | runtime worker | handler 只处理登记 event type |
 

@@ -539,7 +539,8 @@ class WorkbenchQueryFacade:
             if callable(self._refresh_status_with_source_freshness)
             else raw_refresh_status
         )
-        if str(refresh_status_payload.get("read_model_status") or "fresh") != "fresh":
+        refresh_status = str(refresh_status_payload.get("read_model_status") or "fresh")
+        if refresh_status not in {"fresh", "refreshing"}:
             self._enqueue_refresh(scope_key, reason="api_groups_source_versions_stale")
         return refresh_status_payload
 

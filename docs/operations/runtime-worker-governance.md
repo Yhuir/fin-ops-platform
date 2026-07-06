@@ -30,7 +30,7 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   `self-update` 时仍需要一次 root bootstrap。`/usr/local/sbin/finops-ensure-runtime-workers`
   仍是预安装的 root helper；release deploy 只校验该 helper 的合同并通过 `finops-deploy-control activate`
   间接调用它，不在发布链路中覆盖该 runtime worker helper。
-- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；`workbench` 月分片热 lane 为 `0.01s`，`workbench-aggregate` 为 `0.05s` 且每轮最多 drain 4 个 all-scope event，避免 all 聚合 backlog 放大写后可见性抖动。普通 high/urgent 月分片发布后可立即投递 `workbench:all` 聚合并保留 high/urgent priority；relation 写入产生的 `workbench_relation_changed` 月分片必须先让具体月份和 relation/downstream read model 收敛，再以 0 秒 delay/high priority 投递 `all` 聚合。新增 read model / 写后 fan-out worker 不能把
+- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；`workbench` 月分片热 lane 为 `0.01s`，`workbench-aggregate` 为 `0.05s` 且每轮最多 drain 4 个显式 all-scope 维护 event。普通 high/urgent 月分片发布后不再自动投递 `workbench:all` 聚合；relation 写入产生的 `workbench_relation_changed` 必须让具体月份和 relation/downstream read model 收敛，`month=all` 页面由 query-composed active 月分片立即读取最新可见数据。只有 rebuild/repair/backfill 显式设置 `publish_all_aggregate=true` 时才进入 `workbench-aggregate` lane。新增 read model / 写后 fan-out worker 不能把
   `--poll-interval-seconds 2`、`0.25`、`0.1` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，
   可保留显式 5s poll。发布 helper 会把已有 env 中精确命中的历史 `--poll-interval-seconds 2|0.25|0.1|0.05`
   迁移到当前 release env 示例声明的 poll 值；`workbench-aggregate` 的历史单事件 drain 会迁移到 4。该迁移不会重写 RabbitMQ 灰度或自定义事件。

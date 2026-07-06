@@ -77,7 +77,7 @@
 | Scope/freshness | `read_model_scope_policy.py`、`read_model_scope_contract.py`、`read_model_freshness.py`、`operation_freshness_barrier.py` |
 | Write target envelope | `read_model_write_targets.py` 与页面/service 本地 target mapper，当前已覆盖 batch/no-OA/OA pending/pending invoice/turnover、bank-detail、input-invoice-usage OA reverse、output-invoice-collections、tax-offset plan/certified import、workbench relation action、general/file import、ETC import job completion、OA manual import/create/refresh/remove；pending_invoice import fan-out 使用 `pending_invoice_scope_planner.py` |
 | Repository | `postgres_repositories/read_models.py`、`postgres_repositories/read_model_scope_contracts.py` |
-| Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py`；`workbench` 月份 shard 和 `workbench-aggregate` all-scope 聚合使用同一 event type 但不同 claim scope lane |
+| Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py`；`workbench` 月份 shard 使用普通写后可见性主 lane，`workbench-aggregate` all-scope lane 仅服务显式 rebuild/repair/backfill |
 | Frontend | `web/src/features/operationBarrier/api.ts` |
 | Scripts | `scripts/check-read-model-scope-contracts.py` |
 | Production evidence | `docs/operations/read-model-production-evidence-runbook.md`、`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`、`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md` |
@@ -106,6 +106,6 @@
 - `pending_invoice` 的 `filter=all` freshness dependency 月份必须来自 canonical `app.bank_transactions`，父 scope refresh_status 必须上卷子月份 dirty scope，防止新导入事实源已增加但页面仍显示旧 rows 且标记 fresh。
 - `workbench_relation` 的 `rows` 索引是 scope 内唯一，不是 row 全局唯一；跨月 relation 必须在每个受影响 scope 写入所有成员 row 索引，禁止恢复旧的 `(tenant_id, row_id)` 覆盖模型。
 - `workbench_relation` 操作级局部投影必须通过 `WorkbenchRelationReadModelRepositoryPort.save_workbench_relation_distribution_rows(...)` 进入 repository；service/projection 不得直接写 SQL。repository 必须按受影响 row overlap 删除旧 groups、删除/写回受影响 rows、同步 scope source_versions 并重算 row/group count。
-- `workbench` 保留 active generation 原子发布；月份 shard 刷新后可投递 `all` aggregate。relation 写入产生的 `workbench_relation_changed` 必须以 0 秒 delay 和 high priority 把 `all` aggregate 投递给 `workbench-aggregate` lane，让跨页面 all 视图尽快收敛；但该聚合仍不能进入关系写事务或阻塞页面首屏使用的月份 shard worker。
+- `workbench` 保留 active generation 原子发布；ordinary write 后只要求受影响月份 shard 发布。`month=all` 查询组合 active 月度 generation，不再依赖写后 `workbench:all` 全量 aggregate；`workbench-aggregate` lane 只保留显式 rebuild/repair/backfill，不能作为普通 relation 写入可见性、freshness gate 或 operation barrier 的必要条件。
 - legacy compat path 删除不是当前 PSCIP-L4 blocker；它必须继续保持生产 fail-closed、不能绕过 fresh gate，也不能新增未登记 dirty/outbox/readiness 写入。
 - Search 高行数 refresh latency 仍需在后续生产 evidence sweep 中观察；单次高延迟不是当前 stale-as-fresh 或 readiness blocker。

@@ -12,6 +12,7 @@ from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.postgres_repositories.read_models import (
     WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
+    WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     PostgresReadModelRepository,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
@@ -36,7 +37,7 @@ from fin_ops_platform.services.workbench_sql_projection import (
 
 def fresh_workbench_sql_source_versions(app: Application, scope_key: str = "2026-05") -> dict[str, object]:
     builder = (
-        WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
+        WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION
         if scope_key == "all"
         else WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
     )
@@ -47,6 +48,28 @@ def fresh_workbench_sql_source_versions(app: Application, scope_key: str = "2026
         "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
         "oa_projection_sync_version": app._current_oa_projection_sync_version(),
     }
+
+
+COMPOSED_ALL_VERSION = "workbench:all:active-month-shards:1:12:2026-05-28T09:00:00+00:00"
+ACTIVE_MONTH_SUMMARY_ROW = {
+    "scope_key": "2026-05",
+    "generation_id": "gen-active",
+    "generation_source_versions": {"source_version": 12},
+    "generated_at": "2026-05-28T09:00:00+00:00",
+    "payload": {
+        "month": "2026-05",
+        "scope_key": "2026-05",
+        "summary": {
+            "oa_count": 1,
+            "bank_count": 2,
+            "invoice_count": 3,
+            "paired_count": 4,
+            "open_count": 5,
+            "exception_count": 0,
+        },
+        "invoice_inventory": {},
+    },
+}
 
 
 class WorkbenchSqlProjectionRelationPayloadTests(unittest.TestCase):
@@ -680,13 +703,30 @@ class MaterializedWorkbenchSummaryConnection(WorkbenchSummaryGroupsConnection):
 class ActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
-        if "from read_model.workbench_generations" in normalized and "status = 'active'" in normalized:
+        if "count(*)::bigint as scope_count" in normalized and "from read_model.workbench_generations" in normalized:
+            self.fetch_one_calls.append((normalized, params))
+            return {
+                "scope_count": 1,
+                "source_version": 12,
+                "generated_at": "2026-05-28T09:00:00+00:00",
+            }
+        if (
+            "from read_model.workbench_generations" in normalized
+            and "select generation_id" in normalized
+            and "status = 'active'" in normalized
+        ):
             self.fetch_one_calls.append((normalized, params))
             return {"generation_id": "gen-active"}
         return super().fetch_one(sql, params)
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
+        if "left join read_model.workbench_summary" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [ACTIVE_MONTH_SUMMARY_ROW]
+        if "select source_versions" in normalized and "from read_model.workbench_generations" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [{"source_versions": {"source_version": 12}}]
         if "from read_model.workbench_generations" in normalized:
             self.fetch_all_calls.append((normalized, params))
             return [
@@ -706,6 +746,13 @@ class ActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
 class SwitchingActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
+        if "count(*)::bigint as scope_count" in normalized and "from read_model.workbench_generations" in normalized:
+            self.fetch_one_calls.append((normalized, params))
+            return {
+                "scope_count": 1,
+                "source_version": 12,
+                "generated_at": "2026-05-28T09:00:00+00:00",
+            }
         if "from read_model.workbench_generations" in normalized and "select generation_id" in normalized:
             self.fetch_one_calls.append((normalized, params))
             return {"generation_id": "gen-active"}
@@ -757,6 +804,12 @@ class SwitchingActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnect
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
+        if "left join read_model.workbench_summary" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [ACTIVE_MONTH_SUMMARY_ROW]
+        if "select source_versions" in normalized and "from read_model.workbench_generations" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [{"source_versions": {"source_version": 12}}]
         if "from read_model.workbench_generations" in normalized:
             self.fetch_all_calls.append((normalized, params))
             return [
@@ -1518,6 +1571,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 scope_key="2026-05",
             ),
         )
+
+    def test_workbench_sql_all_source_versions_expect_composed_active_month_shards(self) -> None:
+        app = object.__new__(Application)
+
+        versions = app._workbench_sql_read_model_source_versions("all")
+
+        self.assertEqual(versions["builder"], WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
 
     def test_workbench_api_queues_oa_sync_when_sql_snapshot_parser_version_is_stale(self) -> None:
         app = object.__new__(Application)
@@ -2914,10 +2974,21 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
 
         all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
-        self.assertEqual(page["active_generation_id"], "gen-active")
-        self.assertEqual(page["read_model_version"], "gen-active")
-        self.assertTrue(any("g.generation_id = %s" in sql and "gen-active" in params for sql, params in all_queries))
+        self.assertEqual(page["active_generation_id"], COMPOSED_ALL_VERSION)
+        self.assertEqual(page["read_model_version"], COMPOSED_ALL_VERSION)
+        self.assertTrue(
+            any(
+                "join read_model.workbench_generations gen" in sql
+                and "g.scope_key <> 'all'" in sql
+                and "gen.status = 'active'" in sql
+                for sql, _params in all_queries
+            )
+        )
+        self.assertFalse(any("g.generation_id = %s" in sql and "gen-active" in params for sql, params in all_queries))
         self.assertTrue(any("r.generation_id = g.generation_id" in sql for sql, _params in all_queries))
+        self.assertTrue(
+            any("gr.group_id = coalesce(g.source_group_id, g.group_id)" in sql for sql, _params in all_queries)
+        )
 
     def test_repository_excludes_open_etc_summary_groups_already_linked_by_active_relation(self) -> None:
         connection = ActiveWorkbenchGenerationConnection()
@@ -2938,6 +3009,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
         self.assertTrue(any("count(*) as total_count" in sql for sql, _params in connection.fetch_one_calls))
+        self.assertFalse(any("source_group_id" in sql for sql, _params in all_queries))
         self.assertFalse(any("from read_model.workbench_generation_stats" in sql for sql, _params in connection.fetch_one_calls))
 
     def test_batch_accounting_loader_reads_only_active_workbench_generations(self) -> None:
@@ -2973,25 +3045,24 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         page = repository.get_workbench_groups_page(scope_key="all", zone="paired", page=1, page_size=25)
 
         all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
-        active_generation_queries = [
-            sql
-            for sql, _params in all_queries
-            if "from read_model.workbench_generations" in sql and "status = 'active'" in sql
-        ]
-        self.assertEqual(page["active_generation_id"], "gen-active")
-        self.assertEqual(page["source_versions"], {"source_version": 12})
-        self.assertEqual(len(active_generation_queries), 1)
+        self.assertEqual(page["active_generation_id"], COMPOSED_ALL_VERSION)
+        self.assertEqual(
+            page["source_versions"],
+            {"builder": WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION, "source_version": 12},
+        )
         self.assertTrue(
             any(
-                "count(*) as total_count" in sql and "g.generation_id = %s" in sql and "gen-active" in params
+                "count(*) as total_count" in sql
+                and "join read_model.workbench_generations gen" in sql
+                and "g.scope_key <> 'all'" in sql
                 for sql, params in connection.fetch_one_calls
             )
         )
         self.assertTrue(
             any(
-                "select group_id, zone, payload, raw_payload" in sql
-                and "g.generation_id = %s" in sql
-                and "gen-active" in params
+                "select group_id, source_group_id, zone, payload, raw_payload" in sql
+                and "join read_model.workbench_generations gen" in sql
+                and "g.scope_key <> 'all'" in sql
                 for sql, params in connection.fetch_all_calls
             )
         )
@@ -3002,10 +3073,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         summary = repository.get_workbench_summary(scope_key="all")
 
-        self.assertEqual(summary["active_generation_id"], "gen-active")
-        self.assertEqual(summary["source_versions"], {"source_version": 12})
+        self.assertEqual(summary["active_generation_id"], COMPOSED_ALL_VERSION)
+        self.assertEqual(
+            summary["source_versions"],
+            {"builder": WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION, "source_version": 12},
+        )
 
-    def test_repository_uses_materialized_generation_stats_for_default_groups_counts(self) -> None:
+    def test_repository_composed_all_groups_counts_without_materialized_generation_stats(self) -> None:
         connection = WorkbenchGenerationStatsConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -3013,10 +3087,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(page["total"], 2)
         self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
-        self.assertTrue(
+        self.assertFalse(
             any("from read_model.workbench_generation_stats" in sql for sql, _params in connection.fetch_one_calls)
         )
-        self.assertFalse(
+        self.assertTrue(
             any(
                 "count(distinct r.row_id) filter" in sql
                 for sql, _params in connection.fetch_one_calls
@@ -3029,10 +3103,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         version = repository.workbench_groups_cache_version(scope_key="all")
 
-        self.assertEqual(version, "gen-active")
-        self.assertFalse(
+        self.assertEqual(version, COMPOSED_ALL_VERSION)
+        self.assertTrue(
             any(
-                "max((source_versions->>'source_version')::bigint)" in sql
+                "count(*)::bigint as scope_count" in sql
+                and "scope_key <> 'all'" in sql
+                and "status = 'active'" in sql
                 for sql, _params in connection.fetch_one_calls
             )
         )
@@ -3286,6 +3362,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
         group_row_queries = [(sql, params) for sql, params in all_queries if "read_model.workbench_group_rows" in sql]
         self.assertTrue(group_row_queries)
+        self.assertTrue(any("r.group_id = coalesce(g.source_group_id, g.group_id)" in sql for sql, _params in group_row_queries))
         self.assertTrue(any("r.searchable_text ilike %s" in sql for sql, _params in group_row_queries))
         self.assertTrue(
             any(
@@ -3314,14 +3391,16 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertTrue(group_row_queries)
         self.assertTrue(
             any(
-                "r_linked_search.searchable_text ilike %s" in sql
+                "r_linked_search.group_id = coalesce(g.source_group_id, g.group_id)" in sql
+                and "r_linked_search.searchable_text ilike %s" in sql
                 and "%花%" in params
                 for sql, params in group_row_queries
             )
         )
         self.assertTrue(
             any(
-                "r.pane = %s" in sql
+                "r.group_id = coalesce(g.source_group_id, g.group_id)" in sql
+                and "r.pane = %s" in sql
                 and "bank" in params
                 and '"direction": "支出"' in str(params)
                 for sql, params in group_row_queries
@@ -3475,7 +3554,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group = page["groups"][0]
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-expense-ccb"])
 
-    def test_repository_reads_all_scope_groups_from_materialized_all_groups(self) -> None:
+    def test_repository_reads_all_scope_groups_from_active_month_shards(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -3487,8 +3566,60 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             if "from read_model.workbench_groups" in sql
         ]
         self.assertTrue(group_queries)
-        self.assertTrue(any("scope_key = %s" in sql and params[:1] == ("all",) for sql, params in group_queries))
-        self.assertFalse(any("scope_key <> 'all'" in sql for sql, _params in group_queries))
+        self.assertTrue(
+            any(
+                "join read_model.workbench_generations gen" in sql
+                and "g.scope_key <> 'all'" in sql
+                and "gen.status = 'active'" in sql
+                for sql, _params in group_queries
+            )
+        )
+        self.assertFalse(any("scope_key = %s" in sql and params[:1] == ("all",) for sql, params in group_queries))
+
+    def test_repository_composed_all_scope_prefixes_non_mergeable_group_ids(self) -> None:
+        class NonMergeableGroupConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "select group_id, source_group_id, zone, payload, raw_payload" in normalized:
+                    return [
+                        {
+                            "group_id": "scope:2026-05:temp:bank-open",
+                            "source_group_id": "temp:bank-open",
+                            "scope_key": "2026-05",
+                            "generation_id": "gen-2026-05",
+                            "zone": "open",
+                            "payload": {
+                                "group_id": "temp:bank-open",
+                                "bank_rows": [{"id": "bank-open-1", "type": "bank"}],
+                                "oa_rows": [],
+                                "invoice_rows": [],
+                            },
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        connection = NonMergeableGroupConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=1)
+
+        self.assertEqual(page["groups"][0]["group_id"], "scope:2026-05:temp:bank-open")
+        self.assertTrue(
+            any(
+                "'scope:' || g.scope_key || ':' || g.group_id" in sql
+                for sql, _params in connection.fetch_all_calls
+            )
+        )
+        self.assertFalse(
+            any(
+                "like 'case:%'" in sql
+                or "like 'turnover:%'" in sql
+                or "like 'batch-accounting:%'" in sql
+                or "like 'source:oa_attachment:%'" in sql
+                for sql, _params in connection.fetch_all_calls
+            )
+        )
 
     def test_repository_bounds_all_scope_groups_page_query(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
@@ -3499,7 +3630,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         page_queries = [
             (sql, params)
             for sql, params in connection.fetch_all_calls
-            if "select group_id, zone, payload, raw_payload" in sql
+            if "select group_id, source_group_id, zone, payload, raw_payload" in sql
             and "from read_model.workbench_groups" in sql
         ]
         self.assertTrue(page_queries)
@@ -3898,14 +4029,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group = repository.get_workbench_group_detail(scope_key="all", zone="open", group_id="case:1")
 
         self.assertIsNotNone(group)
-        self.assertEqual(group["active_generation_id"], "gen-active")
-        self.assertEqual(group["read_model_version"], "gen-active")
+        self.assertEqual(group["active_generation_id"], COMPOSED_ALL_VERSION)
+        self.assertEqual(group["read_model_version"], COMPOSED_ALL_VERSION)
         self.assertTrue(
             any(
                 "from read_model.workbench_groups" in sql
-                and "generation_id = %s" in sql
-                and "gen-active" in params
-                for sql, params in connection.fetch_one_calls
+                and "join read_model.workbench_generations gen" in sql
+                and "g.scope_key <> 'all'" in sql
+                and "gen.status = 'active'" in sql
+                for sql, _params in connection.fetch_one_calls
             )
         )
 
@@ -3916,14 +4048,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group = repository.get_workbench_group_detail(scope_key="all", zone="open", group_id="case:1")
 
         self.assertIsNotNone(group)
-        self.assertEqual(group["source_versions"], {"source_version": 12})
+        self.assertEqual(group["active_generation_id"], COMPOSED_ALL_VERSION)
+        self.assertEqual(group["read_model_version"], COMPOSED_ALL_VERSION)
+        self.assertEqual(
+            group["source_versions"],
+            {"builder": WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION, "source_version": 12},
+        )
         self.assertEqual(group["read_model_status"], "fresh")
         self.assertTrue(
             any(
                 "join read_model.workbench_generations" in sql
-                and "g.generation_id = %s" in sql
-                and "gen-active" in params
-                for sql, params in connection.fetch_one_calls
+                and "g.scope_key <> 'all'" in sql
+                and "gen.status = 'active'" in sql
+                for sql, _params in connection.fetch_one_calls
             )
         )
 
@@ -3931,7 +4068,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         connection = WorkbenchSummaryGroupsConnection(dirty_status="failed")
         repository = PostgresReadModelRepository(connection)
 
-        status = repository.get_workbench_refresh_status(scope_key="all")
+        status = repository.get_workbench_refresh_status(scope_key="2026-05")
 
         self.assertEqual(status["read_model_status"], "stale")
         self.assertEqual(status["dirty_scopes"][0]["scope_key"], "2026-05")
@@ -3943,7 +4080,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         connection = FailedWorkbenchGenerationConnection()
         repository = PostgresReadModelRepository(connection)
 
-        status = repository.get_workbench_refresh_status(scope_key="all")
+        status = repository.get_workbench_refresh_status(scope_key="2026-05")
 
         self.assertEqual(status["read_model_status"], "stale")
         self.assertEqual(status["active_generation_id"], "gen-active")
@@ -3965,14 +4102,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         repository = PostgresReadModelRepository(RecoveredWorkbenchGenerationConnection())
 
-        status = repository.get_workbench_refresh_status(scope_key="all")
+        status = repository.get_workbench_refresh_status(scope_key="2026-05")
 
         self.assertEqual(status["read_model_status"], "fresh")
         self.assertEqual(status["active_generation_id"], "gen-active")
         self.assertEqual(status["failed_generation_id"], "gen-failed")
         self.assertIsNone(status["last_error"])
 
-    def test_repository_marks_all_scope_groups_stale_when_aggregate_builder_changes(self) -> None:
+    def test_repository_ignores_materialized_all_builder_mismatch_for_composed_all_scope(self) -> None:
         class StaleAggregateBuilderConnection(WorkbenchSummaryGroupsConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
                 normalized = " ".join(sql.lower().split())
@@ -3986,16 +4123,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         status = repository.get_workbench_refresh_status(scope_key="all")
 
-        self.assertEqual(status["read_model_status"], "stale")
-        self.assertIn("builder_schema_mismatch", status["read_model_stale_reasons"])
-        self.assertTrue(
-            any(
-                params and params[0] == WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
-                for _sql, params in connection.fetch_one_calls
-            )
-        )
+        self.assertEqual(status["read_model_status"], "fresh")
+        self.assertNotIn("builder_schema_mismatch", status["read_model_stale_reasons"])
+        self.assertFalse(any(params and params[0] == WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION for _sql, params in connection.fetch_one_calls))
 
-    def test_repository_marks_all_scope_stale_when_parent_generations_have_groups_but_all_is_empty(self) -> None:
+    def test_repository_ignores_empty_materialized_all_generation_when_active_month_shards_exist(self) -> None:
         class EmptyAllWithParentGenerationConnection(WorkbenchSummaryGroupsConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
                 normalized = " ".join(sql.lower().split())
@@ -4041,12 +4173,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         status = repository.get_workbench_refresh_status(scope_key="all")
         groups_status = repository.get_workbench_groups_freshness_status(scope_key="all")
 
-        self.assertEqual(status["read_model_status"], "stale")
-        self.assertEqual(groups_status["read_model_status"], "stale")
-        self.assertIn("all_scope_parent_generation_out_of_sync", status["read_model_stale_reasons"])
-        self.assertEqual(status["all_scope_parent_failures"][0]["parent_group_count"], 9)
-        self.assertEqual(status["all_scope_parent_failures"][0]["parent_scope_keys"], ["2026-03", "2026-02"])
-        self.assertTrue(any("parent_generation_summary" in sql for sql, _params in connection.fetch_one_calls))
+        self.assertEqual(status["read_model_status"], "fresh")
+        self.assertEqual(groups_status["read_model_status"], "fresh")
+        self.assertNotIn("all_scope_parent_generation_out_of_sync", status["read_model_stale_reasons"])
+        self.assertEqual(status["all_scope_parent_failures"], [])
+        self.assertFalse(any("parent_generation_summary" in sql for sql, _params in connection.fetch_one_calls))
 
     def test_repository_persists_workbench_groups_alongside_rows_and_snapshot(self) -> None:
         connection = WorkbenchWriteConnection()
@@ -5950,7 +6081,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(redis.get_json_calls, [])
         self.assertEqual(redis.set_json_calls, [])
         self.assertEqual(page_calls[0]["scope_key"], "all")
-        self.assertEqual(queue.refreshes, [("workbench", "all", "api_groups_source_versions_stale")])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.refreshes, [])
 
     def test_workbench_groups_api_redis_cache_is_separated_by_detail_level(self) -> None:
         app = object.__new__(Application)
@@ -6042,6 +6174,29 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
 
         self.assertNotEqual(linked_key, pane_key)
+
+    def test_workbench_groups_api_redis_cache_key_hashes_colon_version(self) -> None:
+        app = object.__new__(Application)
+
+        key = app._workbench_groups_redis_cache_key_from_version(
+            cache_version=COMPOSED_ALL_VERSION,
+            scope_key="all",
+            zone="open",
+            page="1",
+            page_size="50",
+            status=None,
+            source_kind=None,
+            search=None,
+            sort=None,
+            detail_level="summary",
+        )
+
+        self.assertIsNotNone(key)
+        parsed_version = app._workbench_groups_redis_cache_version_from_key(key or "")
+        self.assertIsNotNone(parsed_version)
+        self.assertNotEqual(parsed_version, "workbench")
+        self.assertNotIn(":", parsed_version or "")
+        self.assertEqual(len(parsed_version or ""), 24)
 
     def test_workbench_groups_api_redis_cache_key_includes_read_model_schema_version(self) -> None:
         app = object.__new__(Application)
@@ -7492,7 +7647,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.fresh_checks, [("tenant-a", "workbench", "2026-02")])
         self.assertEqual(queue.completed, [])
 
-    def test_workbench_refresh_handler_preserves_hot_priority_for_all_aggregate_after_month_publish(self) -> None:
+    def test_workbench_refresh_handler_does_not_enqueue_all_aggregate_after_month_publish_by_default(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(
                 self,
@@ -7541,15 +7696,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         result = service.handle_runtime_event(event)
 
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 19)])
-        self.assertEqual(result["aggregate_enqueued"], True)
-        self.assertEqual(len(queue.enqueued), 1)
-        aggregate = queue.enqueued[0]
-        self.assertEqual(aggregate["scope_key"], "all")
-        self.assertEqual(aggregate["priority"], "high")
-        self.assertEqual(aggregate["trace_id"], "trace-workbench-month")
-        self.assertEqual(aggregate["dedupe_key"], "workbench.read_model.refresh:workbench:all:aggregate:19")
-        self.assertEqual(aggregate["payload"]["aggregate_only"], True)
-        self.assertEqual(aggregate["payload"]["parent_scope_keys"], ["2026-05"])
+        self.assertNotIn("aggregate_enqueued", result)
+        self.assertEqual(queue.enqueued, [])
 
     def test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available(self) -> None:
         class FakeBuilder:
@@ -7594,7 +7742,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             scope_type="workbench",
             scope_key="2026-05",
             dedupe_key=None,
-            payload={"scope_key": "2026-05", "source_version": 19},
+            payload={"scope_key": "2026-05", "source_version": 19, "publish_all_aggregate": True},
             attempts=1,
             status="processing",
             priority="high",
@@ -7621,7 +7769,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ],
         )
 
-    def test_workbench_relation_refresh_enqueues_all_aggregate_immediately_for_write_visibility(self) -> None:
+    def test_workbench_relation_refresh_does_not_enqueue_all_aggregate_for_write_visibility(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(
                 self,
@@ -7679,10 +7827,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         result = service.handle_runtime_event(event)
 
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 19)])
-        self.assertEqual(result["aggregate_enqueued"], True)
-        self.assertEqual(queue.aggregate_enqueued[0]["priority"], "high")
-        self.assertEqual(queue.aggregate_enqueued[0]["delay_seconds"], 0.0)
-        self.assertEqual(queue.aggregate_enqueued[0]["parent_scope_keys"], ["2026-05"])
+        self.assertNotIn("aggregate_enqueued", result)
+        self.assertEqual(queue.aggregate_enqueued, [])
 
     def test_workbench_refresh_handler_can_enqueue_aggregate_without_legacy_enqueue_method(self) -> None:
         class FakeBuilder:
@@ -7715,7 +7861,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             scope_type="workbench",
             scope_key="2026-05",
             dedupe_key=None,
-            payload={"scope_key": "2026-05", "source_version": 19},
+            payload={"scope_key": "2026-05", "source_version": 19, "publish_all_aggregate": True},
             attempts=1,
             status="processing",
         )
