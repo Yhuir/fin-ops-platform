@@ -69,10 +69,12 @@ class WorkbenchRelationReadModelRepositoryPort:
         self,
         *,
         row_ids: list[str],
+        include_member_summaries: bool = False,
         tenant_id: str = "default",
     ) -> list[dict[str, object]]:
         rows = self._repository.list_active_workbench_relation_source_rows(
             row_ids=row_ids,
+            include_member_summaries=include_member_summaries,
             tenant_id=tenant_id,
         )
         return [dict(row) for row in list(rows or []) if isinstance(row, dict)]

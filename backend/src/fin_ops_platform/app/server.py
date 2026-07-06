@@ -740,6 +740,7 @@ class Application:
             return None
         repository = getattr(self, "_bank_detail_sql_read_repository", None)
         required_methods = (
+            "bank_detail_scope_summary",
             "get_bank_detail_tagged_rows_by_transaction_ids",
             "list_bank_detail_tagged_rows_by_month",
         )
@@ -7623,7 +7624,7 @@ class Application:
     def _cost_statistics_source_versions(self, scope_key: str) -> dict[str, object]:
         _project_scope, month = str(scope_key or "active:all").split(":", 1)
         cost_settings_payload = self._app_settings_service.get_cost_statistics_source_settings_payload()
-        return {
+        source_versions = {
             "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             "workbench_scope_key": month,
             "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
@@ -7632,6 +7633,23 @@ class Application:
             "oa_attachment_invoice_parser_version": self._current_oa_attachment_invoice_parser_version(),
             "oa_projection_sync_version": self._current_oa_projection_sync_version(),
         }
+        bank_detail_source_versions = self._cost_statistics_bank_detail_source_versions(month)
+        if bank_detail_source_versions is not None:
+            source_versions["bank_detail_source_versions"] = bank_detail_source_versions
+        return source_versions
+
+    def _cost_statistics_bank_detail_source_versions(self, month: str) -> dict[str, object] | None:
+        facade = getattr(self, "_bank_transaction_tag_read_facade", None)
+        source_versions_for_scope_keys = getattr(facade, "source_versions_for_scope_keys", None)
+        if not callable(source_versions_for_scope_keys) or month == "all":
+            return None
+        payload = source_versions_for_scope_keys(
+            [month],
+            require_fresh=False,
+            reason="cost_statistics_expected_source_versions",
+        )
+        source_versions = payload.get("source_versions") if isinstance(payload, dict) else {}
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
 
     def _cost_statistics_redis_cache_key(
         self,

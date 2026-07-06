@@ -47,12 +47,14 @@ class CostStatisticsSqlProjectionBuilder:
         connection: Any,
         read_model_repository: Any | None = None,
         redis_helper: Any | None = None,
+        bank_transaction_tag_read_facade: Any | None = None,
     ) -> None:
         self._connection = connection
         self._read_model_repository = CostStatisticsReadModelRepositoryPort(
             read_model_repository or PostgresReadModelRepository(connection)
         )
         self._redis_helper = redis_helper
+        self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
         self._settings_payload_cache: dict[str, Any] | None = None
 
     def list_cost_statistics_scope_shards(self, scope_key: str) -> list[str]:
@@ -229,7 +231,25 @@ class CostStatisticsSqlProjectionBuilder:
             workbench_source_versions = self._workbench_source_versions(month)
             if workbench_source_versions:
                 source_versions["workbench_source_versions"] = workbench_source_versions
+            bank_detail_source_versions = self._bank_detail_source_versions(month)
+            if bank_detail_source_versions is not None:
+                source_versions["bank_detail_source_versions"] = bank_detail_source_versions
         return source_versions
+
+    def _bank_detail_source_versions(self, month: str) -> dict[str, Any] | None:
+        facade = self._bank_transaction_tag_read_facade
+        source_versions_for_scope_keys = getattr(facade, "source_versions_for_scope_keys", None)
+        if not callable(source_versions_for_scope_keys) or month == "all":
+            return None
+        payload = source_versions_for_scope_keys(
+            [month],
+            require_fresh=True,
+            reason="cost_statistics_bank_tag_source_versions",
+        )
+        if not isinstance(payload, dict) or str(payload.get("status") or "").strip().lower() != "fresh":
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+        source_versions = payload.get("source_versions")
+        return dict(source_versions) if isinstance(source_versions, dict) else {}
 
     def _workbench_source_versions(self, scope_key: str) -> dict[str, Any]:
         try:
@@ -424,6 +444,15 @@ class CostStatisticsSqlProjectionBuilder:
             if zone == "open" and not is_cost_eligible_open_group(group_payload):
                 continue
             groups.append(group_payload)
+        bank_tag_contexts = self._bank_tag_contexts_for_rows(
+            [
+                row
+                for group in groups
+                for row in list(group.get("bank_rows") or [])
+                if isinstance(row, dict)
+            ],
+            month=month,
+        )
         active_projects = self._active_project_names() if project_scope == "active" else None
         entries: list[dict[str, Any]] = []
         for group in groups:
@@ -440,10 +469,11 @@ class CostStatisticsSqlProjectionBuilder:
                 amount = _outflow_amount(bank_row)
                 if amount is None:
                     continue
+                transaction_id = str(bank_row.get("id") or bank_row.get("row_id") or "")
                 entries.append(
                     {
                         "group_id": str(group.get("group_id") or ""),
-                        "transaction_id": str(bank_row.get("id") or bank_row.get("row_id") or ""),
+                        "transaction_id": transaction_id,
                         "trade_time": str(bank_row.get("trade_time") or bank_row.get("date") or ""),
                         "counterparty_name": str(bank_row.get("counterparty_name") or ""),
                         "payment_account_label": str(bank_row.get("payment_account_label") or bank_row.get("bank_name") or ""),
@@ -455,10 +485,39 @@ class CostStatisticsSqlProjectionBuilder:
                         "expense_content": context["expense_content"],
                         "oa_applicant": context["oa_applicant"],
                         "amount_decimal": amount,
-                        **bank_tag_context_from_row(bank_row),
+                        **(bank_tag_contexts.get(transaction_id) or bank_tag_context_from_row({})),
                     }
                 )
         return entries
+
+    def _bank_tag_contexts_for_rows(self, bank_rows: list[dict[str, Any]], *, month: str) -> dict[str, dict[str, Any]]:
+        facade = self._bank_transaction_tag_read_facade
+        category_records_by_transaction_ids = getattr(facade, "category_records_by_transaction_ids", None)
+        if not callable(category_records_by_transaction_ids):
+            return {}
+        transaction_ids = []
+        seen: set[str] = set()
+        for row in list(bank_rows or []):
+            transaction_id = str(row.get("id") or row.get("transaction_id") or row.get("row_id") or "").strip()
+            if transaction_id and transaction_id not in seen:
+                transaction_ids.append(transaction_id)
+                seen.add(transaction_id)
+        if not transaction_ids:
+            return {}
+        records = category_records_by_transaction_ids(
+            transaction_ids,
+            require_fresh=True,
+            reason="cost_statistics_bank_tag_read",
+            month_hint=month,
+            scope_keys_hint=[month],
+        )
+        if not isinstance(records, dict):
+            return {}
+        return {
+            str(transaction_id): bank_tag_context_from_row(record)
+            for transaction_id, record in records.items()
+            if isinstance(record, dict)
+        }
 
     def _cost_entries_from_materialized_shards(self, *, project_scope: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         rows = self._connection.fetch_all(

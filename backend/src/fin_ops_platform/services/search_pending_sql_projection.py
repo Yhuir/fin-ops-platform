@@ -609,7 +609,7 @@ class SearchPendingSqlProjectionBuilder:
         )
         source_reader = getattr(self._read_model_repository, "list_active_workbench_relation_source_rows", None)
         rows = (
-            source_reader(row_ids=transaction_ids)
+            source_reader(row_ids=transaction_ids, include_member_summaries=True)
             if callable(source_reader)
             else []
         )
@@ -664,21 +664,42 @@ def _source_relation_contexts_by_transaction_id(
         if not bank_ids:
             continue
         relation_status = _source_relation_status(row)
-        linked_oa = _source_relation_oa_summaries(row_ids, row_types, case_id=case_id, relation_status=relation_status)
-        linked_bank_transactions = [
-            {
-                "id": row_id,
-                "relation_case_id": case_id,
-                "relation_status": relation_status,
-            }
-            for row_id in row_ids
-            if row_id in transaction_id_set
-        ]
+        source_summaries = row.get("source_summaries") if isinstance(row.get("source_summaries"), dict) else {}
+        linked_oa = _source_relation_oa_summaries(
+            row_ids,
+            row_types,
+            case_id=case_id,
+            relation_status=relation_status,
+            source_summaries=source_summaries,
+        )
+        linked_bank_transactions: list[dict[str, object]] = []
+        for index, row_id in enumerate(row_ids):
+            row_type = _source_relation_row_type(row_ids, row_types, index)
+            if row_type != "bank":
+                continue
+            source_summary = source_summaries.get(row_id)
+            source_summary = source_summary if isinstance(source_summary, dict) else {}
+            linked_bank_transactions.append(
+                {
+                    "id": row_id,
+                    "amount": text(source_summary.get("amount")),
+                    "counterparty_name": text(source_summary.get("counterparty_name")),
+                    "trade_time": text(source_summary.get("trade_time")),
+                    "summary": text(source_summary.get("summary")),
+                    "remark": text(source_summary.get("remark")),
+                    "statement_serial_no": text(source_summary.get("statement_serial_no")),
+                    "account_name": text(source_summary.get("account_name")),
+                    "account_last4": text(source_summary.get("account_last4")),
+                    "relation_case_id": case_id,
+                    "relation_status": relation_status,
+                }
+            )
         linked_input_invoices, linked_output_invoices = _source_relation_invoice_summaries(
             row_ids,
             row_types,
             case_id=case_id,
             relation_status=relation_status,
+            source_summaries=source_summaries,
         )
         for bank_id in bank_ids:
             context = contexts.setdefault(
@@ -708,16 +729,26 @@ def _source_relation_oa_summaries(
     *,
     case_id: str | None,
     relation_status: str,
+    source_summaries: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
     summaries: list[dict[str, object]] = []
+    source_summaries = source_summaries or {}
     for index, row_id in enumerate(row_ids):
         row_type = _source_relation_row_type(row_ids, row_types, index)
         if row_type != "oa" or not is_valid_pending_invoice_oa_row_id(row_id):
             continue
+        source_summary = source_summaries.get(row_id)
+        source_summary = source_summary if isinstance(source_summary, dict) else {}
         summaries.append(
             {
                 "id": row_id,
-                "detail_available": False,
+                "applicant": text(source_summary.get("applicant")),
+                "application_type": text(source_summary.get("application_type") or source_summary.get("form_type")),
+                "project_name": text(source_summary.get("project_name")),
+                "status": text(source_summary.get("status")),
+                "form_no": text(source_summary.get("form_no") or source_summary.get("form_id")),
+                "amount": text(source_summary.get("amount")),
+                "detail_available": bool(source_summary.get("detail_available", False)),
                 "relation_case_id": case_id,
                 "relation_status": relation_status,
                 "relation_source": "workbench_pair_relations",
@@ -732,16 +763,35 @@ def _source_relation_invoice_summaries(
     *,
     case_id: str | None,
     relation_status: str,
+    source_summaries: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     input_invoices: list[dict[str, object]] = []
     output_invoices: list[dict[str, object]] = []
+    source_summaries = source_summaries or {}
     for index, row_id in enumerate(row_ids):
         row_type = _source_relation_row_type(row_ids, row_types, index)
         if row_type != "invoice":
             continue
+        source_summary = source_summaries.get(row_id)
+        source_summary = source_summary if isinstance(source_summary, dict) else {}
+        invoice_type = text(source_summary.get("invoice_type")) or (
+            "output" if _source_invoice_row_id_is_output(row_id) else "input"
+        )
+        if invoice_type not in {"input", "output"}:
+            invoice_type = "input"
         summary = {
             "id": row_id,
-            "invoice_type": "output" if _source_invoice_row_id_is_output(row_id) else "input",
+            "invoice_no": text(source_summary.get("invoice_no")),
+            "digital_invoice_no": text(source_summary.get("digital_invoice_no")),
+            "invoice_code": text(source_summary.get("invoice_code")),
+            "issue_date": text(source_summary.get("issue_date") or source_summary.get("invoice_date")),
+            "total_with_tax": text(source_summary.get("total_with_tax") or source_summary.get("amount")),
+            "seller_name": text(source_summary.get("seller_name")),
+            "seller_tax_no": text(source_summary.get("seller_tax_no")),
+            "buyer_name": text(source_summary.get("buyer_name")),
+            "buyer_tax_no": text(source_summary.get("buyer_tax_no")),
+            "invoice_type": invoice_type,
+            "source_kind": text(source_summary.get("source_kind")),
             "relation_case_id": case_id,
             "relation_status": relation_status,
             "relation_source": "workbench_pair_relations",

@@ -177,11 +177,6 @@ class CostStatisticsProjectionConnection:
                         "direction": "支出",
                         "remark": "采购",
                         "amount": "10.00",
-                        "effective_category_code": "project_material",
-                        "effective_category_label": "设备材料",
-                        "effective_category_primary_label": "项目开销",
-                        "effective_category_sub_label": "设备材料",
-                        "effective_category_label_path": ["项目开销", "设备材料"],
                     },
                     "member_payload": {"row_id": "bank-1", "type": "bank"},
                 }
@@ -263,6 +258,35 @@ class CostStatisticsProjectionConnection:
                 }
             }
         return None
+
+
+class CostStatisticsBankTagFacade:
+    def __init__(self, *, status: str = "fresh") -> None:
+        self.status = status
+        self.source_version_calls: list[tuple[list[str], dict[str, object]]] = []
+        self.category_calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def source_versions_for_scope_keys(self, scope_keys: list[str], **kwargs: object) -> dict[str, object]:
+        self.source_version_calls.append((list(scope_keys), dict(kwargs)))
+        return {
+            "status": self.status,
+            "source_versions": {"bank_detail_scope_version": "bank-detail-v2"},
+            "scope_keys": list(scope_keys),
+        }
+
+    def category_records_by_transaction_ids(self, transaction_ids: list[str], **kwargs: object) -> dict[str, dict[str, object]]:
+        self.category_calls.append((list(transaction_ids), dict(kwargs)))
+        if self.status != "fresh":
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+        return {
+            "bank-1": {
+                "effective_category_code": "project_material",
+                "effective_category_label": "设备材料",
+                "effective_category_primary_label": "项目开销",
+                "effective_category_sub_label": "设备材料",
+                "effective_category_label_path": ["项目开销", "设备材料"],
+            }
+        }
 
 
 class CostStatisticsParentAggregationConnection:
@@ -953,9 +977,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts(self) -> None:
         repository = CostStatisticsSaveRecorder()
         connection = CostStatisticsProjectionConnection(include_open_candidate=True)
+        tag_facade = CostStatisticsBankTagFacade()
         builder = CostStatisticsSqlProjectionBuilder(
             connection=connection,
             read_model_repository=repository,
+            bank_transaction_tag_read_facade=tag_facade,
         )
 
         result = builder.rebuild_cost_statistics_read_model_scope("active:2026-05")
@@ -970,6 +996,12 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"][0]["bank_tag_primary_label"], "项目开销")
         self.assertEqual(payload["time_rows"][0]["bank_tag_sub_label"], "设备材料")
         self.assertEqual(payload["time_rows"][0]["bank_tag_label_path"], ["项目开销", "设备材料"])
+        self.assertEqual(tag_facade.source_version_calls[0][0], ["2026-05"])
+        self.assertEqual(tag_facade.category_calls[0][0], ["bank-1"])
+        self.assertEqual(
+            snapshot["read_models"]["active:2026-05"]["source_versions"]["bank_detail_source_versions"],
+            {"bank_detail_scope_version": "bank-detail-v2"},
+        )
         self.assertEqual(
             payload["bank_accounts"],
             [
@@ -1007,6 +1039,36 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             if "from app.app_settings" in sql
         ]
         self.assertEqual(len(settings_reads), 1)
+
+    def test_cost_statistics_sql_projection_defers_when_bank_detail_tags_are_not_fresh(self) -> None:
+        repository = CostStatisticsSaveRecorder()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=CostStatisticsProjectionConnection(),
+            read_model_repository=repository,
+            bank_transaction_tag_read_facade=CostStatisticsBankTagFacade(status="refreshing"),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "bank_detail_read_model_not_fresh"):
+            builder.rebuild_cost_statistics_read_model_scope("active:2026-05")
+
+        self.assertEqual(repository.saved, [])
+
+    def test_cost_statistics_expected_source_versions_include_bank_detail_scope_versions(self) -> None:
+        app = object.__new__(Application)
+        tag_facade = CostStatisticsBankTagFacade()
+        app._app_settings_service = CostStatisticsAppSettingsStub()
+        app._bank_transaction_tag_read_facade = tag_facade
+        app._current_oa_attachment_invoice_parser_version = lambda: "parser-v1"
+        app._current_oa_projection_sync_version = lambda: "oa-sync-v1"
+
+        source_versions = app._cost_statistics_source_versions("active:2026-05")
+
+        self.assertEqual(
+            source_versions["bank_detail_source_versions"],
+            {"bank_detail_scope_version": "bank-detail-v2"},
+        )
+        self.assertEqual(tag_facade.source_version_calls[0][0], ["2026-05"])
+        self.assertEqual(tag_facade.source_version_calls[0][1]["require_fresh"], False)
 
     def test_cost_statistics_scope_shards_are_listed_from_active_workbench_generations(self) -> None:
         class Connection(CostStatisticsProjectionConnection):

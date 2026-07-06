@@ -2617,6 +2617,51 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                             "row_types": ["bank", "oa", "invoice"],
                         }
                     ]
+                if "from app.bank_transactions" in normalized and "as row_id" in normalized:
+                    return [
+                        {
+                            "row_id": "txn-1",
+                            "counterparty_name_raw": "云南供应商",
+                            "trade_time": "2026-05-20 10:00:00",
+                            "txn_date": "2026-05-20",
+                            "amount": "118.00",
+                            "txn_direction": "outflow",
+                            "summary": "转账",
+                            "remark": "服务费",
+                            "bank_serial_no": "SERIAL-1",
+                            "account_name": "工商银行",
+                            "account_no": "622200001234",
+                        }
+                    ]
+                if "from app.oa_applications" in normalized:
+                    return [
+                        {
+                            "row_id": "oa-source-pending",
+                            "form_id": "OA-SOURCE-001",
+                            "form_type": "支付申请",
+                            "status": "已完成",
+                            "applicant": "陈佳玉",
+                            "project_name": "云南配电监控系统建设",
+                            "amount": "118.00",
+                        }
+                    ]
+                if "from app.invoices" in normalized:
+                    return [
+                        {
+                            "row_id": "inv-source-pending",
+                            "invoice_type": "input",
+                            "invoice_code": "530001",
+                            "invoice_no": "INV-SOURCE-001",
+                            "digital_invoice_no": "",
+                            "invoice_date": "2026-05-18",
+                            "seller_name": "云南供应商",
+                            "seller_tax_no": "91530000SOURCE",
+                            "buyer_name": "云南溯源科技有限公司",
+                            "buyer_tax_no": "91530000BUYER",
+                            "amount": "118.00",
+                            "total_with_tax": "118.00",
+                        }
+                    ]
                 return super().fetch_all(sql, params)
 
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
@@ -2640,7 +2685,12 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         payload = rows[0]["payload"]
         self.assertEqual(payload["relation_case_ids"], ["case-source-pending"])
         self.assertEqual(payload["oa"]["relation_count"], 1)
+        self.assertEqual(payload["oa"]["primary"]["applicant"], "陈佳玉")
+        self.assertEqual(payload["oa"]["primary"]["project_name"], "云南配电监控系统建设")
         self.assertEqual(payload["input_invoices"]["relation_count"], 1)
+        self.assertEqual(payload["input_invoices"]["primary"]["invoice_no"], "INV-SOURCE-001")
+        self.assertEqual(payload["input_invoices"]["primary"]["seller_name"], "云南供应商")
+        self.assertEqual(payload["input_invoices"]["payment_summary"]["invoice_total"], "118.00")
         self.assertEqual(payload["invoice_acquisition_status"]["code"], "paid_invoiced")
         self.assertEqual(
             builder._pending_invoice_relation_source_versions["source"],

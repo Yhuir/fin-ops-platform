@@ -46,7 +46,7 @@
 | 自动标签规则写入结果 | 前端页面 | 前端优先等待服务端返回的 `operation_barrier_targets`；缺少/未知 read model status 默认按 `refreshing` 处理 |
 | 标签/分类事实写入 | canonical store | `BankDetailsApplicationService` 只依赖显式 `BankTransactionCategoryStorePort.save_bank_transaction_categories(...)`；禁止通过宽 `state_store` 在业务 service 内散写 |
 | 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播；`bank-flow-rule-batches` 只能读取 active 标签并维护自身 OA/发票规则 |
-| 自动标签规则下游刷新 | cost_statistics / workbench matching | `bank_auto_tag_rules_changed` 必须入队 `workbench_matching` 和 `cost_statistics.read_model.refresh`；成本统计页面只读取刷新后的 `time_rows.bank_tag_*`，不得直接读取银行明细 API 或规则表 |
+| 自动标签规则/分类下游刷新 | cost_statistics / workbench matching | `bank_auto_tag_rules_changed` 和银行明细分类变化必须入队 `workbench_matching` 和 `cost_statistics.read_model.refresh`；成本统计 worker 只能通过 `BankTransactionTagReadFacade` 读取 fresh `bank_detail` scoped read model 后写入 `time_rows.bank_tag_*`，成本统计页面不得直接读取银行明细 API 或规则表 |
 | 关系标签展示 | 银行明细列表/下游展示 | 只输出 relation chip/status；不发布 relation 事实、不触发 relation 写入、不绕过 `workbench-relations` freshness/command 边界 |
 | 导出文件 | 用户下载 | 复用当前查询边界，不绕过权限 |
 

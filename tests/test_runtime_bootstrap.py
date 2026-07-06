@@ -334,6 +334,8 @@ class RuntimeBootstrapTests(unittest.TestCase):
         source = Path("backend/src/fin_ops_platform/app/worker.py").read_text(encoding="utf-8")
 
         self.assertIn("BankTransactionTagReadFacade", source)
+        self.assertIn("CostStatisticsSqlProjectionBuilder(", source)
+        self.assertIn("bank_transaction_tag_read_facade=bank_transaction_tag_read_facade", source)
         self.assertIn("SearchPendingSqlProjectionBuilder(", source)
         self.assertIn("bank_transaction_tag_read_facade=bank_transaction_tag_read_facade", source)
         self.assertIn("effective_category_provider=bank_transaction_tag_read_facade", source)

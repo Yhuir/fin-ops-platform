@@ -4026,6 +4026,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         self,
         *,
         row_ids: list[str],
+        include_member_summaries: bool = False,
         tenant_id: str = "default",
     ) -> list[dict[str, Any]]:
         _ = tenant_id
@@ -4042,7 +4043,117 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             """,
             (normalized_row_ids,),
         )
-        return [dict(row) for row in rows if isinstance(row, dict)]
+        result = [dict(row) for row in rows if isinstance(row, dict)]
+        if not include_member_summaries:
+            return result
+        summaries = self._workbench_relation_member_source_summaries(result)
+        for row in result:
+            row["source_summaries"] = {
+                row_id: summaries[row_id]
+                for row_id in text_list(row.get("row_ids"))
+                if row_id in summaries
+            }
+        return result
+
+    def _workbench_relation_member_source_summaries(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        bank_ids: list[str] = []
+        oa_ids: list[str] = []
+        invoice_ids: list[str] = []
+        for row in rows:
+            row_ids = text_list(row.get("row_ids"))
+            row_types = text_list(row.get("row_types"))
+            for index, row_id in enumerate(row_ids):
+                row_type = text(row_types[index] if index < len(row_types) else "")
+                if row_type in {"bank", "bank_transaction"}:
+                    bank_ids.append(row_id)
+                elif row_type == "oa":
+                    oa_ids.append(row_id)
+                elif row_type in {"invoice", "input_invoice", "output_invoice"}:
+                    invoice_ids.append(row_id)
+        summaries: dict[str, dict[str, Any]] = {}
+        normalized_bank_ids = text_list(bank_ids)
+        if normalized_bank_ids:
+            for row in self._connection.fetch_all(
+                """
+                select coalesce(legacy_mongo_id, id::text) as row_id, counterparty_name_raw, trade_time, txn_date,
+                       amount, txn_direction, summary, remark, bank_serial_no, account_name, account_no
+                from app.bank_transactions
+                where status <> 'deleted'
+                  and coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+                """,
+                (normalized_bank_ids,),
+            ):
+                row_id = text(row.get("row_id"))
+                if not row_id:
+                    continue
+                summaries[row_id] = {
+                    "id": row_id,
+                    "amount": decimal_text(row.get("amount")),
+                    "counterparty_name": text(row.get("counterparty_name_raw")),
+                    "trade_time": text(row.get("trade_time") or row.get("txn_date")),
+                    "txn_direction": text(row.get("txn_direction")),
+                    "summary": text(row.get("summary")),
+                    "remark": text(row.get("remark")),
+                    "statement_serial_no": text(row.get("bank_serial_no")),
+                    "account_name": text(row.get("account_name")),
+                    "account_last4": text(row.get("account_no"))[-4:] if text(row.get("account_no")) else "",
+                }
+        normalized_oa_ids = text_list(oa_ids)
+        if normalized_oa_ids:
+            for row in self._connection.fetch_all(
+                """
+                select row_id, form_id, form_type, status, applicant, project_name, amount
+                from app.oa_applications
+                where row_id = any(%s::text[])
+                """,
+                (normalized_oa_ids,),
+            ):
+                row_id = text(row.get("row_id"))
+                if not row_id:
+                    continue
+                summaries[row_id] = {
+                    "id": row_id,
+                    "applicant": text(row.get("applicant")),
+                    "application_type": text(row.get("form_type")),
+                    "project_name": text(row.get("project_name")),
+                    "status": text(row.get("status")),
+                    "form_no": text(row.get("form_id")),
+                    "amount": decimal_text(row.get("amount")),
+                    "detail_available": True,
+                }
+        normalized_invoice_ids = text_list(invoice_ids)
+        if normalized_invoice_ids:
+            for row in self._connection.fetch_all(
+                """
+                select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_code, invoice_no,
+                       digital_invoice_no, invoice_date, seller_name, seller_tax_no, buyer_name, buyer_tax_no,
+                       amount, total_with_tax
+                from app.invoices
+                where status <> 'deleted'
+                  and coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+                """,
+                (normalized_invoice_ids,),
+            ):
+                row_id = text(row.get("row_id"))
+                if not row_id:
+                    continue
+                invoice_type = "output" if text(row.get("invoice_type")) == "output" else "input"
+                summaries[row_id] = {
+                    "id": row_id,
+                    "invoice_no": text(row.get("invoice_no")),
+                    "digital_invoice_no": text(row.get("digital_invoice_no")),
+                    "invoice_code": text(row.get("invoice_code")),
+                    "issue_date": text(row.get("invoice_date")),
+                    "total_with_tax": decimal_text(row.get("total_with_tax") or row.get("amount")),
+                    "amount": decimal_text(row.get("amount")),
+                    "seller_name": text(row.get("seller_name")),
+                    "seller_tax_no": text(row.get("seller_tax_no")),
+                    "buyer_name": text(row.get("buyer_name")),
+                    "buyer_tax_no": text(row.get("buyer_tax_no")),
+                    "invoice_type": invoice_type,
+                    "source_kind": "formal_invoice",
+                }
+        return summaries
 
     def workbench_relation_source_summary_from_source(
         self,

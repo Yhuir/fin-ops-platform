@@ -16,6 +16,14 @@
 - 覆盖点：`/api/pending-invoices/rows` 只走 route owner + `PendingInvoiceReadModelService`；read model miss/unconfigured repository 不同步扫描；filter-options/export 非 fresh 返回 refreshing；QueryService 不再暴露同步 `list_rows`、旧同步 filter/export 或旧 `_handle_api_pending_invoice_rows` 兼容入口。
 - 验证命令：见本轮最终说明。
 
+## 2026-07-06 - source fast path relation member summaries
+
+- 变更类型：`pending_invoice` source fast path 展示字段修复。
+- 新增/更新测试：更新 `tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_source_fast_path_does_not_wait_for_relation_read_model`。
+- 覆盖点：当 `pending_invoice` projection 直接读取 active relation source rows 而不等待 `workbench_relation` read model 时，仍必须从 workbench-relations repository 边界补齐银行金额、OA 申请人/项目、发票号码/供应商/金额；避免只凭 relation `row_ids` 算出 `paid_invoiced`，但待找发票列表 OA/发票列显示为空。
+- 漏测原因：原有 source fast path 测试只断言 relation count、case id、source version 和状态，完整展示字段只在已物化 `workbench_relation` distribution 的假数据里覆盖，未覆盖生产中 source fast path 的 id-only relation row。
+- 验证命令：见本轮最终说明。
+
 ## 修改前影响面清单
 
 待找发票是发票生命周期、银行标签规则、Workbench 关系、选择已有发票、收入状态覆盖和搜索 read model 的交汇页。任何改动都要先按下表做影响面评估：
