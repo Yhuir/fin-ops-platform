@@ -317,10 +317,13 @@ function CandidateGroupGrid({
       setCollapsedGroupExpanded(group.id, paneId, false);
       return;
     }
+    setCollapsedGroupExpanded(group.id, paneId, true);
     if (onEnsureGroupDetail && collapsedRowCount > visibleCollapsedRowCount) {
       setLoadingCollapsedGroups((current) => new Set(current).add(key));
       try {
         await onEnsureGroupDetail(zoneId, group.id);
+      } catch {
+        // The page-level handler already surfaces the load error; keep the preview rows expanded.
       } finally {
         setLoadingCollapsedGroups((current) => {
           const next = new Set(current);
@@ -329,7 +332,6 @@ function CandidateGroupGrid({
         });
       }
     }
-    setCollapsedGroupExpanded(group.id, paneId, true);
   }, [onEnsureGroupDetail, setCollapsedGroupExpanded, zoneId]);
 
   const clearDragClasses = useCallback(() => {
@@ -859,11 +861,13 @@ function isSourceSegmentedPane(paneId: WorkbenchRecordType, segments: ReturnType
 }
 
 function buildPreviewDetailRequestKey(zoneId: "paired" | "open", group: WorkbenchCandidateGroup, panes: WorkbenchPane[]) {
-  if (group.displayMode === "collapsed_summary") {
-    return null;
-  }
   const truncatedPaneSignatures = panes.flatMap((pane) => {
     const paneId = pane.id as WorkbenchRecordType;
+    if (group.displayMode === "collapsed_summary") {
+      const visibleCollapsed = group.collapsedRows?.[paneId]?.length ?? 0;
+      const totalCollapsed = group.collapsedRowCounts?.[paneId] ?? group.rowCounts?.[paneId] ?? visibleCollapsed;
+      return totalCollapsed > visibleCollapsed ? [`${paneId}:collapsed:${visibleCollapsed}/${totalCollapsed}`] : [];
+    }
     const visible = group.rows[paneId]?.length ?? 0;
     const total = group.rowCounts?.[paneId] ?? visible;
     return total > visible ? [`${paneId}:${visible}/${total}`] : [];

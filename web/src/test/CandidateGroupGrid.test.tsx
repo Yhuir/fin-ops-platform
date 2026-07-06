@@ -716,6 +716,33 @@ describe("Workbench candidate grouping layout", () => {
     await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("open", "case:CASE-MANUAL-INVOICE-MANY"));
   });
 
+  test("auto-loads complete collapsed summary detail when summary response truncates collapsed rows", async () => {
+    const group = createBankFlowCollapsedGroup();
+    const ensureGroupDetail = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onEnsureGroupDetail={ensureGroupDetail}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: [] },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: [] },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("paired", "bank-flow-rule-batch:BATCH-202603-FEE"));
+  });
+
   test("renders OA, bank, and invoice candidates on the same horizontal group row", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
@@ -993,6 +1020,37 @@ describe("Workbench candidate grouping layout", () => {
     expect(expandButton).toHaveTextContent("展开 15 条明细");
     expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
     expect(screen.queryByText("实际 15 条流水")).not.toBeInTheDocument();
+  });
+
+  test("expands available collapsed rows when full detail loading fails", async () => {
+    const group = createBankFlowCollapsedGroup();
+    const ensureGroupDetail = vi.fn().mockRejectedValue(new Error("stale"));
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onEnsureGroupDetail={ensureGroupDetail}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: [] },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: [] },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" }));
+
+    expect(screen.getByText("建设银行手续费")).toBeInTheDocument();
+    expect(screen.getByText("网银服务费")).toBeInTheDocument();
+    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("paired", "bank-flow-rule-batch:BATCH-202603-FEE"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "收起流水规则批次明细" })).not.toBeDisabled());
   });
 
   test("renders ETC invoice summaries collapsed by default and expands in the invoice pane", () => {
