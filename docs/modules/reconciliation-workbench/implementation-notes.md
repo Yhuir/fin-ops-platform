@@ -222,12 +222,12 @@
 - 验证命令：`npm test -- --run src/test/CandidateGroupGrid.test.tsx`；`npm run build`。
 - 未测风险：未跑浏览器截图回归；当前风险由组件测试和 build 覆盖，真实大屏/缩放视觉仍建议发布后抽查。
 
-## 2026-07-06 - 折叠批次展开不依赖明细补全成功
+## 2026-07-06 - 折叠批次只展示完整明细
 
-- 目标：修复已配对区 `bank_flow_rule_batch` 折叠摘要点击“展开 N 条明细”时，group detail 补全失败会阻止已带明细展开的问题。
+- 目标：修复已配对区 `bank_flow_rule_batch` 折叠摘要点击“展开 N 条明细”后，summary payload 的轻量/占位 `collapsed_rows` 被直接展开成 `-- / 待处理 / --` 明细的问题。
 - 影响范围：`CandidateGroupGrid` 折叠摘要交互；不改变 Workbench group detail API、read model freshness gate、relation payload 或确认/撤回逻辑。
-- 关键决策：展开按钮先切换本地展开状态，group detail 请求只负责补全更多明细；同时移除 `collapsed_summary` 跳过预取的旧特判，改为按 `collapsedRows` 当前数量与后端总数判断是否需要补全，避免补全后重复请求。
-- 测试覆盖：`web/src/test/CandidateGroupGrid.test.tsx::auto-loads complete collapsed summary detail when summary response truncates collapsed rows`、`web/src/test/CandidateGroupGrid.test.tsx::expands available collapsed rows when full detail loading fails`。
+- 关键决策：移除 `collapsed_summary` 跳过预取的旧特判，改为按 `collapsedRows` 当前数量与后端总数判断是否需要补全；用户点击截断摘要时先保持摘要态并显示加载中，完整 group detail 成功写回后再展开，失败时保持折叠，由页面级 handler 暴露加载错误。
+- 测试覆盖：`web/src/test/CandidateGroupGrid.test.tsx::auto-loads complete collapsed summary detail when summary response truncates collapsed rows`、`web/src/test/CandidateGroupGrid.test.tsx::waits for full collapsed detail before expanding truncated summary rows`、`web/src/test/CandidateGroupGrid.test.tsx::keeps truncated collapsed summary closed when full detail loading fails`。
 - 验证命令：见本轮最终说明。
 - 未测风险：未跑真实浏览器生产数据点击 smoke；组件测试覆盖 UI 状态和 detail 失败路径。
 

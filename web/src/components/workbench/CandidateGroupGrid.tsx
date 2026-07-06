@@ -317,13 +317,12 @@ function CandidateGroupGrid({
       setCollapsedGroupExpanded(group.id, paneId, false);
       return;
     }
-    setCollapsedGroupExpanded(group.id, paneId, true);
     if (onEnsureGroupDetail && collapsedRowCount > visibleCollapsedRowCount) {
       setLoadingCollapsedGroups((current) => new Set(current).add(key));
       try {
         await onEnsureGroupDetail(zoneId, group.id);
       } catch {
-        // The page-level handler already surfaces the load error; keep the preview rows expanded.
+        return;
       } finally {
         setLoadingCollapsedGroups((current) => {
           const next = new Set(current);
@@ -332,6 +331,7 @@ function CandidateGroupGrid({
         });
       }
     }
+    setCollapsedGroupExpanded(group.id, paneId, true);
   }, [onEnsureGroupDetail, setCollapsedGroupExpanded, zoneId]);
 
   const clearDragClasses = useCallback(() => {
