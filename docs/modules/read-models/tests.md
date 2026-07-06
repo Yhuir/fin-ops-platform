@@ -30,6 +30,24 @@
 
 ## 场景覆盖清单
 
+## 2026-07-06 - Page read model fact-display matrix guard
+
+- 变更类型：spec-first coverage guard / documentation contract；不改变运行时代码、HTTP response shape、权限、业务状态机、worker event、queue schema 或前端行为。
+- 覆盖证据：`docs/dev/page-read-model-fact-display-matrix.json` 逐页登记当前 17 个页面 route/pageKey、read model key、生产只读 freshness probe、页面事实源、配对关系事实源和 deterministic Browser/API 证据；`tests/test_page_read_model_fact_display_matrix.py` 强制矩阵与 `web/src/app/pageRegistry.tsx`、App Status read model registry、HTTP SLO probe registry 和证据文件同步。
+- 当前页面命名约束：`/bank-flow-rule-batches` 是“流水规则批量处理”，页面矩阵必须使用 `bank_flow_rule_batch`；legacy `no_oa_bank_batch` 只保留后端回归，不进入当前页面 read model/fact-display 覆盖矩阵。
+- 七类测试决策：read model/cache/background job、frontend interaction evidence、end-to-end business-flow evidence、existing feature regression 适用并覆盖；business core、service-layer、API contract 不新增运行时断言，因为本轮只固化页面覆盖合同，不改变业务规则、服务编排或 HTTP shape。
+- 验证命令：`PYTHONPATH=backend/src:. python3 -m pytest tests/test_page_read_model_fact_display_matrix.py tests/test_spec_first_e2e_docs.py -q`。
+- 未测风险：该 guard 证明每个当前页面都有 fresh 入口和事实源显示证据，不证明生产受控写后所有下游页面 1s 内强可见；生产 mutating cross-page freshness 仍由 write-operation SLO / 受控写影响矩阵覆盖。
+
+## 2026-07-06 - Write operation impact matrix guard
+
+- 变更类型：spec-first write-operation coverage guard / documentation contract；不改变运行时代码、HTTP response shape、权限、业务状态机、worker event、queue schema 或前端行为。
+- 覆盖证据：`docs/dev/write-operation-impact-matrix.json` 覆盖 `write_operation_slo_audit.DEFAULT_OPERATION_EXPECTATIONS` 当前全部 24 个 operation profile，逐项登记 source page、write endpoint、写入事实源、配对关系事实源、expected outbox scopes、目标 read model/page、生产 gate policy、1s/3s SLO 和 deterministic 证据。
+- 新增/更新测试：`tests/test_write_operation_impact_matrix.py` 强制矩阵与 write-operation audit scopes、App Status read model registry、页面 fresh/fact-display 矩阵、standing ticket policy 和证据文件同步；legacy `no_oa_bank_batch` 只允许作为后端 profile/read model，并通过当前“流水规则批量处理”页面的 `bank_flow_rule_batch` 代理 read model 显式记录。
+- 七类测试决策：read model/cache/background job、end-to-end business-flow integration evidence、existing feature regression 适用并覆盖；frontend interaction 通过矩阵引用现有 Browser 证据；business core、service-layer、API contract 不新增运行时断言，因为本轮只固化写操作影响覆盖合同，不改变业务规则、服务编排或 HTTP shape。
+- 验证命令：`PYTHONPATH=backend/src:. python3 -m pytest tests/test_write_operation_impact_matrix.py tests/test_page_read_model_fact_display_matrix.py -q`。
+- 未测风险：该 guard 不执行生产写操作；`standing_apply` 仍需要真实认证、standing ticket 和 `write_operation_e2e_smoke --apply`，导入/设置类写入仍需要 staging 或单次审批。
+
 ## 2026-07-06 - no-OA legacy critical SLO 降级
 
 - 变更类型：production SLO target / app status registry alignment；不改变 legacy no-OA API、worker event、read model payload、权限或审计。

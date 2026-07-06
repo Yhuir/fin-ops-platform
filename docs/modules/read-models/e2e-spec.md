@@ -17,6 +17,8 @@
 | `READMODEL-E2E-005` | 生产/staging direct read model apply gate 能把 critical scopes enqueue 到 worker 并收敛到 done/fresh。 | `read_model_slo_smoke --critical-only --apply` 通过；dry-run 只能证明 scope discovery。 |
 | `READMODEL-E2E-006` | 真实业务写入口必须能被 write-operation audit 关联到 required scopes 和 SLO。 | `write_operation_slo_audit` 有非空 matching samples 且通过 operation profile；无样本是 missing，不是 covered。 |
 | `READMODEL-E2E-007` | 非规范 scope、历史 failed/outbox、legacy readiness 不得污染当前 App Health。 | scope contract check 区分 covered historical failure 与 current blocker，repair 需要 audit/rollback。 |
+| `READMODEL-E2E-008` | 每个当前注册页面必须声明其 read model fresh 入口、生产只读 probe、页面事实源、配对关系事实源（若页面显示配对状态）和 deterministic Browser/API 证据。 | `docs/dev/page-read-model-fact-display-matrix.json` 必须与 `web/src/app/pageRegistry.tsx`、App Status read model registry、HTTP SLO probe registry 和证据文件同步；当前页面矩阵不得再引用 legacy `no_oa_bank_batch` 页面 read model。 |
+| `READMODEL-E2E-009` | 每个 write-operation SLO profile 必须声明写入事实源、配对关系事实源、durable outbox scope、目标页面/read model、生产 gate policy、1s/3s SLO 和 deterministic 证据。 | `docs/dev/write-operation-impact-matrix.json` 必须与 `write_operation_slo_audit.DEFAULT_OPERATION_EXPECTATIONS`、App Status read model registry、页面 fresh/fact-display 矩阵、standing ticket policy 和证据文件同步。 |
 
 ## 权限和角色
 
@@ -29,6 +31,8 @@
 - dirty scope pending/processing/failed：页面必须显示 refreshing/blocked，不伪装 fresh。
 - worker 完成后 readiness fresh：页面可重读并显示最终结果。
 - write-operation audit 无样本：保持 missing，不得用 direct refresh 证据替代真实写链路证据。
+- 页面新增、改名或新增 read model：必须同步更新页面 read model/fact-display 矩阵，否则不能声明页面 fresh 与事实源显示覆盖。
+- 新增或修改 durable write operation：必须同步更新 write-operation impact 矩阵，否则不能声明写后跨页 read model 强可见覆盖。
 
 ## 外部风险
 
