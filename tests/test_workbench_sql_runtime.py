@@ -6787,6 +6787,28 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["row"]["id"], "oa-pay-1976")
         self.assertEqual(facade_calls, [(None, "oa-pay-1976")])
 
+    def test_amount_check_row_resolution_sql_runtime_skips_live_bank_fallback(self) -> None:
+        app = object.__new__(Application)
+        app._requires_sql_read_model_runtime = lambda: True
+        app._resolve_rows_from_cached_read_models = lambda _row_ids, **_kwargs: {}
+        app._row_types_for_row_ids = lambda row_ids: ["bank" for _row_id in row_ids]
+        app._resolve_live_rows_direct = lambda row_ids, **_kwargs: (_ for _ in ()).throw(
+            AssertionError(f"sql runtime must not use live bank fallback: {row_ids}")
+        )
+        detail_calls: list[dict[str, object]] = []
+
+        def row_detail(row_id: str, *, month: str | None = None) -> dict[str, object]:
+            detail_calls.append({"row_id": row_id, "month": month})
+            return {"row": {"id": row_id, "type": "bank"}}
+
+        app._get_api_workbench_row_detail_payload = row_detail
+        app._serialize_value = lambda value: value
+
+        rows = app._resolve_rows_for_amount_check(["txn_imported_0396"], month="all", allow_direct=True)
+
+        self.assertEqual(rows, [{"id": "txn_imported_0396", "type": "bank"}])
+        self.assertEqual(detail_calls, [{"row_id": "txn_imported_0396", "month": "all"}])
+
     def test_repository_persists_workbench_rows_alongside_snapshot(self) -> None:
         connection = WorkbenchWriteConnection()
         repository = PostgresReadModelRepository(connection)
@@ -7001,6 +7023,66 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["source_versions"], {"builder": "workbench-sql:v1"})
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertTrue(any("from read_model.workbench_rows r" in sql for sql, _params in connection.fetch_one_calls))
+
+    def test_repository_reads_all_scope_row_detail_from_active_month_rows(self) -> None:
+        class RowDetailConnection(WorkbenchWriteConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from read_model.workbench_rows r" in normalized and params == ("txn_imported_0396", "all"):
+                    return {
+                        "row_id": "txn_imported_0396",
+                        "source_kind": "bank",
+                        "status": "open",
+                        "scope_key": "2026-06",
+                        "generation_id": "gen-2026-06-active",
+                        "source_versions": {"builder": "workbench-sql:v1"},
+                        "payload": {
+                            "id": "txn_imported_0396",
+                            "type": "bank",
+                            "counterparty_name": "中招国际招标有限公司云南分公司",
+                        },
+                    }
+                return None
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+                if "from job.read_model_dirty_scopes" in self.fetch_all_calls[-1][0]:
+                    return []
+                return []
+
+        connection = RowDetailConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_workbench_row_detail(scope_key="all", row_id="txn_imported_0396")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["row"]["id"], "txn_imported_0396")
+        self.assertEqual(payload["scope_key"], "2026-06")
+        self.assertEqual(payload["read_model_status"], "fresh")
+        sql = connection.fetch_one_calls[0][0]
+        self.assertIn("and true", sql)
+        self.assertNotIn("r.scope_key in (%s, 'all')", sql)
+
+    def test_repository_finds_workbench_row_active_month_scope_key(self) -> None:
+        class RowScopeConnection(WorkbenchWriteConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "select r.scope_key from read_model.workbench_rows r" in normalized:
+                    return {"scope_key": "2026-06"}
+                return None
+
+        connection = RowScopeConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        scope_key = repository.find_workbench_row_scope_key(row_id="txn_imported_0396")
+
+        self.assertEqual(scope_key, "2026-06")
+        self.assertEqual(connection.fetch_one_calls[0][1], ("txn_imported_0396",))
+        self.assertIn("gen.status = 'active'", connection.fetch_one_calls[0][0])
+        self.assertIn("r.scope_key <> 'all'", connection.fetch_one_calls[0][0])
 
     def test_repository_does_not_delete_generation_rows_when_scope_snapshot_is_absent(self) -> None:
         connection = WorkbenchWriteConnection()

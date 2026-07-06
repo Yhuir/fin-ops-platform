@@ -7217,6 +7217,29 @@ class PostgresReadModelRepository:
             "read_model_status": self._workbench_read_model_status_for_groups_page(scope_key=resolved_scope_key),
         }
 
+    def find_workbench_row_scope_key(self, *, row_id: str) -> str | None:
+        normalized_row_id = text(row_id)
+        if not normalized_row_id:
+            return None
+        row = self._connection.fetch_one(
+            """
+            select r.scope_key
+            from read_model.workbench_rows r
+            join read_model.workbench_generations gen
+              on gen.generation_id = r.generation_id
+             and gen.scope_key = r.scope_key
+             and gen.status = 'active'
+            where r.row_id = %s
+              and r.scope_key <> 'all'
+            order by r.updated_at desc nulls last
+            limit 1
+            """,
+            (normalized_row_id,),
+        )
+        if not isinstance(row, dict):
+            return None
+        return text(row.get("scope_key")) or None
+
     def _workbench_read_model_status_for_groups_page(self, *, scope_key: str) -> str:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
         scope_clause = ""

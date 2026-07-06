@@ -48,6 +48,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "get_workbench_groups_page",
             "get_workbench_group_detail",
             "get_workbench_row_detail",
+            "find_workbench_row_scope_key",
             "get_workbench_refresh_status",
             "get_workbench_groups_freshness_status",
             "save_workbench_read_models",

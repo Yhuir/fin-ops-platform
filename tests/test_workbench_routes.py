@@ -3,7 +3,11 @@ from __future__ import annotations
 from http import HTTPStatus
 import unittest
 
-from fin_ops_platform.app.routes_workbench import WorkbenchGroupDetailApiRoutes, WorkbenchReadApiRoutes
+from fin_ops_platform.app.routes_workbench import (
+    WorkbenchGroupDetailApiRoutes,
+    WorkbenchReadApiRoutes,
+    WorkbenchRowDetailApiRoutes,
+)
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResult
 
 
@@ -37,6 +41,41 @@ class FakeWorkbenchQueryFacade:
     def groups(self, month: str | None, **kwargs: object) -> WorkbenchQueryResult:
         self.calls.append({"endpoint": "groups", "month": month, **kwargs})
         return WorkbenchQueryResult(HTTPStatus.OK, {"month": month, "groups": [], "read_model_status": "fresh"})
+
+    def row_detail(self, month: str | None, *, row_id: str) -> WorkbenchQueryResult:
+        self.calls.append({"endpoint": "row_detail", "month": month, "row_id": row_id})
+        return WorkbenchQueryResult(
+            HTTPStatus.OK,
+            {
+                "row": {"id": row_id, "type": "bank"},
+                "scope_key": "2026-06",
+                "read_model_status": "fresh",
+            },
+        )
+
+
+class WorkbenchRowDetailApiRoutesTests(unittest.TestCase):
+    def test_row_detail_delegates_all_month_to_query_facade_in_sql_runtime(self) -> None:
+        facade = FakeWorkbenchQueryFacade()
+        routes = WorkbenchRowDetailApiRoutes(
+            etc_summary_row_detail=lambda _row_id: None,
+            live_row_detail=lambda row_id: (_ for _ in ()).throw(AssertionError(f"live fallback: {row_id}")),
+            row_month_scope_from_row_id=lambda _row_id: None,
+            cached_rows_resolver=lambda _row_ids, **_kwargs: {},
+            query_facade_provider=lambda: facade,
+            looks_like_oa_row_id=lambda _row_id: False,
+            legacy_row_detail=lambda row_id: (_ for _ in ()).throw(AssertionError(f"legacy fallback: {row_id}")),
+            requires_sql_read_model_runtime=lambda: True,
+            apply_row_override=lambda row: row,
+        )
+
+        payload = routes.get_payload("txn_imported_0396", month="all")
+
+        self.assertEqual(payload["row"], {"id": "txn_imported_0396", "type": "bank"})
+        self.assertEqual(
+            facade.calls,
+            [{"endpoint": "row_detail", "month": "all", "row_id": "txn_imported_0396"}],
+        )
 
 
 class WorkbenchGroupDetailApiRoutesTests(unittest.TestCase):

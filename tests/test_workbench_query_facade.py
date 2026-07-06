@@ -100,6 +100,56 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_status"], "fresh")
         self.assertEqual(repository.calls, [{"scope_key": "all", "row_id": "oa-pay-1976"}])
 
+    def test_row_detail_all_scope_resolves_active_month_shard_when_all_detail_misses(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+                self.scope_calls: list[str] = []
+
+            def get_workbench_row_detail(self, **kwargs: object) -> dict[str, object] | None:
+                self.calls.append(dict(kwargs))
+                if kwargs.get("scope_key") == "2026-06":
+                    return {
+                        "row": {
+                            "id": "txn_imported_0396",
+                            "type": "bank",
+                            "counterparty_name": "中招国际招标有限公司云南分公司",
+                        },
+                        "scope_key": "2026-06",
+                        "source_versions": {"builder": "v1"},
+                        "read_model_status": "fresh",
+                    }
+                return None
+
+            def find_workbench_row_scope_key(self, *, row_id: str) -> str | None:
+                self.scope_calls.append(row_id)
+                return "2026-06"
+
+        repository = Repository()
+        facade = WorkbenchQueryFacade(
+            repository=repository,
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.row_detail("all", row_id="txn_imported_0396")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["row"]["id"], "txn_imported_0396")
+        self.assertEqual(result.payload["scope_key"], "2026-06")
+        self.assertEqual(repository.scope_calls, ["txn_imported_0396"])
+        self.assertEqual(
+            repository.calls,
+            [
+                {"scope_key": "all", "row_id": "txn_imported_0396"},
+                {"scope_key": "2026-06", "row_id": "txn_imported_0396"},
+            ],
+        )
+
     def test_group_detail_stale_source_versions_do_not_return_stale_group(self) -> None:
         class Repository:
             def get_workbench_group_detail(self, **_kwargs: object) -> dict[str, object]:

@@ -445,6 +445,14 @@ class WorkbenchQueryFacade:
             )
         try:
             payload = get_row_detail(scope_key=scope_key, row_id=normalized_row_id)
+            if current_month == "all" and (
+                not isinstance(payload, dict) or not isinstance(payload.get("row"), dict)
+            ):
+                find_scope_key = getattr(self._repository, "find_workbench_row_scope_key", None)
+                if callable(find_scope_key):
+                    resolved_scope_key = str(find_scope_key(row_id=normalized_row_id) or "").strip()
+                    if resolved_scope_key and resolved_scope_key != scope_key:
+                        payload = get_row_detail(scope_key=resolved_scope_key, row_id=normalized_row_id)
         except Exception as error:
             if self._missing_read_model_error(error):
                 self._emit_status_metric(
