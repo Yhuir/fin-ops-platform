@@ -5,9 +5,9 @@
 ## 2026-07-06 - 按流水标签类型读取银行明细有效主/子标签
 
 - 变更类型：read model payload contract + cross-module read boundary。
-- 架构结论：成本统计 `time_rows.bank_tag_*` 不再信任 Workbench 行内旧标签字段；月份 shard 使用 `BankTransactionTagReadFacade` 从 fresh `bank_detail` scoped read model 批量读取银行明细有效分类，并把 `bank_detail_source_versions` 写入成本统计 source_versions。`bank_detail` 非 fresh 时成本统计 worker 抛 `bank_detail_read_model_not_fresh`，由 runtime dependency retry 处理，不发布旧标签 payload。
+- 架构结论：成本统计 `time_rows.bank_tag_*` 不再信任 Workbench 行内旧标签字段；月份 shard 使用 `BankTransactionTagReadFacade` 从 fresh `bank_detail` scoped read model 批量读取银行明细有效分类，并把 `bank_detail_source_versions` 写入成本统计 source_versions。payload schema 升级为 `2026-07-cost-statistics-bank-tags-v4`；旧 v3 父 scope 即使仍被标记 fresh，也必须返回空刷新态并入队重建，不能继续把旧 `未标记` 行交给页面。`bank_detail` 非 fresh 时成本统计 worker 抛 `bank_detail_read_model_not_fresh`，由 runtime dependency retry 处理，不发布旧标签 payload。
 - 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py`、`tests/test_runtime_bootstrap.py`。
-- 覆盖点：Workbench bank row 不携带标签字段时，成本统计仍从银行明细 facade 写入主标签、子标签和 label path；成本统计 expected source_versions 包含 bank detail scope 版本；worker wiring 向 `CostStatisticsSqlProjectionBuilder` 传入 `bank_transaction_tag_read_facade`；依赖非 fresh 时不保存成本统计 read model。
+- 覆盖点：Workbench bank row 不携带标签字段时，成本统计仍从银行明细 facade 写入主标签、子标签和 label path；成本统计 expected source_versions 包含 bank detail scope 版本；worker wiring 向 `CostStatisticsSqlProjectionBuilder` 传入 `bank_transaction_tag_read_facade`；旧 v3 `active:all` payload 不向页面返回旧行并入队重建；依赖非 fresh 时不保存成本统计 read model。
 - 七类测试决策：service-layer、API contract、read model/cache/background job、existing regression 适用并覆盖；frontend interaction 由既有 `CostStatisticsPage.test.tsx::bank tag view drills down from primary tag to sub tag to transaction` 覆盖，本轮 UI 未变；business core 金额归因不变；E2E 写流继续沿用银行明细/成本统计既有 Browser flows，本轮不新增跨模块浏览器用例。
 - 验证命令：见本轮最终说明。
 

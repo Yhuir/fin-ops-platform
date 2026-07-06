@@ -888,6 +888,73 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         )
         self.assertLessEqual(redis.sets[0][2], 120)
 
+    def test_cost_statistics_api_rejects_old_bank_tag_schema_parent_payload_without_old_rows(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": queue, "redis_helper": RedisRecorder()},
+        )()
+        app._cost_statistics_sql_read_repository = type(
+            "SqlCostStats",
+            (),
+            {
+                "get_cost_statistics_view": lambda *_args, **_kwargs: {
+                    "payload": {
+                        "month": "all",
+                        "summary": {"row_count": 145, "transaction_count": 145, "total_amount": "19016.25"},
+                        "time_rows": [
+                            {
+                                "transaction_id": "old-parent-row",
+                                "trade_time": "2026-06-23 09:45:03",
+                                "direction": "支出",
+                                "project_name": "项目A",
+                                "expense_type": "火车费",
+                                "expense_content": "火车费",
+                                "amount": "145.00",
+                                "counterparty_name": "陈佳玉",
+                                "payment_account_label": "建设银行 8106",
+                                "remark": "",
+                                "bank_tag_primary_label": "未标记",
+                                "bank_tag_sub_label": "未标记",
+                                "bank_tag_label_path": ["未标记"],
+                            }
+                        ],
+                        "bank_accounts": [],
+                        "project_rows": [],
+                        "expense_type_rows": [],
+                    },
+                    "refresh_status": "fresh",
+                    "schema_version": "2026-07-cost-statistics-bank-accounts-v3",
+                    "generated_at": "2026-07-06T10:00:00+08:00",
+                    "source_versions": app._cost_statistics_expected_source_versions("active:all"),
+                }
+            },
+        )()
+        app._cost_statistics_service = type(
+            "CostStats",
+            (),
+            {"get_explorer": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("stale SQL payload must not sync rebuild"))},
+        )()
+
+        response = app._cost_statistics_routes().route(
+            "GET",
+            "/api/cost-statistics/explorer",
+            {"month": ["all"], "project_scope": ["active"]},
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_key"], "active:all")
+        self.assertEqual(payload["read_model_stale_reasons"], ["schema_version_mismatch"])
+        self.assertEqual(payload["time_rows"], [])
+        self.assertEqual(payload["project_rows"], [])
+        self.assertEqual(payload["expense_type_rows"], [])
+        self.assertEqual(queue.refreshes, [("cost_statistics", "active:all", "api_source_versions_stale")])
+
     def test_cost_statistics_api_rejects_malformed_fresh_sql_payload_and_requeues(self) -> None:
         queue = QueueRecorder()
         redis = RedisRecorder()

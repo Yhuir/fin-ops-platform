@@ -65,7 +65,7 @@
 - `time_rows.bank_tag_*` 的来源是 `BankTransactionTagReadFacade` 暴露的 fresh `bank_detail` scoped read model 有效分类字段，经 `cost_statistics_bank_tags.bank_tag_context_from_row(...)` 归一化后写入成本统计 read model payload。父 scope 从已物化月份 rows 的 payload 回读这些字段，不能回头读 Workbench `all`、Workbench 行内旧标签字段或银行明细页面 API。
 - `bank_accounts` 的来源是 settings owner 的银行账户映射，投影层通过 `cost_statistics_bank_accounts.py` 归一为页面只读 payload，并以 `bank_account_mappings_fingerprint` 纳入 source version。页面银行统计以 `bank_accounts + time_rows` 合并生成，禁止恢复只从当前流水推断银行全集的旧逻辑。
 - Upstream read model 输入：月份 shard 只消费 Workbench active generation；父 scope 从已物化 `read_model.cost_statistics_rows` 聚合，不读 Workbench `all` 或历史 generation。
-- Explorer payload schema version：`2026-07-cost-statistics-bank-accounts-v3`。旧 schema payload 缺少 `bank_accounts` 时必须 fail-closed 并重新投影，不能在页面兜底伪造完整银行全集。
+- Explorer payload schema version：`2026-07-cost-statistics-bank-tags-v4`。旧 schema payload 缺少 `bank_accounts` 或仍使用 Workbench 行内旧标签字段时必须 fail-closed 并重新投影，不能在页面兜底伪造完整银行全集或银行标签。
 
 ## 文件范围
 

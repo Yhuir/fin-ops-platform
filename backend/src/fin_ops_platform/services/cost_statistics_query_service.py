@@ -217,7 +217,7 @@ class CostStatisticsQueryService:
             source_mismatch_reason="api_source_versions_stale",
             payload_invalid_reason="api_payload_shape_invalid",
         )
-        return result.payload, result.cache_hit
+        return self._empty_non_fresh_payload(result.payload, lambda: self.empty_explorer_payload(month)), result.cache_hit
 
     def get_month_from_sql_read_model(
         self,
@@ -247,7 +247,26 @@ class CostStatisticsQueryService:
             stale_reason="api_month_stale",
             source_mismatch_reason="api_month_source_versions_stale",
         )
-        return result.payload, result.cache_hit
+        return self._empty_non_fresh_payload(result.payload, lambda: self.empty_month_payload(month)), result.cache_hit
+
+    @staticmethod
+    def _empty_non_fresh_payload(payload: dict[str, Any], empty_payload_factory: Any) -> dict[str, Any]:
+        if str(payload.get("read_model_status") or "").strip().lower() == "fresh":
+            return payload
+        replacement = dict(empty_payload_factory())
+        for key in (
+            "read_model_status",
+            "read_model_scope_key",
+            "read_model_generated_at",
+            "read_model_schema_version",
+            "read_model_stale_reasons",
+            "source_versions",
+            "refresh_enqueued",
+            "refresh_reason",
+        ):
+            if key in payload:
+                replacement[key] = payload[key]
+        return replacement
 
     def _refreshing_explorer_payload(self, month: str, project_scope: str, *, reason: str) -> dict[str, Any]:
         scope_key = self._runtime_service.request_scope_key(month, project_scope)
