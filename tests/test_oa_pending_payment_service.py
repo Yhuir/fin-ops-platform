@@ -60,8 +60,10 @@ class FakeAdmissionPaymentStatusRepository:
     def __init__(self, *, flow_ids: dict[str, str], admitted_flow_ids: set[str]) -> None:
         self.flow_ids = dict(flow_ids)
         self.admitted_flow_ids = set(admitted_flow_ids)
+        self.list_calls = 0
 
     def list_payment_statuses(self) -> dict[str, OAPaymentStatusRecord]:
+        self.list_calls += 1
         return {
             flow_id: OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PENDING)
             for flow_id in self.admitted_flow_ids
@@ -369,6 +371,28 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual([row["oa"]["id"] for row in progress_payload["rows"]], ["oa-progress-admitted"])
         self.assertEqual(completed_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
         self.assertEqual(progress_payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 1})
+
+    def test_in_progress_view_reuses_loaded_payment_statuses_for_admission_filter(self) -> None:
+        payment_repository = FakeAdmissionPaymentStatusRepository(
+            flow_ids={
+                "oa-progress-admitted": "mongo-progress",
+                "oa-progress-denied": "mongo-denied",
+            },
+            admitted_flow_ids={"mongo-progress"},
+        )
+        service = self._service(
+            oa_records=[],
+            in_progress_oa_records=[
+                self._oa("oa-progress-admitted", "李四", "40.00", workflow_status="in_progress"),
+                self._oa("oa-progress-denied", "李四", "40.00", workflow_status="in_progress"),
+            ],
+            payment_repository=payment_repository,
+        )
+
+        progress_payload = service.list_rows(page_size=20, view_mode="in_progress")
+
+        self.assertEqual([row["oa"]["id"] for row in progress_payload["rows"]], ["oa-progress-admitted"])
+        self.assertEqual(payment_repository.list_calls, 1)
 
     def test_in_progress_view_reads_bank_relation_from_pending_payment_source(self) -> None:
         bank = self._bank("bank-progress-paid", "163000.00", counterparty_name="威斯达昆明信息技术有限责任公司")

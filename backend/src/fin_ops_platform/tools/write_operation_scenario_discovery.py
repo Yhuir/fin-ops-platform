@@ -21,7 +21,9 @@ STANDARD_APPROVAL_TICKET = "FINOPS-WRITE-SMOKE-STANDING-20260702"
 STANDARD_WRITE_OPERATIONS = (
     "turnover_manual_closure_or_withdraw",
     "workbench_relation_withdraw",
-    "no_oa_bank_batch_withdraw",
+    "pending_invoice_attach_existing_invoice",
+    "pending_invoice_attach_existing_invoice_with_oa",
+    "bank_flow_rule_batch_submit",
 )
 STANDARD_PAGE_WRITE_SCENARIO_POLICIES: tuple[dict[str, Any], ...] = (
     {
@@ -40,14 +42,9 @@ STANDARD_PAGE_WRITE_SCENARIO_POLICIES: tuple[dict[str, Any], ...] = (
         "scenario_operations": ("workbench_relation_withdraw",),
     },
     {
-        "page_key": "no-oa-bank-batches",
-        "apply_policy": "standing_apply",
-        "scenario_operations": ("no_oa_bank_batch_withdraw",),
-    },
-    {
         "page_key": "bank-flow-rule-batches",
-        "apply_policy": "fanout_evidence",
-        "scenario_operations": ("no_oa_bank_batch_withdraw",),
+        "apply_policy": "standing_apply",
+        "scenario_operations": ("bank_flow_rule_batch_submit",),
     },
     {
         "page_key": "bank-details",
@@ -181,6 +178,7 @@ def discover_write_operation_scenarios(
     normalized_limit = max(1, int(limit))
     turnover_candidates = _turnover_withdraw_candidates(connection, limit=normalized_limit)
     workbench_candidates = _workbench_withdraw_candidates(connection, limit=normalized_limit)
+    bank_flow_candidates = _bank_flow_rule_batch_submit_candidates(connection, limit=normalized_limit)
     no_oa_candidates = _no_oa_withdraw_candidates(connection, limit=normalized_limit)
     scenarios = [
         *[
@@ -192,8 +190,8 @@ def discover_write_operation_scenarios(
             for candidate in workbench_candidates[:STANDARD_SCENARIOS_PER_OPERATION]
         ],
         *[
-            _no_oa_withdraw_scenario(candidate)
-            for candidate in no_oa_candidates[:STANDARD_SCENARIOS_PER_OPERATION]
+            _bank_flow_rule_batch_submit_scenario(candidate)
+            for candidate in bank_flow_candidates[:STANDARD_SCENARIOS_PER_OPERATION]
         ],
     ]
     return {
@@ -207,6 +205,7 @@ def discover_write_operation_scenarios(
         "candidate_counts": {
             "turnover_manual_closure_or_withdraw": len(turnover_candidates),
             "workbench_pair_withdraw_context": len(workbench_candidates),
+            "bank_flow_rule_batch_submit_context": len(bank_flow_candidates),
             "no_oa_bank_batch_withdraw_context": len(no_oa_candidates),
         },
         "scenario_json": {
@@ -219,6 +218,7 @@ def discover_write_operation_scenarios(
         "candidates": {
             "turnover_manual_closure_or_withdraw": turnover_candidates,
             "workbench_pair_withdraw_context": workbench_candidates,
+            "bank_flow_rule_batch_submit_context": bank_flow_candidates,
             "no_oa_bank_batch_withdraw_context": no_oa_candidates,
         },
         "safety": {
@@ -230,7 +230,8 @@ def discover_write_operation_scenarios(
             "approval_ticket_policy": "standing_ticket_allowed_for_controlled_reversible_smoke",
             "notes": [
                 "Discovery is read-only and does not call mutating HTTP endpoints.",
-                "Generated scenarios are limited to controlled turnover, Workbench, or no-OA withdraw candidates.",
+                "Generated scenarios are limited to controlled turnover, Workbench withdraw, or current bank-flow submit candidates.",
+                "Legacy no-OA candidates remain discovery-only context and are not part of current standard page coverage.",
                 "Apply remains blocked until real OA/Admin auth and the standard approval ticket are supplied.",
             ],
         },
@@ -431,6 +432,81 @@ def _no_oa_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[str,
     ]
 
 
+def _bank_flow_rule_batch_submit_candidates(connection: Any, *, limit: int) -> list[dict[str, Any]]:
+    rows = connection.fetch_all(
+        """
+        select
+          batch.batch_id,
+          batch.status,
+          batch.status_bucket,
+          batch.scope_month::text as scope_month,
+          coalesce(cardinality(batch.bank_transaction_ids), 0) as row_count,
+          batch.bank_transaction_ids,
+          coalesce(
+            nullif(batch.raw_payload->'normalized_payload'->>'batch_type', ''),
+            nullif(batch.raw_payload->>'batch_type', ''),
+            ''
+          ) as batch_type,
+          coalesce(
+            nullif(batch.raw_payload->'normalized_payload'->>'batch_label', ''),
+            nullif(batch.raw_payload->>'batch_label', ''),
+            ''
+          ) as batch_label,
+          batch.version,
+          batch.updated_at
+        from app.bank_flow_rule_batches batch
+        where coalesce(batch.status_bucket, batch.status, '') in ('draft', 'unsubmitted', 'candidate')
+          and batch.scope_month is not null
+          and coalesce(cardinality(batch.bank_transaction_ids), 0) between 1 and 10
+          and not exists (
+            select 1
+            from app.workbench_pair_relations relation
+            where relation.status = 'active'
+              and relation.relation_mode = 'bank_flow_rule_batch'
+              and relation.row_ids && batch.bank_transaction_ids
+          )
+        order by
+          case
+            when coalesce(
+              nullif(batch.raw_payload->'normalized_payload'->>'batch_type', ''),
+              nullif(batch.raw_payload->>'batch_type', ''),
+              ''
+            ) = 'fee' and coalesce(cardinality(batch.bank_transaction_ids), 0) = 10 then 0
+            when coalesce(
+              nullif(batch.raw_payload->'normalized_payload'->>'batch_type', ''),
+              nullif(batch.raw_payload->>'batch_type', ''),
+              ''
+            ) = 'fee' then 1
+            else 2
+          end,
+          coalesce(cardinality(batch.bank_transaction_ids), 0) desc,
+          batch.updated_at desc nulls last,
+          batch.batch_id
+        limit %s
+        """,
+        (limit,),
+    )
+    return [
+        {
+            "operation_context": "bank_flow_rule_batch_submit",
+            "batch_id": _text(row.get("batch_id")),
+            "status": _text(row.get("status")),
+            "status_bucket": _text(row.get("status_bucket")),
+            "month": _month_text(row.get("scope_month")) or "all",
+            "row_count": row.get("row_count"),
+            "row_ids": [_text(item) for item in list(row.get("bank_transaction_ids") or []) if _text(item)],
+            "batch_type": _text(row.get("batch_type")),
+            "batch_label": _text(row.get("batch_label")),
+            "version": row.get("version"),
+            "updated_at": str(row.get("updated_at") or ""),
+            "candidate_path": "/api/bank-flow-rule-batches/submit-selection",
+            "risk": "bank_flow_submit_creates_relation_and_requires_controlled_withdraw_or_reset_after_smoke",
+        }
+        for row in rows
+        if _text(row.get("batch_id")) and list(row.get("bank_transaction_ids") or [])
+    ]
+
+
 def _turnover_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
     relation_id = _text(candidate.get("relation_id"))
     row_ids = [_text(item) for item in list(candidate.get("row_ids") or []) if _text(item)]
@@ -453,12 +529,14 @@ def _turnover_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
             }
         ],
         "post_api_probes": [
+            *_workbench_paired_probes(month),
             {
                 "name": "turnover_ledger_grouped",
                 "path": "/api/turnover-ledger?view=grouped&page=1&page_size=50",
                 "expected_statuses": [200, 202],
                 "target_ms": 1000,
             },
+            *_bank_relation_fanout_probes(month),
             {
                 "name": "operations_app_health_dashboard",
                 "path": "/api/operations/app-health-dashboard",
@@ -499,12 +577,8 @@ def _workbench_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
             }
         ],
         "post_api_probes": [
-            {
-                "name": "workbench_groups",
-                "path": f"/api/workbench/groups?month={quote(month, safe='')}&zone=paired&page=1&page_size=20",
-                "expected_statuses": [200, 202],
-                "target_ms": 1000,
-            },
+            *_workbench_paired_probes(month),
+            *_bank_invoice_relation_fanout_probes(month),
             {
                 "name": "operations_app_health_dashboard",
                 "path": "/api/operations/app-health-dashboard",
@@ -516,6 +590,53 @@ def _workbench_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
             **_standard_scenario_metadata("reconciliation-workbench"),
             "candidate_case_id": case_id,
             "candidate_relation_mode": candidate.get("relation_mode"),
+            "candidate_month": month,
+            "candidate_row_count": candidate.get("row_count"),
+            "risk": candidate.get("risk"),
+        },
+    }
+
+
+def _bank_flow_rule_batch_submit_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
+    batch_id = _text(candidate.get("batch_id"))
+    month = _month_text(candidate.get("month")) or "all"
+    row_ids = [_text(item) for item in list(candidate.get("row_ids") or []) if _text(item)]
+    return {
+        "name": f"bank-flow-rule-submit-{batch_id}",
+        "operation": "bank_flow_rule_batch_submit",
+        "steps": [
+            {
+                "name": "submit_selection",
+                "method": "POST",
+                "path": "/api/bank-flow-rule-batches/submit-selection",
+                "json": {
+                    "transaction_ids": row_ids,
+                    "note": "controlled runtime sync SLO smoke bank-flow submit under standing ticket",
+                },
+                "expected_statuses": [200],
+            }
+        ],
+        "post_api_probes": [
+            {
+                "name": "bank_flow_rule_batches_submitted",
+                "path": f"/api/bank-flow-rule-batches?month={quote(month, safe='')}&bucket=submitted&page=1&page_size=50",
+                "expected_statuses": [200, 202],
+                "target_ms": 1000,
+            },
+            *_workbench_paired_probes(month),
+            *_bank_relation_fanout_probes(month),
+            {
+                "name": "operations_app_health_dashboard",
+                "path": "/api/operations/app-health-dashboard",
+                "expected_statuses": [200, 202],
+                "target_ms": 1000,
+            },
+        ],
+        "metadata": {
+            **_standard_scenario_metadata("bank-flow-rule-batches"),
+            "candidate_batch_id": batch_id,
+            "candidate_batch_type": candidate.get("batch_type"),
+            "candidate_batch_label": candidate.get("batch_label"),
             "candidate_month": month,
             "candidate_row_count": candidate.get("row_count"),
             "risk": candidate.get("risk"),
@@ -566,6 +687,76 @@ def _no_oa_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
             "risk": candidate.get("risk"),
         },
     }
+
+
+def _workbench_paired_probes(month: str) -> list[dict[str, Any]]:
+    month_scope = _month_text(month) or "all"
+    return [
+        {
+            "name": "workbench_groups_all_paired",
+            "path": "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50&detail_level=summary",
+            "expected_statuses": [200, 202],
+            "target_ms": 1000,
+        },
+        {
+            "name": "workbench_groups_month_paired",
+            "path": (
+                f"/api/workbench/groups?month={quote(month_scope, safe='')}"
+                "&zone=paired&page=1&page_size=50&detail_level=summary"
+            ),
+            "expected_statuses": [200, 202],
+            "target_ms": 1000,
+        },
+    ]
+
+
+def _bank_relation_fanout_probes(month: str) -> list[dict[str, Any]]:
+    month_scope = _month_text(month) or "all"
+    return [
+        {
+            "name": "bank_details_transactions",
+            "path": "/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+            "expected_statuses": [200, 202],
+            "target_ms": 1000,
+        },
+        {
+            "name": "pending_invoices_rows",
+            "path": "/api/pending-invoices/rows?direction=expense&page=1&page_size=50&sort_field=trade_date&sort_direction=desc",
+            "expected_statuses": [200, 202],
+            "target_ms": 1000,
+        },
+        {
+            "name": "cost_statistics_explorer",
+            "path": f"/api/cost-statistics/explorer?month={quote(month_scope, safe='')}&project_scope=active",
+            "expected_statuses": [200, 202],
+            "target_ms": 1000,
+        },
+        {
+            "name": "search_all",
+            "path": "/api/search?q=%E5%85%AC%E5%8F%B8&scope=all&month=all&limit=5",
+            "expected_statuses": [200, 202],
+            "target_ms": 1000,
+        },
+    ]
+
+
+def _bank_invoice_relation_fanout_probes(month: str) -> list[dict[str, Any]]:
+    month_scope = _month_text(month) or "all"
+    return [
+        *_bank_relation_fanout_probes(month_scope),
+        {
+            "name": "input_invoice_usage_rows",
+            "path": "/api/input-invoice-usage/rows?page=1&page_size=20",
+            "expected_statuses": [200, 202],
+            "target_ms": 1000,
+        },
+        {
+            "name": "tax_offset_rows",
+            "path": f"/api/tax-offset?month={quote(month_scope, safe='')}",
+            "expected_statuses": [200, 202],
+            "target_ms": 1000,
+        },
+    ]
 
 
 def _standard_inputs_payload() -> dict[str, str]:

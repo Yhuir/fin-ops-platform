@@ -34,6 +34,21 @@ class FakeConnection:
                     "updated_at": "2026-06-13T10:00:00+08:00",
                 }
             ]
+        if "from app.bank_flow_rule_batches" in normalized:
+            return [
+                {
+                    "batch_id": "BANK-FLOW-BATCH-1",
+                    "status": "draft",
+                    "status_bucket": "unsubmitted",
+                    "scope_month": "2026-06-01",
+                    "row_count": 10,
+                    "bank_transaction_ids": [f"bank-fee-{index}" for index in range(1, 11)],
+                    "batch_type": "fee",
+                    "batch_label": "手续费",
+                    "version": 6,
+                    "updated_at": "2026-06-13T10:00:00+08:00",
+                }
+            ]
         if "from app.workbench_pair_relations" in normalized:
             return [
                 {
@@ -73,6 +88,22 @@ class MultiCandidateConnection(FakeConnection):
         normalized = " ".join(sql.lower().split())
         if "from app.turnover_relations" in normalized:
             return []
+        if "from app.bank_flow_rule_batches" in normalized:
+            return [
+                {
+                    "batch_id": f"BANK-FLOW-BATCH-{index}",
+                    "status": "draft",
+                    "status_bucket": "unsubmitted",
+                    "scope_month": "2026-06-01",
+                    "row_count": 10,
+                    "bank_transaction_ids": [f"bank-fee-{index}-{row}" for row in range(1, 11)],
+                    "batch_type": "fee",
+                    "batch_label": "手续费",
+                    "version": index,
+                    "updated_at": f"2026-06-13T10:00:0{index}+08:00",
+                }
+                for index in range(1, 3)
+            ]
         if "from app.workbench_pair_relations" in normalized:
             return [
                 {
@@ -111,6 +142,7 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         self.assertEqual(report["status"], "ready")
         self.assertEqual(report["candidate_counts"]["turnover_manual_closure_or_withdraw"], 1)
         self.assertEqual(report["candidate_counts"]["workbench_pair_withdraw_context"], 1)
+        self.assertEqual(report["candidate_counts"]["bank_flow_rule_batch_submit_context"], 1)
         self.assertEqual(report["candidate_counts"]["no_oa_bank_batch_withdraw_context"], 1)
         scenarios = report["scenario_json"]["scenarios"]
         self.assertEqual(len(scenarios), 3)
@@ -120,7 +152,7 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
             [
                 "turnover_manual_closure_or_withdraw",
                 "workbench_relation_withdraw",
-                "no_oa_bank_batch_withdraw",
+                "bank_flow_rule_batch_submit",
             ],
         )
         self.assertEqual(scenarios[0]["steps"][0]["path"], "/api/workbench/actions/withdraw-link")
@@ -128,7 +160,22 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         self.assertEqual(scenarios[0]["metadata"]["candidate_case_id"], "turnover:turnover_rel_1")
         self.assertEqual(scenarios[1]["steps"][0]["path"], "/api/workbench/actions/withdraw-link")
         self.assertEqual(scenarios[1]["steps"][0]["json"]["row_ids"], ["oa-1", "bank-1"])
-        self.assertEqual(scenarios[2]["steps"][0]["path"], "/api/no-oa-bank-batches/BATCH-1/withdraw")
+        scenario_1_probe_paths = {probe["name"]: probe["path"] for probe in scenarios[1]["post_api_probes"]}
+        self.assertEqual(
+            scenario_1_probe_paths["workbench_groups_month_paired"],
+            "/api/workbench/groups?month=2026-06&zone=paired&page=1&page_size=50&detail_level=summary",
+        )
+        self.assertEqual(
+            scenario_1_probe_paths["workbench_groups_all_paired"],
+            "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50&detail_level=summary",
+        )
+        self.assertEqual(scenarios[2]["steps"][0]["path"], "/api/bank-flow-rule-batches/submit-selection")
+        self.assertEqual(scenarios[2]["steps"][0]["json"]["transaction_ids"], [f"bank-fee-{index}" for index in range(1, 11)])
+        self.assertEqual(scenarios[2]["metadata"]["candidate_batch_type"], "fee")
+        probe_names = {probe["name"] for probe in scenarios[2]["post_api_probes"]}
+        self.assertIn("bank_flow_rule_batches_submitted", probe_names)
+        self.assertIn("workbench_groups_all_paired", probe_names)
+        self.assertIn("workbench_groups_month_paired", probe_names)
         self.assertTrue(all("requires_manual_approval_before_apply" not in scenario["metadata"] for scenario in scenarios))
         self.assertEqual(
             scenarios[0]["metadata"]["approval_ticket"],
@@ -177,14 +224,32 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         report = discovery.discover_write_operation_scenarios(MultiCandidateConnection(), limit=5)
 
         self.assertEqual(report["candidate_counts"]["workbench_pair_withdraw_context"], 3)
+        self.assertEqual(report["candidate_counts"]["bank_flow_rule_batch_submit_context"], 2)
         self.assertEqual(report["candidate_counts"]["no_oa_bank_batch_withdraw_context"], 2)
         scenarios = report["scenario_json"]["scenarios"]
         self.assertEqual(
             [scenario["operation"] for scenario in scenarios],
-            ["workbench_relation_withdraw", "no_oa_bank_batch_withdraw"],
+            ["workbench_relation_withdraw", "bank_flow_rule_batch_submit"],
         )
         self.assertEqual(scenarios[0]["name"], "workbench-withdraw-CASE-1")
-        self.assertEqual(scenarios[1]["name"], "no-oa-withdraw-BATCH-1")
+        self.assertEqual(scenarios[1]["name"], "bank-flow-rule-submit-BANK-FLOW-BATCH-1")
+
+    def test_bank_flow_discovery_uses_current_page_source_and_excludes_active_relations(self) -> None:
+        connection = FakeConnection()
+
+        discovery.discover_write_operation_scenarios(connection, limit=5)
+
+        bank_flow_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "from app.bank_flow_rule_batches" in " ".join(sql.lower().split())
+        )
+        normalized_sql = " ".join(bank_flow_sql.lower().split())
+        self.assertIn("from app.bank_flow_rule_batches batch", normalized_sql)
+        self.assertIn("relation.relation_mode = 'bank_flow_rule_batch'", normalized_sql)
+        self.assertIn("relation.row_ids && batch.bank_transaction_ids", normalized_sql)
+        self.assertIn("not exists", normalized_sql)
+        self.assertIn("= 'fee'", normalized_sql)
 
     def test_no_oa_discovery_requires_active_relation_contract(self) -> None:
         connection = FakeConnection()
@@ -217,13 +282,21 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
             policy_by_page["reconciliation-workbench"]["approval_ticket"],
             "FINOPS-WRITE-SMOKE-STANDING-20260702",
         )
+        self.assertEqual(
+            policy_by_page["bank-flow-rule-batches"]["scenario_operations"],
+            ["bank_flow_rule_batch_submit"],
+        )
+        self.assertEqual(policy_by_page["bank-flow-rule-batches"]["apply_policy"], "standing_apply")
+        self.assertNotIn("no-oa-bank-batches", policy_by_page)
         self.assertEqual(policy_by_page["bank-details"]["apply_policy"], "fanout_evidence")
         self.assertEqual(
             policy_by_page["bank-details"]["scenario_operations"],
             [
                 "turnover_manual_closure_or_withdraw",
                 "workbench_relation_withdraw",
-                "no_oa_bank_batch_withdraw",
+                "pending_invoice_attach_existing_invoice",
+                "pending_invoice_attach_existing_invoice_with_oa",
+                "bank_flow_rule_batch_submit",
             ],
         )
         self.assertEqual(policy_by_page["settings"]["apply_policy"], "no_standing_production_apply")
@@ -273,6 +346,7 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         )
         self.assertIn("page_write_scenario_policy", scenario)
         self.assertEqual(len(scenario["scenarios"]), 3)
+        self.assertEqual(scenario["scenarios"][2]["operation"], "bank_flow_rule_batch_submit")
 
     def test_cli_does_not_write_empty_scenario_file_when_no_candidates_are_found(self) -> None:
         with TemporaryDirectory() as temp_dir:

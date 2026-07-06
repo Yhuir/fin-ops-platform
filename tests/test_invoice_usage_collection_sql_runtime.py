@@ -476,6 +476,7 @@ class ProjectionCoreRepository:
     ) -> None:
         self.invoices = list(invoices or [])
         self.transactions = list(transactions or [])
+        self.invoice_page_calls: list[dict[str, object]] = []
 
     def list_invoices_page(
         self,
@@ -486,6 +487,9 @@ class ProjectionCoreRepository:
         invoice_type: str | None = None,
         **_kwargs: object,
     ) -> tuple[list[Invoice], int]:
+        self.invoice_page_calls.append(
+            {"page": page, "page_size": page_size, "month": month, "invoice_type": invoice_type}
+        )
         rows = list(self.invoices)
         if month:
             rows = [invoice for invoice in rows if str(invoice.invoice_date or "").startswith(month[:7])]
@@ -521,12 +525,21 @@ class EmptyOAProjectionRepository:
 class StaticOAProjectionRepository:
     def __init__(self, records: list[OAApplicationRecord]) -> None:
         self.records = list(records)
+        self.list_all_calls = 0
+        self.list_month_calls: list[str] = []
 
     def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[object]:
         wanted = {str(row_id) for row_id in list(row_ids or [])}
         return [record for record in self.records if record.id in wanted]
 
+    def list_application_records(self, month: str) -> list[OAApplicationRecord]:
+        self.list_month_calls.append(str(month))
+        if str(month or "").strip() == "all":
+            return self.list_all_application_records()
+        return [record for record in self.records if str(record.month or "").startswith(str(month)[:7])]
+
     def list_all_application_records(self) -> list[object]:
+        self.list_all_calls += 1
         return list(self.records)
 
     def list_available_months(self) -> list[str]:
@@ -542,8 +555,11 @@ class StaticOAPaymentStatusRepository:
     def __init__(self, *, flow_ids: dict[str, str], admitted_flow_ids: set[str]) -> None:
         self.flow_ids = dict(flow_ids)
         self.admitted_flow_ids = set(admitted_flow_ids)
+        self.list_statuses_calls = 0
+        self.get_payment_status_calls = 0
 
     def list_payment_statuses(self) -> dict[str, OAPaymentStatusRecord]:
+        self.list_statuses_calls += 1
         return {
             flow_id: OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PENDING)
             for flow_id in self.admitted_flow_ids
@@ -553,6 +569,7 @@ class StaticOAPaymentStatusRepository:
         return self.flow_ids.get(record.id)
 
     def get_payment_status(self, flow_id: str) -> OAPaymentStatusRecord | None:
+        self.get_payment_status_calls += 1
         return self.list_payment_statuses().get(flow_id)
 
     def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord:
@@ -2191,20 +2208,22 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             self._oa("oa-pay-mongo-progress", "刘际涛", "100.00", workflow_status="in_progress"),
             self._oa("oa-pay-mongo-duplicate", "刘际涛", "100.00", workflow_status="in_progress"),
         ])
+        core_repository = ProjectionCoreRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(
             connection=EmptyTransactionConnection(),
             workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
             payment_status_repository=payment_repository,
             oa_source_adapter=oa_source_adapter,
         )
-        builder._core_repository = ProjectionCoreRepository()
+        builder._core_repository = core_repository
         builder._read_repository = read_repository
         builder._output_invoice_collection_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
-        builder._oa_projection_repository = StaticOAProjectionRepository([
+        completed_projection = StaticOAProjectionRepository([
             self._oa("oa-completed-unified", "张三", "80.00", workflow_status="completed"),
             self._oa("oa-completed-other-month", "李四", "90.00", workflow_status="completed", month="2026-04"),
         ])
+        builder._oa_projection_repository = completed_projection
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
 
@@ -2212,6 +2231,14 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         rows = read_repository.saved_oa["rows"]
         self.assertEqual(result["row_count"], 2)
         self.assertEqual([row["oa"]["id"] for row in rows], ["oa-completed-unified", "oa-pay-mongo-progress"])
+        self.assertEqual(completed_projection.list_month_calls, ["2026-05"])
+        self.assertEqual(completed_projection.list_all_calls, 0)
+        self.assertEqual(payment_repository.list_statuses_calls, 1)
+        self.assertEqual(payment_repository.get_payment_status_calls, 0)
+        self.assertEqual(
+            core_repository.invoice_page_calls,
+            [{"page": 1, "page_size": 500, "month": None, "invoice_type": InvoiceType.INPUT.value}],
+        )
         self.assertEqual(builder.list_oa_pending_payment_scope_shards("all"), ["2026-05", "2026-04"])
 
     def test_projection_builder_marks_empty_scopes_with_source_versions(self) -> None:

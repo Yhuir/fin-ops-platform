@@ -104,6 +104,7 @@ class BankBatchReadModelRefreshService:
             }
 
         relation_mode = self._relation_mode_for_event(event)
+        precheck_source_versions: dict[str, object] | None = None
         if _is_month_scope(scope_key):
             precheck_source_versions = self._application_service.read_model_scope_source_versions(
                 scope_key=scope_key,
@@ -128,8 +129,12 @@ class BankBatchReadModelRefreshService:
         )
         categories = self._application_service.effective_categories_for_rows(bank_rows)
         self._application_service.load_relation_source_versions_for_bank_rows(bank_rows)
-        source_versions = self._application_service.no_oa_bank_batch_source_versions(
-            relation_mode=relation_mode,
+        source_versions = (
+            dict(precheck_source_versions)
+            if isinstance(precheck_source_versions, dict) and precheck_source_versions
+            else self._application_service.no_oa_bank_batch_source_versions(
+                relation_mode=relation_mode,
+            )
         )
 
         active_relations = self._application_service.active_relations_for_bank_rows(bank_rows)

@@ -106,7 +106,7 @@ DEFAULT_PAGE_PATHS: tuple[str, ...] = (
     "/fin-ops/output-invoice-collections",
     "/fin-ops/tax-offset",
     "/fin-ops/cost-statistics",
-    "/fin-ops/no-oa-bank-batches",
+    "/fin-ops/bank-flow-rule-batches",
     "/fin-ops/batch-accounting",
     "/fin-ops/turnover-ledger",
     "/fin-ops/etc-tickets",
@@ -124,7 +124,7 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("background_jobs_active", "/api/background-jobs/active"),
     HttpProbe("operations_app_health_dashboard", "/api/operations/app-health-dashboard", auth_scope="admin"),
     HttpProbe("workbench_summary_all", "/api/workbench/summary?month=all", expected_statuses=(200, 202)),
-    HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50&detail_level=summary", expected_statuses=(200, 202)),
     HttpProbe("workbench_settings", "/api/workbench/settings", expected_statuses=(200, 202)),
     HttpProbe(
         "bank_details_accounts",
@@ -169,11 +169,11 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
         expected_statuses=(200, 202),
     ),
     HttpProbe(
-        "no_oa_bank_batches",
-        f"/api/no-oa-bank-batches?month={_current_month()}&bucket=unsubmitted&page=1&page_size=200",
+        "bank_flow_rule_batches",
+        f"/api/bank-flow-rule-batches?month={_current_month()}&bucket=unsubmitted&page=1&page_size=200",
         expected_statuses=(200, 202),
     ),
-    HttpProbe("no_oa_bank_batches_tag_selection", "/api/no-oa-bank-batches/tag-selection", expected_statuses=(200, 202)),
+    HttpProbe("bank_flow_rule_batches_tag_rules", "/api/bank-flow-rule-batches/tag-rules", expected_statuses=(200, 202)),
     HttpProbe(
         "batch_accounting",
         f"/api/batch-accounting?bank_year={_current_year()}&bucket=unsubmitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",

@@ -23,6 +23,8 @@ class WorkbenchRelationDerivedLifecycleExecutorTests(unittest.TestCase):
                 "metadata": {
                     "source": "unit-test",
                     "case_id": "CASE-1",
+                    "row_ids": ["oa-1", "bank-1"],
+                    "case_ids": ["CASE-1"],
                     "action_name": "confirm_link",
                     "downstream_scope_types": ["pending_invoice"],
                     "invoice_usage_scope_types": ["input_invoice_usage"],
@@ -41,6 +43,8 @@ class WorkbenchRelationDerivedLifecycleExecutorTests(unittest.TestCase):
                     "metadata": {
                         "source": "unit-test",
                         "case_id": "CASE-1",
+                        "row_ids": ["oa-1", "bank-1"],
+                        "case_ids": ["CASE-1"],
                         "action_name": "confirm_link",
                         "downstream_scope_types": ["pending_invoice"],
                         "invoice_usage_scope_types": ["input_invoice_usage"],

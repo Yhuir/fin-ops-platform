@@ -22,7 +22,7 @@ MONEY_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.000001")
 ZERO = Decimal("0.00")
 ZERO_RATE = Decimal("0.000000")
-TURNOVER_LEDGER_SCHEMA_VERSION = "2026-06-turnover-ledger-v2"
+TURNOVER_LEDGER_SCHEMA_VERSION = "2026-07-turnover-ledger-v3"
 TURNOVER_FAMILY_LABELS = {
     "personal": "个人往来",
     "company": "公司往来",
@@ -307,8 +307,10 @@ class TurnoverLedgerService:
         provider = self._category_provider
         if provider is not None and hasattr(provider, "bulk_get_for_rows"):
             raw_records = provider.bulk_get_for_rows(bank_rows)
+            use_legacy_manual_fallback = False
         else:
             raw_records = self._category_service.bulk_get(transaction_ids)
+            use_legacy_manual_fallback = True
         if not isinstance(raw_records, dict):
             raw_records = {}
         records = {
@@ -316,6 +318,8 @@ class TurnoverLedgerService:
             for transaction_id, record in raw_records.items()
             if isinstance(record, dict)
         }
+        if not use_legacy_manual_fallback:
+            return records
         for transaction_id in transaction_ids:
             record = records.get(transaction_id) or {}
             if record.get("category_code") in BANK_TRANSACTION_CATEGORY_DEFINITIONS:

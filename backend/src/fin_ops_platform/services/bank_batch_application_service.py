@@ -221,9 +221,18 @@ class BankBatchApplicationService:
                 }
             if summary_read_model_batches is not None and read_model_batches is not None:
                 self.load_relation_source_versions_for_scope_keys(refresh_scope_keys)
+                expected_source_versions = (
+                    self.read_model_scope_source_versions(
+                        scope_key=refresh_scope_keys[0],
+                        relation_mode=relation_mode,
+                    )
+                    if len(refresh_scope_keys) == 1 and SEARCH_MONTH_RE.match(refresh_scope_keys[0])
+                    else None
+                )
                 stale_reasons = self.no_oa_bank_batch_stale_reasons(
                     summary_read_model_batches + read_model_batches,
                     relation_mode=relation_mode,
+                    expected_source_versions=expected_source_versions,
                 )
                 summary_public_batches = self._public_batches(summary_read_model_batches)
                 read_model_public_batches = self._public_batches(read_model_batches)
@@ -1845,12 +1854,15 @@ class BankBatchApplicationService:
         batches: object,
         *,
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+        expected_source_versions: dict[str, object] | None = None,
     ) -> list[str]:
         batch_rows = batches if isinstance(batches, list) else []
         if not batch_rows:
             return []
         expected = require_expected_source_versions(
-            self.no_oa_bank_batch_source_versions(relation_mode=relation_mode),
+            expected_source_versions
+            if isinstance(expected_source_versions, dict) and expected_source_versions
+            else self.no_oa_bank_batch_source_versions(relation_mode=relation_mode),
             context=(
                 "bank_flow_rule_batch_read_model"
                 if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE

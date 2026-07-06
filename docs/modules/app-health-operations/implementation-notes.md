@@ -28,6 +28,26 @@
 
 ## 历史记录
 
+## 2026-07-05 - App Health SSE first-event heartbeat
+
+- 目标：让 `/api/app-health/stream` 的首事件在 1 秒 SLO 内稳定到达，避免 SSE smoke 把完整 AppHealth 大 JSON 传输耗时当作连接首事件耗时。
+- 影响范围：`Application._handle_api_app_health_stream(...)` 的事件顺序；不改变 `/api/app-health` payload、不改变前端 AppHealth 状态更新事件、不改变 operation barrier 或写安全判断。
+- 关键决策：SSE 建连后先发送小型 `heartbeat` 事件，再构建并发送完整 `app_health` snapshot。前端仍只监听 `app_health` 并据此更新状态；SSE probe 的 expected prefixes 已允许 `heartbeat`，因此该改动只优化首事件/保活，不降低运行状态事实要求。
+- 文档影响：同步本实施记录。
+- 测试覆盖：更新 `tests/test_app_health_api.py::AppHealthApiTests::test_app_health_stream_returns_sse_snapshot_and_heartbeat`，锁定首事件为 connected heartbeat，后续仍发送完整 app_health 和 heartbeat。
+- 验证命令：`python3 -m pytest tests/test_app_health_api.py::AppHealthApiTests::test_app_health_stream_returns_sse_snapshot_and_heartbeat tests/test_sse_smoke_probe.py -q`。
+- 未测风险：真实生产 Nginx/SSE 仍需发布后复跑 `sse_smoke_probe --target-ms 1000`；本地测试只证明事件顺序和 probe contract。
+
+## 2026-07-05 - App Health first-response hot path
+
+- 目标：压缩 `/api/app-health` 和 SSE first event 的首包耗时，避免运行状态页面自身成为慢操作。
+- 影响范围：`Application._build_app_health_snapshot(...)`、展示型 App Status runtime snapshot 读取、ETC 发票列表序列化、Operations dashboard freshness warning 聚合、`/health/ready` runtime summary 和 HTTP SLO probe 默认参数；不改变权限、审计、业务状态或 operation barrier。
+- 关键决策：`/api/app-health` 一次请求只构建一次 snapshot，alerts 评估后直接注入同一 payload；`_app_status_runtime_statuses()` 仅对展示型 app-health/oa-sync status 使用 1 秒 TTL，`/api/operation-barrier/status` 继续直读 runtime snapshot；ETC 列表页不逐行探测对象存储附件存在性，只根据已持久化路径给 `has_pdf/has_xml`；`/health/ready` 主动跳过 RabbitMQ Management API，防止可选管理接口拖慢 readiness；历史 optional worker warning 保留行级明细但不污染 dashboard 全局 freshness。
+- 文档影响：同步本实施记录和 `docs/operations/monitoring.md`。
+- 测试覆盖：`tests/test_app_health_api.py` 覆盖 snapshot 单次构建和 runtime snapshot 短缓存；`tests/test_etc_backend.py` 覆盖 ETC 列表序列化不探测对象存储；`tests/test_operations_dashboard_service.py` 覆盖 optional historical worker warning 不进入全局 freshness；`tests/test_postgres_state_store.py` 覆盖 ready health 跳过 RabbitMQ Management；`tests/test_http_slo_probe.py` 覆盖 workbench groups summary probe。
+- 验证命令：`python3 -m pytest tests/test_app_health_api.py::AppHealthApiTests::test_app_health_builds_snapshot_once_per_request tests/test_app_health_api.py::AppHealthApiTests::test_app_health_caches_runtime_snapshot_briefly -q`；`python3 -m pytest tests/test_etc_backend.py::EtcServiceTests::test_etc_invoice_list_serializer_does_not_probe_attachment_storage -q`；`python3 -m pytest tests/test_operations_dashboard_service.py::OperationsDashboardServiceTests::test_optional_historical_worker_warning_stays_row_level_only tests/test_postgres_state_store.py::PostgresStateStoreTests::test_ready_health_summary_uses_lightweight_runtime_summary tests/test_http_slo_probe.py::HttpSloProbeTests::test_default_probes_cover_page_domains_and_known_slow_endpoints -q`。
+- 未测风险：本地测试不证明公网 Nginx、真实 PostgreSQL 大库、真实 RabbitMQ Management 或 SSE 网络 p95；发布后仍需 authenticated HTTP/SSE SLO 和 `/health/ready` probe 复跑。
+
 ## 2026-06-30 - App Health 流水/发票/OA 导入统计模块化口径
 
 - 目标：在 AppHealth 运维状态主页面展示流水、手工发票、OA 解析和 OA 单据同步的每次导入数量，默认只展示最新 5 条，并通过右侧抽屉查看全量历史；同时把发票来源统计收敛为 `手工导入` 和 `OA 解析` 两类。

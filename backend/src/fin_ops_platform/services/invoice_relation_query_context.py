@@ -58,10 +58,12 @@ class DistributedInvoiceRelationContext:
 
     def bank_transactions_by_id(self) -> dict[str, BankTransaction]:
         if self._bank_transactions_by_id is None:
+            month = self._month_hint if self._month_hint and self._month_hint != "all" else "all"
             self._bank_transactions_by_id = {
                 transaction.id: transaction
-                for transaction in self._import_service.list_transactions(month="all")
+                for transaction in self._import_service.list_transactions(month=month)
             }
+        self._load_bank_transactions_from_loaded_relations()
         return self._bank_transactions_by_id
 
     def distributed_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
@@ -178,6 +180,26 @@ class DistributedInvoiceRelationContext:
         self._merge_distributed_result(result)
         for row_id in missing_ids:
             self._distributed_relations_by_row_id.setdefault(row_id, [])
+
+    def _load_bank_transactions_from_loaded_relations(self) -> None:
+        if self._bank_transactions_by_id is None:
+            return
+        missing_bank_ids: list[str] = []
+        seen: set[str] = set(self._bank_transactions_by_id)
+        for relations in self._distributed_relations_by_row_id.values():
+            for relation in relations:
+                for row_id, row_type in self.typed_relation_rows(relation):
+                    if row_type != "bank" or not row_id or row_id in seen:
+                        continue
+                    seen.add(row_id)
+                    missing_bank_ids.append(row_id)
+        for bank_id in missing_bank_ids:
+            try:
+                transaction = self._import_service.get_transaction(bank_id)
+            except KeyError:
+                continue
+            if isinstance(transaction, BankTransaction):
+                self._bank_transactions_by_id[transaction.id] = transaction
 
     def _assert_fresh_distribution(self, result: dict[str, Any]) -> None:
         if not self._require_fresh_relations:

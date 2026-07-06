@@ -12,7 +12,11 @@ from fin_ops_platform.services.pending_invoice_rules import (
     pending_invoice_group_for_category,
     pending_invoice_tag_group_sets,
 )
-from fin_ops_platform.services.pending_invoice_relation_identity import sanitize_pending_invoice_oa_summaries
+from fin_ops_platform.services.pending_invoice_relation_identity import (
+    infer_pending_invoice_relation_row_type,
+    is_valid_pending_invoice_oa_row_id,
+    sanitize_pending_invoice_oa_summaries,
+)
 from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
     pending_invoice_status_matches_filter,
@@ -22,7 +26,7 @@ from fin_ops_platform.services.pending_invoice_read_model_repository import Pend
 from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
 from fin_ops_platform.services.invoice_lifecycle_policy import INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
-from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload, text
+from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload, text, text_list
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
@@ -42,6 +46,7 @@ class SearchPendingSqlProjectionBuilder:
         pending_invoice_read_model_repository: Any | None = None,
         bank_transaction_tag_read_facade: Any | None = None,
         workbench_relation_read_facade: Any | None = None,
+        relation_rows_from_source: bool = False,
     ) -> None:
         self._connection = connection
         broad_read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
@@ -53,6 +58,7 @@ class SearchPendingSqlProjectionBuilder:
         )
         self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
         self._workbench_relation_read_facade = workbench_relation_read_facade
+        self._relation_rows_from_source = bool(relation_rows_from_source)
         self._pending_invoice_bank_tag_source_versions: dict[str, object] = {}
         self._pending_invoice_relation_source_versions: dict[str, object] = {}
 
@@ -74,6 +80,13 @@ class SearchPendingSqlProjectionBuilder:
         normalized_scope = str(scope_key or "").strip()
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("search SQL projection scope_key must be a month shard YYYY-MM.")
+        source_versions = self._search_source_versions()
+        unchanged = self._unchanged_search_scope_result(
+            scope_key=normalized_scope,
+            source_versions=source_versions,
+        )
+        if unchanged is not None:
+            return unchanged
         rows = self._search_rows_for_month(normalized_scope)
         source_versions = self._search_source_versions()
         self._search_read_model_repository.save_search_index_rows(
@@ -82,6 +95,29 @@ class SearchPendingSqlProjectionBuilder:
             source_versions=source_versions,
         )
         return {"scope_key": normalized_scope, "row_count": len(rows), "source_versions": source_versions}
+
+    def _unchanged_search_scope_result(
+        self,
+        *,
+        scope_key: str,
+        source_versions: dict[str, object],
+    ) -> dict[str, object] | None:
+        scope_summary_loader = getattr(self._search_read_model_repository, "search_index_scope_summary", None)
+        if not callable(scope_summary_loader):
+            return None
+        scope_summary = scope_summary_loader(month=scope_key)
+        if not isinstance(scope_summary, dict) or str(scope_summary.get("read_model_status") or "") != "fresh":
+            return None
+        existing_source_versions = scope_summary.get("source_versions")
+        if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
+            return None
+        return {
+            "scope_key": scope_key,
+            "row_count": max(int(scope_summary.get("row_count") or 0), 0),
+            "source_versions": source_versions,
+            "skipped": True,
+            "skip_reason": "source_versions_unchanged",
+        }
 
     def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_direction, normalized_filter, month = _parse_pending_invoice_scope_key(scope_key)
@@ -530,6 +566,8 @@ class SearchPendingSqlProjectionBuilder:
 
     def _workbench_relation_rows_by_transaction_id(self, *, row_ids: list[str], month: str) -> dict[str, dict[str, object]]:
         self._pending_invoice_relation_source_versions = {}
+        if self._relation_rows_from_source:
+            return self._workbench_relation_rows_by_transaction_id_from_source(row_ids=row_ids, month=month)
         facade = self._workbench_relation_read_facade
         if facade is None:
             return {}
@@ -556,6 +594,33 @@ class SearchPendingSqlProjectionBuilder:
             if isinstance(row, dict) and (row_id := str(row.get("row_id") or "").strip()) in transaction_ids
         }
 
+    def _workbench_relation_rows_by_transaction_id_from_source(
+        self,
+        *,
+        row_ids: list[str],
+        month: str,
+    ) -> dict[str, dict[str, object]]:
+        transaction_ids = _dedupe_preserve_order(text(row_id) for row_id in row_ids)
+        if not transaction_ids:
+            return {}
+        self._pending_invoice_relation_source_versions = self._workbench_relation_source_versions_from_source(
+            month=month,
+            row_ids=transaction_ids,
+        )
+        source_reader = getattr(self._read_model_repository, "list_active_workbench_relation_source_rows", None)
+        rows = (
+            source_reader(row_ids=transaction_ids)
+            if callable(source_reader)
+            else []
+        )
+        return _source_relation_contexts_by_transaction_id(rows, transaction_ids)
+
+    def _workbench_relation_source_versions_from_source(self, *, month: str, row_ids: list[str]) -> dict[str, object]:
+        summary_reader = getattr(self._read_model_repository, "workbench_relation_source_summary_from_source", None)
+        if not callable(summary_reader):
+            return {}
+        return dict(summary_reader(scope_key=month, row_ids=text_list(row_ids), include_row_ids=True))
+
     def _pending_invoice_source_versions(self) -> dict[str, object]:
         settings = _settings_payload(self._connection)
         pending_groups = settings.get("pending_invoice_tag_groups")
@@ -581,6 +646,156 @@ def _parse_pending_invoice_scope_key(scope_key: str) -> tuple[str, str, str | No
     month = parts[2] if len(parts) > 2 and parts[2] else ""
     normalized_month = month[:7] if MONTH_RE.match(month[:7]) else None
     return direction, filter_name, normalized_month
+
+
+def _source_relation_contexts_by_transaction_id(
+    rows: list[dict[str, object]],
+    transaction_ids: list[str],
+) -> dict[str, dict[str, object]]:
+    transaction_id_set = set(transaction_ids)
+    contexts: dict[str, dict[str, object]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        case_id = text(row.get("case_id"))
+        row_ids = text_list(row.get("row_ids"))
+        row_types = text_list(row.get("row_types"))
+        bank_ids = [row_id for row_id in row_ids if row_id in transaction_id_set]
+        if not bank_ids:
+            continue
+        relation_status = _source_relation_status(row)
+        linked_oa = _source_relation_oa_summaries(row_ids, row_types, case_id=case_id, relation_status=relation_status)
+        linked_bank_transactions = [
+            {
+                "id": row_id,
+                "relation_case_id": case_id,
+                "relation_status": relation_status,
+            }
+            for row_id in row_ids
+            if row_id in transaction_id_set
+        ]
+        linked_input_invoices, linked_output_invoices = _source_relation_invoice_summaries(
+            row_ids,
+            row_types,
+            case_id=case_id,
+            relation_status=relation_status,
+        )
+        for bank_id in bank_ids:
+            context = contexts.setdefault(
+                bank_id,
+                {
+                    "row_id": bank_id,
+                    "row_type": "bank_transaction",
+                    "relation_status": relation_status,
+                    "group_ids": [],
+                    "linked_oa": [],
+                    "linked_bank_transactions": [],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [],
+                },
+            )
+            _append_unique_text(context["group_ids"], case_id)
+            _extend_unique_dicts(context["linked_oa"], linked_oa, key="id")
+            _extend_unique_dicts(context["linked_bank_transactions"], linked_bank_transactions, key="id")
+            _extend_unique_dicts(context["linked_input_invoices"], linked_input_invoices, key="id")
+            _extend_unique_dicts(context["linked_output_invoices"], linked_output_invoices, key="id")
+    return contexts
+
+
+def _source_relation_oa_summaries(
+    row_ids: list[str],
+    row_types: list[str],
+    *,
+    case_id: str | None,
+    relation_status: str,
+) -> list[dict[str, object]]:
+    summaries: list[dict[str, object]] = []
+    for index, row_id in enumerate(row_ids):
+        row_type = _source_relation_row_type(row_ids, row_types, index)
+        if row_type != "oa" or not is_valid_pending_invoice_oa_row_id(row_id):
+            continue
+        summaries.append(
+            {
+                "id": row_id,
+                "detail_available": False,
+                "relation_case_id": case_id,
+                "relation_status": relation_status,
+                "relation_source": "workbench_pair_relations",
+            }
+        )
+    return summaries
+
+
+def _source_relation_invoice_summaries(
+    row_ids: list[str],
+    row_types: list[str],
+    *,
+    case_id: str | None,
+    relation_status: str,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    input_invoices: list[dict[str, object]] = []
+    output_invoices: list[dict[str, object]] = []
+    for index, row_id in enumerate(row_ids):
+        row_type = _source_relation_row_type(row_ids, row_types, index)
+        if row_type != "invoice":
+            continue
+        summary = {
+            "id": row_id,
+            "invoice_type": "output" if _source_invoice_row_id_is_output(row_id) else "input",
+            "relation_case_id": case_id,
+            "relation_status": relation_status,
+            "relation_source": "workbench_pair_relations",
+        }
+        if summary["invoice_type"] == "output":
+            output_invoices.append(summary)
+        else:
+            input_invoices.append(summary)
+    return input_invoices, output_invoices
+
+
+def _source_relation_row_type(row_ids: list[str], row_types: list[str], index: int) -> str:
+    if index < len(row_types) and row_types[index]:
+        row_type = row_types[index]
+        if row_type == "bank_transaction":
+            return "bank"
+        return row_type
+    return infer_pending_invoice_relation_row_type(row_ids[index] if index < len(row_ids) else "")
+
+
+def _source_invoice_row_id_is_output(row_id: str) -> bool:
+    normalized = str(row_id or "").strip().lower()
+    return normalized.startswith("output") or "output_invoice" in normalized or "销项" in normalized
+
+
+def _source_relation_status(row: dict[str, object]) -> str:
+    raw_status = text(row.get("relation_status") or row.get("status"))
+    if raw_status in {None, "", "active"}:
+        return "linked"
+    return raw_status
+
+
+def _append_unique_text(target: object, value: str | None) -> None:
+    if not isinstance(target, list):
+        return
+    normalized = text(value)
+    if normalized and normalized not in target:
+        target.append(normalized)
+
+
+def _extend_unique_dicts(target: object, values: list[dict[str, object]], *, key: str) -> None:
+    if not isinstance(target, list):
+        return
+    seen = {
+        text(item.get(key))
+        for item in target
+        if isinstance(item, dict) and text(item.get(key))
+    }
+    for value in values:
+        identity = text(value.get(key))
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        target.append(dict(value))
 
 
 def _relation_invoice_summaries(relation_context: dict[str, object], *, target_invoice_type: str) -> list[dict[str, object]]:

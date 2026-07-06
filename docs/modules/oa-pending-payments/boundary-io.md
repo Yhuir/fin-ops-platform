@@ -1,6 +1,6 @@
 # OA待付款核对模块边界与 I/O
 
-日期：2026-07-05
+日期：2026-07-06
 
 ## 模块化状态
 
@@ -46,7 +46,7 @@
 ## 持久化与投影
 
 - Read model：`oa_pending_payment`
-- Projection：`scoped_incremental`
+- Projection：`scoped_incremental`；月份 refresh 必须使用月份 OA projection、context 级事实索引复用、payment-admitted 准入边界、批量支付状态 map 和 admitted OA record cache，避免同一 refresh 重复全量读取 completed OA、进项发票、支付状态表或 OA source adapter。
 - Worker：`invoice-usage-collection`
 - Query owner：`OaPendingPaymentReadModelService`
 - Repository owner：`OaPendingPaymentReadModelRepositoryPort`

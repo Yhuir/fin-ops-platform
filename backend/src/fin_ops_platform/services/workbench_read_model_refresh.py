@@ -164,8 +164,8 @@ class WorkbenchReadModelRefreshService:
         if not callable(enqueue_aggregate) and not callable(enqueue_event):
             return None
         source_version = event.source_version or event.payload.get("source_version")
-        aggregate_priority = "low"
         aggregate_delay_seconds = _aggregate_delay_seconds_for(event)
+        aggregate_priority = _aggregate_priority_for(event, aggregate_delay_seconds)
         if callable(enqueue_aggregate):
             enqueue_aggregate(
                 tenant_id=event.tenant_id,
@@ -254,10 +254,33 @@ def _truthy(value: Any) -> bool:
 
 
 def _aggregate_delay_seconds_for(event: RuntimeQueueEvent) -> float:
+    if _is_workbench_relation_write_refresh(event):
+        return WORKBENCH_HOT_SHARD_AGGREGATE_DELAY_SECONDS
     priority = str(event.priority or "").strip().lower()
     if priority in {"urgent", "high"}:
         return WORKBENCH_HOT_SHARD_AGGREGATE_DELAY_SECONDS
     return WORKBENCH_SHARD_AGGREGATE_DELAY_SECONDS
+
+
+def _aggregate_priority_for(event: RuntimeQueueEvent, delay_seconds: float) -> str:
+    if delay_seconds <= 0:
+        priority = str(event.priority or "normal").strip().lower()
+        return priority if priority in {"urgent", "high"} else "high"
+    return "low"
+
+
+def _is_workbench_relation_write_refresh(event: RuntimeQueueEvent) -> bool:
+    reason = str(event.payload.get("reason") or "").strip()
+    if reason == "workbench_relation_changed":
+        return True
+    action_name = str(event.payload.get("action_name") or "").strip()
+    if action_name in {"confirm_link", "cancel_link", "withdraw_link"}:
+        return True
+    metadata = event.payload.get("metadata")
+    if isinstance(metadata, dict):
+        metadata_action = str(metadata.get("action_name") or "").strip()
+        return metadata_action in {"confirm_link", "cancel_link", "withdraw_link"}
+    return False
 
 
 def _normalized_parent_scope_keys(parent_scope_keys: list[Any]) -> list[str]:

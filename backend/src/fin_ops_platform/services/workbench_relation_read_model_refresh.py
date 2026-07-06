@@ -36,6 +36,19 @@ class WorkbenchRelationReadModelRefreshService:
             shard_result = self._enqueue_scope_shards(event, scope_key)
             if shard_result is not None:
                 return shard_result
+        row_ids = _event_text_list(event.payload, "row_ids")
+        if not row_ids:
+            metadata = event.payload.get("metadata")
+            row_ids = _event_text_list(metadata if isinstance(metadata, dict) else {}, "row_ids")
+        if row_ids:
+            rebuild_rows = getattr(self._projection_builder, "rebuild_workbench_relation_read_model_rows", None)
+            if callable(rebuild_rows):
+                result = rebuild_rows(scope_key, row_ids=row_ids)
+                payload = result if isinstance(result, dict) else {"scope_key": scope_key}
+                complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
+                if callable(complete_dirty_scope):
+                    complete_dirty_scope(tenant_id=event.tenant_id, scope_type=scope_type, scope_key=scope_key)
+                return payload
         rebuild = getattr(self._projection_builder, "rebuild_workbench_relation_read_model_scope", None)
         if not callable(rebuild):
             raise RuntimeError("Projection builder does not expose rebuild_workbench_relation_read_model_scope.")
@@ -65,3 +78,22 @@ class WorkbenchRelationReadModelRefreshService:
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type=WORKBENCH_RELATION_SCOPE_TYPE, scope_key=scope_key)
         return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
+
+
+def _event_text_list(payload: dict[str, Any], name: str) -> list[str]:
+    raw_value = payload.get(name) if isinstance(payload, dict) else None
+    if isinstance(raw_value, str):
+        raw_items: list[object] = [raw_value]
+    elif isinstance(raw_value, (list, tuple, set)):
+        raw_items = list(raw_value)
+    else:
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        normalized = str(item or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result

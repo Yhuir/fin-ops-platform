@@ -645,6 +645,8 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 refresh_metadata={
                     "source": "confirm_link",
                     "case_id": "CASE-1",
+                    "row_ids": ["oa-1", "txn-1"],
+                    "case_ids": ["CASE-1"],
                     "downstream_scope_types": ["bank_detail", "pending_invoice", "search"],
                     "invoice_usage_scope_types": ["input_invoice_usage"],
                     "pending_invoice_scope_keys": ["expense:all:2026-05"],
@@ -670,6 +672,8 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             {
                 "source": "confirm_link",
                 "case_id": "CASE-1",
+                "row_ids": ["oa-1", "txn-1"],
+                "case_ids": ["CASE-1"],
                 "action_name": "confirm_link",
                 "downstream_scope_types": ["bank_detail", "pending_invoice", "search"],
                 "invoice_usage_scope_types": ["input_invoice_usage"],
@@ -677,6 +681,54 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             },
         )
         self.assertEqual(writer.calls[4]["metadata"], writer.calls[0]["metadata"])
+
+    def test_withdraw_link_merges_handler_refresh_metadata_in_transactional_outbox(self) -> None:
+        writer = _RecordingDirtyOutboxWriter()
+        uow = self._new_uow(read_model_writer=writer)
+
+        def handler(ctx: object) -> dict[str, object]:
+            ctx.pair_relations.record("withdraw_relation", case_id="CASE-WITHDRAW")
+            return {
+                "case_id": "CASE-WITHDRAW",
+                "affected_scope_keys": ["2026-05"],
+                "refresh_metadata": {
+                    "case_id": "CASE-WITHDRAW",
+                    "row_ids": ["oa-1", "txn-1"],
+                    "downstream_scope_types": ["bank_detail", "search"],
+                },
+            }
+
+        result = self._run_uow(
+            uow,
+            _Command(
+                action_name="withdraw_link",
+                scope_keys=[],
+                refresh_metadata={"source": "withdraw_link"},
+            ),
+            handler,
+        )
+
+        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2", "event-3", "event-4"])
+        self.assertEqual(
+            [(call["scope_type"], call["scope_key"], call["reason"]) for call in writer.calls],
+            [
+                ("workbench", "2026-05", "workbench_relation_changed"),
+                ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
+                ("bank_detail", "2026-05", "workbench_relation_changed"),
+                ("search", "2026-05", "workbench_relation_changed"),
+            ],
+        )
+        self.assertEqual(
+            writer.calls[0]["metadata"],
+            {
+                "source": "withdraw_link",
+                "case_id": "CASE-WITHDRAW",
+                "row_ids": ["oa-1", "txn-1"],
+                "action_name": "withdraw_link",
+                "downstream_scope_types": ["bank_detail", "search"],
+            },
+        )
+        self.assertEqual(writer.calls[3]["metadata"], writer.calls[0]["metadata"])
 
     def test_confirm_link_relation_refresh_metadata_normalizes_cost_statistics_targets(self) -> None:
         writer = _RecordingDirtyOutboxWriter()

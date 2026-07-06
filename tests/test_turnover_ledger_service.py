@@ -50,6 +50,14 @@ class _EffectiveCategoryProviderStub:
         }
 
 
+class _FailingLegacyCategoryService:
+    def bulk_get(self, _transaction_ids: list[str]) -> dict[str, dict[str, object]]:
+        raise AssertionError("provider-backed turnover ledger must not bulk-read legacy category service")
+
+    def get(self, _transaction_id: str) -> dict[str, object]:
+        raise AssertionError("provider-backed turnover ledger must not per-row read legacy category service")
+
+
 class TurnoverLedgerServiceTests(unittest.TestCase):
     def _transaction(
         self,
@@ -557,6 +565,46 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(group["flow_rows"][0]["category_code"], "external_turnover")
         self.assertEqual(group["flow_rows"][0]["category_label"], "借出款")
         self.assertEqual(group["flow_rows"][0]["category_version"], 4)
+
+    def test_provider_backed_grouped_ledger_does_not_per_row_read_legacy_categories(self) -> None:
+        transaction = self._transaction(
+            "txn-provider-external-turnover",
+            direction=TransactionDirection.OUTFLOW,
+            amount="8000.00",
+            counterparty="云南路桥",
+            trade_time="2026-01-16 09:00:00",
+            summary="借出周转款",
+            remark="待收回",
+        )
+        ledger_service = TurnoverLedgerService(
+            import_service=_ImportServiceStub([transaction]),
+            category_service=_FailingLegacyCategoryService(),  # type: ignore[arg-type]
+            relation_service=TurnoverRelationService.from_snapshot(None),
+            category_provider=_EffectiveCategoryProviderStub(
+                {
+                    "txn-provider-external-turnover": {
+                        "category_code": "external_turnover",
+                        "category_label": "借出款",
+                        "category_primary_label": "外部往来款付款",
+                        "category_sub_label": "借出款",
+                        "category_third_label": "公司往来",
+                        "category_label_path": ["外部往来款付款", "借出款", "公司往来"],
+                        "category_path": ["外部往来款付款", "借出款", "公司往来"],
+                        "category_source": "read_model",
+                        "category_version": 4,
+                        "turnover_role": "external_turnover",
+                        "turnover_action_type": "pending_collection",
+                        "turnover_family": "company",
+                    }
+                }
+            ),
+            today_provider=lambda: date(2026, 1, 31),
+        )
+
+        payload = ledger_service.list_grouped_ledger(family="company")
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["groups"][0]["family"], "company")
 
     def test_grouped_ledger_keeps_unselected_same_counterparty_flows_after_manual_closure(self) -> None:
         transactions = [

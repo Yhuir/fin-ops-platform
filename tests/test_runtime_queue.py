@@ -220,6 +220,24 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "workbench_relation_changed")
         self.assertEqual(params[4], 3.0)
 
+    def test_workbench_all_aggregate_high_priority_coalesce_pulls_available_at_forward(self) -> None:
+        transaction = FakeTransaction(rows=[event_row(priority="high")])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        repository.enqueue_workbench_all_aggregate_refresh(
+            tenant_id="tenant-a",
+            parent_scope_keys=["2026-05"],
+            reason="workbench_relation_changed",
+            priority="high",
+            delay_seconds=0.0,
+        )
+
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("when excluded.priority in ('urgent', 'high')", normalized_sql)
+        self.assertIn("then least(job.outbox_events.available_at, excluded.available_at)", normalized_sql)
+        self.assertEqual(params[6], "high")
+
     def test_enqueue_inserts_runtime_event_fields_and_returns_event(self) -> None:
         available_at = datetime(2026, 5, 21, 12, 0, tzinfo=timezone.utc)
         transaction = FakeTransaction(rows=[event_row()])
@@ -581,10 +599,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("trace_id", normalized_outbox_sql)
         self.assertIn("schema_version", normalized_outbox_sql)
         self.assertIn("status = 'pending'", normalized_outbox_sql)
-        self.assertIn("payload = job.outbox_events.payload || excluded.payload", normalized_outbox_sql)
+        self.assertIn("jsonb_array_elements_text", normalized_outbox_sql)
+        self.assertIn("metadata,row_ids", normalized_outbox_sql)
+        self.assertIn("metadata,case_ids", normalized_outbox_sql)
         self.assertIn("clock_timestamp()", normalized_dirty_sql)
         self.assertIn("clock_timestamp()", normalized_outbox_sql)
         self.assertIn("available_at = least(job.outbox_events.available_at, excluded.available_at)", normalized_outbox_sql)
+        self.assertIn("created_at = clock_timestamp()", normalized_outbox_sql)
         self.assertEqual(
             outbox_params[6:10],
             (3, "high", "trace-read-model", {"scope_type": "workbench", "scope_key": "2026-05", "reason": "test", "source_version": 3}),
@@ -669,13 +690,13 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                     "scope_type": "workbench",
                     "scope_key": "2026-05",
                     "reason": "workbench_relation_changed",
-                    "metadata": {"action_name": "withdraw_link", "ignored": "not persisted"},
+                    "metadata": {"action_name": "withdraw_link", "row_ids": ["txn-1", "oa-1"], "ignored": "not persisted"},
                 },
                 {
                     "scope_type": "workbench_relation",
                     "scope_key": "2026-05",
                     "reason": "workbench_pair_relation_changed",
-                    "metadata": {"action_name": "withdraw_link"},
+                    "metadata": {"action_name": "withdraw_link", "row_ids": ["txn-1", "oa-1"]},
                 },
             ],
             priority="high",
@@ -692,13 +713,17 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("insert into job.read_model_dirty_scopes", normalized_sql)
         self.assertIn("insert into job.outbox_events", normalized_sql)
         self.assertIn("source_version = job.read_model_dirty_scopes.source_version + 1", normalized_sql)
-        self.assertIn("payload = job.outbox_events.payload || excluded.payload", normalized_sql)
+        self.assertIn("jsonb_array_elements_text", normalized_sql)
+        self.assertIn("metadata,row_ids", normalized_sql)
+        self.assertIn("metadata,case_ids", normalized_sql)
+        self.assertIn("when count(*) > 200 then '[]'::jsonb", normalized_sql)
         self.assertIn("clock_timestamp()", normalized_sql)
         self.assertIn("available_at = least(job.outbox_events.available_at, excluded.available_at)", normalized_sql)
+        self.assertIn("created_at = clock_timestamp()", normalized_sql)
         self.assertEqual(params[0:7], (0, "default", "workbench", "2026-05", "workbench_relation_changed", "high", "trace-batch"))
         first_payload = getattr(params[7], "obj", params[7])
         self.assertEqual(first_payload["action_name"], "withdraw_link")
-        self.assertEqual(first_payload["metadata"], {"action_name": "withdraw_link"})
+        self.assertEqual(first_payload["metadata"], {"action_name": "withdraw_link", "row_ids": ["txn-1", "oa-1"]})
         self.assertNotIn("ignored", first_payload["metadata"])
         self.assertEqual(params[8:10], ("workbench.read_model.refresh", "workbench.read_model.refresh:workbench:2026-05"))
 
@@ -743,7 +768,9 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("insert into job.read_model_dirty_scopes", normalized_dirty_sql)
         self.assertIn("source_version = job.read_model_dirty_scopes.source_version + 1", normalized_dirty_sql)
         self.assertIn("insert into job.outbox_events", normalized_outbox_sql)
-        self.assertIn("payload = job.outbox_events.payload || excluded.payload", normalized_outbox_sql)
+        self.assertIn("jsonb_array_elements_text", normalized_outbox_sql)
+        self.assertIn("metadata,row_ids", normalized_outbox_sql)
+        self.assertIn("metadata,case_ids", normalized_outbox_sql)
         self.assertIn("clock_timestamp()", normalized_dirty_sql)
         self.assertIn("clock_timestamp()", normalized_outbox_sql)
         self.assertEqual(
@@ -817,7 +844,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
         )
 
-    def test_enqueue_read_model_refresh_metadata_records_action_name_only(self) -> None:
+    def test_enqueue_read_model_refresh_metadata_records_safe_operation_fields_only(self) -> None:
         transaction = FakeTransaction(
             rows=[
                 {"source_version": 9},
@@ -832,7 +859,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                         "scope_type": "workbench",
                         "scope_key": "2026-05",
                         "reason": "confirm_link",
-                        "metadata": {"action_name": "confirm_relation"},
+                        "metadata": {"action_name": "confirm_relation", "row_ids": ["txn-1"], "case_ids": ["CASE-1"]},
                         "action_name": "confirm_relation",
                         "source_version": 9,
                     },
@@ -850,6 +877,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             reason="confirm_link",
             metadata={
                 "action_name": "confirm_relation",
+                "row_ids": ["txn-1", "txn-1", ""],
+                "case_ids": ["CASE-1"],
                 "actor_id": "finance-user",
                 "cookie": "secret",
                 "authorization": "Bearer secret",
@@ -862,7 +891,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             "scope_type": "workbench",
             "scope_key": "2026-05",
             "reason": "confirm_link",
-            "metadata": {"action_name": "confirm_relation"},
+            "metadata": {"action_name": "confirm_relation", "row_ids": ["txn-1"], "case_ids": ["CASE-1"]},
             "action_name": "confirm_relation",
         }
         self.assertEqual(dirty_params[4], expected_payload)

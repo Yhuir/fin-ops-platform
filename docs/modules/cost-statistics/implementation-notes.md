@@ -31,6 +31,16 @@
 
 ## 历史记录
 
+## 2026-07-05 - 父 scope rollup 热路径索引
+
+- 目标：降低写操作 fan-out 后 `cost_statistics:active:all` / `all:all` 父 scope 从月 shard 聚合的 I/O 成本，收敛生产 1 秒目标附近的长尾。
+- 影响范围：新增 migration `0092_cost_statistics_parent_rollup_hot_path.sql`，只给 `read_model.cost_statistics_rows` 增加父聚合读取索引；不改变成本归因、scope contract、read model payload、worker 事件、权限或审计。
+- 关键决策：父 scope 仍从已物化月 shard rows 聚合，不回读 Workbench all 或 live service。索引按真实过滤/排序口径覆盖 `project_scope`、`scope_month`、`trade_date desc nulls last`、`trade_time_text desc`、`transaction_id`、`row_key`，避免为该热点新增服务层分支。
+- 文档影响：本实施记录同步；模块边界仍保持 closed。
+- 测试覆盖：`tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_cost_statistics_parent_rollup_hot_path_index_is_declared` 和 migration 顺序 pinning。
+- 验证命令：`python3 -m pytest tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_expected_migration_files_are_present_and_ordered tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_cost_statistics_parent_rollup_hot_path_index_is_declared tests/test_postgres_test_utils.py::PostgresTestUtilsTests::test_discover_stage06_migrations_is_pinned_to_current_set -q`。
+- 未测风险：索引收益必须发布后用生产 write-operation cross-page audit、HTTP SLO 和必要时 `EXPLAIN (ANALYZE, BUFFERS)` 复核；本地测试只锁定 migration contract。
+
 ## 2026-07-05 - 成本统计模块化 Close：删除旧 fallback 和 live export 链路
 
 - 目标：关闭 `boundary-io.md` 中的 `partial` 状态，移除会污染 SQL read model/fresh gate 的旧代码逻辑。

@@ -209,6 +209,16 @@ install_deploy_control_helper() {
   install -m 0755 -o root -g root "$helper_src" "$DEPLOY_CONTROL_HELPER"
 }
 
+install_runtime_worker_helper() {
+  local src="$1"
+  local helper_src="$src/deploy/oa/bin/finops-ensure-runtime-workers.sh"
+  [[ -f "$helper_src" ]] || die "missing runtime worker helper in release: $helper_src"
+  if [[ -f "$ENSURE_RUNTIME_WORKERS_HELPER" ]] && cmp -s "$helper_src" "$ENSURE_RUNTIME_WORKERS_HELPER"; then
+    return 0
+  fi
+  install -m 0755 -o root -g root "$helper_src" "$ENSURE_RUNTIME_WORKERS_HELPER"
+}
+
 install_workbench_generation_retention() {
   local src="$1"
   local helper_src service_src timer_src timer_unit
@@ -490,10 +500,12 @@ case "$cmd" in
   self-update)
     src="$(release_src "${2:-}")"
     install_deploy_control_helper "$src"
+    install_runtime_worker_helper "$src"
     ;;
   activate)
     src="$(release_src "${2:-}")"
     install_deploy_control_helper "$src"
+    install_runtime_worker_helper "$src"
     assert_runtime_env_contract
     sync_python_envs "$src"
     run_schema_migrations "$src"

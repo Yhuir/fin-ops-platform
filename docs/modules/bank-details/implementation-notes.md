@@ -421,6 +421,13 @@
 - 未测风险：本地未写生产；真实生产仍需备份、应用恢复、刷新 `bank_detail`/`turnover_ledger`/`workbench_relation`/`workbench` read models 后，验证目标三笔流水在关联台 open 区形成 active bank-only 关系组。
 - 后续事项：生产写入前必须输出写入 key/table、版本变化、回滚方案、refresh scope 和验收 SQL/API/UI 步骤，并取得明确授权。
 
+## 2026-07-06 - bank detail relation source fast path
+
+- 目标：消除 Workbench relation 写后银行明细关系标签投影等待 `workbench_relation` 分发 read model 的尾延迟。
+- 决策：`bank-detail` SQL projection 通过 workbench-relations repository port 读取 active relation source rows/source summary，用于关系标签和 source-version proof；SQL owner 仍在 workbench-relations repository，银行明细模块不直接读 relation 表。
+- 边界：页面读取仍由 `BankDetailsApplicationService` / `bank_detail` read model fresh gate 控制；源端快路径只服务 worker 投影，不用于 relation 写前事实或 raw Workbench payload fallback。
+- 本地保护：`tests/test_bank_details_sql_runtime.py::BankDetailSqlProjectionBuilderTests::test_relation_tags_source_fast_path_does_not_wait_for_relation_read_model`。
+
 ## 2026-06-14 - Bank detail stale source guard
 
 - 目标：修复真实关联台 confirm/withdraw 连续写入时，旧 `bank_detail` source_version 事件仍完整 rebuild，导致新版本 bank detail 和下游 pending invoice 写后 SLO 超过 5s。

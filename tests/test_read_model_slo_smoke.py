@@ -83,6 +83,7 @@ class FakeConnection:
             {"scope_key": "2026-01", "row_count": 10, "updated_at": "2026-06-13 10:04:00+08"},
         ]
         self.event_created_at = datetime(2026, 6, 13, 10, 0, 0, tzinfo=timezone.utc)
+        self.event_available_at = self.event_created_at
         self.event_processed_at = self.event_created_at + timedelta(seconds=3)
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
@@ -107,6 +108,7 @@ class FakeConnection:
                 "status": "done",
                 "source_version": 4,
                 "created_at": self.event_created_at,
+                "available_at": self.event_available_at,
                 "processed_at": self.event_processed_at,
                 "raw_payload": {"runtime_result": {"duration_ms": 500}},
             }
@@ -163,6 +165,7 @@ class PendingThenFreshConnection(FakeConnection):
                     "status": "pending",
                     "source_version": 8,
                     "created_at": self.event_created_at,
+                    "available_at": self.event_created_at,
                     "processed_at": None,
                     "raw_payload": {},
                     "last_error": None,
@@ -176,6 +179,7 @@ class PendingThenFreshConnection(FakeConnection):
                 "status": "done",
                 "source_version": 8,
                 "created_at": self.event_created_at,
+                "available_at": self.event_created_at,
                 "processed_at": self.event_processed_at,
                 "raw_payload": {"runtime_result": {"duration_ms": 620}},
                 "last_error": None,
@@ -220,6 +224,7 @@ class DirtyDoneWithoutReadinessConnection(FakeConnection):
                 "status": "done",
                 "source_version": 9,
                 "created_at": self.event_created_at,
+                "available_at": self.event_created_at,
                 "processed_at": self.event_processed_at,
                 "raw_payload": {"runtime_result": {"duration_ms": 27}},
                 "last_error": None,
@@ -259,6 +264,8 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertIn("workbench", planned_keys)
         self.assertIn("turnover_ledger", planned_keys)
         self.assertIn("bank_account_balance", planned_keys)
+        self.assertIn("bank_flow_rule_batch", planned_keys)
+        self.assertNotIn("no_oa_bank_batch", planned_keys)
 
     def test_critical_only_plans_every_critical_app_status_read_model(self) -> None:
         report = read_model_slo_smoke.run_smoke(
@@ -355,6 +362,23 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(report["summary"]["enqueue_to_fresh_ms"]["p95"], 3000.0)
         self.assertEqual(report["summary"]["enqueue_to_fresh_ms"]["p99"], 3000.0)
         self.assertEqual(report["summary"]["handler_duration_ms"]["p95"], 500.0)
+
+    def test_apply_measures_enqueue_to_fresh_from_available_at(self) -> None:
+        connection = FakeConnection()
+        connection.event_available_at = connection.event_created_at + timedelta(seconds=2)
+        connection.event_processed_at = connection.event_created_at + timedelta(seconds=3)
+        with patch.object(read_model_slo_smoke, "RuntimeQueueRepository", FakeQueueRepository):
+            report = read_model_slo_smoke.run_smoke(
+                connection,
+                apply=True,
+                read_model_keys=["bank_detail"],
+                scope_overrides={"bank_detail": "2026-01"},
+                target_ms=1_500,
+                poll_interval_seconds=0.1,
+            )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["results"][0]["enqueue_to_fresh_ms"], 1000.0)
 
     def test_apply_fails_when_no_smoke_scopes_are_discovered(self) -> None:
         with patch.dict(read_model_slo_smoke.APP_STATUS_READ_MODEL_REGISTRY, {}, clear=True):

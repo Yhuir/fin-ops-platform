@@ -142,6 +142,7 @@ class OaPendingPaymentQueryService:
         parsed_filters = self._parse_filters(filters)
         normalized_sort_field, normalized_sort_direction = self._parse_sort(sort_field, sort_direction)
         context = self._query_context(month_hint=month)
+        payment_statuses_by_flow_id = self._payment_statuses_by_flow_id()
         rows = self._filtered_sorted_rows(
             context=context,
             keyword=keyword,
@@ -152,6 +153,7 @@ class OaPendingPaymentQueryService:
             sort_field=normalized_sort_field,
             sort_direction=normalized_sort_direction,
             view_mode=normalized_view_mode,
+            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
         )
         view_counts = self._view_counts(
             context=context,
@@ -160,6 +162,7 @@ class OaPendingPaymentQueryService:
             trade_date_from=trade_date_from,
             trade_date_to=trade_date_to,
             filters=parsed_filters,
+            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
         )
         total = len(rows)
         paged_rows = rows[(page_number - 1) * page_limit : page_number * page_limit]
@@ -191,6 +194,7 @@ class OaPendingPaymentQueryService:
     ) -> dict[str, Any]:
         normalized_view_mode = self._parse_view_mode(view_mode)
         parsed_filters = self._parse_filters(filters)
+        payment_statuses_by_flow_id = self._payment_statuses_by_flow_id()
         rows = self._filtered_sorted_rows(
             context=self._query_context(),
             keyword=keyword,
@@ -201,6 +205,7 @@ class OaPendingPaymentQueryService:
             sort_field="bank_trade_time",
             sort_direction="desc",
             view_mode=normalized_view_mode,
+            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
         )
         return self.filter_options_for_rows(
             rows=rows,
@@ -419,8 +424,14 @@ class OaPendingPaymentQueryService:
         sort_field: str,
         sort_direction: str,
         view_mode: str = VIEW_MODE_COMPLETED,
+        payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        rows = self._build_rows(month=month, context=context, view_mode=view_mode)
+        rows = self._build_rows(
+            month=month,
+            context=context,
+            view_mode=view_mode,
+            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+        )
         rows = [row for row in rows if self._row_matches_trade_date(row, date_from=trade_date_from, date_to=trade_date_to)]
         if keyword:
             needle = str(keyword).strip().lower()
@@ -438,6 +449,7 @@ class OaPendingPaymentQueryService:
         trade_date_from: str | None,
         trade_date_to: str | None,
         filters: list[dict[str, Any]],
+        payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> dict[str, int]:
         counts: dict[str, int] = {}
         for view_mode in (VIEW_MODE_COMPLETED, VIEW_MODE_IN_PROGRESS):
@@ -451,6 +463,7 @@ class OaPendingPaymentQueryService:
                 sort_field="bank_trade_time",
                 sort_direction="desc",
                 view_mode=view_mode,
+                payment_statuses_by_flow_id=payment_statuses_by_flow_id,
             )
             counts[view_mode] = len(rows)
         return counts
@@ -461,8 +474,13 @@ class OaPendingPaymentQueryService:
         month: str | None,
         context: DistributedInvoiceRelationContext,
         view_mode: str = VIEW_MODE_COMPLETED,
+        payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        records = self._oa_records(month=month, view_mode=view_mode)
+        records = self._oa_records(
+            month=month,
+            view_mode=view_mode,
+            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+        )
         record_ids = [record.id for record in records]
         context.preload_relation_rows(record_ids)
         context.preload_oa_records_from_relations(record_ids)
@@ -471,7 +489,7 @@ class OaPendingPaymentQueryService:
             context.preload_oa_records_from_relations(record_ids)
         oa_by_id = {record.id: record for record in records}
         bank_by_id = context.bank_transactions_by_id()
-        invoices_by_id = self._input_invoices_by_id()
+        invoices_by_id = self._input_invoices_by_id(context=context)
         rows = []
         emitted_relation_ids: set[str] = set()
         grouped_oa_ids: set[str] = set()
@@ -489,6 +507,7 @@ class OaPendingPaymentQueryService:
                     records=relation_records,
                     bank_by_id=bank_by_id,
                     invoices_by_id=invoices_by_id,
+                    payment_statuses_by_flow_id=payment_statuses_by_flow_id,
                 )
                 rows.append(row)
                 emitted_relation_ids.add(relation_id)
@@ -502,6 +521,7 @@ class OaPendingPaymentQueryService:
                     context=context,
                     bank_by_id=bank_by_id,
                     invoices_by_id=invoices_by_id,
+                    payment_statuses_by_flow_id=payment_statuses_by_flow_id,
                 )
             )
         return rows
@@ -519,6 +539,7 @@ class OaPendingPaymentQueryService:
         context: DistributedInvoiceRelationContext,
         bank_by_id: dict[str, BankTransaction],
         invoices_by_id: dict[str, Invoice],
+        payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         relations = context.distributed_relations_for_row_ids([record.id])
         bank_payload = self._bank_relation_payload(record, relations=relations, bank_by_id=bank_by_id)
@@ -528,7 +549,11 @@ class OaPendingPaymentQueryService:
             "id": _row_id(record.id),
             "oa": self._oa_summary(record),
             "paymentStatus": payment_status,
-            "oaPaymentWriteback": self._oa_payment_writeback_status([record], payment_status),
+            "oaPaymentWriteback": self._oa_payment_writeback_status(
+                [record],
+                payment_status,
+                payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+            ),
             "bankTransaction": bank_payload,
             "invoice": invoice_payload,
         }
@@ -542,6 +567,7 @@ class OaPendingPaymentQueryService:
         records: list[OAApplicationRecord],
         bank_by_id: dict[str, BankTransaction],
         invoices_by_id: dict[str, Invoice],
+        payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         oa_payload = self._oa_group_payload(records, relation)
         oa_amount = _parse_decimal(oa_payload.get("amount")) or ZERO
@@ -553,7 +579,11 @@ class OaPendingPaymentQueryService:
             "id": _relation_row_id(_relation_row_identity(relation)),
             "oa": oa_payload,
             "paymentStatus": payment_status,
-            "oaPaymentWriteback": self._oa_payment_writeback_status(records, payment_status),
+            "oaPaymentWriteback": self._oa_payment_writeback_status(
+                records,
+                payment_status,
+                payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+            ),
             "bankTransaction": bank_payload,
             "invoice": invoice_payload,
         }
@@ -660,6 +690,8 @@ class OaPendingPaymentQueryService:
         self,
         records: list[OAApplicationRecord],
         payment_status: dict[str, str],
+        *,
+        payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if str(payment_status.get("code") or "") != "paid":
             return _oa_writeback_status("not_written", sync_status="not_required")
@@ -672,7 +704,10 @@ class OaPendingPaymentQueryService:
                 if not flow_id:
                     return _oa_writeback_status("not_written", sync_status="flow_id_missing")
                 flow_ids.append(flow_id)
-                status_record = self._payment_status_repository.get_payment_status(flow_id)
+                if payment_statuses_by_flow_id is not None:
+                    status_record = payment_statuses_by_flow_id.get(flow_id)
+                else:
+                    status_record = self._payment_status_repository.get_payment_status(flow_id)
                 if status_record is None or status_record.pay_status != PAY_STATUS_PAID:
                     return _oa_writeback_status("not_written", flow_ids=flow_ids, sync_status="ready")
         except OAPaymentStatusError:
@@ -684,8 +719,15 @@ class OaPendingPaymentQueryService:
         *,
         month: str | None,
         view_mode: str = VIEW_MODE_COMPLETED,
+        payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> list[OAApplicationRecord]:
-        records = list(self._oa_records_by_id(month=month, view_mode=view_mode).values())
+        records = list(
+            self._oa_records_by_id(
+                month=month,
+                view_mode=view_mode,
+                payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+            ).values()
+        )
         normalized_month = str(month or "").strip()
         if normalized_month and normalized_month != "all":
             records = [record for record in records if str(record.month or "").startswith(normalized_month[:7])]
@@ -698,18 +740,24 @@ class OaPendingPaymentQueryService:
         *,
         month: str | None,
         view_mode: str = VIEW_MODE_COMPLETED,
+        payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> dict[str, OAApplicationRecord]:
         projection = self._projection_for_view_mode(view_mode)
         if projection is None:
             return {}
-        list_all = getattr(projection, "list_all_application_records", None)
-        if callable(list_all):
-            records = list_all()
+        normalized_month = str(month or "").strip()
+        list_month = getattr(projection, "list_application_records", None)
+        if normalized_month and normalized_month != "all" and callable(list_month):
+            records = list_month(normalized_month)
         else:
-            records = []
+            list_all = getattr(projection, "list_all_application_records", None)
+            records = list_all() if callable(list_all) else []
         records = [record for record in records if isinstance(record, OAApplicationRecord)]
-        if view_mode == VIEW_MODE_IN_PROGRESS:
-            records = self._filter_records_by_payment_status_admission(records)
+        if view_mode == VIEW_MODE_IN_PROGRESS and not bool(getattr(projection, "payment_admission_filtered", False)):
+            records = self._filter_records_by_payment_status_admission(
+                records,
+                payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+            )
         return {record.id: record for record in records if isinstance(record, OAApplicationRecord)}
 
     def _all_view_oa_records_by_id(self, *, month: str | None) -> dict[str, OAApplicationRecord]:
@@ -726,16 +774,20 @@ class OaPendingPaymentQueryService:
     def _filter_records_by_payment_status_admission(
         self,
         records: list[OAApplicationRecord],
+        *,
+        payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> list[OAApplicationRecord]:
         if self._payment_status_repository is None:
             return records
-        list_statuses = getattr(self._payment_status_repository, "list_payment_statuses", None)
-        if not callable(list_statuses):
-            return records
-        try:
-            payment_statuses = list_statuses()
-        except OAPaymentStatusError:
-            return []
+        payment_statuses = payment_statuses_by_flow_id
+        if payment_statuses is None:
+            list_statuses = getattr(self._payment_status_repository, "list_payment_statuses", None)
+            if not callable(list_statuses):
+                return records
+            try:
+                payment_statuses = list_statuses()
+            except OAPaymentStatusError:
+                return []
         if not isinstance(payment_statuses, dict):
             return []
         admitted_flow_ids = {
@@ -755,10 +807,27 @@ class OaPendingPaymentQueryService:
                 admitted_records.append(record)
         return admitted_records
 
-    def _input_invoices_by_id(self) -> dict[str, Invoice]:
+    def _payment_statuses_by_flow_id(self) -> dict[str, Any] | None:
+        repository = self._payment_status_repository
+        if repository is None:
+            return None
+        list_statuses = getattr(repository, "list_payment_statuses", None)
+        if not callable(list_statuses):
+            return None
+        try:
+            payment_statuses = list_statuses()
+        except OAPaymentStatusError:
+            return None
+        return dict(payment_statuses) if isinstance(payment_statuses, dict) else None
+
+    def _input_invoices_by_id(self, *, context: DistributedInvoiceRelationContext | None = None) -> dict[str, Invoice]:
+        if context is not None:
+            invoices = context.list_invoices(month="all", invoice_type=InvoiceType.INPUT)
+        else:
+            invoices = self._import_service.list_invoices(month="all", invoice_type=InvoiceType.INPUT)
         return {
             invoice.id: invoice
-            for invoice in self._import_service.list_invoices(month="all", invoice_type=InvoiceType.INPUT)
+            for invoice in invoices
         }
 
     @staticmethod

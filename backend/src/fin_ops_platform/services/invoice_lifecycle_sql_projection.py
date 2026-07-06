@@ -370,7 +370,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
         }
         if self._workbench_relation_read_facade.last_source_versions:
             source_versions["workbench_relation_source_versions"] = self._workbench_relation_read_facade.last_source_versions
-        source_versions.update(self._read_model_dependency_source_versions)
+        source_versions.update(_without_runtime_source_version(self._read_model_dependency_source_versions))
         return source_versions
 
     def _dependency_source_versions_for_scope(self, month: str) -> dict[str, object]:
@@ -586,3 +586,15 @@ class InvoiceLifecycleSqlProjectionBuilder:
 
 def _status_code(status: dict[str, Any]) -> str:
     return str(status.get("code") or "unknown").strip() or "unknown"
+
+
+def _without_runtime_source_version(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            str(key): _without_runtime_source_version(item)
+            for key, item in value.items()
+            if str(key) != "source_version"
+        }
+    if isinstance(value, list):
+        return [_without_runtime_source_version(item) for item in value]
+    return value

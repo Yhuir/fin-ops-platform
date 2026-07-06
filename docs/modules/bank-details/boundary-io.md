@@ -33,6 +33,7 @@
 | 标签/分类写操作 | route/service | 通过 write UoW 触发受影响 month scope |
 | 自动标签规则保存/重跑 | `BankDetailsApplicationService` | 返回 `bank_detail` operation barrier targets；无明确范围时按现有月份 fan-out，不把 `all` 当作页面 fresh 结果 |
 | 关系标签投影 | `BankDetailsRelationTagProjectionService` -> `WorkbenchRelationReadFacade.get_by_row_ids(...)` | 只允许按银行流水 row id 读取 relation distribution；可作为展示标签降级读，但不得作为写前事实源、freshness proof 或 raw Workbench payload fallback |
+| Worker 关系源端快路径 | `WorkbenchRelationReadModelRepositoryPort` | `bank-detail` SQL projection 可通过 `list_active_workbench_relation_source_rows(...)` / `workbench_relation_source_summary_from_source(...)` 读取 active relation source summary，用于关系标签投影和 source-version proof；SQL owner 仍归 workbench-relations repository，下游不得直接读 relation 表，也不得用该快路径做 relation 写前判断 |
 | 可用月份 scope 枚举 | `BankDetailAvailableMonthScopeProvider` | PostgreSQL read-model runtime 下只从 `BankDetailReadModelRepositoryPort.bank_detail_scope_keys_for_range(...)` 读取 scope；只有非 SQL/local runtime 才允许回退导入服务扫描，生产/API 页面读不得使用导入扫描证明 fresh |
 | 自动分类候选推断 | `BankDetailAutoCategorySuggestionProvider` | 作为显式 provider 注入 `BankDetailsApplicationService`；应用服务本身不直接读取 import service 或 `BankDetailsService.auto_category_input_row(...)` |
 | Refresh scope | `bank_detail` manifest | month or `all`；`all` 只允许 fan-out 到 month shards |
@@ -90,6 +91,7 @@
 - 已删除旧宽依赖：`BankDetailsApplicationService` 构造函数不再接收 `import_service`、`bank_details_service` 或 `requires_sql_read_model_runtime`；候选推断和标签字典分别通过显式 provider 注入。
 - 已删除旧 scope 兼容：`Application._turnover_bank_transaction_rows_from_sql_read_model(...)` 不再动态读取 `_bank_detail_available_month_scope_keys`，统一通过 `BankDetailAvailableMonthScopeProvider.scope_keys()`。
 - 不得删除自动规则 response envelope、前端 unknown-status fail-closed 断言、非 fresh 导出保护和 relation distribution guard。
+- 不得删除 worker 关系源端快路径的 repository-port 边界；若恢复为等待 `workbench_relation` read model 分发，Workbench 写后银行明细关系标签会重新受 relation worker 尾延迟影响。
 
 ## Canonical facts ownership
 

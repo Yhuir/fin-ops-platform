@@ -64,6 +64,15 @@ class TurnoverLedgerSqlProjectionBuilder:
         )
         if unchanged is not None:
             return unchanged
+        refreshed_existing = self._refresh_existing_scope_rows(
+            read_repository=read_repository,
+            workbench_relation_read_facade=workbench_relation_read_facade,
+            scope_key=normalized_scope_key,
+            source_versions=source_versions,
+            source_version=source_version,
+        )
+        if refreshed_existing is not None:
+            return refreshed_existing
         rows = self._collect_rows(ledger_service)
         if normalized_scope_key != "all":
             rows = [row for row in rows if self._row_scope_key(row) == normalized_scope_key]
@@ -104,6 +113,8 @@ class TurnoverLedgerSqlProjectionBuilder:
         if not isinstance(existing_source_versions, dict):
             return None
         current_source_versions = dict(source_versions)
+        if any(existing_source_versions.get(key) != value for key, value in current_source_versions.items()):
+            return None
         rows = [dict(row) for row in list(payload.get("rows") or []) if isinstance(row, dict)]
         if workbench_relation_read_facade is not None:
             row_ids = _dedupe_preserve_order(row_id for row in rows for row_id in cls._bank_row_ids(row))
@@ -133,6 +144,79 @@ class TurnoverLedgerSqlProjectionBuilder:
             "skipped": True,
             "skip_reason": "source_versions_unchanged",
         }
+
+    @classmethod
+    def _refresh_existing_scope_rows(
+        cls,
+        *,
+        read_repository: Any,
+        workbench_relation_read_facade: Any | None,
+        scope_key: str,
+        source_versions: dict[str, Any],
+        source_version: object,
+    ) -> dict[str, Any] | None:
+        rows, existing_source_versions = cls._existing_scope_rows(
+            read_repository=read_repository,
+            scope_key=scope_key,
+        )
+        if not rows or not isinstance(existing_source_versions, dict):
+            return None
+        if any(existing_source_versions.get(key) != value for key, value in source_versions.items()):
+            return None
+        refreshed_source_versions = dict(source_versions)
+        rows = cls._with_workbench_relation_context(
+            rows,
+            workbench_relation_read_facade=workbench_relation_read_facade,
+            source_versions=refreshed_source_versions,
+        )
+        rows = [{**row, "source_versions": refreshed_source_versions} for row in rows]
+        save_rows = getattr(read_repository, "save_turnover_ledger_rows", None)
+        if not callable(save_rows):
+            return None
+        save_rows(
+            {
+                "scope_key": scope_key,
+                "rows": rows,
+                "source_versions": refreshed_source_versions,
+                "source_version": source_version,
+            },
+            scope_key=scope_key,
+        )
+        return {
+            "scope_key": scope_key,
+            "row_count": len(rows),
+            "source_version": source_version,
+            "source_versions": refreshed_source_versions,
+            "refreshed_from_existing_scope": True,
+        }
+
+    @staticmethod
+    def _existing_scope_rows(
+        *,
+        read_repository: Any,
+        scope_key: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        list_view = getattr(read_repository, "list_turnover_ledger_view", None)
+        if not callable(list_view):
+            return [], None
+        page = 1
+        page_size = 200
+        rows: list[dict[str, Any]] = []
+        source_versions: dict[str, Any] | None = None
+        while True:
+            payload = list_view(scope_key=scope_key, page=page, page_size=page_size)
+            if not isinstance(payload, dict):
+                return [], None
+            if source_versions is None and isinstance(payload.get("source_versions"), dict):
+                source_versions = dict(payload["source_versions"])
+            page_rows = [dict(row) for row in list(payload.get("rows") or []) if isinstance(row, dict)]
+            rows.extend(page_rows)
+            pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+            total = int(pagination.get("total") or len(rows))
+            if len(rows) >= total or not page_rows:
+                break
+            page += 1
+        return rows, source_versions
 
     @staticmethod
     def _collect_rows(ledger_service: TurnoverLedgerService) -> list[dict[str, Any]]:

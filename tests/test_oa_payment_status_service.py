@@ -92,6 +92,40 @@ class OAPaymentStatusServiceTests(unittest.TestCase):
         self.assertEqual([record.id for record in records], ["oa-pay-flow-admitted"])
         self.assertEqual(source.row_id_calls, [["oa-pay-flow-admitted", "oa-exp-flow-admitted"]])
 
+    def test_payment_admitted_projection_can_reuse_payment_statuses_provider(self) -> None:
+        source = StaticOASource([
+            _oa_record("oa-pay-flow-admitted"),
+            _oa_record("oa-pay-flow-duplicate"),
+        ])
+        payment_repository = FailingListPaymentStatusRepository(admitted_flow_ids=set())
+        projection = PaymentAdmittedOAProjectionAdapter(
+            source_adapter=source,
+            payment_status_repository=payment_repository,
+            payment_statuses_provider=lambda: {
+                "flow-admitted": OAPaymentStatusRecord(flow_id="flow-admitted", pay_status=PAY_STATUS_PENDING),
+            },
+        )
+
+        records = projection.list_all_application_records()
+
+        self.assertEqual([record.id for record in records], ["oa-pay-flow-admitted"])
+        self.assertEqual(source.row_id_calls, [["oa-pay-flow-admitted", "oa-exp-flow-admitted"]])
+
+    def test_payment_admitted_projection_reuses_loaded_records_for_row_id_lookup(self) -> None:
+        source = StaticOASource([
+            _oa_record("oa-pay-flow-admitted"),
+            _oa_record("oa-pay-flow-extra"),
+        ])
+        payment_repository = StaticPaymentStatusRepository(admitted_flow_ids={"flow-admitted", "flow-extra"})
+        projection = PaymentAdmittedOAProjectionAdapter(
+            source_adapter=source,
+            payment_status_repository=payment_repository,
+        )
+
+        self.assertEqual([record.id for record in projection.list_all_application_records()], ["oa-pay-flow-admitted", "oa-pay-flow-extra"])
+        self.assertEqual([record.id for record in projection.list_application_records_by_row_ids(["oa-pay-flow-admitted"])], ["oa-pay-flow-admitted"])
+        self.assertEqual(source.row_id_calls, [["oa-pay-flow-admitted", "oa-exp-flow-admitted", "oa-pay-flow-extra", "oa-exp-flow-extra"]])
+
     def test_payment_admitted_projection_returns_empty_when_status_repository_is_missing(self) -> None:
         source = StaticOASource([_oa_record("oa-pay-flow-admitted")])
         projection = PaymentAdmittedOAProjectionAdapter(
@@ -294,6 +328,11 @@ class StaticPaymentStatusRepository:
 
     def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord:
         return OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PAID)
+
+
+class FailingListPaymentStatusRepository(StaticPaymentStatusRepository):
+    def list_payment_statuses(self) -> dict[str, OAPaymentStatusRecord]:
+        raise AssertionError("payment statuses provider should avoid repository list read")
 
 
 def _settings() -> OAPaymentStatusSettings:

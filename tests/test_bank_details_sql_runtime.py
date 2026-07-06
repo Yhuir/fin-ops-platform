@@ -27,12 +27,16 @@ class FakeConnection:
         dirty_scope_rows: list[dict[str, object]] | None = None,
         category_rows: list[dict[str, object]] | None = None,
         confirmation_rows: list[dict[str, object]] | None = None,
+        relation_rows: list[dict[str, object]] | None = None,
+        relation_source_row: dict[str, object] | None = None,
     ) -> None:
         self.rows = list(rows or [])
         self.app_settings_payload = app_settings_payload
         self.dirty_scope_rows = list(dirty_scope_rows or [])
         self.category_rows = list(category_rows or [])
         self.confirmation_rows = list(confirmation_rows or [])
+        self.relation_rows = list(relation_rows or [])
+        self.relation_source_row = relation_source_row
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
@@ -44,6 +48,8 @@ class FakeConnection:
                 value = self.rows.pop(0)
                 return value if isinstance(value, dict) else None
             return None
+        if "from app.workbench_pair_relations" in " ".join(sql.lower().split()):
+            return self.relation_source_row
         value = self.rows.pop(0) if self.rows else None
         return value if isinstance(value, dict) else None
 
@@ -56,6 +62,8 @@ class FakeConnection:
             return list(self.category_rows)
         if "from app.bank_transaction_category_confirmations" in normalized_sql:
             return list(self.confirmation_rows)
+        if "from app.workbench_pair_relations" in normalized_sql:
+            return list(self.relation_rows)
         value = self.rows.pop(0) if self.rows else []
         return list(value) if isinstance(value, list) else []
 
@@ -500,6 +508,43 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         self.assertEqual(repository.scope_summary_calls, [{"scope_keys": ["2026-05"], "tenant_id": "default"}])
         self.assertEqual(repository.id_calls, [])
         self.assertEqual(repository.month_calls, [])
+
+    def test_source_versions_for_scope_keys_supports_bank_detail_port_without_tenant_arg(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
+                self.calls.append({"scope_keys": list(scope_keys)})
+                return {
+                    "read_model_status": "fresh",
+                    "read_model_scope_keys": list(scope_keys),
+                    "read_model_scope_signatures": {
+                        "2026-07": {
+                            "source_versions": {
+                                "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                                "row_count": 4,
+                            }
+                        }
+                    },
+                }
+
+        repository = Repository()
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=BankDetailReadModelRepositoryPort(repository),
+        )
+
+        payload = facade.source_versions_for_scope_keys(["2026-07"])
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(
+            payload["source_versions"],
+            {
+                "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                "row_count": 4,
+            },
+        )
+        self.assertEqual(repository.calls, [{"scope_keys": ["2026-07"]}])
 
     def test_get_by_transaction_ids_requires_fresh_before_returning_publishable_rows(self) -> None:
         queue = CaptureRuntimeQueueRepository()
@@ -2294,6 +2339,37 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(tags, {})
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertNotIn("workbench_candidate_matches", sql_text)
+
+    def test_relation_tags_source_fast_path_does_not_wait_for_relation_read_model(self) -> None:
+        class FailingRelationFacade:
+            last_source_versions: dict[str, object] = {}
+
+            def list_by_month(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("source fast path must not read relation read model")
+
+        connection = FakeConnection(
+            relation_rows=[
+                {
+                    "case_id": "CASE-SOURCE-001",
+                    "status": "active",
+                    "row_ids": ["txn-source-1", "oa-source-1", "inv-source-1"],
+                    "row_types": ["bank", "oa", "invoice"],
+                }
+            ],
+        )
+        builder = BankDetailSqlProjectionBuilder(
+            connection=connection,
+            workbench_relation_read_facade=FailingRelationFacade(),
+            relation_tags_from_source=True,
+        )
+
+        tags = builder._load_relation_tags(["txn-source-1"], scope_key="2026-06")  # noqa: SLF001
+
+        self.assertEqual(tags["txn-source-1"]["oa_relation_tag"], "有oa")
+        self.assertEqual(tags["txn-source-1"]["invoice_relation_tag"], "有发票")
+        self.assertEqual(tags["txn-source-1"]["relation_case_id"], "CASE-SOURCE-001")
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("from app.workbench_pair_relations", sql_text)
 
     def test_normalized_row_splits_bank_text_fields_for_bank_detail_table(self) -> None:
         builder = BankDetailSqlProjectionBuilder(connection=FakeConnection())

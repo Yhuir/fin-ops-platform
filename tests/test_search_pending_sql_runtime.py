@@ -125,6 +125,14 @@ class UnderlyingSearchReadModelRepository:
     def save_search_index_rows(self, **kwargs: object) -> None:
         self.calls.append(("save_search_index_rows", dict(kwargs)))
 
+    def search_index_scope_summary(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("search_index_scope_summary", dict(kwargs)))
+        return {
+            "read_model_status": "fresh",
+            "row_count": 1,
+            "source_versions": {"search": "v1"},
+        }
+
 
 def _pending_invoice_expected_source_versions() -> dict[str, object]:
     return {
@@ -252,8 +260,10 @@ class SearchReadModelRepositoryPortTests(unittest.TestCase):
             rows=[{"row_id": "txn-1"}],
             source_versions={"search": "v1"},
         )
+        summary = port.search_index_scope_summary(month="2026-05")
 
         self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual(summary["row_count"], 1)
         self.assertFalse(hasattr(port, "list_pending_invoice_rows"))
         self.assertFalse(hasattr(port, "save_pending_invoice_rows"))
         self.assertFalse(hasattr(port, "list_bank_detail_transactions"))
@@ -261,7 +271,7 @@ class SearchReadModelRepositoryPortTests(unittest.TestCase):
         self.assertFalse(hasattr(port, "list_workbench_relation_rows"))
         self.assertEqual(
             [name for name, _payload in underlying.calls],
-            ["search_index", "save_search_index_rows"],
+            ["search_index", "save_search_index_rows", "search_index_scope_summary"],
         )
 
 
@@ -490,6 +500,19 @@ class SearchPendingConnection:
         self.fetch_one_calls.append((normalized, params))
         if "from job.read_model_dirty_scopes" in normalized:
             return {"status": "pending", "updated_at": "2026-05-21T09:00:00+00:00"} if self.dirty else None
+        if "count(*)" in normalized and "from read_model.search_index_rows" in normalized:
+            versions = [
+                dict(row.get("source_versions"))
+                for row in self.search_rows
+                if isinstance(row.get("source_versions"), dict)
+            ]
+            version_texts = [json.dumps(version, ensure_ascii=False, sort_keys=True) for version in versions]
+            return {
+                "row_count": len(self.search_rows),
+                "min_source_versions": min(version_texts) if version_texts else None,
+                "max_source_versions": max(version_texts) if version_texts else None,
+                "source_versions": versions[0] if versions else {},
+            }
         if "count(*)" in normalized and "from read_model.pending_invoice_rows" in normalized:
             return {"count": len(self.pending_rows)}
         return None
@@ -1157,6 +1180,63 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertIn("where row_rank = 1", sql)
         self.assertEqual(params, ("2026-05-01", "2026-05"))
 
+    def test_search_index_scope_summary_reads_versions_without_loading_rows(self) -> None:
+        connection = SearchPendingConnection(
+            search_rows=[
+                {
+                    "row_id": "txn-1",
+                    "source_versions": {"search_index_schema_version": "v1"},
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        summary = repository.search_index_scope_summary(month="2026-05")
+
+        self.assertEqual(summary["read_model_status"], "fresh")
+        self.assertEqual(summary["row_count"], 1)
+        self.assertEqual(summary["source_versions"], {"search_index_schema_version": "v1"})
+        self.assertTrue(any("from read_model.search_index_rows" in sql for sql, _params in connection.fetch_one_calls))
+        self.assertFalse(any("from read_model.search_index_rows" in sql for sql, _params in connection.fetch_all_calls))
+
+    def test_search_projection_skips_unchanged_scope_without_workbench_scan(self) -> None:
+        class SummaryRepository:
+            def __init__(self) -> None:
+                self.source_versions: dict[str, object] = {}
+                self.summary_months: list[str] = []
+
+            def search_index_scope_summary(self, *, month: str) -> dict[str, object]:
+                self.summary_months.append(month)
+                return {
+                    "read_model_status": "fresh",
+                    "row_count": 210,
+                    "source_versions": dict(self.source_versions),
+                }
+
+            def save_search_index_rows(self, **_kwargs: object) -> None:
+                raise AssertionError("unchanged search scope must not save rows")
+
+        class NoWorkbenchScanConnection(SearchPendingConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.workbench_rows" in normalized:
+                    raise AssertionError("unchanged search scope must not scan workbench rows")
+                return super().fetch_all(sql, params)
+
+        connection = NoWorkbenchScanConnection()
+        repository = SummaryRepository()
+        builder = SearchPendingSqlProjectionBuilder(connection=connection, read_model_repository=repository)
+        repository.source_versions = builder._search_source_versions()
+
+        result = builder.rebuild_search_index_scope("2026-05")
+
+        self.assertEqual(result["scope_key"], "2026-05")
+        self.assertEqual(result["row_count"], 210)
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["skip_reason"], "source_versions_unchanged")
+        self.assertEqual(repository.summary_months, ["2026-05"])
+        self.assertFalse(any("from read_model.workbench_rows" in sql for sql, _params in connection.fetch_all_calls))
+
     def test_search_index_rows_are_saved_with_bulk_values(self) -> None:
         connection = SearchIndexBulkWriteConnection()
         repository = PostgresReadModelRepository(connection)
@@ -1437,6 +1517,64 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         raw_payload_param = params[-1]
         self.assertEqual(payload_param.obj["id"], "txn-raw-1")
         self.assertEqual(raw_payload_param.obj, {})
+
+    def test_pending_invoice_repository_all_scope_marks_filter_scopes_from_same_write(self) -> None:
+        connection = SearchIndexBulkWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_pending_invoice_rows(
+            scope_key="expense:all:2026-05",
+            rows=[
+                {
+                    "payload": {
+                        "id": "txn-requires",
+                        "bank_transaction": {
+                            "id": "txn-requires",
+                            "trade_time": "2026-05-20",
+                            "amount": "128.00",
+                        },
+                        "filter_group": "requires_invoice",
+                        "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                        "input_invoices": {"primary": None, "payment_summary": {}},
+                        "oa": {"primary": None},
+                        "invoices": [],
+                        "can_create_invoice": True,
+                    }
+                },
+                {
+                    "payload": {
+                        "id": "txn-bank-statement",
+                        "bank_transaction": {
+                            "id": "txn-bank-statement",
+                            "trade_time": "2026-05-21",
+                            "amount": "88.00",
+                        },
+                        "filter_group": "bank_statement_as_invoice",
+                        "invoice_acquisition_status": {"code": "bank_statement_as_invoice"},
+                        "input_invoices": {"primary": None, "payment_summary": {}},
+                        "oa": {"primary": None},
+                        "invoices": [],
+                        "can_create_invoice": False,
+                    }
+                },
+            ],
+            source_versions={"schema": "v1"},
+        )
+
+        scope_upserts = [
+            params
+            for sql, params in connection.execute_calls
+            if "insert into read_model.pending_invoice_scopes" in sql
+        ]
+        self.assertEqual(
+            [(params[0], params[3]) for params in scope_upserts],
+            [
+                ("expense:all:2026-05", 2),
+                ("expense:requires_invoice:2026-05", 1),
+                ("expense:bank_statement_as_invoice:2026-05", 1),
+                ("expense:no_invoice_required:2026-05", 0),
+            ],
+        )
 
     def test_pending_invoice_repository_all_direction_combines_direction_summaries(self) -> None:
         connection = SearchPendingConnection(
@@ -2316,26 +2454,22 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
                 normalized = " ".join(sql.lower().split())
                 if "from read_model.pending_invoice_rows" in normalized:
-                    return [{"scope_key": "2026-04"}, {"scope_key": "2026-05"}]
-                if "from read_model.workbench_relation_scopes" in normalized:
-                    self.relation_scope_params = params
                     return [
-                        {
-                            "scope_key": "2026-04",
-                            "source_versions": {
-                                "workbench_relation_schema_version": "relation-v1",
-                                "source_version": 41,
-                            },
-                        },
-                        {
-                            "scope_key": "2026-05",
-                            "source_versions": {
-                                "workbench_relation_schema_version": "relation-v1",
-                                "source_version": 42,
-                            },
-                        },
+                        {"scope_key": "2026-04", "row_ids": ["txn-april"]},
+                        {"scope_key": "2026-05", "row_ids": ["txn-may-1", "txn-may-2"]},
                     ]
                 return []
+
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
+                normalized = " ".join(sql.lower().split())
+                if "from app.workbench_pair_relations" in normalized:
+                    self.relation_source_summary_params = getattr(self, "relation_source_summary_params", [])
+                    self.relation_source_summary_params.append(params)
+                    return {
+                        "relation_count": 2 if "txn-may-1" in params[-1] else 1,
+                        "relation_updated_at": f"{params[0]} 10:00:00",
+                    }
+                return None
 
             def transaction(self):
                 connection = self
@@ -2357,12 +2491,28 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             filter="all",
         )
 
-        self.assertEqual(connection.relation_scope_params, ("default", ["2026-04", "2026-05"]))
+        self.assertEqual(
+            connection.relation_source_summary_params,
+            [
+                ("2026-04-01", ["txn-april"]),
+                ("2026-05-01", ["txn-may-1", "txn-may-2"]),
+            ],
+        )
         self.assertEqual(
             source_versions,
             {
-                "2026-04": {"workbench_relation_schema_version": "relation-v1", "source_version": 41},
-                "2026-05": {"workbench_relation_schema_version": "relation-v1", "source_version": 42},
+                "2026-04": {
+                    "source": "workbench_pair_relations",
+                    "scope_key": "2026-04",
+                    "relation_count": 1,
+                    "relation_updated_at": "2026-04-01 10:00:00",
+                },
+                "2026-05": {
+                    "source": "workbench_pair_relations",
+                    "scope_key": "2026-05",
+                    "relation_count": 2,
+                    "relation_updated_at": "2026-05-01 10:00:00",
+                },
             },
         )
 
@@ -2453,6 +2603,49 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["oa"]["relation_count"], 1)
         self.assertEqual(payload["relation_case_ids"], ["case-tian-196"])
         self.assertEqual(relation_facade.calls[0]["reason"], "pending_invoice_sql_projection")
+
+    def test_pending_invoice_source_fast_path_does_not_wait_for_relation_read_model(self) -> None:
+        class SourceRelationConnection(PendingProjectionConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.workbench_pair_relations" in normalized:
+                    return [
+                        {
+                            "case_id": "case-source-pending",
+                            "status": "active",
+                            "row_ids": ["txn-1", "oa-source-pending", "inv-source-pending"],
+                            "row_types": ["bank", "oa", "invoice"],
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                if "from app.workbench_pair_relations" in normalized:
+                    return {"relation_count": 1, "relation_updated_at": "2026-05-20 10:00:00"}
+                return super().fetch_one(sql, params)
+
+        class FailingRelationFacade:
+            def get_by_row_ids(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("source fast path must not read relation read model")
+
+        builder = SearchPendingSqlProjectionBuilder(
+            connection=SourceRelationConnection(),
+            workbench_relation_read_facade=FailingRelationFacade(),
+            relation_rows_from_source=True,
+        )
+
+        rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+
+        payload = rows[0]["payload"]
+        self.assertEqual(payload["relation_case_ids"], ["case-source-pending"])
+        self.assertEqual(payload["oa"]["relation_count"], 1)
+        self.assertEqual(payload["input_invoices"]["relation_count"], 1)
+        self.assertEqual(payload["invoice_acquisition_status"]["code"], "paid_invoiced")
+        self.assertEqual(
+            builder._pending_invoice_relation_source_versions["source"],
+            "workbench_pair_relations",
+        )
 
     def test_pending_invoice_sql_projection_collapses_multi_bank_relation_members(self) -> None:
         class MultiBankConnection(PendingProjectionConnection):

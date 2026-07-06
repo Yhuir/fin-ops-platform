@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：外部往来款页面读取 `turnover_ledger` read model；写操作通过 write facade/UoW/adapters 进入 scoped dirty projection。
 - 当前闭环：read path 由 `TurnoverLedgerApiRoutes` route owner 进入 `TurnoverLedgerQueryService` / read model；write path 由 request-boundary facade 进入 `TurnoverLedgerWriteFacade` / UoW / explicit adapters；refresh producer 只负责通过 `ReadModelRefreshGateway` enqueue，不再暴露 direct clear I/O。
-- 旧代码删除状态：`TurnoverLedgerReadFacade` app 转发壳、`TurnoverLedgerRelationMutationInvalidationLegacyAdapter`、`Application._after_turnover_relation_mutation(...)` 与 refresh producer `clear_best_effort()` 已删除；边界 guard 防止恢复。
+- 旧代码删除状态：`TurnoverLedgerReadFacade` app 转发壳、`TurnoverLedgerRelationMutationInvalidationLegacyAdapter`、`Application._after_turnover_relation_mutation(...)` 与 refresh producer `clear_best_effort()` 已删除；provider-backed 生产投影不再在 `BankTransactionTagReadFacade` 之后逐笔回读 legacy `category_service.get(...)`；边界 guard 防止恢复。
 
 ## 职责边界
 
@@ -31,7 +31,7 @@
 | 页面查询/筛选 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | 进入 `TurnoverLedgerApiRoutes` route owner，再由 `TurnoverLedgerQueryService` 读取 read model |
 | 确认/撤回写操作 | write facade/UoW | 已知 affected months 的写路径触发 turnover/workbench/workbench_relation/cost/search affected month scopes；未知月份例外才允许 `all` fan-out |
 | Workbench relation requirement | `TurnoverLedgerWorkbenchPairPort` | 创建 `turnover_manual_closure` 时必须写入 `requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`；这些字段是关联台分区的唯一输入，不能由关联台查询当前设置兜底 |
-| Refresh scope | `turnover_ledger` manifest | month or `all`；`all` 是 fan-out command，不是普通写操作默认 scope |
+| Refresh scope | `turnover_ledger` manifest | month or `all`；`all` 是 fan-out command，不是普通写操作默认 scope。`all`/month scope 在 own source_versions 未变化、仅 Workbench relation source_versions 追平时，可以从现有 rows 重套 relation context 后保存，避免 relation-version 追平重建整本台账。`all` 查询由月度/行级 rows 拼接时允许 mixed row source_versions，freshness 以 repository 返回的 durable `refresh_status` 为准；dirty scope 非 fresh 时仍必须返回 refreshing/stale |
 
 ## 输出 I/O
 
@@ -47,6 +47,8 @@
 
 - Read model：`turnover_ledger`
 - Projection：`partitioned_scoped_incremental`
+- 生产投影必须信任 `BankTransactionTagReadFacade` 输出的 fresh bank-detail tag 事实；只有无 provider 的 legacy/local 路径才允许回退 `BankTransactionCategoryService` snapshot。禁止在 provider-backed worker hot path 逐笔读取旧 category service。
+- `all` 聚合查询不得要求所有行级 source_versions 完全一致；按月增量 worker 刷新会让不相关月份保留旧 provenance。Query owner 只能在 repository 标记 mixed row versions 且 durable dirty scope 为 fresh 时把 all-view 判为 fresh，不能绕过 dirty scope。
 - Worker：`turnover-ledger`
 - Query owner：`TurnoverLedgerQueryService`
 - Repository owner：`TurnoverLedgerReadModelRepositoryPort`

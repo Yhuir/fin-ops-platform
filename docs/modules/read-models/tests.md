@@ -17,7 +17,7 @@
   - `backend/src/fin_ops_platform/services/read_model_readiness.py`
   - `backend/src/fin_ops_platform/services/runtime_queue.py`
   - `backend/src/fin_ops_platform/services/postgres_repositories/read_model_scope_contracts.py`
-- Read model：`workbench`、`workbench_relation`、`bank_detail`、`bank_account_balance`、`pending_invoice`、`search`、`invoice_lifecycle`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`cost_statistics`、`tax_offset`、`no_oa_bank_batch`、`turnover_ledger`。
+- Read model：当前页面 critical 集合为 `workbench`、`workbench_relation`、`bank_detail`、`bank_account_balance`、`pending_invoice`、`search`、`invoice_lifecycle`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`cost_statistics`、`tax_offset`、`bank_flow_rule_batch`、`turnover_ledger`。`no_oa_bank_batch` 仅作为 legacy API/read-model 回归项保留，不再进入默认 production page SLO 或 `read_model_slo_smoke --critical-only`。
 - Worker / dirty scope：`job.read_model_dirty_scopes`、`job.outbox_events`、`RuntimeQueueRepository.enqueue_read_model_refresh(...)`、`runtime_worker_registry.py` 中 read model worker event types。
 - Domain event：前端 domain event 只作为刷新提示；read model freshness 和 worker readiness 是事实源。
 - 权限 / 审计：本模块不直接做权限判定；风险来自 API route 绕过 read boundary 或 service 直接写 runtime 表。
@@ -29,6 +29,15 @@
 - 依赖地图引用：`../../dev/testing-closure-dependency-map.md` 的 Read Model / Worker 依赖图、API Contract 风险图和共享风险热点。
 
 ## 场景覆盖清单
+
+## 2026-07-06 - no-OA legacy critical SLO 降级
+
+- 变更类型：production SLO target / app status registry alignment；不改变 legacy no-OA API、worker event、read model payload、权限或审计。
+- 覆盖证据：当前前端页面入口是 `/bank-flow-rule-batches`，默认 HTTP SLO 采样 `/api/bank-flow-rule-batches` 与 `/api/bank-flow-rule-batches/tag-rules`；`no_oa_bank_batch` 在 App Status read model registry 中标为 non-critical，`read_model_slo_smoke --critical-only` 只覆盖当前页面 critical read model。
+- 新增/更新测试：`tests/test_http_slo_probe.py`、`tests/test_read_model_slo_smoke.py`、`tests/test_app_status_overview_service.py`。
+- 七类测试决策：read model/cache/background job、API/tool contract、existing regression 适用并覆盖；business core、frontend interaction、E2E 不新增，因为不改变用户操作、页面 UI 或业务状态转换。
+- 验证命令：本轮统一运行相关 pytest、lint、docs 和生产 SLO。
+- 未测风险：legacy `/api/no-oa-bank-batches/*` 仍由后端回归测试保护；若未来要彻底删除 no-OA 代码，需要单独做 route/service/worker/scenario 全量删除计划。
 
 ## 2026-07-03 - Runtime queue available-at SLO boundary
 
@@ -507,6 +516,12 @@ git diff --check
 - 更新测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available` 断言 high priority 月分片发布后 `workbench:all` aggregate delay 为 `0s`。
 - 更新测试：`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_can_enqueue_aggregate_without_legacy_enqueue_method` 断言普通优先级仍保留 `3s` aggregate 合并窗口。
 - 覆盖类别：read model/cache/background job tests、service-layer worker scheduling、existing feature regression。API contract 未改；frontend interaction 只调整轮询间隔，复用 `WorkbenchSelection` 行为测试；E2E 真实业务流仍需生产固定 write scenario 验证。
+
+## 2026-07-06 - Invoice lifecycle volatile source_version canonicalization tests
+
+- 新增测试：`tests/test_invoice_lifecycle_sql_projection.py::test_invoice_lifecycle_dependency_versions_ignore_runtime_source_version_only`。
+- 覆盖合同：`invoice_lifecycle` 依赖 source_versions 递归移除精确键名 `source_version`，但保留 `*_source_version`、schema/signature/updated_at 等稳定版本字段；上游 read model no-op refresh 的队列计数变化不能触发 lifecycle full rebuild。
+- 覆盖类别：read model/cache/background job tests、service-layer projection boundary、existing feature regression。API contract、frontend interaction、business core 和 E2E 真实业务流未新增，因为 HTTP response shape、页面行为和业务写入口不变。
 
 `infra-smoke` 默认跑 read model SLO、runtime sync closure gate、write-operation SLO 和 RabbitMQ staging preflight 工具合同；设置 `FIN_OPS_TEST_DATABASE_URL` 后会追加 critical read model 的 `read_model_slo_smoke --critical-only` dry-run scope discovery，仍不写入 queue。只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才会追加 `--apply`，真正 enqueue refresh events 并等待 worker drain；设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 profile 后，会追加只读 `write_operation_slo_audit`，审计最近真实业务写入产生的 durable refresh events；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 后还会追加 RabbitMQ staging preflight。该入口用于验证 read model / worker 最新状态，不能用 deterministic Browser mock 替代，但必须区分 dry-run、apply 和真实业务写入 audit 证据。
 

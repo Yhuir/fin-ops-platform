@@ -88,3 +88,11 @@
 - 旧逻辑删除：生产主链路不得恢复 `delete where scope_month = ...` 后重写全部行的旧保存方式；该方式会重新引入索引/锁写放大并污染 grouped SLO。
 - 本地保护：`tests/test_search_pending_sql_runtime.py` 锁定 no-op upsert、stale-row delete 和空结果 scope delete。
 - 生产证据：release `pscip-l4-search-index-noop-20260703` 上 `search:2026-03` targeted 1s direct SLO `10/10` pass，最大 enqueue-to-fresh `666.731ms`，最大 handler `231.055ms`。Search 已不再是最新 grouped blocker；剩余全域 1s blocker 在 Workbench/invoice lifecycle 总耗时和 runtime queue pickup。
+
+## 2026-07-06 - Search source-version unchanged skip
+
+- 触发事实：生产 grouped 1s smoke 中 `search:2026-03` 再次出现 handler `4461.641ms`，说明即使 row-level no-op save 已存在，worker 每次仍会先构建 search rows，grouped run 中仍可能被 Workbench row scan 或 projection build 放大。
+- 决策：保持 Search API、ranking、scope、source_versions、worker event 和 persistence contract 不变；在 `SearchPendingSqlProjectionBuilder.rebuild_search_index_scope(...)` 开头先计算 expected source_versions，并通过 `SearchReadModelRepositoryPort.search_index_scope_summary(month)` 读取 scope row count/freshness/source_versions。source_versions 一致且 scope fresh 时返回 `source_versions_unchanged`，不扫描 `read_model.workbench_rows`，不调用 `save_search_index_rows(...)`。
+- 旧逻辑删除：Search worker 不得在 source_versions 已一致时无条件重扫 Workbench rows；这会让 grouped SLO 被无变化 scope 放大。
+- 本地保护：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_index_scope_summary_reads_versions_without_loading_rows`、`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_projection_skips_unchanged_scope_without_workbench_scan` 和 `SearchReadModelRepositoryPortTests`。
+- 验证命令：`PYTHONPATH=backend/src:. python3 -m pytest tests/test_search_pending_sql_runtime.py tests/test_search_api.py tests/test_read_model_manifest.py tests/test_runtime_worker_registry.py -q`。

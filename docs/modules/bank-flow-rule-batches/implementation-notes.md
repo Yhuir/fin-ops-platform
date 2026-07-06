@@ -1,5 +1,26 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-06 Scope source-version freshness 修复
+
+目标：修复生产 `bank_flow_rule_batches` API 在 `bank_flow_rule_batch:2026-07` worker 刷新已完成且耗时约 100ms 后，仍因 `bank_detail_source_versions_mismatch` 持续返回 stale 并反复 enqueue refresh 的问题。
+
+关键决策：
+
+- API 列表 fresh gate 对月份 scope 不再依赖 bank-detail provider 的 mutable `last_source_versions`；它和 worker 一样通过 `read_model_scope_source_versions(month)` 读取 bank-detail scope summary 与 Workbench relation source-version port。
+- Worker 月份 scope rebuild 在 precheck 后若无法 skip，发布 snapshot 时复用同一份 precheck source_versions；后续 `bulk_get_for_rows(...)` 或 relation 明细读取只影响 row payload，不允许改写 scope source-version 形态。
+- 不放宽 stale 判定、不把 stale 伪装成 fresh；修复的是同一 scope 内 API 期望版本与 worker 发布版本不一致的问题。
+- 旧 no-OA legacy worker/模块仍是独立 legacy 域，本修复只覆盖当前 `/bank-flow-rule-batches` 生产链路和中性 bank-batch refresh core。
+
+测试覆盖：
+
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_list_freshness_uses_scope_source_versions`
+- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_bank_flow_refresh_publishes_prechecked_scope_source_versions`
+- `tests/test_bank_flow_rule_batch_backend_boundary.py`
+
+验证命令：
+
+- `PYTHONPATH=backend/src:. python3 -m pytest tests/test_bank_flow_rule_batch_application_service.py tests/test_bank_flow_rule_batch_backend_boundary.py tests/test_no_oa_bank_batch_api.py tests/test_no_oa_bank_batch_routes.py -q`
+
 ## 2026-07-04 Bank Transaction Paired Policy 全局化
 
 目标：把“流水规则标签 / 流水规则标签管理”收敛为全局 Bank Transaction Paired Policy，并删除 bank-flow 页面链路中的旧 no-OA 历史重算和 selected-tag 兼容输出。

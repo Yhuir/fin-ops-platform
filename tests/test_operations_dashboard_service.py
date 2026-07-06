@@ -199,6 +199,45 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(payload["runtime_performance"]["queues"][0]["status"], "unknown")
         self.assertIn("rabbitmq_metrics_unavailable", payload["freshness"]["warnings"])
 
+    def test_optional_historical_worker_warning_stays_row_level_only(self) -> None:
+        class RuntimeRepository(FakeRuntimeRepository):
+            def dashboard_queue_metrics(self) -> list[dict[str, object]]:
+                return []
+
+            def dashboard_worker_metrics(self) -> list[dict[str, object]]:
+                return [
+                    {
+                        "worker_kind": "cost-tax-read-model",
+                        "status": "stale",
+                        "required": False,
+                        "current_effective": False,
+                        "warning_code": "worker_event_type_mismatch",
+                    },
+                    {
+                        "worker_kind": "workbench-read-model",
+                        "status": "missing",
+                        "required": True,
+                        "current_effective": True,
+                        "warning_code": "required_worker_missing",
+                    },
+                ]
+
+        service = OperationsDashboardService(
+            FakeDashboardConnection(),
+            api_performance_recorder=ApiPerformanceRecorder(),
+            runtime_repository=RuntimeRepository(),
+        )
+
+        payload = service.build_payload()
+        worker_rows = {
+            row["worker_kind"]: row
+            for row in payload["runtime_performance"]["workers"]
+        }
+
+        self.assertEqual(worker_rows["cost-tax-read-model"]["warning_code"], "worker_event_type_mismatch")
+        self.assertNotIn("worker_event_type_mismatch", payload["freshness"]["warnings"])
+        self.assertIn("required_worker_missing", payload["freshness"]["warnings"])
+
     def test_invoice_inventory_unknown_uses_null_not_zero(self) -> None:
         service = OperationsDashboardService(
             FakeDashboardConnection(fail_invoice_inventory=True),

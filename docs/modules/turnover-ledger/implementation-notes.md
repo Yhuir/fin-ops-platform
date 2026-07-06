@@ -1,5 +1,15 @@
 # 外部往来款管理 实施记录
 
+## 2026-07-05 - Worker / Read Model 抖动收敛
+
+- 目标：降低外部往来款 read model worker 在 source_versions 已明显变化时仍先等待 Workbench relation fresh gate 的抖动，减少无意义 relation read I/O 和 dependency defer。
+- 影响范围：`TurnoverLedgerSqlProjectionBuilder._unchanged_scope_result(...)` 的 unchanged skip 判定；不改变外部往来款业务分组、relation/closure 写入、affected-month scope、API payload shape、worker event type、dirty scope 或 readiness 合同。
+- 关键决策：skip 判定先比较当前基础 `source_versions` 与已持久化版本；基础版本不同直接进入 rebuild，不再先调用 `WorkbenchRelationReadFacade.get_by_row_ids(... require_fresh=True)` 做 unchanged check。只有基础版本一致时才读取 Workbench relation source_versions 来判断能否安全 skip。
+- 旧逻辑清理：禁止在基础版本已不一致的情况下把 relation fresh gate 当作 skip 前置条件；这会把本来应重建的 event 变成跨 read model 等待抖动。
+- 测试覆盖：`tests/test_turnover_ledger_read_model_refresh.py::TurnoverLedgerReadModelRefreshServiceTests::test_projection_rebuilds_without_relation_check_when_base_source_versions_changed`。
+- 验证命令：`python3 -m pytest tests/test_turnover_ledger_read_model_refresh.py::TurnoverLedgerReadModelRefreshServiceTests::test_projection_rebuilds_without_relation_check_when_base_source_versions_changed -q`。
+- 未测风险：本地测试不证明真实生产历史数据下所有 turnover scope p95；发布后仍需 direct read model SLO、authenticated turnover API SLO 和受控写操作 fan-out 验证。
+
 ## 2026-06-30 - 外部往来闭环免发票 requirement 同步修复
 
 - 目标：修复用户已在流水规则标签管理中把外部往来款借入/归还借款设置为不需要发票后，历史 `turnover:*` 关系仍停留在关联台未配对区的问题。
@@ -602,3 +612,11 @@ git diff --check
   - 更新 `tests/test_platform_runtime_boundary_guards.py`，禁止 read facade 文件、producer direct clear、legacy invalidation adapter 和 server 旧 helper 恢复。
   - 更新 `tests/test_bank_details_sql_runtime.py`，证明 bank auto-tag finalizer 不再直接清外部往来 read model，只保留明确 refresh enqueue。
 - 未测风险：本轮不连接真实 PostgreSQL/RabbitMQ/Redis/systemd，不验证生产历史数据、真实 worker drain、真实 XLSX 下载或大数据浏览器性能；这些仍归 staging/infra smoke。
+
+## 2026-07-06 - provider-backed 分类旧回退删除与 1s SLO 收敛
+
+- 触发事实：生产 `read_model_slo_smoke --apply --critical-only --target-ms 1000` 中 `turnover_ledger:2026-02` handler `1015.759ms`、enqueue-to-fresh `1056.525ms` 超过目标。远端 breakdown 显示 `collect_rows_all` 约 `777ms`，其中 `BankTransactionTagReadFacade.bulk_get_for_rows(...)` 后仍对 910 笔流水逐笔执行 legacy `category_service.get(...)` fallback。
+- 根因：生产 worker 已通过 fresh `bank_detail` read model 获取有效分类事实，但 `TurnoverLedgerService._categories_for_rows(...)` 仍保留 provider 后的旧 category service fallback；这是旧链路污染 provider-backed read model hot path。
+- 决策：provider 存在时直接信任 provider records，不再逐笔回读 legacy category service；只有无 provider 的 local/legacy path 保留 `bulk_get(...)` 后的 manual fallback。将 `TURNOVER_LEDGER_SCHEMA_VERSION` bump 到 `2026-07-turnover-ledger-v3`，发布后旧投影必须重建。
+- 测试覆盖：新增 `tests/test_turnover_ledger_service.py::TurnoverLedgerServiceTests::test_provider_backed_grouped_ledger_does_not_per_row_read_legacy_categories`；更新 `tests/test_turnover_ledger_source_versions.py` schema version 期望。
+- 未测风险：真实生产 1s SLO 需发布后重跑；跨月往来关系仍不能简单按月份窄读银行流水，否则会丢失后续还款/收款事实。

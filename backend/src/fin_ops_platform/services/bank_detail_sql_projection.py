@@ -35,6 +35,7 @@ class BankDetailSqlProjectionBuilder:
         read_model_repository: PostgresReadModelRepository | None = None,
         auto_category_service: BankTransactionAutoCategoryService | None = None,
         workbench_relation_read_facade: WorkbenchRelationReadFacade | None = None,
+        relation_tags_from_source: bool = False,
     ) -> None:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
@@ -44,6 +45,7 @@ class BankDetailSqlProjectionBuilder:
         self._workbench_relation_read_facade = workbench_relation_read_facade or WorkbenchRelationReadFacade(
             read_model_repository=self._read_model_repository,
         )
+        self._relation_tags_from_source = bool(relation_tags_from_source)
         self._bank_auto_tag_rules_version = 1
 
     def list_bank_detail_scope_shards(self, scope_key: str) -> list[str]:
@@ -298,6 +300,8 @@ class BankDetailSqlProjectionBuilder:
         transaction_ids = list(transaction_ids or [])
         if not transaction_ids:
             return {}
+        if self._relation_tags_from_source:
+            return self._load_relation_tags_from_source(transaction_ids)
         if not self._require_fresh_relation_tags:
             return {}
         result_payload = self._workbench_relation_read_facade.list_by_month(
@@ -332,6 +336,36 @@ class BankDetailSqlProjectionBuilder:
                 has_invoice=has_invoice,
                 case_id=next((group_id for group_id in text_list(row.get("group_ids")) if group_id), None),
                 relation_status=text(row.get("relation_status")) or "linked",
+            )
+        return result
+
+    def _load_relation_tags_from_source(self, transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
+        normalized_transaction_ids = [transaction_id for transaction_id in text_list(transaction_ids) if transaction_id]
+        if not normalized_transaction_ids:
+            return {}
+        source_reader = getattr(self._read_model_repository, "list_active_workbench_relation_source_rows", None)
+        rows = (
+            source_reader(row_ids=normalized_transaction_ids)
+            if callable(source_reader)
+            else []
+        )
+        result: dict[str, dict[str, Any]] = {}
+        transaction_id_set = set(normalized_transaction_ids)
+        for row in rows:
+            row_ids = text_list(row.get("row_ids"))
+            bank_ids = [row_id for row_id in row_ids if row_id in transaction_id_set]
+            if not bank_ids:
+                continue
+            row_types = text_list(row.get("row_types"))
+            has_oa = _relation_rows_have_type(row_ids, row_types, "oa")
+            has_invoice = _relation_rows_have_type(row_ids, row_types, "invoice")
+            self._merge_relation_tags(
+                result,
+                bank_ids=bank_ids,
+                has_oa=has_oa,
+                has_invoice=has_invoice,
+                case_id=text(row.get("case_id")),
+                relation_status=_source_relation_status(row),
             )
         return result
 
@@ -620,12 +654,22 @@ class BankDetailSqlProjectionBuilder:
         }
 
     def _workbench_relation_source_versions_for_scope(self, scope_key: str) -> dict[str, Any]:
+        if self._relation_tags_from_source:
+            return self._workbench_relation_source_versions_from_source(scope_key)
         source_versions_loader = getattr(self._read_model_repository, "workbench_relation_source_versions", None)
         if callable(source_versions_loader):
             source_versions = source_versions_loader(scope_key=scope_key)
             if isinstance(source_versions, dict) and source_versions:
                 return dict(source_versions)
         return dict(self._workbench_relation_read_facade.last_source_versions)
+
+    def _workbench_relation_source_versions_from_source(self, scope_key: str) -> dict[str, Any]:
+        if not _is_month_scope(scope_key):
+            return {}
+        summary_reader = getattr(self._read_model_repository, "workbench_relation_source_summary_from_source", None)
+        if not callable(summary_reader):
+            return {}
+        return dict(summary_reader(scope_key=scope_key))
 
     @staticmethod
     def _source_signature(
@@ -795,9 +839,28 @@ def _looks_like_invoice_row(row_id: str) -> bool:
     return looks_like_invoice_workbench_row_id(row_id)
 
 
-def _relation_has_row_type(row_types: list[str], expected: str) -> bool:
+def _relation_rows_have_type(row_ids: list[str], row_types: list[str], expected: str) -> bool:
     normalized_expected = str(expected or "").strip()
-    return any(str(row_type or "").strip() == normalized_expected for row_type in row_types)
+    for index, row_id in enumerate(row_ids):
+        row_type = row_types[index] if index < len(row_types) and row_types[index] else row_type_for_bank_detail_row_id(row_id)
+        if row_type == normalized_expected:
+            return True
+    return False
+
+
+def row_type_for_bank_detail_row_id(row_id: object) -> str:
+    if _looks_like_oa_row(str(row_id or "")):
+        return "oa"
+    if _looks_like_invoice_row(str(row_id or "")):
+        return "invoice"
+    return "bank"
+
+
+def _source_relation_status(row: dict[str, Any]) -> str:
+    raw_status = text(row.get("relation_status") or row.get("status"))
+    if raw_status in {None, "", "active"}:
+        return "linked"
+    return raw_status
 
 
 def _search_text(payload: dict[str, Any]) -> str:

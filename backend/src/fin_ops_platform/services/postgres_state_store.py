@@ -51,6 +51,14 @@ FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 BANK_FLOW_RULE_BATCH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
+class _ReadyHealthRabbitMqMetricsUnavailable:
+    def summary(self) -> dict[str, object]:
+        return {
+            "rabbitmq_management_configured": False,
+            "rabbitmq_metric_error": "ready_health_rabbitmq_metrics_skipped",
+        }
+
+
 def _base_read_model_scope_key(scope_key: object) -> str:
     normalized = str(scope_key or "").strip()
     if normalized.startswith("visibility:"):
@@ -215,7 +223,10 @@ class PostgresStateStore:
         else:
             summary = {"postgres_status": "unknown"}
         try:
-            summary["runtime_infrastructure"] = RuntimeMonitoringRepository(self._connection).ready_health_summary()
+            summary["runtime_infrastructure"] = RuntimeMonitoringRepository(
+                self._connection,
+                rabbitmq_metrics_provider=_ReadyHealthRabbitMqMetricsUnavailable(),
+            ).ready_health_summary()
         except Exception as exc:  # pragma: no cover - readiness should degrade instead of blocking probes.
             summary["runtime_infrastructure"] = {"status": "error", "error": str(exc)}
         return summary

@@ -334,6 +334,7 @@ def _run_one_scenario(
             base_url=base_url,
             api_prefix=api_prefix,
             headers=headers,
+            target_ms=write_target_ms,
             timeout_seconds=timeout_seconds,
             request_fn=request_fn,
         )
@@ -385,6 +386,7 @@ def _execute_step(
     base_url: str,
     api_prefix: str,
     headers: Mapping[str, str],
+    target_ms: float,
     timeout_seconds: float,
     request_fn: RequestFn,
 ) -> WriteStepResult:
@@ -413,17 +415,24 @@ def _execute_step(
             if status_ok
             else None
         )
-        ok = status_ok and html_api_error is None
+        elapsed_rounded = round(elapsed_ms, 3)
+        error = None
+        if html_api_error:
+            error = html_api_error
+        elif not status_ok:
+            error = f"unexpected_status:{response.status_code}"
+        elif elapsed_ms > target_ms:
+            error = f"write_step_slo_miss:{elapsed_rounded}>{round(target_ms, 3)}"
         return WriteStepResult(
             name=step.name,
             method=step.method,
             path=step.path,
-            status="pass" if ok else "fail",
-            elapsed_ms=round(elapsed_ms, 3),
+            status="pass" if error is None else "fail",
+            elapsed_ms=elapsed_rounded,
             status_code=response.status_code,
             response_bytes=len(response.body or b""),
             content_type=content_type,
-            error=None if ok else html_api_error or f"unexpected_status:{response.status_code}",
+            error=error,
         )
     except Exception as exc:
         elapsed_ms = (monotonic() - started) * 1000

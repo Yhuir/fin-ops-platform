@@ -38,6 +38,8 @@ class WorkbenchRelationDerivedLifecycleExecutor:
         for key in (
             "source",
             "case_id",
+            "row_ids",
+            "case_ids",
             "action_name",
             "downstream_scope_types",
             "invoice_usage_scope_types",

@@ -38,6 +38,7 @@
 | --- | --- | --- |
 | 搜索结果 | 调用页面 | 必须来自 fresh index 或暴露 nonfresh |
 | Search index rows | repository | partitioned scoped index；保存时按 `row_id` 做 no-op aware bulk upsert，只删除同 scope 不再存在的 stale rows；空结果 scope 才允许整月删除 |
+| Search scope summary | repository / worker | `search_index_scope_summary(month)` 只返回 scope row count、freshness 和 source_versions；worker 在 source_versions 未变化时必须跳过 Workbench row scan 和保存。 |
 | Dirty scope | runtime queue | `search.read_model.refresh` |
 
 ## 持久化与投影
@@ -48,6 +49,7 @@
 - Query owner：Search read API
 - Repository owner：`SearchReadModelRepositoryPort`
 - Persistence contract：`save_search_index_rows(...)` 不允许恢复整月 delete + 全量 rewrite 的旧逻辑；更新必须通过 `row_id` upsert 和 `is distinct from` 跳过 no-op 行，避免 grouped SLO 写放大。
+- Refresh contract：`SearchPendingSqlProjectionBuilder.rebuild_search_index_scope(...)` 必须先用当前 expected source_versions 与 `search_index_scope_summary(month)` 比较；一致时返回 `source_versions_unchanged`，不得扫描 `read_model.workbench_rows` 或写 `read_model.search_index_rows`。
 
 ## 文件范围
 

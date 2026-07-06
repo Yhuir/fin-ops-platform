@@ -382,6 +382,8 @@ def test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables
         "insert into read_model.workbench_rows(row_id, payload) values (%s, %s)",
         "insert into read_model.workbench_groups(group_id, payload) values (%s, %s)",
         "insert into read_model.workbench_group_rows(group_id, payload) values (%s, %s)",
+        "insert into read_model.workbench_relation_rows(row_id, payload) values (%s, %s)",
+        "insert into read_model.workbench_relation_groups(group_id, payload) values (%s, %s)",
         "insert into read_model.search_index_rows(row_id, payload) values (%s, %s)",
         "insert into read_model.turnover_ledger_rows(relation_id, payload) values (%s, %s)",
     ]
@@ -439,7 +441,7 @@ def test_workbench_relation_distribution_save_batches_rows_and_groups() -> None:
         source_versions={"source_version": 9},
     )
 
-    bulk_sql = [sql for sql, _params in connection.executed_many]
+    bulk_sql = [sql for sql, _params in connection.executed_many_values]
     assert any("insert into read_model.workbench_relation_groups" in sql for sql in bulk_sql)
     assert any("insert into read_model.workbench_relation_rows" in sql for sql in bulk_sql)
     assert not any(
@@ -447,6 +449,58 @@ def test_workbench_relation_distribution_save_batches_rows_and_groups() -> None:
         or "insert into read_model.workbench_relation_rows" in sql
         for sql, _params in connection.executed
     )
+    assert not any(
+        "insert into read_model.workbench_relation_groups" in sql
+        or "insert into read_model.workbench_relation_rows" in sql
+        for sql, _params in connection.executed_many
+    )
+
+
+def test_workbench_relation_distribution_partial_save_deletes_overlap_and_counts_scope() -> None:
+    connection = RecordingConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.save_workbench_relation_distribution_rows(
+        scope_key="2026-05",
+        affected_row_ids=["txn-1", "oa-1"],
+        groups=[
+            {
+                "group_id": "case-1",
+                "relation_source": "manual",
+                "relation_kind": "oa_bank",
+                "relation_status": "linked",
+                "oa_row_ids": ["oa-1"],
+                "bank_transaction_ids": ["txn-1"],
+                "payload": {"case_id": "case-1", "row_ids": ["oa-1", "txn-1"]},
+            }
+        ],
+        rows=[
+            {
+                "row_id": "txn-1",
+                "row_type": "bank_transaction",
+                "relation_status": "linked",
+                "group_ids": ["case-1"],
+            },
+            {
+                "row_id": "oa-1",
+                "row_type": "oa",
+                "relation_status": "linked",
+                "group_ids": ["case-1"],
+            },
+        ],
+        source_versions={"source_version": 10},
+    )
+
+    executed_sql = [sql for sql, _params in connection.executed]
+    assert any("delete from read_model.workbench_relation_groups" in sql for sql in executed_sql)
+    assert any("coalesce(bank_transaction_ids, array[]::text[]) && %s::text[]" in sql for sql in executed_sql)
+    assert any("delete from read_model.workbench_relation_rows" in sql for sql in executed_sql)
+    assert not any("update read_model.workbench_relation_rows" in sql for sql in executed_sql)
+    assert not any("update read_model.workbench_relation_groups" in sql for sql in executed_sql)
+    assert any("select ( select count(*)::integer from read_model.workbench_relation_rows" in sql for sql, _params in connection.fetched_one)
+    bulk_sql = [sql for sql, _params in connection.executed_many_values]
+    assert any("insert into read_model.workbench_relation_groups" in sql for sql in bulk_sql)
+    assert any("insert into read_model.workbench_relation_rows" in sql for sql in bulk_sql)
 
 
 def test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches() -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -185,29 +185,23 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         )
         if unchanged is not None:
             return unchanged
-        service = self._oa_pending_payment_service()
-        context = service._query_context(month_hint=normalized_scope_key)
-        completed_rows = service._filtered_sorted_rows(
-            context=context,
-            month=normalized_scope_key,
-            keyword=None,
-            trade_date_from=None,
-            trade_date_to=None,
-            filters=[],
-            sort_field="bank_trade_time",
-            sort_direction="desc",
-            view_mode="completed",
+        payment_statuses_by_flow_id: dict[str, Any] | None = None
+        service = self._oa_pending_payment_service(
+            payment_statuses_provider=lambda: payment_statuses_by_flow_id,
         )
-        in_progress_rows = service._filtered_sorted_rows(
-            context=context,
+        context = service._query_context(month_hint=normalized_scope_key)
+        payment_statuses_by_flow_id = service._payment_statuses_by_flow_id()
+        completed_rows = service._build_rows(
             month=normalized_scope_key,
-            keyword=None,
-            trade_date_from=None,
-            trade_date_to=None,
-            filters=[],
-            sort_field="bank_trade_time",
-            sort_direction="desc",
+            context=context,
+            view_mode="completed",
+            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+        )
+        in_progress_rows = service._build_rows(
+            month=normalized_scope_key,
+            context=context,
             view_mode="in_progress",
+            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
         )
         cleanup_result = self._cancel_oa_pending_relations_missing_admission(
             month_scope=normalized_scope_key,
@@ -293,21 +287,32 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             require_fresh_relations=True,
         )
 
-    def _oa_pending_payment_service(self) -> OaPendingPaymentQueryService:
+    def _oa_pending_payment_service(
+        self,
+        *,
+        payment_statuses_provider: Callable[[], dict[str, Any] | None] | None = None,
+    ) -> OaPendingPaymentQueryService:
         return OaPendingPaymentQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
             pending_relation_service=PostgresOaPendingPaymentRelationRepository(self._connection),
             oa_projection=self._oa_projection_repository,
-            in_progress_oa_projection=self._oa_pending_payment_projection(),
+            in_progress_oa_projection=self._oa_pending_payment_projection(
+                payment_statuses_provider=payment_statuses_provider,
+            ),
             payment_status_repository=self._payment_status_repository,
             require_fresh_relations=True,
         )
 
-    def _oa_pending_payment_projection(self) -> PaymentAdmittedOAProjectionAdapter:
+    def _oa_pending_payment_projection(
+        self,
+        *,
+        payment_statuses_provider: Callable[[], dict[str, Any] | None] | None = None,
+    ) -> PaymentAdmittedOAProjectionAdapter:
         return PaymentAdmittedOAProjectionAdapter(
             source_adapter=self._oa_source_adapter,
             payment_status_repository=self._payment_status_repository,
+            payment_statuses_provider=payment_statuses_provider,
         )
 
     def _cancel_oa_pending_relations_missing_admission(

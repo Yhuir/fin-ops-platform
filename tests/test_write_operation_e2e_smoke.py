@@ -492,6 +492,51 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["results"][0]["write_slo"]["status"], "skipped")
 
+    def test_slow_write_step_fails_before_claiming_write_slo(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="workbench-withdraw",
+            operations=("workbench_relation_withdraw",),
+            steps=(
+                write_operation_e2e_smoke.WriteStep(
+                    name="withdraw",
+                    method="POST",
+                    path="/api/workbench/actions/withdraw-link",
+                    json_body={"month": "2026-06", "row_ids": ["bank-1", "invoice-1"]},
+                    expected_statuses=(200,),
+                ),
+            ),
+            post_api_probes=(),
+        )
+
+        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"ok":true}',
+            )
+
+        monotonic_values = iter([100.0, 101.25])
+        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.monotonic", side_effect=lambda: next(monotonic_values)):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection(_turnover_withdraw_rows()),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+                write_target_ms=1000,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(result["steps"][0]["status"], "fail")
+        self.assertEqual(result["steps"][0]["elapsed_ms"], 1250.0)
+        self.assertEqual(result["steps"][0]["error"], "write_step_slo_miss:1250.0>1000")
+        self.assertEqual(result["write_slo"]["status"], "skipped")
+
     def test_write_step_rejects_html_shell_even_when_status_matches(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
             name="turnover-withdraw",

@@ -425,6 +425,27 @@
 - 保留面：`list_pending_invoice_scope_shards(...)` 继续作为 projection source-fact 月份枚举；后端 mutation response 暂不新增 `freshness_targets`，继续使用 `affectedMonths` 与页面 scope 组合生成 barrier target。
 - 状态：本模块不标记全局 closed；真实 PostgreSQL/worker/App Status/high-row/browser 证据仍按 production-evidence-deferred 处理。
 
+## 2026-07-05 - pending invoice filter fanout write-through
+
+- 目标：修复 Workbench relation 写后待找发票 read model filter scopes 重复入队造成的跨页面可见性抖动。
+- 触发事实：生产 Workbench withdraw cross-page audit 中，同一 `expense:all:YYYY-MM` 写后又为 `requires_invoice`、`bank_statement_as_invoice`、`no_invoice_required` 等 filter scope 各自排队刷新，最慢 filter scope 约 2.6 秒才 fresh。
+- 决策：Workbench relation 写链路只 enqueue direction-level `expense:all[:month]` / `income:all[:month]`；`save_pending_invoice_rows(...)` 在保存 all scope rows 的同一事务内同步 upsert 对应 filter scope freshness 和 row_count。filter 页面继续走原有 scope key 和 freshness gate，不新增并行队列或兼容分支。
+- 旧逻辑删除：`WorkbenchWriteFacade` 不再维护支出/收入 filter scope 常量，也不在写链路上 fan-out 四个 pending invoice refresh target。
+- 本地保护：`tests/test_workbench_write_characterization.py::WorkbenchWriteCharacterizationTests::test_relation_pending_invoice_scope_keys_only_enqueue_direction_all_scopes` 锁定写链路只 enqueue direction all scopes；`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_repository_all_scope_marks_filter_scopes_from_same_write` 锁定 repository 同步发布 filter scopes。
+
+## 2026-07-06 - pending invoice relation source fast path
+
+- 目标：消除 Workbench relation 写后待找发票 worker 等待 `workbench_relation` 分发 read model 的尾延迟和重试抖动。
+- 决策：`search-pending` projection 通过 workbench-relations repository port 读取 active relation source rows/source summary，直接构造银行流水对应的 OA/进项/销项 relation context 与 source-version proof；SQL owner 仍在 workbench-relations repository，待找发票模块不直接读 relation 表。
+- 边界：页面 fresh payload 仍只能来自 `PendingInvoiceReadModelService`；源端快路径只服务 worker 投影，不用于待找发票写状态机或页面绕过 fresh gate。
+- 本地保护：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_source_fast_path_does_not_wait_for_relation_read_model`。
+
+## 2026-07-06 - pending invoice relation source-version expected/actual alignment
+
+- 触发事实：生产发布 relation source fast path 后，`pending_invoice` worker 已按 active relation source summary 写入 `read_model.pending_invoice_scopes.source_versions`，但 API expected-source gate 仍读取 `read_model.workbench_relation_scopes.source_versions`；`/api/pending-invoices/rows` 因 `workbench_relation_source_versions_mismatch` 持续返回 refreshing，形成自触发刷新抖动。
+- 决策：`PostgresPendingInvoiceLifecycleReadModelRepository.pending_invoice_workbench_relation_source_versions(...)` 改为按当前 pending invoice rows 命中的月份和 row id 调 `workbench_relation_source_summary_from_source(...)`，与 worker 保存的 actual source_versions 使用同一事实源；不新增旧 read model fallback，也不让页面绕过 fresh gate。
+- 本地保护：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_repository_loads_workbench_relation_source_versions_for_matching_months` 锁定 expected source versions 使用 source summary，并传递 month + row_ids。
+
 ## 2026-06-12 - relation 写入口迁入 workbench relation command service
 
 - 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。

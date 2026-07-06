@@ -225,13 +225,14 @@ def test_relation_change_enqueues_relation_read_model_before_relevant_downstream
     assert outbox_by_scope_type["bank_detail"]["priority"] == "high"
     assert outbox_by_scope_type["invoice_lifecycle"]["priority"] == "high"
     assert outbox_by_scope_type["search"]["priority"] == "high"
-    workbench_all_outbox_payloads = [
-        dict(row["payload"])
+    assert not [
+        row
         for row in _outbox_refresh_rows(connection)
         if str(row["scope_type"]) == "workbench" and str(row["scope_key"]) == "all"
     ]
-    assert workbench_all_outbox_payloads
-    assert workbench_all_outbox_payloads[-1]["aggregate_only"] is True
+    refresh_metadata = dirty_by_scope_type["workbench_relation"]["payload"]["metadata"]
+    assert refresh_metadata["row_ids"] == ["bank-1", "invoice-1"]
+    assert refresh_metadata["case_ids"] == ["CASE-1"]
 
 
 def test_relation_repository_can_persist_without_refresh_fanout_for_uow_boundary() -> None:
@@ -403,7 +404,7 @@ def test_relation_downstream_refresh_routes_scope_keys_by_row_domain() -> None:
         scope_keys_by_type.setdefault(str(row["scope_type"]), set()).add(str(row["scope_key"]))
 
     assert scope_keys_by_type["workbench_relation"] == {"2026-01", "2026-02"}
-    assert scope_keys_by_type["workbench"] == {"2026-01", "2026-02", "all"}
+    assert scope_keys_by_type["workbench"] == {"2026-01", "2026-02"}
     assert scope_keys_by_type["bank_detail"] == {"2026-02"}
     assert scope_keys_by_type["invoice_lifecycle"] == {"2026-01"}
     assert scope_keys_by_type["input_invoice_usage"] == {"2026-01"}
@@ -416,19 +417,12 @@ def test_relation_downstream_refresh_routes_scope_keys_by_row_domain() -> None:
         "expense:bank_statement_as_invoice:2026-02",
         "expense:no_invoice_required:2026-02",
     }
-    workbench_all_outbox_payloads = [
-        dict(row["payload"])
-        for row in _outbox_refresh_rows(connection)
-        if str(row["scope_type"]) == "workbench" and str(row["scope_key"]) == "all"
-    ]
-    assert workbench_all_outbox_payloads[-1]["aggregate_only"] is True
-    assert workbench_all_outbox_payloads[-1]["parent_scope_keys"] == ["2026-01", "2026-02"]
     workbench_all_outbox_rows = [
         row
         for row in _outbox_refresh_rows(connection)
         if str(row["scope_type"]) == "workbench" and str(row["scope_key"]) == "all"
     ]
-    assert workbench_all_outbox_rows[-1]["dedupe_key"] == "workbench.read_model.refresh:workbench:all:aggregate"
+    assert not workbench_all_outbox_rows
 
 
 def test_relation_refresh_uses_full_workbench_all_only_when_scope_is_unknown() -> None:

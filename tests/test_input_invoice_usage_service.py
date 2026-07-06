@@ -38,6 +38,7 @@ class RepositoryOnlyInvoiceFacts:
         self.transactions = list(transactions or [])
         self.invoice_page_calls: list[dict[str, object]] = []
         self.transaction_page_calls: list[dict[str, object]] = []
+        self.transaction_get_calls: list[str] = []
 
     def list_invoices_page(
         self,
@@ -66,10 +67,27 @@ class RepositoryOnlyInvoiceFacts:
         *,
         page: int = 1,
         page_size: int = 100,
+        date_from: str | None = None,
+        date_to: str | None = None,
         **_: object,
     ) -> tuple[list[BankTransaction], int]:
-        self.transaction_page_calls.append({"page": page, "page_size": page_size})
-        return list(self.transactions), len(self.transactions)
+        self.transaction_page_calls.append(
+            {"page": page, "page_size": page_size, "date_from": date_from, "date_to": date_to}
+        )
+        rows = [
+            transaction
+            for transaction in self.transactions
+            if (date_from is None or str(transaction.txn_date or "") >= date_from)
+            and (date_to is None or str(transaction.txn_date or "") <= date_to)
+        ]
+        return rows, len(rows)
+
+    def get_transaction(self, transaction_id: str) -> BankTransaction | None:
+        self.transaction_get_calls.append(str(transaction_id))
+        for transaction in self.transactions:
+            if transaction.id == transaction_id:
+                return transaction
+        return None
 
 
 class CrossMonthWorkbenchRelationFacade:
@@ -554,6 +572,41 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual({summary["relationStatus"] for summary in row["oa"]["summaries"]}, {"linked"})
         self.assertEqual({summary["relationStatus"] for summary in row["bankTransactions"]["summaries"]}, {"linked"})
         self.assertEqual(row["invoiceRelations"]["summaries"][0]["relationStatus"], "linked")
+
+    def test_month_scope_bank_lookup_uses_month_page_and_fetches_cross_month_relation_ids(self) -> None:
+        vendor = self._counterparty("vendor-lg", "良固阀门集团股份有限公司")
+        invoice = self._invoice(
+            "inv-lianggu-repo-75799",
+            "26332000003800042821",
+            vendor,
+            amount="67078.77",
+            tax_amount="8720.23",
+            total_with_tax="75799.00",
+            invoice_date="2026-05-08",
+        )
+        april_bank = self._bank_transaction("bank-lianggu-april", "75799.00", trade_time="2026-04-29 13:19:07")
+        may_unrelated_bank = self._bank_transaction("bank-lianggu-may", "1.00", trade_time="2026-05-02 08:00:00")
+        oa_record = self._oa("oa-lianggu-repo", "杨丽萍", "75799.00", project_name="大理卷烟厂余热综合利用项目")
+        oa_record.month = "2026-04"
+        repository = RepositoryOnlyInvoiceFacts([invoice], transactions=[april_bank, may_unrelated_bank])
+        relation_facade = CrossMonthWorkbenchRelationFacade(
+            invoice_id=invoice.id,
+            bank_ids=[april_bank.id],
+            oa_ids=[oa_record.id],
+        )
+        service = InputInvoiceUsageQueryService(
+            import_service=ImportNormalizationService(fact_repository=repository),
+            relation_facade=relation_facade,
+            oa_projection=StaticOAProjection([oa_record]),
+        )
+
+        row = service.list_rows(month="2026-05")["rows"][0]
+
+        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
+        self.assertEqual(row["bankTransactions"]["summaries"][0]["bankTransactionId"], april_bank.id)
+        self.assertEqual(repository.transaction_page_calls[0]["date_from"], "2026-05-01")
+        self.assertEqual(repository.transaction_page_calls[0]["date_to"], "2026-05-31")
+        self.assertEqual(repository.transaction_get_calls, [april_bank.id])
 
     def test_oa_attachment_source_relation_displays_for_promoted_formal_invoice(self) -> None:
         vendor = self._counterparty("vendor", "安徽德易智莱科技有限公司")

@@ -79,7 +79,7 @@ class RuntimeQueueSettings:
     rabbitmq_prefetch: int = 10
     rabbitmq_publish_confirm: bool = True
     rabbitmq_heartbeat_seconds: int = 60
-    rabbitmq_consumer_postgres_drain_interval_seconds: float = 0.1
+    rabbitmq_consumer_postgres_drain_interval_seconds: float = 0.05
     rabbitmq_blocked_connection_timeout_seconds: int = 300
     rabbitmq_management_url: str | None = None
     rabbitmq_management_username: str | None = None
@@ -115,7 +115,7 @@ class RuntimeQueueSettings:
             rabbitmq_heartbeat_seconds=_positive_int(source.get("RABBITMQ_HEARTBEAT_SECONDS"), default=60, name="RABBITMQ_HEARTBEAT_SECONDS"),
             rabbitmq_consumer_postgres_drain_interval_seconds=_positive_float(
                 source.get("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS"),
-                default=1.0,
+                default=0.05,
                 name="RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS",
             ),
             rabbitmq_blocked_connection_timeout_seconds=_positive_int(
@@ -353,15 +353,15 @@ class RuntimeQueueRepository:
                     input.priority,
                     input.trace_id
                 from input
-                on conflict (tenant_id, scope_type, scope_key)
-                where status in ('pending', 'processing')
-                do update set
-                    reason = excluded.reason,
-                    payload = job.read_model_dirty_scopes.payload || excluded.payload,
-                    raw_payload = excluded.raw_payload,
-                    source_version = job.read_model_dirty_scopes.source_version + 1,
-                    status = 'pending',
-                    next_run_at = clock_timestamp(),
+            on conflict (tenant_id, scope_type, scope_key)
+            where status in ('pending', 'processing')
+            do update set
+                reason = excluded.reason,
+                payload = {_merge_refresh_payload_sql("job.read_model_dirty_scopes.payload", "excluded.payload")},
+                raw_payload = {_merge_refresh_payload_sql("job.read_model_dirty_scopes.raw_payload", "excluded.raw_payload")},
+                source_version = job.read_model_dirty_scopes.source_version + 1,
+                status = 'pending',
+                next_run_at = clock_timestamp(),
                     priority = excluded.priority,
                     trace_id = coalesce(excluded.trace_id, job.read_model_dirty_scopes.trace_id),
                     updated_at = clock_timestamp()
@@ -397,11 +397,11 @@ class RuntimeQueueRepository:
                   on dirty.tenant_id = input.tenant_id
                  and dirty.scope_type = input.scope_type
                  and dirty.scope_key = input.scope_key
-                on conflict (tenant_id, dedupe_key)
-                where dedupe_key is not null and status = 'pending'
-                do update set
-                    payload = job.outbox_events.payload || excluded.payload,
-                    raw_payload = excluded.raw_payload,
+            on conflict (tenant_id, dedupe_key)
+            where dedupe_key is not null and status = 'pending'
+            do update set
+                    payload = {_merge_refresh_payload_sql("job.outbox_events.payload", "excluded.payload")},
+                    raw_payload = {_merge_refresh_payload_sql("job.outbox_events.raw_payload", "excluded.raw_payload")},
                     source_version = excluded.source_version,
                     priority = excluded.priority,
                     available_at = least(job.outbox_events.available_at, excluded.available_at),
@@ -413,6 +413,7 @@ class RuntimeQueueRepository:
                     publish_locked_by = null,
                     publish_locked_at = null,
                     publish_confirmed_at = null,
+                    created_at = clock_timestamp(),
                     updated_at = clock_timestamp()
                 returning
                     id::text as event_id,
@@ -614,7 +615,7 @@ class RuntimeQueueRepository:
         }
         event_type = f"{normalized_scope_type}.read_model.refresh"
         dirty_row = transaction.fetch_one(
-            """
+            f"""
             insert into job.read_model_dirty_scopes(
                 tenant_id, scope_type, scope_key, reason, payload, raw_payload,
                 source_version, status, next_run_at, priority, trace_id
@@ -637,8 +638,8 @@ class RuntimeQueueRepository:
             where status in ('pending', 'processing')
             do update set
                 reason = excluded.reason,
-                payload = job.read_model_dirty_scopes.payload || excluded.payload,
-                raw_payload = excluded.raw_payload,
+                payload = {_merge_refresh_payload_sql("job.read_model_dirty_scopes.payload", "excluded.payload")},
+                raw_payload = {_merge_refresh_payload_sql("job.read_model_dirty_scopes.raw_payload", "excluded.raw_payload")},
                 source_version = job.read_model_dirty_scopes.source_version + 1,
                 status = 'pending',
                 next_run_at = clock_timestamp(),
@@ -664,7 +665,7 @@ class RuntimeQueueRepository:
         source_version = int((dirty_row or {}).get("source_version") or 0)
         payload = {**payload, "source_version": source_version}
         row = transaction.fetch_one(
-            """
+            f"""
             insert into job.outbox_events (
                 tenant_id, event_type, aggregate_type, aggregate_id,
                 scope_type, scope_key, dedupe_key, schema_version,
@@ -678,8 +679,8 @@ class RuntimeQueueRepository:
             on conflict (tenant_id, dedupe_key)
             where dedupe_key is not null and status = 'pending'
             do update set
-                payload = job.outbox_events.payload || excluded.payload,
-                raw_payload = excluded.raw_payload,
+                payload = {_merge_refresh_payload_sql("job.outbox_events.payload", "excluded.payload")},
+                raw_payload = {_merge_refresh_payload_sql("job.outbox_events.raw_payload", "excluded.raw_payload")},
                 source_version = excluded.source_version,
                 priority = excluded.priority,
                 available_at = least(job.outbox_events.available_at, excluded.available_at),
@@ -691,6 +692,7 @@ class RuntimeQueueRepository:
                 publish_locked_by = null,
                 publish_locked_at = null,
                 publish_confirmed_at = null,
+                created_at = clock_timestamp(),
                 updated_at = clock_timestamp()
             returning
                 id::text as event_id,
@@ -2462,13 +2464,82 @@ def _optional_int(value: Any) -> int | None:
         raise RuntimeQueueDataError(f"source_version must be an integer, got {value!r}.") from exc
 
 
-def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dict[str, str]:
+def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dict[str, object]:
     if not isinstance(metadata, dict):
         return {}
     action_name = str(metadata.get("action_name") or "").strip()
-    if not action_name:
-        return {}
-    return {"action_name": action_name[:120]}
+    result: dict[str, object] = {}
+    if action_name:
+        result["action_name"] = action_name[:120]
+    row_ids = _normalized_metadata_list(metadata.get("row_ids"))
+    if row_ids:
+        result["row_ids"] = row_ids
+    case_ids = _normalized_metadata_list(metadata.get("case_ids"))
+    if case_ids:
+        result["case_ids"] = case_ids
+    return result
+
+
+def _merge_refresh_payload_sql(existing_payload: str, incoming_payload: str) -> str:
+    merged = f"({existing_payload} || {incoming_payload})"
+    return f"""
+                jsonb_set(
+                    jsonb_set(
+                        {merged},
+                        '{{metadata,row_ids}}',
+                        {_merged_metadata_array_sql(existing_payload, incoming_payload, "row_ids")},
+                        true
+                    ),
+                    '{{metadata,case_ids}}',
+                    {_merged_metadata_array_sql(existing_payload, incoming_payload, "case_ids")},
+                    true
+                )
+            """.strip()
+
+
+def _merged_metadata_array_sql(existing_payload: str, incoming_payload: str, name: str) -> str:
+    path = f"'{{metadata,{name}}}'"
+    return f"""
+                        coalesce((
+                            with merged_metadata as (
+                                select value, min(ord) as first_seen
+                                from (
+                                    select value, ord::bigint as ord
+                                    from jsonb_array_elements_text(coalesce({existing_payload} #> {path}, '[]'::jsonb))
+                                        with ordinality as existing_item(value, ord)
+                                    union all
+                                    select value, 1000000 + ord::bigint as ord
+                                    from jsonb_array_elements_text(coalesce({incoming_payload} #> {path}, '[]'::jsonb))
+                                        with ordinality as incoming_item(value, ord)
+                                ) metadata_items
+                                where value <> ''
+                                group by value
+                            )
+                            select case
+                                when count(*) > 200 then '[]'::jsonb
+                                else jsonb_agg(value order by first_seen)
+                            end
+                            from merged_metadata
+                        ), '[]'::jsonb)
+                    """.strip()
+
+
+def _normalized_metadata_list(value: object) -> list[str]:
+    if isinstance(value, str):
+        raw_values: list[object] = [value]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_values:
+        text_value = str(item or "").strip()
+        if not text_value or text_value in seen:
+            continue
+        normalized.append(text_value[:240])
+        seen.add(text_value)
+    return normalized[:200]
 
 
 def _normalized_scope_key_list(values: Iterable[object] | None) -> list[str]:

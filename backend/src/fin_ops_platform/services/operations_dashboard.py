@@ -423,7 +423,7 @@ class OperationsDashboardService:
             return []
         for row in rows:
             warning = row.get("warning_code")
-            if warning:
+            if warning and row.get("required") is not False and row.get("current_effective") is not False:
                 warnings.append(str(warning))
         return rows
 

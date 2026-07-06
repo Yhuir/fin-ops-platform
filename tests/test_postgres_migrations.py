@@ -103,6 +103,10 @@ EXPECTED_MIGRATIONS = [
     "0087_oa_pending_payment_claim_hot_path.sql",
     "0088_app_health_dashboard_current_effective_hot_path.sql",
     "0089_read_model_performance_hot_paths.sql",
+    "0090_import_etc_list_hot_paths.sql",
+    "0091_import_file_ordering_hot_path.sql",
+    "0092_cost_statistics_parent_rollup_hot_path.sql",
+    "0093_workbench_relation_source_version_hot_paths.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -250,7 +254,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 90)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 94)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -343,6 +347,57 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("on read_model.bank_flow_rule_batch_rows", normalized_sql)
         self.assertIn("include (source_versions)", normalized_sql)
         self.assertIn("where status <> 'superseded'", normalized_sql)
+
+    def test_import_and_etc_list_hot_path_indexes_are_declared(self) -> None:
+        sql = (MIGRATIONS_DIR / "0090_import_etc_list_hot_paths.sql").read_text().lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("import_files_uploaded_id_idx", normalized_sql)
+        self.assertIn("on app.import_files (uploaded_at desc, id desc)", normalized_sql)
+        self.assertIn("import_files_session_uploaded_id_idx", normalized_sql)
+        self.assertIn("import_files_status_uploaded_id_idx", normalized_sql)
+        self.assertIn("etc_invoices_issue_status_id_idx", normalized_sql)
+        self.assertIn("include (status, batch_id, business_batch_id, file_path, raw_payload)", normalized_sql)
+        self.assertIn("etc_invoices_status_issue_id_idx", normalized_sql)
+
+    def test_import_file_ordering_hot_path_indexes_are_declared(self) -> None:
+        sql = (MIGRATIONS_DIR / "0091_import_file_ordering_hot_path.sql").read_text().lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("import_files_uploaded_legacy_id_idx", normalized_sql)
+        self.assertIn("coalesce(legacy_mongo_id, id::text)", normalized_sql)
+        self.assertIn("on app.import_files (uploaded_at desc, (coalesce(legacy_mongo_id, id::text)) desc)", normalized_sql)
+        self.assertIn("import_files_session_uploaded_legacy_id_idx", normalized_sql)
+        self.assertIn("import_files_status_uploaded_legacy_id_idx", normalized_sql)
+
+    def test_cost_statistics_parent_rollup_hot_path_index_is_declared(self) -> None:
+        sql = (MIGRATIONS_DIR / "0092_cost_statistics_parent_rollup_hot_path.sql").read_text().lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("cost_statistics_rows_parent_rollup_idx", normalized_sql)
+        self.assertIn("on read_model.cost_statistics_rows", normalized_sql)
+        self.assertIn("project_scope", normalized_sql)
+        self.assertIn("scope_month", normalized_sql)
+        self.assertIn("trade_date desc nulls last", normalized_sql)
+        self.assertIn("where scope_month is not null", normalized_sql)
+
+    def test_workbench_relation_source_version_hot_path_indexes_are_declared(self) -> None:
+        sql = (MIGRATIONS_DIR / "0093_workbench_relation_source_version_hot_paths.sql").read_text().lower()
+        normalized_sql = " ".join(sql.split())
+
+        for required in (
+            "workbench_pair_relations_scope_updated_idx",
+            "workbench_pair_relations_updated_idx",
+            "workbench_reconciliation_decisions_scope_updated_idx",
+            "bank_transaction_relation_claims_active_scope_updated_idx",
+            "bank_transactions_month_updated_idx",
+            "invoices_month_updated_idx",
+            "oa_applications_application_updated_idx",
+        ):
+            self.assertIn(required, normalized_sql)
+        self.assertIn("where status = 'active'", normalized_sql)
+        self.assertIn("where status <> 'deleted'", normalized_sql)
+        self.assertIn("where application_date is not null", normalized_sql)
 
     def test_oa_pending_payment_bank_relation_schema_and_migration_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
@@ -642,6 +697,12 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "bank_transactions_legacy_source_batch_idx",
             "bank_transactions_created_id_idx",
             "import_files_status_uploaded_idx",
+            "workbench_pair_relations_scope_updated_idx",
+            "workbench_reconciliation_decisions_scope_updated_idx",
+            "bank_transaction_relation_claims_active_scope_updated_idx",
+            "bank_transactions_month_updated_idx",
+            "invoices_month_updated_idx",
+            "oa_applications_application_updated_idx",
             "temporary_object_key",
             "source_storage_uri",
             "verified_at",

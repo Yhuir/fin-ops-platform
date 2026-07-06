@@ -4149,6 +4149,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("status <> 'active'", generation_deletes[0][0])
         self.assertEqual(generation_deletes[0][1], (["old-2026-05-gen"],))
 
+    def test_repository_skips_sync_retention_for_all_scope_publish(self) -> None:
+        connection = WorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository._prune_workbench_generations_after_publish({"all"})
+
+        self.assertFalse(connection.fetch_all_calls)
+        self.assertFalse(connection.executed)
+
     def test_repository_retention_failure_does_not_rollback_published_workbench_generation(self) -> None:
         class FailingRetentionAfterPublishConnection(WorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
@@ -7023,6 +7032,31 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("generation_metadata_actual_mismatch", status["read_model_stale_reasons"])
         self.assertIsNone(status["last_error"])
 
+    def test_repository_treats_covered_dirty_workbench_scope_as_fresh(self) -> None:
+        class CoveredDirtyScopeConnection(ActiveWorkbenchGenerationConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return [
+                        {
+                            "scope_key": "2026-03",
+                            "status": "processing",
+                            "updated_at": "2026-06-21T22:48:00+08:00",
+                            "last_error": None,
+                            "source_version": 7,
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        repository = PostgresReadModelRepository(CoveredDirtyScopeConnection())
+
+        status = repository.get_workbench_refresh_status(scope_key="2026-03")
+
+        self.assertEqual(status["read_model_status"], "fresh")
+        self.assertEqual(status["dirty_scopes"][0]["status"], "processing")
+        self.assertEqual(status["generations"][0]["source_versions"]["source_version"], 12)
+
     def test_repository_does_not_publish_all_scope_when_month_generation_is_inconsistent(self) -> None:
         class InconsistentAggregateConnection(WorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
@@ -7458,7 +7492,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.fresh_checks, [("tenant-a", "workbench", "2026-02")])
         self.assertEqual(queue.completed, [])
 
-    def test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish(self) -> None:
+    def test_workbench_refresh_handler_preserves_hot_priority_for_all_aggregate_after_month_publish(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(
                 self,
@@ -7511,7 +7545,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(queue.enqueued), 1)
         aggregate = queue.enqueued[0]
         self.assertEqual(aggregate["scope_key"], "all")
-        self.assertEqual(aggregate["priority"], "low")
+        self.assertEqual(aggregate["priority"], "high")
         self.assertEqual(aggregate["trace_id"], "trace-workbench-month")
         self.assertEqual(aggregate["dedupe_key"], "workbench.read_model.refresh:workbench:all:aggregate:19")
         self.assertEqual(aggregate["payload"]["aggregate_only"], True)
@@ -7580,12 +7614,75 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "parent_scope_keys": ["2026-05"],
                     "source_version": 19,
                     "reason": "workbench_shard_published",
-                    "priority": "low",
+                    "priority": "high",
                     "delay_seconds": 0.0,
                     "trace_id": "trace-workbench-month",
                 }
             ],
         )
+
+    def test_workbench_relation_refresh_enqueues_all_aggregate_immediately_for_write_visibility(self) -> None:
+        class FakeBuilder:
+            def rebuild_workbench_read_model_scope(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                return {"scope_key": scope_key, "active_generation_id": f"gen-{scope_key}", "source_version": source_version}
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.completed: list[tuple[str, str, str, object]] = []
+                self.aggregate_enqueued: list[dict[str, object]] = []
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+            def enqueue_workbench_all_aggregate_refresh(self, **kwargs: object) -> None:
+                self.aggregate_enqueued.append(dict(kwargs))
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-relation-month",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="workbench",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={
+                "scope_key": "2026-05",
+                "source_version": 19,
+                "reason": "workbench_relation_changed",
+                "metadata": {
+                    "action_name": "withdraw_link",
+                    "row_ids": ["oa-1", "bank-1"],
+                    "case_ids": ["CASE-1"],
+                },
+            },
+            attempts=1,
+            status="processing",
+            priority="high",
+            trace_id="trace-workbench-relation-month",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 19)])
+        self.assertEqual(result["aggregate_enqueued"], True)
+        self.assertEqual(queue.aggregate_enqueued[0]["priority"], "high")
+        self.assertEqual(queue.aggregate_enqueued[0]["delay_seconds"], 0.0)
+        self.assertEqual(queue.aggregate_enqueued[0]["parent_scope_keys"], ["2026-05"])
 
     def test_workbench_refresh_handler_can_enqueue_aggregate_without_legacy_enqueue_method(self) -> None:
         class FakeBuilder:
@@ -7627,6 +7724,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result["aggregate_enqueued"], True)
         self.assertEqual(queue.aggregate_enqueued[0]["parent_scope_keys"], ["2026-05"])
+        self.assertEqual(queue.aggregate_enqueued[0]["priority"], "low")
         self.assertEqual(queue.aggregate_enqueued[0]["delay_seconds"], 3.0)
 
     def test_workbench_refresh_handler_expands_all_into_month_shards(self) -> None:
@@ -8744,6 +8842,66 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertCountEqual([row["id"] for row in paired[0]["collapsed_rows"]["bank"]], ["bank-a", "bank-b"])
         self.assertEqual(paired[0]["summary_row"]["special_metadata"]["source_batch_id"], "batch-no-oa-fee-001")
         self.assertEqual(paired[0]["bank_rows"][0]["invoice_relation"]["code"], "no_oa_bank_batch")
+
+    def test_sql_projection_pairs_bank_flow_rule_batch_ten_fee_rows_without_oa_or_invoice(self) -> None:
+        recorder = CandidateSnapshotRecorder()
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=recorder,
+        )
+        row_ids = [f"bank-flow-fee-{index:02d}" for index in range(1, 11)]
+        rows_by_id = {
+            row_id: {
+                "id": row_id,
+                "type": "bank",
+                "source_kind": "bank",
+                "debit_amount": "8.00",
+                "credit_amount": "",
+                "trade_time": f"2026-05-{index:02d} 09:00",
+                "counterparty_name": "手续费",
+            }
+            for index, row_id in enumerate(row_ids, start=1)
+        }
+        relation = {
+            "case_id": "CASE-BANK-FLOW-FEE-010",
+            "relation_mode": "bank_flow_rule_batch",
+            "row_ids": row_ids,
+            "row_types": ["bank" for _row_id in row_ids],
+            "special_metadata": {
+                "source": "bank_flow_rule_batch",
+                "relation_mode": "bank_flow_rule_batch",
+                "source_batch_id": "bank-flow-fee-batch-010",
+                "batch_type": "fee",
+                "batch_label": "手续费",
+                "flow_rule_tag_code": "fee",
+                "flow_rule_version": 7,
+                "requires_oa": False,
+                "requires_invoice": False,
+                "source_row_count": 10,
+                "collapsed_bank_rows": True,
+                "total_amount": "80.00",
+                "withdrawable": True,
+                "display_tags": ["流水规则", "手续费"],
+            },
+            "display_tags": ["流水规则", "手续费"],
+        }
+
+        payload = builder._group_payload("2026-05", rows_by_id, [relation])
+
+        self.assertEqual(payload["open"]["groups"], [])
+        paired = payload["paired"]["groups"]
+        self.assertEqual(len(paired), 1)
+        self.assertEqual(paired[0]["relation_mode"], "bank_flow_rule_batch")
+        self.assertEqual(paired[0]["display_mode"], "collapsed_summary")
+        self.assertEqual([row["id"] for row in paired[0]["bank_rows"]], ["bank_flow_rule_summary:bank-flow-fee-batch-010"])
+        self.assertCountEqual([row["id"] for row in paired[0]["collapsed_rows"]["bank"]], row_ids)
+        summary_row = paired[0]["summary_row"]
+        self.assertEqual(summary_row["source_kind"], "bank_flow_rule_batch_summary")
+        self.assertEqual(summary_row["invoice_relation"]["code"], "bank_flow_rule_batch")
+        self.assertEqual(summary_row["special_metadata"]["source_batch_id"], "bank-flow-fee-batch-010")
+        self.assertIn("流水规则", summary_row["display_tags"])
+        self.assertIn("手续费", summary_row["display_tags"])
+        self.assertNotIn("no_oa_bank_batch", {summary_row["source_kind"], summary_row["invoice_relation"]["code"]})
 
     def test_sql_projection_applies_row_overrides_before_grouping(self) -> None:
         recorder = CandidateSnapshotRecorder()

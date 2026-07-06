@@ -453,6 +453,11 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             0.25,
         )
 
+    def test_runtime_queue_settings_default_consumer_postgres_drain_interval_is_fast(self) -> None:
+        settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
+
+        self.assertEqual(settings.rabbitmq_consumer_postgres_drain_interval_seconds, 0.05)
+
     def test_consumer_records_idle_heartbeat_for_rabbitmq_transport(self) -> None:
         worker = FakeWorker()
         settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})

@@ -101,6 +101,10 @@ EXPECTED_MIGRATION_FILES = [
     "0087_oa_pending_payment_claim_hot_path.sql",
     "0088_app_health_dashboard_current_effective_hot_path.sql",
     "0089_read_model_performance_hot_paths.sql",
+    "0090_import_etc_list_hot_paths.sql",
+    "0091_import_file_ordering_hot_path.sql",
+    "0092_cost_statistics_parent_rollup_hot_path.sql",
+    "0093_workbench_relation_source_version_hot_paths.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

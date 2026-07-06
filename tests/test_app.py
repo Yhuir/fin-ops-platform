@@ -1,8 +1,10 @@
 import json
+from io import BytesIO
 from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+from fin_ops_platform.app.server import Response, _build_handler_factory
 from tests.app_test_support import build_local_state_application as build_application
 
 
@@ -245,6 +247,46 @@ class AppTests(unittest.TestCase):
                 "errors": [],
             },
         )
+
+    def test_http_handler_ignores_stream_client_disconnect_without_traceback(self) -> None:
+        class FakeApp:
+            def handle_request(self, method, path, body=None, headers=None):  # noqa: ANN001
+                self.request = {
+                    "method": method,
+                    "path": path,
+                    "body": body,
+                    "headers": dict(headers or {}),
+                }
+                return Response(
+                    status_code=200,
+                    body=iter(["data: ok\n\n"]),
+                    stream=True,
+                    headers={"Content-Type": "text/event-stream"},
+                )
+
+        class ClosedWfile:
+            def write(self, _data):  # noqa: ANN001
+                raise BrokenPipeError()
+
+            def flush(self) -> None:
+                raise AssertionError("flush should not run after a failed write")
+
+        fake_app = FakeApp()
+        handler_class = _build_handler_factory(fake_app)
+        handler = handler_class.__new__(handler_class)
+        handler.headers = {"X-Test": "1"}
+        handler.rfile = BytesIO()
+        handler.path = "/api/workbench/events"
+        handler.wfile = ClosedWfile()
+        handler.send_response = lambda status_code: None
+        handler.send_header = lambda key, value: None
+        handler.end_headers = lambda: None
+
+        with patch("fin_ops_platform.app.server.traceback.print_exc") as print_exc:
+            handler._dispatch("GET")
+
+        self.assertEqual(fake_app.request["method"], "GET")
+        print_exc.assert_not_called()
 
 
 if __name__ == "__main__":

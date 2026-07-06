@@ -38,6 +38,16 @@
 
 ## 历史记录
 
+## 2026-07-05 - 月分片刷新避免全量银行流水扫描
+
+- 目标：修复 `input_invoice_usage` 月 scope read model refresh 在生产写操作 fan-out 后仍出现 4 秒级耗时的问题，减少 worker projection I/O。
+- 影响范围：`DistributedInvoiceRelationContext.bank_transactions_by_id(...)` 及进项发票使用、销项收款、OA 待付款共享的 invoice relation 查询上下文；不改变页面 API shape、支付状态规则、relation freshness、权限或审计。
+- 关键决策：当 context 有具体 `month_hint` 时，银行流水索引先按该月份分页读取；随后根据已加载 Workbench relation 的 bank row ids 用 `ImportNormalizationService.get_transaction(...)` 补取跨月已关联流水。这样保留“5 月发票可展示 4 月付款流水”的业务口径，同时避免每个 shard 都扫 `month=all`。
+- 文档影响：本实施记录同步；模块边界 I/O 不变，仍通过 WorkbenchRelationReadFacade 和 ImportNormalizationService。
+- 测试覆盖：新增 `tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_month_scope_bank_lookup_uses_month_page_and_fetches_cross_month_relation_ids`，并保留跨月 linked relation 回归。
+- 验证命令：`python3 -m pytest tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_month_scope_unlinked_row_does_not_hide_cross_month_linked_relation tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_month_scope_bank_lookup_uses_month_page_and_fetches_cross_month_relation_ids tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_list_rows_batches_repository_bank_reads_across_all_invoice_rows tests/test_invoice_usage_collection_sql_runtime.py -q`。
+- 未测风险：真实收益需发布后用生产 write-operation apply/audit 和 `input_invoice_usage.read_model.refresh` enqueue-to-fresh 重新采样；本地测试证明查询边界，不证明生产 p95。
+
 ## 2026-07-01 - 反提 OA 抽屉创建草稿入口排版调整
 
 - 目标：按 GSD UI 排版约束，把 `创建 OA 草稿` 从抽屉底部 `OA 草稿` block 提升到候选发票清单工具栏，并放在候选搜索框左侧。

@@ -92,7 +92,7 @@ create index if not exists workbench_group_rows_column_values_gin on read_model.
 - `read_model.workbench_generation_consistency`：active workbench generation 的 metadata、实际 rows/groups、对象身份跨区一致性和可见 row 归属唯一性。`inconsistent` 必须按 read model unavailable 处理；如果原因是 `duplicate_invoice_identity_cross_zone`、`duplicate_bank_identity_cross_zone` 或 `duplicate_row_membership`，先运行 `python3 -m fin_ops_platform.tools.audit_object_identity --json --workbench-scope <scope>` 定位重复对象，再重建受影响 workbench/workbench_relation scope。发布前也要用同一审计命令确认 `workbench_open_visible_owner_duplicate_group_count=0`；同一命令的 `blocking_issue_count` 只计入强发票 identity、银行 identity、OA 附件强 identity、Workbench 归属和 active relation orphan 风险，弱税额指纹与 `app.etc_invoices` 原始来源重复只作为 warning。
 - `redis_hit_count` / `redis_miss_count`：进程内 Redis helper 计数。
 
-RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 只能补充投递层健康度，不能代替 outbox/dirty scope 的事实状态。RabbitMQ 相关指标包括：
+RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 只能补充投递层健康度，不能代替 outbox/dirty scope 的事实状态。`/health/ready` 不实时调用 RabbitMQ Management API，避免可选管理接口把 readiness 探针拖慢；ready payload 中出现 `rabbitmq_metric_error=ready_health_rabbitmq_metrics_skipped` 表示该探针主动跳过管理指标。完整 RabbitMQ Management 指标只在 `/health`、Prometheus 或显式启用 `FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS=1` 的 dashboard 路径中作为补充证据。RabbitMQ 相关指标包括：
 
 - `rabbitmq_publish_status`：outbox 按 publish status 聚合。
 - `rabbitmq_unpublished_backlog`：等待 dispatcher 投递的 pending outbox 数量。
@@ -359,6 +359,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
   rows/filter-options/rules、OA 待付款 rows/filter-options、销项收款 rows/filter-options/rules、税金抵扣、
   成本统计、免 OA、批量账务、往来款、ETC、导入 facts、后台任务和搜索首屏 API。
   `pending-invoices/filter-options` 是历史慢接口，默认必须覆盖。
+- 工作台 groups probe 必须使用前端首屏同口径的 `detail_level=summary`；不带 `detail_level` 的 full payload 只用于兼容或调试，不作为页面首屏 SLO 证据。
 
 判定原则：
 
@@ -411,6 +412,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sse_smoke_probe \
 
 - `/api/app-health/stream`：期望 `event: app_health` 或 `event: heartbeat`。
 - `/api/workbench/events?month=all`：期望 `event: workbench.read_model.*` 或 `event: heartbeat`。
+
+App Health stream 建连后允许先返回轻量 `heartbeat` 作为首事件，完整 `app_health` snapshot 随后发送；首事件 SLO 用来证明代理未缓冲/连接已可读，不替代 `/api/app-health` HTTP payload 和 App Status freshness 验证。
 
 判定原则：
 

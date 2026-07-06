@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Callable
 
 from fin_ops_platform.services.workbench_idempotency import (
@@ -55,6 +56,7 @@ class WorkbenchWriteUnitOfWork:
         command: Any,
         handler: Callable[[WorkbenchWriteUnitOfWorkContext], dict[str, Any]],
     ) -> dict[str, Any]:
+        uow_started_at = monotonic()
         idempotency = _idempotency_request_for(command)
         if idempotency is not None:
             existing = _idempotency_get(self._idempotency_store, idempotency)
@@ -92,15 +94,36 @@ class WorkbenchWriteUnitOfWork:
                 candidate_matches=repositories.candidate_matches,
                 idempotency_store=idempotency_store,
             )
+            handler_started_at = monotonic()
             handler_result = handler(context)
             if not isinstance(handler_result, dict):
                 raise TypeError("WorkbenchWriteUnitOfWork handler must return a dict result.")
+            _emit_timing_if_available(
+                command,
+                "uow_handler",
+                handler_started_at,
+                detail=f"result_keys={len(handler_result)}",
+            )
 
             result = dict(handler_result)
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
+            target_started_at = monotonic()
             refresh_targets = _refresh_targets_for(command, result)
+            _emit_timing_if_available(
+                command,
+                "uow_refresh_target_plan",
+                target_started_at,
+                detail=f"target_count={len(refresh_targets)}",
+            )
+            enqueue_started_at = monotonic()
             refresh_events = self._enqueue_refresh_targets(transaction=transaction, targets=refresh_targets)
+            _emit_timing_if_available(
+                command,
+                "uow_enqueue_refresh_targets",
+                enqueue_started_at,
+                detail=f"target_count={len(refresh_targets)}",
+            )
             if len(refresh_events) != len(refresh_targets):
                 raise RuntimeError("read model refresh writer returned a different number of events than targets.")
             for target, event in zip(refresh_targets, refresh_events, strict=True):
@@ -115,6 +138,7 @@ class WorkbenchWriteUnitOfWork:
             result["source_versions"] = source_versions
             result["outbox_event_ids"] = outbox_event_ids
             if idempotency is not None:
+                commit_started_at = monotonic()
                 _idempotency_commit(
                     idempotency_store,
                     idempotency,
@@ -122,6 +146,18 @@ class WorkbenchWriteUnitOfWork:
                     source_versions=source_versions,
                     outbox_event_ids=outbox_event_ids,
                 )
+                _emit_timing_if_available(
+                    command,
+                    "uow_idempotency_commit",
+                    commit_started_at,
+                    detail=f"outbox_count={len(outbox_event_ids)}",
+                )
+            _emit_timing_if_available(
+                command,
+                "uow_total",
+                uow_started_at,
+                detail=f"outbox_count={len(outbox_event_ids)}",
+            )
             return result
 
     def _enqueue_refresh_targets(
@@ -256,7 +292,7 @@ def _scope_keys_for(command: Any, handler_result: dict[str, Any]) -> list[str]:
 def _refresh_targets_for(command: Any, handler_result: dict[str, Any]) -> list[WorkbenchReadModelRefreshTarget]:
     action_name = str(getattr(command, "action_name", "") or "")
     reason = _refresh_reason_for(command, action_name)
-    metadata = _refresh_metadata_for(command, action_name)
+    metadata = _refresh_metadata_for(command, action_name, handler_result)
     scope_keys = _scope_keys_for(command, handler_result)
     targets: list[WorkbenchReadModelRefreshTarget] = []
 
@@ -368,9 +404,16 @@ def _metadata_text_set(metadata: dict[str, object] | None, name: str) -> set[str
     return set(_metadata_text_list(metadata, name))
 
 
-def _refresh_metadata_for(command: Any, action_name: str) -> dict[str, object] | None:
+def _refresh_metadata_for(
+    command: Any,
+    action_name: str,
+    handler_result: dict[str, Any] | None = None,
+) -> dict[str, object] | None:
     raw_metadata = getattr(command, "refresh_metadata", None)
     metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+    result_metadata = handler_result.get("refresh_metadata") if isinstance(handler_result, dict) else None
+    if isinstance(result_metadata, dict):
+        metadata.update(result_metadata)
     if action_name:
         metadata["action_name"] = action_name
     return metadata or None
@@ -385,6 +428,13 @@ def _refresh_reason_for(command: Any, action_name: str) -> str:
     if action_name in {"confirm_link", "withdraw_link", "cancel_link"}:
         return "workbench_relation_changed"
     return action_name or "workbench_write_changed"
+
+
+def _emit_timing_if_available(command: Any, phase: str, started_at: float, *, detail: str | None = None) -> None:
+    emitter = getattr(command, "timing_emit", None)
+    if not callable(emitter):
+        return
+    emitter(phase, started_at, detail)
 
 
 def _event_value(event: Any, name: str) -> Any:

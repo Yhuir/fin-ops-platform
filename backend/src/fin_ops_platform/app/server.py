@@ -685,6 +685,8 @@ class Application:
         self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)
         self._app_health_dashboard_cache_lock = Lock()
         self._app_health_dashboard_cache: tuple[float, dict[str, object]] | None = None
+        self._app_status_runtime_snapshot_cache_lock = Lock()
+        self._app_status_runtime_snapshot_cache: tuple[float, dict[str, object]] | None = None
         self._workbench_matching_dirty_worker_lock = Lock()
         self._workbench_matching_dirty_worker_started = False
         self._workbench_matching_run_lock = Lock()
@@ -3743,6 +3745,14 @@ class Application:
         except ValueError:
             return 30.0
 
+    @staticmethod
+    def _app_status_runtime_snapshot_cache_ttl_seconds() -> float:
+        raw_value = os.getenv("FIN_OPS_APP_STATUS_RUNTIME_SNAPSHOT_CACHE_TTL_SECONDS", "1").strip()
+        try:
+            return min(5.0, max(0.0, float(raw_value)))
+        except ValueError:
+            return 1.0
+
     def _read_model_refresh_gateway(self) -> ReadModelRefreshGateway:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         return ReadModelRefreshGateway(queue_repository=queue_repository)
@@ -3805,6 +3815,13 @@ class Application:
 
         def event_stream() -> Iterable[str]:
             while True:
+                yield self._app_health_service.serialize_sse_event(
+                    "heartbeat",
+                    {
+                        "generated_at": datetime.now(UTC).isoformat(),
+                        "phase": "connected",
+                    },
+                )
                 started_at = monotonic()
                 snapshot = self._build_app_health_snapshot(session, started_at=started_at)
                 heartbeat = {"generated_at": snapshot.get("generated_at")}
@@ -3960,7 +3977,7 @@ class Application:
             "storage_mode": self._state_store.storage_mode if self._state_store is not None else "memory",
             "backend": self._state_store.storage_backend if self._state_store is not None else "memory",
         }
-        snapshot_without_alerts = self._app_health_service.build_snapshot(
+        snapshot = self._app_health_service.build_snapshot(
             session=session,
             active_jobs=active_jobs,
             oa_sync_payload=oa_sync_payload,
@@ -3970,21 +3987,14 @@ class Application:
             attention_jobs=attention_jobs,
             alerts={"active": [], "recent_recovered": []},
         )
-        self._apply_workbench_generation_health(snapshot_without_alerts)
-        alerts = self._app_health_alert_service.evaluate(snapshot_without_alerts)
+        self._apply_workbench_generation_health(snapshot)
+        alerts = self._app_health_alert_service.evaluate(snapshot)
         if self._state_store is not None:
             self._state_store.save_app_health_alerts(self._app_health_alert_service.snapshot())
-        snapshot = self._app_health_service.build_snapshot(
-            session=session,
-            active_jobs=active_jobs,
-            oa_sync_payload=oa_sync_payload,
-            state_store_info=state_store_info,
-            rebuild_scheduled=self._is_oa_sync_rebuild_scheduled(),
-            duration_ms=self._duration_ms(started_at),
-            attention_jobs=attention_jobs,
-            alerts=alerts,
-        )
-        self._apply_workbench_generation_health(snapshot)
+        snapshot["alerts"] = alerts
+        metrics = snapshot.get("metrics") if isinstance(snapshot.get("metrics"), dict) else {}
+        metrics["active_alert_count"] = len(alerts.get("active", [])) if isinstance(alerts, dict) else 0
+        snapshot["metrics"] = metrics
         runtime_statuses = self._app_status_runtime_statuses()
         snapshot["app_status"] = self._app_status_overview_service.build_overview(
             session=session,
@@ -4006,12 +4016,34 @@ class Application:
                 "worker_statuses": {},
                 "outbox_statuses": {},
             }
+        ttl_seconds = self._app_status_runtime_snapshot_cache_ttl_seconds()
+        if ttl_seconds > 0:
+            now = monotonic()
+            cache_lock = getattr(self, "_app_status_runtime_snapshot_cache_lock", None)
+            if cache_lock is not None:
+                with cache_lock:
+                    cached = getattr(self, "_app_status_runtime_snapshot_cache", None)
+            else:
+                cached = getattr(self, "_app_status_runtime_snapshot_cache", None)
+            if isinstance(cached, tuple) and len(cached) == 2:
+                expires_at, payload = cached
+                if isinstance(expires_at, (int, float)) and now < float(expires_at) and isinstance(payload, dict):
+                    return deepcopy(payload)
         snapshot = snapshot_provider()
-        return snapshot if isinstance(snapshot, dict) else {
+        normalized = snapshot if isinstance(snapshot, dict) else {
             "read_model_statuses": None,
             "worker_statuses": {},
             "outbox_statuses": {},
         }
+        if ttl_seconds > 0:
+            cache_entry = (monotonic() + ttl_seconds, deepcopy(normalized))
+            cache_lock = getattr(self, "_app_status_runtime_snapshot_cache_lock", None)
+            if cache_lock is not None:
+                with cache_lock:
+                    self._app_status_runtime_snapshot_cache = cache_entry
+            else:
+                self._app_status_runtime_snapshot_cache = cache_entry
+        return normalized
 
     def _apply_workbench_generation_health(self, snapshot: dict[str, object]) -> None:
         repository = getattr(self, "_workbench_sql_read_repository", None)
@@ -5319,16 +5351,8 @@ class Application:
             return {}
         pdf_path = payload.get("pdf_file_path")
         xml_path = payload.get("xml_file_path")
-        payload["has_pdf"] = bool(
-            isinstance(pdf_path, str)
-            and pdf_path
-            and self._etc_service._stored_invoice_file_exists(pdf_path)
-        )
-        payload["has_xml"] = bool(
-            isinstance(xml_path, str)
-            and xml_path
-            and self._etc_service._stored_invoice_file_exists(xml_path)
-        )
+        payload["has_pdf"] = isinstance(pdf_path, str) and bool(pdf_path)
+        payload["has_xml"] = isinstance(xml_path, str) and bool(xml_path)
         return payload
 
     def _delete_etc_business_batch_via_route_owner(self, business_batch_id: str, body: str | bytes | None) -> Response:
@@ -13294,6 +13318,8 @@ class Application:
         for key in (
             "source",
             "case_id",
+            "row_ids",
+            "case_ids",
             "action_name",
             "downstream_scope_types",
             "invoice_usage_scope_types",
@@ -14960,22 +14986,25 @@ def _build_handler_factory(app: Application) -> Callable[..., BaseHTTPRequestHan
                         ensure_ascii=False,
                     ),
                 )
-            self.send_response(response.status_code)
-            for key, value in response.headers.items():
-                self.send_header(key, value)
-            if response.stream:
+            try:
+                self.send_response(response.status_code)
+                for key, value in response.headers.items():
+                    self.send_header(key, value)
+                if response.stream:
+                    self.end_headers()
+                    for chunk in response.body:
+                        encoded_chunk = chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+                        if not encoded_chunk:
+                            continue
+                        self.wfile.write(encoded_chunk)
+                        self.wfile.flush()
+                    return
+                encoded = response.body.encode("utf-8") if isinstance(response.body, str) else response.body
+                self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
-                for chunk in response.body:
-                    encoded_chunk = chunk.encode("utf-8") if isinstance(chunk, str) else chunk
-                    if not encoded_chunk:
-                        continue
-                    self.wfile.write(encoded_chunk)
-                    self.wfile.flush()
+                self.wfile.write(encoded)
+            except (BrokenPipeError, ConnectionResetError):
                 return
-            encoded = response.body.encode("utf-8") if isinstance(response.body, str) else response.body
-            self.send_header("Content-Length", str(len(encoded)))
-            self.end_headers()
-            self.wfile.write(encoded)
 
         def log_message(self, format: str, *args: object) -> None:
             return

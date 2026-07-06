@@ -339,19 +339,27 @@ def test_list_import_files_page_uses_summary_projection_without_raw_payload_blob
     files, total = repository.list_import_files_page(page=1, page_size=50, status="confirmed")
 
     assert total == 1
-    assert files[0].id == "file_1"
-    assert files[0].batch_id == "batch_1"
-    assert files[0].row_count == 8
-    assert files[0].success_count == 7
-    assert files[0].error_count == 1
-    assert files[0].updated_count == 2
-    assert files[0].audit.importable_count == 7
-    assert files[0].row_results == []
-    assert files[0].normalized_rows == []
+    assert files[0]["id"] == "file_1"
+    assert files[0]["batch_id"] == "batch_1"
+    assert files[0]["row_count"] == 8
+    assert files[0]["success_count"] == 7
+    assert files[0]["error_count"] == 1
+    assert files[0]["updated_count"] == 2
+    assert files[0]["audit"]["importable_count"] == 7
+    assert "row_results" not in files[0]
+    assert "normalized_rows" not in files[0]
+    count_sql, count_params = connection.fetch_one_calls[0]
+    assert "count(*)::bigint as total" in count_sql
+    assert "import_files.uploaded_at is not null" in count_sql
+    assert count_params == ("confirmed",)
     sql, params = connection.fetch_all_calls[0]
     select_clause = sql.split(" from app.import_files", 1)[0]
     assert "payload.data->>'row_count'" in sql
     assert "import_files.raw_payload" not in select_clause
+    assert "payload_selected_bank" not in sql
+    assert "payload_detected_bank" not in sql
+    assert "payload_conflict_message" not in sql
+    assert "payload_bank_selection_conflict" not in sql
     assert params == ("confirmed", 50, 0)
 
 

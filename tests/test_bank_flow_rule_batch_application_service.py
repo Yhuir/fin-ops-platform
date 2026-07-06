@@ -6,7 +6,11 @@ import unittest
 from fin_ops_platform.services.bank_batch_application_service import BankBatchPairRelationSnapshotPort, BankBatchPersistenceError
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
-from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh import BankFlowRuleBatchReadModelPersistencePort
+from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh import (
+    BankFlowRuleBatchReadModelPersistencePort,
+    BankFlowRuleBatchReadModelRefreshService,
+)
+from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class RecordingStateStore:
@@ -777,6 +781,319 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             },
         )
         self.assertEqual(service.bank_row_count_from_source_versions(versions), 100)
+
+    def test_bank_flow_list_freshness_uses_scope_source_versions(self) -> None:
+        settings = RecordingBankFlowRuleSettings()
+
+        class EffectiveCategoryProvider:
+            last_source_versions = {
+                "bank_detail_schema_version": 8,
+                "row_count": 999,
+            }
+
+            def __init__(self) -> None:
+                self.source_version_calls: list[list[str]] = []
+
+            def source_versions_for_scope_keys(self, scope_keys: list[str], **_kwargs: object) -> dict[str, object]:
+                self.source_version_calls.append(list(scope_keys))
+                return {
+                    "status": "fresh",
+                    "source_versions": {
+                        "bank_detail_schema_version": 8,
+                        "row_count": 4,
+                        "source_version": 12,
+                    },
+                }
+
+        class RelationFacade:
+            last_source_versions = {
+                "scope_key": "wrong",
+                "relation_signature": "wrong",
+            }
+
+            def __init__(self) -> None:
+                self.source_version_calls: list[str] = []
+
+            def source_versions_for_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+                self.source_version_calls.append(month)
+                return {
+                    "status": "fresh",
+                    "source_versions": {
+                        "scope_key": month,
+                        "relation_signature": "relation-v1",
+                    },
+                }
+
+        provider = EffectiveCategoryProvider()
+        relation_facade = RelationFacade()
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._app_settings_service = settings
+        service._workbench_matching_source_versions_provider = lambda: {"workbench_matching_rules_version": "rules-v1"}
+        service._bank_transaction_category_service = SimpleNamespace(
+            snapshot=lambda: {"version": 3},
+            tag_dictionary_payload=lambda: {
+                "definitions": [
+                    {
+                        "code": "fee",
+                        "label": "手续费",
+                        "output_primary_label": "费用",
+                        "output_sub_label": "手续费",
+                    }
+                ]
+            },
+        )
+        service._effective_category_provider = provider
+        service._relation_facade = relation_facade
+        expected_versions = service.read_model_scope_source_versions(
+            scope_key="2026-07",
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        row = {
+            "batch_id": "batch-1",
+            "batch_type": "fee",
+            "scope_month": "2026-07",
+            "status": "draft",
+            "status_bucket": "unsubmitted",
+            "row_count": 4,
+            "total_amount": "12.00",
+            "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            "source_versions": expected_versions,
+        }
+
+        class Repository:
+            def __init__(self) -> None:
+                self.filters: list[dict[str, object]] = []
+
+            def list_bank_flow_rule_batch_rows(self, filters: dict[str, object]) -> list[dict[str, object]]:
+                self.filters.append(dict(filters))
+                return [dict(row)]
+
+        repository = Repository()
+        service._bank_batch_read_model_repository = repository
+        service._bank_batch_service = SimpleNamespace(list_batches=lambda _filters: [])
+        service.enqueue_background_refresh = (  # type: ignore[method-assign]
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("fresh read model must not enqueue refresh"))
+        )
+
+        payload = service.list_batches_payload(
+            {"month": ["2026-07"]},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(len(payload["batches"]), 1)
+        self.assertEqual(provider.source_version_calls, [["2026-07"], ["2026-07"]])
+        self.assertEqual(relation_facade.source_version_calls, ["2026-07", "2026-07", "2026-07"])
+        self.assertEqual(
+            repository.filters,
+            [
+                {"month": "2026-07", "account_key": "", "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE},
+                {
+                    "month": "2026-07",
+                    "type": "",
+                    "status": "",
+                    "bucket": "",
+                    "account_key": "",
+                    "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                },
+            ],
+        )
+
+    def test_bank_flow_refresh_publishes_prechecked_scope_source_versions(self) -> None:
+        class ImportService:
+            def list_transactions(self, *, month: str = "all") -> list[dict[str, object]]:
+                self.month = month
+                return [
+                    {
+                        "id": "bank-1",
+                        "txn_date": "2026-07-01",
+                        "txn_direction": "outflow",
+                        "amount": "12.00",
+                        "bank_name": "CCB",
+                        "account_no": "6222000000008106",
+                        "counterparty_name": "供应商",
+                    }
+                ]
+
+        class EffectiveCategoryProvider:
+            def __init__(self) -> None:
+                self.last_source_versions = {
+                    "bank_detail_schema_version": 8,
+                    "row_count": 999,
+                    "source_version": 50,
+                }
+
+            def source_versions_for_scope_keys(self, scope_keys: list[str], **_kwargs: object) -> dict[str, object]:
+                return {
+                    "status": "fresh",
+                    "source_versions": {
+                        "bank_detail_schema_version": 8,
+                        "row_count": 1,
+                        "source_version": 51,
+                    },
+                }
+
+            def bulk_get_for_rows(self, rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+                self.last_source_versions = {
+                    "bank_detail_schema_version": 8,
+                    "row_count": 999,
+                    "source_version": 52,
+                }
+                return {
+                    str(row["id"]): {
+                        "transaction_id": row["id"],
+                        "category_code": "fee",
+                        "category_label": "手续费",
+                        "category_source": "auto",
+                    }
+                    for row in rows
+                }
+
+        class RelationFacade:
+            def source_versions_for_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "status": "fresh",
+                    "source_versions": {
+                        "scope_key": month,
+                        "relation_signature": "relation-v1",
+                    },
+                }
+
+            def list_by_month(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                return {"rows": [], "groups": []}
+
+        class Repository:
+            def bank_flow_rule_batch_source_versions_summary(
+                self,
+                _filters: dict[str, object],
+            ) -> dict[str, object]:
+                return {
+                    "read_model_status": "fresh",
+                    "row_count": 1,
+                    "source_versions": {"different": "version"},
+                }
+
+        class StateStore:
+            bank_flow_rule_batch_sql_read_repository = Repository()
+
+        class QueueRepository:
+            def __init__(self) -> None:
+                self.completions: list[dict[str, object]] = []
+
+            def read_model_refresh_is_current(self, **_kwargs: object) -> bool:
+                return True
+
+            def complete_read_model_refresh(self, **kwargs: object) -> None:
+                self.completions.append(dict(kwargs))
+
+        class BatchService:
+            def __init__(self) -> None:
+                self.published_source_versions: dict[str, object] = {}
+                self._snapshot: dict[str, object] = {"batches": {}}
+
+            def build_batches(self, *_args: object, **_kwargs: object) -> None:
+                self.published_source_versions = dict(_args[3])
+                self._snapshot = {
+                    "batches": {
+                        "batch-1": {
+                            "batch_id": "batch-1",
+                            "batch_type": "fee",
+                            "status": "draft",
+                            "scope_month": "2026-07",
+                            "source_versions": self.published_source_versions,
+                        }
+                    }
+                }
+
+            def public_snapshot(self) -> dict[str, object]:
+                return dict(self._snapshot)
+
+            def last_legacy_migration_result(self) -> dict[str, object]:
+                return {"changed": False}
+
+        class Persistence:
+            def __init__(self) -> None:
+                self.saved: list[dict[str, object]] = []
+
+            def save_public_snapshot(
+                self,
+                snapshot: dict[str, object],
+                *,
+                scope_key: str = "all",
+                relation_mode: str = BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            ) -> None:
+                self.saved.append(
+                    {
+                        "scope_key": scope_key,
+                        "relation_mode": relation_mode,
+                        "snapshot": dict(snapshot),
+                    }
+                )
+
+        batch_service = BatchService()
+        persistence = Persistence()
+        queue = QueueRepository()
+        service = BankFlowRuleBatchReadModelRefreshService(
+            import_service=ImportService(),
+            effective_category_provider=EffectiveCategoryProvider(),
+            bank_batch_service=batch_service,
+            app_settings_service=RecordingBankFlowRuleSettings(),
+            bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
+            pair_relation_service=SimpleNamespace(snapshot=lambda: {}),
+            workbench_read_model_service=SimpleNamespace(snapshot=lambda: {}),
+            state_store=StateStore(),
+            read_model_persistence=persistence,
+            queue_repository=queue,
+            workbench_matching_source_versions_provider=lambda: {"workbench_matching_rules_version": "rules-v1"},
+            relation_facade=RelationFacade(),
+        )
+
+        result = service.handle_runtime_event(
+            RuntimeQueueEvent(
+                event_id="evt-bank-flow-refresh",
+                tenant_id="default",
+                event_type="bank_flow_rule_batch.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="2026-07",
+                scope_type="bank_flow_rule_batch",
+                scope_key="2026-07",
+                dedupe_key="bank_flow_rule_batch.read_model.refresh:bank_flow_rule_batch:2026-07",
+                payload={
+                    "scope_type": "bank_flow_rule_batch",
+                    "scope_key": "2026-07",
+                    "source_version": 9,
+                    "metadata": {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE},
+                },
+                attempts=1,
+                status="processing",
+                source_version=9,
+            )
+        )
+
+        self.assertEqual(result["scope_key"], "2026-07")
+        self.assertEqual(
+            batch_service.published_source_versions["bank_detail_source_versions"],
+            {
+                "bank_detail_schema_version": 8,
+                "row_count": 1,
+            },
+        )
+        self.assertEqual(
+            persistence.saved[0]["snapshot"]["batches"]["batch-1"]["source_versions"],
+            batch_service.published_source_versions,
+        )
+        self.assertEqual(
+            queue.completions,
+            [
+                {
+                    "tenant_id": "default",
+                    "scope_type": "bank_flow_rule_batch",
+                    "scope_key": "2026-07",
+                    "source_version": 9,
+                }
+            ],
+        )
 
     def test_unchanged_read_model_scope_uses_bank_flow_source_version_summary(self) -> None:
         class Repository:

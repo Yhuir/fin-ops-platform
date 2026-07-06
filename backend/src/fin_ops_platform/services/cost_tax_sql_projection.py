@@ -53,6 +53,7 @@ class CostStatisticsSqlProjectionBuilder:
             read_model_repository or PostgresReadModelRepository(connection)
         )
         self._redis_helper = redis_helper
+        self._settings_payload_cache: dict[str, Any] | None = None
 
     def list_cost_statistics_scope_shards(self, scope_key: str) -> list[str]:
         project_scope, month = _parse_cost_scope_key(scope_key)
@@ -81,56 +82,64 @@ class CostStatisticsSqlProjectionBuilder:
         return self.rebuild_cost_statistics_month_scope(scope_key)
 
     def rebuild_cost_statistics_month_scope(self, scope_key: str) -> dict[str, object]:
-        project_scope, month = _parse_cost_scope_key(scope_key)
-        if month == "all":
-            raise ValueError("month scope rebuild requires a concrete YYYY-MM scope.")
-        source_versions = self._source_versions(month)
-        unchanged = self._unchanged_cost_statistics_scope_result(
-            scope_key=f"{project_scope}:{month}",
-            month=month,
-            project_scope=project_scope,
-            source_versions=source_versions,
-            refresh_kind="month",
-        )
-        if unchanged is not None:
-            return unchanged
-        payload = self._build_explorer_payload(month, project_scope=project_scope)
-        return self._publish_cost_statistics_scope(
-            month=month,
-            project_scope=project_scope,
-            payload=payload,
-            source_versions=source_versions,
-            refresh_kind="month",
-        )
+        self._settings_payload_cache = None
+        try:
+            project_scope, month = _parse_cost_scope_key(scope_key)
+            if month == "all":
+                raise ValueError("month scope rebuild requires a concrete YYYY-MM scope.")
+            source_versions = self._source_versions(month)
+            unchanged = self._unchanged_cost_statistics_scope_result(
+                scope_key=f"{project_scope}:{month}",
+                month=month,
+                project_scope=project_scope,
+                source_versions=source_versions,
+                refresh_kind="month",
+            )
+            if unchanged is not None:
+                return unchanged
+            payload = self._build_explorer_payload(month, project_scope=project_scope)
+            return self._publish_cost_statistics_scope(
+                month=month,
+                project_scope=project_scope,
+                payload=payload,
+                source_versions=source_versions,
+                refresh_kind="month",
+            )
+        finally:
+            self._settings_payload_cache = None
 
     def rebuild_cost_statistics_parent_scope(self, scope_key: str) -> dict[str, object]:
-        project_scope, month = _parse_cost_scope_key(scope_key)
-        if month != "all":
-            raise ValueError("parent scope rebuild requires an all scope.")
-        entries, shard_versions = self._cost_entries_from_materialized_shards(project_scope=project_scope)
-        payload = self._build_explorer_payload_from_entries(entries, month="all", project_scope=project_scope)
-        source_versions = {
-            **self._source_versions("all"),
-            "cost_statistics_parent_source": "materialized_shards",
-            "source_shard_count": len(shard_versions),
-            "source_shards": shard_versions,
-        }
-        unchanged = self._unchanged_cost_statistics_scope_result(
-            scope_key=f"{project_scope}:all",
-            month="all",
-            project_scope=project_scope,
-            source_versions=source_versions,
-            refresh_kind="parent",
-        )
-        if unchanged is not None:
-            return unchanged
-        return self._publish_cost_statistics_scope(
-            month="all",
-            project_scope=project_scope,
-            payload=payload,
-            source_versions=source_versions,
-            refresh_kind="parent",
-        )
+        self._settings_payload_cache = None
+        try:
+            project_scope, month = _parse_cost_scope_key(scope_key)
+            if month != "all":
+                raise ValueError("parent scope rebuild requires an all scope.")
+            entries, shard_versions = self._cost_entries_from_materialized_shards(project_scope=project_scope)
+            payload = self._build_explorer_payload_from_entries(entries, month="all", project_scope=project_scope)
+            source_versions = {
+                **self._source_versions("all"),
+                "cost_statistics_parent_source": "materialized_shards",
+                "source_shard_count": len(shard_versions),
+                "source_shards": shard_versions,
+            }
+            unchanged = self._unchanged_cost_statistics_scope_result(
+                scope_key=f"{project_scope}:all",
+                month="all",
+                project_scope=project_scope,
+                source_versions=source_versions,
+                refresh_kind="parent",
+            )
+            if unchanged is not None:
+                return unchanged
+            return self._publish_cost_statistics_scope(
+                month="all",
+                project_scope=project_scope,
+                payload=payload,
+                source_versions=source_versions,
+                refresh_kind="parent",
+            )
+        finally:
+            self._settings_payload_cache = None
 
     def missing_or_stale_cost_statistics_shards(self, parent_scope_key: str) -> list[str]:
         project_scope, month = _parse_cost_scope_key(parent_scope_key)
@@ -206,7 +215,7 @@ class CostStatisticsSqlProjectionBuilder:
         }
 
     def _source_versions(self, month: str) -> dict[str, Any]:
-        settings_payload = _app_settings_payload(self._connection)
+        settings_payload = self._settings_payload()
         source_versions = {
             "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             "workbench_scope_key": month,
@@ -496,7 +505,7 @@ class CostStatisticsSqlProjectionBuilder:
         return payload if isinstance(payload, dict) else {}
 
     def _active_project_names(self) -> set[str] | None:
-        payload = _app_settings_payload(self._connection)
+        payload = self._settings_payload()
         if not payload:
             return None
         projects = payload.get("projects")
@@ -513,7 +522,12 @@ class CostStatisticsSqlProjectionBuilder:
         return active or None
 
     def _bank_accounts_from_settings(self) -> list[dict[str, str]]:
-        return bank_accounts_from_settings_payload(_app_settings_payload(self._connection))
+        return bank_accounts_from_settings_payload(self._settings_payload())
+
+    def _settings_payload(self) -> dict[str, Any]:
+        if self._settings_payload_cache is None:
+            self._settings_payload_cache = _app_settings_payload(self._connection)
+        return dict(self._settings_payload_cache)
 
     def _set_redis_json(self, key: str, value: dict[str, Any]) -> None:
         set_json = getattr(self._redis_helper, "set_json", None)

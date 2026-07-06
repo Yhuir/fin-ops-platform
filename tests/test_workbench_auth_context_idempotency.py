@@ -41,18 +41,8 @@ class _RecordingUoW:
                 "message": "已取消关联并回退为待处理。",
             }
         if action_name == "withdraw_link":
-            return {
-                "success": True,
-                "action": "withdraw_link",
-                "operation": "withdraw_link",
-                "month": getattr(command, "month"),
-                "case_id": getattr(command, "case_id"),
-                "affected_row_ids": list(getattr(command, "row_ids")),
-                "affected_months": list(getattr(command, "scope_keys")),
-                "affected_scope_keys": list(getattr(command, "scope_keys")),
-                "restored_relations": [],
-                "message": "已撤回 1 组关联。",
-            }
+            ctx = type("UoWContext", (), {"transaction": object(), "pair_relations": object()})()
+            return handler(ctx)
         return {
             "success": True,
             "action": "confirm_link",
@@ -410,6 +400,7 @@ def _new_facade(
     scope_keys_for_row_ids: object | None = None,
     scope_keys_for_rows: object | None = None,
     resolve_rows_for_amount_check: object | None = None,
+    resolve_live_rows_direct: object | None = None,
     resolved_row_types_for_row_ids: object | None = None,
     pair_relation_service: object | None = None,
 ) -> WorkbenchWriteFacade:
@@ -437,7 +428,7 @@ def _new_facade(
         month_scope_for_selected_row_ids=lambda **_: "2026-05",
         scope_keys_for_row_ids=scope_keys_for_row_ids or (lambda **_: {"2026-05"}),
         scope_keys_for_rows=scope_keys_for_rows or (lambda rows, **_: ["2026-05"]),
-        resolve_live_rows_direct=lambda *_, **__: list(live_rows or []),
+        resolve_live_rows_direct=resolve_live_rows_direct or (lambda *_, **__: list(live_rows or [])),
         resolve_live_row=lambda row_id, **_: {"id": row_id},
         relation_groups=relation_groups or (lambda *_, **__: []),
         withdraw_rows_and_after_relations=withdraw_rows_and_after_relations or (lambda *_, **__: ([], [], [])),
@@ -536,6 +527,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(
             result.payload["freshness_targets"],
             [
+                {"read_model_key": "workbench", "scope_key": "2026-05"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
             ],
         )
@@ -660,7 +652,9 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(
             result.payload["freshness_targets"],
             [
+                {"read_model_key": "workbench", "scope_key": "2026-03"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
+                {"read_model_key": "workbench", "scope_key": "2026-02"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
             ],
         )
@@ -755,14 +749,128 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(
             result.payload["freshness_targets"],
             [
+                {"read_model_key": "workbench", "scope_key": "2026-05"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
             ],
         )
 
+    def test_withdraw_link_submit_skips_optional_operation_projection_rebuild(self) -> None:
+        def forbidden_projection_rebuild(**_kwargs: object) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
+            raise AssertionError("withdraw submit must not rebuild optional operation projection")
+
+        facade = _new_facade(
+            withdraw_uow=_RecordingUoW(),
+            relation_command_service=_RecordingRelationCommandService(),
+            withdraw_rows_and_after_relations=forbidden_projection_rebuild,
+        )
+
+        result = facade.withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "withdraw:no-submit-projection",
+            },
+            request_id="req-withdraw-no-submit-projection",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["operation_projection"], {})
+        self.assertEqual(
+            result.payload["freshness_targets"],
+            [
+                {"read_model_key": "workbench", "scope_key": "2026-05"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
+            ],
+        )
+
+    def test_withdraw_link_uow_submit_reuses_alias_map_in_postprocess(self) -> None:
+        resolve_calls: list[dict[str, object]] = []
+
+        def resolve_live_rows_direct(row_ids: list[str], **kwargs: object) -> list[dict[str, object]]:
+            resolve_calls.append({"row_ids": list(row_ids), **kwargs})
+            return [
+                {"id": "oa-1", "type": "oa", "summary_fields": {"申请日期": "2026-05-10"}},
+                {"id": "bank-1", "type": "bank", "trade_time": "2026-05-10 10:00:00"},
+            ]
+
+        facade = _new_facade(
+            withdraw_uow=_RecordingUoW(),
+            relation_command_service=_RecordingRelationCommandService(),
+            resolve_live_rows_direct=resolve_live_rows_direct,
+        )
+
+        result = facade.withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "withdraw:single-alias-map",
+            },
+            request_id="req-withdraw-single-alias-map",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(resolve_calls, [{"row_ids": ["oa-1", "bank-1"], "month_hint": "2026-05"}])
+
+    def test_withdraw_link_bank_invoice_submit_does_not_resolve_live_rows_for_metadata(self) -> None:
+        class _BankInvoiceWithdrawRelationCommandService(_RecordingRelationCommandService):
+            def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+                self.withdraw_calls.append(dict(kwargs))
+                before_relation = {
+                    "case_id": "CASE-BANK-INVOICE",
+                    "row_ids": ["bank-1", "invoice-1"],
+                    "row_types": ["bank", "invoice"],
+                    "status": "active",
+                    "month_scope": "2026-05",
+                    "version": 3,
+                }
+                return {
+                    "status": "withdrawn",
+                    "relation": {**before_relation, "status": "cancelled", "version": 4},
+                    "before_relation": before_relation,
+                    "history": {"operation_type": "withdraw_link"},
+                    "changed_case_ids": ["CASE-BANK-INVOICE"],
+                    "affected_months": ["2026-05"],
+                    "affected_row_ids": ["bank-1", "invoice-1"],
+                    "restored_relations": [],
+                    "version": 4,
+                    "read_model_status": "fresh",
+                    "read_model_stale_reasons": [],
+                    "read_model_scope_keys": ["2026-05"],
+                    "refresh_enqueued": False,
+                    "idempotent_replay": False,
+                }
+
+        def forbidden_live_rows(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+            raise AssertionError("bank+invoice withdraw submit must not synchronously resolve live rows.")
+
+        facade = _new_facade(
+            withdraw_uow=_RecordingUoW(),
+            relation_command_service=_BankInvoiceWithdrawRelationCommandService(),
+            resolve_live_rows_direct=forbidden_live_rows,
+        )
+
+        result = facade.withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["bank-1", "invoice-1"],
+                "idempotency_key": "withdraw:bank-invoice-no-live-rows",
+            },
+            request_id="req-withdraw-bank-invoice-no-live-rows",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
+
     def test_withdraw_link_targets_preview_row_months_when_relation_scope_is_all(self) -> None:
-        class _AllScopePreviewRelationCommandService(_RecordingRelationCommandService):
-            def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
-                self.preview_withdraw_calls.append(dict(kwargs))
+        class _AllScopeWithdrawRelationCommandService(_RecordingRelationCommandService):
+            def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+                self.withdraw_calls.append(dict(kwargs))
                 active_relation = {
                     "case_id": "CASE-ALL",
                     "row_ids": list(kwargs["row_ids"]),
@@ -772,14 +880,20 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                     "version": 7,
                 }
                 return {
-                    "operation": "withdraw_link",
-                    "operation_type": "withdraw_relation",
-                    "preview_id": "withdraw_relation:CASE-ALL:7",
-                    "active_relation": active_relation,
-                    "before_relations": [active_relation],
-                    "after_relations": [],
-                    "submit_expected_versions": {"relation:CASE-ALL": 7},
+                    "status": "withdrawn",
+                    "relation": {**active_relation, "status": "cancelled", "version": 8},
+                    "before_relation": active_relation,
+                    "history": {"operation_type": "withdraw_link"},
+                    "changed_case_ids": ["CASE-ALL"],
+                    "affected_months": ["all"],
+                    "affected_row_ids": list(kwargs["row_ids"]),
+                    "restored_relations": [],
+                    "version": 8,
+                    "read_model_status": "fresh",
+                    "read_model_stale_reasons": [],
                     "read_model_scope_keys": ["all"],
+                    "refresh_enqueued": False,
+                    "idempotent_replay": False,
                 }
 
         uow = _RecordingUoW()
@@ -789,9 +903,10 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             {"id": "txn_imported_1361", "type": "bank", "trade_time": "2026-03-09 12:06:30"},
             {"id": "txn_imported_1269", "type": "bank", "trade_time": "2026-02-03 09:16:49"},
         ]
+        relation_command = _AllScopeWithdrawRelationCommandService()
         facade = _new_facade(
             withdraw_uow=uow,
-            relation_command_service=_AllScopePreviewRelationCommandService(),
+            relation_command_service=relation_command,
             scope_keys_for_row_ids=lambda **_: {"all"},
             scope_keys_for_rows=lambda rows, **_: [
                 "all",
@@ -816,12 +931,16 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
-        self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), ["2026-03", "2026-02"])
+        self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), [])
+        self.assertEqual(len(relation_command.preview_withdraw_calls), 0)
+        self.assertEqual(relation_command.withdraw_calls[0]["row_ids"], row_ids)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
         self.assertEqual(
             result.payload["freshness_targets"],
             [
+                {"read_model_key": "workbench", "scope_key": "2026-03"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
+                {"read_model_key": "workbench", "scope_key": "2026-02"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
             ],
         )

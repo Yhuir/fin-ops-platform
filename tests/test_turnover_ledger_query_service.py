@@ -4,6 +4,7 @@ import unittest
 
 from fin_ops_platform.services.postgres_repositories.read_models import (
     _turnover_ledger_family_summary,
+    _turnover_ledger_source_versions_mixed,
     _turnover_ledger_summary,
 )
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
@@ -109,6 +110,59 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         self.assertEqual(queue.enqueued, [])
         self.assertEqual(legacy_calls, [])
 
+    def test_mixed_all_scope_row_versions_use_dirty_scope_status_instead_of_reenqueueing_all(self) -> None:
+        queue = FakeQueue()
+        repository = FakeRepository(
+            {
+                "rows": [{"relation_id": "mixed"}],
+                "pagination": {"page": 1, "page_size": 50, "total": 1},
+                "source_versions": {},
+                "source_versions_mixed": True,
+                "refresh_status": "fresh",
+                "read_model_status": "fresh",
+            }
+        )
+        service = TurnoverLedgerQueryService(
+            read_repository=repository,
+            refresh_queue_repository=queue,
+            source_versions_provider=lambda: {"turnover_ledger_schema_version": "current"},
+            legacy_payload_builder=lambda **_kwargs: {"rows": []},
+            settings_provider=lambda: {"postgres_required": True},
+        )
+
+        payload = service.list_ledger(family="all", direction="all", status=None, page=1, page_size=50)
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertFalse(payload["refresh_enqueued"])
+        self.assertEqual(payload["source_versions"], {"turnover_ledger_schema_version": "current"})
+        self.assertEqual(queue.enqueued, [])
+
+    def test_mixed_all_scope_row_versions_still_refresh_when_dirty_scope_is_active(self) -> None:
+        queue = FakeQueue()
+        repository = FakeRepository(
+            {
+                "rows": [{"relation_id": "mixed-refreshing"}],
+                "pagination": {"page": 1, "page_size": 50, "total": 1},
+                "source_versions": {},
+                "source_versions_mixed": True,
+                "refresh_status": "processing",
+                "read_model_status": "fresh",
+            }
+        )
+        service = TurnoverLedgerQueryService(
+            read_repository=repository,
+            refresh_queue_repository=queue,
+            source_versions_provider=lambda: {"turnover_ledger_schema_version": "current"},
+            legacy_payload_builder=lambda **_kwargs: {"rows": []},
+            settings_provider=lambda: {"postgres_required": True},
+        )
+
+        payload = service.list_ledger(family="all", direction="all", status=None, page=1, page_size=50)
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
+        self.assertEqual(payload["source_versions"], {})
+
     def test_missing_required_sql_read_model_returns_empty_refreshing_payload_and_enqueues_miss(self) -> None:
         queue = FakeQueue()
         repository = FakeRepository(None)
@@ -154,6 +208,25 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["source_versions"], {"turnover_ledger_schema_version": "expected"})
         self.assertEqual(payload["rows"][0]["source_versions"], {"turnover_ledger_schema_version": "expected"})
         self.assertEqual(queue.enqueued, [])
+
+    def test_turnover_source_versions_mixed_detects_incremental_row_versions(self) -> None:
+        self.assertTrue(
+            _turnover_ledger_source_versions_mixed(
+                [
+                    {"source_versions": {"turnover_ledger_schema_version": "old"}},
+                    {"source_versions": {"turnover_ledger_schema_version": "new"}},
+                ]
+            )
+        )
+        self.assertFalse(
+            _turnover_ledger_source_versions_mixed(
+                [
+                    {"source_versions": {"turnover_ledger_schema_version": "same"}},
+                    {"source_versions": {"turnover_ledger_schema_version": "same"}},
+                ]
+            )
+        )
+        self.assertFalse(_turnover_ledger_source_versions_mixed([{"source_versions": {}}]))
 
 
 class TurnoverLedgerReadModelRepositoryPortTests(unittest.TestCase):

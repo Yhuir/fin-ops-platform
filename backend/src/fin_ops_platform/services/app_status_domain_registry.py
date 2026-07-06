@@ -104,14 +104,6 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         job_types=("output_invoice_collection.read_model.refresh", "invoice_lifecycle.read_model.refresh"),
     ),
     AppStatusDomainDefinition(
-        key="no_oa_bank_batches",
-        label="免OA批次",
-        route="/no-oa-bank-batches",
-        read_model_keys=("no_oa_bank_batch",),
-        worker_instances=("no-oa-bank-batch",),
-        job_types=("no_oa_bank_batch.read_model.refresh",),
-    ),
-    AppStatusDomainDefinition(
         key="bank_flow_rule_batches",
         label="流水规则批量处理",
         route="/bank-flow-rule-batches",

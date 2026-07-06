@@ -342,6 +342,53 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-05"])
         self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
 
+    def test_withdraw_relation_row_id_submit_fingerprint_distinguishes_row_ids(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "case-1": {
+                        "case_id": "case-1",
+                        "row_ids": ["bank-1", "invoice-1"],
+                        "row_types": ["bank", "invoice"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "2026-05",
+                        "version": 2,
+                    },
+                    "case-2": {
+                        "case_id": "case-2",
+                        "row_ids": ["bank-2", "invoice-2"],
+                        "row_types": ["bank", "invoice"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "2026-05",
+                        "version": 3,
+                    },
+                }
+            }
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        first = service.withdraw_relation(
+            case_id="",
+            row_ids=["bank-1", "invoice-1"],
+            actor_id="finance-user",
+            operation_type="withdraw_relation",
+            idempotency_key="withdraw-row-id-submit",
+        )
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.withdraw_relation(
+                case_id="",
+                row_ids=["bank-2", "invoice-2"],
+                actor_id="finance-user",
+                operation_type="withdraw_relation",
+                idempotency_key="withdraw-row-id-submit",
+            )
+
+        self.assertEqual(first["relation"]["case_id"], "case-1")
+        self.assertEqual(context.exception.error_code, "workbench_relation_idempotency_conflict")
+        self.assertEqual(len(repository.save_calls), 1)
+
     def test_withdraw_relation_rejects_stale_preview_identity(self) -> None:
         active_relation = {
             "case_id": "case-new",

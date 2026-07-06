@@ -124,6 +124,7 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertIn("install_if_missing", helper)
         self.assertIn("migrate_legacy_worker_poll_interval", helper)
+        self.assertIn("migrate_workbench_aggregate_drain", helper)
         self.assertIn('source_poll="$(grep -oE -- "--poll-interval-seconds [0-9.]+"', helper)
         self.assertIn("--poll-interval-seconds (2|0\\\\.25|0\\\\.1|0\\\\.05)([^0-9.]|$)", helper)
         self.assertIn("--poll-interval-seconds ${source_poll}", helper)
@@ -148,7 +149,10 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("workbench-aggregate", required)
         self.assertIn("--exclude-claim-scope-key all", workbench_env)
         self.assertIn("--claim-scope-key all", aggregate_env)
+        self.assertIn("--poll-interval-seconds 0.05", aggregate_env)
+        self.assertIn("FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=4", aggregate_env)
         self.assertIn("migrate_workbench_scope_split", helper)
+        self.assertIn("migrate_workbench_aggregate_drain", helper)
         self.assertIn("--exclude-claim-scope-key all", helper)
 
     def test_rabbitmq_dispatcher_env_includes_invoice_usage_collection_events(self) -> None:
@@ -164,13 +168,13 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertNotRegex(env_example, r"(?m)^\s*FIN_OPS_QUEUE_BACKEND=", msg=env_example)
         self.assertIn("RABBITMQ_URL=", env_example)
-        self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1", env_example)
+        self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.05", env_example)
 
     def test_runtime_worker_env_install_migrates_rabbitmq_consumer_drain_interval(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
 
         self.assertIn("migrate_rabbitmq_worker_drain_interval", helper)
-        self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1", helper)
+        self.assertIn("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.05", helper)
 
     def test_search_pending_workers_and_dispatcher_include_pending_invoice_refresh(self) -> None:
         postgres_worker_env = (REPO_ROOT / "deploy/oa/env/fin-ops.worker.search-pending.env.example").read_text()

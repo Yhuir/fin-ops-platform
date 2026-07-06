@@ -42,3 +42,10 @@ class SearchReadModelRepositoryPort:
             rows=rows,
             source_versions=source_versions,
         )
+
+    def search_index_scope_summary(self, *, month: str) -> dict[str, Any] | None:
+        summary = getattr(self._repository, "search_index_scope_summary", None)
+        if not callable(summary):
+            return None
+        payload = summary(month=month)
+        return dict(payload) if isinstance(payload, dict) else None

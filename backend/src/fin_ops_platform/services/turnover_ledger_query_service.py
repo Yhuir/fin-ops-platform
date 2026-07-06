@@ -44,6 +44,11 @@ class TurnoverLedgerQueryService:
             page=page,
             page_size=page_size,
         )
+        if isinstance(read_model_payload, dict):
+            read_model_payload = self._normalize_all_scope_source_versions(
+                read_model_payload,
+                expected_source_versions=expected_source_versions,
+            )
 
         if isinstance(read_model_payload, dict) or self._postgres_required():
             result = ReadModelQueryGateway(queue_repository=self._refresh_queue_repository).load(
@@ -104,6 +109,17 @@ class TurnoverLedgerQueryService:
             page_size=page_size,
             scope_key="all",
         )
+
+    @staticmethod
+    def _normalize_all_scope_source_versions(
+        payload: dict[str, Any],
+        *,
+        expected_source_versions: dict[str, Any],
+    ) -> dict[str, Any]:
+        refresh_status = str(payload.get("refresh_status") or "").strip().lower()
+        if payload.get("source_versions_mixed") is True and refresh_status == "fresh":
+            return {**payload, "source_versions": dict(expected_source_versions)}
+        return payload
 
     def _postgres_required(self) -> bool:
         settings = self._settings_provider()

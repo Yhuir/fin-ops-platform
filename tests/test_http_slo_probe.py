@@ -21,7 +21,7 @@ class HttpSloProbeTests(unittest.TestCase):
             "/fin-ops/output-invoice-collections",
             "/fin-ops/tax-offset",
             "/fin-ops/cost-statistics",
-            "/fin-ops/no-oa-bank-batches",
+            "/fin-ops/bank-flow-rule-batches",
             "/fin-ops/batch-accounting",
             "/fin-ops/turnover-ledger",
             "/fin-ops/etc-tickets",
@@ -46,7 +46,7 @@ class HttpSloProbeTests(unittest.TestCase):
             "output_invoice_collections_filter_options",
             "cost_statistics_explorer_all",
             "cost_statistics_summary_all",
-            "no_oa_bank_batches",
+            "bank_flow_rule_batches",
             "batch_accounting",
             "turnover_ledger_grouped",
             "etc_business_batches",
@@ -62,6 +62,7 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("date_to=", probe_paths["bank_details_transactions"])
         self.assertIn("page=1", probe_paths["workbench_groups_all_paired"])
         self.assertIn("page_size=50", probe_paths["workbench_groups_all_paired"])
+        self.assertIn("detail_level=summary", probe_paths["workbench_groups_all_paired"])
         self.assertIn("page=1", probe_paths["pending_invoices_rows"])
         self.assertIn("page_size=50", probe_paths["pending_invoices_rows"])
         self.assertIn("direction=expense", probe_paths["pending_invoices_filter_options"])
@@ -75,9 +76,10 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("month=2026-03", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("project_scope=active", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("project_scope=active", probe_paths["cost_statistics_summary_all"])
-        self.assertIn("bucket=unsubmitted", probe_paths["no_oa_bank_batches"])
-        self.assertIn("page=1", probe_paths["no_oa_bank_batches"])
-        self.assertIn("page_size=200", probe_paths["no_oa_bank_batches"])
+        self.assertIn("bucket=unsubmitted", probe_paths["bank_flow_rule_batches"])
+        self.assertIn("page=1", probe_paths["bank_flow_rule_batches"])
+        self.assertIn("page_size=200", probe_paths["bank_flow_rule_batches"])
+        self.assertEqual(probe_paths["bank_flow_rule_batches_tag_rules"], "/api/bank-flow-rule-batches/tag-rules")
         self.assertIn("bank_year=", probe_paths["batch_accounting"])
         self.assertIn("bank_page=1", probe_paths["batch_accounting"])
         self.assertIn("bank_page_size=200", probe_paths["batch_accounting"])

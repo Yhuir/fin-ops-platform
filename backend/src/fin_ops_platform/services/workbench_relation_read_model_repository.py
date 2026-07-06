@@ -65,6 +65,34 @@ class WorkbenchRelationReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else {}
 
+    def list_active_workbench_relation_source_rows(
+        self,
+        *,
+        row_ids: list[str],
+        tenant_id: str = "default",
+    ) -> list[dict[str, object]]:
+        rows = self._repository.list_active_workbench_relation_source_rows(
+            row_ids=row_ids,
+            tenant_id=tenant_id,
+        )
+        return [dict(row) for row in list(rows or []) if isinstance(row, dict)]
+
+    def workbench_relation_source_summary_from_source(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str] | None = None,
+        include_row_ids: bool = False,
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        payload = self._repository.workbench_relation_source_summary_from_source(
+            scope_key=scope_key,
+            row_ids=row_ids,
+            include_row_ids=include_row_ids,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else {}
+
     def workbench_relation_scope_summary(
         self,
         *,
@@ -112,6 +140,25 @@ class WorkbenchRelationReadModelRepositoryPort:
     ) -> None:
         self._repository.save_workbench_relation_distribution(
             scope_key=scope_key,
+            rows=rows,
+            groups=groups,
+            source_versions=source_versions,
+            tenant_id=tenant_id,
+        )
+
+    def save_workbench_relation_distribution_rows(
+        self,
+        *,
+        scope_key: str,
+        affected_row_ids: list[str],
+        rows: list[dict[str, object]],
+        groups: list[dict[str, object]],
+        source_versions: dict[str, object] | None = None,
+        tenant_id: str = "default",
+    ) -> None:
+        self._repository.save_workbench_relation_distribution_rows(
+            scope_key=scope_key,
+            affected_row_ids=affected_row_ids,
             rows=rows,
             groups=groups,
             source_versions=source_versions,

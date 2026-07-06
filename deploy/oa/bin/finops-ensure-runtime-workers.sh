@@ -91,13 +91,23 @@ migrate_workbench_scope_split() {
   fi
 }
 
+migrate_workbench_aggregate_drain() {
+  local worker="$1"
+  local target_file="$env_dir/fin-ops.worker.${worker}.env"
+  [ "$worker" = "workbench-aggregate" ] || return 0
+  [ -f "$target_file" ] || return 0
+  if grep -q '^FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=1$' "$target_file"; then
+    sed -i -E 's/^FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=1$/FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=4/' "$target_file"
+  fi
+}
+
 migrate_rabbitmq_worker_drain_interval() {
   local target_file="$env_dir/fin-ops.rabbitmq-worker.env"
   [ -f "$target_file" ] || return 0
   if grep -q '^RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=' "$target_file"; then
-    sed -i -E 's/^RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=.*/RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1/' "$target_file"
+    sed -i -E 's/^RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=.*/RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.05/' "$target_file"
   else
-    printf '\nRABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1\n' >> "$target_file"
+    printf '\nRABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.05\n' >> "$target_file"
   fi
 }
 
@@ -152,6 +162,7 @@ for worker in $required_workers $optional_workers; do
   ensure_worker_env "$worker"
   migrate_legacy_worker_poll_interval "$worker"
   migrate_workbench_scope_split "$worker"
+  migrate_workbench_aggregate_drain "$worker"
 done
 
 if [ ! -f "$env_dir/fin-ops.common.env" ]; then

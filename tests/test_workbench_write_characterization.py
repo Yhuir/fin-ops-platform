@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,
@@ -1092,6 +1093,8 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         assert isinstance(metadata, dict)
         self.assertIn("downstream_scope_types", metadata)
         self.assertIn("invoice_usage_scope_types", metadata)
+        self.assertCountEqual(metadata.get("row_ids") or [], row_ids)
+        self.assertEqual(metadata.get("case_ids"), ["CASE-WITHDRAW-SCOPE"])
         pending_invoice_scope_keys = metadata.get("pending_invoice_scope_keys")
         self.assertIsInstance(pending_invoice_scope_keys, list)
         assert isinstance(pending_invoice_scope_keys, list)
@@ -1133,6 +1136,8 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         assert isinstance(metadata, dict)
         self.assertEqual(metadata.get("source"), "confirm_link")
         self.assertEqual(metadata.get("action_name"), "confirm_link")
+        self.assertCountEqual(metadata.get("row_ids") or [], row_ids)
+        self.assertEqual(metadata.get("case_ids"), ["CASE-CONFIRM-SCOPE"])
         pending_invoice_scope_keys = metadata.get("pending_invoice_scope_keys")
         if pending_invoice_scope_keys is not None:
             self.assertIsInstance(pending_invoice_scope_keys, list)
@@ -1140,6 +1145,20 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             self.assertTrue(any(str(scope_key).endswith(":2026-03") for scope_key in pending_invoice_scope_keys))
             self.assertNotIn("expense:all", pending_invoice_scope_keys)
             self.assertNotIn("income:all", pending_invoice_scope_keys)
+
+    def test_relation_pending_invoice_scope_keys_only_enqueue_direction_all_scopes(self) -> None:
+        facade = object.__new__(WorkbenchWriteFacade)
+
+        scope_keys = facade._relation_pending_invoice_scope_keys(
+            relation={"row_types": ["bank"]},
+            rows=[
+                {"type": "bank", "direction": "outflow"},
+                {"type": "bank", "direction": "inflow"},
+            ],
+            month="2026-03",
+        )
+
+        self.assertEqual(scope_keys, ["expense:all:2026-03", "income:all:2026-03"])
 
     def test_withdraw_link_uses_uow_transaction_when_available(self) -> None:
         app = self._build_app()

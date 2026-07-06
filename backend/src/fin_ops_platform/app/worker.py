@@ -350,6 +350,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
             workbench_relation_read_facade=workbench_relation_read_facade,
+            relation_rows_from_source=True,
         )
         refresh_service = SearchPendingReadModelRefreshService(
             projection_builder=projection_builder,
@@ -367,6 +368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         projection_builder = BankDetailSqlProjectionBuilder(
             connection=connection,
             workbench_relation_read_facade=workbench_relation_read_facade,
+            relation_tags_from_source=True,
         )
         refresh_service = BankDetailReadModelRefreshService(
             projection_builder=projection_builder,

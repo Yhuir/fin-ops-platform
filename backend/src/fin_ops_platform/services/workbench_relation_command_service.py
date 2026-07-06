@@ -613,6 +613,7 @@ class WorkbenchRelationCommandService:
         *,
         case_id: str,
         actor_id: str,
+        row_ids: list[str] | None = None,
         reason: str | None = None,
         occurred_at: str | None = None,
         idempotency_key: str | None = None,
@@ -630,10 +631,16 @@ class WorkbenchRelationCommandService:
                 "Withdraw relation submit operation_type does not match the preview.",
                 payload={"operation_type": resolved_operation_type},
             )
+        selected_row_ids = [
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        ]
         fingerprint = self._request_fingerprint(
             "withdraw_relation",
             {
                 "case_id": resolved_case_id,
+                "row_ids": selected_row_ids,
                 "actor_id": actor_id,
                 "reason": reason,
                 "history_operation_type": history_operation_type,
@@ -647,13 +654,31 @@ class WorkbenchRelationCommandService:
         if replay is not None:
             return replay
 
-        pair_service = self._pair_service_for_case_ids([resolved_case_id])
-        before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
+        if resolved_case_id:
+            pair_service = self._pair_service_for_case_ids([resolved_case_id])
+            before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
+        else:
+            pair_service = self._pair_service_for_row_ids(selected_row_ids)
+            active_relations = pair_service.active_relations_for_row_ids(selected_row_ids)
+            if len(active_relations) > 1:
+                raise WorkbenchRelationCommandError(
+                    "workbench_relation_multiple_groups_selected",
+                    "Only one workbench relation group can be withdrawn at a time.",
+                    payload={
+                        "case_ids": [
+                            str(relation.get("case_id") or "")
+                            for relation in active_relations
+                            if str(relation.get("case_id") or "").strip()
+                        ],
+                    },
+                )
+            before_relation = active_relations[0] if active_relations else None
+            resolved_case_id = str((before_relation or {}).get("case_id") or "").strip()
         if not isinstance(before_relation, dict):
             raise WorkbenchRelationCommandError(
                 "workbench_relation_not_found",
                 "Workbench relation is not active or does not exist.",
-                payload={"case_id": resolved_case_id},
+                payload={"case_id": resolved_case_id, "row_ids": selected_row_ids},
             )
         before_row_ids = [
             str(row_id)
@@ -733,6 +758,7 @@ class WorkbenchRelationCommandService:
             ),
             "restored_relations": deepcopy(restored_relations),
             "affected_row_ids": list(dict.fromkeys(affected_row_ids)),
+            "before_relation": deepcopy(before_relation),
         }
         self._save_idempotency_result(idempotency_key, fingerprint, result)
         return result

@@ -92,6 +92,13 @@ def workbench_reconciliation_decision(key: str, *, scope_month: str, row_ids: tu
     )
 
 
+def workbench_operation_targets(scope_key: str) -> list[dict[str, str]]:
+    return [
+        {"read_model_key": "workbench", "scope_key": scope_key},
+        {"read_model_key": "workbench_relation", "scope_key": scope_key},
+    ]
+
+
 class WorkbenchSystemAutoPairModePolicyTests(unittest.TestCase):
     def test_salary_and_internal_transfer_are_not_system_auto_pair_relation_modes(self) -> None:
         self.assertNotIn("salary_personal_auto_match", SYSTEM_AUTO_PAIR_RELATION_MODES)
@@ -4409,7 +4416,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(confirm_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             confirm_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
         self.assertNotIn("updated_rows", confirm_payload)
 
@@ -4435,7 +4442,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(cancel_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             cancel_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
         self.assertNotIn("updated_rows", cancel_payload)
 
@@ -4469,7 +4476,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(cash_pass_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             cash_pass_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
         cash_cancel_response = app_for_cash_special.handle_request(
             "POST",
@@ -4489,7 +4496,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(cash_cancel_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             cash_cancel_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
 
         app_for_cash_ticket = build_application()
@@ -4525,7 +4532,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(cash_ticket_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             cash_ticket_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
 
         app_for_bank_exception = build_application()
@@ -4553,7 +4560,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(update_bank_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             update_bank_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
         update_bank_case = app_for_bank_exception._workbench_exception_case_service.snapshot()["cases"][update_bank_payload["exception_case_id"]]
         self.assertEqual(update_bank_case["rule_version"], "exception_rules_v1")
@@ -4585,7 +4592,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(mark_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             mark_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
         mark_case = app_for_mark_exception._workbench_exception_case_service.snapshot()["cases"][mark_payload["exception_case_id"]]
         self.assertEqual(mark_case["rule_version"], "exception_rules_v1")
@@ -4680,7 +4687,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(payload["affected_scope_keys"], ["2026-05"])
         self.assertEqual(
             payload["freshness_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-05"}],
+            workbench_operation_targets("2026-05"),
         )
 
     def test_cancel_link_uses_existing_case_members_without_rebuilding_workbench(self) -> None:
@@ -4887,7 +4894,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
 
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["case_id"])
@@ -6660,7 +6667,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(cancel_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             cancel_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
 
         updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -6865,7 +6872,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(ignore_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             ignore_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
         ignored_case = app._workbench_exception_case_service.snapshot()["cases"][ignore_payload["exception_case_id"]]
         self.assertEqual(ignored_case["status"], "ignored")
@@ -6897,7 +6904,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(unignore_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             unignore_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
         unignored_case = app._workbench_exception_case_service.snapshot()["cases"][ignore_payload["exception_case_id"]]
         self.assertEqual(unignored_case["status"], "cancelled")
@@ -6934,7 +6941,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             response_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
         self.assertEqual(response_payload["exception_case_ids"], [response_payload["exception_case_id"]])
         exception_case = app._workbench_exception_case_service.snapshot()["cases"][response_payload["exception_case_id"]]
@@ -6982,7 +6989,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response_payload["read_model_scope_keys"], ["2026-03"])
         self.assertEqual(
             response_payload["operation_barrier_targets"],
-            [{"read_model_key": "workbench_relation", "scope_key": "2026-03"}],
+            workbench_operation_targets("2026-03"),
         )
         self.assertIn(response_payload["exception_case_id"], app._workbench_exception_case_service.snapshot()["cases"])
 

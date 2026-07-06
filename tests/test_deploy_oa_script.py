@@ -305,6 +305,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-deploy-control}"', script)
         self.assertIn("self-update <release-name>", script)
         self.assertIn("install_deploy_control_helper", script)
+        self.assertIn("install_runtime_worker_helper", script)
+        self.assertIn('install_runtime_worker_helper "$src"', script)
         self.assertIn('ensure_runtime_workers "$src"', script)
         self.assertIn('"$ENSURE_RUNTIME_WORKERS_HELPER" "$src"', script)
         self.assertIn("wait_required_workers_ready", script)

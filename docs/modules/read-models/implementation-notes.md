@@ -30,6 +30,76 @@
 
 ## 历史记录
 
+## 2026-07-06 - no-OA legacy 从当前页面 SLO 移除
+
+- 目标：修正生产 SLO 与 App Status 当前页面事实源，避免已迁移为“流水规则批量处理”的页面继续被 legacy `no_oa_bank_batch` read model 和 `/no-oa-bank-batches` 探针污染。
+- 影响范围：`APP_STATUS_READ_MODEL_REGISTRY` 的 critical 标记、App Status domain registry、`http_slo_probe` 默认页面/API 采样、相关测试和 read model 文档；不改变 legacy no-OA API、worker、read model payload、权限、审计或历史回归。
+- 关键决策：`bank_flow_rule_batch` 是当前页面 critical read model；`no_oa_bank_batch` 只作为 legacy API/read-model 回归项保留，显式 `--read-model-key no_oa_bank_batch` 仍可单独验证，但默认 `read_model_slo_smoke --critical-only` 和 authenticated HTTP SLO 不再采样它。
+- 文档影响：同步 `docs/app-architecture/pages.md`、`docs/architecture/module-boundaries/read-model-contracts.md`、`docs/modules/read-models/README.md`、`boundary-io.md`、`tests.md`。
+- 测试覆盖：`tests/test_http_slo_probe.py`、`tests/test_read_model_slo_smoke.py`、`tests/test_app_status_overview_service.py`。
+- 验证命令：待本轮完整验证后统一记录。
+- 未测风险：legacy no-OA 后端仍存在；彻底删除需要另起删除计划并验证所有历史 relation、write-operation scenario、权限矩阵和 API 回归。
+
+## 2026-07-06 - Workbench relation operation-scoped partial refresh
+
+- 目标：修复生产 Workbench withdraw 写操作中 `workbench_relation.read_model.refresh` 偶发超过 1s 的慢点。生产事件显示单次撤回只影响少量 rows，但 worker 仍执行整月 distribution rebuild，冷缓存/并发时 handler 可超过 1s。
+- 影响范围：`WorkbenchWriteFacade` relation refresh metadata、`RuntimeQueueRepository` metadata 白名单与同 scope dedupe 合并语义、`WorkbenchRelationReadModelRefreshService`、`WorkbenchRelationSqlProjectionBuilder`、`WorkbenchRelationReadModelRepositoryPort`、`PostgresReadModelRepository` workbench relation distribution 保存；不改变 relation fact 表、API response shape、dirty/outbox/readiness 事实源、权限或审计。
+- 关键决策：confirm/withdraw/cancel 关系写操作把本次操作影响的 `row_ids` / `case_ids` 写入 outbox metadata；`workbench-relation` month worker 在单事件携带 row ids 时只读取受影响 rows 与仍 active relation 成员，并用局部保存删除 overlap 旧 group、写回当前 rows/groups、同步 scope source_versions 和 row/group count。同 scope pending event 发生 dedupe 合并时删除 row 级 metadata，让合并事件降级 full month rebuild，避免只刷新最后一次操作导致漏行。
+- 文档影响：同步 `docs/modules/workbench-relations/boundary-io.md`、`docs/modules/read-models/boundary-io.md`、`docs/architecture/module-boundaries/read-model-contracts.md`。
+- 测试覆盖：新增 `tests/test_workbench_relation_read_model_refresh.py`；更新 `tests/test_workbench_relation_sql_projection.py`、`tests/test_postgres_repositories_boundaries.py`、`tests/test_runtime_queue.py`、`tests/test_workbench_uow_contract.py`、`tests/test_workbench_write_characterization.py`、`tests/test_read_model_manifest.py`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_workbench_uow_contract.py tests/test_workbench_relation_read_model_refresh.py tests/test_workbench_relation_sql_projection.py tests/test_postgres_repositories_boundaries.py tests/test_workbench_write_characterization.py tests/test_read_model_manifest.py -q`。
+- 未测风险：本地 fake 测试不能证明真实 PostgreSQL planner、RabbitMQ consumer fallback 和生产写操作 p95；发布后必须重新执行 health/SSE、full authenticated HTTP SLO、read-model SLO 和受控 Workbench write smoke。
+
+## 2026-07-06 - Workbench relation scoped source versions
+
+- 目标：减少 `workbench_relation` 月份 shard 因其它月份 OA/流水/发票更新而被误判 stale 的抖动，并压缩 Workbench withdraw/confirm 后 relation distribution rebuild 耗时。
+- 影响范围：`WorkbenchRelationSqlProjectionBuilder`、`PostgresReadModelRepository` 批量 upsert allowlist、migration `0093_workbench_relation_source_version_hot_paths.sql`；不改变 relation fact 写入口、read model table schema、dirty/outbox 事实源、API response shape、权限或审计。
+- 关键决策：`workbench_relation` projection schema 升级到 `2026-07-06-scoped-source-versions-v1`。`source_versions` 改为按 month scope 计算；relation fact 自身版本覆盖所有与本 scope 相关的 active/inactive relation，确保 withdraw/恢复会失效当前 scope；跨月源对象版本只跟随 active relation 成员，避免已撤回 relation 继续污染当前 scope。保存 `workbench_relation_rows/groups` 复用既有 multi-values upsert 热路径。
+- 文档影响：同步 workbench-relations boundary。
+- 测试覆盖：`tests/test_workbench_relation_sql_projection.py` 覆盖 scoped source_versions SQL 与 schema bump；`tests/test_postgres_repositories_boundaries.py` 覆盖 relation rows/groups 批量 values upsert；`tests/test_postgres_migrations.py` 覆盖 0093 索引。
+- 验证命令：待本轮修复完成后统一记录。
+- 未测风险：本地 fake 不能证明生产 optimizer 和 worker concurrency；发布后必须复跑 production write-operation apply、HTTP SLO 和 relation projection profile。
+
+## 2026-07-06 - RabbitMQ fallback drain default consistency
+
+- 目标：避免 RabbitMQ worker 缺少共享 env 时退回 1 秒 PostgreSQL fallback drain，造成 read model wakeup 长尾。
+- 影响范围：`RuntimeQueueSettings.from_env(...)` 默认值；不改变已配置生产 env、RabbitMQ queue topology、outbox schema 或 worker handler。
+- 关键决策：默认 `RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS` 与 dataclass、deploy helper 和 docs 保持一致为 `0.05`；生产仍可通过 env 显式覆盖。
+- 测试覆盖：`tests/test_rabbitmq_runtime.py::RabbitMqRuntimeTests::test_runtime_queue_settings_default_consumer_postgres_drain_interval_is_fast`。
+- 验证命令：待本轮修复完成后统一记录。
+- 未测风险：默认值测试不证明 RabbitMQ broker delivery latency；生产仍需 read model SLO smoke 验证。
+
+## 2026-07-05 - 写后 fan-out worker/read-model 热路径修复补充
+
+- 目标：针对最新生产写操作验证暴露的慢点，继续压缩 `input_invoice_usage` 月刷新和 `cost_statistics` 父聚合耗时，并修正 Workbench write-operation 后置探针口径。
+- 影响范围：`DistributedInvoiceRelationContext`、`write_operation_scenario_discovery`、migration `0092_cost_statistics_parent_rollup_hot_path.sql`、迁移 pinning 测试和相关模块实施记录；不改变业务写入口、read model scope policy、dirty/outbox 事实源、权限或审计。
+- 关键决策：进项使用月分片不再对银行流水调用 `month=all`，改为月内列表加 relation bank ids 补取，保留跨月付款展示。成本统计父 scope 继续从 materialized shards 聚合，通过索引优化而不是恢复 live fallback。Workbench 写操作后置 API probe 固定使用前端首屏同口径 `/api/workbench/groups?...&detail_level=summary`，full payload 只作为兼容/调试面，不作为首屏 SLO 证据。
+- 生产事实：上一轮受控 Workbench withdraw 写入成功，但 post probe 首次观察到 `workbench_groups` refreshing；随后同一路径改用 summary 首屏口径连续返回 fresh 且约 239 到 486ms。strict cross-page audit 仍暴露 `workbench:all`、`input_invoice_usage`、`cost_statistics:all` 等后台 fan-out 长尾，因此本条只关闭已定位的 I/O 热点，不声明全域闭环。
+- 文档影响：同步 read-models、input-invoice-usage、cost-statistics 实施记录和 monitoring 中 Workbench groups summary 探针口径。
+- 测试覆盖：新增/更新 `tests/test_input_invoice_usage_service.py`、`tests/test_write_operation_scenario_discovery.py`、`tests/test_postgres_migrations.py`、`tests/postgres_test_utils.py`、`tests/test_postgres_test_utils.py`。
+- 验证命令：`python3 -m pytest tests/test_write_operation_scenario_discovery.py tests/test_write_operation_e2e_smoke.py -q`；`python3 -m pytest tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_month_scope_unlinked_row_does_not_hide_cross_month_linked_relation tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_month_scope_bank_lookup_uses_month_page_and_fetches_cross_month_relation_ids tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_list_rows_batches_repository_bank_reads_across_all_invoice_rows tests/test_invoice_usage_collection_sql_runtime.py -q`；migration pinning 测试。
+- 未测风险：`workbench:all` 仍是重型全局 generation 发布，可能继续超过 1 秒严格目标；需发布后用生产 write-operation apply/audit 复测，再决定是否拆成 lazy/incremental all aggregate。
+
+## 2026-07-05 - 导入文件列表排序 hot path
+
+- 目标：继续压缩 `/api/import-facts/files?page=1&page_size=50` 的生产首屏 p95，避免公网样本在 1 秒目标附近抖动。
+- 影响范围：`PostgresCoreRepository.list_import_files_page(...)` exact count 查询和新增 migration `0091_import_file_ordering_hot_path.sql`；不改变 API response shape、分页 total 语义、权限、审计或导入业务状态。
+- 关键决策：`app.import_files.uploaded_at` 是 `not null` schema contract，count 查询增加等价条件 `import_files.uploaded_at is not null`，使 PostgreSQL 可选择小 btree index-only count，避免扫描带大 `raw_payload` 的 heap。新增排序表达式索引匹配真实 `order by uploaded_at desc, coalesce(legacy_mongo_id, id::text) desc`，以及 session/status 过滤组合，避免旧 `(uploaded_at desc, id desc)` 与实际稳定排序键不一致。
+- 2026-07-05 后续修正：`PostgresCoreRepository.list_import_files_page(...)` 返回真正的 summary dict，不再为 `/api/import-facts/files` 构造完整 `FileImportPreviewItem`；列表 SQL 只从 JSONB 提取计数、batch id 和 audit 摘要，删除银行选择、识别结果和冲突消息等预览上下文字段，预览/确认仍由 `/imports/files/*` session 边界读取完整 payload。
+- 文档影响：同步本实施记录。
+- 测试覆盖：`tests/test_postgres_repositories_core.py::test_list_import_files_page_uses_summary_projection_without_raw_payload_blob` 覆盖 count 条件和列表不取完整 raw payload；`tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_import_file_ordering_hot_path_indexes_are_declared` 覆盖 0091 表达式索引；migration 顺序 pinning 同步到 0091。
+- 验证命令：`python3 -m pytest tests/test_postgres_repositories_core.py::test_list_import_files_page_uses_summary_projection_without_raw_payload_blob tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_expected_migration_files_are_present_and_ordered tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_import_file_ordering_hot_path_indexes_are_declared tests/test_postgres_test_utils.py::PostgresTestUtilsTests::test_discover_stage06_migrations_is_pinned_to_current_set -q`。
+- 未测风险：真实收益需发布后用 authenticated HTTP SLO、AppHealth dashboard API performance 和必要时生产只读 EXPLAIN 复核；本地测试只锁定查询和 migration contract。
+
+## 2026-07-05 - 列表首屏 hot-path migration
+
+- 目标：补齐生产首屏列表中导入文件和 ETC 发票列表的 PostgreSQL 排序/筛选索引，减少 `/api/import-facts/files` 和 ETC 列表类操作的数据库排序与扫描成本。
+- 影响范围：新增 migration `0090_import_etc_list_hot_paths.sql`；不改变 read model freshness、worker scope、API response shape、权限或审计。
+- 关键决策：导入文件列表按 `uploaded_at desc, id desc` 及 session/status 组合补索引；ETC 发票列表按 `invoice_date desc, etc_invoice_id desc` 和 status 组合补索引，并 include 列表页常用字段。ETC 当前 API 仍保留 service 返回对象合同，本轮另在 App 层去掉列表序列化的逐行附件存储探测。
+- 测试覆盖：`tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_import_and_etc_list_hot_path_indexes_are_declared`、migration 顺序 pinning 测试。
+- 验证命令：`python3 -m pytest tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_expected_migration_files_are_present_and_ordered tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_import_and_etc_list_hot_path_indexes_are_declared tests/test_postgres_test_utils.py::PostgresTestUtilsTests::test_discover_stage06_migrations_is_pinned_to_current_set -q`。
+- 未测风险：索引效果需发布后用生产 `http_slo_probe`、dashboard SQL p95 和必要时 `EXPLAIN (ANALYZE, BUFFERS)` 复核；本地测试只证明 migration contract。
+
 ## 2026-07-03 - Workbench relation source-object补读快路径
 
 - 目标：压缩真实 Workbench withdraw 后 `workbench_relation.read_model.refresh` changed rebuild，避免固定 write-operation apply 成功后 read model enqueue-to-done 被 projection 重复源对象读取拖过 1s。
@@ -1628,6 +1698,13 @@
 - 本地保护：`tests/test_invoice_lifecycle_sql_projection.py::test_invoice_lifecycle_defers_when_dependency_scope_is_dirty` 覆盖 dependency dirty 时不扫描 lifecycle source rows、不保存 projection。
 - 生产验证：release `pscip-l4-invoice-defer-20260703` grouped run 中 `invoice_lifecycle:2026-02` handler 降到 `300.036ms`，但 enqueue-to-fresh 仍 `1067.206ms`，说明剩余为 worker pickup/defer/queue 总耗时而非 lifecycle handler 重建。
 
+## 2026-07-06 - Invoice lifecycle dependency source-version canonicalization
+
+- 触发事实：生产 1s critical grouped smoke 中 `invoice_lifecycle:2026-06` 在上游 `bank_detail` / `pending_invoice` no-op refresh 后仍偶发进入完整 rebuild，handler 可到约 `3391ms`；单独分段计时显示 unchanged skip 本身约 `12-18ms`。
+- 根因：invoice lifecycle 依赖 source_versions 递归保存了上游 read model 的运行时 `source_version` 计数。该计数会随 durable refresh event 递增，即使上游 payload 内容和业务签名未变，也会让 invoice lifecycle 误判依赖版本变化。
+- 决策：只在 invoice lifecycle 依赖版本归一化中递归移除精确键名 `source_version`；保留 `*_source_version`、schema version、内容 signature、updated_at、relation count 等稳定业务/结构版本字段。这样上游 no-op refresh 不再污染 lifecycle unchanged skip，真实内容或 schema 变化仍会触发重建。
+- 本地保护：`tests/test_invoice_lifecycle_sql_projection.py::test_invoice_lifecycle_dependency_versions_ignore_runtime_source_version_only` 覆盖上游只改变运行时 `source_version` 时必须 skip，不扫描 lifecycle source rows、不保存 projection。
+
 ## 2026-07-03 - Runtime queue claim hot path index
 
 - 触发事实：Search 和 invoice lifecycle handler 已收敛后，full critical grouped 1s 仍出现 `bank_detail`、`bank_account_balance`、`invoice_lifecycle` 等 handler 很短但 enqueue-to-fresh 超过 1s 的漂移，说明 grouped run 的 worker pickup/claim 竞争仍是尾延迟来源之一。
@@ -1646,8 +1723,24 @@
 
 ## 2026-07-05 - Workbench hot aggregate scheduling
 
-- 触发事实：关联台确认/撤回写操作走 high 优先级 UoW，月分片 refresh 完成后旧逻辑仍固定延迟 3 秒再投递 `workbench:all` aggregate；用户默认看到的是 `all` 关联台，这个固定等待会直接放大写后 ReadModel 可见耗时。
-- 决策：保持 Workbench active generation、`workbench` / `workbench-aggregate` split lane、dirty scope/outbox 事实源和 parent consistency gate 不变；仅把 high/urgent 月分片发布后的 aggregate delay 调整为 `0s`。普通/低优先级后台 refresh 仍保留 3 秒合并窗口，避免批量重建反复抢占 aggregate lane。
+- 触发事实：生产 Workbench relation withdraw 验证中，月分片 read model 已约 1.4 秒发布，但 dirty scope 清理滞后导致立即读取 `/api/workbench/groups?month=...&detail_level=summary` 显示 `refreshing`；同时 high priority 月分片立即投递 `workbench:all` aggregate 会抢占 worker，`workbench:all` enqueue-to-fresh 约 4.8 秒。
+- 决策：保持 Workbench active generation、`workbench` / `workbench-aggregate` split lane、dirty scope/outbox 事实源和 parent consistency gate 不变；high/urgent 月分片发布后的 aggregate delay 为 `0s`，让真实写操作后 `workbench:all` 尽快追赶；普通优先级仍保留 3 秒合并窗口，避免批量导入反复重建 all aggregate。月分片 fresh gate 在 active generation `source_version` 已覆盖 pending/processing dirty scope 时直接视为 fresh，不让 dirty scope 清理尾延迟误报页面刷新中。
 - 前端配套：关联台 operation barrier 显式使用 150ms 轮询间隔，减少 worker 已完成后页面观察到 fresh 的尾延迟；确认关联仍只等待操作级 `workbench_relation` 后应用 projection，`workbench` 月分片/all aggregate 后台追赶。
-- 本地保护：`tests/test_workbench_sql_runtime.py` 锁定 high priority 月分片立即投递 aggregate，普通事件仍带 3 秒 delay。
-- 未闭合：需要发布后用固定 scenario/ticket 复跑真实 Workbench relation confirm/withdraw 或 write-operation E2E，证明生产写后 `workbench:all` enqueue-to-fresh p95/p99 达标。
+- 性能优化：`workbench:all` 聚合只对本次生成使用的 group 做顶层复制，不再对所有已物化 row payload 做重复深拷贝；生产只读 profiling 显示 all aggregate 热点主要是 Python 物化/聚合而非 relation claim SQL。
+- 本地保护：`tests/test_workbench_sql_runtime.py` 锁定 active generation 覆盖 dirty source_version 时返回 fresh，并锁定 high priority 月分片投递 aggregate delay 为 `0s`、普通优先级仍为 `3s`。
+- 未闭合：需要发布后用固定 scenario/ticket 复跑真实 Workbench relation confirm/withdraw 或 write-operation E2E，证明生产写后 month scope 立即可见，且 cross-page fan-out p95/p99 达标。
+
+## 2026-07-06 - Relation source fast path for downstream projections
+
+- 触发事实：生产 Workbench withdraw 后，`bank_detail`、`pending_invoice` 和 `invoice_lifecycle` 曾因为等待 `workbench_relation` read model 分发或其依赖 scope fresh，出现多次 retry 和跨页面可见性抖动；外部往来款 projection 也需要在 relation rebuild side effect 前固定 base source versions，避免 unchanged skip 被下游刷新顺序污染。
+- 决策：保持 `app.workbench_pair_relations` 的 SQL owner 在 workbench-relations/read-model repository，新增窄 repository port 给下游 worker 读取 active relation source rows/source summary。`bank-detail` 和 `search-pending` projection 用该 port 计算关系标签、pending relation context 和 source-version proof，不再等待 `workbench_relation` 分发 read model 完成后才可重建。页面读取仍走各自 fresh-gated read model，不把源端快路径暴露成 API payload。
+- 写后 fan-out 优化：Workbench relation 写链路只 enqueue direction-level pending invoice all scopes，repository 在保存 all scope rows 的同一事务内发布 filter scopes freshness；银行方向从 relation row id/amount 推断，避免对纯 OA+bank 撤回同步解析整组 live rows。
+- Workbench all 优化：high/urgent 月分片投递 all aggregate delay 为 `0s`，普通优先级仍为 `3s`；all 聚合内存路径删除不必要的 deep copy。
+- 本地保护：`tests/test_bank_details_sql_runtime.py::BankDetailSqlProjectionBuilderTests::test_relation_tags_source_fast_path_does_not_wait_for_relation_read_model`、`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_source_fast_path_does_not_wait_for_relation_read_model`、`tests/test_workbench_write_characterization.py::WorkbenchWriteCharacterizationTests::test_relation_pending_invoice_scope_keys_only_enqueue_direction_all_scopes`、`tests/test_turnover_ledger_read_model_refresh.py::TurnoverLedgerReadModelRefreshServiceTests`、Workbench/cost statistics runtime tests。
+- 生产验证：发布后必须复跑 fixed scenario/ticket 的 write-operation E2E、cross-page outbox audit、HTTP/SSE SLO 和 health ready；若任一生产 SLO 仍 fail，保持 high-performance closure open。
+
+## 2026-07-06 - Pending invoice relation source-version expected/actual alignment
+
+- 触发事实：relation source fast path 发布后，pending invoice projection 保存的是 `workbench_relation_source_summary_from_source(...)` 的 source summary；API expected-source gate 却继续读取 `read_model.workbench_relation_scopes.source_versions`，导致刷新完成后仍因 `workbench_relation_source_versions_mismatch` 返回 refreshing。
+- 决策：pending invoice API expected-source 与 worker actual 统一为 active relation source summary，按当前 pending invoice rows 命中的月份和 row id 计算；继续通过 workbench-relations repository port 访问源表，不新增页面 fallback 或绕过 fresh gate。
+- 本地保护：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_repository_loads_workbench_relation_source_versions_for_matching_months`。

@@ -163,6 +163,29 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertIn("metrics", payload)
         self.assertEqual(payload["alerts"]["active"], [])
 
+    def test_app_health_builds_snapshot_once_per_request(self) -> None:
+        app = build_application()
+
+        class CountingAppHealthService:
+            def __init__(self, delegate: object) -> None:
+                self._delegate = delegate
+                self.calls = 0
+
+            def build_snapshot(self, **kwargs: object) -> dict[str, object]:
+                self.calls += 1
+                return self._delegate.build_snapshot(**kwargs)
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(self._delegate, name)
+
+        service = CountingAppHealthService(app._app_health_service)
+        app._app_health_service = service
+
+        response = app.handle_request("GET", "/api/app-health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(service.calls, 1)
+
     def test_operation_barrier_status_returns_runtime_readiness_contract(self) -> None:
         app = build_application()
         app._state_store = SimpleNamespace(
@@ -322,6 +345,32 @@ class AppHealthApiTests(unittest.TestCase):
         app.handle_request("GET", "/api/app-health")
 
         self.assertEqual(repository.calls, 1)
+
+    def test_app_health_caches_runtime_snapshot_briefly(self) -> None:
+        app = build_application()
+        calls = 0
+
+        def runtime_snapshot() -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            return {
+                "read_model_statuses": {},
+                "worker_statuses": {},
+                "outbox_statuses": {},
+            }
+
+        app._state_store = SimpleNamespace(
+            storage_mode="postgres",
+            storage_backend="postgres",
+            app_status_runtime_snapshot=runtime_snapshot,
+            save_app_health_alerts=lambda _snapshot: None,
+        )
+
+        with self._temporary_env(FIN_OPS_APP_STATUS_RUNTIME_SNAPSHOT_CACHE_TTL_SECONDS="30"):
+            app.handle_request("GET", "/api/app-health")
+            app.handle_request("GET", "/api/app-health")
+
+        self.assertEqual(calls, 1)
 
     def test_dirty_oa_scopes_block_workbench_write_actions(self) -> None:
         app = build_application()
@@ -545,15 +594,18 @@ class AppHealthApiTests(unittest.TestCase):
 
         response = app.handle_request("GET", "/api/app-health/stream")
         stream = iter(response.body)
+        first_heartbeat_event = next(stream)
         snapshot_event = next(stream)
-        heartbeat_event = next(stream)
+        second_heartbeat_event = next(stream)
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.stream)
         self.assertIn("text/event-stream", response.headers["Content-Type"])
+        self.assertIn("event: heartbeat", first_heartbeat_event)
+        self.assertIn('"phase": "connected"', first_heartbeat_event)
         self.assertIn("event: app_health", snapshot_event)
         self.assertIn('"status": "ok"', snapshot_event)
-        self.assertIn("event: heartbeat", heartbeat_event)
+        self.assertIn("event: heartbeat", second_heartbeat_event)
 
     def test_app_health_uses_existing_auth_guard_when_session_is_missing(self) -> None:
         with self._temporary_env(FIN_OPS_TEST_DEFAULT_AUTH="0"), tempfile.TemporaryDirectory() as temp_dir:

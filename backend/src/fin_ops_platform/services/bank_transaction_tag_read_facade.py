@@ -121,7 +121,12 @@ class BankTransactionTagReadFacade:
                 reason=reason,
                 stale_reasons=["repository_method_unavailable" if not callable(reader) else "scope_keys_required"],
             )
-        payload = reader(scope_keys=normalized_scope_keys, tenant_id=self._tenant_id)
+        try:
+            payload = reader(scope_keys=normalized_scope_keys, tenant_id=self._tenant_id)
+        except TypeError as exc:
+            if "tenant_id" not in str(exc):
+                raise
+            payload = reader(scope_keys=normalized_scope_keys)
         result = self._result_from_repository_payload(
             _source_versions_payload_from_scope_summary(payload),
             require_fresh=require_fresh,

@@ -8,6 +8,7 @@ from fin_ops_platform.services.workbench_relation_sql_projection import Workbenc
 class CaptureWorkbenchRelationRepository:
     def __init__(self) -> None:
         self.saved: list[dict[str, object]] = []
+        self.saved_rows: list[dict[str, object]] = []
         self.existing_scope_summary: dict[str, object] | None = None
         self.scope_summary_calls: list[dict[str, object]] = []
 
@@ -32,6 +33,27 @@ class CaptureWorkbenchRelationRepository:
         self.saved.append(
             {
                 "scope_key": scope_key,
+                "rows": list(rows),
+                "groups": list(groups),
+                "source_versions": dict(source_versions or {}),
+                "tenant_id": tenant_id,
+            }
+        )
+
+    def save_workbench_relation_distribution_rows(
+        self,
+        *,
+        scope_key: str,
+        affected_row_ids: list[str],
+        rows: list[dict[str, object]],
+        groups: list[dict[str, object]],
+        source_versions: dict[str, object] | None = None,
+        tenant_id: str = "default",
+    ) -> None:
+        self.saved_rows.append(
+            {
+                "scope_key": scope_key,
+                "affected_row_ids": list(affected_row_ids),
                 "rows": list(rows),
                 "groups": list(groups),
                 "source_versions": dict(source_versions or {}),
@@ -182,7 +204,9 @@ class CrossMonthRelationProjectionConnection(WorkbenchRelationProjectionConnecti
         if "from app.oa_applications" in normalized:
             self.sql_statements.append(sql)
             explicit_ids = (
-                set(params[1])
+                set(params[2])
+                if len(params) > 2 and isinstance(params[2], list)
+                else set(params[1])
                 if len(params) > 1 and isinstance(params[1], list)
                 else set(params[0])
                 if params and isinstance(params[0], list)
@@ -260,6 +284,23 @@ class CrossMonthRelationProjectionConnection(WorkbenchRelationProjectionConnecti
 class FailIfFetchAllRelationProjectionConnection(WorkbenchRelationProjectionConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
         raise AssertionError("source-version unchanged projection should not scan source rows")
+
+
+class ScopedSourceVersionsRelationProjectionConnection(WorkbenchRelationProjectionConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
+        self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
+        return {
+            "pair_relations_updated_at": "2026-04-30T00:00:00+08:00",
+            "reconciliation_decisions_updated_at": "2026-04-29T00:00:00+08:00",
+            "oa_pending_payment_bank_claims_updated_at": "2026-04-28T00:00:00+08:00",
+            "bank_transactions_updated_at": "2026-04-27T00:00:00+08:00",
+            "invoices_updated_at": "2026-05-20T00:00:00+08:00",
+            "oa_projection_updated_at": "2026-04-26T00:00:00+08:00",
+        }
 
 
 class DuplicateInvoiceIdentityRelationProjectionConnection(WorkbenchRelationProjectionConnection):
@@ -499,6 +540,49 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertTrue(any("invoice_month =" in sql for sql in invoice_queries))
         self.assertTrue(any("invoice_month =" not in sql for sql in invoice_queries))
 
+    def test_rebuild_rows_uses_changed_row_ids_without_month_source_scan(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = CrossMonthRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_workbench_relation_read_model_rows("2026-04", row_ids=["bank-nanjing"])
+
+        self.assertTrue(result["partial"])
+        saved = repository.saved_rows[0]
+        self.assertEqual(saved["scope_key"], "2026-04")
+        self.assertEqual(saved["affected_row_ids"], ["bank-nanjing"])
+        rows_by_id = {row["row_id"]: row for row in saved["rows"]}
+        self.assertEqual(set(rows_by_id), {"oa-yang", "bank-nanjing", "input-invoice-nanjing"})
+        self.assertEqual(saved["groups"][0]["group_id"], "case-nanjing-cross-month")
+        self.assertEqual(self._statement_count(connection, "from app.bank_transactions"), 1)
+        self.assertEqual(self._statement_count(connection, "from app.oa_applications"), 1)
+        self.assertEqual(self._statement_count(connection, "from app.invoices"), 1)
+        source_queries = [" ".join(sql.lower().split()) for sql in connection.sql_statements]
+        self.assertFalse(
+            any(
+                "txn_month =" in sql
+                for sql in source_queries
+                if "from app.bank_transactions" in sql
+            )
+        )
+        self.assertFalse(
+            any(
+                "application_date >=" in sql
+                for sql in source_queries
+                if "from app.oa_applications" in sql
+            )
+        )
+        self.assertFalse(
+            any(
+                "invoice_month =" in sql
+                for sql in source_queries
+                if "from app.invoices" in sql
+            )
+        )
+
     def test_cross_month_member_index_schema_change_invalidates_old_scope(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
         connection = CrossMonthRelationProjectionConnection()
@@ -509,7 +593,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         source_versions = builder._source_versions()
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-06-cross-month-relation-member-index-v1",
+            "2026-07-06-scoped-source-versions-v1",
         )
         repository.existing_scope_summary = {
             "scope_key": "2026-04",
@@ -528,10 +612,33 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         saved = repository.saved[0]
         self.assertEqual(
             saved["source_versions"]["workbench_relation_schema_version"],
-            "2026-06-cross-month-relation-member-index-v1",
+            "2026-07-06-scoped-source-versions-v1",
         )
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
         self.assertIn("input-invoice-nanjing", rows_by_id)
+
+    def test_source_versions_are_scoped_to_month_and_active_relation_members(self) -> None:
+        connection = ScopedSourceVersionsRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=CaptureWorkbenchRelationRepository(),
+        )
+
+        source_versions = builder._source_versions("2026-04")
+
+        self.assertEqual(
+            source_versions["workbench_relation_schema_version"],
+            "2026-07-06-scoped-source-versions-v1",
+        )
+        self.assertEqual(connection.fetch_one_calls[0][1], ("2026-04-01",))
+        sql = connection.fetch_one_calls[0][0]
+        self.assertIn("with scope as", sql)
+        self.assertIn("scoped_relations as", sql)
+        self.assertIn("relation.row_ids && objects.row_ids", sql)
+        self.assertIn("active_relation_row_ids as", sql)
+        self.assertIn("where status = 'active'", sql)
+        self.assertIn("application_date >= scope.scope_month", sql)
+        self.assertIn("application_date < scope.scope_month + interval '1 month'", sql)
 
     def test_rebuild_keeps_oa_summary_for_legacy_completed_workflow_status(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -595,7 +702,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
             connection=connection,
             read_model_repository=repository,
         )
-        source_versions = builder._source_versions()
+        source_versions = builder._source_versions("2026-01")
         repository.existing_scope_summary = {
             "scope_key": "2026-01",
             "row_count": 399,

@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-06 - oa_pending_payment refresh 热路径 I/O 收敛
+
+- 变更类型：read model worker 性能优化；页面/API 合同不变。
+- 新增/更新测试：`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_projection_builder_reads_completed_from_unified_projection_and_in_progress_from_admission`。
+- 覆盖点：`oa_pending_payment` 月份 refresh 必须按月读取 completed OA projection，不全量扫 completed OA；同一次 refresh 内 completed/in-progress 两个视图共用 `DistributedInvoiceRelationContext` 的进项发票索引；`PaymentAdmittedOAProjectionAdapter` 已完成 `t_payment_simple.flow_id` 准入过滤时，query service 不得再次读取支付状态表做重复准入过滤；`oaPaymentWriteback` 必须复用批量支付状态 map，不得按行调用 OA MySQL `get_payment_status`。
+- 验证命令：见本轮最终说明。
+
 ## 2026-07-05 - 模块 close 与旧 confirm-paid 写入口移除
 
 - 变更类型：命令 I/O 边界收口、旧链路删除、API contract 清理。

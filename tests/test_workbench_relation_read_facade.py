@@ -271,7 +271,7 @@ class RelationGroupPayloadConnection:
                     "linked_bank_transactions": [],
                     "linked_input_invoices": [],
                     "linked_output_invoices": [],
-                    "source_versions": {"workbench_relation_schema_version": "test"},
+                    "source_versions": {"workbench_relation_schema_version": "stale-row"},
                     "payload": {"row_id": "txn-batch-1", "row_type": "bank_transaction"},
                     "raw_payload": {},
                 }
@@ -289,7 +289,7 @@ class RelationGroupPayloadConnection:
                     "bank_transaction_ids": ["txn-batch-1"],
                     "input_invoice_ids": [],
                     "output_invoice_ids": [],
-                    "source_versions": {"workbench_relation_schema_version": "test"},
+                    "source_versions": {"workbench_relation_schema_version": "stale-group"},
                     "payload": {
                         "group_id": "CASE-BATCH-1",
                         "relation_mode": "manual_confirmed",
@@ -315,7 +315,7 @@ class RelationGroupPayloadConnection:
                 "scope_key": "2026-01",
                 "row_count": 1,
                 "group_count": 1,
-                "source_versions": {"workbench_relation_schema_version": "test"},
+                "source_versions": {"workbench_relation_schema_version": "fresh-scope"},
                 "cache_status": "fresh",
             }
         if "from job.read_model_dirty_scopes" in normalized:
@@ -530,6 +530,18 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(relation["case_id"], "CASE-BATCH-1")
         self.assertEqual(relation["status"], "active")
         self.assertEqual(relation["special_metadata"]["bank_row_id"], "txn-batch-1")
+        self.assertEqual(payload["source_versions"], {"workbench_relation_schema_version": "fresh-scope"})
+
+    def test_repository_group_lookup_uses_scope_source_versions_over_relation_record(self) -> None:
+        repository = PostgresReadModelRepository(RelationGroupPayloadConnection())
+
+        payload = repository.get_workbench_relation_groups_by_ids(["CASE-BATCH-1"])
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["groups"][0]["group_id"], "CASE-BATCH-1")
+        self.assertEqual(payload["source_versions"], {"workbench_relation_schema_version": "fresh-scope"})
 
     def test_facade_passes_scope_hint_for_empty_relation_context(self) -> None:
         repository = FakeRelationRepository(

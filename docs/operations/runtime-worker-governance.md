@@ -30,10 +30,10 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   `self-update` 时仍需要一次 root bootstrap。`/usr/local/sbin/finops-ensure-runtime-workers`
   仍是预安装的 root helper；release deploy 只校验该 helper 的合同并通过 `finops-deploy-control activate`
   间接调用它，不在发布链路中覆盖该 runtime worker helper。
-- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；`workbench` 月分片热 lane 为 `0.01s`，`workbench-aggregate` 仍为 `0.25s`，避免 all-scope 聚合挤占月份 shard pickup。用户写操作产生的 high/urgent 月分片发布后可立即投递 `workbench:all` 聚合；普通/低优先级月分片仍保留聚合合并窗口。新增 read model / 写后 fan-out worker 不能把
+- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；`workbench` 月分片热 lane 为 `0.01s`，`workbench-aggregate` 为 `0.05s` 且每轮最多 drain 4 个 all-scope event，避免 all 聚合 backlog 放大写后可见性抖动。普通 high/urgent 月分片发布后可立即投递 `workbench:all` 聚合并保留 high/urgent priority；relation 写入产生的 `workbench_relation_changed` 月分片必须先让具体月份和 relation/downstream read model 收敛，再以 0 秒 delay/high priority 投递 `all` 聚合。新增 read model / 写后 fan-out worker 不能把
   `--poll-interval-seconds 2`、`0.25`、`0.1` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，
   可保留显式 5s poll。发布 helper 会把已有 env 中精确命中的历史 `--poll-interval-seconds 2|0.25|0.1|0.05`
-  迁移到当前 release env 示例声明的 poll 值，不会重写 RabbitMQ 灰度、自定义事件或吞吐参数。
+  迁移到当前 release env 示例声明的 poll 值；`workbench-aggregate` 的历史单事件 drain 会迁移到 4。该迁移不会重写 RabbitMQ 灰度或自定义事件。
 - PostgreSQL durable queue worker 的空轮询 heartbeat 必须节流。`idle` 只证明 worker 存活和当前无可 claim event，
   不能每个 0.05s poll 都写 `job.runtime_worker_heartbeats`；`processing`、`deferred`、`failed`、`stopping`、`stopped`
   必须即时写入，保证 App Health 和故障定位不丢关键状态。
@@ -90,7 +90,7 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - `APP_STATUS_READ_MODEL_REGISTRY` 中的每个 read model 必须有对应 required worker registration、refresh event、RabbitMQ dispatch event 和 SLO smoke 计划。
 - `tests/test_postgres_migrations.py` 的 read model storage contract 必须覆盖每个 App Status read model；新增 SQL projection 表时不能只写 migration 而不更新本地 schema 基线。
 - `read_model_slo_smoke --critical-only` 必须规划所有 critical App Status read model；dry-run 只证明 scope discovery，`--apply` 才证明真实 enqueue-to-fresh worker drain。
-- `fin-ops.rabbitmq-worker.env` 只放共享 RabbitMQ 凭据和 consumer fallback 参数，不设置 `FIN_OPS_QUEUE_BACKEND`；RabbitMQ 灰度切换只能发生在单 worker instance env。`RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS` 当前基线为 `0.1`，避免 RabbitMQ envelope 丢失或 dispatcher 延迟时让 1s read model SLO 卡在 fallback drain。
+- `fin-ops.rabbitmq-worker.env` 只放共享 RabbitMQ 凭据和 consumer fallback 参数，不设置 `FIN_OPS_QUEUE_BACKEND`；RabbitMQ 灰度切换只能发生在单 worker instance env。`RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS` 当前基线为 `0.05`，避免 RabbitMQ envelope 丢失或 dispatcher 延迟时让 1s read model SLO 卡在 fallback drain。
 - Redis 生产 env 模板必须和 `RuntimeRedisSettings.from_env()` 保持一致；Redis 只能缓存 fresh gate 后 payload，不能成为 worker/readiness 状态事实源。
 
 ## 固定写操作 smoke 输入
@@ -507,7 +507,7 @@ cd "$release_src"
 4. 如果 `/health/ready.runtime_infrastructure.rabbitmq_metric_error` 是 queue/DLQ missing，先使用
    `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 执行 topology apply，再重新检查 Management metrics。
 5. 创建或更新 root-only `/etc/fin-ops/fin-ops.rabbitmq-worker.env`，只写共享 `RABBITMQ_URL`
-   和 `RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.1`。该文件权限必须是
+   和 `RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.05`。该文件权限必须是
    `0600 root root`，且不得设置 `FIN_OPS_QUEUE_BACKEND`。
 6. 备份准备切换的 `/etc/fin-ops/fin-ops.worker.<instance>.env` 到带时间戳的目录。
 7. 逐个或按小批量把 required eligible worker 的 per-instance env 改为 `FIN_OPS_QUEUE_BACKEND=rabbitmq`，

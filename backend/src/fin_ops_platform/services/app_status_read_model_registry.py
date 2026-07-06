@@ -92,6 +92,7 @@ APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
         scope_type="no_oa_bank_batch",
         worker_instance="no-oa-bank-batch",
         refresh_event_type="no_oa_bank_batch.read_model.refresh",
+        critical=False,
     ),
     "bank_flow_rule_batch": AppStatusReadModelDefinition(
         key="bank_flow_rule_batch",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord, OAReadStatus
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRepository
@@ -13,14 +13,20 @@ MONTH_FORMAT = "%Y-%m"
 class PaymentAdmittedOAProjectionAdapter:
     """OA projection for pages whose OA scope is admitted by t_payment_simple."""
 
+    payment_admission_filtered = True
+
     def __init__(
         self,
         *,
         source_adapter: Any,
         payment_status_repository: OAPaymentStatusRepository | None,
+        payment_statuses_provider: Callable[[], dict[str, Any] | None] | None = None,
     ) -> None:
         self._source_adapter = source_adapter
         self._payment_status_repository = payment_status_repository
+        self._payment_statuses_provider = payment_statuses_provider
+        self._admitted_flow_ids_cache: set[str] | None = None
+        self._records_by_id_cache: dict[str, OAApplicationRecord] = {}
 
     def list_application_records(self, month: str) -> list[OAApplicationRecord]:
         normalized_month = str(month or "").strip()
@@ -37,7 +43,9 @@ class PaymentAdmittedOAProjectionAdapter:
         if not flow_ids:
             return []
         records = self._load_source_records_for_flow_ids(flow_ids)
-        return self._filter_admitted(records, flow_ids)
+        admitted = self._filter_admitted(records, flow_ids)
+        self._cache_records(admitted)
+        return admitted
 
     def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
         normalized_row_ids = _dedupe_texts(row_ids)
@@ -46,9 +54,10 @@ class PaymentAdmittedOAProjectionAdapter:
         flow_ids = self._admitted_flow_ids()
         if not flow_ids:
             return []
-        records = self._load_source_records_by_row_ids(normalized_row_ids)
-        records_by_id = {record.id: record for record in self._filter_admitted(records, flow_ids)}
-        return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
+        missing_row_ids = [row_id for row_id in normalized_row_ids if row_id not in self._records_by_id_cache]
+        if missing_row_ids:
+            self._cache_records(self._filter_admitted(self._load_source_records_by_row_ids(missing_row_ids), flow_ids))
+        return [self._records_by_id_cache[row_id] for row_id in normalized_row_ids if row_id in self._records_by_id_cache]
 
     def list_available_months(self) -> list[str]:
         return sorted(
@@ -68,6 +77,13 @@ class PaymentAdmittedOAProjectionAdapter:
         return OAReadStatus(code="ready", message="OA payment-admitted projection ready")
 
     def _admitted_flow_ids(self) -> set[str]:
+        if self._admitted_flow_ids_cache is not None:
+            return set(self._admitted_flow_ids_cache)
+        if self._payment_statuses_provider is not None:
+            statuses = self._payment_statuses_provider()
+            if isinstance(statuses, dict):
+                self._admitted_flow_ids_cache = {str(flow_id or "").strip() for flow_id in statuses if str(flow_id or "").strip()}
+                return set(self._admitted_flow_ids_cache)
         repository = self._payment_status_repository
         if repository is None:
             return set()
@@ -77,7 +93,14 @@ class PaymentAdmittedOAProjectionAdapter:
         statuses = list_statuses()
         if not isinstance(statuses, dict):
             return set()
-        return {str(flow_id or "").strip() for flow_id in statuses if str(flow_id or "").strip()}
+        self._admitted_flow_ids_cache = {str(flow_id or "").strip() for flow_id in statuses if str(flow_id or "").strip()}
+        return set(self._admitted_flow_ids_cache)
+
+    def _cache_records(self, records: list[OAApplicationRecord]) -> None:
+        for record in records:
+            record_id = str(getattr(record, "id", "") or "").strip()
+            if record_id:
+                self._records_by_id_cache[record_id] = record
 
     def _load_source_records_for_flow_ids(self, flow_ids: set[str]) -> list[OAApplicationRecord]:
         row_ids = _row_id_candidates_for_flow_ids(flow_ids)

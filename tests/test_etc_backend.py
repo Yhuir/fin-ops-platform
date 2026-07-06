@@ -787,6 +787,27 @@ class EtcServiceTests(unittest.TestCase):
         self.assertTrue(str(invoices[0].pdf_file_path).startswith("memory://"))
         self.assertTrue(str(invoices[0].xml_file_path).startswith("memory://"))
 
+    def test_etc_invoice_list_serializer_does_not_probe_attachment_storage(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            class RaisingEtcService:
+                def _stored_invoice_file_exists(self, _path: str) -> bool:
+                    raise AssertionError("list serialization must not probe attachment storage")
+
+            app._etc_service = RaisingEtcService()
+            payload = app._serialize_etc_invoice(
+                {
+                    "id": "etc_invoice_0001",
+                    "invoice_number": "ETC001",
+                    "pdf_file_path": "minio://bucket/etc/ETC001.pdf",
+                    "xml_file_path": "minio://bucket/etc/ETC001.xml",
+                }
+            )
+
+        self.assertTrue(payload["has_pdf"])
+        self.assertTrue(payload["has_xml"])
+
     def test_preview_valid_zip_reports_imported_without_persisting_records(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir))

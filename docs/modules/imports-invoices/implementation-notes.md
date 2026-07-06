@@ -31,6 +31,7 @@
 - 目标：修复生产 HTTP SLO 中 `/api/import-facts/files?page=1&page_size=50` 返回约 15MB 导致导入页探针超时的问题。
 - 影响范围：`/api/import-facts/files`、`PostgresCoreRepository.list_import_files_page()`、默认 HTTP SLO probe；不改变 `/imports/files/*` 上传、预览、确认和 session detail 合同。
 - 关键决策：导入文件事实列表是摘要 read API，只投影文件名、模板、状态、计数、批次 ID 和审计计数；完整 `raw_payload`、`row_results`、`normalized_rows` 只能保留在导入预览/session 边界，禁止旧 full payload 污染列表链路。
+- 2026-07-05 后续修正：列表 repository 返回 summary dict，不再构造完整 `FileImportPreviewItem`；SQL 继续保留计数/batch/audit 摘要，但删除银行选择、识别结果和冲突消息等预览上下文 JSONB 提取。
 - 文档影响：更新本模块 boundary、共享 persistence/read-model 边界、银行流水导入和 ETC 导入 boundary。
 - 测试覆盖：`tests/test_postgres_repositories_core.py::test_list_import_files_page_uses_summary_projection_without_raw_payload_blob`、`tests/test_import_file_api.py::ImportFileApiTests::test_import_fact_files_list_omits_preview_detail_payloads`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_import_file_api.py tests/test_postgres_repositories_core.py tests/test_http_slo_probe.py -q`。

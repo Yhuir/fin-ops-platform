@@ -144,10 +144,16 @@ class PostgresWorkbenchRelationRepository:
             no_oa_batch_relation_modes_by_scope: dict[str, set[str]] = {}
             bank_flow_batch_relation_modes_by_scope: dict[str, set[str]] = {}
             pending_invoice_scope_keys: set[str] = set()
+            refresh_row_ids: set[str] = set()
+            refresh_case_ids: set[str] = set()
             for case_id, payload in iter_mapping(relations):
                 if changed_ids is not None and case_id not in changed_ids:
                     continue
                 if self._enqueue_refreshes:
+                    normalized_case_id = text(case_id) or text(payload.get("case_id"))
+                    if normalized_case_id:
+                        refresh_case_ids.add(normalized_case_id)
+                    refresh_row_ids.update(text_list(payload.get("row_ids")))
                     relation_mode = text(payload.get("relation_mode") or payload.get("mode"))
                     domain_scope_keys = _workbench_relation_domain_scope_keys(connection, payload)
                     relation_scope_keys = _workbench_relation_dirty_scope_keys_from_domain_scope_keys(domain_scope_keys)
@@ -217,6 +223,11 @@ class PostgresWorkbenchRelationRepository:
             self._replace_workbench_pair_relation_history(connection, history, changed_case_ids=changed_ids)
             if not self._enqueue_refreshes:
                 return
+            refresh_metadata: dict[str, Any] = {}
+            if refresh_row_ids:
+                refresh_metadata["row_ids"] = sorted(refresh_row_ids)
+            if refresh_case_ids:
+                refresh_metadata["case_ids"] = sorted(refresh_case_ids)
             refreshes: list[dict[str, Any]] = []
             relation_refresh_scope_keys = set(dirty_scope_keys or {"all"})
             downstream_refresh_scope_keys = relation_refresh_scope_keys | set(downstream_by_scope_key.keys())
@@ -228,6 +239,7 @@ class PostgresWorkbenchRelationRepository:
                         scope_key=scope_key,
                         reason="workbench_pair_relation_changed",
                         priority="high",
+                        metadata=refresh_metadata,
                     )
                 downstream_scope_types = downstream_by_scope_key.get(scope_key, set())
                 for downstream_scope_type in WORKBENCH_RELATION_DOWNSTREAM_SCOPE_TYPES:
@@ -245,6 +257,7 @@ class PostgresWorkbenchRelationRepository:
                                     priority="high",
                                     payload_extra={"relation_mode": relation_mode},
                                     dedupe_kind=relation_mode,
+                                    metadata=refresh_metadata,
                                 )
                             continue
                     if downstream_scope_type == "bank_flow_rule_batch":
@@ -259,6 +272,7 @@ class PostgresWorkbenchRelationRepository:
                                     priority="high",
                                     payload_extra={"relation_mode": relation_mode},
                                     dedupe_kind=relation_mode,
+                                    metadata=refresh_metadata,
                                 )
                             continue
                     _append_read_model_refresh(
@@ -267,6 +281,7 @@ class PostgresWorkbenchRelationRepository:
                         scope_key=scope_key,
                         reason="workbench_relation_changed",
                         priority="high",
+                        metadata=refresh_metadata,
                     )
             workbench_scope_keys = _workbench_relation_workbench_refresh_scope_keys(dirty_scope_keys)
             workbench_month_scope_keys = sorted(scope_key for scope_key in workbench_scope_keys if scope_key != "all")
@@ -277,6 +292,7 @@ class PostgresWorkbenchRelationRepository:
                     scope_key=scope_key,
                     reason="workbench_relation_changed",
                     priority="high",
+                    metadata=refresh_metadata,
                 )
             if "all" in workbench_scope_keys:
                 if workbench_month_scope_keys:
@@ -291,6 +307,7 @@ class PostgresWorkbenchRelationRepository:
                             "parent_scope_keys": workbench_month_scope_keys,
                         },
                         dedupe_kind="aggregate",
+                        metadata=refresh_metadata,
                     )
                 else:
                     _append_read_model_refresh(
@@ -299,6 +316,7 @@ class PostgresWorkbenchRelationRepository:
                         scope_key="all",
                         reason="workbench_relation_changed",
                         priority="high",
+                        metadata=refresh_metadata,
                     )
             if dirty_scope_keys and pending_invoice_scope_keys:
                 for pending_scope_key in sorted(pending_invoice_scope_keys):
@@ -308,6 +326,7 @@ class PostgresWorkbenchRelationRepository:
                         scope_key=pending_scope_key,
                         reason="workbench_relation_changed",
                         priority="high",
+                        metadata=refresh_metadata,
                     )
             _enqueue_read_model_refreshes_in_transaction(connection, refreshes)
 
@@ -538,7 +557,7 @@ def _workbench_relation_workbench_refresh_scope_keys(scope_keys: set[str]) -> se
         return {"all"}
     if normalized_scope_keys == {"all"}:
         return {"all"}
-    return {*normalized_scope_keys, "all"}
+    return set(normalized_scope_keys)
 
 
 def _domain_scope_keys(domain_scope_keys: dict[str, set[str]], key: str, dirty_scope_keys: set[str]) -> set[str]:
@@ -696,6 +715,7 @@ def _append_read_model_refresh(
     priority: str = "normal",
     payload_extra: dict[str, Any] | None = None,
     dedupe_kind: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     if scope_type == "cost_statistics":
         for target_scope_key in CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys([scope_key]):
@@ -708,6 +728,7 @@ def _append_read_model_refresh(
                 priority=priority,
                 payload_extra=payload_extra,
                 dedupe_kind=dedupe_kind,
+                metadata=metadata,
             )
         return
     _append_single_read_model_refresh(
@@ -719,6 +740,7 @@ def _append_read_model_refresh(
         priority=priority,
         payload_extra=payload_extra,
         dedupe_kind=dedupe_kind,
+        metadata=metadata,
     )
 
 
@@ -732,6 +754,7 @@ def _append_single_read_model_refresh(
     priority: str = "normal",
     payload_extra: dict[str, Any] | None = None,
     dedupe_kind: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     normalized_scope_type = text(scope_type)
     normalized_scope_key = text(scope_key)
@@ -751,6 +774,8 @@ def _append_single_read_model_refresh(
         "reason": normalized_reason,
         **(payload_extra or {}),
     }
+    if metadata:
+        payload["metadata"] = dict(metadata)
     refreshes.append(
         {
             "tenant_id": normalized_tenant_id,

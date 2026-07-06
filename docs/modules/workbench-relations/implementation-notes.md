@@ -4488,7 +4488,7 @@ git diff --check
 
 ```bash
 PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_workbench_relation_repository.py tests/test_write_operation_slo_audit.py tests/test_read_model_slo_smoke.py -q
-PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_can_enqueue_aggregate_without_legacy_enqueue_method tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_expands_all_into_month_shards tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_completes_all_after_aggregate_only_event tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_completes_all_when_aggregate_publish_is_confirmed_despite_self_dirty_status tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_aggregate_only_all_scope_defers_when_parent_generation_is_inconsistent -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_preserves_hot_priority_for_all_aggregate_after_month_publish tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_can_enqueue_aggregate_without_legacy_enqueue_method tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_expands_all_into_month_shards tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_completes_all_after_aggregate_only_event tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_completes_all_when_aggregate_publish_is_confirmed_despite_self_dirty_status tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_aggregate_only_all_scope_defers_when_parent_generation_is_inconsistent -q
 ```
 
 后续：发布后重跑 critical read model SLO 和 Workbench turnover write-operation 样本；未通过前不能声明完整 PSCIP-L4/global closure。
@@ -4518,3 +4518,77 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_write_characteriza
 ```
 
 未闭合：本地测试只证明批量入队合同和 UoW wiring；生产 release 后必须使用固定 scenario `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json` 与 standing ticket `FINOPS-WRITE-SMOKE-STANDING-20260702` 重新跑 Workbench withdraw write-operation SLO。
+
+## 2026-07-06 - Workbench relation partial refresh scope source_versions I/O
+
+目标：修复生产 `withdraw-link` 写 smoke 中 `workbench_relation:2026-06` dirty/outbox 已完成但 enqueue-to-done 超过 1s 的尾延迟。排查显示操作级 row refresh 只替换少量 rows/groups，但 repository 保存后仍对同 scope 全量 rows/groups 回写 `source_versions`、`raw_payload.source_versions` 和 `updated_at`，把小刷新放大成整月 I/O。
+
+变更：
+
+- `save_workbench_relation_distribution_rows(...)` 不再全量 UPDATE 同月未变 rows/groups 的 source_versions；只删除/写回受影响 rows/groups，并更新 `read_model.workbench_relation_scopes` 的 row_count、group_count 和 source_versions。
+- `workbench_relation` 读 payload 优先使用 `read_model.workbench_relation_scopes.source_versions`；只有 scope summary 不存在版本时，才回退到调用方 fallback 或 row/group record source_versions。
+- API payload shape、fresh/stale/refreshing 语义、relation command 状态机、dirty/outbox 事实源均不变。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_postgres_repositories_boundaries.py::test_workbench_relation_distribution_partial_save_deletes_overlap_and_counts_scope tests/test_workbench_relation_read_facade.py::WorkbenchRelationReadFacadeTests::test_repository_preserves_relation_group_payload_for_distribution_mapping tests/test_workbench_relation_read_facade.py::WorkbenchRelationReadFacadeTests::test_repository_group_lookup_uses_scope_source_versions_over_relation_record -q
+```
+
+后续：发布后重新跑 health/SSE、HTTP SLO、critical read model SLO 和生产 `write_operation_smoke --operation workbench.withdraw-link`。如果写后 SLO 仍超过 1s，下一步再看 queue latency 或 write endpoint duplicate preview，不恢复全量 row/group source_versions 回写。
+
+## 2026-07-06 - Workbench withdraw submit and all aggregate hot path
+
+目标：继续修复生产 `withdraw-link` 写 smoke 中两个 1s SLO 问题：HTTP submit 约 2.3s，且写后 `workbench:all` aggregate enqueue-to-done 约 4.6s。生产 timing 显示 relation mutation 本身约 285ms，慢点来自提交前后的同步重计算和 worker/read model 协同。
+
+变更：
+
+- `WorkbenchReadModelRefreshService._aggregate_delay_seconds_for(...)` 对 `workbench_relation_changed` / confirm / cancel / withdraw 关系写入刷新返回 hot delay `0.0`，让月份 shard 发布后立即把 `workbench:all` aggregate 投递给 `workbench-aggregate` lane。普通低优先级月分片仍保留 3 秒合并窗口。
+- `WorkbenchWriteFacade.withdraw_link(...)` 的 submit 路径不再同步构建可选 `operation_projection`；提交响应保留 affected scopes、restored relations、freshness targets 和 operation barrier，由前端等待真实 `workbench` / `workbench_relation` read model fresh 后刷新页面。
+- `withdraw-link` UoW submit 继续删除 Facade 级重复 preview：请求只带 row ids 进入 `_withdraw_link_with_uow_from_row_ids(...)`，transaction-bound `WorkbenchRelationCommandService.withdraw_relation(...)` 在同一 scoped snapshot 内找到 active relation、做 preview lock 和状态转换，并返回 `before_relation` / `refresh_metadata` 供 UoW 写 dirty/outbox。
+- `WorkbenchWriteUnitOfWork` 合并 handler result 中的 `refresh_metadata`，让 row-id submit 仍能把 downstream scope types、row ids 和 pending invoice scope keys 写入同一事务 outbox；`WorkbenchRelationCommandService.withdraw_relation(...)` 的 row-id submit 幂等 fingerprint 也包含 `row_ids`。
+- 生产 timing 继续显示 `withdraw_alias_map` 与 `withdraw_postprocess` 各自做了一次 live row alias 解析；`_canonicalize_withdraw_row_ids(...)` 改为接收并复用已解析的 `row_id_aliases`，新增回归测试保证 UoW submit 只解析一次 alias map。
+- 对非 OA 选中行，`_withdraw_selected_row_alias_map(...)` 直接返回 identity map；row-id UoW submit 的 `_relation_refresh_metadata(...)` 不再为 invoice direction 同步读取 live rows，缺方向时沿用既有 fallback 同时刷新 input/output 相关 read model，避免 HTTP 写入被方向判断阻塞。
+- 该改动不改变 withdraw preview payload、preview lock、canonical relation 状态机、审计身份、UoW/idempotency 或 dirty/outbox 事实源。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_workbench_sql_runtime.py -k 'aggregate or workbench_refresh_handler_preserves_hot_priority_for_all_aggregate_after_month_publish or workbench_relation_refresh_enqueues_all_aggregate_immediately_for_write_visibility or can_enqueue_aggregate_without_legacy_enqueue_method' -q
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_workbench_auth_context_idempotency.py -k 'withdraw_link_response_returns_operation_freshness_targets_for_affected_scopes or withdraw_link_submit_skips_optional_operation_projection_rebuild or withdraw_link_targets_preview_row_months_when_relation_scope_is_all or withdraw_link_preview_and_submit_delegate_to_relation_command_service' -q
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_auth_context_idempotency.py tests/test_workbench_uow_contract.py -q
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_workbench_auth_context_idempotency.py tests/test_workbench_write_characterization.py tests/test_workbench_uow_contract.py tests/test_workbench_sql_runtime.py -q
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_write_operation_e2e_smoke.py tests/test_write_operation_slo_audit.py tests/test_runtime_queue.py tests/test_read_model_slo_smoke.py -q
+```
+
+后续：发布后必须重新发现可撤回 relation 场景，执行一次受控 `withdraw-link` 写操作，并用 `write_operation_slo_audit --since <scenario-start>` 验证 `workbench`、`workbench_relation` 和下游 scopes 都在目标内完成。
+
+## 2026-07-06 - Workbench all aggregate write-after-read jitter
+
+目标：修复生产受控 `withdraw-link` 已把 HTTP submit 压到 1s 内后，`workbench:all` aggregate 仍出现 enqueue-to-done 5.5s 的跨页面可见性抖动。
+
+证据：
+
+- 生产事件 `51757bfd-9995-4539-a82d-ec7f46b5f82d`（`workbench:2026-06`）priority 为 `high`，2.18s 完成。
+- 其后投递的 `250edf5e-937c-4630-80fa-98f11c255b53`（`workbench:all` aggregate）被降成 `low`，虽然 0s delay，但 enqueue-to-done 为 5.51s。
+- `workbench-aggregate` lane 旧 env 使用 `--poll-interval-seconds 0.25` 且 `FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=1`，all-scope backlog 会放大热写后的聚合尾延迟。
+
+变更：
+
+- `WorkbenchReadModelRefreshService` 对 0s delay 的 hot aggregate 保留 high/urgent priority；relation 写入即使源事件不是 high，也会把 all aggregate 提升到 high，确保 pending coalescing 使用 `least(existing.available_at, excluded.available_at)` 拉早可处理时间。
+- 普通低优先级月分片仍使用 low priority 和 3s 合并窗口，避免批量导入期间无意义重复 all 聚合。
+- `workbench-aggregate` worker env 示例改为 `--poll-interval-seconds 0.05` 与 `FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=4`；deploy helper 会把生产旧的单事件 drain 迁移到 4。
+- cProfile 显示 all 聚合 Python 热点来自 `_as_workbench_row_list(...)` 对每个 row 做递归 `deepcopy`；该 helper 调用方只重组列表并读取 row 字段，因此改为浅拷贝，避免全量 `workbench:all` 聚合重复复制嵌套 payload。
+- `workbench:all` 发布后的 generation retention 不再在 worker hot path 同步执行；all-only 旧代清理交给 `finops-prune-workbench-generations.timer`，月份 shard 发布后的 month-scope retention 仍保留。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_workbench_sql_runtime.py -k 'aggregate' -q
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_workbench_sql_runtime.py -k 'workbench_rows_page or workbench_groups or group_rows' -q
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_workbench_sql_runtime.py -k 'retention' -q
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_runtime_queue.py -k 'workbench_all_aggregate' -q
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_deploy_runtime_examples.py -q
+```
+
+后续：发布后重新执行生产受控 `withdraw-link` 写 smoke，要求 HTTP submit、`workbench_relation:<month>`、`workbench:<month>` 和 `workbench:all` aggregate 均进入 1s SLO；若仍失败，继续按生产事件时间线拆分 worker pickup 与 aggregate rebuild 耗时。

@@ -353,7 +353,10 @@ def wait_for_event_fresh(
         readiness_status = str((readiness or {}).get("status") or "").strip() or None
         dirty_status = str((dirty or {}).get("status") or "").strip() or None
         source_version = _optional_int((event or {}).get("source_version"))
-        enqueue_ms = _duration_ms((event or {}).get("created_at"), (event or {}).get("processed_at"))
+        enqueue_ms = _duration_ms(
+            (event or {}).get("available_at") or (event or {}).get("created_at"),
+            (event or {}).get("processed_at"),
+        )
         handler_ms = _runtime_handler_duration_ms(event)
         dirty_done_without_readiness = (
             allow_dirty_done_without_readiness
@@ -539,6 +542,7 @@ def _event_status(connection: Any, event_id: str) -> dict[str, Any] | None:
           status,
           source_version,
           created_at,
+          available_at,
           processed_at,
           updated_at,
           last_error,

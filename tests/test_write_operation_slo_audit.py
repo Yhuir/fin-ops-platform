@@ -286,10 +286,10 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
         self.assertEqual(params[-1], 50)
 
-    def test_workbench_relation_withdraw_profile_requires_only_operation_blocking_relation_scope(self) -> None:
+    def test_workbench_relation_withdraw_profile_requires_operation_visible_workbench_scopes(self) -> None:
         rows = [
             _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
-            _event(scope_type="workbench", reason="workbench_relation_changed", seconds=12.0),
+            _event(scope_type="workbench", reason="workbench_relation_changed"),
             _event(scope_type="bank_detail", reason="workbench_relation_changed", seconds=3.0),
         ]
 
@@ -300,8 +300,34 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 1)
-        self.assertEqual(report["results"][0]["scope_type"], "workbench_relation")
+        self.assertEqual(report["expectation_count"], 2)
+        self.assertEqual(
+            {result["scope_type"] for result in report["results"]},
+            {"workbench", "workbench_relation"},
+        )
+
+    def test_workbench_relation_withdraw_profile_fails_when_workbench_refresh_is_slow(self) -> None:
+        rows = [
+            _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
+            _event(scope_type="workbench", reason="workbench_relation_changed", seconds=12.0),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["workbench_relation_withdraw"],
+            target_ms=2_000,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["expectation_count"], 2)
+        self.assertIn(
+            "workbench",
+            {
+                result["scope_type"]
+                for result in report["results"]
+                if result["status"] == "fail"
+            },
+        )
 
     def test_workbench_relation_withdraw_cross_page_profile_keeps_background_refresh_visible(self) -> None:
         rows = [
@@ -325,10 +351,10 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["expectation_count"], 9)
 
-    def test_workbench_relation_confirm_profile_requires_only_operation_blocking_relation_scope(self) -> None:
+    def test_workbench_relation_confirm_profile_requires_operation_visible_workbench_scopes(self) -> None:
         rows = [
             _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
-            _event(scope_type="workbench", reason="workbench_relation_changed", seconds=12.0),
+            _event(scope_type="workbench", reason="workbench_relation_changed"),
             _event(scope_type="input_invoice_usage", reason="workbench_relation_changed", seconds=3.0),
         ]
 
@@ -339,8 +365,11 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 1)
-        self.assertEqual(report["results"][0]["scope_type"], "workbench_relation")
+        self.assertEqual(report["expectation_count"], 2)
+        self.assertEqual(
+            {result["scope_type"] for result in report["results"]},
+            {"workbench", "workbench_relation"},
+        )
 
     def test_workbench_relation_confirm_cross_page_profile_keeps_background_refresh_visible(self) -> None:
         rows = [
@@ -460,6 +489,124 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             confirm_scopes,
             {"workbench", "workbench_relation", "bank_detail", "pending_invoice", "cost_statistics", "search"},
         )
+
+    def test_pending_invoice_attach_existing_profile_requires_cross_page_refresh_scopes(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="workbench_relation_changed"),
+            _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
+            _event(scope_type="bank_detail", reason="workbench_relation_changed"),
+            _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
+            _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
+            _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="search", reason="workbench_relation_changed"),
+            _event(scope_type="tax_offset", reason="workbench_relation_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["pending_invoice_attach_existing_invoice"],
+            target_ms=5_000,
+        )
+
+        scope_types = {result["scope_type"] for result in report["results"]}
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["expectation_count"], 8)
+        self.assertEqual(
+            scope_types,
+            {
+                "workbench",
+                "workbench_relation",
+                "bank_detail",
+                "invoice_lifecycle",
+                "pending_invoice",
+                "input_invoice_usage",
+                "search",
+                "tax_offset",
+            },
+        )
+
+    def test_pending_invoice_attach_existing_with_oa_profile_includes_oa_and_cost_scopes(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="workbench_relation_changed"),
+            _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
+            _event(scope_type="bank_detail", reason="workbench_relation_changed"),
+            _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
+            _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
+            _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="oa_pending_payment", reason="workbench_relation_changed"),
+            _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
+            _event(scope_type="search", reason="workbench_relation_changed"),
+            _event(scope_type="tax_offset", reason="workbench_relation_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["pending_invoice_attach_existing_invoice_with_oa"],
+            target_ms=5_000,
+        )
+
+        scope_types = {result["scope_type"] for result in report["results"]}
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["expectation_count"], 10)
+        self.assertIn("oa_pending_payment", scope_types)
+        self.assertIn("cost_statistics", scope_types)
+
+    def test_bank_flow_rule_batch_submit_profile_requires_current_page_and_relation_visibility_scopes(self) -> None:
+        rows = [
+            _event(scope_type="bank_flow_rule_batch", reason="workbench_relation_changed"),
+            _event(scope_type="workbench", reason="workbench_relation_changed"),
+            _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
+            _event(scope_type="bank_detail", reason="workbench_relation_changed"),
+            _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
+            _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
+            _event(scope_type="search", reason="workbench_relation_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["bank_flow_rule_batch_submit"],
+            target_ms=5_000,
+        )
+
+        scope_types = {result["scope_type"] for result in report["results"]}
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["expectation_count"], 7)
+        self.assertEqual(
+            scope_types,
+            {
+                "bank_flow_rule_batch",
+                "workbench",
+                "workbench_relation",
+                "bank_detail",
+                "pending_invoice",
+                "cost_statistics",
+                "search",
+            },
+        )
+        self.assertNotIn("no_oa_bank_batch", scope_types)
+
+    def test_pairing_write_profiles_require_canonical_workbench_relation_refresh(self) -> None:
+        pairing_operations = [
+            "turnover_manual_closure_or_withdraw",
+            "workbench_relation_confirm_cross_page",
+            "workbench_relation_withdraw_cross_page",
+            "workbench_relation_confirm_bank_invoice_cross_page",
+            "workbench_relation_withdraw_bank_invoice_cross_page",
+            "workbench_relation_confirm_bank_turnover_cross_page",
+            "workbench_relation_withdraw_bank_turnover_cross_page",
+            "pending_invoice_attach_existing_invoice",
+            "pending_invoice_attach_existing_invoice_with_oa",
+            "bank_flow_rule_batch_submit",
+        ]
+
+        for operation in pairing_operations:
+            with self.subTest(operation=operation):
+                scope_types = {
+                    expectation.scope_type
+                    for expectation in write_operation_slo_audit.selected_expectations_for_operations([operation])
+                }
+                self.assertIn("workbench_relation", scope_types)
+                self.assertIn("workbench", scope_types)
 
     def test_invoice_import_confirmed_profile_requires_actual_file_import_refresh_scopes(self) -> None:
         rows = [

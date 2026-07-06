@@ -22,6 +22,18 @@
 - `tests/test_workbench_relation_repository.py`
 - `tests/test_derived_data_lifecycle_service.py`
 
+## 2026-07-06 - Search source-version unchanged skip
+
+- 新增：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_index_scope_summary_reads_versions_without_loading_rows`。
+- 新增：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_search_projection_skips_unchanged_scope_without_workbench_scan`。
+- 更新：`tests/test_search_pending_sql_runtime.py::SearchReadModelRepositoryPortTests::test_port_excludes_unrelated_read_model_methods` 覆盖 `search_index_scope_summary(...)` narrow port。
+- 覆盖：Search worker 在 source_versions 未变化时只读 scope summary 并返回 `source_versions_unchanged`，不扫描 `read_model.workbench_rows`，不调用 `save_search_index_rows(...)`。
+- 验证命令：
+
+```bash
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_search_pending_sql_runtime.py tests/test_search_api.py tests/test_read_model_manifest.py tests/test_runtime_worker_registry.py -q
+```
+
 ## 2026-06-24 - repository port extraction
 
 - 新增：`tests/test_search_pending_sql_runtime.py::SearchReadModelRepositoryPortTests::test_port_excludes_unrelated_read_model_methods`。

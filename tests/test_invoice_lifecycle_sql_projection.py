@@ -71,10 +71,11 @@ class InvoiceLifecycleSkipConnection:
 class InvoiceLifecycleSkipReadRepository:
     def __init__(self) -> None:
         self.relation_calls: list[str] = []
+        self.relation_source_version = 7
 
     def workbench_relation_source_versions(self, *, scope_key: str) -> dict[str, object]:
         self.relation_calls.append(scope_key)
-        return {"scope_key": scope_key, "source_version": 7, "source_signature": "relation-v1"}
+        return {"scope_key": scope_key, "source_version": self.relation_source_version, "source_signature": "relation-v1"}
 
 
 class FreshInvoiceLifecycleReadModelRepository:
@@ -162,13 +163,55 @@ def test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild(
     assert not connection.fetch_all_calls
     assert result["source_versions"]["workbench_relation_source_versions"] == {
         "scope_key": "2026-05",
-        "source_version": 7,
         "source_signature": "relation-v1",
     }
     assert result["source_versions"]["pending_invoice_read_model_source_versions"] == {
         "expense:all:2026-05": {"pending_invoice": "expense-v1"},
         "income:all:2026-05": {"pending_invoice": "income-v1"},
     }
+
+
+def test_invoice_lifecycle_dependency_versions_ignore_runtime_source_version_only() -> None:
+    connection = InvoiceLifecycleSkipConnection()
+    connection.pending_versions = {
+        "expense:all:2026-05": {
+            "pending_invoice": "expense-v1",
+            "bank_detail_source_versions": {"source_version": 1, "bank_detail_source_signature": "bank-same"},
+        },
+        "income:all:2026-05": {
+            "pending_invoice": "income-v1",
+            "bank_detail_source_versions": {"source_version": 2, "bank_detail_source_signature": "bank-same"},
+        },
+    }
+    connection.input_versions = {"source_version": 3, "input_signature": "input-same"}
+    connection.output_versions = {"source_version": 4, "output_signature": "output-same"}
+    connection.oa_versions = {"source_version": 5, "oa_signature": "oa-same"}
+    read_repository = InvoiceLifecycleSkipReadRepository()
+    invoice_repository = FreshInvoiceLifecycleReadModelRepository()
+    builder = InvoiceLifecycleSqlProjectionBuilder(
+        connection=connection,
+        read_model_repository=read_repository,
+        workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+        invoice_lifecycle_read_model_repository=invoice_repository,
+    )
+    builder._read_model_dependency_source_versions = builder._dependency_source_versions_for_scope("2026-05")
+    invoice_repository.source_versions = builder._source_versions()
+    assert not _has_exact_source_version_key(invoice_repository.source_versions)
+
+    connection.pending_versions["expense:all:2026-05"]["bank_detail_source_versions"]["source_version"] = 101  # type: ignore[index]
+    connection.pending_versions["income:all:2026-05"]["bank_detail_source_versions"]["source_version"] = 102  # type: ignore[index]
+    connection.input_versions["source_version"] = 103
+    connection.output_versions["source_version"] = 104
+    connection.oa_versions["source_version"] = 105
+    read_repository.relation_source_version = 106
+    connection.fetch_all_calls = []
+
+    result = builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
+
+    assert result["skipped"] is True
+    assert result["skip_reason"] == "source_versions_unchanged"
+    assert not _has_exact_source_version_key(result["source_versions"])
+    assert not connection.fetch_all_calls
 
 
 def test_invoice_lifecycle_defers_when_dependency_scope_is_dirty() -> None:
@@ -185,3 +228,11 @@ def test_invoice_lifecycle_defers_when_dependency_scope_is_dirty() -> None:
         builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
 
     assert not connection.fetch_all_calls
+
+
+def _has_exact_source_version_key(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(str(key) == "source_version" or _has_exact_source_version_key(item) for key, item in value.items())
+    if isinstance(value, list):
+        return any(_has_exact_source_version_key(item) for item in value)
+    return False

@@ -3,6 +3,13 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-07-06 - oa_pending_payment refresh 热路径 I/O 收敛
+
+- 目标：压低生产 `oa_pending_payment:2026-06` read model refresh handler 耗时，消除外部往来款/进行中 OA worker 刷新时的可见抖动。
+- 关键决策：不新增缓存层、不改 read model/API shape。月份 refresh 继续由 `invoice-usage-collection` worker 执行，但 completed 视图优先调用 OA projection 的 `list_application_records(month)`，同一 refresh 内复用 `DistributedInvoiceRelationContext` 的进项发票索引，且 `PaymentAdmittedOAProjectionAdapter` 已按 `t_payment_simple.flow_id` 准入过滤时跳过 query service 的二次支付状态表过滤。`oaPaymentWriteback` 复用单次 `list_payment_statuses` 结果，不再对每行调用 OA MySQL `get_payment_status`。
+- 测试覆盖：更新 `tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_projection_builder_reads_completed_from_unified_projection_and_in_progress_from_admission`，锁定单次 refresh 的 projection/发票/支付状态读取次数，并断言逐行 `get_payment_status` 调用数为 0。
+- 验证命令：见本轮最终说明。
+
 ## 2026-07-05 - 移除自动匹配写回并改为逐行写回
 
 - 目标：移除 OA 待付款核对页“自动匹配写回”按钮和对应后端 route/service 旧链路；对支付状态为“已支付”且写回状态为“未写回”的行提供行内“写回”按钮。
@@ -442,6 +449,13 @@
 - 数据结论：生产 repository 同源读取 `view_mode=in_progress` 为 fresh、total `0`；`view_mode=completed` 为 fresh、total `211`。当前进行中视图空表是 OA 投影事实数据，不是页面未加载。
 - 未测风险：当时未能完成生产 OA MySQL 写回配置验证；文件层已确认目标表在 MySQL datadir 的 `smart_oa/t_payment_simple.ibd`，但缺少可用 MySQL 管理凭据。该 blocker 已由后续“OA 支付状态 MySQL 写回生产配置闭环”记录解除。
 - 后续事项：已由后续记录补齐最小权限账号、生产 env、只读 repository smoke 和 rollback 写权限 smoke；真实业务级 confirm-paid smoke 仍需等待生产出现进行中 OA 样本。
+
+## 2026-07-06 - payment status 单次 refresh 复用
+
+- 触发事实：生产 `read_model_slo_smoke --apply --critical-only --target-ms 1000` 中 `oa_pending_payment:2026-06` 首次采样 handler `2849.815ms`、enqueue-to-fresh `2873.731ms` 超过目标；随后远端 breakdown 的完整 rebuild 约 `905ms`，其中 `payment_statuses_by_flow_id` 与 in-progress OA admission projection 存在同一 refresh 内重复读取 payment status 的风险。
+- 决策：`PaymentAdmittedOAProjectionAdapter` 增加可选 `payment_statuses_provider`；`InvoiceUsageCollectionSqlProjectionBuilder.rebuild_oa_pending_payment_read_model_scope(...)` 先批量读取一次 payment statuses，再让 in-progress projection 复用同一 map。默认 adapter 行为不变，只有 builder 明确传入 provider 时才减少重复 MySQL 读取。
+- 测试覆盖：新增 `tests/test_oa_payment_status_service.py::OAPaymentStatusServiceTests::test_payment_admitted_projection_can_reuse_payment_statuses_provider`，防止 provider cache 可用时再次调用 repository list。
+- 未测风险：真实生产 1s SLO 需发布后重跑；该修复不改变 OA admission、写回状态、关系清理或页面 API shape。
 
 ## 2026-06-17 - OA pending read model runtime freshness 闭环
 

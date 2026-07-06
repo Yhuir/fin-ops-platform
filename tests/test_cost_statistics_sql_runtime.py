@@ -1001,6 +1001,12 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertIn("left join read_model.workbench_rows", workbench_sql)
         self.assertIn("g.generation_id = active.generation_id", workbench_sql)
         self.assertNotIn("jsonb_path_exists", workbench_sql)
+        settings_reads = [
+            sql
+            for sql, _params in connection.fetch_one_calls
+            if "from app.app_settings" in sql
+        ]
+        self.assertEqual(len(settings_reads), 1)
 
     def test_cost_statistics_scope_shards_are_listed_from_active_workbench_generations(self) -> None:
         class Connection(CostStatisticsProjectionConnection):

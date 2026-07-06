@@ -1,13 +1,13 @@
 # Read Model 模块边界与 I/O
 
-日期：2026-07-03
+日期：2026-07-06
 
 ## 模块化状态
 
 - 状态：Read Model 模块化 PSCIP-L4 closed；full external PSCIP-L4 / 高性能全域闭环 open
 - 当前边界可信度：high
 - 目标边界：所有当前 App Status read model 通过 manifest、scope policy、refresh gateway、runtime worker、freshness/status gate 和 operation barrier 形成可验证闭环。
-- 当前闭环：14 个当前 App Status read model 已完成 Read Model 模块化 PSCIP-L4，`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 以显式例外语义闭环。
+- 当前闭环：14 个当前页面 critical read model 已完成 Read Model 模块化 PSCIP-L4，`workbench`、`bank_account_balance`、`pending_invoice`、`cost_statistics` 以显式例外语义闭环。`no_oa_bank_batch` 仍登记为 legacy API/read-model 回归项，但不再代表当前页面 `/bank-flow-rule-batches`，也不进入默认 critical production SLO。
 - 当前阻塞风险：2026-07-03 release `pscip-l4-workbench-group-row-min-20260703` 已把 Workbench 月分片 warmed targeted 1s direct SLO 收敛到 `10/10` pass，`source_version 3124..3133` p95/max `890.808ms`；成本统计 `active:2026-02` targeted `5/5` pass，p95/max `938.124ms`。但 full critical grouped 1s smoke 仍未闭环，最新一轮 `15/16` pass，`search:2026-03` handler `3087.035ms` / enqueue `3399.122ms` fail；targeted search `4/5` pass 但仍有一次 `1425.676ms` handler 长尾。固定 write scenario/ticket 后的 full gate 仍缺当前 release 真实 confirm/withdraw/no-OA withdraw 写样本；因此性能专项仍 open，不能声明高性能全域闭环。
 - 旧代码删除条件：legacy/local compat path 仍可保留为明确隔离路径；删除前必须证明对应页面 API、worker、测试和生产脚本不再调用该路径。
 
@@ -41,7 +41,7 @@
 | Scope key | manifest/scope policy | 必须符合注册 scope policy |
 | Query freshness request | API/read facade | 必须返回 fresh/stale/refreshing 或等价状态 |
 | Write response target envelope | 页面写 API/service | 会影响 read model 的成功写入必须返回或透出 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets` 和 `operation_barrier_targets`；缺少/未知前端 read model status 必须保持非 fresh |
-| Transactional refresh targets | `WorkbenchWriteUnitOfWork` 等事务 writer | 事务 writer 可以在业务事务内直接写 dirty scope/outbox，但必须使用等价 scope contract。Workbench confirm/withdraw 的 target source 是 `refresh_metadata.downstream_scope_types` 与 `pending_invoice_scope_keys`，并通过 scope policy registry normalize/validate/dedupe；禁止依赖 repository 隐式 SQL 扫描来补 downstream scope |
+| Transactional refresh targets | `WorkbenchWriteUnitOfWork` 等事务 writer | 事务 writer 可以在业务事务内直接写 dirty scope/outbox，但必须使用等价 scope contract。Workbench confirm/withdraw/cancel 的 target source 是 `refresh_metadata.downstream_scope_types`、`pending_invoice_scope_keys` 与操作级 `row_ids` / `case_ids`，并通过 scope policy registry normalize/validate/dedupe；禁止依赖 repository 隐式 SQL 扫描来补 downstream scope。同 scope pending event 被 dedupe 合并时必须合并并去重 row/case metadata，让小集合继续局部投影；超过 bounded metadata 上限时必须清空 row/case metadata，让 worker 降级 full rebuild，不能用最后一次操作或截断后的 row ids 伪装覆盖所有变更。active pending outbox 合并必须重置 `created_at`/`updated_at`，SLO 仍以 `available_at -> processed_at` 计算 |
 | Projection source versions | Worker/projection/upstream read model | 必须包含 own projection schema version 和依赖 source_versions；行为变更必须 bump version |
 | Parent/shard freshness | Repository/API fresh gate | 父 scope 不能在子 scope dirty/missing dependency 时返回 fresh；`pending_invoice` 父 scope 必须聚合子月份 dirty status |
 | Workbench pending OA claim lookup | `app.bank_transaction_relation_claims` | Workbench 月投影排除 OA 待付款进行中认领的银行流水时，必须使用 active `oa_pending_payment_relation` + `scope_month` + `bank_transaction_id` 的窄索引合同；该 I/O 只影响投影读取计划，不改变候选/关系业务语义 |
@@ -53,9 +53,10 @@
 | Dirty scope/outbox event | PostgreSQL durable queue | `job.outbox_events` 与 `job.read_model_dirty_scopes` 是事实源 |
 | Fresh payload | 页面 API/Redis | Redis 只能缓存 fresh gate 后 payload |
 | Readiness/status | app status/operation barrier | 页面不能伪装 fresh |
-| Workbench relation fan-out | runtime queue / workers | confirm/withdraw UoW 显式输出 `workbench`、`workbench_relation` 和 metadata 声明的 downstream scopes。`PostgresWorkbenchRelationRepository(..., enqueue_refreshes=False)` 是该主链路的持久化-only adapter，不能写 hidden outbox |
+| Workbench relation fan-out | runtime queue / workers | confirm/withdraw/cancel UoW 显式输出 `workbench`、`workbench_relation` 和 metadata 声明的 downstream scopes；写响应的 `freshness_targets` / `operation_barrier_targets` 必须至少包含本次受影响的 `workbench` 与 `workbench_relation` month scopes，避免前端等完 relation 后立即读取仍在 refreshing 的 groups read model。`workbench_relation` month worker 在事件包含 row ids 时优先执行局部投影，只读受影响 rows 与仍 active relation 成员；缺少 row ids、`all` fan-out 或 row/case metadata 超出合并上限时执行 full month rebuild。`PostgresWorkbenchRelationRepository(..., enqueue_refreshes=False)` 是该主链路的持久化-only adapter，不能写 hidden outbox；旧 snapshot repository 的兼容 fan-out 只能投递具体月份，不得把普通 relation 写入扩成即时 `workbench:all` |
 | Workbench generation payload | PostgreSQL read_model.workbench_* | 新 generation 的规范 payload 由各结构化 owner 表输出：`workbench_rows.payload` 拥有行详情，但不保存 nested `object_identity` 仲裁对象；canonical identity owner 是 `workbench_rows` / `workbench_group_rows` 的结构化 `object_identity_*` 列和行 payload 顶层字段。`workbench_groups.payload` 只拥有组级 metadata/sort/count/`workbench_group_rows_materialized` marker，`workbench_group_rows` 只拥有成员关系、过滤、排序、搜索和 object identity 结构化列，`payload` / `raw_payload` / `source_versions` 写 `{}`；`workbench_snapshots.payload` 只保存 metadata/summary shell 与 `workbench_groups_materialized=true` marker；旧 `/api/workbench`、groups page/detail 和成本统计如需完整 group rows，从 active generation 的 `workbench_group_rows + workbench_rows` 重建。Repository 遍历 rows/groups 时不得先 eager `serialize_value(...)` 整行/整组；序列化只允许发生在 `workbench_rows.payload`、`workbench_groups.payload` 等 JSON 写入 helper 的最终 I/O 边界。`raw_payload` 不再复制同一 JSON，只作为旧数据 fallback 字段存在 |
 | Workbench pending claim hot path index | PostgreSQL migration | `0087_oa_pending_payment_claim_hot_path.sql` 保留 `bank_transaction_relation_claims_active_oa_scope_bank_idx`，覆盖 active OA 认领按月份读取和按 `bank_transaction_id` 排序；禁止用 handler sleep、页面补丁或 broad query fallback 掩盖该查询慢点 |
+| Relation source fast path for downstream workers | `WorkbenchRelationReadModelRepositoryPort` | 下游 worker 如 `bank-detail`、`search-pending` 只能通过 workbench-relations repository port 读取 active relation source rows/source summary，用于 source-version proof 和投影上下文；禁止下游 projection 直接 SQL 读取 `app.workbench_pair_relations`，也禁止把该快路径伪装成页面 fresh payload |
 | Source-version proof | Scope rows / API fresh gate | `source_versions_unchanged` 只能在 own schema version 与依赖版本都匹配时跳过重建 |
 | Queue history retention | Runtime worker ops | 只回收 `done` 历史，不改变 pending/processing/failed/dead-lettered freshness 事实源 |
 
@@ -104,6 +105,7 @@
 - 事务 writer 若直接写 dirty scope/outbox，必须有等价 scope contract 测试。Workbench confirm/withdraw 不能恢复 repository 内部 hidden fan-out；新增 downstream 只能走 UoW target planner 或明确 gateway/lifecycle owner。
 - `pending_invoice` 的 `filter=all` freshness dependency 月份必须来自 canonical `app.bank_transactions`，父 scope refresh_status 必须上卷子月份 dirty scope，防止新导入事实源已增加但页面仍显示旧 rows 且标记 fresh。
 - `workbench_relation` 的 `rows` 索引是 scope 内唯一，不是 row 全局唯一；跨月 relation 必须在每个受影响 scope 写入所有成员 row 索引，禁止恢复旧的 `(tenant_id, row_id)` 覆盖模型。
-- `workbench` 保留 active generation 原子发布；月份 shard 刷新后可投递 `all` aggregate，但 aggregate 必须由 `workbench-aggregate` lane 独立消费，不能阻塞页面首屏使用的月份 shard worker。
+- `workbench_relation` 操作级局部投影必须通过 `WorkbenchRelationReadModelRepositoryPort.save_workbench_relation_distribution_rows(...)` 进入 repository；service/projection 不得直接写 SQL。repository 必须按受影响 row overlap 删除旧 groups、删除/写回受影响 rows、同步 scope source_versions 并重算 row/group count。
+- `workbench` 保留 active generation 原子发布；月份 shard 刷新后可投递 `all` aggregate。relation 写入产生的 `workbench_relation_changed` 必须以 0 秒 delay 和 high priority 把 `all` aggregate 投递给 `workbench-aggregate` lane，让跨页面 all 视图尽快收敛；但该聚合仍不能进入关系写事务或阻塞页面首屏使用的月份 shard worker。
 - legacy compat path 删除不是当前 PSCIP-L4 blocker；它必须继续保持生产 fail-closed、不能绕过 fresh gate，也不能新增未登记 dirty/outbox/readiness 写入。
 - Search 高行数 refresh latency 仍需在后续生产 evidence sweep 中观察；单次高延迟不是当前 stale-as-fresh 或 readiness blocker。
