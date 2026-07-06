@@ -73,9 +73,12 @@ describe("AppHealthOperationsPage", () => {
     expect(data).toHaveTextContent("40（5）");
     expect(data).not.toHaveTextContent("普通导入");
     expect(data).not.toHaveTextContent("ETC");
-    expect(within(data).getByRole("grid", { name: "最近导入记录" })).toBeInTheDocument();
+    const recentImportEvents = within(data).getByRole("grid", { name: "最近导入记录" });
+    expect(recentImportEvents).toBeInTheDocument();
     expect(data).toHaveTextContent("bank-5.xlsx");
     expect(data).toHaveTextContent("invoice-4.xlsx");
+    expect(recentImportEvents).not.toHaveTextContent("OA 同步");
+    expect(recentImportEvents).not.toHaveTextContent("OA 附件解析");
     expect(data).not.toHaveTextContent("bank-6.xlsx");
     expect(within(data).getByRole("grid", { name: "银行流水来源" })).toBeInTheDocument();
     expect(within(data).getByRole("grid", { name: "发票来源" })).toBeInTheDocument();
@@ -117,6 +120,8 @@ describe("AppHealthOperationsPage", () => {
     const drawer = await screen.findByRole("dialog", { name: "导入历史" }, { timeout: PAGE_TIMEOUT });
     expect(within(drawer).getByRole("grid", { name: "全部导入历史" })).toBeInTheDocument();
     expect(drawer).toHaveTextContent("bank-6.xlsx");
+    expect(drawer).not.toHaveTextContent("OA 同步");
+    expect(drawer).not.toHaveTextContent("OA 附件解析");
 
     expect(screen.queryByTestId("app-health-summary")).not.toBeInTheDocument();
     expect(screen.queryByTestId("app-health-background-jobs")).not.toBeInTheDocument();

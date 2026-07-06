@@ -1010,14 +1010,14 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
         "status": "completed"
       },
       {
-        "key": "oa-attachment-20260523094800",
-        "source_key": "oa_attachment",
-        "label": "OA 解析",
-        "source_name": "OA 附件解析",
-        "imported_by": "oa_sync",
-        "count": 40,
-        "supplementary_count": 5,
-        "imported_at": "2026-05-23T09:48:00+08:00",
+        "key": "invoice-4",
+        "source_key": "manual",
+        "label": "手工导入",
+        "source_name": "invoice-4.xlsx",
+        "imported_by": "admin.ops",
+        "count": 18,
+        "supplementary_count": null,
+        "imported_at": "2026-05-23T09:54:00+08:00",
         "status": "completed"
       }
     ]
@@ -1046,7 +1046,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 - Dashboard 只返回页面需要的聚合读数据，不返回业务 payload、snapshot、raw payload、token、数据库 URL 或 RabbitMQ URL。
 - `data_inventory.invoice.sources` 固定包含 `manual`、`oa_attachment`。`oa_attachment.supplementary_count` 表示 OA 解析来源且不在手工导入中的 active 发票数；unknown 时为 `null`。
-- `data_inventory.import_events[*]` 是全量导入历史，包含流水、手工发票、OA 解析和 OA 单据同步记录。每条 `count` 必须是真实成功导入/同步数量；`oa_attachment` 事件可带 `supplementary_count` 表示该次 OA 解析新增进入发票池且不在手工导入中的数量。前端主页面只显示最新 5 条，抽屉展示全量历史。
+- `data_inventory.import_events[*]` 是全量手工导入历史，只包含银行流水和发票导入批次。每条 `count` 必须来自 `app.import_batches.success_count`；OA 解析、OA 单据同步和其它 OA runtime facts 不进入该列表。前端主页面只显示最新 5 条，抽屉展示全量历史。
 - `request_performance.endpoints[*]` 包含 `duration_ms`、`database_duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_query_count` 的 p50/p95/p99。
 - `runtime_performance.queues[*]` 基于已知 RabbitMQ route 输出，即使 RabbitMQ Management API 不可用也保留行，数值为 `null`。
 - Dashboard API 可返回短 TTL 缓存 payload。缓存刷新失败但已有旧 payload 时，响应仍为 `200`，并在 `freshness.warnings` 中包含 `dashboard_cache_stale_after_error`。

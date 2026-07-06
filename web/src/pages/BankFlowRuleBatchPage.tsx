@@ -405,16 +405,20 @@ export default function BankFlowRuleBatchPage() {
     if (!selectedBatchId || details[selectedBatchId] || detailErrors[selectedBatchId]) {
       return undefined;
     }
+    const controller = new AbortController();
     const requestId = detailRequestSeqRef.current + 1;
     detailRequestSeqRef.current = requestId;
     let cancelled = false;
-    fetchBankFlowRuleBatchDetail(selectedBatchId)
+    fetchBankFlowRuleBatchDetail(selectedBatchId, controller.signal)
       .then((detail) => {
         if (!cancelled && requestId === detailRequestSeqRef.current) {
           setDetails((current) => ({ ...current, [selectedBatchId]: detail }));
         }
       })
       .catch((caught) => {
+        if (isAbortLikeError(caught)) {
+          return;
+        }
         if (!cancelled && requestId === detailRequestSeqRef.current) {
           setDetailErrors((current) => ({
             ...current,
@@ -424,6 +428,7 @@ export default function BankFlowRuleBatchPage() {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [detailErrors, details, selectedBatchId]);
 
@@ -459,6 +464,8 @@ export default function BankFlowRuleBatchPage() {
   }, []);
 
   const handleMutationComplete = useCallback((message: string, result: { affectedMonths?: string[] }) => {
+    suppressNextAutoSelectRef.current = true;
+    setSelectedBatchId("");
     emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
       ...mutationEventDetail(result),
     });
@@ -591,12 +598,8 @@ export default function BankFlowRuleBatchPage() {
             transactionIds,
             note: "",
           });
-          setMessage("正在等待流水规则批次读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(submitResult, month),
-          );
-          setMessage("正在刷新流水规则批次...");
-          await reloadBatchesAfterMutation();
+          setMessage("正在更新流水规则批次...");
+          reconcileMutationInBackground(submitResult, month);
           return submitResult;
         } finally {
           setMutating(false);

@@ -1048,6 +1048,78 @@ describe("BankFlowRuleBatchPage", () => {
     }
   });
 
+  test("submits selected rows without foreground freshness wait or opening the next batch", async () => {
+    const user = userEvent.setup();
+    const nextFeeBatch = {
+      ...listPayload.batches[0],
+      batch_id: "batch-draft-fee-next",
+      account_key: "ceb:8826",
+      bank_name: "光大银行",
+      account_last4: "8826",
+      total_amount: "44.00",
+    };
+    const payload = {
+      ...listPayload,
+      summary: {
+        ...listPayload.summary,
+        draft_count: 4,
+        categories: listPayload.summary.categories.map((category) => (
+          category.code === "fee"
+            ? { ...category, total: 3, draft: 2, total_amount: "150.00" }
+            : category
+        )),
+      },
+      batches: [listPayload.batches[0], nextFeeBatch, ...listPayload.batches.slice(1)],
+    };
+    const operationBarrierStarted = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
+        return jsonResponse(tagSelectionPayload);
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
+        return jsonResponse(withPagination(payload, url));
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
+        return jsonResponse(feeDetailPayload);
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee-next") {
+        return jsonResponse({ batch: nextFeeBatch, tag_counts: { fee: 1 }, direction_counts: { expense: 1 }, rows: [] });
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/submit-selection") {
+        return jsonResponse({
+          batch: { ...listPayload.batches[0], status: "submitted", status_bucket: "submitted", version: 2 },
+          affected_months: ["2026-05"],
+          operation_barrier_targets: [
+            { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
+            { read_model_key: "workbench", scope_key: "all" },
+          ],
+          results: [{ batch_id: "batch-selected-fee", status: "submitted" }],
+        });
+      }
+      if (url.pathname === "/api/operation-barrier/status") {
+        operationBarrierStarted();
+        return new Promise<Response>(() => undefined);
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
+    await user.click(screen.getByRole("button", { name: "提交批次" }));
+
+    expect(await screen.findByText("选中流水已提交")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(operationBarrierStarted).toHaveBeenCalled();
+    });
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee-next";
+    })).toBe(false);
+  });
+
   test("keeps draft row selection available when legacy read model rows omit can_submit", async () => {
     const legacyDraftBatch = { ...listPayload.batches[0] };
     delete (legacyDraftBatch as Partial<typeof legacyDraftBatch>).can_submit;

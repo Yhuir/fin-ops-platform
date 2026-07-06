@@ -210,7 +210,7 @@ GET /api/operations/app-health-dashboard
 
 Dashboard 三个区域：
 
-- `数据`：`app.bank_transactions`、`app.invoices`、`app.oa_applications`、`app.oa_application_items` 的数量和最近同步时间。发票来源只拆为 `手工导入` 和 `OA 解析`；`OA 解析` 括号内数量表示 OA 解析来源且不在手工导入中的发票数。主页面还展示最新 5 条流水、手工发票、OA 解析和 OA 单据同步历史，右侧抽屉展示全量历史。
+- `数据`：`app.bank_transactions`、`app.invoices`、`app.oa_applications`、`app.oa_application_items` 的数量和最近同步时间。发票来源只拆为 `手工导入` 和 `OA 解析`；`OA 解析` 括号内数量表示 OA 解析来源且不在手工导入中的发票数。主页面还展示最新 5 条手工银行流水和发票导入历史，右侧抽屉展示全量历史。
 - `请求`：当前 API 进程内 rolling window 的 p95/p99，包括完整请求耗时、DB 总耗时、连接获取、SQL execute/fetch 和 SQL 次数。
 - `后台`：`job.outbox_events`、RabbitMQ queue/DLQ、`job.runtime_worker_heartbeats`、read model refresh duration 和 dirty scope 计数。
 
@@ -223,7 +223,7 @@ Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS
 - API/DB p95 同时升高，优先看 PostgreSQL、连接池和 top SQL。
 - API p95 升高但 DB 指标不高，优先看 Python 对象构造、JSON 序列化、前端请求量和网络。
 - 发票 inventory 读取 canonical `app.invoices.source_links`：`manual_invoice_import` 计入 `手工导入`，`oa_attachment_invoice` 计入 `OA 解析`，同时带 `oa_attachment_invoice` 但不带 `manual_invoice_import` 的 active 发票计入 OA 括号数。OA 附件 OCR cache 只是解析缓存，不作为 App Health 发票 inventory 事实源；ETC 已包含在手工导入口径中，不单独展示。
-- 导入历史数量来自真实成功导入/同步事实：流水和手工发票读取 `app.import_batches.success_count`，OA 解析读取 canonical invoice OA source links，OA 单据同步读取 `app.oa_sync_runs(sync_type='oa_projection').upserted_count`。预览候选数、附件数和 OCR 候选项总数不得作为导入数量。
+- 导入历史数量只来自手工导入批次事实：流水和发票读取 `app.import_batches.success_count`。OA 解析、OA 单据同步、预览候选数、附件数和 OCR 候选项总数不得作为最近导入记录。
 - Read model refresh 的“历史”指标是 bounded history：最近 7 天或每个 event type 最近 512 条完成事件，不是全库永久历史扫描。
 - `/health/ready` 和 `/metrics` 的 read model refresh / enqueue-to-fresh / RabbitMQ publish confirm percentile 使用每个 event type 最近 512 条样本，不扫全历史 `done` outbox。
 - `read_model_refresh_current_windows` 仍基于每个 event type 最近 512 条 bounded 样本，但按 `created_at` 过滤固定窗口；它用于当前 SLO 判定，历史滞留事件仍由 all-time bounded 指标和 slow events 保留。

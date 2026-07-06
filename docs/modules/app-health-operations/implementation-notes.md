@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-07 - 最近导入记录排除 OA 同步
+
+- 目标：`/operations/app-health` 的最近导入记录只展示手工导入的银行流水和发票批次，不再记录 OA 解析或 OA 单据同步。
+- 影响范围：`OperationsDashboardService._import_events()`、`/api/operations/app-health-dashboard` 的 `data_inventory.import_events` 语义、前端 dashboard mock/test 和 App Health 模块/API/运维文档；不改变发票来源 inventory 的 `OA 解析` 统计，也不改变 OA 卡片最近同步时间。
+- 关键决策：根因修复放在后端 dashboard 聚合层，只读取 `app.import_batches` 的 `bank_transaction`、`input_invoice`、`output_invoice`。移除旧的 `app.invoices.source_links` OA 附件聚合和 `app.oa_sync_runs(sync_type='oa_projection')` 导入历史聚合，避免 OA runtime facts 污染手工导入链路。
+- 文档影响：更新本模块 README、boundary-io、tests、API contracts 和运维 monitoring。
+- 测试覆盖：`tests/test_operations_dashboard_service.py` 锁定 import history 只含 `bank_transactions` / `manual`，并让旧 OA import-history 查询失败；`web/src/test/AppHealthOperationsPage.test.tsx` 锁定最近/全量导入历史不显示 OA 同步或 OA 附件解析。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：本地测试证明后端 contract 和前端展示；真实生产历史数据是否仍有旧 OA 行需要发布后只读 dashboard/API 复验。
+
 ## 2026-07-05 - App Health SSE first-event heartbeat
 
 - 目标：让 `/api/app-health/stream` 的首事件在 1 秒 SLO 内稳定到达，避免 SSE smoke 把完整 AppHealth 大 JSON 传输耗时当作连接首事件耗时。
@@ -50,14 +60,14 @@
 
 ## 2026-06-30 - App Health 流水/发票/OA 导入统计模块化口径
 
-- 目标：在 AppHealth 运维状态主页面展示流水、手工发票、OA 解析和 OA 单据同步的每次导入数量，默认只展示最新 5 条，并通过右侧抽屉查看全量历史；同时把发票来源统计收敛为 `手工导入` 和 `OA 解析` 两类。
+- 目标：当时在 AppHealth 运维状态主页面展示流水、手工发票和 OA 派生事件的每次数量，默认只展示最新 5 条，并通过右侧抽屉查看全量历史；同时把发票来源统计收敛为 `手工导入` 和 `OA 解析` 两类。2026-07-07 起，导入历史已收敛为只展示手工银行流水和发票导入批次。
 - 影响范围：`OperationsDashboardService`、`/api/operations/app-health-dashboard` response shape、`AppHealthOperationsPage`、前端 AppHealth 类型、模块文档和运维/API 合同；不新增 read model、worker 或写操作。
 - 关键决策：发票 inventory 的事实源从 OA OCR cache 改为 canonical `app.invoices.source_links`。`manual_invoice_import` 计入 `手工导入`，`oa_attachment_invoice` 计入 `OA 解析`，同时有 OA 来源但没有手工导入来源的 active 发票计入 `OA 解析` 后面的括号数。`普通导入` 不再展示；`ETC` 已包含在手工导入中，不单独展示。OA 解析仍是校验/补充来源：只有不存在于发票池并被 promotion 的 OA 附件发票才通过 canonical source link 进入统计。
-- 导入历史 I/O：后端输出 `data_inventory.import_events` 全量列表。流水/手工发票读取 `app.import_batches.success_count`；OA 解析按 canonical OA source link 创建时间聚合并输出补充数；OA 单据同步读取 `app.oa_sync_runs(sync_type='oa_projection').upserted_count`。前端主页面截取最新 5 条，抽屉展示全量。
+- 导入历史 I/O：后端输出 `data_inventory.import_events` 全量列表。当前只读取 `app.import_batches.success_count` 中的手工银行流水和发票导入批次；OA 解析和 OA 单据同步已从导入历史移除。前端主页面截取最新 5 条，抽屉展示全量。
 - 文档影响：更新本模块 README、boundary-io、tests、运维 monitoring 和 API contracts。
 - 测试覆盖：`tests/test_operations_dashboard_service.py` 覆盖 source_links 统计、OA supplementary count、导入事件和 import history 降级；`tests/test_app_health_api.py` 覆盖 admin dashboard API 新 shape；`web/src/test/AppHealthOperationsPage.test.tsx` 覆盖页面不显示 `普通导入`/`ETC`、`OA 解析` 括号数、最新 5 条和抽屉全量历史。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest -q tests/test_operations_dashboard_service.py`；`PYTHONPATH=backend/src python3 -m pytest -q tests/test_app_health_api.py`；`cd web && npm test -- --run src/test/AppHealthOperationsPage.test.tsx`。
-- 未测风险：历史 OA 解析“每次导入”目前由 canonical source link `created_at` 按秒聚合，这是现有 durable fact 能提供的最小可追踪粒度；若后续需要严格 worker-run 级别的 OA 附件发票 promotion 批次，需要在 promotion 写入时同步记录专门的 `oa_sync_runs` 或 import event fact。
+- 未测风险：本记录中的 OA 派生导入历史口径已废止；若后续需要独立追踪 OA 附件 promotion 批次，应新增专门 OA 运维记录，不得复用手工导入历史。
 
 ## 2026-06-21 - App Status outbox 与 ready summary current-effective 口径对齐
 

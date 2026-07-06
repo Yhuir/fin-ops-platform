@@ -47,7 +47,7 @@
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
 - Dashboard 发票 inventory 只展示 `手工导入` 和 `OA 解析` 两类来源，不再展示 `普通导入` 或 `ETC`。统计事实源是统一发票池 `app.invoices.source_links`：`手工导入` 统计 `source_type='manual_invoice_import'` 的 active 发票，`OA 解析` 统计 `source_type='oa_attachment_invoice'` 的 active 发票，`OA 解析` 括号内数量统计带 OA 来源但不带手工导入来源的 active 发票。
-- Dashboard 导入历史展示流水、手工发票、OA 解析和 OA 单据同步的每次导入数量；主页面只显示最新 5 条，右侧抽屉展示所有历史记录。
+- Dashboard 导入历史只展示手工导入的银行流水和发票批次；OA 解析和 OA 单据同步只属于发票/OA inventory 与运行状态，不进入最近导入记录。主页面只显示最新 5 条，右侧抽屉展示所有历史记录。
 
 ## 运行事实源
 
@@ -57,7 +57,7 @@
 - Worker registry：`runtime_worker_registry.py`。
 - Domain/read model/job/dependency registries：`app_status_*_registry.py`。
 - 发票 inventory：读取 `app.invoices.source_links`，只统计已进入统一发票池且未删除的 canonical invoice facts；OA 附件 OCR cache 只作为解析缓存，不作为 App Health 发票 inventory 事实源。
-- 导入历史：读取 `app.import_batches` 的银行流水/发票导入成功数、`app.invoices.source_links` 中 OA 附件发票 source link 的创建时间和补充数，以及 `app.oa_sync_runs(sync_type='oa_projection')` 的 OA 单据同步数。
+- 导入历史：只读取 `app.import_batches` 的 `bank_transaction`、`input_invoice`、`output_invoice` 批次成功数。
 - 前端只展示后端事实；不能用当前 route、表格 loading、组件本地状态推导全局状态。
 
 ## 关键 fan-out

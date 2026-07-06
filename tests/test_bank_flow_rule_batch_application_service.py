@@ -3,8 +3,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 
-from fin_ops_platform.services.bank_batch_application_service import BankBatchPairRelationSnapshotPort, BankBatchPersistenceError
-from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
+from fin_ops_platform.services.bank_batch_application_service import (
+    BankBatchPairRelationSnapshotPort,
+    BankBatchPersistenceError,
+    BankBatchRelationMutationError,
+)
+from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE, BankBatchService
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
 from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh import (
     BankFlowRuleBatchReadModelPersistencePort,
@@ -377,6 +381,212 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_submit_selected_bank_flow_rows_uses_row_scoped_inputs_without_all_refresh(self) -> None:
+        class ImportService:
+            def __init__(self) -> None:
+                self.list_calls: list[str] = []
+                self.get_calls: list[str] = []
+                self.rows = {
+                    "bank-row-1": {
+                        "id": "bank-row-1",
+                        "trade_time": "2026-06-03 10:20:00",
+                        "account_key": "ccb:8106",
+                        "bank_name": "建设银行",
+                        "account_last4": "8106",
+                        "direction": "expense",
+                        "amount": "8.80",
+                    },
+                    "bank-row-2": {
+                        "id": "bank-row-2",
+                        "trade_time": "2026-06-04 10:20:00",
+                        "account_key": "ccb:8106",
+                        "bank_name": "建设银行",
+                        "account_last4": "8106",
+                        "direction": "expense",
+                        "amount": "18.20",
+                    },
+                }
+
+            def list_transactions(self, *, month: str = "all") -> list[dict[str, object]]:
+                self.list_calls.append(month)
+                raise AssertionError("selected bank-flow submit must not scan all transactions")
+
+            def get_transaction(self, row_id: str) -> dict[str, object]:
+                self.get_calls.append(row_id)
+                return dict(self.rows[row_id])
+
+        class CategoryProvider:
+            def __init__(self) -> None:
+                self.bulk_get_calls: list[list[str]] = []
+                self.source_version_scope_calls: list[list[str]] = []
+
+            def bulk_get_for_rows(self, rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+                row_ids = [str(row.get("id") or "") for row in rows]
+                self.bulk_get_calls.append(row_ids)
+                return {
+                    row_id: {
+                        "category_code": "fee",
+                        "category_label": "手续费",
+                        "category_primary_label": "费用",
+                        "category_sub_label": "手续费",
+                        "category_label_path": ["费用", "手续费"],
+                        "category_source": "auto",
+                    }
+                    for row_id in row_ids
+                }
+
+            def source_versions_for_scope_keys(self, scope_keys: list[str], **_kwargs: object) -> dict[str, object]:
+                self.source_version_scope_calls.append(list(scope_keys))
+                return {
+                    "source_versions": {
+                        "bank_detail_schema_version": "bd-v1",
+                        "row_count": 2,
+                    }
+                }
+
+        class RelationFacade:
+            def __init__(self) -> None:
+                self.list_by_month_calls: list[str] = []
+                self.source_version_month_calls: list[str] = []
+
+            def list_by_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+                self.list_by_month_calls.append(month)
+                return {}
+
+            def source_versions_for_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+                self.source_version_month_calls.append(month)
+                return {"source_versions": {"workbench_relation_schema_version": "wr-v1"}}
+
+        class Settings:
+            def get_bank_flow_rule_batch_tag_rules_payload(self) -> dict[str, object]:
+                return {
+                    "version": 7,
+                    "active_tags": [{"code": "fee"}],
+                    "requirements_by_tag_code": {
+                        "fee": {"requires_oa": False, "requires_invoice": False},
+                    },
+                }
+
+        import_service = ImportService()
+        category_provider = CategoryProvider()
+        relation_facade = RelationFacade()
+        confirm_calls: list[dict[str, object]] = []
+        mutation_calls: list[dict[str, object]] = []
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._bank_batch_service = BankBatchService()
+        service._import_service = import_service
+        service._effective_category_provider = category_provider
+        service._bank_transaction_category_service = SimpleNamespace(snapshot=lambda: {})
+        service._app_settings_service = Settings()
+        service._workbench_matching_source_versions_provider = lambda: {}
+        service._relation_facade = relation_facade
+        service._confirm_relation_for_batch = (  # type: ignore[method-assign]
+            lambda batch, **kwargs: confirm_calls.append({"batch": dict(batch), **kwargs})
+        )
+        service._mutation_result = (  # type: ignore[method-assign]
+            lambda batch, **kwargs: mutation_calls.append(dict(kwargs)) or {"batch": dict(batch)}
+        )
+
+        result = service.submit_selected_rows(
+            row_ids=["bank-row-1", "bank-row-2"],
+            actor="finance-user",
+            note="提交",
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        self.assertEqual(import_service.get_calls, ["bank-row-1", "bank-row-2"])
+        self.assertEqual(import_service.list_calls, [])
+        self.assertEqual(category_provider.bulk_get_calls, [["bank-row-1", "bank-row-2"]])
+        self.assertEqual(category_provider.source_version_scope_calls, [["2026-06"]])
+        self.assertEqual(relation_facade.list_by_month_calls, ["2026-06"])
+        self.assertEqual(relation_facade.source_version_month_calls, ["2026-06"])
+        self.assertEqual(result["batch"]["status"], "submitted")
+        self.assertEqual(result["batch"]["row_ids"], ["bank-row-1", "bank-row-2"])
+        self.assertEqual(confirm_calls[0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        self.assertEqual(mutation_calls[0]["read_model_key"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+
+    def test_submit_selected_bank_flow_internal_transfer_fails_fast_without_legacy_refresh(self) -> None:
+        class ImportService:
+            def __init__(self) -> None:
+                self.get_calls: list[str] = []
+                self.list_calls: list[object] = []
+
+            def list_transactions(self, *, month: str = "all") -> list[dict[str, object]]:
+                self.list_calls.append(month)
+                raise AssertionError("bank-flow submit-selection must not enter legacy full refresh")
+
+            def get_transaction(self, row_id: str) -> dict[str, object]:
+                self.get_calls.append(row_id)
+                return {
+                    "id": row_id,
+                    "trade_time": "2026-06-04 10:20:00",
+                    "account_key": "ccb:8106",
+                    "bank_name": "建设银行",
+                    "account_last4": "8106",
+                    "direction": "expense",
+                    "amount": "18.20",
+                }
+
+        class CategoryProvider:
+            def bulk_get_for_rows(self, rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+                row_ids = [str(row.get("id") or "") for row in rows]
+                return {
+                    row_id: {
+                        "category_code": "internal_transfer",
+                        "category_label": "内部往来款",
+                        "category_primary_label": "内部往来款",
+                        "category_sub_label": "",
+                        "category_label_path": ["内部往来款"],
+                        "category_source": "auto",
+                    }
+                    for row_id in row_ids
+                }
+
+        import_service = ImportService()
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._bank_batch_service = BankBatchService()
+        service._import_service = import_service
+        service._effective_category_provider = CategoryProvider()
+        service._bank_transaction_category_service = SimpleNamespace(snapshot=lambda: {})
+
+        with self.assertRaises(BankBatchRelationMutationError) as raised:
+            service.submit_selected_rows(
+                row_ids=["bank-row-1"],
+                actor="finance-user",
+                note="提交",
+                relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            )
+
+        self.assertEqual(
+            raised.exception.error_code,
+            "bank_flow_rule_batch_selection_internal_transfer_requires_pair",
+        )
+        self.assertEqual(str(raised.exception), "内部往来批次请使用单批提交。")
+        self.assertEqual(import_service.get_calls, ["bank-row-1"])
+        self.assertEqual(import_service.list_calls, [])
+
+    def test_mutation_rejects_non_bank_flow_relation_mode(self) -> None:
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+
+        with self.assertRaises(BankBatchRelationMutationError) as submit_batch_error:
+            service.submit_batch(
+                "batch-1",
+                actor="finance-user",
+                expected_version=1,
+                note=None,
+                relation_mode="no_oa_bank_batch",
+            )
+        self.assertEqual(submit_batch_error.exception.error_code, "invalid_bank_flow_rule_batch_relation_mode")
+
+        with self.assertRaises(BankBatchRelationMutationError) as submit_selection_error:
+            service.submit_selected_rows(
+                row_ids=["bank-row-1"],
+                actor="finance-user",
+                note=None,
+                relation_mode="no_oa_bank_batch",
+            )
+        self.assertEqual(submit_selection_error.exception.error_code, "invalid_bank_flow_rule_batch_relation_mode")
 
     def test_withdraw_uses_bank_flow_relation_mode_for_shared_mutation_boundary(self) -> None:
         service, _batch_service, _refresh_calls = self._service_with_refresh_aware_batch()

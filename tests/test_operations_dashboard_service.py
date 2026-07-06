@@ -51,11 +51,7 @@ class FakeDashboardConnection:
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
         self.calls.append((sql, params))
         normalized = " ".join(sql.lower().split())
-        if self.fail_import_events and (
-            "from app.import_batches" in normalized
-            or "oa_attachment_source_links" in normalized
-            or "from app.oa_sync_runs" in normalized
-        ):
+        if self.fail_import_events and "from app.import_batches" in normalized:
             raise RuntimeError("import events missing")
         if "from app.import_batches" in normalized and "batch_type in" in normalized:
             return [
@@ -83,33 +79,9 @@ class FakeDashboardConnection:
                 },
             ]
         if "oa_attachment_source_links" in normalized:
-            return [
-                {
-                    "event_id": "oa-attachment-2026-05-21t10:05:00+00:00",
-                    "source_key": "oa_attachment",
-                    "label": "OA 解析",
-                    "source_name": "OA 附件解析",
-                    "imported_by": "oa_sync",
-                    "count": 4,
-                    "supplementary_count": 1,
-                    "imported_at": datetime(2026, 5, 21, 10, 5, tzinfo=UTC),
-                    "status": "completed",
-                }
-            ]
+            raise AssertionError("import events must not read OA attachment source links")
         if "from app.oa_sync_runs" in normalized and "sync_type = 'oa_projection'" in normalized:
-            return [
-                {
-                    "event_id": "oa-run-1",
-                    "source_key": "oa_records",
-                    "label": "OA 同步",
-                    "source_name": "oa_projection",
-                    "imported_by": "oa_sync",
-                    "count": 7,
-                    "supplementary_count": None,
-                    "imported_at": datetime(2026, 5, 20, 10, 5, tzinfo=UTC),
-                    "status": "succeeded",
-                }
-            ]
+            raise AssertionError("import events must not read OA sync runs")
         raise AssertionError(f"Unexpected fetch_all SQL: {sql}")
 
 
@@ -188,9 +160,9 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(oa_sources["oa_items"]["count"], 30)
         self.assertEqual(oa_sources["oa_items"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
         import_events = payload["data_inventory"]["import_events"]
-        self.assertEqual([row["source_key"] for row in import_events], ["bank_transactions", "manual", "oa_attachment", "oa_records"])
-        self.assertEqual(import_events[2]["count"], 4)
-        self.assertEqual(import_events[2]["supplementary_count"], 1)
+        self.assertEqual([row["source_key"] for row in import_events], ["bank_transactions", "manual"])
+        self.assertNotIn("oa_attachment", [row["source_key"] for row in import_events])
+        self.assertNotIn("oa_records", [row["source_key"] for row in import_events])
         endpoints = {row["endpoint"]: row for row in payload["request_performance"]["endpoints"]}
         self.assertEqual(endpoints["GET /api/workbench/summary"]["duration_ms"]["p95"], 640.0)
         self.assertEqual(endpoints["GET /api/workbench/summary"]["database_duration_ms"]["p99"], 310.0)

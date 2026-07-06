@@ -71,21 +71,9 @@ class FakeOperationsDashboardConnection:
                 }
             ]
         if "oa_attachment_source_links" in normalized:
-            return [
-                {
-                    "event_id": "oa-attachment-1",
-                    "source_key": "oa_attachment",
-                    "label": "OA 解析",
-                    "source_name": "OA 附件解析",
-                    "imported_by": "oa_sync",
-                    "count": 1,
-                    "supplementary_count": 1,
-                    "imported_at": "2026-05-19T10:00:00+00:00",
-                    "status": "completed",
-                }
-            ]
+            raise AssertionError("dashboard import events must not read OA attachment source links")
         if "from app.oa_sync_runs" in normalized and "sync_type = 'oa_projection'" in normalized:
-            return []
+            raise AssertionError("dashboard import events must not read OA sync runs")
         if "from job.outbox_events" in normalized:
             return []
         if "from job.read_model_dirty_scopes" in normalized:
@@ -644,7 +632,10 @@ class AppHealthApiTests(unittest.TestCase):
         invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
         self.assertEqual(set(invoice_sources), {"manual", "oa_attachment"})
         self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 1)
-        self.assertEqual(payload["data_inventory"]["import_events"][0]["source_key"], "bank_transactions")
+        import_source_keys = [row["source_key"] for row in payload["data_inventory"]["import_events"]]
+        self.assertEqual(import_source_keys, ["bank_transactions"])
+        self.assertNotIn("oa_attachment", import_source_keys)
+        self.assertNotIn("oa_records", import_source_keys)
 
     def test_operations_app_health_dashboard_returns_stale_cached_payload_after_refresh_error(self) -> None:
         current_time = {"value": 100.0}

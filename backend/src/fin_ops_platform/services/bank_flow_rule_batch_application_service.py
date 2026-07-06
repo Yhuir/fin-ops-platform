@@ -6,8 +6,9 @@ from fin_ops_platform.services.bank_batch_application_service import (
     SEARCH_MONTH_RE,
     BankBatchApplicationService,
     BankBatchPersistenceError,
+    BankBatchRelationMutationError,
 )
-from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
+from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE, BankBatchService
 
 
 BANK_FLOW_RULE_BATCH_ONLINE_MUTATION_ACTIONS = frozenset(
@@ -114,13 +115,9 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         persist: bool = True,
     ) -> dict[str, object]:
         if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
-            return super().submit_batch(
-                batch_id,
-                actor=actor,
-                expected_version=expected_version,
-                note=note,
-                relation_mode=relation_mode,
-                persist=persist,
+            raise BankBatchRelationMutationError(
+                "invalid_bank_flow_rule_batch_relation_mode",
+                "流水规则批次服务只接受 bank_flow_rule_batch relation mode。",
             )
         previous_batch_snapshot = self._bank_batch_service.snapshot()
         try:
@@ -144,6 +141,70 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         except Exception:
             self._restore_batch_service_snapshot(self._bank_batch_service, previous_batch_snapshot)
             raise
+
+    def submit_selected_rows(
+        self,
+        *,
+        row_ids: list[str],
+        actor: str,
+        note: str | None,
+        relation_mode: str = BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    ) -> dict[str, object]:
+        if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            raise BankBatchRelationMutationError(
+                "invalid_bank_flow_rule_batch_relation_mode",
+                "流水规则批次服务只接受 bank_flow_rule_batch relation mode。",
+            )
+        bank_rows = self.no_oa_bank_transaction_rows_by_ids(row_ids)
+        categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
+        if self._selected_rows_include_internal_transfer(bank_rows, categories_by_transaction_id):
+            raise BankBatchRelationMutationError(
+                "bank_flow_rule_batch_selection_internal_transfer_requires_pair",
+                "内部往来批次请使用单批提交。",
+            )
+        previous_batch_snapshot = self._bank_batch_service.snapshot()
+        try:
+            months = self._months_for_bank_rows(bank_rows)
+            source_versions = (
+                self.read_model_scope_source_versions(
+                    scope_key=months[0],
+                    relation_mode=relation_mode,
+                )
+                if len(months) == 1
+                else self.no_oa_bank_batch_source_versions(relation_mode=relation_mode)
+            )
+            batch = self._bank_batch_service.submit_selected_rows(
+                bank_rows=bank_rows,
+                categories_by_transaction_id=categories_by_transaction_id,
+                active_relations=self._workbench_relation_active_relations_for_bank_rows(bank_rows),
+                source_versions=source_versions,
+                eligible_batch_types=self._eligible_tag_codes_for_relation_mode(relation_mode),
+                row_ids=row_ids,
+                actor=actor,
+                note=note,
+                relation_mode=relation_mode,
+            )
+            self._confirm_relation_for_batch(batch, actor=actor, note=note, relation_mode=relation_mode)
+            return self._mutation_result(
+                batch,
+                status="submitted",
+                persist=True,
+                read_model_key=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            )
+        except Exception:
+            self._restore_batch_service_snapshot(self._bank_batch_service, previous_batch_snapshot)
+            raise
+
+    def _selected_rows_include_internal_transfer(
+        self,
+        bank_rows: list[dict[str, object]],
+        categories_by_transaction_id: dict[str, dict[str, object]],
+    ) -> bool:
+        return "internal_transfer" in {
+            BankBatchService._category_code(row, categories_by_transaction_id)
+            for row in list(bank_rows or [])
+            if isinstance(row, dict)
+        }
 
     def detail_payload(self, batch_id: str) -> dict[str, object]:
         self._refresh_bank_flow_rule_batch_runtime_snapshot_if_missing(batch_id)
