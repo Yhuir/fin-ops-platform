@@ -4,11 +4,11 @@
 
 ## 模块化状态
 
-- 状态：partial
+- 状态：closed-local
 - 当前边界可信度：high
 - 目标边界：销项发票收款情况通过 `output_invoice_collection` read model 查询；linked relation 下多张销项发票先归并为一条收款行，成员发票按净额汇总且负数/红字发票必须保留在 relation summaries；收款/红冲/生命周期变更产生 scoped refresh。
-- 当前缺口：与 invoice lifecycle、workbench relation、receipt service 关联紧密，旧路径删除需要多模块回归。
-- 旧代码删除条件：旧 service 直读路径不再参与页面 API，fresh gate tests 覆盖。
+- 当前本地 I/O 缺口：无已知 route/service/repository/read model 边界污染。剩余风险是生产 PostgreSQL 大数据、真实 worker drain 和 staging smoke，不属于本地模块化缺口。
+- 旧代码删除条件：生产页面 API 的 read-model 编排已移入 `OutputInvoiceCollectionReadApplicationService`；旧 service 直读路径只作为 legacy/local compat-only，不参与生产页面 API fresh 结果；fresh gate 和架构守卫测试覆盖。
 
 ## 职责边界
 
@@ -50,7 +50,7 @@
 - Read model：`output_invoice_collection`
 - Projection：`scoped_incremental`
 - Worker：`invoice-usage-collection`
-- Query owner：`OutputInvoiceCollectionService`
+- Query owner：`OutputInvoiceCollectionReadApplicationService`
 - Repository owner：`OutputInvoiceCollectionReadModelRepositoryPort`
 - Source version：改变 row ownership、relation grouping、金额口径或 relation summaries 字段时必须 bump `OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION`，防止旧投影被 freshness gate 当作 fresh。
 
@@ -61,19 +61,20 @@
 | Frontend page | `web/src/pages/OutputInvoiceCollectionsPage.tsx` |
 | Frontend feature/components | `web/src/features/outputInvoiceCollections/*`、`web/src/components/outputInvoiceCollections/*` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py` |
-| Backend service | `output_invoice_collection_service.py`、`output_invoice_collection_lifecycle_service.py`、`output_invoice_collection_receipt_service.py`、`output_invoice_collection_status_service.py`、`output_invoice_collection_read_model_*` |
+| Backend service | `output_invoice_collection_read_application_service.py`、`output_invoice_collection_service.py`、`output_invoice_collection_lifecycle_service.py`、`output_invoice_collection_receipt_service.py`、`output_invoice_collection_status_service.py`、`output_invoice_collection_read_model_*` |
 | Repository / SQL | `postgres_repositories/output_invoice_collection.py`、`invoice_usage_collection_sql_projection.py` |
 | Tests | `tests/test_output_invoice_collection*.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-*.spec.ts` |
 
 ## 依赖方向
 
 - 允许依赖：invoice lifecycle policy, invoice usage collection projection, workbench relation read facade。
-- 必须通过：OutputInvoiceCollectionService/lifecycle service。
+- 必须通过：页面读路径走 `OutputInvoiceCollectionReadApplicationService`；业务规则和 legacy/local 组行走 `OutputInvoiceCollectionService`；写路径走 lifecycle/receipt service。
 - 禁止绕过：直接改 lifecycle 状态；页面自行补齐 stale 明细。
 
 ## 测试与验证
 
 - `tests/test_output_invoice_collection_api.py`
+- `tests/test_output_invoice_collection_read_application_service.py`
 - `tests/test_output_invoice_collection_lifecycle.py`
 - `tests/test_output_invoice_collection_read_model_fresh_gate_service.py`
 - `web/src/test/OutputInvoiceCollectionsPage.test.tsx` 覆盖页面等待 operation barrier 行为。

@@ -36,6 +36,8 @@ class FakeOperationsDashboardConnection:
         if "oa_records_count" in normalized:
             return {
                 "oa_records_count": 3,
+                "oa_records_completed_count": 2,
+                "oa_records_in_progress_count": 1,
                 "oa_items_count": 4,
                 "oa_records_latest_synced_at": "2026-05-20T10:00:00+00:00",
                 "oa_latest_synced_at": "2026-05-20T10:00:00+00:00",
@@ -632,6 +634,10 @@ class AppHealthApiTests(unittest.TestCase):
         invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
         self.assertEqual(set(invoice_sources), {"manual", "oa_attachment"})
         self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 1)
+        oa_sources = {row["key"]: row for row in payload["data_inventory"]["oa"]["sources"]}
+        self.assertEqual(set(oa_sources), {"oa_records", "oa_records_completed", "oa_records_in_progress", "oa_items"})
+        self.assertEqual(oa_sources["oa_records_completed"]["count"], 2)
+        self.assertEqual(oa_sources["oa_records_in_progress"]["count"], 1)
         import_source_keys = [row["source_key"] for row in payload["data_inventory"]["import_events"]]
         self.assertEqual(import_source_keys, ["bank_transactions"])
         self.assertNotIn("oa_attachment", import_source_keys)

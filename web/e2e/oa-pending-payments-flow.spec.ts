@@ -90,7 +90,7 @@ test.describe("OA pending payments browser flow", () => {
     const recoveredRow = page.getByRole("row", { name: /浏览器付款申请人/ });
     await expect(recoveredRow).toBeVisible();
     await expect(recoveredRow).toContainText("浏览器待付款项目");
-    await expect(recoveredRow).toContainText("支付少了");
+    await expect(recoveredRow).toContainText("已支付");
     await expect(page.getByText("1-1 / 1")).toBeVisible();
     expect(api.count("GET /api/oa-pending-payments/rows")).toBeGreaterThanOrEqual(3);
   });
@@ -112,7 +112,7 @@ test.describe("OA pending payments browser flow", () => {
     }));
     expect(tableShellSize.scrollWidth).toBeLessThanOrEqual(tableShellSize.clientWidth + 1);
     await expect(row).toContainText("浏览器待付款项目");
-    await expect(row).toContainText("支付少了");
+    await expect(row).toContainText("已支付");
     await expect(row).toContainText("浏览器待付款供应商");
     await expect(row).toContainText("INV-PAY-E2E-001");
     await expect(row).toContainText("建设银行 1234");
@@ -145,13 +145,13 @@ test.describe("OA pending payments browser flow", () => {
     }, async (mark) => {
       await page.getByRole("button", { name: "筛选 支付状态" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("menu", { name: "支付状态筛选" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("menuitemcheckbox", { name: "支付状态：支付少了 1" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("menuitemcheckbox", { name: "支付状态：已支付 1" })).toBeVisible());
     });
-    await page.getByRole("menuitemcheckbox", { name: "支付状态：支付少了 1" }).click();
+    await page.getByRole("menuitemcheckbox", { name: "支付状态：已支付 1" }).click();
     const filterRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
       return url.pathname.endsWith("/api/oa-pending-payments/rows")
-        && (url.searchParams.get("filters") ?? "").includes("partially_paid");
+        && (url.searchParams.get("filters") ?? "").includes("paid");
     });
     await recordLatency({
       operationId: "oa-pending-payments.apply-payment-status-filter",
@@ -165,7 +165,7 @@ test.describe("OA pending payments browser flow", () => {
     expect(filtersFromRequest((await filterRequest).url())).toContainEqual({
       field: "payment_status",
       operator: "in",
-      values: ["partially_paid"],
+      values: ["paid"],
     });
 
     await recordLatency({

@@ -31,6 +31,7 @@
 `以发票反提 OA` 的当前目标是：操作人在 FinOps 中选择目标 OA 申请人与发票，FinOps 后端使用目标 OA 申请人的已配置凭据创建 OA 暂存草稿；OA 提交流程由用户在 OA 系统中手动完成。草稿创建成功后本地 batch 立即进入 `暂存`，用户可以稍后选择 `我已在OA系统提交该草稿 / OA正在进行中` 或 `OA提交内容需修改 / 删除本次提交内容`；FinOps 只记录本地确认后的已提交历史。
 
 OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须通过 `WorkbenchRelationCommandService` 写入 `input_invoice_oa_reverse` 并由 `workbench_relation` read model 分发给相关页面。
+创建 OA 草稿、清除暂存、手动确认已提交都不改变进项使用 rows；这些动作不能触发或等待 `input_invoice_usage` read model 刷新。只有 evidence detected 后真正写入 relation 时，才污染受影响月份并返回 operation barrier target。
 
 进项发票使用情况的列表和关系详情是读路径：关系证据来自 `WorkbenchRelationReadFacade` / `DistributedInvoiceRelationContext`，不直接调用 `WorkbenchRelationCommandService`。只有 Workbench active relation 能进入本页已关联口径；未正式化的自动匹配 decision 不作为本页 candidate relation 展示，本页不能直接读取关联台候选表或自行拼候选。
 
@@ -47,6 +48,8 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 `/api/input-invoice-usage/rows/{row_id}/relation-details` 在 SQL read model 可用时必须按 `row_id` 读取单行 payload 并展开已有 summaries，不能为了打开 `+N` 详情触发全量 live rebuild；read model missing/stale/source mismatch 时返回 refreshing 状态并入队刷新。
 
 生产 PostgreSQL runtime 下，`/api/input-invoice-usage/rows` 和 filter/export 相关 all-rows helper 必须依赖 SQL read model repository。repository 缺失、SQL view miss、schema/source version mismatch 或 refresh_status 非 fresh 时都返回 `202`/`read_model_status=refreshing` 并 enqueue `input_invoice_usage` 对应 month/all scope；不得回退 `InputInvoiceUsageQueryService.list_rows(...)` 进行 live scan 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
+
+`/api/input-invoice-usage/filter-options` 的生产路径必须调用 `list_input_invoice_usage_filter_options(...)`，由 PostgreSQL 结构化列直接聚合 enum options；禁止恢复旧的 `all_rows` 分页拉齐完整 row payload 后在 Python 聚合 options 的链路。
 
 页面首屏和筛选态由 rows 与 filter-options 两个读接口共同证明 fresh。前端必须合并两者的 `readModelStatus` / `read_model_status`：任一接口返回 `stale`、`missing`、`schema_mismatch`、`refreshing` 或等价非 fresh 状态时，页面整体进入刷新诊断，不展示普通空态，不启用导出，也不把另一接口的 fresh 空 rows 当成最终事实。
 

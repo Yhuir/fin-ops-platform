@@ -5,6 +5,7 @@ import os
 from typing import Any, Callable
 
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder
+from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_ALIASES
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 
 
@@ -158,10 +159,17 @@ class OperationsDashboardService:
         )
 
     def _oa_inventory(self) -> dict[str, Any]:
+        completed_statuses = sorted(COMPLETED_WORKFLOW_STATUS_ALIASES)
         row = self._connection.fetch_one(
             """
             select
               (select count(*)::bigint from app.oa_applications) as oa_records_count,
+              (select count(*)::bigint
+                 from app.oa_applications
+                where coalesce(nullif(workflow_status, ''), 'completed') = any(%s::text[])) as oa_records_completed_count,
+              (select count(*)::bigint
+                 from app.oa_applications
+                where coalesce(nullif(workflow_status, ''), 'completed') <> all(%s::text[])) as oa_records_in_progress_count,
               (select count(*)::bigint from app.oa_application_items) as oa_items_count,
               (select max(synced_at) from app.oa_applications) as oa_records_latest_synced_at,
               (select max(coalesce(finished_at, started_at))
@@ -176,23 +184,37 @@ class OperationsDashboardService:
                 (select max(last_success_at) from app.oa_sync_watermarks),
                 (select max(synced_at) from app.oa_applications)
               ) as oa_latest_synced_at
-            """
+            """,
+            (completed_statuses, completed_statuses),
         ) or {}
+        latest_synced_at = _isoformat(row.get("oa_latest_synced_at"))
         return _inventory_block(
             total_count=_optional_int(row.get("oa_records_count")),
-            latest_synced_at=_isoformat(row.get("oa_latest_synced_at")),
+            latest_synced_at=latest_synced_at,
             sources=[
                 _inventory_source(
                     key="oa_records",
                     label="单据",
                     count=_optional_int(row.get("oa_records_count")),
-                    latest_synced_at=_isoformat(row.get("oa_latest_synced_at")),
+                    latest_synced_at=latest_synced_at,
+                ),
+                _inventory_source(
+                    key="oa_records_completed",
+                    label="已完成 OA",
+                    count=_optional_int(row.get("oa_records_completed_count")),
+                    latest_synced_at=latest_synced_at,
+                ),
+                _inventory_source(
+                    key="oa_records_in_progress",
+                    label="进行中 OA",
+                    count=_optional_int(row.get("oa_records_in_progress_count")),
+                    latest_synced_at=latest_synced_at,
                 ),
                 _inventory_source(
                     key="oa_items",
                     label="明细",
                     count=_optional_int(row.get("oa_items_count")),
-                    latest_synced_at=_isoformat(row.get("oa_latest_synced_at")),
+                    latest_synced_at=latest_synced_at,
                 ),
             ],
         )

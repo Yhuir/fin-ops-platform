@@ -552,6 +552,7 @@ class OaPendingPaymentQueryService:
             "oaPaymentWriteback": self._oa_payment_writeback_status(
                 [record],
                 payment_status,
+                writeback_eligible=self._payment_writeback_eligible(record.amount, bank_payload),
                 payment_statuses_by_flow_id=payment_statuses_by_flow_id,
             ),
             "bankTransaction": bank_payload,
@@ -582,6 +583,7 @@ class OaPendingPaymentQueryService:
             "oaPaymentWriteback": self._oa_payment_writeback_status(
                 records,
                 payment_status,
+                writeback_eligible=self._payment_writeback_eligible(oa_payload.get("amount"), bank_payload),
                 payment_statuses_by_flow_id=payment_statuses_by_flow_id,
             ),
             "bankTransaction": bank_payload,
@@ -664,26 +666,17 @@ class OaPendingPaymentQueryService:
 
     def _payment_status_for_amount(self, oa_amount_value: Any, bank_payload: dict[str, Any]) -> dict[str, str]:
         oa_amount = _parse_decimal(oa_amount_value)
-        if oa_amount is None:
-            return self._lifecycle_policy.evaluate_oa_payment(oa_amount=None, paid_total=ZERO, has_bank=False)
-        bank_ids = [
-            str(summary.get("bankTransactionId") or "")
-            for summary in list(bank_payload.get("summaries") or [])
-            if isinstance(summary, dict) and summary_is_linked(summary)
-        ]
-        bank_ids = [bank_id for bank_id in bank_ids if bank_id]
-        if not bank_ids:
-            return self._lifecycle_policy.evaluate_oa_payment(
-                oa_amount=oa_amount,
-                paid_total=ZERO,
-                has_bank=False,
-                has_missing_bank_relation=int(bank_payload.get("missingBankRelationCount") or 0) > 0,
-                has_non_outflow_bank_relation=int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0,
-            )
+        has_linked_payment_relation = (
+            int(bank_payload.get("linkedRelationCount") or 0) > 0
+            or int(bank_payload.get("missingBankRelationCount") or 0) > 0
+            or int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0
+        )
         return self._lifecycle_policy.evaluate_oa_payment(
             oa_amount=oa_amount,
             paid_total=_decimal(bank_payload.get("paidTotal")),
-            has_bank=True,
+            has_bank=has_linked_payment_relation,
+            has_missing_bank_relation=int(bank_payload.get("missingBankRelationCount") or 0) > 0,
+            has_non_outflow_bank_relation=int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0,
         )
 
     def _oa_payment_writeback_status(
@@ -691,9 +684,12 @@ class OaPendingPaymentQueryService:
         records: list[OAApplicationRecord],
         payment_status: dict[str, str],
         *,
+        writeback_eligible: bool = True,
         payment_statuses_by_flow_id: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if str(payment_status.get("code") or "") != "paid":
+            return _oa_writeback_status("not_written", sync_status="not_required")
+        if not writeback_eligible:
             return _oa_writeback_status("not_written", sync_status="not_required")
         if self._payment_status_repository is None:
             return _oa_writeback_status("not_written", sync_status="unavailable")
@@ -713,6 +709,19 @@ class OaPendingPaymentQueryService:
         except OAPaymentStatusError:
             return _oa_writeback_status("not_written", flow_ids=flow_ids, sync_status="unavailable")
         return _oa_writeback_status("written", flow_ids=flow_ids, sync_status="ready")
+
+    @staticmethod
+    def _payment_writeback_eligible(oa_amount_value: Any, bank_payload: dict[str, Any]) -> bool:
+        oa_amount = _parse_decimal(oa_amount_value)
+        if oa_amount is None:
+            return False
+        if int(bank_payload.get("linkedRelationCount") or 0) <= 0:
+            return False
+        if int(bank_payload.get("missingBankRelationCount") or 0) > 0:
+            return False
+        if int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0:
+            return False
+        return _within_cent(_decimal(bank_payload.get("paidTotal")), oa_amount)
 
     def _oa_records(
         self,
@@ -868,15 +877,18 @@ class OaPendingPaymentQueryService:
         resolved_oa_amount = oa_amount if oa_amount is not None else (_parse_decimal(record.amount) if record is not None else None)
         resolved_oa_amount = resolved_oa_amount or ZERO
         for relation in relations:
+            linked_relation = relation_status(relation) == "linked"
             for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
                 if row_type != "bank":
                     continue
                 bank = bank_by_id.get(row_id)
                 if bank is None:
-                    missing_bank_relation_count += 1
+                    if linked_relation:
+                        missing_bank_relation_count += 1
                     continue
                 if _bank_direction(bank) != "outflow":
-                    non_outflow_relation_count += 1
+                    if linked_relation:
+                        non_outflow_relation_count += 1
                     continue
                 if bank.id not in seen:
                     seen.add(bank.id)
@@ -1213,7 +1225,7 @@ def _parse_positive_int(value: int | str | None, field: str, *, maximum: int | N
 
 
 def _status(code: str, label: str, reason: str) -> dict[str, str]:
-    severity = "success" if code == "paid" else "warning" if code in {"unpaid", "pending_review", "partially_paid"} else "error"
+    severity = "success" if code == "paid" else "warning" if code == "unpaid" else "error"
     return {"code": code, "label": label, "reason": reason, "severity": severity}
 
 

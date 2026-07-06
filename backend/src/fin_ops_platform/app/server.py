@@ -6190,7 +6190,7 @@ class Application:
         routes = InputInvoiceUsageApiRoutes(
             query_service=query_service,
             rows_from_sql_read_model=self._get_input_invoice_usage_rows_from_sql_read_model,
-            all_rows_from_sql_read_model=self._get_input_invoice_usage_all_rows_from_sql_read_model,
+            filter_options_from_sql_read_model=self._get_input_invoice_usage_filter_options_from_sql_read_model,
             relation_details_from_sql_read_model=self._get_input_invoice_usage_relation_details_from_sql_read_model,
             export_service=self._input_invoice_usage_export_service(),
             resolve_read_session=self._resolve_fin_ops_read_session,
@@ -6735,11 +6735,11 @@ class Application:
         }
         return self._json_response(exc.status_code, payload)
 
-    def _get_input_invoice_usage_all_rows_from_sql_read_model(
+    def _get_input_invoice_usage_filter_options_from_sql_read_model(
         self,
         query: dict[str, list[str]],
     ) -> dict[str, object] | None:
-        return self._input_invoice_usage_read_model_fresh_gate().all_rows(query)
+        return self._input_invoice_usage_read_model_fresh_gate().filter_options(query)
 
     def _get_output_invoice_collection_all_rows_from_sql_read_model(
         self,

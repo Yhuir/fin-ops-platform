@@ -959,9 +959,6 @@ function firstColumnInGroup(columnId: string) {
 }
 
 function paymentStatusLabel(row: OaPendingPaymentRow): string {
-  if (row.paymentStatus.code === "unpaid") {
-    return "待支付";
-  }
   return row.paymentStatus.label || "-";
 }
 
@@ -1018,7 +1015,7 @@ function writebackWritten(row: OaPendingPaymentRow): boolean {
 }
 
 function canWritebackPaid(row: OaPendingPaymentRow): boolean {
-  return row.paymentStatus.code === "paid" && !writebackWritten(row);
+  return row.paymentStatus.code === "paid" && !writebackWritten(row) && row.oaPaymentWriteback?.syncStatus === "ready";
 }
 
 function canSelectOa(row: OaPendingPaymentRow): boolean {

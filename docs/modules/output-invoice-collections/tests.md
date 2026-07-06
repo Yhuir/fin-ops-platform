@@ -9,7 +9,8 @@
 | Frontend page | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | rows/filter-options 并行加载、`readModelStatus=refreshing` 自动重试、route unmount cleanup、drawer 状态、admin-only 收据设置 |
 | Frontend API mapper | `web/src/features/outputInvoiceCollections/api.ts` | snake_case/camelCase、`read_model_status`、`summary`、`bank.receivedTotal`、receipt/red relation/history/settings shape、export-preview/download 错误解析和文件名 |
 | UI components | `web/src/components/outputInvoiceCollections/*` | 分组表头、筛选菜单、详情 drawer、导出 drawer、收款状态 drawer、收据预览/历史 drawer、作废/重开 dialog |
-| HTTP routes | `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py` | SQL read model fresh gate、202 refreshing、不伪装 stale rows、权限 gate、structured errors、idempotency key |
+| HTTP routes | `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py` | 路径分发、HTTP/session/权限 gate、structured errors、idempotency key、202/200 响应映射 |
+| Read application service | `backend/src/fin_ops_platform/services/output_invoice_collection_read_application_service.py` | SQL read model fresh/refreshing 编排、lifecycle overlay、filter/export/relation detail 不回退 stale rows |
 | Query service | `OutputInvoiceCollectionQueryService` | 销项发票行聚合、状态规则、分页/筛选/排序、relation detail、receipt preview fallback |
 | Lifecycle write service | `OutputInvoiceCollectionLifecycleService` | 手动状态、提醒、红蓝票关系、expectedVersion、tenant/actor、transaction-bound enqueue |
 | Receipt service | `OutputInvoiceCollectionReceiptService` | 正式收据 preview/create/void/reissue/settings、幂等、状态冲突、真实 history |
@@ -39,7 +40,7 @@
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用，已覆盖主要规则 | `tests/test_output_invoice_collection_service.py`、`tests/test_invoice_lifecycle_page_integration.py` | 覆盖一张正式销项发票一行、linked 多销项发票 relation 单行净额归并、负数/红字发票 summary 保留、收款状态规则、红冲优先级、receipt preview 规则、非法 filter/sort/relation kind，以及统一 relation 下多 OA/流水/销项发票 summaries 和非 active relation 不计已收款。 |
-| 2. Service-layer tests | 适用，已覆盖主要写边界 | `tests/test_output_invoice_collection_lifecycle.py`、`tests/test_output_invoice_collection_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py::OutputInvoiceCollectionReadModelRepositoryPortTests`、`tests/test_output_invoice_collection_api.py::OutputInvoiceCollectionApiTests.test_relation_details_use_fresh_sql_read_model_row_without_live_rebuild` | 覆盖 query service 的 relation-group row projection、手动状态、提醒、红蓝票关系、receipt 幂等、tenant scoped overlay、enqueue month scope、mutation response freshness target、正式收据并发编号、跨期重置、大页请求上限、output relation details `kind=oa|bank|invoice`、SQL read-model detail service 和 output read model repository port 边界。 |
+| 2. Service-layer tests | 适用，已覆盖主要写边界 | `tests/test_output_invoice_collection_read_application_service.py`、`tests/test_output_invoice_collection_lifecycle.py`、`tests/test_output_invoice_collection_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py::OutputInvoiceCollectionReadModelRepositoryPortTests`、`tests/test_output_invoice_collection_api.py::OutputInvoiceCollectionApiTests.test_relation_details_use_fresh_sql_read_model_row_without_live_rebuild` | 覆盖 read application service 的 SQL read model fresh/refreshing 编排、query service 的 relation-group row projection、手动状态、提醒、红蓝票关系、receipt 幂等、tenant scoped overlay、enqueue month scope、mutation response freshness target、正式收据并发编号、跨期重置、大页请求上限、output relation details `kind=oa|bank|invoice`、SQL read-model detail service 和 output read model repository port 边界。 |
 | 3. API contract tests | 适用，已覆盖 | `tests/test_output_invoice_collection_api.py` | 覆盖 rows/detail/rules/preview/history/relation routes、relation detail production fail-closed、export-preview/export、structured validation/not found、权限、fresh SQL overlay、lifecycle 写 routes、mutation response `read_model_scope_keys`/`freshness_targets`、真实 xlsx 和 row-limit contract。 |
 | 4. Read model/cache/background job tests | 适用，已覆盖核心 read model/worker | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 覆盖 output SQL repository native filters/sort、stale 返回 refreshing、不返回 stale rows、source_versions、source version bump 后旧投影不可作为 fresh、all scope expansion、RabbitMQ event registration、App Status readiness、OA relation native columns、缺统一关系字段的 schema stale，以及 projection builder output save/mark/prune 通过窄 port。 |
 | 5. Frontend component and interaction tests | 适用，已覆盖页面主交互 | `web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts` | 覆盖页面骨架、首屏有界分页请求、keyword/filter/sort/page-size、空状态、rows 临时失败错误态空行/导出禁用/刷新恢复、refreshing 诊断、metadata hidden、retry cleanup、表格、OA/流水/发票多项 `+N` 入口、导出 drawer、三类 workflow drawer、lifecycle action close、admin-only receipt settings、mutation response target mapper、红蓝票/receipt 创建写后等待具体月份 operation barrier target，以及真实 Chromium 中 fresh rows 搜索/筛选/排序/page-size 同步、stale read model 不显示旧 rows/普通空态、状态/提醒保存、状态保存暂时失败后的本地错误/草稿保持/零半提交/重试成功、status 成功但 reminder 暂时失败后的本地错误/提醒草稿保持/不重复提交 status/重试成功、正式收据 preview/create/history/void/reissue drawer/dialog、receipt create 暂时失败后的本地错误/预览保持/零伪历史/重试成功、receipt void/reissue 暂时失败后的原因弹窗/输入保持/重试成功、导出 download event/row-limit 错误、红蓝票 relation 字段导出、read-export 零 mutation权限、红蓝票关系 drawer、状态/收据/红蓝票成功后错误残留检查和本地 browser error 捕获。 |
@@ -104,6 +105,7 @@
 
 ```bash
 PYTHONPATH=backend/src python3 -m unittest \
+  tests.test_output_invoice_collection_read_application_service \
   tests.test_output_invoice_collection_service.OutputInvoiceCollectionQueryServiceTests.test_page_size_limit_protects_first_screen_slo \
   tests.test_output_invoice_collection_api \
   tests.test_output_invoice_collection_service \
@@ -133,7 +135,7 @@ bash scripts/verify.sh docs
 
 ## Nightly CI 覆盖
 
-夜间 CI 应包含上述后端和前端模块命令，并包含全局 docs 校验。push/main smoke 可只跑 `tests.test_output_invoice_collection_api`、`tests.test_output_invoice_collection_lifecycle`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx` 和 deterministic Playwright `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`。
+夜间 CI 应包含上述后端和前端模块命令，并包含全局 docs 校验。push/main smoke 可只跑 `tests.test_output_invoice_collection_read_application_service`、`tests.test_output_invoice_collection_api`、`tests.test_output_invoice_collection_lifecycle`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx` 和 deterministic Playwright `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`。
 
 ## 未测风险
 

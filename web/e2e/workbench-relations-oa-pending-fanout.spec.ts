@@ -21,7 +21,7 @@ test.describe("workbench relations OA pending payment browser fan-out", () => {
     await expect(page.getByTestId("oa-pending-payments-page")).toBeVisible();
     const rowBefore = page.getByRole("row", { name: /陈涛/ });
     await expect(rowBefore).toBeVisible();
-    await expect(rowBefore.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("支付少了");
+    await expect(rowBefore.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("未支付");
     expect(await rowBefore.getByText("候选").count()).toBeGreaterThan(0);
     await expect(rowBefore).toContainText("智能工厂设备商");
     await expect(rowBefore).toContainText("12561048");

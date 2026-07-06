@@ -62,6 +62,36 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
         self.assertEqual(payload["read_model_stale_reasons"], ["schema_mismatch"])
         self.assertEqual(enqueued, [("2026-05", "api_source_versions_stale")])
 
+    def test_filter_options_use_repository_projection_without_loading_all_rows(self) -> None:
+        enqueued: list[tuple[str, str]] = []
+        repository = FilterOptionsRepository(
+            {
+                "options": {
+                    "payment_status": [{"value": "pending", "label": "待处理", "count": 2}],
+                    "bank_direction": [{"value": "outflow", "label": "支出", "count": 2}],
+                },
+                "refresh_status": "fresh",
+                "source_versions": {"schema": "v1"},
+            }
+        )
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=repository,
+            query_service=QueryServiceStub(),
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+        )
+
+        payload = service.filter_options({"month": ["2026-05"]})
+
+        assert payload is not None
+        fields = {field["field"]: field for field in payload["fields"] if isinstance(field, dict)}
+        self.assertEqual(fields["payment_status"]["options"], [{"value": "pending", "label": "待处理", "count": 2}])
+        self.assertEqual(fields["bank_direction"]["options"], [{"value": "outflow", "label": "支出", "count": 2}])
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(repository.calls, [("list_input_invoice_usage_filter_options", {"month": "2026-05", "keyword": None, "invoice_date_from": None, "invoice_date_to": None, "filters": None})])
+        self.assertEqual(enqueued, [])
+
 
 class RowsRepository:
     def __init__(self, payload: dict[str, object]) -> None:
@@ -69,6 +99,19 @@ class RowsRepository:
 
     def list_input_invoice_usage_rows(self, **_: object) -> dict[str, object]:
         return dict(self._payload)
+
+
+class FilterOptionsRepository:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def list_input_invoice_usage_filter_options(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("list_input_invoice_usage_filter_options", dict(kwargs)))
+        return dict(self._payload)
+
+    def list_input_invoice_usage_rows(self, **_: object) -> dict[str, object]:
+        raise AssertionError("filter options must not load full input invoice usage rows")
 
 
 class QueryServiceStub:
@@ -79,7 +122,10 @@ class QueryServiceStub:
         return str(sort_field), str(sort_direction)
 
     def _filter_config(self) -> list[object]:
-        return []
+        return [
+            {"field": "payment_status", "label": "支付状态", "mode": "enum_multi", "operators": ["in"], "sortable": True},
+            {"field": "bank_direction", "label": "收支", "mode": "enum_multi", "operators": ["in"], "sortable": True},
+        ]
 
     def list_rows(self, **_: object) -> dict[str, object]:
         return {"rows": [], "pagination": {"page": 1, "pageSize": 50, "total": 0}, "summary": {}}

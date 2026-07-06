@@ -800,6 +800,10 @@ class InputInvoiceUsageReadModelRepositoryPortTests(unittest.TestCase):
                 self.calls.append(("list_input_invoice_usage_rows", dict(kwargs)))
                 return {"rows": [{"id": "input-1"}], "refresh_status": "fresh"}
 
+            def list_input_invoice_usage_filter_options(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("list_input_invoice_usage_filter_options", dict(kwargs)))
+                return {"options": {"payment_status": [{"value": "pending", "label": "待处理", "count": 1}]}, "refresh_status": "fresh"}
+
             def save_input_invoice_usage_rows(self, **kwargs: object) -> None:
                 self.calls.append(("save_input_invoice_usage_rows", dict(kwargs)))
 
@@ -833,6 +837,10 @@ class InputInvoiceUsageReadModelRepositoryPortTests(unittest.TestCase):
             port.get_input_invoice_usage_row_by_row_id("input-1")["row"]["id"],
             "input-1",
         )
+        self.assertEqual(
+            port.list_input_invoice_usage_filter_options(month="2026-05")["options"]["payment_status"][0]["label"],
+            "待处理",
+        )
         port.save_input_invoice_usage_rows(
             scope_key="2026-05",
             rows=[{"id": "input-1"}],
@@ -853,6 +861,7 @@ class InputInvoiceUsageReadModelRepositoryPortTests(unittest.TestCase):
             [
                 "list_input_invoice_usage_rows",
                 "get_input_invoice_usage_row_by_row_id",
+                "list_input_invoice_usage_filter_options",
                 "save_input_invoice_usage_rows",
                 "mark_input_invoice_usage_scope",
                 "prune_input_invoice_usage_scope_shards",
@@ -977,6 +986,42 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("bank_account", executed_sql)
         self.assertIn("bank_direction", executed_sql)
         self.assertIn("bank_account asc", executed_sql)
+
+    def test_input_repository_filter_options_use_sql_aggregation_without_payload_rows(self) -> None:
+        class FilterOptionConnection:
+            def __init__(self) -> None:
+                self.fetch_all_calls: list[tuple[str, tuple]] = []
+                self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return None
+                if "from read_model.input_invoice_usage_scopes" in normalized:
+                    return {"scope_key": "2026-05", "source_versions": input_invoice_usage_source_versions()}
+                return None
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                assert "cross join lateral" in normalized
+                assert "payment_status_label" in normalized
+                assert "select payload, raw_payload" not in normalized
+                return [
+                    {"field": "payment_status", "value": "pending", "label": "待处理", "option_count": 2},
+                    {"field": "bank_direction", "value": "outflow", "label": "outflow", "option_count": 2},
+                ]
+
+        connection = FilterOptionConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_input_invoice_usage_filter_options(month="2026-05")
+
+        self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual(payload["options"]["payment_status"], [{"value": "pending", "label": "待处理", "count": 2}])
+        self.assertEqual(payload["options"]["bank_direction"], [{"value": "outflow", "label": "支出", "count": 2}])
+        self.assertEqual(connection.fetch_all_calls[0][1], ("2026-05",))
 
     def test_input_repository_save_persists_bank_account_and_direction_columns(self) -> None:
         connection = WriteRecordingConnection()

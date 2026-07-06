@@ -995,7 +995,36 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
       "total_count": 72,
       "latest_synced_at": "2026-05-23T09:45:00+08:00",
       "status": "available",
-      "sources": []
+      "sources": [
+        {
+          "key": "oa_records",
+          "label": "单据",
+          "count": 72,
+          "latest_synced_at": "2026-05-23T09:45:00+08:00",
+          "status": "available"
+        },
+        {
+          "key": "oa_records_completed",
+          "label": "已完成 OA",
+          "count": 61,
+          "latest_synced_at": "2026-05-23T09:45:00+08:00",
+          "status": "available"
+        },
+        {
+          "key": "oa_records_in_progress",
+          "label": "进行中 OA",
+          "count": 11,
+          "latest_synced_at": "2026-05-23T09:45:00+08:00",
+          "status": "available"
+        },
+        {
+          "key": "oa_items",
+          "label": "明细",
+          "count": 316,
+          "latest_synced_at": "2026-05-23T09:45:00+08:00",
+          "status": "available"
+        }
+      ]
     },
     "import_events": [
       {
@@ -1046,6 +1075,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 - Dashboard 只返回页面需要的聚合读数据，不返回业务 payload、snapshot、raw payload、token、数据库 URL 或 RabbitMQ URL。
 - `data_inventory.invoice.sources` 固定包含 `manual`、`oa_attachment`。`oa_attachment.supplementary_count` 表示 OA 解析来源且不在手工导入中的 active 发票数；unknown 时为 `null`。
+- `data_inventory.oa.sources` 固定包含 `oa_records`、`oa_records_completed`、`oa_records_in_progress`、`oa_items`。`oa_records` 是 `app.oa_applications` 申请主表总数，`oa_items` 是 `app.oa_application_items` 明细行总数；已完成/进行中按 OA projection 的 `workflow_status` 完成态合同拆分。
 - `data_inventory.import_events[*]` 是全量手工导入历史，只包含银行流水和发票导入批次。每条 `count` 必须来自 `app.import_batches.success_count`；OA 解析、OA 单据同步和其它 OA runtime facts 不进入该列表。前端主页面只显示最新 5 条，抽屉展示全量历史。
 - `request_performance.endpoints[*]` 包含 `duration_ms`、`database_duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_query_count` 的 p50/p95/p99。
 - `runtime_performance.queues[*]` 基于已知 RabbitMQ route 输出，即使 RabbitMQ Management API 不可用也保留行，数值为 `null`。
@@ -1059,7 +1089,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 ## 销项发票收款情况 API
 
-`/api/output-invoice-collections/*` 由 Invoices 模块承接。`server.py` 只做 HTTP dispatch、统一 JSON/error 包装和 route object 装配；参数解析、权限 gate 与业务调用在 `app/routes_output_invoice_collections.py`，业务事实写入在 service/repository 层。
+`/api/output-invoice-collections/*` 由 Invoices 模块承接。`server.py` 只做 HTTP dispatch、统一 JSON/error 包装和 route object 装配；`app/routes_output_invoice_collections.py` 只做路径、session、权限和响应映射；rows/filter/export/relation detail 的读侧编排在 `OutputInvoiceCollectionReadApplicationService`；业务事实写入在 service/repository 层。
 
 读接口：
 

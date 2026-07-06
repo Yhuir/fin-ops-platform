@@ -98,21 +98,17 @@ class InvoiceLifecyclePolicy:
         has_non_outflow_bank_relation: bool = False,
         merged_payment: bool = False,
     ) -> dict[str, str]:
-        amount = _optional_decimal(oa_amount)
-        if amount is None:
-            return _status("pending_review", "待核对", "OA金额缺失或无法解析")
         if not has_bank:
-            if has_missing_bank_relation:
-                return _status("pending_review", "待核对", "关联流水事实缺失或证据不完整")
-            if has_non_outflow_bank_relation:
-                return _status("pending_review", "待核对", "关联流水不是支出流水，证据不完整")
             return _status("unpaid", "未支付", "未关联支出流水")
+        if has_missing_bank_relation:
+            return _status("paid", "已支付", "已存在已配对流水关系，流水事实缺失不影响付款状态")
+        if has_non_outflow_bank_relation:
+            return _status("paid", "已支付", "已存在已配对流水关系，流水方向待检查但不影响付款状态")
+        amount = _optional_decimal(oa_amount)
         paid = _decimal(paid_total)
-        if _within_cent(paid, amount):
-            return _status("paid", "已支付", "支出流水合计等于OA金额")
-        if paid < amount:
-            return _status("partially_paid", "支付少了", "支出流水合计小于OA金额")
-        return _status("pending_review", "待核对", "支出流水合计大于OA金额，需要复核关联台关系")
+        if amount is not None and _within_cent(paid, amount):
+            return _status("paid", "已支付", "已存在已配对支出流水关系")
+        return _status("paid", "已支付", "已存在已配对支出流水关系，金额差额不影响付款状态")
 
     def evaluate_output_invoice_collection(
         self,

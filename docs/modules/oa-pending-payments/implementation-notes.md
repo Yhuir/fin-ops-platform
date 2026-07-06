@@ -3,6 +3,13 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-07-07 - 付款状态二态化
+
+- 目标：OA 待付款核对页只展示 `已支付` / `未支付`，移除 `待核对`、`支付少了` 等付款状态。
+- 关键决策：付款状态以 active linked 付款关系为事实源；只要已配对，即使金额有差额、银行事实缺失或流水方向异常，也显示 `已支付`。这些异常只保留在 reason、金额字段和写回强校验中，不再污染状态枚举。
+- I/O 边界：状态判定仍在 `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService`；前端不按金额自算。OA 写回继续由 `writeback-paid` 命令复核 active relation、outflow、金额相等和 `flow_id`，前端只在 `oaPaymentWriteback.syncStatus=ready` 时展示写回按钮。
+- 测试覆盖：更新 lifecycle policy、OA pending query service、页面 Vitest 和 Browser mock/fan-out 用例，锁定 `partially_paid` / `pending_review` 不再作为公开状态。
+
 ## 2026-07-06 - oa_pending_payment refresh 热路径 I/O 收敛
 
 - 目标：压低生产 `oa_pending_payment:2026-06` read model refresh handler 耗时，消除外部往来款/进行中 OA worker 刷新时的可见抖动。
@@ -251,7 +258,7 @@
 - OA 待付款列表以 OA application 为主行；银行流水、进项发票和 relation 只是付款证据或详情证据。
 - completed 视图以 Workbench active relation 作为 OA/支出流水/进项发票关联关系事实源；in-progress 视图以 OA 待付款独立 pending relation 作为 OA/支出流水关系事实源。多 OA、流水或发票在同一 relation 中必须聚合成一条核对行，并通过 `relationCount`/`summaries` 展开详情。
 - `paymentStatus` 由 `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService` 判定，前端不得按金额字段自行推断。
-- `paymentStatus` 不输出 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计进入 `pending_review`，多 OA 合并付款先按 relation group 合计后再判定。
+- `paymentStatus` 只输出 `paid` / `unpaid`；active linked 付款关系即判定 `paid`，金额差额、缺失银行事实或非支出流水只保留 reason/金额字段并继续阻断写回。
 - `/oa-pending-payments` 通过 `view_mode=completed|in_progress` 承载同一页面的两类 OA：completed 是原待付款核对，in_progress 只展示 OA 系统仍进行中的支付申请/日常报销。
 - OA 待付款核对的 OA 范围以 OA MySQL `t_payment_simple.flow_id` 为准。页面/read model 先用该字段匹配 OA Mongo `form_data._id`，再按 OA 当前 workflow status 分配到 completed/in-progress；未进入 `t_payment_simple` 的重复/异常 OA 不进入正常表格。
 - `t_payment_simple.id` 不是 OA ID，只能作为支付状态记录诊断字段；支付状态展示、tab 统计和写回闭环都必须围绕同一 `flow_id`。
@@ -388,7 +395,7 @@
 
 ## 2026-06-18 - OA pending 主体三段表格内部布局调整
 
-- 目标：按最新 UI 要求调整 OA 待付款核对的 completed/in-progress 表格主体，让 OA 区域内部固定展示申请人、项目、金额三栏；流水区域内部固定展示对方户名、金额、摘要三栏；支付状态列收窄并只展示“待支付/已支付”“确认已支付”和“未写回/已写回”。
+- 目标：按最新 UI 要求调整 OA 待付款核对的 completed/in-progress 表格主体，让 OA 区域内部固定展示申请人、项目、金额三栏；流水区域内部固定展示对方户名、金额、摘要三栏；支付状态列收窄并只展示“未支付/已支付”“确认已支付”和“未写回/已写回”。
 - 影响范围：`OaPendingPaymentsTable`、表格 CSS、`OaPendingPaymentsPage.test.tsx` 和本模块测试/实施文档；后端 API、read model、付款判定和写回流程不变。
 - 关键决策：保持 HTML 主表格仍以 OA、支付状态、流水为主体；completed 视图按既有状态机继续保留发票情况列，in-progress 视图继续隐藏发票列。写回状态不展示失败标签，外部依赖不可用仍只展示同步状态异常。
 - 文档影响：更新本实施记录和 `tests.md`；长期 API/架构文档不适用。

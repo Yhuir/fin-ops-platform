@@ -79,6 +79,13 @@ function formatCountWithSupplement(value: number | null | undefined, supplementa
   return `${base}（${formatNumber(supplementary)}）`;
 }
 
+function inventorySourceLabel(source: OperationsDashboardInventoryBlock["sources"][number]) {
+  if (source.key === "oa_attachment") {
+    return `${source.label}（进入统一发票池的数量）`;
+  }
+  return source.label;
+}
+
 function formatMs(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return EMPTY_VALUE;
@@ -256,7 +263,7 @@ function InventorySourceRows({ title, block }: { title: string; block: Operation
       <FinanceTableBody>
           {block.sources.map((source) => (
             <FinanceTableRow key={source.key} id={source.key}>
-              <FinanceTableCell columnRole="identity" textValue={source.label}>{source.label}</FinanceTableCell>
+              <FinanceTableCell columnRole="identity" textValue={inventorySourceLabel(source)}>{inventorySourceLabel(source)}</FinanceTableCell>
               <FinanceTableCell columnRole="quantity">{formatCountWithSupplement(source.count, source.supplementary_count)}</FinanceTableCell>
               <FinanceTableCell columnRole="date">{formatTimestamp(source.latest_synced_at)}</FinanceTableCell>
             </FinanceTableRow>

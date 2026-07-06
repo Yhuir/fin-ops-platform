@@ -14,6 +14,16 @@
 - 正式收据 history 只返回真实 lifecycle facts；不得为了 UI 方便伪造历史。
 - OA、收入流水和销项发票项统一走 `workbench_relation` 分发事实源；linked relation 下多张销项发票由 read model 投影为一条净额收款行，负数/红字发票必须保留在 `invoiceRelations.summaries`。多项时 UI 使用 `+N`，其中 `N=relationCount-1` 表示额外项数。销项发票栏多项时仍展示当前行发票主信息和多张发票价税合计，再显示 `+N` 展开全部发票 summaries。
 
+## 2026-07-07 - 读侧应用服务边界闭环
+
+- 目标：用 GrillMe 审计销项发票收款情况页面模块化、边界和 I/O 污染后，关闭 route owner 中残留的读侧编排缺口。
+- 影响范围：`OutputInvoiceCollectionApiRoutes`、新增 `OutputInvoiceCollectionReadApplicationService`、read model manifest query owner、read model architecture guard、本模块边界/测试文档；不改变 API payload shape、业务状态、repository、worker、前端交互或 source version。
+- 关键决策：route owner 只保留 HTTP path、session、权限、JSON/XLSX/error 映射；rows、filter-options、export-preview、export 和 relation detail 的 SQL read model fresh/refreshing 编排、lifecycle overlay、summary/export 组装由 `OutputInvoiceCollectionReadApplicationService` 负责。`OutputInvoiceCollectionQueryService` 继续保留业务组行和 legacy/local compat-only 查询能力，不作为生产 fresh gate owner。
+- 文档影响：同步 `README.md`、`boundary-io.md`、`state-machine.md`、`tests.md`、`docs/dev/api-contracts.md`、`docs/architecture/module-boundaries/read-model-contracts.md` 和 `read_model_manifest.py` query owner。
+- 测试覆盖：新增 `tests/test_output_invoice_collection_read_application_service.py` 覆盖 SQL fresh rows overlay、refreshing filter-options 不 live fallback、refreshing export fail-closed；更新 `tests/test_read_model_architecture_guards.py`，禁止 route owner 继续直接标记 fresh。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_read_application_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_api.OutputInvoiceCollectionApiTests.test_export_and_filter_routes_preserve_refreshing_sql_read_model_payload -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_architecture_guards.ReadModelArchitectureGuardTests.test_direct_fresh_status_assignments_are_explicitly_classified -v`。
+- 未测风险：未跑真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、浏览器视觉或生产大数据导出；这些仍归 staging/infra-smoke，不是本次本地模块化缺口。
+
 ## 2026-07-01 - linked 多销项发票 relation 单行净额投影
 
 - 目标：修复关联台中 3 张销项发票（含一张负数/红字发票）+ 1 条收入流水已确认关联后，销项发票收款情况页面漏掉负数发票并把 364800 relation group 显示两次的问题。

@@ -1874,7 +1874,7 @@ PYTHONPATH=backend/src python -m pytest tests/test_platform_runtime_boundary_gua
 
 - 新增 `web/e2e/workbench-relations-candidate-semantics.spec.ts`，并加入 `npm run e2e:smoke`。
 - deterministic API mock 新增 `pendingInvoiceCandidateRelations` 和 `oaPendingPaymentCandidateRelations`，可显式构造“候选关系可见但未确认”的页面数据，不影响既有 fan-out happy path。
-- Browser 断言银行明细只显示 `候选oa` / `候选发票`，不显示 `有oa` / `有发票`；待找发票展示候选发票/OA 证据但状态仍为 `已支付待开票`；OA 待付款展示 OA/银行/发票候选 chip，但状态仍为 `支付少了`，只有显式确认动作才可能进入写回。
+- Browser 断言银行明细只显示 `候选oa` / `候选发票`，不显示 `有oa` / `有发票`；待找发票展示候选发票/OA 证据但状态仍为 `已支付待开票`；OA 待付款展示 OA/银行/发票候选 chip，但状态仍为 `未支付`，只有显式确认动作才可能进入写回。
 - `WB-REL-E2E-005` 从 `partial` 更新为 `covered`；后续已由 `workbench-relations-nonfresh-diagnostics.spec.ts` 补齐 non-fresh 诊断，`workbench-relations` 模块整体仍为 `spec-first-partial`，因为更多下游页面、真实下载和生产 display audit 仍未闭环。
 
 验证：

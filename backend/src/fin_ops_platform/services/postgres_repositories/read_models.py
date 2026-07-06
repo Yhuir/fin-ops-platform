@@ -37,7 +37,7 @@ BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
 BANK_DETAIL_NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
 WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.same_case_visible_paired_owner.v1"
-WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = "workbench_sql_projection.composed_active_month_shards.v1"
+WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = "workbench_sql_projection.composed_active_month_shards.visible_owner.v2"
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
@@ -217,6 +217,23 @@ INPUT_INVOICE_USAGE_FILTER_FIELDS = {
     "bank_direction": ("bank_direction", "text", {"in"}),
     "bank_summary": ("bank_summary", "text", {"contains"}),
 }
+INPUT_INVOICE_USAGE_OPTION_FIELDS = {
+    field: INPUT_INVOICE_USAGE_FILTER_FIELDS[field]
+    for field in (
+        "seller_name",
+        "tax_rate",
+        "specific_business_type",
+        "taxable_item_name",
+        "payment_status",
+        "oa_applicant",
+        "oa_application_type",
+        "oa_project_name",
+        "bank_counterparty_name",
+        "bank_name",
+        "bank_account",
+        "bank_direction",
+    )
+}
 INPUT_INVOICE_USAGE_SORT_EXPRESSIONS = {
     field: expression
     for field, (expression, _mode, _operators) in INPUT_INVOICE_USAGE_FILTER_FIELDS.items()
@@ -322,6 +339,28 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             page=page,
             page_size=page_size,
             summary_kind="input",
+        )
+
+    def list_input_invoice_usage_filter_options(
+        self,
+        *,
+        month: str | None = None,
+        keyword: str | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        return self._list_invoice_relation_filter_options(
+            table_name="read_model.input_invoice_usage_rows",
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            scope_type="input_invoice_usage",
+            month=month,
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            filters=filters,
+            filter_fields=INPUT_INVOICE_USAGE_FILTER_FIELDS,
+            option_fields=INPUT_INVOICE_USAGE_OPTION_FIELDS,
         )
 
     def save_input_invoice_usage_rows(
@@ -857,6 +896,88 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             "rows": [row for row in payload_rows if isinstance(row, dict)],
             "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
             "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=total),
+            "refresh_status": refresh_status,
+            "source_versions": source_versions,
+        }
+
+    def _list_invoice_relation_filter_options(
+        self,
+        *,
+        table_name: str,
+        scope_table_name: str,
+        scope_type: str,
+        month: str | None,
+        keyword: str | None,
+        invoice_date_from: str | None,
+        invoice_date_to: str | None,
+        filters: str | list[dict[str, Any]] | None,
+        filter_fields: dict[str, tuple[str, str, set[str]]],
+        option_fields: dict[str, tuple[str, str, set[str]]],
+    ) -> dict[str, Any] | None:
+        scope_key = _invoice_relation_scope_key(month)
+        where: list[str] = []
+        params: list[Any] = []
+        if scope_key != "all":
+            where.append("scope_key = %s")
+            params.append(scope_key)
+        if invoice_date_from:
+            where.append("invoice_date >= %s::date")
+            params.append(invoice_date_from)
+        if invoice_date_to:
+            where.append("invoice_date <= %s::date")
+            params.append(invoice_date_to)
+        if keyword:
+            where.append("searchable_text ilike %s")
+            params.append(f"%{keyword}%")
+        for clause, clause_params in _invoice_relation_filter_clauses(filters, filter_fields):
+            where.append(clause)
+            params.extend(clause_params)
+        where_sql = " and ".join(where) if where else "true"
+        refresh_status = self._invoice_relation_refresh_status(scope_type=scope_type, scope_key=scope_key)
+        scope_row = self._invoice_relation_scope_row(scope_table_name=scope_table_name, scope_key=scope_key)
+        if scope_row is None:
+            return None
+        source_versions = scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {}
+        option_values = ",\n                    ".join(
+            f"('{field}', nullif(btrim(({expression})::text), ''), nullif(btrim(({_invoice_relation_option_label_expression(field, expression)})::text), ''))"
+            for field, (expression, _mode, _operators) in option_fields.items()
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            with filtered_rows as (
+                select *
+                from {table_name}
+                where {where_sql}
+            ),
+            option_values(field, value, label) as (
+                select option_value.field, option_value.value, option_value.label
+                from filtered_rows
+                cross join lateral (
+                    values
+                    {option_values}
+                ) as option_value(field, value, label)
+            )
+            select field, value, max(label) as label, count(*)::integer as option_count
+            from option_values
+            where value is not null
+            group by field, value
+            order by field, value
+            """,
+            tuple(params),
+        )
+        options: dict[str, list[dict[str, Any]]] = {field: [] for field in option_fields}
+        for row in rows:
+            field = text(row.get("field")) or ""
+            value = text(row.get("value")) or ""
+            if field not in options or not value:
+                continue
+            label = text(row.get("label")) or value
+            if field == "bank_direction":
+                label = "支出" if value == "outflow" else "收入" if value == "inflow" else value
+            count = int_value(row.get("option_count"), 0)
+            options[field].append({"value": value, "label": label, "count": count})
+        return {
+            "options": options,
             "refresh_status": refresh_status,
             "source_versions": source_versions,
         }
@@ -5317,6 +5438,9 @@ class PostgresReadModelRepository:
     def list_input_invoice_usage_rows(self, **kwargs: Any) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.list_input_invoice_usage_rows(**kwargs)
 
+    def list_input_invoice_usage_filter_options(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.list_input_invoice_usage_filter_options(**kwargs)
+
     def save_input_invoice_usage_rows(self, **kwargs: Any) -> None:
         self._invoice_usage_collection_repository.save_input_invoice_usage_rows(**kwargs)
 
@@ -6954,6 +7078,26 @@ class PostgresReadModelRepository:
             params.extend(row_filter_params)
         where_sql = " and ".join(clauses)
         order_by_sql = _workbench_groups_order_by(sort)
+        if composed_all_scope and normalized_zone == "open":
+            return self._composed_all_open_workbench_groups_page(
+                groups_from_sql=groups_from_sql,
+                group_select_sql=group_select_sql,
+                where_sql=where_sql,
+                params=params,
+                order_by_sql=order_by_sql,
+                normalized_scope_key=normalized_scope_key,
+                normalized_zone=normalized_zone,
+                normalized_page=normalized_page,
+                normalized_page_size=normalized_page_size,
+                normalized_detail_level=normalized_detail_level,
+                normalized_column_filters=normalized_column_filters,
+                normalized_time_filters=normalized_time_filters,
+                normalized_search_by_pane=normalized_search_by_pane,
+                normalized_search_mode=normalized_search_mode,
+                normalized_search=normalized_search,
+                active_generation_id=active_generation_id,
+                active_source_versions=active_source_versions,
+            )
         oa_row_filter_sql, oa_row_filter_params = _workbench_group_row_count_filter_sql(
             "oa",
             column_filters=normalized_column_filters,
@@ -7092,6 +7236,106 @@ class PostgresReadModelRepository:
             "read_model_version": active_generation_id,
         }
 
+    def _composed_all_open_workbench_groups_page(
+        self,
+        *,
+        groups_from_sql: str,
+        group_select_sql: str,
+        where_sql: str,
+        params: list[Any],
+        order_by_sql: str,
+        normalized_scope_key: str,
+        normalized_zone: str,
+        normalized_page: int,
+        normalized_page_size: int,
+        normalized_detail_level: str,
+        normalized_column_filters: dict[str, dict[str, list[str]]],
+        normalized_time_filters: dict[str, dict[str, str]],
+        normalized_search_by_pane: dict[str, str],
+        normalized_search_mode: str,
+        normalized_search: str | None,
+        active_generation_id: str | None,
+        active_source_versions: dict[str, Any],
+    ) -> dict[str, Any]:
+        # ponytail: all/open is sub-1k active groups today; push owner arbitration into SQL if this breaches SLO.
+        rows = self._connection.fetch_all(
+            f"""
+            select {group_select_sql}
+            from {groups_from_sql}
+            where {where_sql}
+            order by {order_by_sql}
+            """,
+            tuple(params),
+        )
+        paired_rows = self._connection.fetch_all(
+            f"""
+            select {group_select_sql}
+            from {groups_from_sql}
+            where g.zone = %s
+            order by {order_by_sql}
+            """,
+            ("paired",),
+        )
+        groups = self._materialized_workbench_groups_for_all_scope_page(rows, expected_zone="open")
+        paired_groups = self._materialized_workbench_groups_for_all_scope_page(paired_rows, expected_zone="paired")
+        _suppress_all_scope_open_rows_claimed_by_paired(paired_groups, groups)
+        _suppress_all_scope_open_rows_claimed_by_other_open_groups(groups)
+        groups = [
+            group
+            for group in groups
+            if _workbench_group_fact_row_counts(group)["rows"] > 0
+        ]
+        total = len(groups)
+        row_counts = _sum_workbench_group_fact_row_counts(groups)
+        offset = (normalized_page - 1) * normalized_page_size
+        page_groups = groups[offset : offset + normalized_page_size + 1]
+        visible_groups = page_groups[:normalized_page_size]
+        result_groups: list[dict[str, Any]] = []
+        for group in visible_groups:
+            if normalized_detail_level == "summary":
+                group = _filter_workbench_group_preview_rows_for_criteria(
+                    group,
+                    column_filters=normalized_column_filters,
+                    time_filters=normalized_time_filters,
+                    search_by_pane=normalized_search_by_pane,
+                    fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
+                )
+                group = _compact_workbench_group_for_summary_page(group)
+            result_groups.append(group)
+        read_model_status = self._workbench_read_model_status_for_groups_page(scope_key=normalized_scope_key)
+        return {
+            "month": normalized_scope_key,
+            "scope_key": normalized_scope_key,
+            "zone": normalized_zone,
+            "page": normalized_page,
+            "page_size": normalized_page_size,
+            "detail_level": normalized_detail_level,
+            "total": total,
+            "row_counts": row_counts,
+            "has_more": len(page_groups) > normalized_page_size,
+            "groups": result_groups,
+            "read_model_status": read_model_status,
+            "source_versions": active_source_versions,
+            "active_generation_id": active_generation_id,
+            "read_model_version": active_generation_id,
+        }
+
+    def _materialized_workbench_groups_for_all_scope_page(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        expected_zone: str,
+    ) -> list[dict[str, Any]]:
+        groups: list[dict[str, Any]] = []
+        for group in self._materialize_workbench_group_payloads(rows):
+            if not isinstance(group, dict):
+                continue
+            if text(group.get("zone") or group.get("status")) != expected_zone:
+                continue
+            group = _sanitize_workbench_group_invoice_rows(group)
+            groups.append(_with_workbench_group_counts(group))
+        return groups
+
     def get_workbench_group_detail(self, *, scope_key: str, zone: str, group_id: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         normalized_zone = str(zone or "").strip()
@@ -7168,10 +7412,12 @@ class PostgresReadModelRepository:
         if not normalized_row_id:
             return None
         if normalized_scope_key == "all":
-            scope_clause = "true"
+            row_scope_clause = "true"
+            group_row_scope_clause = "true"
             scope_params: tuple[Any, ...] = ()
         else:
-            scope_clause = "r.scope_key in (%s, 'all')"
+            row_scope_clause = "r.scope_key in (%s, 'all')"
+            group_row_scope_clause = "gr.scope_key in (%s, 'all')"
             scope_params = (normalized_scope_key,)
         row = self._connection.fetch_one(
             f"""
@@ -7190,7 +7436,7 @@ class PostgresReadModelRepository:
              and gen.scope_key = r.scope_key
              and gen.status = 'active'
             where r.row_id = %s
-              and {scope_clause}
+              and {row_scope_clause}
             order by
               case
                 when r.scope_key = %s then 0
@@ -7202,6 +7448,60 @@ class PostgresReadModelRepository:
             """,
             (normalized_row_id, *scope_params, normalized_scope_key),
         )
+        if not isinstance(row, dict):
+            row = self._connection.fetch_one(
+                f"""
+                select
+                  gr.row_id,
+                  gr.pane,
+                  gr.source_kind,
+                  gr.status,
+                  gr.payload as member_payload,
+                  gr.raw_payload as member_raw_payload,
+                  gr.scope_key,
+                  gr.generation_id,
+                  gen.source_versions
+                from read_model.workbench_group_rows gr
+                join read_model.workbench_generations gen
+                  on gen.generation_id = gr.generation_id
+                 and gen.scope_key = gr.scope_key
+                 and gen.status = 'active'
+                where gr.row_id = %s
+                  and {group_row_scope_clause}
+                order by
+                  case
+                    when gr.scope_key = %s then 0
+                    when gr.scope_key = 'all' then 1
+                    else 2
+                  end,
+                  gr.updated_at desc nulls last
+                limit 1
+                """,
+                (normalized_row_id, *scope_params, normalized_scope_key),
+            )
+            if isinstance(row, dict):
+                payload = row_payload(row, "member_payload", "member_raw_payload")
+                if not isinstance(payload, dict) or not payload:
+                    return None
+                payload = dict(payload)
+                payload.setdefault("id", normalized_row_id)
+                payload.setdefault("row_id", normalized_row_id)
+                payload.setdefault("type", text(row.get("source_kind")) or text(row.get("pane")) or "unknown")
+                source_kind = text(row.get("source_kind"))
+                if source_kind:
+                    payload.setdefault("source_kind", source_kind)
+                status = text(row.get("status"))
+                if status:
+                    payload.setdefault("status", status)
+                resolved_scope_key = text(row.get("scope_key")) or normalized_scope_key
+                return {
+                    "row": payload,
+                    "scope_key": resolved_scope_key,
+                    "source_versions": row.get("source_versions"),
+                    "active_generation_id": row.get("generation_id"),
+                    "read_model_version": row.get("generation_id"),
+                    "read_model_status": self._workbench_read_model_status_for_groups_page(scope_key=resolved_scope_key),
+                }
         if not isinstance(row, dict):
             return None
         payload = _read_model_payload(row)
@@ -7472,7 +7772,8 @@ class PostgresReadModelRepository:
     def workbench_groups_cache_version(self, *, scope_key: str) -> str | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         if normalized_scope_key == "all":
-            return text(self._workbench_active_month_generation_version(self._connection).get("version"))
+            version = text(self._workbench_active_month_generation_version(self._connection).get("version"))
+            return f"{WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION}:{version}" if version else None
         active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
         if active_generation_id:
             return active_generation_id
@@ -10162,6 +10463,16 @@ def _invoice_relation_filter_clauses(
     return clauses
 
 
+def _invoice_relation_option_label_expression(field: str, expression: str) -> str:
+    if field == "payment_status":
+        return "payment_status_label"
+    if field == "receipt_status":
+        return "receipt_status_label"
+    if field == "collection_status":
+        return "collection_status_label"
+    return expression
+
+
 def _oa_pending_payment_view_mode_clause(view_mode: str | None) -> str:
     normalized = text(view_mode) or "completed"
     if normalized == "in_progress":
@@ -11196,18 +11507,21 @@ def _all_scope_open_group_claim_rank(group: dict[str, Any]) -> tuple[Any, ...]:
     has_reconciliation_decision = any(
         isinstance(row.get("workbench_reconciliation_decision"), dict) for row in _iter_group_rows(group)
     )
+    automatic_decision_group = _is_all_scope_automatic_decision_group(group)
     if group_type == "source_linked":
         group_type_priority = 0
     elif group_type in {"auto_closed", "manual_confirmed", "open_exception", "ignored", "legacy_exception"}:
         group_type_priority = 1
-    elif group_type == "open" and (reason == "reconciliation_decision_open" or has_reconciliation_decision):
+    elif automatic_decision_group and pane_count >= 2:
         group_type_priority = 2
-    elif group_type == "candidate":
+    elif group_type == "open" and (reason == "reconciliation_decision_open" or has_reconciliation_decision):
         group_type_priority = 3
-    elif group_type == "open":
+    elif group_type == "candidate":
         group_type_priority = 4
-    else:
+    elif group_type == "open":
         group_type_priority = 5
+    else:
+        group_type_priority = 6
     confidence_priority = {"high": 0, "medium": 1, "low": 2}.get(text(group.get("match_confidence")) or "", 3)
     stable_group_id = text(group.get("group_id") or group.get("id")) or ""
     return (group_type_priority, -pane_count, -row_count, confidence_priority, stable_group_id)
@@ -11596,6 +11910,15 @@ def _workbench_group_page_row_counts(row: dict[str, Any] | None) -> dict[str, in
     bank_count = int_value((row or {}).get("bank_count"), 0)
     invoice_count = int_value((row or {}).get("invoice_count"), 0)
     return {"oa": oa_count, "bank": bank_count, "invoice": invoice_count, "rows": oa_count + bank_count + invoice_count}
+
+
+def _sum_workbench_group_fact_row_counts(groups: list[dict[str, Any]]) -> dict[str, int]:
+    result = _empty_workbench_row_counts()
+    for group in groups:
+        counts = _workbench_group_fact_row_counts(group)
+        for key in ("oa", "bank", "invoice", "rows"):
+            result[key] += counts[key]
+    return result
 
 
 def _normalize_workbench_column_filters(value: Any) -> dict[str, dict[str, list[str]]]:

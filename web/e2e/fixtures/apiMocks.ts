@@ -437,11 +437,38 @@ function appHealthPayload(options: ApiMockOptions = {}) {
 }
 
 function inventoryBlock(label: string) {
-  return {
-    total_count: 1,
-    latest_synced_at: "2026-06-17T01:00:00Z",
-    status: "available",
-    sources: [
+  const sources = label === "OA"
+    ? [
+      {
+        key: "oa_records",
+        label: "单据",
+        count: 1,
+        latest_synced_at: "2026-06-17T01:00:00Z",
+        status: "available",
+      },
+      {
+        key: "oa_records_completed",
+        label: "已完成 OA",
+        count: 1,
+        latest_synced_at: "2026-06-17T01:00:00Z",
+        status: "available",
+      },
+      {
+        key: "oa_records_in_progress",
+        label: "进行中 OA",
+        count: 0,
+        latest_synced_at: "2026-06-17T01:00:00Z",
+        status: "available",
+      },
+      {
+        key: "oa_items",
+        label: "明细",
+        count: 1,
+        latest_synced_at: "2026-06-17T01:00:00Z",
+        status: "available",
+      },
+    ]
+    : [
       {
         key: `${label}-mock`,
         label,
@@ -449,7 +476,12 @@ function inventoryBlock(label: string) {
         latest_synced_at: "2026-06-17T01:00:00Z",
         status: "available",
       },
-    ],
+    ];
+  return {
+    total_count: 1,
+    latest_synced_at: "2026-06-17T01:00:00Z",
+    status: "available",
+    sources,
   };
 }
 
@@ -3435,10 +3467,10 @@ function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceI
           ...candidateRelationFields,
         },
         paymentStatus: {
-          code: "partially_paid",
-          label: "支付少了",
-          reason: "支出流水合计小于 OA 金额",
-          severity: "warning",
+          code: "paid",
+          label: "已支付",
+          reason: "已存在已配对支出流水关系，金额差额不影响付款状态",
+          severity: "success",
         },
         bankTransaction: {
           primaryBankTransactionId: "bank-payment-e2e-001",
@@ -3556,7 +3588,7 @@ function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceI
       rowCount: includeInvoiceImportEvidence ? 2 : 1,
       oaAmountTotal: includeInvoiceImportEvidence ? "30320.00" : "12000.00",
       bankPaidTotal: includeInvoiceImportEvidence ? "26320.00" : "8000.00",
-      statusCounts: includeInvoiceImportEvidence ? { partially_paid: 1, paid: 1 } : { partially_paid: 1 },
+      statusCounts: { paid: includeInvoiceImportEvidence ? 2 : 1 },
     },
     filterConfig: [
       { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
@@ -3704,7 +3736,7 @@ function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
           }
           : {
             code: "unpaid",
-            label: "待支付",
+            label: "未支付",
             reason: "未关联支出流水",
             severity: "warning",
           },
@@ -3903,8 +3935,8 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
             severity: "success",
           }
           : {
-            code: "partially_paid",
-            label: "支付少了",
+            code: "unpaid",
+            label: "未支付",
             reason: "存在候选关系，未确认前不能计入已支付。",
             severity: "warning",
           },
@@ -3957,7 +3989,7 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
       rowCount: 1,
       oaAmountTotal: "58000.00",
       bankPaidTotal: relationConfirmed ? "58000.00" : "0.00",
-      statusCounts: relationConfirmed ? { paid: 1 } : { partially_paid: 1 },
+      statusCounts: relationConfirmed ? { paid: 1 } : { unpaid: 1 },
     },
     filterConfig: [
       { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
@@ -4017,7 +4049,7 @@ function oaPendingPaymentFilterOptionsPayload(readModelStatus: OaPendingPaymentR
         mode: "enum_multi",
         sortable: true,
         operators: ["in"],
-        options: [{ value: "partially_paid", label: "支付少了", count: 1 }],
+        options: [{ value: "paid", label: "已支付", count: 1 }],
       },
       {
         field: "bank_counterparty_name",

@@ -23,13 +23,13 @@ READ_MODEL_PRODUCTION_EVIDENCE_RUNBOOK = (
 
 DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     (
-        "backend/src/fin_ops_platform/app/routes_output_invoice_collections.py",
-        "OutputInvoiceCollectionApiRoutes.filter_options",
+        "backend/src/fin_ops_platform/services/output_invoice_collection_read_application_service.py",
+        "OutputInvoiceCollectionReadApplicationService.filter_options",
         "read_model_status=fresh",
     ): (1, "filter options are derived only after sql_all_rows_provider returned a fresh rows payload."),
     (
-        "backend/src/fin_ops_platform/app/routes_output_invoice_collections.py",
-        "OutputInvoiceCollectionApiRoutes.filter_options",
+        "backend/src/fin_ops_platform/services/output_invoice_collection_read_application_service.py",
+        "OutputInvoiceCollectionReadApplicationService.filter_options",
         "readModelStatus=fresh",
     ): (1, "camelCase alias for the same fresh-gated filter-options response."),
     (

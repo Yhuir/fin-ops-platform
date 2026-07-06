@@ -66,6 +66,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-07 | 读侧应用服务边界闭环 | 不改变业务/UI/read model/worker 状态；rows/filter-options/export-preview/export/relation detail 的 SQL read model 编排从 route owner 移入 `OutputInvoiceCollectionReadApplicationService`，route 只做 HTTP/session/权限/响应映射 | `tests.test_output_invoice_collection_read_application_service`、`tests.test_output_invoice_collection_api`、`tests.test_read_model_manifest`、`tests.test_read_model_architecture_guards` |
 | 2026-07-01 | linked 多销项发票 relation 归并为单条净额收款行 | 改变 output collection read model row ownership；负数/红字发票进入 `invoiceRelations.summaries`，source version bump 到 `v4-relation-group-rows` | `tests.test_output_invoice_collection_service`、`tests.test_output_invoice_collection_api`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_output_invoice_collection_read_model_fresh_gate_service` |
 | 2026-06-24 | 补齐 relation detail 生产 fail-closed | 不改变 relation detail payload shape；生产 SQL runtime 缺 detail repository 时返回 refreshing/enqueue，fresh SQL detail row 直接构造详情，不回退 live query | `tests.test_output_invoice_collection_api`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_read_model_manifest` |
 | 2026-06-24 | T8 module IO contract reconciliation | 不改变收款业务状态；明确 rows 与 filter-options 合并 fresh 后才允许普通空态和导出 | `web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`bash scripts/verify.sh docs` |

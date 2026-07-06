@@ -18,7 +18,7 @@
 | `OA-PENDING-E2E-002` | 搜索、筛选、排序 | 搜索关键字、支付状态、项目、发票方筛选和交易时间排序都进入 rows query；分页大小保持有界。 |
 | `OA-PENDING-E2E-003` | 打开 OA/流水/发票详情和规则抽屉 | 三类详情 drawer 展示对应事实；规则 drawer 请求待找发票规则；规则保存成功后必须等待 `oa_pending_payment` operation barrier fresh 再读取 rows；关闭后页面恢复。 |
 | `OA-PENDING-E2E-004` | 未正式化 decision 负面语义 | 未正式化自动匹配 decision 或历史 candidate 兼容值不能驱动 `已支付`，不能触发自动写回 mutation；页面只把 active linked relation 当作已关联证据。 |
-| `OA-PENDING-E2E-005` | Workbench confirm -> OA pending linked fan-out | 关联台确认 OA+银行流水+进项发票后，返回 OA 待付款重新请求 rows；目标行从 `支付少了` 变为 `已支付`，候选标记消失，显示 `关联台已确认`、支出流水、发票号和金额。 |
+| `OA-PENDING-E2E-005` | Workbench confirm -> OA pending linked fan-out | 关联台确认 OA+银行流水+进项发票后，返回 OA 待付款重新请求 rows；目标行从 `未支付` 变为 `已支付`，候选标记消失，显示 `关联台已确认`、支出流水、发票号和金额。 |
 | `OA-PENDING-E2E-006` | in-progress OA 已支付未写回逐行写回 | 页面进入后不得自动调用写接口；已存在 active pending relation、支付状态为 `已支付` 且写回状态为 `未写回` 的行必须显示行内“写回”按钮；点击后调用 `writeback-paid`，成功后刷新为 `已写回` 并隐藏按钮；失败时保留 `未写回` 且显示错误，不允许半写。 |
 | `OA-PENDING-E2E-007` | in-progress OA 人工关联支出流水并自动写回 | 从已选 OA 打开抽屉时，候选请求必须携带 `oa_row_ids`，候选池返回全部支出流水并支持全部、未配对、已配对、已关联进行中 OA 分类筛选和分页浏览；已配对/已关联进行中 OA 行禁选；提交创建 OA 待付款独立 pending relation 和 bank claim，不写 Workbench active relation，并在后端校验通过时自动写回 OA MySQL pay status；成功后等待 `oa_pending_payment` operation barrier fresh 再刷新 rows。 |
 | `OA-PENDING-E2E-008` | read model/detail 非 fresh | rows/detail refreshing/stale 时显示诊断或详情暂不可用；不能把空 rows 当真实空态。 |

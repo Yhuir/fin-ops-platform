@@ -399,7 +399,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["groups"][0]["group_id"], "fresh-db")
         self.assertEqual(redis.get_json_calls, [])
         self.assertEqual(redis.set_json_calls, [])
-        self.assertEqual(queue.refreshes, [("all", "api_groups_source_versions_stale")])
+        self.assertEqual(queue.refreshes, [])
 
     def test_groups_query_timeout_returns_retryable_unavailable(self) -> None:
         class Repository:

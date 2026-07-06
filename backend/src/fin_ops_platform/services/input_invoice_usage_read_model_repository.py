@@ -35,6 +35,24 @@ class InputInvoiceUsageReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    def list_input_invoice_usage_filter_options(
+        self,
+        *,
+        month: str | None = None,
+        keyword: str | None = None,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+    ) -> dict[str, object] | None:
+        payload = self._repository.list_input_invoice_usage_filter_options(
+            month=month,
+            keyword=keyword,
+            invoice_date_from=invoice_date_from,
+            invoice_date_to=invoice_date_to,
+            filters=filters,
+        )
+        return dict(payload) if isinstance(payload, dict) else None
+
     def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, object] | None:
         payload = self._repository.get_input_invoice_usage_row_by_row_id(row_id)
         return dict(payload) if isinstance(payload, dict) else None

@@ -45,40 +45,61 @@ class InputInvoiceUsageReadModelFreshGateService:
             sort_direction=kwargs.get("sort_direction") or "desc",
         )
 
-    def all_rows(self, query: dict[str, list[str]]) -> dict[str, object] | None:
-        page_size = 200
-        first_query = {key: list(values) for key, values in query.items()}
-        first_query["page"] = ["1"]
-        first_query["page_size"] = [str(page_size)]
-        first_payload = self.rows(first_query)
-        if first_payload is None:
+    def filter_options(self, query: dict[str, list[str]]) -> dict[str, object] | None:
+        list_options = getattr(self._repository, "list_input_invoice_usage_filter_options", None)
+        scope_key = self.scope_key_from_query(query)
+        if not callable(list_options):
+            if self._requires_sql_read_model_runtime():
+                self._enqueue_refresh(scope_key, "api_filter_options_sql_repository_unavailable")
+                return self.refreshing_payload(scope_key=scope_key)
             return None
-        if first_payload.get("read_model_status") != "fresh":
-            return first_payload
-        rows = list(first_payload.get("rows") or [])
-        pagination = first_payload.get("pagination") if isinstance(first_payload.get("pagination"), dict) else {}
-        total = int(pagination.get("total") or len(rows))
-        page = 2
-        while len(rows) < total:
-            page_query = {key: list(values) for key, values in query.items()}
-            page_query["page"] = [str(page)]
-            page_query["page_size"] = [str(page_size)]
-            page_payload = self.rows(page_query)
-            if not isinstance(page_payload, dict):
-                return None
-            if page_payload.get("read_model_status") != "fresh":
-                return page_payload
-            page_rows = list(page_payload.get("rows") or [])
-            if not page_rows:
-                break
-            rows.extend(page_rows)
-            page += 1
+        try:
+            payload = list_options(
+                month=query.get("month", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                filters=query.get("filters", [None])[0],
+            )
+        except ValueError as exc:
+            raise InputInvoiceUsageError("invalid_input_invoice_usage_query", str(exc)) from exc
+        if not isinstance(payload, dict):
+            self._enqueue_refresh(scope_key, "api_filter_options_miss")
+            return self.refreshing_payload(scope_key=scope_key)
+        refresh_status = str(payload.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_refresh(scope_key, "api_filter_options_stale")
+            return self.refreshing_payload(scope_key=scope_key)
+        stale_reasons = source_version_mismatch_reasons(
+            expected=require_expected_source_versions(
+                self._expected_source_versions(scope_key=scope_key),
+                context="input_invoice_usage_read_model",
+            ),
+            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+        )
+        if stale_reasons:
+            self._enqueue_refresh(scope_key, "api_filter_options_source_versions_stale")
+            return self.refreshing_payload(scope_key=scope_key, stale_reasons=stale_reasons)
+
+        options_by_field = payload.get("options") if isinstance(payload.get("options"), dict) else {}
+        fields: list[dict[str, object]] = []
+        for config in self._filter_config():
+            if not isinstance(config, dict):
+                continue
+            field = str(config.get("field") or "")
+            options = options_by_field.get(field) if isinstance(options_by_field, dict) else []
+            fields.append({**config, "options": list(options) if isinstance(options, list) else []})
         return {
-            "rows": rows,
-            "pagination": {"page": 1, "pageSize": page_size, "total": total},
-            "summary": first_payload.get("summary") if isinstance(first_payload.get("summary"), dict) else {},
+            "fields": fields,
+            "context": {
+                "keyword": query.get("keyword", [""])[0] or "",
+                "invoiceDateFrom": query.get("invoice_date_from", [None])[0],
+                "invoiceDateTo": query.get("invoice_date_to", [None])[0],
+                "month": query.get("month", [None])[0],
+                "filters": self._parse_filters(query.get("filters", [None])[0]),
+            },
             "read_model_status": "fresh",
-            "read_model_scope_key": first_payload.get("read_model_scope_key"),
+            "read_model_scope_key": scope_key,
         }
 
     def rows(self, query: dict[str, list[str]]) -> dict[str, object] | None:

@@ -47,6 +47,7 @@
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
 - Dashboard 发票 inventory 只展示 `手工导入` 和 `OA 解析` 两类来源，不再展示 `普通导入` 或 `ETC`。统计事实源是统一发票池 `app.invoices.source_links`：`手工导入` 统计 `source_type='manual_invoice_import'` 的 active 发票，`OA 解析` 统计 `source_type='oa_attachment_invoice'` 的 active 发票，`OA 解析` 括号内数量统计带 OA 来源但不带手工导入来源的 active 发票。
+- Dashboard OA inventory 的 `单据` 统计 `app.oa_applications` 申请主表行数，`明细` 统计 `app.oa_application_items` 明细行数；同一卡片额外按 `workflow_status` 展示 `已完成 OA` 和 `进行中 OA`，空/历史完成态别名按 OA projection 完成态合同归入已完成。
 - Dashboard 导入历史只展示手工导入的银行流水和发票批次；OA 解析和 OA 单据同步只属于发票/OA inventory 与运行状态，不进入最近导入记录。主页面只显示最新 5 条，右侧抽屉展示所有历史记录。
 
 ## 运行事实源

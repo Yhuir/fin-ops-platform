@@ -3103,7 +3103,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         version = repository.workbench_groups_cache_version(scope_key="all")
 
-        self.assertEqual(version, COMPOSED_ALL_VERSION)
+        self.assertEqual(version, f"{WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION}:{COMPOSED_ALL_VERSION}")
         self.assertTrue(
             any(
                 "count(*)::bigint as scope_count" in sql
@@ -3621,11 +3621,108 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_repository_composed_all_open_page_suppresses_single_conflict_claimed_by_automatic_decision(self) -> None:
+        class DuplicateOpenOwnerConnection(ActiveWorkbenchGenerationConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "select group_id, source_group_id, zone, payload, raw_payload" in normalized:
+                    self.fetch_all_calls.append((normalized, params))
+                    if params[:1] == ("paired",):
+                        return []
+                    oa_row = {
+                        "id": "oa-pay-2309",
+                        "type": "oa",
+                        "source_kind": "oa",
+                        "status": "open",
+                        "amount": "6868.55",
+                    }
+                    bank_row = {
+                        "id": "txn_imported_0472",
+                        "type": "bank",
+                        "source_kind": "bank_transaction",
+                        "status": "open",
+                        "amount": "6868.55",
+                    }
+                    decision_group_id = (
+                        "case:decision:2026-07:oa_bank_exact_amount:oa-pay-2309:txn_imported_0472"
+                    )
+                    return [
+                        {
+                            "group_id": "scope:2026-06:temp:0003",
+                            "source_group_id": "temp:0003",
+                            "scope_key": "2026-06",
+                            "generation_id": "gen-2026-06",
+                            "zone": "open",
+                            "payload": {
+                                "group_id": "temp:0003",
+                                "zone": "open",
+                                "group_type": "open",
+                                "reason": "reconciliation_decision_open",
+                                "oa_rows": [
+                                    {
+                                        **oa_row,
+                                        "workbench_reconciliation_decision": {
+                                            "decision_key": "decision:2026-06:free_matching_conflict:oa-pay-2309",
+                                            "decision_status": "open",
+                                            "display_state": "open",
+                                        },
+                                    }
+                                ],
+                                "bank_rows": [],
+                                "invoice_rows": [],
+                            },
+                        },
+                        {
+                            "group_id": decision_group_id,
+                            "source_group_id": decision_group_id,
+                            "scope_key": "2026-07",
+                            "generation_id": "gen-2026-07",
+                            "zone": "open",
+                            "payload": {
+                                "group_id": decision_group_id,
+                                "zone": "open",
+                                "group_type": "candidate",
+                                "reason": "existing_case_candidate",
+                                "case_id": "decision:2026-07:oa_bank_exact_amount:oa-pay-2309:txn_imported_0472",
+                                "oa_rows": [
+                                    {
+                                        **oa_row,
+                                        "case_id": "decision:2026-07:oa_bank_exact_amount:oa-pay-2309:txn_imported_0472",
+                                        "relation_mode": "automatic_decision",
+                                    }
+                                ],
+                                "bank_rows": [
+                                    {
+                                        **bank_row,
+                                        "case_id": "decision:2026-07:oa_bank_exact_amount:oa-pay-2309:txn_imported_0472",
+                                        "relation_mode": "automatic_decision",
+                                    }
+                                ],
+                                "invoice_rows": [],
+                            },
+                        },
+                    ]
+                return super().fetch_all(sql, params)
+
+        connection = DuplicateOpenOwnerConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
+
+        self.assertEqual(page["total"], 1)
+        self.assertEqual(page["row_counts"], {"oa": 1, "bank": 1, "invoice": 0, "rows": 2})
+        self.assertEqual(
+            [group["group_id"] for group in page["groups"]],
+            ["case:decision:2026-07:oa_bank_exact_amount:oa-pay-2309:txn_imported_0472"],
+        )
+        self.assertEqual(page["groups"][0]["oa_rows"][0]["id"], "oa-pay-2309")
+        self.assertEqual(page["groups"][0]["bank_rows"][0]["id"], "txn_imported_0472")
+
     def test_repository_bounds_all_scope_groups_page_query(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
 
-        page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=2, page_size=500)
+        page = repository.get_workbench_groups_page(scope_key="all", zone="paired", page=2, page_size=500)
 
         page_queries = [
             (sql, params)
@@ -3666,7 +3763,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("detail_fields", group["invoice_rows"][0])
         self.assertEqual([row["id"] for row in group["collapsed_rows"]["oa"]], ["collapsed-oa-1", "collapsed-oa-2", "collapsed-oa-3"])
         self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
-        self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
+        self.assertEqual(page["row_counts"], {"oa": 9, "bank": 1, "invoice": 1, "rows": 11})
         self.assertNotIn("searchable_text", group)
         self.assertNotIn("source_versions", group)
         self.assertNotIn("group_metadata", group)
@@ -3759,12 +3856,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             time_filters={"bank": {"mode": "month", "month": "2026-04"}},
         )
 
-        row_count_queries = [
+        row_filter_queries = [
             (sql, params)
-            for sql, params in connection.fetch_one_calls
-            if "count(distinct r.row_id) filter" in sql
+            for sql, params in connection.fetch_all_calls
+            if "select group_id, source_group_id, zone, payload, raw_payload" in sql
+            and "r.column_values @> %s::jsonb" in sql
         ]
-        self.assertTrue(row_count_queries)
+        self.assertTrue(row_filter_queries)
         self.assertTrue(
             any(
                 "r.column_values @> %s::jsonb" in sql
@@ -3773,7 +3871,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 and '"direction": "支出"' in str(params)
                 and "2026-04-01" in str(params)
                 and "%建行%" in params
-                for sql, params in row_count_queries
+                for sql, params in row_filter_queries
             )
         )
 
@@ -5044,7 +5142,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertIn("case:no_oa_batch_1", [group["group_id"] for group in aggregate_group_payloads])
 
-    def test_repository_all_scope_keeps_unclaimed_bank_when_open_group_takes_automatic_decision_oa(self) -> None:
+    def test_repository_all_scope_open_automatic_decision_wins_over_single_conflict_row(self) -> None:
         class AggregateAllOpenAutomaticDecisionOwnerConnection(WorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 normalized = " ".join(sql.lower().split())
@@ -5117,11 +5215,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
         ]
         payloads_by_id = {group["group_id"]: group for group in aggregate_group_payloads}
-        self.assertIn("scope:2026-03:temp:0001", payloads_by_id)
         self.assertIn("case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419", payloads_by_id)
-        self.assertEqual(all_scope_group_row_ids(connection, "scope:2026-03:temp:0001", "oa"), ["oa-pay-2068"])
+        self.assertNotIn("scope:2026-03:temp:0001", payloads_by_id)
         decision_group = payloads_by_id["case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419"]
-        self.assertEqual(all_scope_group_row_ids(connection, decision_group["group_id"], "oa"), [])
+        self.assertEqual(all_scope_group_row_ids(connection, decision_group["group_id"], "oa"), ["oa-pay-2068"])
         self.assertEqual(all_scope_group_row_ids(connection, decision_group["group_id"], "bank"), ["txn_imported_1419"])
 
     def test_repository_all_scope_suppresses_open_invoice_rows_claimed_by_stronger_open_group(self) -> None:
@@ -7064,6 +7161,78 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         sql = connection.fetch_one_calls[0][0]
         self.assertIn("and true", sql)
         self.assertNotIn("r.scope_key in (%s, 'all')", sql)
+
+    def test_repository_reads_legacy_group_member_payload_when_row_detail_row_is_missing(self) -> None:
+        class LegacyGroupMemberConnection(WorkbenchWriteConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from read_model.workbench_rows r" in normalized:
+                    return None
+                if "from read_model.workbench_group_rows gr" in normalized:
+                    return {
+                        "row_id": "oa-pay-legacy",
+                        "pane": "oa",
+                        "source_kind": "oa",
+                        "status": "open",
+                        "scope_key": "2026-05",
+                        "generation_id": "gen-2026-05-active",
+                        "source_versions": {"builder": "workbench-sql:v1"},
+                        "member_payload": {
+                            "id": "oa-pay-legacy",
+                            "type": "oa",
+                            "amount": "1500.00",
+                            "applicant": "刘际涛",
+                        },
+                    }
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return None
+                return None
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+                if "from job.read_model_dirty_scopes" in self.fetch_all_calls[-1][0]:
+                    return []
+                return []
+
+        connection = LegacyGroupMemberConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_workbench_row_detail(scope_key="all", row_id="oa-pay-legacy")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["row"]["id"], "oa-pay-legacy")
+        self.assertEqual(payload["row"]["amount"], "1500.00")
+        self.assertEqual(payload["scope_key"], "2026-05")
+        self.assertEqual(payload["active_generation_id"], "gen-2026-05-active")
+        self.assertTrue(any("from read_model.workbench_group_rows gr" in sql for sql, _params in connection.fetch_one_calls))
+
+    def test_repository_does_not_synthesize_row_detail_from_empty_group_member_payload(self) -> None:
+        class EmptyGroupMemberConnection(WorkbenchWriteConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from read_model.workbench_rows r" in normalized:
+                    return None
+                if "from read_model.workbench_group_rows gr" in normalized:
+                    return {
+                        "row_id": "oa-pay-empty",
+                        "pane": "oa",
+                        "source_kind": "oa",
+                        "status": "open",
+                        "scope_key": "2026-05",
+                        "generation_id": "gen-2026-05-active",
+                        "member_payload": {},
+                    }
+                return None
+
+        connection = EmptyGroupMemberConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_workbench_row_detail(scope_key="all", row_id="oa-pay-empty")
+
+        self.assertIsNone(payload)
 
     def test_repository_finds_workbench_row_active_month_scope_key(self) -> None:
         class RowScopeConnection(WorkbenchWriteConnection):

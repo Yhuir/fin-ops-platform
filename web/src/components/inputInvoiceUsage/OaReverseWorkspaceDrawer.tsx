@@ -230,6 +230,13 @@ export default function OaReverseWorkspaceDrawer({
     [candidateInvoices.length, error, feedback, preview],
   );
 
+  const notifyBatchChanged = () => {
+    if (!onBatchChanged) {
+      return;
+    }
+    void Promise.resolve(onBatchChanged()).catch(() => undefined);
+  };
+
   const runBatchAction = (
     actionName: string,
     action: () => Promise<InputInvoiceUsageOaReverseBatch>,
@@ -240,11 +247,11 @@ export default function OaReverseWorkspaceDrawer({
     setError(null);
     setFeedback(null);
     action()
-      .then(async (nextBatch) => {
+      .then((nextBatch) => {
         setBatch(nextBatch);
         setFeedback(successMessage);
         onSuccess?.(nextBatch);
-        await onBatchChanged?.();
+        notifyBatchChanged();
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : `${successMessage}失败。`);
@@ -261,25 +268,33 @@ export default function OaReverseWorkspaceDrawer({
     runBatchAction(
       "createDraft",
       async () => {
-        const refreshedPreview = await loadPreview({
-          sourceFilters,
-          selectedInvoiceIds: selectedIds,
-          targetApplicantCode: resolvedTargetApplicantCode || null,
-        });
-        setPreview(refreshedPreview);
-        const refreshedCandidateIds = invoicesFromPreview(refreshedPreview)
-          .filter((invoice) => invoice.selectable)
-          .map((invoice) => invoice.invoiceId);
-        setSelectedCandidateIds(refreshedCandidateIds);
-        if (!refreshedPreview.previewId || !refreshedPreview.previewHash || refreshedCandidateIds.length === 0) {
-          throw new Error(refreshedPreview.unavailableReason || "当前选择没有可创建 OA 草稿的候选发票。");
+        const currentCandidateIds = selectableCandidateInvoices.map((invoice) => invoice.invoiceId);
+        const canUseCurrentPreview = selectedIds.length === currentCandidateIds.length
+          && selectedIds.every((invoiceId, index) => invoiceId === currentCandidateIds[index]);
+        const draftPreview = canUseCurrentPreview
+          ? preview
+          : await loadPreview({
+            sourceFilters,
+            selectedInvoiceIds: selectedIds,
+            targetApplicantCode: resolvedTargetApplicantCode || null,
+          });
+        if (!canUseCurrentPreview) {
+          setPreview(draftPreview);
+          const refreshedCandidateIds = invoicesFromPreview(draftPreview)
+            .filter((invoice) => invoice.selectable)
+            .map((invoice) => invoice.invoiceId);
+          setSelectedCandidateIds(refreshedCandidateIds);
+          selectedIds.splice(0, selectedIds.length, ...refreshedCandidateIds);
+        }
+        if (!draftPreview.previewId || !draftPreview.previewHash || selectedIds.length === 0) {
+          throw new Error(draftPreview.unavailableReason || "当前选择没有可创建 OA 草稿的候选发票。");
         }
         return createDraftFromSelection({
-          previewId: refreshedPreview.previewId,
-          expectedPreviewHash: refreshedPreview.previewHash,
+          previewId: draftPreview.previewId,
+          expectedPreviewHash: draftPreview.previewHash,
           idempotencyKey: createIdempotencyKey("input-invoice-usage-oa-reverse-draft"),
-          selectedInvoiceIds: refreshedCandidateIds,
-          targetApplicantCode: refreshedPreview.targetApplicantCode || resolvedTargetApplicantCode,
+          selectedInvoiceIds: selectedIds,
+          targetApplicantCode: draftPreview.targetApplicantCode || resolvedTargetApplicantCode,
         });
       },
       "OA 草稿已创建，请在 OA 页面处理后选择提交状态。",
@@ -300,20 +315,20 @@ export default function OaReverseWorkspaceDrawer({
       decision,
       reason: decision === "submitted" ? "用户确认已在 OA 系统提交该草稿" : "用户确认 OA 提交内容需修改并删除本次提交内容",
     })
-      .then(async (nextBatch) => {
+      .then((nextBatch) => {
         setConfirmationOpen(false);
         setStagedDrafts((current) => current.filter((item) => item.batchId !== targetBatch.batchId));
         if (decision === "submitted") {
           setBatch(nextBatch);
           setFeedback("已进入已提交历史。");
           setActiveTab("submitted");
-          await onBatchChanged?.();
+          notifyBatchChanged();
           return;
         }
         setBatch(null);
         setFeedback("已清除暂存批次，返回待处理后可重新创建 OA 草稿。");
         setActiveTab("pending");
-        await onBatchChanged?.();
+        notifyBatchChanged();
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : "OA 提交状态确认失败。");

@@ -30,9 +30,9 @@ const rowsPayload = {
         workflowStatus: "completed",
       },
       paymentStatus: {
-        code: "partially_paid",
-        label: "支付少了",
-        reason: "支出流水合计小于 OA 金额",
+        code: "paid",
+        label: "已支付",
+        reason: "已存在已配对支出流水关系",
       },
       bankTransaction: {
         primaryBankTransactionId: "bank-001",
@@ -231,6 +231,12 @@ const rowsPayload = {
         code: "paid",
         label: "已支付",
         reason: "支出流水合计等于 OA 金额",
+      },
+      oaPaymentWriteback: {
+        code: "not_written",
+        label: "未写回",
+        flowIds: ["flow-003"],
+        syncStatus: "ready",
       },
       bankTransaction: {
         primaryBankTransactionId: "bank-004",
@@ -593,7 +599,7 @@ function installOaPendingPaymentsFetch(overrides?: {
             mode: "enum_multi",
             sortable: true,
             operators: ["in"],
-            options: [{ value: "partially_paid", label: "支付少了", count: 1 }],
+            options: [{ value: "paid", label: "已支付", count: 3 }],
           },
           {
             field: "oa_project_name",
@@ -986,7 +992,7 @@ describe("OA pending payments page", () => {
     expect(await within(page).findByText("张三")).toBeInTheDocument();
     expect(within(page).getByText("报销")).toBeInTheDocument();
     expect(within(page).getAllByText("流程状态：已完成").length).toBeGreaterThan(0);
-    expect(within(page).getAllByText("支付少了").some((element) => element.closest(".oa-pending-payment-status-cell"))).toBe(true);
+    expect(within(page).getAllByText("已支付").some((element) => element.closest(".oa-pending-payment-status-cell"))).toBe(true);
     expect(within(page).getByText("26532000000123456789")).toBeInTheDocument();
     expect(within(page).getByText("2026-01-08")).toBeInTheDocument();
     const invoiceSeller = within(page).getByText("云南恒昆机电设备有限公司");
@@ -1011,6 +1017,7 @@ describe("OA pending payments page", () => {
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__amount")).toHaveTextContent("10000.00");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__amount")).toHaveTextContent("建设银行 1234");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__summary")).toHaveTextContent("电子转账");
+    expect(within(paidRow).queryByRole("button", { name: "写回 OA 张三" })).not.toBeInTheDocument();
     const groupedRow = within(page).getByRole("row", { name: /刘际涛/ });
     const groupedCells = groupedRow.querySelectorAll(".oa-pending-payments-table-cell");
     expect(groupedCells[0]).toHaveTextContent("4450.00");
@@ -1030,7 +1037,7 @@ describe("OA pending payments page", () => {
     expect(within(noInvoiceRow).queryByRole("button", { name: /查看发票/ })).not.toBeInTheDocument();
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     expect(within(candidateRow).getByText("候选")).toBeInTheDocument();
-    expect(within(candidateRow).getByText("待支付")).toBeInTheDocument();
+    expect(within(candidateRow).getByText("未支付")).toBeInTheDocument();
     expect(within(candidateRow).queryByRole("button", { name: "确认已支付并写回" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水无需开票规则设置" })).toBeInTheDocument();
 
@@ -1078,11 +1085,11 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
 
     await user.click(await within(page).findByRole("button", { name: "筛选 支付状态" }));
-    await user.click(await screen.findByRole("menuitemcheckbox", { name: "支付状态：支付少了 1" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "支付状态：已支付 3" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
       const filters = JSON.parse(decodeURIComponent(rowsRequests(fetchMock).at(-1)?.searchParams.get("filters") ?? "[]"));
-      expect(filters).toContainEqual({ field: "payment_status", operator: "in", values: ["partially_paid"] });
+      expect(filters).toContainEqual({ field: "payment_status", operator: "in", values: ["paid"] });
     });
 
     await user.click(within(page).getByRole("button", { name: "筛选 项目" }));

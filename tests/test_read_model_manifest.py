@@ -493,7 +493,7 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertEqual(output_collection.auxiliary_refresh_worker_instances, ())
         self.assertEqual(lifecycle.query_owner, "InvoiceLifecycleReadFacade")
         self.assertEqual(input_usage.query_owner, "InputInvoiceUsageReadModelService")
-        self.assertEqual(output_collection.query_owner, "OutputInvoiceCollectionService")
+        self.assertEqual(output_collection.query_owner, "OutputInvoiceCollectionReadApplicationService")
         self.assertEqual(lifecycle.permission_owner, "invoice_lifecycle_page_api_session")
         self.assertEqual(input_usage.permission_owner, "input_invoice_usage_api_session")
         self.assertEqual(output_collection.permission_owner, "output_invoice_collection_api_session")

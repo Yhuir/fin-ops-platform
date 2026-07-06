@@ -243,7 +243,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["bankTransaction"]["relationCount"], 2)
         self.assertTrue(row["bankTransaction"]["hasMultiple"])
 
-    def test_grouped_payment_above_oa_total_is_pending_review_not_overpaid(self) -> None:
+    def test_grouped_payment_above_oa_total_is_paid_when_relation_is_linked(self) -> None:
         bank = self._bank("bank-above-group-total", "120.00")
         pair_service = WorkbenchPairRelationService()
         self._relation(
@@ -267,7 +267,8 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         row = payload["rows"][0]
         self.assertEqual(row["oa"]["amount"], "90.00")
         self.assertEqual(row["bankTransaction"]["paidTotal"], "120.00")
-        self.assertEqual(row["paymentStatus"]["code"], "pending_review")
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertEqual(row["oaPaymentWriteback"]["syncStatus"], "not_required")
         self.assertNotEqual(row["paymentStatus"]["code"], "overpaid")
 
     def test_oa_summary_exposes_application_time_from_detail_fields(self) -> None:
@@ -590,7 +591,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["bankTransaction"]["paidTotal"], "100.00")
         self.assertEqual(payload["summary"]["bankPaidTotal"], "100.00")
 
-    def test_only_outflow_bank_relations_count_as_payment_evidence(self) -> None:
+    def test_linked_non_outflow_bank_relation_still_counts_as_paid_status(self) -> None:
         income_bank = self._bank("bank-income", "100.00", direction=TransactionDirection.INFLOW)
         pair_service = WorkbenchPairRelationService()
         self._relation(pair_service, "case-income", ["oa-income", income_bank.id], matched=True)
@@ -602,11 +603,11 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
 
         row = service.list_rows()["rows"][0]
 
-        self.assertEqual(row["paymentStatus"]["code"], "pending_review")
-        self.assertIn("证据不完整", row["paymentStatus"]["reason"])
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertIn("流水方向待检查", row["paymentStatus"]["reason"])
         self.assertEqual(row["bankTransaction"]["relationCount"], 0)
 
-    def test_missing_related_bank_fact_is_pending_review_not_unpaid(self) -> None:
+    def test_missing_related_bank_fact_still_counts_as_paid_status(self) -> None:
         pair_service = WorkbenchPairRelationService()
         self._relation(pair_service, "case-missing-bank", ["oa-missing-bank", "bank-missing"], matched=False)
         service = self._service(
@@ -617,8 +618,8 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
 
         row = service.list_rows()["rows"][0]
 
-        self.assertEqual(row["paymentStatus"]["code"], "pending_review")
-        self.assertIn("关联流水事实缺失", row["paymentStatus"]["reason"])
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertIn("流水事实缺失", row["paymentStatus"]["reason"])
 
     def _service(
         self,

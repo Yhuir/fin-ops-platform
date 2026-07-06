@@ -2864,6 +2864,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "OutputInvoiceCollectionApiRoutes")
+        read_application_source = (SERVICES_ROOT / "output_invoice_collection_read_application_service.py").read_text(encoding="utf-8")
         fresh_gate_source = (SERVICES_ROOT / "output_invoice_collection_read_model_fresh_gate_service.py").read_text(encoding="utf-8")
         violations: list[str] = []
 
@@ -2895,6 +2896,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if required not in route_class:
                 violations.append(f"Output collection route owner is missing {required}")
+        for forbidden in (
+            "filter_options_for_rows(",
+            "apply_lifecycle_overlays_to_rows(",
+            "export_preview_for_rows(",
+            "export_for_rows(",
+            "_sql_rows_provider",
+            "_sql_all_rows_provider",
+            "_sql_relation_details_provider",
+        ):
+            if forbidden in route_class:
+                violations.append(f"Output collection route owner still owns read application orchestration {forbidden}")
+        for required in (
+            "class OutputInvoiceCollectionReadApplicationService",
+            "def rows(",
+            "def filter_options(",
+            "def export_preview(",
+            "def export(",
+            "def relation_details(",
+        ):
+            if required not in read_application_source:
+                violations.append(f"Output collection read application service is missing {required}")
         if "_output_invoice_collection_routes().route(method, route_path, query, body, headers)" not in server_source:
             violations.append("Application does not dispatch output collection read routes through route owner")
         if "def _output_invoice_collection_xlsx_response(" not in server_source:
@@ -3806,7 +3828,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for required in (
             "query_service=query_service",
             "rows_from_sql_read_model=self._get_input_invoice_usage_rows_from_sql_read_model",
-            "all_rows_from_sql_read_model=self._get_input_invoice_usage_all_rows_from_sql_read_model",
+            "filter_options_from_sql_read_model=self._get_input_invoice_usage_filter_options_from_sql_read_model",
             "relation_details_from_sql_read_model=self._get_input_invoice_usage_relation_details_from_sql_read_model",
             "export_service=self._input_invoice_usage_export_service()",
             "resolve_read_session=self._resolve_fin_ops_read_session",
@@ -3855,11 +3877,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "require_expected_source_versions",
             "payload_requires_schema_refresh",
             "def export_page(",
-            "def all_rows(",
+            "def filter_options(",
             "def relation_details(",
         ):
             if required not in fresh_gate_source:
                 violations.append(f"Input usage fresh-gate service is missing {required}")
+        for forbidden in (
+            "all_rows_from_sql_read_model=",
+            "def _get_input_invoice_usage_all_rows_from_sql_read_model(",
+            "def all_rows(",
+        ):
+            if forbidden in route_source or forbidden in server_source or forbidden in fresh_gate_source:
+                violations.append(f"Input usage read path keeps removed all-rows filter-options path {forbidden}")
         for removed_handler in (
             "def _handle_api_input_invoice_usage_rows(",
             "def _handle_api_input_invoice_usage_filter_options(",

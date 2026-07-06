@@ -69,10 +69,12 @@ describe("AppHealthOperationsPage", () => {
     expect(data).toHaveTextContent("发票");
     expect(data).toHaveTextContent("256");
     expect(data).toHaveTextContent("手工导入");
-    expect(data).toHaveTextContent("OA 解析");
+    expect(data).toHaveTextContent("OA 解析（进入统一发票池的数量）");
     expect(data).toHaveTextContent("40（5）");
     expect(data).not.toHaveTextContent("普通导入");
     expect(data).not.toHaveTextContent("ETC");
+    expect(data).toHaveTextContent("已完成 OA");
+    expect(data).toHaveTextContent("进行中 OA");
     const recentImportEvents = within(data).getByRole("grid", { name: "最近导入记录" });
     expect(recentImportEvents).toBeInTheDocument();
     expect(data).toHaveTextContent("bank-5.xlsx");
@@ -171,6 +173,8 @@ describe("AppHealthOperationsPage", () => {
             status: "unknown",
             sources: [
               { key: "oa_records", label: "单据", count: null, latest_synced_at: null, status: "unknown" },
+              { key: "oa_records_completed", label: "已完成 OA", count: null, latest_synced_at: null, status: "unknown" },
+              { key: "oa_records_in_progress", label: "进行中 OA", count: null, latest_synced_at: null, status: "unknown" },
               { key: "oa_items", label: "明细", count: null, latest_synced_at: null, status: "unknown" },
             ],
           },
@@ -264,6 +268,8 @@ describe("AppHealthOperationsPage", () => {
                 status: "available",
                 sources: [
                   { key: "oa_records", label: "单据", count: 72, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
+                  { key: "oa_records_completed", label: "已完成 OA", count: 61, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
+                  { key: "oa_records_in_progress", label: "进行中 OA", count: 11, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
                   { key: "oa_items", label: "明细", count: 316, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
                 ],
               },

@@ -392,7 +392,7 @@
 
 - 目标：继续推进 `IN-USAGE-E2E-009`，补齐 OA reverse 草稿创建和用户确认 submitted 后的当前页 read model refresh 浏览器闭环。
 - 影响范围：`OaReverseWorkspaceDrawer` batch mutation 成功回调、`InputInvoiceUsagePage` 当前查询 refresh、`web/e2e/input-invoice-usage-flow.spec.ts` 和本模块覆盖文档；后端业务逻辑不变。
-- 关键决策：后端 `InputInvoiceUsageOaReverseService.create_draft_from_selection(...)` / `manual_oa_status(...)` 已在成功后 `_invalidate_read_models(...)`，本轮只修前端未通知父页面重新拉 rows 的缺口。`submitted_confirmed` 仍只是本地历史状态；真正 OA/发票 relation fan-out 只在 `evidence_detected` 通过 `WorkbenchRelationCommandService.confirm_relation(...)` 后发生。
+- 关键决策：这是 2026-06-19 的历史记录；当时草稿创建和手工确认仍复用 rows refresh 链路。2026-07-07 起当前合同已调整为：`create_draft_from_selection(...)` / `manual_oa_status(...)` 只修改本地 OA reverse batch 状态，不触发或等待 `input_invoice_usage` read model；真正 OA/发票 relation fan-out 只在 `evidence_detected` 通过 `WorkbenchRelationCommandService.confirm_relation(...)` 后发生。
 - 文档影响：`IN-USAGE-E2E-004` 继续 covered，并补充 draft/manual submitted 后当前 rows refresh；`IN-USAGE-E2E-009` 继续 partial，仍保留 OA reverse evidence detected 到更多下游和真实 worker drain 风险。
 - 测试覆盖：扩展 `web/e2e/input-invoice-usage-flow.spec.ts::creates an OA reverse draft from a selected invoice subset and records submitted history`，覆盖草稿创建后 rows refresh、manual submitted 后 rows refresh、submitted history、内部 batch id 不展示和无浏览器错误。
 - 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts --project=chromium --grep "OA reverse draft"`。

@@ -6,13 +6,16 @@ from urllib.parse import unquote
 
 from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session, tenant_id_for_session
 from fin_ops_platform.services.output_invoice_collection_lifecycle_service import OutputInvoiceCollectionLifecycleService
+from fin_ops_platform.services.output_invoice_collection_read_application_service import (
+    OutputInvoiceCollectionReadApplicationService,
+    SqlAllRowsProvider,
+    SqlRelationDetailsProvider,
+    SqlRowsProvider,
+)
 from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService, OutputInvoiceCollectionError
 
 
-SqlRowsProvider = Callable[[dict[str, list[str]]], dict[str, object] | Any | None]
-SqlAllRowsProvider = Callable[[dict[str, list[str]]], dict[str, object] | Any | None]
-SqlRelationDetailsProvider = Callable[[str, dict[str, list[str]]], dict[str, object] | None]
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
 JsonResponse = Callable[[HTTPStatus, object], Any]
 XlsxResponse = Callable[[str, bytes], Any]
@@ -27,6 +30,7 @@ class OutputInvoiceCollectionApiRoutes:
         query_service: OutputInvoiceCollectionQueryService,
         lifecycle_service: OutputInvoiceCollectionLifecycleService,
         receipt_service: OutputInvoiceCollectionReceiptService,
+        read_service: OutputInvoiceCollectionReadApplicationService | None = None,
         sql_rows_provider: SqlRowsProvider | None = None,
         sql_all_rows_provider: SqlAllRowsProvider | None = None,
         sql_relation_details_provider: SqlRelationDetailsProvider | None = None,
@@ -39,9 +43,12 @@ class OutputInvoiceCollectionApiRoutes:
         self._query_service = query_service
         self._lifecycle_service = lifecycle_service
         self._receipt_service = receipt_service
-        self._sql_rows_provider = sql_rows_provider
-        self._sql_all_rows_provider = sql_all_rows_provider
-        self._sql_relation_details_provider = sql_relation_details_provider
+        self._read_service = read_service or OutputInvoiceCollectionReadApplicationService(
+            query_service=query_service,
+            sql_rows_provider=sql_rows_provider,
+            sql_all_rows_provider=sql_all_rows_provider,
+            sql_relation_details_provider=sql_relation_details_provider,
+        )
         self._resolve_read_session = resolve_read_session
         self._json_response = json_response
         self._xlsx_response = xlsx_response
@@ -191,135 +198,21 @@ class OutputInvoiceCollectionApiRoutes:
 
     def rows(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
         tenant_id = _tenant_id(session)
-        sql_payload = self._sql_rows_provider(query) if callable(self._sql_rows_provider) else None
-        if isinstance(sql_payload, dict):
-            status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-            if status_code == HTTPStatus.OK:
-                all_rows_payload = self._sql_all_rows_provider(query) if callable(self._sql_all_rows_provider) else None
-                sql_payload = self._overlay_rows_payload(
-                    sql_payload,
-                    tenant_id=tenant_id,
-                    summary_rows=list(all_rows_payload.get("rows") or []) if isinstance(all_rows_payload, dict) else None,
-                )
-            return status_code, sql_payload
-        payload = self._query_service.list_rows(
-            page=query.get("page", [1])[0],
-            page_size=query.get("page_size", [50])[0],
-            keyword=query.get("keyword", [None])[0],
-            invoice_date_from=query.get("invoice_date_from", [None])[0],
-            invoice_date_to=query.get("invoice_date_to", [None])[0],
-            month=query.get("month", [None])[0],
-            filters=query.get("filters", [None])[0],
-            sort_field=query.get("sort_field", ["invoice_date"])[0],
-            sort_direction=query.get("sort_direction", ["desc"])[0],
-            tenant_id=tenant_id,
-        )
-        return HTTPStatus.OK, payload
+        payload = self._read_service.rows(query, tenant_id=tenant_id)
+        return _read_status(payload), payload
 
     def filter_options(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
         tenant_id = _tenant_id(session)
-        sql_rows_payload = self._sql_all_rows_provider(query) if callable(self._sql_all_rows_provider) else None
-        if _is_response_like(sql_rows_payload):
-            return HTTPStatus.ACCEPTED, _response_like_payload(sql_rows_payload)
-        if isinstance(sql_rows_payload, dict):
-            if sql_rows_payload.get("read_model_status") == "refreshing":
-                sql_rows_payload["readModelStatus"] = (
-                    sql_rows_payload.get("readModelStatus")
-                    or sql_rows_payload.get("read_model_status")
-                    or "refreshing"
-                )
-                return HTTPStatus.ACCEPTED, sql_rows_payload
-            payload = self._query_service.filter_options_for_rows(
-                rows=list(sql_rows_payload.get("rows") or []),
-                keyword=query.get("keyword", [None])[0],
-                invoice_date_from=query.get("invoice_date_from", [None])[0],
-                invoice_date_to=query.get("invoice_date_to", [None])[0],
-                month=query.get("month", [None])[0],
-                filters=query.get("filters", [None])[0],
-                tenant_id=tenant_id,
-            )
-            payload["read_model_status"] = "fresh"
-            payload["read_model_scope_key"] = sql_rows_payload.get("read_model_scope_key")
-            payload["readModelStatus"] = "fresh"
-            return HTTPStatus.OK, payload
-        return HTTPStatus.OK, self._query_service.filter_options(
-            keyword=query.get("keyword", [None])[0],
-            invoice_date_from=query.get("invoice_date_from", [None])[0],
-            invoice_date_to=query.get("invoice_date_to", [None])[0],
-            month=query.get("month", [None])[0],
-            filters=query.get("filters", [None])[0],
-            tenant_id=tenant_id,
-        )
+        payload = self._read_service.filter_options(query, tenant_id=tenant_id)
+        return _read_status(payload), payload
 
     def export_preview(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[HTTPStatus, dict[str, Any]]:
         tenant_id = _tenant_id(session)
-        sql_rows_payload = self._sql_all_rows_provider(query) if callable(self._sql_all_rows_provider) else None
-        if _is_response_like(sql_rows_payload):
-            payload = _response_like_payload(sql_rows_payload)
-            payload["readModelStatus"] = payload.get("readModelStatus") or payload.get("read_model_status") or "refreshing"
-            return HTTPStatus.ACCEPTED, payload
-        if isinstance(sql_rows_payload, dict):
-            if sql_rows_payload.get("read_model_status") == "refreshing":
-                sql_rows_payload["readModelStatus"] = (
-                    sql_rows_payload.get("readModelStatus")
-                    or sql_rows_payload.get("read_model_status")
-                    or "refreshing"
-                )
-                return HTTPStatus.ACCEPTED, sql_rows_payload
-            rows = self._query_service.apply_lifecycle_overlays_to_rows(
-                [row for row in list(sql_rows_payload.get("rows") or []) if isinstance(row, dict)],
-                tenant_id=tenant_id,
-            )
-            return HTTPStatus.OK, self._query_service.export_preview_for_rows(rows=rows)
-        return HTTPStatus.OK, self._query_service.export_preview(
-            keyword=query.get("keyword", [None])[0],
-            invoice_date_from=query.get("invoice_date_from", [None])[0],
-            invoice_date_to=query.get("invoice_date_to", [None])[0],
-            month=query.get("month", [None])[0],
-            filters=query.get("filters", [None])[0],
-            sort_field=query.get("sort_field", ["invoice_date"])[0],
-            sort_direction=query.get("sort_direction", ["desc"])[0],
-            tenant_id=tenant_id,
-        )
+        payload = self._read_service.export_preview(query, tenant_id=tenant_id)
+        return _read_status(payload), payload
 
     def export(self, query: dict[str, list[str]], *, session: OARequestSession | None = None) -> tuple[str, bytes]:
-        tenant_id = _tenant_id(session)
-        sql_rows_payload = self._sql_all_rows_provider(query) if callable(self._sql_all_rows_provider) else None
-        if _is_response_like(sql_rows_payload):
-            raise OutputInvoiceCollectionError(
-                "output_invoice_collection_read_model_refreshing",
-                "销项发票收款情况数据正在刷新，请稍后重试导出。",
-                status_code=HTTPStatus.CONFLICT,
-                details=_response_like_payload(sql_rows_payload),
-            )
-        if isinstance(sql_rows_payload, dict):
-            if sql_rows_payload.get("read_model_status") == "refreshing":
-                sql_rows_payload["readModelStatus"] = (
-                    sql_rows_payload.get("readModelStatus")
-                    or sql_rows_payload.get("read_model_status")
-                    or "refreshing"
-                )
-                raise OutputInvoiceCollectionError(
-                    "output_invoice_collection_read_model_refreshing",
-                    "销项发票收款情况数据正在刷新，请稍后重试导出。",
-                    status_code=HTTPStatus.CONFLICT,
-                    details=sql_rows_payload,
-                )
-            rows = self._query_service.apply_lifecycle_overlays_to_rows(
-                [row for row in list(sql_rows_payload.get("rows") or []) if isinstance(row, dict)],
-                tenant_id=tenant_id,
-            )
-            return self._query_service.export_for_rows(rows)
-        return self._query_service.export(
-            keyword=query.get("keyword", [None])[0],
-            invoice_date_from=query.get("invoice_date_from", [None])[0],
-            invoice_date_to=query.get("invoice_date_to", [None])[0],
-            month=query.get("month", [None])[0],
-            filters=query.get("filters", [None])[0],
-            sort_field=query.get("sort_field", ["invoice_date"])[0],
-            sort_direction=query.get("sort_direction", ["desc"])[0],
-            tenant_id=tenant_id,
-        )
+        return self._read_service.export(query, tenant_id=_tenant_id(session))
 
     def status_rules(self, *, session: OARequestSession | None = None) -> dict[str, Any]:
         payload = self._query_service.status_rules()
@@ -342,14 +235,7 @@ class OutputInvoiceCollectionApiRoutes:
         *,
         session: OARequestSession | None = None,
     ) -> dict[str, Any]:
-        sql_payload = (
-            self._sql_relation_details_provider(row_id, query)
-            if callable(self._sql_relation_details_provider)
-            else None
-        )
-        if isinstance(sql_payload, dict):
-            return sql_payload
-        return self._query_service.row_relation_details(row_id, kind=query.get("kind", [""])[0])
+        return self._read_service.relation_details(row_id, query)
 
     def receipt_preview(self, payload: dict[str, Any], *, session: OARequestSession | None = None) -> dict[str, Any]:
         row_id = str(payload.get("rowId") or payload.get("row_id") or "").strip()
@@ -524,26 +410,6 @@ class OutputInvoiceCollectionApiRoutes:
         if not getattr(session, "can_admin_access", False):
             raise OutputInvoiceCollectionError("admin_only", "当前账户没有维护收据编号设置权限。", status_code=HTTPStatus.FORBIDDEN)
 
-    def _overlay_rows_payload(
-        self,
-        payload: dict[str, Any],
-        *,
-        tenant_id: str,
-        summary_rows: list[Any] | None = None,
-    ) -> dict[str, Any]:
-        rows = self._query_service.apply_lifecycle_overlays_to_rows(
-            [row for row in list(payload.get("rows") or []) if isinstance(row, dict)],
-            tenant_id=tenant_id,
-        )
-        result = dict(payload)
-        result["rows"] = rows
-        if summary_rows is not None:
-            typed_summary_rows = [row for row in summary_rows if isinstance(row, dict)]
-            result["summary"] = self._query_service.summary_for_rows(
-                self._query_service.apply_lifecycle_overlays_to_rows(typed_summary_rows, tenant_id=tenant_id)
-            )
-        return result
-
     def _json_read(
         self,
         headers: dict[str, str] | None,
@@ -650,19 +516,6 @@ class OutputInvoiceCollectionApiRoutes:
         return self._error_response(exc)
 
 
-def _is_response_like(value: Any) -> bool:
-    return hasattr(value, "status_code") and hasattr(value, "body")
-
-
-def _response_like_payload(value: Any) -> dict[str, Any]:
-    import json
-
-    try:
-        return json.loads(value.body)
-    except Exception:
-        return {"read_model_status": "refreshing"}
-
-
 def _actor_id(session: OARequestSession | None) -> str:
     return actor_id_for_session(session) if session is not None else "local"
 
@@ -677,3 +530,7 @@ def _trace_id(headers: dict[str, str] | None) -> str | None:
 
 def _idempotency_key(headers: dict[str, str] | None) -> str | None:
     return (headers or {}).get("idempotency-key") or (headers or {}).get("Idempotency-Key")
+
+
+def _read_status(payload: dict[str, Any]) -> HTTPStatus:
+    return HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK

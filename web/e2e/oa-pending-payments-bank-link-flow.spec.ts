@@ -84,7 +84,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
     const row = page.getByRole("row", { name: /进行中关联申请人/ });
     await expect(row).toBeVisible();
     await expect(row).toContainText("流程状态：进行中");
-    await expect(row).toContainText("待支付");
+    await expect(row).toContainText("未支付");
     await expect(row).toContainText("未写回");
     await expect(page.getByRole("button", { name: "关联支出流水" })).toBeDisabled();
 
@@ -268,7 +268,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       await page.getByRole("button", { name: "关闭关联支出流水抽屉" }).click();
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "关联支出流水" })).toHaveCount(0));
     });
-    await expect(row).toContainText("待支付");
+    await expect(row).toContainText("未支付");
     await expect(row).toContainText("未写回");
     await expect(row).not.toContainText("进行中关联供应商");
     expect(unexpectedRuntimeErrors(runtimeErrors, [/409 \(Conflict\)/])).toEqual([]);

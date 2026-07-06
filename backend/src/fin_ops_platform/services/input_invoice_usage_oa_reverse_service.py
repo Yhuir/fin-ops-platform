@@ -549,7 +549,6 @@ class InputInvoiceUsageOaReverseService:
         self._bump_version(batch, actor_id=actor_id, event_type="oa_reverse_draft_created", before_status=before_status, after_status=batch.status)
         self._repository.save_batch(batch)
         self._record_external_audit(batch, "oa_reverse_draft_created", actor_id=actor_id)
-        self._invalidate_read_models(batch, "input_invoice_usage_oa_reverse_draft_created")
         return self.batch_payload(batch)
 
     def revoke_oa_draft(
@@ -593,7 +592,6 @@ class InputInvoiceUsageOaReverseService:
         self._bump_version(batch, actor_id=actor_id, event_type="oa_reverse_draft_revoked", before_status=before_status, after_status=batch.status, reason=normalized_reason)
         self._repository.save_batch(batch)
         self._record_external_audit(batch, "oa_reverse_draft_revoked", actor_id=actor_id)
-        self._invalidate_read_models(batch, "input_invoice_usage_oa_reverse_draft_revoked")
         return self.batch_payload(batch)
 
     def refresh_oa_status(
@@ -638,7 +636,7 @@ class InputInvoiceUsageOaReverseService:
         self._repository.save_batch(batch)
         self._record_external_audit(batch, "oa_reverse_status_detected", actor_id=actor_id)
         self._invalidate_read_models(batch, "input_invoice_usage_oa_reverse_evidence_detected")
-        return self.batch_payload(batch)
+        return self.batch_payload(batch, include_write_targets=True)
 
     def manual_oa_status(
         self,
@@ -706,13 +704,12 @@ class InputInvoiceUsageOaReverseService:
         self._bump_version(batch, actor_id=actor_id, event_type=event_type, before_status=before_status, after_status=batch.status, reason=normalized_reason)
         self._repository.save_batch(batch)
         self._record_external_audit(batch, event_type, actor_id=actor_id)
-        self._invalidate_read_models(batch, "input_invoice_usage_oa_reverse_manual_status_changed")
         return self.batch_payload(batch)
 
     @staticmethod
-    def batch_payload(batch: InputInvoiceUsageOaReverseBatch) -> dict[str, object]:
+    def batch_payload(batch: InputInvoiceUsageOaReverseBatch, *, include_write_targets: bool = False) -> dict[str, object]:
         scope_keys = InputInvoiceUsageOaReverseService._batch_scope_keys(batch)
-        return {
+        payload: dict[str, object] = {
             "batchId": batch.batch_id,
             "status": batch.status,
             "version": batch.version,
@@ -744,12 +741,16 @@ class InputInvoiceUsageOaReverseService:
             "canRevoke": _can_revoke_oa_draft(batch),
             "canRefreshStatus": batch.status in DETECTION_STATUSES,
             "canManualStatus": batch.status in MANUAL_FALLBACK_STATUSES,
-            **write_target_envelope(
-                read_model_key="input_invoice_usage",
-                scope_keys=scope_keys,
-                fallback_scope_key="all",
-            ),
         }
+        if include_write_targets:
+            payload.update(
+                write_target_envelope(
+                    read_model_key="input_invoice_usage",
+                    scope_keys=scope_keys,
+                    fallback_scope_key="all",
+                )
+            )
+        return payload
 
     @staticmethod
     def _batch_scope_keys(batch: InputInvoiceUsageOaReverseBatch) -> list[str]:

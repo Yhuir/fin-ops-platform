@@ -83,7 +83,7 @@ Spec-first Browser e2e 审计入口：
 - `web/e2e/output-invoice-red-relation-fanout.spec.ts`：真实 Chromium 中验证销项收款红蓝票 relation 写入后重新读取 rows，并在 drawer 的已有依据中展示人工 relation source/evidence。
 - `web/e2e/input-invoice-relation-fanout.spec.ts`：真实 Chromium 中验证进项发票使用页面消费 relation distribution；未正式化前不驱动 `已支付`，Workbench confirm 后重新进入页面显示 linked 证据和 `已支付`，OA reverse drawer 中旧 candidate 兼容数据归入未关联；进项、OA pending、税金和成本下游成功节点都会检查无操作失败/同步失败/read model 失败残留。
 - `web/e2e/workbench-relations-tax-offset-fanout.spec.ts`：真实 Chromium 中先进入税金抵扣页确认 relation 影响前无目标进项计划行，再从 Workbench confirm，回到税金抵扣页验证重新请求 `/api/tax-offset`、显示 relation 影响后的 fresh 进项计划行且无读模型错误，并检查无成功后的错误残留。
-- `web/e2e/workbench-relations-oa-pending-fanout.spec.ts`：真实 Chromium 中先进入 OA 待付款确认未正式化匹配仍为 `支付少了`，再从 Workbench confirm，回到 OA 待付款验证 rows 重新读取、状态变为 `已支付` 并显示 `关联台已确认`，并检查无成功后的错误残留。
+- `web/e2e/workbench-relations-oa-pending-fanout.spec.ts`：真实 Chromium 中先进入 OA 待付款确认未正式化匹配仍为 `未支付`，再从 Workbench confirm，回到 OA 待付款验证 rows 重新读取、状态变为 `已支付` 并显示 `关联台已确认`，并检查无成功后的错误残留。
 - `web/e2e/workbench-withdraw-flow.spec.ts`：真实 Chromium 中先建立 paired group，再从关联台自身执行 withdraw preview/submit；断言 submit 带回 `operation_type`、`preview_id`、`expected_versions`，弹窗内 busy 锁定，等待 `workbench_relation` barrier 和 Workbench fresh refetch 后恢复 open group，并检查成功后无操作失败/同步失败/read model 失败残留。
 - `web/e2e/workbench-candidate-split-flow.spec.ts`：真实 Chromium 中从未配对自动建议点击任意 row，preview 判定内部兼容 operation `split_candidate`，submit 后等待 `workbench_relation` barrier 和 Workbench fresh refetch 并隐藏建议；该用例保护 automatic decision 不被误当作 active relation withdraw，不写 relation lifecycle，并检查成功后无错误残留。
 - `web/e2e/workbench-exception-flow.spec.ts`：真实 Chromium 中覆盖异常处理 apply/cancel 和 ignore/unignore 的 barrier/fresh refetch；每个成功节点都会检查无操作失败/同步失败/read model 失败残留。

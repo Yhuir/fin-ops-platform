@@ -274,7 +274,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "mark_output_invoice_collection_scope",
             "prune_output_invoice_collection_scope_shards",
         ),
-        query_owner="OutputInvoiceCollectionService",
+        query_owner="OutputInvoiceCollectionReadApplicationService",
         repository_owner="OutputInvoiceCollectionReadModelRepositoryPort",
         permission_owner="output_invoice_collection_api_session",
         test_owner="tests/test_output_invoice_collection_api.py",

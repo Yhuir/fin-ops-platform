@@ -41,6 +41,8 @@ class FakeDashboardConnection:
         if "from app.oa_applications" in normalized and "oa_records_count" in normalized:
             return {
                 "oa_records_count": 7,
+                "oa_records_completed_count": 5,
+                "oa_records_in_progress_count": 2,
                 "oa_items_count": 30,
                 "oa_records_latest_synced_at": datetime(2026, 5, 19, 11, 0, tzinfo=UTC),
                 "latest_successful_sync_at": datetime(2026, 5, 20, 10, 5, tzinfo=UTC),
@@ -157,6 +159,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 2)
         oa_sources = {row["key"]: row for row in payload["data_inventory"]["oa"]["sources"]}
         self.assertEqual(oa_sources["oa_records"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
+        self.assertEqual(oa_sources["oa_records_completed"]["count"], 5)
+        self.assertEqual(oa_sources["oa_records_in_progress"]["count"], 2)
         self.assertEqual(oa_sources["oa_items"]["count"], 30)
         self.assertEqual(oa_sources["oa_items"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
         import_events = payload["data_inventory"]["import_events"]

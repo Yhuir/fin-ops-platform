@@ -694,6 +694,46 @@ describe("Input invoice usage workflow drawers", () => {
     expect(await screen.findByText("SD-INV-001")).toBeInTheDocument();
   });
 
+  test("OA reverse drawer creates draft from current preview when the candidate set is unchanged", async () => {
+    const user = userEvent.setup();
+    const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } }));
+    const createDraftFromSelection = vi.fn(() => Promise.resolve({
+      batchId: "oa_reverse_batch_fast_create",
+      version: 2,
+      status: "oa_draft_created",
+      invoiceIds: ["inv-001", "inv-002"],
+      selectedInvoiceIds: ["inv-001", "inv-002"],
+      totalWithTax: "99.72",
+      targetApplicantCode: "chen_xiuyun",
+      targetApplicantName: "陈秀云",
+      invoices: [],
+      rejectedInvoices: [],
+      oaDraftId: "oa-draft-fast-create",
+      oaDraftUrl: "https://oa.example.test/draft/fast-create",
+      canConfirmSubmission: true,
+    }));
+
+    render(
+      <OaReverseWorkspaceDrawer
+        open
+        sourceFilters={[]}
+        selectedInvoiceIds={["inv-001", "inv-002"]}
+        loadPreview={loadPreview}
+        createDraftFromSelection={createDraftFromSelection}
+        onClose={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
+
+    await waitFor(() => expect(createDraftFromSelection).toHaveBeenCalledWith(expect.objectContaining({
+      previewId: previewPayload.previewId,
+      expectedPreviewHash: previewPayload.previewHash,
+      selectedInvoiceIds: ["inv-001", "inv-002"],
+    })));
+    expect(loadPreview).toHaveBeenCalledTimes(1);
+  });
+
   test("OA reverse draft confirmation stays open across parent rerenders until the user decides", async () => {
     const user = userEvent.setup();
     const loadPreview = vi.fn(() => Promise.resolve({
@@ -743,7 +783,7 @@ describe("Input invoice usage workflow drawers", () => {
       />,
     );
 
-    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(1));
     const confirmDialog = screen.getByRole("dialog", { name: "OA 草稿提交确认" });
     expect(within(confirmDialog).getByRole("button", { name: /我已在OA系统提交该草稿\s+OA正在进行中/ })).toBeInTheDocument();
     expect(within(confirmDialog).getByRole("button", { name: /OA提交内容需修改\s+删除本次提交内容/ })).toBeInTheDocument();
@@ -756,7 +796,7 @@ describe("Input invoice usage workflow drawers", () => {
       />,
     );
 
-    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("dialog", { name: "OA 草稿提交确认" })).toBeInTheDocument();
   });
 
@@ -997,6 +1037,9 @@ describe("Input invoice usage workflow drawers", () => {
       oaDraftUrl: null,
       canCreateDraft: true,
     }));
+    const onBatchChanged = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => new Promise<void>(() => undefined));
 
     render(
       <OaReverseWorkspaceDrawer
@@ -1006,6 +1049,7 @@ describe("Input invoice usage workflow drawers", () => {
         loadPreview={loadPreview}
         createDraftFromSelection={createDraftFromSelection}
         manualStatus={manualStatus}
+        onBatchChanged={onBatchChanged}
         onClose={() => undefined}
       />,
     );
@@ -1021,6 +1065,7 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.queryByRole("dialog", { name: "OA 草稿提交确认" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
     expect(screen.queryByText("oa_reverse_batch_not_submitted")).not.toBeInTheDocument();
+    expect(onBatchChanged).toHaveBeenCalledTimes(2);
   });
 
   test("OA reverse submitted tab renders compact business history without internal identifiers", async () => {
