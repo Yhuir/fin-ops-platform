@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+
 from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
@@ -190,6 +192,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         invoice = self._invoice("inv-postgres", "PG-001", vendor, total_with_tax="118.00")
         repository = RepositoryOnlyInvoiceFacts([invoice])
         service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(fact_repository=repository),
         )
 
@@ -212,6 +215,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         pair_service = WorkbenchPairRelationService()
         self._relation(pair_service, "case-postgres-1", [invoices[0].id, bank.id], amount_matched=True)
         service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(fact_repository=repository),
             relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
                 pair_service=pair_service,
@@ -235,6 +239,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         ]
         repository = RepositoryOnlyInvoiceFacts(invoices)
         service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(fact_repository=repository),
         )
 
@@ -373,7 +378,9 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         pair_service = WorkbenchPairRelationService()
         self._relation(pair_service, "case-chen", [chen_invoice.id, "oa-chen", chen_bank.id], amount_matched=True)
         self._relation(pair_service, "case-paid", [paid_invoice.id, "oa-paid", paid_bank.id], amount_matched=True)
-        self._relation(pair_service, "case-fallback", [fallback_invoice.id, "oa-fallback", fallback_bank.id], amount_matched=False)
+        self._relation(
+            pair_service, "case-fallback", [fallback_invoice.id, "oa-fallback", fallback_bank.id], amount_matched=False
+        )
         service = self._service(
             invoices=[fallback_invoice, paid_invoice, chen_invoice],
             transactions=[fallback_bank, paid_bank, chen_bank],
@@ -397,7 +404,9 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             self._oa("oa-split-b", "刘际涛", "2470.00"),
         ]
         pair_service = WorkbenchPairRelationService()
-        self._relation(pair_service, "case-invoice-paid", [invoice.id, "oa-split-a", "oa-split-b", bank.id], amount_matched=True)
+        self._relation(
+            pair_service, "case-invoice-paid", [invoice.id, "oa-split-a", "oa-split-b", bank.id], amount_matched=True
+        )
         service = self._service(
             invoices=[invoice],
             transactions=[bank],
@@ -443,6 +452,29 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["inv-wei"]["paymentStatus"]["code"], "offset_wei_dailian")
         self.assertEqual(rows["inv-wait"]["paymentStatus"]["code"], "waiting_payment")
 
+    def test_confirmed_multi_invoice_relation_collapses_to_one_payment_row(self) -> None:
+        vendor = self._counterparty("vendor", "云南城建物业运营集团")
+        first = self._invoice("inv-zhou-1", "26532000000021026521", vendor, total_with_tax="600.00")
+        second = self._invoice("inv-zhou-2", "15312761", vendor, total_with_tax="200.00")
+        oa_records = [self._oa("oa-zhou", "周洁莹", "800.00", project_name="云南溯源科技")]
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-zhou-group", [first.id, second.id, "oa-zhou"], amount_matched=True)
+        service = self._service(
+            invoices=[first, second],
+            pair_service=pair_service,
+            oa_projection=StaticOAProjection(oa_records),
+        )
+
+        payload = service.list_rows(page_size=20)
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
+        self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
+        self.assertEqual(row["oa"]["relationCount"], 1)
+        self.assertEqual(row["oa"]["amount"], "800.00")
+        self.assertEqual(row["paymentStatus"]["code"], "offset_zhou_jieying")
+
     def test_one_to_many_oa_and_bank_relations_include_deterministic_primary_and_all_summaries(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         invoice = self._invoice("inv-many", "9201", vendor, total_with_tax="100.00")
@@ -472,7 +504,9 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["oa"]["detailMode"], "list")
         self.assertEqual([summary["oaId"] for summary in row["oa"]["summaries"]], ["oa-exact", "oa-small"])
         self.assertEqual(row["bankTransactions"]["primaryBankTransactionId"], "bank-exact")
-        self.assertEqual([summary["bankTransactionId"] for summary in relation_detail["summaries"]], ["bank-exact", "bank-old"])
+        self.assertEqual(
+            [summary["bankTransactionId"] for summary in relation_detail["summaries"]], ["bank-exact", "bank-old"]
+        )
 
     def test_candidate_relations_are_displayed_without_marking_invoice_paid(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
@@ -514,6 +548,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             ],
         )
         service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(
                 existing_invoices=[invoice],
                 existing_transactions=[bank],
@@ -553,6 +588,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             oa_ids=[oa_1.id, oa_2.id],
         )
         service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(
                 existing_invoices=[invoice],
                 existing_transactions=[bank_1, bank_2],
@@ -595,6 +631,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             oa_ids=[oa_record.id],
         )
         service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(fact_repository=repository),
             relation_facade=relation_facade,
             oa_projection=StaticOAProjection([oa_record]),
@@ -661,6 +698,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             ],
         )
         service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(
                 existing_invoices=[invoice],
                 existing_transactions=[bank],
@@ -734,8 +772,18 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         ]
         pair_service = WorkbenchPairRelationService()
         self._relation(pair_service, "case-target", [target.id, "oa-target", target_bank.id], amount_matched=True)
-        self._relation(pair_service, "case-wrong-type", [same_applicant_wrong_type.id, "oa-wrong-type", wrong_type_bank.id], amount_matched=True)
-        self._relation(pair_service, "case-wrong-direction", [same_account_wrong_direction.id, "oa-wrong-direction", wrong_direction_bank.id], amount_matched=True)
+        self._relation(
+            pair_service,
+            "case-wrong-type",
+            [same_applicant_wrong_type.id, "oa-wrong-type", wrong_type_bank.id],
+            amount_matched=True,
+        )
+        self._relation(
+            pair_service,
+            "case-wrong-direction",
+            [same_account_wrong_direction.id, "oa-wrong-direction", wrong_direction_bank.id],
+            amount_matched=True,
+        )
         service = self._service(
             invoices=[same_account_wrong_direction, same_applicant_wrong_type, target],
             transactions=[wrong_direction_bank, wrong_type_bank, target_bank],
@@ -760,7 +808,9 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(bank["direction"], "outflow")
         self.assertEqual(bank["directionLabel"], "支出")
         fields = {field["field"]: field for field in options["fields"]}
-        self.assertIn({"value": "交通银行 3847", "label": "交通银行 3847", "count": 3}, fields["bank_account"]["options"])
+        self.assertIn(
+            {"value": "交通银行 3847", "label": "交通银行 3847", "count": 3}, fields["bank_account"]["options"]
+        )
         self.assertIn({"value": "outflow", "label": "支出", "count": 2}, fields["bank_direction"]["options"])
         self.assertIn({"value": "inflow", "label": "收入", "count": 1}, fields["bank_direction"]["options"])
 
@@ -882,7 +932,11 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         amount_matched: bool,
     ) -> None:
         row_types = [
-            "invoice" if row_id.startswith("inv") or row_id.startswith("invoice") else "bank" if row_id.startswith("bank") else "oa"
+            "invoice"
+            if row_id.startswith("inv") or row_id.startswith("invoice")
+            else "bank"
+            if row_id.startswith("bank")
+            else "oa"
             for row_id in row_ids
         ]
         pair_service.create_active_relation(
@@ -903,6 +957,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         oa_projection: object | None = None,
     ) -> InputInvoiceUsageQueryService:
         return InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(
                 existing_invoices=invoices,
                 existing_transactions=transactions or [],

@@ -1201,6 +1201,7 @@ describe("Input invoice usage workflow drawers", () => {
 
     await waitFor(() => expect(loadRules).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole("list", { name: "Sheet4 支付状态规则" })).toBeInTheDocument();
+    expect(screen.getByText("2 条规则 · 3 个待处理方向")).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Sheet4 支付状态规则" })).not.toBeInTheDocument();
     expect(await screen.findByText("待付款（自动识别有oa无流水）")).toBeInTheDocument();
     expect(screen.getByText("有发票、有 OA、无流水")).toBeInTheDocument();
@@ -1255,17 +1256,21 @@ describe("Input invoice usage workflow drawers", () => {
 
     expect(screen.queryByText(/版本\s*7/)).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "保存并刷新" })).toBeDisabled();
+    expect(screen.getByText("1 条规则 · 1 个待处理方向")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "还原" })).toBeDisabled();
     const ruleEditor = await screen.findByLabelText("原因文案");
     await user.clear(ruleEditor);
     await user.type(ruleEditor, "已更新规则");
+    await user.selectOptions(screen.getByLabelText("待付款 流水条件"), "any");
     await waitFor(() => expect(screen.getByRole("button", { name: "还原" })).toBeEnabled());
+    expect(screen.getByText("1 条规则 · 1 个待处理方向 · 未保存")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存并刷新" }));
 
     await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({
       expectedVersion: 7,
       rules: [expect.objectContaining({ description: "已更新规则", reason: "已更新规则", enabled: true })],
     })));
+    expect(saveRules.mock.calls[0][0].rules[0].conditions).toEqual({ hasOa: true });
     expect(saveRules.mock.calls[0][0].idempotencyKey).toMatch(/^input-invoice-usage-payment-rules-save:/);
     expect(await screen.findByText("规则已保存，正在刷新进项发票使用情况。")).toBeInTheDocument();
   });

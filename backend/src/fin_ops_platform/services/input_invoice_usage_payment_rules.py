@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
-import json
 from typing import Any, Callable, Protocol
-
 
 SETTINGS_KEY = "input_invoice_usage_payment_status_rules"
 DEFAULT_VERSION = 1
@@ -126,24 +125,6 @@ _SUPPORTED_APPLICANTS = {
     for rule in DEFAULT_RULES
     if str(rule.get("conditions", {}).get("applicantName") or "").strip()
 }
-
-
-class StaticInputInvoiceUsagePaymentRulesProvider:
-    def __init__(self, rules_payload: dict[str, Any] | None = None) -> None:
-        self._settings = normalize_payment_status_rules_settings(rules_payload)
-
-    def payment_status_rules_payload(self, *, can_save: bool = True) -> dict[str, Any]:
-        return public_payment_status_rules_payload(
-            self._settings,
-            read_only=True,
-            can_save=False,
-        )
-
-    def rules_source_version(self) -> int:
-        return int(self._settings["version"])
-
-    def evaluate(self, context: PaymentStatusEvaluationContext) -> dict[str, str]:
-        return evaluate_payment_status(self._settings, context)
 
 
 class AppSettingsInputInvoiceUsagePaymentRulesProvider:
@@ -302,7 +283,11 @@ def normalize_payment_status_rules_settings(value: Any) -> dict[str, Any]:
     raw_pending = raw.get("pendingDirections") if isinstance(raw.get("pendingDirections"), list) else raw.get("pending_directions")
     if not isinstance(raw_pending, list):
         raw_pending = DEFAULT_PENDING_DIRECTIONS
-    rules = _normalize_rules(raw_rules, require_complete=False)
+    rules = _normalize_rules(
+        raw_rules,
+        require_complete=False,
+        exact_conditions=_has_complete_rule_set(raw_rules),
+    )
     pending_directions = _normalize_pending_directions(raw_pending, require_complete=False)
     return {
         "version": version,
@@ -317,8 +302,18 @@ def normalize_payment_status_rules_update(
     *,
     current_settings: dict[str, Any],
 ) -> dict[str, Any]:
+    current_rules_by_id = {
+        str(rule.get("id")): rule
+        for rule in current_settings.get("rules", [])
+        if isinstance(rule, dict) and str(rule.get("id") or "").strip()
+    }
     return {
-        "rules": _normalize_rules(payload.get("rules"), require_complete=True),
+        "rules": _normalize_rules(
+            payload.get("rules"),
+            require_complete=True,
+            current_rules_by_id=current_rules_by_id,
+            exact_conditions=True,
+        ),
         "pendingDirections": _normalize_pending_directions(payload.get("pendingDirections"), require_complete=True),
     }
 
@@ -359,7 +354,13 @@ def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEval
     return _status_payload(fallback or _DEFAULT_RULES_BY_ID["pending_default"])
 
 
-def _normalize_rules(value: Any, *, require_complete: bool) -> list[dict[str, Any]]:
+def _normalize_rules(
+    value: Any,
+    *,
+    require_complete: bool,
+    current_rules_by_id: dict[str, dict[str, Any]] | None = None,
+    exact_conditions: bool = False,
+) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         if require_complete:
             raise InputInvoiceUsagePaymentRulesValidationError(
@@ -399,7 +400,12 @@ def _normalize_rules(value: Any, *, require_complete: bool) -> list[dict[str, An
                 details={"priority": priority},
             )
         seen_priorities.add(priority)
-        conditions = _normalize_conditions(rule_id, item.get("conditions", default.get("conditions")))
+        current_rule = (current_rules_by_id or {}).get(rule_id) if exact_conditions else None
+        if exact_conditions and "conditions" not in item and isinstance(current_rule, dict):
+            conditions_value = current_rule.get("conditions", default.get("conditions"))
+        else:
+            conditions_value = item.get("conditions", default.get("conditions"))
+        conditions = _normalize_conditions(rule_id, conditions_value, exact=exact_conditions)
         normalized.append(
             {
                 "id": rule_id,
@@ -431,24 +437,64 @@ def _normalize_rules(value: Any, *, require_complete: bool) -> list[dict[str, An
     return sorted(normalized, key=lambda item: (int(item["priority"]), str(item["id"])))
 
 
-def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
+def _has_complete_rule_set(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    rule_ids = {
+        str(item.get("id") or "").strip()
+        for item in value
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    return rule_ids == set(_DEFAULT_RULES_BY_ID)
+
+
+def _normalize_conditions(rule_id: str, value: Any, *, exact: bool = False) -> dict[str, Any]:
     default_conditions = deepcopy(_DEFAULT_RULES_BY_ID[rule_id].get("conditions") or {})
     conditions = value if isinstance(value, dict) else default_conditions
     applicant = str(conditions.get("applicantName") or "").strip()
     default_applicant = str(default_conditions.get("applicantName") or "").strip()
-    if applicant:
-        if applicant not in _SUPPORTED_APPLICANTS or (default_applicant and applicant != default_applicant) or (not default_applicant):
+    if default_applicant:
+        if applicant and applicant != default_applicant:
             raise InputInvoiceUsagePaymentRulesValidationError(
                 "unsupported_input_invoice_usage_payment_rule_constraint",
                 "Unsupported applicant constraint for input invoice usage payment rule.",
                 details={"ruleId": rule_id, "applicantName": applicant},
             )
-    normalized = deepcopy(default_conditions)
+        if exact and not applicant:
+            raise InputInvoiceUsagePaymentRulesValidationError(
+                "unsupported_input_invoice_usage_payment_rule_constraint",
+                "Unsupported applicant constraint for input invoice usage payment rule.",
+                details={"ruleId": rule_id, "applicantName": applicant},
+            )
+    elif applicant:
+        raise InputInvoiceUsagePaymentRulesValidationError(
+            "unsupported_input_invoice_usage_payment_rule_constraint",
+            "Unsupported applicant constraint for input invoice usage payment rule.",
+            details={"ruleId": rule_id, "applicantName": applicant},
+        )
+    if conditions.get("fallback") is True and default_conditions.get("fallback") is not True:
+        raise InputInvoiceUsagePaymentRulesValidationError(
+            "unsupported_input_invoice_usage_payment_rule_constraint",
+            "Only the pending default rule can be configured as fallback.",
+            details={"ruleId": rule_id},
+        )
+    normalized = {} if exact else deepcopy(default_conditions)
     for key in ("hasOa", "hasBank", "fullyMatched", "invoiceOaAmountMatched", "fallback"):
         if key in conditions:
             normalized[key] = bool(conditions[key])
-    if applicant:
-        normalized["applicantName"] = applicant
+    if default_conditions.get("fallback") is True:
+        normalized["fallback"] = True
+    if default_applicant:
+        normalized["applicantName"] = default_applicant
+    if normalized.get("fallback") is not True and not any(
+        key in normalized
+        for key in ("hasOa", "hasBank", "fullyMatched", "invoiceOaAmountMatched", "applicantName")
+    ):
+        raise InputInvoiceUsagePaymentRulesValidationError(
+            "empty_input_invoice_usage_payment_rule_conditions",
+            "Payment status rule conditions cannot be empty.",
+            details={"ruleId": rule_id},
+        )
     return normalized
 
 

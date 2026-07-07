@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from copy import deepcopy
-from datetime import date
-from datetime import datetime
-from decimal import Decimal, InvalidOperation
 import json
 import logging
 import re
+from collections.abc import Mapping
+from copy import deepcopy
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import unquote
 from uuid import uuid4
@@ -439,26 +438,36 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             }
         rows = self._connection.fetch_all(
             """
-            select distinct on (invoice_id)
-                   invoice_id, scope_key, source_versions, payload, raw_payload
+            select invoice_id, scope_key, source_versions, payload, raw_payload
             from read_model.input_invoice_usage_rows
             where invoice_id = any(%s)
-            order by invoice_id, generated_at desc, scope_key desc, row_id
+               or exists (
+                    select 1
+                    from jsonb_array_elements(
+                        case
+                            when jsonb_typeof(payload->'invoiceRelations'->'summaries') = 'array'
+                            then payload->'invoiceRelations'->'summaries'
+                            else '[]'::jsonb
+                        end
+                    ) as member
+                    where member->>'invoiceId' = any(%s)
+               )
+            order by generated_at desc, scope_key desc, row_id
             """,
-            (normalized_ids,),
+            (normalized_ids, normalized_ids),
         )
         rows_by_invoice_id: dict[str, dict[str, Any]] = {}
         source_versions_by_scope: dict[str, dict[str, Any]] = {}
+        requested_ids = set(normalized_ids)
         for row in rows:
             if not isinstance(row, dict):
                 continue
             payload = _read_model_payload(row)
             if not isinstance(payload, dict):
                 continue
-            invoice_id = text(row.get("invoice_id")) or text(payload.get("invoiceId"))
-            if not invoice_id:
-                continue
-            rows_by_invoice_id[invoice_id] = payload
+            for invoice_id in _input_invoice_usage_payload_invoice_ids(row, payload):
+                if invoice_id in requested_ids and invoice_id not in rows_by_invoice_id:
+                    rows_by_invoice_id[invoice_id] = payload
             scope_key = text(row.get("scope_key")) or "all"
             source_versions_by_scope.setdefault(
                 scope_key,
@@ -499,7 +508,17 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             if scope_status != "fresh":
                 refresh_status = scope_status
                 break
-        ordered_rows = [rows_by_invoice_id[invoice_id] for invoice_id in normalized_ids if invoice_id in rows_by_invoice_id]
+        ordered_rows = []
+        seen_row_ids: set[str] = set()
+        for invoice_id in normalized_ids:
+            row = rows_by_invoice_id.get(invoice_id)
+            if row is None:
+                continue
+            row_id = text(row.get("id")) or invoice_id
+            if row_id in seen_row_ids:
+                continue
+            seen_row_ids.add(row_id)
+            ordered_rows.append(row)
         return {
             "rows": ordered_rows,
             "missing_invoice_ids": missing_invoice_ids,
@@ -13220,6 +13239,25 @@ def _read_model_payload(row: dict[str, Any], *, drop_rebuildable_rows: bool = Fa
     if drop_rebuildable_rows and isinstance(payload, dict) and payload.get("rebuildable") is True:
         return None
     return without_keys(payload, {"rebuildable"})
+
+
+def _input_invoice_usage_payload_invoice_ids(row: dict[str, Any], payload: dict[str, Any]) -> list[str]:
+    invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else {}
+    relation_payload = payload.get("invoiceRelations") if isinstance(payload.get("invoiceRelations"), dict) else {}
+    summaries = relation_payload.get("summaries") if isinstance(relation_payload.get("summaries"), list) else []
+    return _dedupe_preserve_order(
+        [
+            row.get("invoice_id"),
+            payload.get("invoiceId"),
+            invoice.get("primaryInvoiceId"),
+            invoice.get("id"),
+            *[
+                summary.get("invoiceId")
+                for summary in summaries
+                if isinstance(summary, dict)
+            ],
+        ]
+    )
 
 
 def _workbench_reconciliation_row_types(payload: dict[str, Any]) -> list[str]:

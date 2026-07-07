@@ -1,22 +1,24 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from decimal import Decimal
+from pathlib import Path
 
-from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
+    PaymentStatusEvaluationContext,
 )
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+
+from tests.app_test_support import build_local_state_application as build_application
 from tests.test_pending_invoice_service import FakeOAProjection, FakeWorkbenchRelationFacade
 
 
@@ -159,6 +161,22 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
                     },
                     actor_id="finance-owner",
                 )
+            missing_applicant_rules = [dict(rule) for rule in current["rules"]]
+            missing_applicant_rules[2]["conditions"] = {
+                "hasOa": True,
+                "hasBank": False,
+                "invoiceOaAmountMatched": True,
+            }
+            with self.assertRaises(AppSettingsValidationError) as missing_applicant_context:
+                app._app_settings_service.update_input_invoice_usage_payment_status_rules(
+                    {
+                        "expectedVersion": first["version"],
+                        "idempotencyKey": "rules-save-missing-applicant",
+                        "rules": missing_applicant_rules,
+                        "pendingDirections": first["pendingDirections"],
+                    },
+                    actor_id="finance-owner",
+                )
             with self.assertRaises(AppSettingsValidationError) as idempotency_context:
                 app._app_settings_service.update_input_invoice_usage_payment_status_rules(
                     {
@@ -171,7 +189,42 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
         self.assertEqual(repeated, first)
         self.assertEqual(stale_context.exception.error_code, "input_invoice_usage_payment_rules_version_conflict")
         self.assertEqual(invalid_context.exception.error_code, "unsupported_input_invoice_usage_payment_rule_constraint")
+        self.assertEqual(missing_applicant_context.exception.error_code, "unsupported_input_invoice_usage_payment_rule_constraint")
         self.assertEqual(idempotency_context.exception.error_code, "input_invoice_usage_payment_rules_idempotency_conflict")
+
+    def test_rules_update_persists_exact_boolean_conditions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            app = build_application(data_dir=data_dir)
+            current = app._app_settings_service.get_input_invoice_usage_payment_status_rules_payload(can_save=True)
+            next_rules = json.loads(json.dumps(current["rules"]))
+            next_rules[1]["conditions"] = {"hasOa": True, "hasBank": True}
+
+            updated = app._app_settings_service.update_input_invoice_usage_payment_status_rules(
+                {
+                    "expectedVersion": current["version"],
+                    "idempotencyKey": "rules-save-exact-conditions",
+                    "rules": next_rules,
+                    "pendingDirections": current["pendingDirections"],
+                },
+                actor_id="finance-owner",
+            )
+            reloaded_app = build_application(data_dir=data_dir)
+            reloaded = reloaded_app._app_settings_service.get_input_invoice_usage_payment_status_rules_payload(can_save=True)
+            provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=reloaded_app._state_store)
+            status = provider.evaluate(
+                PaymentStatusEvaluationContext(
+                    has_oa=True,
+                    has_bank=True,
+                    applicant_name="李四",
+                    fully_matched=False,
+                    invoice_oa_amount_matched=False,
+                )
+            )
+
+        self.assertNotIn("fullyMatched", updated["rules"][1]["conditions"])
+        self.assertNotIn("fullyMatched", reloaded["rules"][1]["conditions"])
+        self.assertEqual(status["code"], "paid")
 
     def test_query_service_uses_injected_rules_provider_for_payload_and_row_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

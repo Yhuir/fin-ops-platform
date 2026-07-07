@@ -1,22 +1,20 @@
 from __future__ import annotations
 
+import json
+import tempfile
+import unittest
 from decimal import Decimal
 from http import HTTPStatus
 from io import BytesIO
-import json
 from pathlib import Path
-import tempfile
-import unittest
 from urllib.parse import quote
 
-from openpyxl import load_workbook
-
 from fin_ops_platform.app.server import Application
-from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import InputInvoiceUsageOaReverseStatus
+from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_read_model_detail_service import (
     InputInvoiceUsageReadModelDetailService,
 )
@@ -27,6 +25,9 @@ from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.target_oa_applicant_token_provider import TargetOaApplicantTokenProvider
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
+from openpyxl import load_workbook
+
+from tests.app_test_support import build_local_state_application as build_application
 from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
@@ -138,6 +139,17 @@ class RecordingReadModelRefreshQueue:
         )
 
 
+def _input_invoice_usage_relation_details_response(
+    app: Application,
+    row_id: str,
+    query: dict[str, list[str]],
+):
+    payload = app._get_input_invoice_usage_relation_details_from_sql_read_model(row_id, query)
+    assert payload is not None
+    status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+    return Application._json_response(status, payload)
+
+
 class InputInvoiceUsageApiTests(unittest.TestCase):
     def test_rows_route_returns_aggregated_rows_with_filters_sort_and_pagination(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -239,7 +251,9 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
                 ),
             )
 
-            rows_response = app.handle_request("GET", "/api/input-invoice-usage/rows?sort_field=invoice_no&sort_direction=asc")
+            rows_response = app.handle_request(
+                "GET", "/api/input-invoice-usage/rows?sort_field=invoice_no&sort_direction=asc"
+            )
             rows_payload = json.loads(rows_response.body)
             row = next(item for item in rows_payload["rows"] if item["invoiceId"] == invoice_a.id)
             row_id = row["id"]
@@ -294,7 +308,8 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             repository = StaticInputInvoiceUsageReadRepository(row)
             app._input_invoice_usage_sql_read_repository = repository
             app._input_invoice_usage_query_service = FailingInputInvoiceUsageQueryService(
-                import_service=ImportNormalizationService()
+                payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
+                import_service=ImportNormalizationService(),
             )
 
             response = app.handle_request(
@@ -318,10 +333,12 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._input_invoice_usage_sql_read_repository = None
         app._input_invoice_usage_query_service = FailingInputInvoiceUsageQueryService(
-            import_service=ImportNormalizationService()
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
+            import_service=ImportNormalizationService(),
         )
 
-        response = app._handle_api_input_invoice_usage_relation_details(
+        response = _input_invoice_usage_relation_details_response(
+            app,
             "usage-row-missing-repository",
             {"kind": ["oa"]},
         )
@@ -1130,6 +1147,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         app._import_service = import_service
         app._workbench_pair_relation_service = relation_service
         app._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=import_service,
             relation_facade=relation_facade
             or FakeWorkbenchRelationFacade.from_pair_service(

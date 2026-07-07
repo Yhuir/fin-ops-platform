@@ -17,6 +17,8 @@
 - 进项发票使用情况页面列表、筛选、明细、OA 反提和使用规则。
 - `input_invoice_usage` scoped read model。
 - 与 invoice usage collection worker 的 event 合同。
+- rows 聚合单位必须是 confirmed/linked 配对关系组优先；同一配对关系组内多张进项发票、多条 OA 或多条流水只能生成一行，行内展示合计和 `+N` 明细。没有 confirmed relation group 的发票才按发票 identity 聚合兜底。
+- `InputInvoiceUsageQueryService` 必须显式接收支付状态规则 provider 或上层 lifecycle policy；生产 `Application` 和 SQL projection 必须注入 app-settings backed provider，`InvoiceLifecyclePolicy` 不提供进项支付规则默认值，生产模块不得保留静态支付规则 provider，禁止静默回退静态规则污染支付状态链路；规则设置完整保存时以提交的 `conditions` 为准，读取历史配置时才补默认条件。
 - OA reverse evidence detected 后通过 relation command 写入真正影响 rows 的事实，并返回 `input_invoice_usage` write target envelope；创建 OA 草稿、撤回本地草稿绑定、手动确认 submitted/not_submitted 只修改本地 batch 状态，不污染 rows read model。
 
 ### 不负责
@@ -40,7 +42,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 使用情况 rows/details | 前端页面 | fresh/status 可见；rows summary 的 `invoiceCount` 按唯一进项发票 ID 统计并驱动表头 `进项票 N`，`pagination.total` 仍是表格行数/配对组行数 |
+| 使用情况 rows/details | 前端页面 | fresh/status 可见；confirmed relation group 是优先行边界，组内发票/OA/流水各显示一次合计与 `+N`，未 linked 发票按 identity 兜底；rows summary 的 `invoiceCount` 按唯一进项发票 ID 统计并驱动表头 `进项票 N`，`pagination.total` 仍是表格行数/配对组行数 |
 | 支付状态 | rows/filter/export/read model | 只消费 `workbench_relation` distribution 中 confirmed/linked 关系；多 OA/多流水用 linked 合计与发票价税合计比对；无 active relation 或历史 candidate 兼容值不参与 `已付款` 判断 |
 | OA reverse 本地状态 | API/OA drawer | draft/staged/submitted/not_submitted 只落 `app.input_invoice_usage_oa_reverse_batches`，前端立即释放按钮；不等待 `input_invoice_usage` operation barrier |
 | OA reverse relation 结果 | Workbench relation / API / operation barrier | evidence detected 写入 relation 后触发 dirty scope，并返回 `read_model_key=input_invoice_usage`、`scope_key=<invoice month>` |

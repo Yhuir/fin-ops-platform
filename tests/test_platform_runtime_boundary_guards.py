@@ -2864,6 +2864,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "OutputInvoiceCollectionApiRoutes")
+        factory_source = _function_source(server_tree, server_source, "_output_invoice_collection_routes")
         read_application_source = (SERVICES_ROOT / "output_invoice_collection_read_application_service.py").read_text(encoding="utf-8")
         fresh_gate_source = (SERVICES_ROOT / "output_invoice_collection_read_model_fresh_gate_service.py").read_text(encoding="utf-8")
         violations: list[str] = []
@@ -2893,6 +2894,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def _relation_details_response(",
             "_idempotency_key(headers)",
             "_trace_id(headers)",
+            "allow_live_fallback=allow_live_fallback",
         ):
             if required not in route_class:
                 violations.append(f"Output collection route owner is missing {required}")
@@ -2914,9 +2916,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def export_preview(",
             "def export(",
             "def relation_details(",
+            "_allow_live_fallback",
         ):
             if required not in read_application_source:
                 violations.append(f"Output collection read application service is missing {required}")
+        if "allow_live_fallback=not self._requires_sql_read_model_runtime()" not in factory_source:
+            violations.append("Application output collection route factory must disable live fallback in SQL read model runtime")
         if "_output_invoice_collection_routes().route(method, route_path, query, body, headers)" not in server_source:
             violations.append("Application does not dispatch output collection read routes through route owner")
         if "def _output_invoice_collection_xlsx_response(" not in server_source:
@@ -2958,6 +2963,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_output_invoice_collection_sql_payload_requires_schema_refresh",
             "_invoice_relation_scope_key_from_query",
             "_invoice_relation_refreshing_payload",
+            "_compat_output_invoice_collections_rows_response",
         ):
             if _function_source(server_tree, server_source, removed_handler):
                 violations.append(f"server.py still owns output collection route callback {removed_handler}")
@@ -3807,12 +3813,37 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "InputInvoiceUsageApiRoutes")
+        service_path = SERVICES_ROOT / "input_invoice_usage_service.py"
+        service_source = service_path.read_text(encoding="utf-8")
+        service_tree = _parse(service_path)
+        service_class = _class_source(service_tree, service_source, "InputInvoiceUsageQueryService")
+        payment_rules_source = (SERVICES_ROOT / "input_invoice_usage_payment_rules.py").read_text(encoding="utf-8")
+        lifecycle_policy_source = (SERVICES_ROOT / "invoice_lifecycle_policy.py").read_text(encoding="utf-8")
         fresh_gate_source = (SERVICES_ROOT / "input_invoice_usage_read_model_fresh_gate_service.py").read_text(encoding="utf-8")
         factory_source = _function_source(server_tree, server_source, "_input_invoice_usage_routes")
+        service_factory_source = _function_source(server_tree, server_source, "_input_invoice_usage_service")
 
         violations: list[str] = []
         if not route_class:
             violations.append("InputInvoiceUsageApiRoutes is missing")
+        if not service_class:
+            violations.append("InputInvoiceUsageQueryService is missing")
+        if "StaticInputInvoiceUsagePaymentRulesProvider" in service_source:
+            violations.append("Input usage query service still imports static payment rules fallback")
+        if "StaticInputInvoiceUsagePaymentRulesProvider" in payment_rules_source:
+            violations.append("Input usage payment rules module still defines static payment rules provider")
+        if "StaticInputInvoiceUsagePaymentRulesProvider" in lifecycle_policy_source:
+            violations.append("Invoice lifecycle policy still imports static input payment rules fallback")
+        for required in (
+            "payment_rules_provider is required for input invoice usage payment status rules",
+            "input_invoice_usage_payment_rules_provider_required",
+        ):
+            if required not in service_class:
+                violations.append(f"Input usage query service is missing explicit payment rules guard {required}")
+        if "input_payment_rules_provider is required for input invoice usage payment evaluation" not in lifecycle_policy_source:
+            violations.append("Invoice lifecycle policy is missing explicit input payment rules provider guard")
+        if "payment_rules_provider=self._input_invoice_usage_payment_rules_provider()" not in service_factory_source:
+            violations.append("Application input usage service factory must inject app-settings payment rules provider")
         for forbidden in (
             "Application",
             "_handle_api_input_invoice_usage_rows",
@@ -3842,6 +3873,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "payment_rules_error_response=self._input_invoice_usage_payment_rules_error_response",
             "json_response=self._json_response",
             "input_usage_error_response=self._input_invoice_usage_error_response",
+            "allow_live_fallback=not self._requires_sql_read_model_runtime()",
         ):
             if required not in factory_source:
                 violations.append(f"Application input usage route factory is missing explicit port {required}")
@@ -3859,6 +3891,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "relation_details",
             "export_preview",
             "def export(",
+            "_allow_live_fallback",
         ):
             if required not in route_class:
                 violations.append(f"Input usage route owner is missing route/method marker {required}")
@@ -3900,6 +3933,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def _handle_api_input_invoice_usage_oa_detail(",
             "def _handle_api_input_invoice_usage_relation_details(",
             "def _handle_api_input_invoice_usage_payment_status_rules(",
+            "def _compat_input_invoice_usage_rows_response(",
+            "def _compat_input_invoice_usage_relation_details_response(",
         ):
             if removed_handler in server_source:
                 violations.append(f"server.py still owns removed input usage read handler {removed_handler}")

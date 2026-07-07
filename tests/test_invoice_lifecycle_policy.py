@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
-from fin_ops_platform.services.input_invoice_usage_payment_rules import StaticInputInvoiceUsagePaymentRulesProvider
+from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 
 
@@ -24,7 +24,7 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
         self.assertEqual(status["primary_action"], "view_relation")
 
     def test_unifies_input_invoice_payment_status_with_configurable_rules(self) -> None:
-        policy = InvoiceLifecyclePolicy(input_payment_rules_provider=StaticInputInvoiceUsagePaymentRulesProvider())
+        policy = InvoiceLifecyclePolicy(input_payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None))
 
         status = policy.evaluate_input_invoice_payment(
             has_oa=True,
@@ -36,6 +36,21 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
 
         self.assertEqual(status["code"], "paid")
         self.assertEqual(status["label"], "已付款")
+
+    def test_input_invoice_payment_requires_explicit_rules_provider(self) -> None:
+        policy = InvoiceLifecyclePolicy()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "input_payment_rules_provider is required for input invoice usage payment evaluation",
+        ):
+            policy.evaluate_input_invoice_payment(
+                has_oa=True,
+                has_bank=True,
+                applicant_name="田孟维",
+                fully_matched=True,
+                invoice_oa_amount_matched=True,
+            )
 
     def test_unifies_output_invoice_collection_status(self) -> None:
         policy = InvoiceLifecyclePolicy()

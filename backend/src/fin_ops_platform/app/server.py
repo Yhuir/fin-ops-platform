@@ -667,9 +667,6 @@ ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
 class Application:
     def __getattr__(self, name: str) -> object:
         compatibility_handlers = {
-            "_handle_api_input_invoice_usage_rows": self._compat_input_invoice_usage_rows_response,
-            "_handle_api_input_invoice_usage_relation_details": self._compat_input_invoice_usage_relation_details_response,
-            "_handle_api_output_invoice_collections_rows": self._compat_output_invoice_collections_rows_response,
             "_handle_api_tax_offset": self._compat_tax_offset_response,
             "_handle_api_tax_offset_summary": self._compat_tax_offset_summary_response,
             "_handle_api_tax_offset_calculate": self._compat_tax_offset_calculate_response,
@@ -6205,6 +6202,7 @@ class Application:
             payment_rules_error_response=self._input_invoice_usage_payment_rules_error_response,
             json_response=self._json_response,
             input_usage_error_response=self._input_invoice_usage_error_response,
+            allow_live_fallback=not self._requires_sql_read_model_runtime(),
         )
         self._input_invoice_usage_api_routes = routes
         return routes
@@ -6682,6 +6680,7 @@ class Application:
             sql_rows_provider=self._get_output_invoice_collection_rows_from_sql_read_model,
             sql_all_rows_provider=self._get_output_invoice_collection_all_rows_from_sql_read_model,
             sql_relation_details_provider=self._get_output_invoice_collection_relation_details_from_sql_read_model,
+            allow_live_fallback=not self._requires_sql_read_model_runtime(),
             resolve_read_session=self._resolve_output_invoice_collection_read_session,
             json_response=self._json_response,
             xlsx_response=self._output_invoice_collection_xlsx_response,
@@ -6762,72 +6761,6 @@ class Application:
         query: dict[str, list[str]],
     ) -> dict[str, object] | None:
         return self._output_invoice_collection_read_model_fresh_gate().relation_details(row_id, query)
-
-    def _compat_input_invoice_usage_rows_response(self, query: dict[str, list[str]]) -> Response:
-        """Compatibility HTTP mapper for route-owner extraction tests."""
-        try:
-            sql_payload = self._get_input_invoice_usage_rows_from_sql_read_model(query)
-            if sql_payload is not None:
-                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-                return self._json_response(status, sql_payload)
-            query_service = getattr(self, "_input_invoice_usage_query_service", None)
-            if query_service is None:
-                query_service = self._input_invoice_usage_service()
-            payload = query_service.list_rows(
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
-                keyword=query.get("keyword", [None])[0],
-                invoice_date_from=query.get("invoice_date_from", [None])[0],
-                invoice_date_to=query.get("invoice_date_to", [None])[0],
-                month=query.get("month", [None])[0],
-                filters=query.get("filters", [None])[0],
-                sort_field=query.get("sort_field", ["invoice_date"])[0],
-                sort_direction=query.get("sort_direction", ["desc"])[0],
-            )
-        except InputInvoiceUsageError as exc:
-            return self._input_invoice_usage_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _compat_input_invoice_usage_relation_details_response(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-    ) -> Response:
-        """Compatibility HTTP mapper for route-owner extraction tests."""
-        try:
-            sql_payload = self._get_input_invoice_usage_relation_details_from_sql_read_model(row_id, query)
-            if sql_payload is not None:
-                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-                return self._json_response(status, sql_payload)
-            query_service = getattr(self, "_input_invoice_usage_query_service", None)
-            if query_service is None:
-                query_service = self._input_invoice_usage_service()
-            payload = query_service.row_relation_details(row_id, kind=query.get("kind", [""])[0])
-        except InputInvoiceUsageError as exc:
-            return self._input_invoice_usage_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _compat_output_invoice_collections_rows_response(self, query: dict[str, list[str]]) -> Response:
-        """Compatibility HTTP mapper for route-owner extraction tests."""
-        try:
-            sql_payload = self._get_output_invoice_collection_rows_from_sql_read_model(query)
-            if sql_payload is not None:
-                status = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
-                return self._json_response(status, sql_payload)
-            payload = self._output_invoice_collection_service().list_rows(
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
-                keyword=query.get("keyword", [None])[0],
-                invoice_date_from=query.get("invoice_date_from", [None])[0],
-                invoice_date_to=query.get("invoice_date_to", [None])[0],
-                month=query.get("month", [None])[0],
-                filters=query.get("filters", [None])[0],
-                sort_field=query.get("sort_field", ["invoice_date"])[0],
-                sort_direction=query.get("sort_direction", ["desc"])[0],
-            )
-        except OutputInvoiceCollectionError as exc:
-            return self._output_invoice_collection_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
 
     def _input_invoice_usage_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         source_versions = input_invoice_usage_source_versions(

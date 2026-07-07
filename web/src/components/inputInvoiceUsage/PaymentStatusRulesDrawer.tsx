@@ -29,6 +29,20 @@ export type PaymentStatusRulesPayload = {
   pendingDirections: Array<{ code?: string; label: string }>;
 };
 
+type RuleConditionKey = "hasOa" | "hasBank" | "fullyMatched" | "invoiceOaAmountMatched";
+
+const CONDITION_FIELDS: Array<{
+  key: RuleConditionKey;
+  label: string;
+  trueLabel: string;
+  falseLabel: string;
+}> = [
+  { key: "hasOa", label: "OA", trueLabel: "需要 OA", falseLabel: "无 OA" },
+  { key: "hasBank", label: "流水", trueLabel: "需要流水", falseLabel: "无流水" },
+  { key: "fullyMatched", label: "完全匹配", trueLabel: "必须完全匹配", falseLabel: "不得完全匹配" },
+  { key: "invoiceOaAmountMatched", label: "发票/OA 金额", trueLabel: "金额必须匹配", falseLabel: "金额不得匹配" },
+];
+
 type PaymentStatusRulesDrawerProps = {
   open: boolean;
   loadRules: () => Promise<PaymentStatusRulesPayload>;
@@ -220,6 +234,9 @@ export default function PaymentStatusRulesDrawer({
             <section className="input-invoice-usage-payment-rules-panel">
               <div className="input-invoice-usage-payment-rules-panel__header">
                 <h3>支付状态规则</h3>
+                <span className="input-invoice-usage-payment-rules-panel__meta">
+                  {draftRules.length} 条规则 · {draftPendingDirections.length} 个待处理方向{dirty ? " · 未保存" : ""}
+                </span>
               </div>
               <div aria-label="Sheet4 支付状态规则" className="input-invoice-usage-payment-rules-list" role="list">
                 {draftRules.map((rule, index) => (
@@ -277,6 +294,12 @@ export default function PaymentStatusRulesDrawer({
                           </span>
                         ))}
                       </div>
+                      {canSave ? (
+                        <RuleConditionEditor
+                          onChange={(key, value) => updateRuleCondition(index, key, value, setDraftRules)}
+                          rule={rule}
+                        />
+                      ) : null}
                     </div>
                     <div className="input-invoice-usage-payment-rule-row__reason">
                       {canSave ? (
@@ -352,6 +375,26 @@ function updateRule(
   )));
 }
 
+function updateRuleCondition(
+  index: number,
+  key: RuleConditionKey,
+  value: "any" | "true" | "false",
+  setDraftRules: Dispatch<SetStateAction<PaymentStatusRule[]>>,
+) {
+  setDraftRules((current) => current.map((item, itemIndex) => {
+    if (itemIndex !== index) {
+      return item;
+    }
+    const conditions = { ...(item.conditions ?? {}) };
+    if (value === "any") {
+      delete conditions[key];
+    } else {
+      conditions[key] = value === "true";
+    }
+    return { ...item, conditions };
+  }));
+}
+
 function updatePendingDirection(
   index: number,
   label: string,
@@ -367,6 +410,53 @@ function createIdempotencyKey(prefix: string) {
     return `${prefix}:${crypto.randomUUID()}`;
   }
   return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
+function RuleConditionEditor({
+  rule,
+  onChange,
+}: {
+  rule: PaymentStatusRule;
+  onChange: (key: RuleConditionKey, value: "any" | "true" | "false") => void;
+}) {
+  const conditions = rule.conditions ?? {};
+  const applicantName = String(conditions.applicantName ?? "").trim();
+  const fallback = conditions.fallback === true;
+  if (fallback) {
+    return (
+      <div className="input-invoice-usage-payment-rule-condition-editor" aria-label={`${rule.label || "规则"}条件编辑`}>
+        <span className="input-invoice-usage-rules-tag">兜底规则</span>
+      </div>
+    );
+  }
+  return (
+    <div className="input-invoice-usage-payment-rule-condition-editor" aria-label={`${rule.label || "规则"}条件编辑`}>
+      {applicantName ? (
+        <span className="input-invoice-usage-rules-tag">申请人={applicantName}</span>
+      ) : null}
+      {CONDITION_FIELDS.map((field) => (
+        <label className="input-invoice-usage-payment-rule-condition" key={field.key}>
+          <span>{field.label}</span>
+          <select
+            aria-label={`${rule.label || "规则"} ${field.label}条件`}
+            onChange={(event) => onChange(field.key, event.target.value as "any" | "true" | "false")}
+            value={conditionSelectValue(conditions, field.key)}
+          >
+            <option value="any">不限制</option>
+            <option value="true">{field.trueLabel}</option>
+            <option value="false">{field.falseLabel}</option>
+          </select>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function conditionSelectValue(conditions: Record<string, unknown>, key: RuleConditionKey) {
+  if (!(key in conditions)) {
+    return "any";
+  }
+  return conditions[key] === true ? "true" : "false";
 }
 
 function conditionChips(rule: PaymentStatusRule) {

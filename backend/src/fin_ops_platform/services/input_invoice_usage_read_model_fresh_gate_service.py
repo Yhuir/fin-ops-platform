@@ -281,6 +281,7 @@ class InputInvoiceUsageReadModelFreshGateService:
             "summary": {},
             "filterConfig": [],
             "read_model_status": "refreshing",
+            "readModelStatus": "refreshing",
             "read_model_scope_key": scope_key,
         }
         if stale_reasons:

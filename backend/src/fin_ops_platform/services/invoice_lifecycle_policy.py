@@ -6,10 +6,8 @@ from typing import Any
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     InputInvoiceUsagePaymentRulesProvider,
     PaymentStatusEvaluationContext,
-    StaticInputInvoiceUsagePaymentRulesProvider,
 )
 from fin_ops_platform.services.pending_invoice_status import pending_invoice_status_payload
-
 
 INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION = 1
 
@@ -28,19 +26,23 @@ class InvoiceLifecyclePolicy:
         input_payment_rules_provider: InputInvoiceUsagePaymentRulesProvider | None = None,
         output_collection_status_rule_service: Any | None = None,
     ) -> None:
-        self._input_payment_rules_provider = input_payment_rules_provider or StaticInputInvoiceUsagePaymentRulesProvider()
+        self._input_payment_rules_provider = input_payment_rules_provider
         if output_collection_status_rule_service is None:
-            from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionStatusRuleService
+            from fin_ops_platform.services.output_invoice_collection_service import (
+                OutputInvoiceCollectionStatusRuleService,
+            )
 
             output_collection_status_rule_service = OutputInvoiceCollectionStatusRuleService()
         self._output_collection_status_rule_service = output_collection_status_rule_service
 
     def source_versions(self) -> dict[str, object]:
-        return {
+        versions: dict[str, object] = {
             "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
-            "input_invoice_usage_payment_rules_version": self._input_payment_rules_provider.rules_source_version(),
             "output_invoice_collection_status_rules_version": "sheet6-static-v1+lifecycle-v1",
         }
+        if self._input_payment_rules_provider is not None:
+            versions["input_invoice_usage_payment_rules_version"] = self._input_payment_rules_provider.rules_source_version()
+        return versions
 
     def evaluate_pending_invoice_acquisition(
         self,
@@ -70,6 +72,8 @@ class InvoiceLifecyclePolicy:
         fully_matched: bool,
         invoice_oa_amount_matched: bool,
     ) -> dict[str, str]:
+        if self._input_payment_rules_provider is None:
+            raise ValueError("input_payment_rules_provider is required for input invoice usage payment evaluation.")
         if has_oa and has_bank and not fully_matched:
             return {
                 "code": "pending",

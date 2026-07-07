@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
@@ -95,7 +96,10 @@ class InvoiceLifecyclePageIntegrationTests(unittest.TestCase):
     def test_input_invoice_usage_rows_delegate_payment_status_to_lifecycle_policy(self) -> None:
         policy = FakeLifecyclePolicy()
         service = InputInvoiceUsageQueryService(
-            import_service=ImportNormalizationService(existing_invoices=[_invoice("inv-in", InvoiceType.INPUT, "88.00")]),
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
+            import_service=ImportNormalizationService(
+                existing_invoices=[_invoice("inv-in", InvoiceType.INPUT, "88.00")]
+            ),
             lifecycle_policy=policy,
         )
 
@@ -107,7 +111,9 @@ class InvoiceLifecyclePageIntegrationTests(unittest.TestCase):
     def test_output_invoice_collection_rows_delegate_collection_status_to_lifecycle_policy(self) -> None:
         policy = FakeLifecyclePolicy()
         service = OutputInvoiceCollectionQueryService(
-            import_service=ImportNormalizationService(existing_invoices=[_invoice("inv-out", InvoiceType.OUTPUT, "88.00")]),
+            import_service=ImportNormalizationService(
+                existing_invoices=[_invoice("inv-out", InvoiceType.OUTPUT, "88.00")]
+            ),
             lifecycle_policy=policy,
         )
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from http import HTTPStatus
-import json
 from typing import Any
 from urllib.parse import unquote
 
@@ -15,14 +15,12 @@ from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     InputInvoiceUsagePaymentRulesProvider,
-    StaticInputInvoiceUsagePaymentRulesProvider,
 )
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
-from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
-
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -106,9 +104,11 @@ class InputInvoiceUsageQueryService:
         self._import_service = import_service
         self._relation_facade = relation_facade
         self._oa_projection = oa_projection
-        self._payment_rules_provider = payment_rules_provider or StaticInputInvoiceUsagePaymentRulesProvider()
+        if payment_rules_provider is None and lifecycle_policy is None:
+            raise ValueError("payment_rules_provider is required for input invoice usage payment status rules.")
+        self._payment_rules_provider = payment_rules_provider
         self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy(
-            input_payment_rules_provider=self._payment_rules_provider,
+            input_payment_rules_provider=payment_rules_provider,
         )
         self._require_fresh_relations = require_fresh_relations
 
@@ -398,6 +398,11 @@ class InputInvoiceUsageQueryService:
         )
 
     def payment_status_rules(self) -> dict[str, Any]:
+        if self._payment_rules_provider is None:
+            raise InputInvoiceUsageError(
+                "input_invoice_usage_payment_rules_provider_required",
+                "Input invoice usage payment rules provider is required.",
+            )
         return self._payment_rules_provider.payment_status_rules_payload(can_save=True)
 
     def _build_rows(self, *, month: str | None, context: DistributedInvoiceRelationContext) -> list[dict[str, Any]]:
@@ -424,13 +429,59 @@ class InputInvoiceUsageQueryService:
             invoice
             for invoice in context.list_invoices(month=source_month, invoice_type=InvoiceType.INPUT)
         ]
+        relation_lookup_ids = self._invoice_relation_lookup_ids(invoices)
+        context.preload_relation_rows(relation_lookup_ids)
+        source_invoice_ids = {invoice.id for invoice in invoices}
+        source_lookup = self._invoice_lookup_by_relation_row_id(invoices)
+        all_lookup: dict[str, Invoice] | None = None
+        relation_groups: dict[str, dict[str, Any]] = {}
+        for relation in context.distributed_relations_for_row_ids(relation_lookup_ids):
+            if not self._relation_is_confirmed(relation):
+                continue
+            relation_line_items = self._relation_input_invoices(relation, source_lookup)
+            if self._relation_has_unloaded_input_invoice(relation, source_lookup):
+                if all_lookup is None:
+                    all_lookup = self._invoice_lookup_by_relation_row_id(
+                        context.list_invoices(month="all", invoice_type=InvoiceType.INPUT)
+                    )
+                relation_line_items = self._relation_input_invoices(relation, all_lookup)
+            if len(relation_line_items) < 2:
+                continue
+            group_key = self._relation_group_key(relation)
+            if not group_key:
+                continue
+            source_members = [invoice for invoice in relation_line_items if invoice.id in source_invoice_ids]
+            if not source_members:
+                continue
+            relation_groups[group_key] = {
+                "row_key": f"relation:{group_key}",
+                "identity_key": self._identity_key(sorted(source_members, key=lambda item: str(item.id))[0]),
+                "primary": sorted(source_members, key=lambda item: str(item.id))[0],
+                "line_items": sorted(relation_line_items, key=lambda item: str(item.id)),
+                "relation_group_id": group_key,
+            }
+
+        groups: list[dict[str, Any]] = []
+        assigned_invoice_ids: set[str] = set()
+        for group in sorted(relation_groups.values(), key=lambda item: str(item["row_key"])):
+            if any(invoice.id in assigned_invoice_ids for invoice in group["line_items"]):
+                continue
+            groups.append(group)
+            assigned_invoice_ids.update(invoice.id for invoice in group["line_items"])
+
         grouped: dict[str, list[Invoice]] = {}
         for invoice in invoices:
+            if invoice.id in assigned_invoice_ids:
+                continue
             grouped.setdefault(self._identity_key(invoice), []).append(invoice)
-        groups = []
         for identity_key, line_items in grouped.items():
             sorted_items = sorted(line_items, key=lambda item: str(item.id))
-            groups.append({"identity_key": identity_key, "primary": sorted_items[0], "line_items": sorted_items})
+            groups.append({
+                "row_key": identity_key,
+                "identity_key": identity_key,
+                "primary": sorted_items[0],
+                "line_items": sorted_items,
+            })
         groups.sort(key=lambda group: (str(group["primary"].invoice_date or ""), str(group["identity_key"])))
         return groups
 
@@ -462,8 +513,8 @@ class InputInvoiceUsageQueryService:
         oa_payload = self._oa_relation_payload(primary, line_items, relations, context=context)
         invoice_relation_payload = self._invoice_relation_payload(primary, line_items, relations, context=context)
         payment_status = self._payment_status(primary, line_items, relations, oa_payload, bank_payload, context=context)
-        row_id = "invoice_usage_row_" + sha1(str(group["identity_key"]).encode("utf-8")).hexdigest()[:16]
-        return {
+        row_id = "invoice_usage_row_" + sha1(str(group.get("row_key") or group["identity_key"]).encode("utf-8")).hexdigest()[:16]
+        payload = {
             "id": row_id,
             "invoiceId": primary.id,
             "invoiceIdentityKey": group["identity_key"],
@@ -473,6 +524,9 @@ class InputInvoiceUsageQueryService:
             "bankTransactions": bank_payload,
             "invoiceRelations": invoice_relation_payload,
         }
+        if group.get("relation_group_id"):
+            payload["relationGroupId"] = str(group["relation_group_id"])
+        return payload
 
     def _invoice_summary(self, primary: Invoice, line_items: list[Invoice]) -> dict[str, Any]:
         total_with_tax = sum((_invoice_total(line) for line in line_items), start=ZERO)
@@ -930,13 +984,34 @@ class InputInvoiceUsageQueryService:
 
     @staticmethod
     def _row_matches_date(row: dict[str, Any], *, date_from: str | None, date_to: str | None, month: str | None) -> bool:
-        invoice_date = str(row["invoice"].get("invoiceDate") or "")
-        if month and str(month).strip() not in {"", "all"} and not invoice_date.startswith(str(month)[:7]):
-            return False
-        if date_from and invoice_date[:10] < str(date_from):
-            return False
-        if date_to and invoice_date[:10] > str(date_to):
-            return False
+        dates = _dedupe_preserve_order(
+            str(date or "")[:10]
+            for date in [
+                row["invoice"].get("invoiceDate"),
+                *[
+                    summary.get("invoiceDate")
+                    for summary in list(
+                        (row.get("invoiceRelations") if isinstance(row.get("invoiceRelations"), dict) else {}).get("summaries")
+                        or []
+                    )
+                    if isinstance(summary, dict)
+                ],
+            ]
+            if str(date or "").strip()
+        )
+        if not dates:
+            return True
+        if month and str(month).strip() not in {"", "all"}:
+            month_prefix = str(month)[:7]
+            dates = [invoice_date for invoice_date in dates if invoice_date.startswith(month_prefix)]
+            if not dates:
+                return False
+        if date_from or date_to:
+            return any(
+                (not date_from or invoice_date >= str(date_from))
+                and (not date_to or invoice_date <= str(date_to))
+                for invoice_date in dates
+            )
         return True
 
     def _sort_value(self, row: dict[str, Any], field: str) -> Any:
@@ -1027,6 +1102,15 @@ class InputInvoiceUsageQueryService:
     def _identity_key(invoice: Invoice) -> str:
         return OBJECT_IDENTITY_POLICY.legacy_invoice_identity_key(invoice)
 
+    @classmethod
+    def _invoice_lookup_by_relation_row_id(cls, invoices: list[Invoice]) -> dict[str, Invoice]:
+        lookup: dict[str, Invoice] = {}
+        for invoice in invoices:
+            for row_id in cls._invoice_relation_lookup_ids_for_invoice(invoice):
+                if row_id:
+                    lookup.setdefault(row_id, invoice)
+        return lookup
+
     @staticmethod
     def _line_item_payload(invoice: Invoice) -> dict[str, Any]:
         return {
@@ -1054,6 +1138,30 @@ class InputInvoiceUsageQueryService:
             row_type = row_types[index] if index < len(row_types) else _infer_row_type(row_id)
             typed.append((row_id, row_type))
         return typed
+
+    @classmethod
+    def _relation_input_invoices(cls, relation: dict[str, Any], invoice_lookup: dict[str, Invoice]) -> list[Invoice]:
+        invoices: list[Invoice] = []
+        seen: set[str] = set()
+        for row_id, row_type in cls._typed_relation_rows(relation):
+            if cls._canonical_relation_row_type(row_type, row_id) != "invoice":
+                continue
+            invoice = invoice_lookup.get(row_id)
+            if invoice is not None and invoice.id not in seen:
+                seen.add(invoice.id)
+                invoices.append(invoice)
+        return invoices
+
+    @classmethod
+    def _relation_has_unloaded_input_invoice(cls, relation: dict[str, Any], invoice_lookup: dict[str, Invoice]) -> bool:
+        return any(
+            cls._canonical_relation_row_type(row_type, row_id) == "invoice" and row_id not in invoice_lookup
+            for row_id, row_type in cls._typed_relation_rows(relation)
+        )
+
+    @staticmethod
+    def _relation_group_key(relation: dict[str, Any]) -> str:
+        return str(relation.get("case_id") or relation.get("group_id") or relation.get("relation_id") or "").strip()
 
     def _relation_has_invoice_oa_bank(self, relation: dict[str, Any]) -> bool:
         types = {self._canonical_relation_row_type(row_type, row_id) for row_id, row_type in self._typed_relation_rows(relation)}

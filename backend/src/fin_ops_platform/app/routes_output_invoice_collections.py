@@ -34,6 +34,7 @@ class OutputInvoiceCollectionApiRoutes:
         sql_rows_provider: SqlRowsProvider | None = None,
         sql_all_rows_provider: SqlAllRowsProvider | None = None,
         sql_relation_details_provider: SqlRelationDetailsProvider | None = None,
+        allow_live_fallback: bool = True,
         resolve_read_session: ReadSessionResolver | None = None,
         json_response: JsonResponse | None = None,
         xlsx_response: XlsxResponse | None = None,
@@ -48,6 +49,7 @@ class OutputInvoiceCollectionApiRoutes:
             sql_rows_provider=sql_rows_provider,
             sql_all_rows_provider=sql_all_rows_provider,
             sql_relation_details_provider=sql_relation_details_provider,
+            allow_live_fallback=allow_live_fallback,
         )
         self._resolve_read_session = resolve_read_session
         self._json_response = json_response

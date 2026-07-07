@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import Counterparty, Invoice
@@ -16,10 +16,12 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     InputInvoiceUsageOaReverseVersionConflictError,
     WorkbenchInputInvoiceUsageOaReverseRelationWriter,
 )
+from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageError, InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
+
 from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
@@ -195,7 +197,9 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(preview["invoiceRows"][0]["sellerName"], "供应商")
         reason_codes = {item["reasonCode"] for item in preview["rejectedInvoices"]}
         self.assertEqual(reason_codes, {"already_has_active_oa", "invoice_not_found"})
-        active_oa_rejection = next(item for item in preview["rejectedInvoices"] if item["reasonCode"] == "already_has_active_oa")
+        active_oa_rejection = next(
+            item for item in preview["rejectedInvoices"] if item["reasonCode"] == "already_has_active_oa"
+        )
         self.assertEqual(active_oa_rejection["invoiceId"], "inv-bound")
         self.assertEqual(active_oa_rejection["invoiceNo"], "9402")
         self.assertEqual(active_oa_rejection["sellerName"], "供应商")
@@ -248,6 +252,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         )
         service = InputInvoiceUsageOaReverseService(
             query_service=InputInvoiceUsageQueryService(
+                payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
                 import_service=ImportNormalizationService(existing_invoices=[invoice]),
                 relation_facade=relation_facade,
                 oa_projection=oa_projection,
@@ -277,10 +282,13 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         service = InputInvoiceUsageOaReverseService(
             query_service=ExplodingInputInvoiceUsageQueryService(),
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
-            read_model_rows_loader=lambda query: calls.append(dict(query)) or {
-                "rows": [self._read_model_row("inv-fast", "9101")],
-                "read_model_status": "fresh",
-            },
+            read_model_rows_loader=lambda query: (
+                calls.append(dict(query))
+                or {
+                    "rows": [self._read_model_row("inv-fast", "9101")],
+                    "read_model_status": "fresh",
+                }
+            ),
         )
 
         preview = service.preview(
@@ -303,11 +311,14 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         service = InputInvoiceUsageOaReverseService(
             query_service=ExplodingInputInvoiceUsageQueryService(),
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
-            read_model_rows_by_invoice_ids_loader=lambda invoice_ids: calls.append(list(invoice_ids)) or {
-                "rows": [self._read_model_row("inv-fast", "9101")],
-                "missing_invoice_ids": ["inv-missing"],
-                "read_model_status": "fresh",
-            },
+            read_model_rows_by_invoice_ids_loader=lambda invoice_ids: (
+                calls.append(list(invoice_ids))
+                or {
+                    "rows": [self._read_model_row("inv-fast", "9101")],
+                    "missing_invoice_ids": ["inv-missing"],
+                    "read_model_status": "fresh",
+                }
+            ),
         )
 
         preview = service.preview(
@@ -322,7 +333,10 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(calls, [["inv-fast", "inv-missing"]])
         self.assertEqual(preview["invoiceCount"], 1)
         self.assertEqual(preview["invoiceRows"][0]["invoiceId"], "inv-fast")
-        self.assertEqual(preview["rejectedInvoices"], [{"invoiceId": "inv-missing", "reasonCode": "invoice_not_found", "reason": "发票不存在"}])
+        self.assertEqual(
+            preview["rejectedInvoices"],
+            [{"invoiceId": "inv-missing", "reasonCode": "invoice_not_found", "reason": "发票不存在"}],
+        )
 
     def test_preview_read_model_refreshing_returns_business_error_without_live_fallback(self) -> None:
         service = InputInvoiceUsageOaReverseService(
@@ -342,7 +356,9 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
 
     def test_create_batch_is_idempotent_and_persists_audit_metadata(self) -> None:
         service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
-        preview = service.preview({"invoiceIds": ["inv-1"], "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True)
+        preview = service.preview(
+            {"invoiceIds": ["inv-1"], "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True
+        )
 
         first = service.create_batch(
             {
@@ -374,7 +390,9 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
     def test_create_oa_draft_from_selection_creates_internal_batch_and_uses_target_provider(self) -> None:
         service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
         provider = FakeTargetOaDraftClientProvider()
-        preview = service.preview({"invoiceIds": ["inv-1"], "targetApplicantCode": "zhou_jieying"}, can_create_draft=True)
+        preview = service.preview(
+            {"invoiceIds": ["inv-1"], "targetApplicantCode": "zhou_jieying"}, can_create_draft=True
+        )
 
         drafted = service.create_oa_draft_from_selection(
             {
@@ -398,8 +416,12 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
     def test_staged_drafts_returns_created_drafts_waiting_for_user_decision(self) -> None:
         service = self._service(
             invoices=[
-                self._invoice("inv-staged", "1201", self._counterparty("vendor", "暂存供应商"), total_with_tax="188.00"),
-                self._invoice("inv-submitted", "1202", self._counterparty("vendor-2", "已提交供应商"), total_with_tax="288.00"),
+                self._invoice(
+                    "inv-staged", "1201", self._counterparty("vendor", "暂存供应商"), total_with_tax="188.00"
+                ),
+                self._invoice(
+                    "inv-submitted", "1202", self._counterparty("vendor-2", "已提交供应商"), total_with_tax="288.00"
+                ),
             ],
             oa_client=FakeOaDraftClient(),
         )
@@ -439,7 +461,9 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
     def test_create_oa_draft_from_selection_missing_target_credential_does_not_create_batch(self) -> None:
         service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
         provider = FakeTargetOaDraftClientProvider(fail=True)
-        preview = service.preview({"invoiceIds": ["inv-1"], "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True)
+        preview = service.preview(
+            {"invoiceIds": ["inv-1"], "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True
+        )
 
         with self.assertRaises(InputInvoiceUsageOaReverseMissingClientError):
             service.create_oa_draft_from_selection(
@@ -531,7 +555,9 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))],
             oa_client=client,
         )
-        preview = service.preview({"invoiceIds": ["inv-1"], "targetApplicantCode": "zhou_jieying"}, can_create_draft=True)
+        preview = service.preview(
+            {"invoiceIds": ["inv-1"], "targetApplicantCode": "zhou_jieying"}, can_create_draft=True
+        )
         batch = service.create_batch(
             {
                 "invoiceIds": ["inv-1"],
@@ -700,7 +726,9 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         )
 
     def _create_batch(self, service: InputInvoiceUsageOaReverseService, invoice_ids: list[str]) -> dict[str, object]:
-        preview = service.preview({"invoiceIds": invoice_ids, "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True)
+        preview = service.preview(
+            {"invoiceIds": invoice_ids, "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True
+        )
         return service.create_batch(
             {
                 "invoiceIds": invoice_ids,
@@ -819,6 +847,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         read_model_invalidator: object | None = None,
     ) -> InputInvoiceUsageOaReverseService:
         query_service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(existing_invoices=invoices),
             relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
                 pair_service=pair_service or WorkbenchPairRelationService(),

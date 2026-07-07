@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import json
-from http import HTTPStatus
 import unittest
+from decimal import Decimal
+from http import HTTPStatus
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
-from fin_ops_platform.services.oa_adapter import OAApplicationRecord, OAReadStatus
+from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
+from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
+from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.invoice_usage_collection_read_model_refresh import (
     InvoiceUsageCollectionReadModelRefreshService,
 )
@@ -18,11 +21,11 @@ from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     output_invoice_collection_source_versions,
 )
 from fin_ops_platform.services.invoice_usage_collection_sql_projection import InvoiceUsageCollectionSqlProjectionBuilder
-from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PENDING
-from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.input_invoice_usage_read_model_repository import InputInvoiceUsageReadModelRepositoryPort
-from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
-from fin_ops_platform.services.output_invoice_collection_read_model_repository import OutputInvoiceCollectionReadModelRepositoryPort
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord, OAReadStatus
+from fin_ops_platform.services.oa_payment_status_service import PAY_STATUS_PENDING, OAPaymentStatusRecord
+from fin_ops_platform.services.output_invoice_collection_read_model_repository import (
+    OutputInvoiceCollectionReadModelRepositoryPort,
+)
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.rabbitmq_runtime import SUPPORTED_EVENT_TYPES
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES, RuntimeQueueEvent
@@ -45,7 +48,9 @@ class QueueRecorder:
         scope_key: str,
         source_version: int | str | None = None,
     ) -> None:
-        self.completed.append((tenant_id, scope_type, scope_key, int(source_version) if source_version is not None else None))
+        self.completed.append(
+            (tenant_id, scope_type, scope_key, int(source_version) if source_version is not None else None)
+        )
 
     def read_model_refresh_is_current(
         self,
@@ -56,6 +61,20 @@ class QueueRecorder:
         source_version: object,
     ) -> bool:
         return True
+
+
+def _input_invoice_usage_rows_response(app: Application, query: dict[str, list[str]]):
+    payload = app._get_input_invoice_usage_rows_from_sql_read_model(query)
+    assert payload is not None
+    status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+    return Application._json_response(status, payload)
+
+
+def _output_invoice_collection_rows_response(app: Application, query: dict[str, list[str]]):
+    payload = app._get_output_invoice_collection_rows_from_sql_read_model(query)
+    assert payload is not None
+    status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+    return Application._json_response(status, payload)
 
 
 class EmptyTransactionConnection:
@@ -105,11 +124,13 @@ class FreshStaticWorkbenchRelationFacade:
 
     def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
         wanted = {str(row_id) for row_id in list(row_ids or [])}
-        return self._payload([
-            self._group(relation)
-            for relation in self.relations
-            if wanted & {str(row_id) for row_id in list(relation.get("row_ids") or [])}
-        ])
+        return self._payload(
+            [
+                self._group(relation)
+                for relation in self.relations
+                if wanted & {str(row_id) for row_id in list(relation.get("row_ids") or [])}
+            ]
+        )
 
     def _payload(self, groups: list[dict[str, object]]) -> dict[str, object]:
         rows: list[dict[str, object]] = []
@@ -125,7 +146,9 @@ class FreshStaticWorkbenchRelationFacade:
                 if key in seen:
                     continue
                 seen.add(key)
-                rows.append({"row_id": row_id, "row_type": row_type, "relation_status": "linked", "group_ids": [group_id]})
+                rows.append(
+                    {"row_id": row_id, "row_type": row_type, "relation_status": "linked", "group_ids": [group_id]}
+                )
         return {"status": "fresh", "rows": rows, "groups": groups, "source_versions": {}, "read_model_scope_keys": []}
 
     @staticmethod
@@ -450,7 +473,10 @@ class InvoiceReadModelConnection:
             return rows
         if "oa_workflow_status = 'in_progress'" in normalized_sql:
             return [row for row in rows if self._oa_workflow_status(row) == "in_progress"]
-        if "oa_workflow_status is null or oa_workflow_status = '' or oa_workflow_status = 'completed'" in normalized_sql:
+        if (
+            "oa_workflow_status is null or oa_workflow_status = '' or oa_workflow_status = 'completed'"
+            in normalized_sql
+        ):
             return [row for row in rows if self._oa_workflow_status(row) != "in_progress"]
         return rows
 
@@ -787,7 +813,9 @@ class OaPendingRelationCleanupConnection(EmptyTransactionConnection):
             return []
         rows = [dict(relation) for relation in self.relations.values() if relation.get("status") == "active"]
         if "scope_month = %s::date" in normalized:
-            admitted = {str(row_id) for row_id in list(params[1] if isinstance(params, tuple) and len(params) > 1 else [])}
+            admitted = {
+                str(row_id) for row_id in list(params[1] if isinstance(params, tuple) and len(params) > 1 else [])
+            }
             return [
                 row
                 for row in rows
@@ -847,7 +875,10 @@ class InputInvoiceUsageReadModelRepositoryPortTests(unittest.TestCase):
 
             def list_input_invoice_usage_filter_options(self, **kwargs: object) -> dict[str, object]:
                 self.calls.append(("list_input_invoice_usage_filter_options", dict(kwargs)))
-                return {"options": {"payment_status": [{"value": "pending", "label": "待处理", "count": 1}]}, "refresh_status": "fresh"}
+                return {
+                    "options": {"payment_status": [{"value": "pending", "label": "待处理", "count": 1}]},
+                    "refresh_status": "fresh",
+                }
 
             def save_input_invoice_usage_rows(self, **kwargs: object) -> None:
                 self.calls.append(("save_input_invoice_usage_rows", dict(kwargs)))
@@ -999,7 +1030,9 @@ class OutputInvoiceCollectionReadModelRepositoryPortTests(unittest.TestCase):
 
 class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
     def test_input_repository_returns_fresh_empty_scope_without_api_miss(self) -> None:
-        repository = PostgresReadModelRepository(InvoiceReadModelConnection(input_rows=[], dirty=False, scope_exists=True))
+        repository = PostgresReadModelRepository(
+            InvoiceReadModelConnection(input_rows=[], dirty=False, scope_exists=True)
+        )
 
         payload = repository.list_input_invoice_usage_rows(month="2026-05", page=1, page_size=50)
 
@@ -1228,7 +1261,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                         "id": "output_invoice_collection_row_1",
                         "invoiceId": "invoice-1",
                         "invoice": {"invoiceNo": "1001", "totalWithTax": "118.00"},
-                        "collectionStatus": {"code": "collected", "label": "已收款", "collectedAmount": "118.00", "pendingAmount": "0.00"},
+                        "collectionStatus": {
+                            "code": "collected",
+                            "label": "已收款",
+                            "collectedAmount": "118.00",
+                            "pendingAmount": "0.00",
+                        },
                         "bankTransactions": {"relationCount": 1},
                         "redInvoiceRelation": {"relationCount": 0},
                         "receipt": {"status": "pending", "label": "待出收据"},
@@ -1268,7 +1306,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                                 {"relatedInvoiceId": "output-related-b"},
                             ],
                         },
-                        "collectionStatus": {"code": "collected", "label": "已收款", "collectedAmount": "300.00", "pendingAmount": "0.00"},
+                        "collectionStatus": {
+                            "code": "collected",
+                            "label": "已收款",
+                            "collectedAmount": "300.00",
+                            "pendingAmount": "0.00",
+                        },
                         "bankTransactions": {"relationCount": 1},
                         "redInvoiceRelation": {"relationCount": 0},
                         "receipt": {"status": "pending", "label": "待出收据"},
@@ -1338,7 +1381,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                 {
                     "payload": {
                         "id": "oa_pending_payment_row_1",
-                        "oa": {"id": "oa-1", "applicantName": "张三", "amount": "100.00", "workflowStatus": "in_progress"},
+                        "oa": {
+                            "id": "oa-1",
+                            "applicantName": "张三",
+                            "amount": "100.00",
+                            "workflowStatus": "in_progress",
+                        },
                         "paymentStatus": {"code": "paid", "label": "已支付"},
                         "bankTransaction": {"paidTotal": "100.00"},
                         "invoice": {},
@@ -1404,9 +1452,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["source_versions"], source_versions)
         self.assertEqual(payload["pagination"]["total"], 1)
         executed_scope_fetches = [
-            sql
-            for sql, _params in connection.fetch_all_calls
-            if "from read_model.oa_pending_payment_scopes" in sql
+            sql for sql, _params in connection.fetch_all_calls if "from read_model.oa_pending_payment_scopes" in sql
         ]
         self.assertTrue(executed_scope_fetches)
 
@@ -1602,12 +1648,46 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("from read_model.input_invoice_usage_rows", executed_sql)
         self.assertIn("invoice_id = any(%s)", executed_sql)
 
+    def test_input_repository_invoice_id_lookup_matches_relation_member_invoice_ids(self) -> None:
+        connection = InvoiceReadModelConnection(
+            input_rows=[
+                {
+                    "scope_key": "2026-05",
+                    "invoice_id": "input-invoice-primary",
+                    "source_versions": input_invoice_usage_source_versions(),
+                    "payload": {
+                        "id": "input_invoice_usage_row_grouped",
+                        "invoiceId": "input-invoice-primary",
+                        "invoice": {"invoiceNo": "1001"},
+                        "invoiceRelations": {
+                            "summaries": [
+                                {"invoiceId": "input-invoice-primary"},
+                                {"invoiceId": "input-invoice-secondary"},
+                            ]
+                        },
+                        "oa": {"relationCount": 1},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        row_payload = repository.list_input_invoice_usage_rows_by_invoice_ids(["input-invoice-secondary"])
+
+        self.assertEqual(row_payload["rows"][0]["id"], "input_invoice_usage_row_grouped")
+        self.assertEqual(row_payload["missing_invoice_ids"], [])
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("jsonb_array_elements", executed_sql)
+        self.assertIn("invoice_id = any(%s)", executed_sql)
+
     def test_input_api_miss_enqueues_refresh_without_live_scan(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._import_service = ImportNormalizationService()
         app._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(),
         )
         app._input_invoice_usage_sql_read_repository = type(
@@ -1618,10 +1698,14 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         app._input_invoice_usage_query_service = type(
             "InputService",
             (),
-            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("input API miss must not live scan"))},
+            {
+                "list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("input API miss must not live scan")
+                )
+            },
         )()
 
-        response = app._handle_api_input_invoice_usage_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _input_invoice_usage_rows_response(app, {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -1638,10 +1722,14 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         app._input_invoice_usage_query_service = type(
             "InputService",
             (),
-            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("production input API must not live scan"))},
+            {
+                "list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("production input API must not live scan")
+                )
+            },
         )()
 
-        response = app._handle_api_input_invoice_usage_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _input_invoice_usage_rows_response(app, {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -1700,7 +1788,10 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_output_invoice_collections_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _output_invoice_collection_rows_response(
+            app,
+            {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]}
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -1735,7 +1826,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_input_invoice_usage_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _input_invoice_usage_rows_response(app, {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -1750,6 +1841,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._import_service = ImportNormalizationService()
         app._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(),
         )
         old_relation_versions = {"source_version": "1"}
@@ -1784,7 +1876,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-        response = app._handle_api_input_invoice_usage_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _input_invoice_usage_rows_response(app, {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -1799,6 +1891,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(),
         )
         app._input_invoice_usage_sql_read_repository = PostgresReadModelRepository(
@@ -1842,7 +1935,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-        response = app._handle_api_input_invoice_usage_rows({"page": ["1"], "page_size": ["50"]})
+        response = _input_invoice_usage_rows_response(app, {"page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -1863,6 +1956,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         app = object.__new__(Application)
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(),
         )
         connection = InvoiceReadModelConnection(
@@ -1889,7 +1983,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         repository = PostgresReadModelRepository(connection)
         app._input_invoice_usage_sql_read_repository = repository
 
-        stale_response = app._handle_api_input_invoice_usage_rows({"page": ["1"], "page_size": ["50"]})
+        stale_response = _input_invoice_usage_rows_response(app, {"page": ["1"], "page_size": ["50"]})
         stale_payload = json.loads(stale_response.body)
 
         self.assertEqual(stale_response.status_code, int(HTTPStatus.ACCEPTED))
@@ -1899,7 +1993,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.refreshes, [("input_invoice_usage", "all", "api_source_versions_stale")])
 
         repository.prune_input_invoice_usage_scope_shards(["2026-06"])
-        fresh_response = app._handle_api_input_invoice_usage_rows({"page": ["1"], "page_size": ["50"]})
+        fresh_response = _input_invoice_usage_rows_response(app, {"page": ["1"], "page_size": ["50"]})
         fresh_payload = json.loads(fresh_response.body)
 
         self.assertEqual(fresh_response.status_code, int(HTTPStatus.OK))
@@ -1963,7 +2057,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-        response = app._handle_api_output_invoice_collections_rows({"page": ["1"], "page_size": ["50"]})
+        response = _output_invoice_collection_rows_response(app, {"page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -2033,7 +2127,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-        response = app._handle_api_output_invoice_collections_rows({"page": ["1"], "page_size": ["50"]})
+        response = _output_invoice_collection_rows_response(app, {"page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
@@ -2073,7 +2167,10 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             },
         )()
 
-        response = app._handle_api_output_invoice_collections_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _output_invoice_collection_rows_response(
+            app,
+            {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]}
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -2126,7 +2223,10 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-        response = app._handle_api_output_invoice_collections_rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        response = _output_invoice_collection_rows_response(
+            app,
+            {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]}
+        )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
@@ -2221,9 +2321,9 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._output_invoice_collection_read_model_repository = read_repository
         builder._input_invoice_usage_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
-        builder._oa_projection_repository = StaticOAProjectionRepository([
-            self._oa("oa-cross-month", "杨丽萍", "75799.00")
-        ])
+        builder._oa_projection_repository = StaticOAProjectionRepository(
+            [self._oa("oa-cross-month", "杨丽萍", "75799.00")]
+        )
 
         result = builder.rebuild_input_invoice_usage_read_model_scope("2026-05")
 
@@ -2242,25 +2342,29 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         read_repository = RecordingInvoiceRelationReadRepository()
         bank = self._bank("bank-grouped-projection", "4450.00")
         invoice = self._invoice("input-invoice-grouped-projection", InvoiceType.INPUT, total="4450.00")
-        relation_facade = FreshStaticWorkbenchRelationFacade([
-            {
-                "case_id": "case-grouped-projection",
-                "row_ids": [
-                    "oa-pay-projection-a",
-                    "oa-pay-projection-b",
-                    "oa-pay-projection-c",
-                    bank.id,
-                    invoice.id,
-                ],
-                "row_types": ["oa", "oa", "oa", "bank", "invoice"],
-                "amount_check": {"matched": True},
-            }
-        ])
-        oa_source_adapter = StaticOAProjectionRepository([
-            self._oa("oa-pay-projection-a", "刘际涛", "1690.00"),
-            self._oa("oa-pay-projection-b", "刘际涛", "1980.00"),
-            self._oa("oa-pay-projection-c", "刘际涛", "780.00"),
-        ])
+        relation_facade = FreshStaticWorkbenchRelationFacade(
+            [
+                {
+                    "case_id": "case-grouped-projection",
+                    "row_ids": [
+                        "oa-pay-projection-a",
+                        "oa-pay-projection-b",
+                        "oa-pay-projection-c",
+                        bank.id,
+                        invoice.id,
+                    ],
+                    "row_types": ["oa", "oa", "oa", "bank", "invoice"],
+                    "amount_check": {"matched": True},
+                }
+            ]
+        )
+        oa_source_adapter = StaticOAProjectionRepository(
+            [
+                self._oa("oa-pay-projection-a", "刘际涛", "1690.00"),
+                self._oa("oa-pay-projection-b", "刘际涛", "1980.00"),
+                self._oa("oa-pay-projection-c", "刘际涛", "780.00"),
+            ]
+        )
         payment_repository = StaticOAPaymentStatusRepository(
             flow_ids={
                 "oa-pay-projection-a": "projection-a",
@@ -2292,11 +2396,14 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(row["paymentStatus"]["code"], "paid")
         self.assertEqual(row["oa"]["amount"], "4450.00")
         self.assertEqual(row["oa"]["relationCount"], 3)
-        self.assertEqual([summary["oaId"] for summary in row["oa"]["summaries"]], [
-            "oa-pay-projection-a",
-            "oa-pay-projection-b",
-            "oa-pay-projection-c",
-        ])
+        self.assertEqual(
+            [summary["oaId"] for summary in row["oa"]["summaries"]],
+            [
+                "oa-pay-projection-a",
+                "oa-pay-projection-b",
+                "oa-pay-projection-c",
+            ],
+        )
         self.assertEqual(row["bankTransaction"]["paidTotal"], "4450.00")
         self.assertEqual(row["invoice"]["totalWithTax"], "4450.00")
         self.assertEqual(read_repository.saved_oa["source_versions"], oa_pending_payment_source_versions())
@@ -2310,10 +2417,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             },
             admitted_flow_ids={"mongo-admitted"},
         )
-        oa_source_adapter = StaticOAProjectionRepository([
-            self._oa("oa-pay-mongo-admitted", "刘际涛", "100.00", workflow_status="in_progress"),
-            self._oa("oa-pay-mongo-duplicate", "刘际涛", "100.00", workflow_status="in_progress"),
-        ])
+        oa_source_adapter = StaticOAProjectionRepository(
+            [
+                self._oa("oa-pay-mongo-admitted", "刘际涛", "100.00", workflow_status="in_progress"),
+                self._oa("oa-pay-mongo-duplicate", "刘际涛", "100.00", workflow_status="in_progress"),
+            ]
+        )
         builder = InvoiceUsageCollectionSqlProjectionBuilder(
             connection=EmptyTransactionConnection(),
             workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
@@ -2342,10 +2451,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             },
             admitted_flow_ids={"mongo-admitted"},
         )
-        oa_source_adapter = StaticOAProjectionRepository([
-            self._oa("oa-pay-mongo-admitted", "刘际涛", "100.00", workflow_status="in_progress"),
-            self._oa("oa-pay-missing-admission", "张三", "1500.00", workflow_status="in_progress"),
-        ])
+        oa_source_adapter = StaticOAProjectionRepository(
+            [
+                self._oa("oa-pay-mongo-admitted", "刘际涛", "100.00", workflow_status="in_progress"),
+                self._oa("oa-pay-missing-admission", "张三", "1500.00", workflow_status="in_progress"),
+            ]
+        )
         builder = InvoiceUsageCollectionSqlProjectionBuilder(
             connection=connection,
             workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
@@ -2369,16 +2480,20 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             "oa_pending_payment_admission_missing",
         )
 
-    def test_projection_builder_does_not_release_pending_relation_when_oa_admission_projection_is_refreshing(self) -> None:
+    def test_projection_builder_does_not_release_pending_relation_when_oa_admission_projection_is_refreshing(
+        self,
+    ) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
         connection = OaPendingRelationCleanupConnection()
         payment_repository = StaticOAPaymentStatusRepository(
             flow_ids={"oa-pay-missing-admission": "mongo-missing-admission"},
             admitted_flow_ids=set(),
         )
-        oa_source_adapter = RefreshingOAProjectionRepository([
-            self._oa("oa-pay-missing-admission", "张三", "1500.00", workflow_status="in_progress"),
-        ])
+        oa_source_adapter = RefreshingOAProjectionRepository(
+            [
+                self._oa("oa-pay-missing-admission", "张三", "1500.00", workflow_status="in_progress"),
+            ]
+        )
         builder = InvoiceUsageCollectionSqlProjectionBuilder(
             connection=connection,
             workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
@@ -2405,10 +2520,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             },
             admitted_flow_ids={"mongo-progress"},
         )
-        oa_source_adapter = StaticOAProjectionRepository([
-            self._oa("oa-pay-mongo-progress", "刘际涛", "100.00", workflow_status="in_progress"),
-            self._oa("oa-pay-mongo-duplicate", "刘际涛", "100.00", workflow_status="in_progress"),
-        ])
+        oa_source_adapter = StaticOAProjectionRepository(
+            [
+                self._oa("oa-pay-mongo-progress", "刘际涛", "100.00", workflow_status="in_progress"),
+                self._oa("oa-pay-mongo-duplicate", "刘际涛", "100.00", workflow_status="in_progress"),
+            ]
+        )
         core_repository = ProjectionCoreRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(
             connection=EmptyTransactionConnection(),
@@ -2420,10 +2537,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._read_repository = read_repository
         builder._output_invoice_collection_read_model_repository = read_repository
         builder._oa_pending_payment_read_model_repository = read_repository
-        completed_projection = StaticOAProjectionRepository([
-            self._oa("oa-completed-unified", "张三", "80.00", workflow_status="completed"),
-            self._oa("oa-completed-other-month", "李四", "90.00", workflow_status="completed", month="2026-04"),
-        ])
+        completed_projection = StaticOAProjectionRepository(
+            [
+                self._oa("oa-completed-unified", "张三", "80.00", workflow_status="completed"),
+                self._oa("oa-completed-other-month", "李四", "90.00", workflow_status="completed", month="2026-04"),
+            ]
+        )
         builder._oa_projection_repository = completed_projection
 
         result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
@@ -2494,7 +2613,9 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                 raise AssertionError(scope_key)
 
         queue = QueueRecorder()
-        service = InvoiceUsageCollectionReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        service = InvoiceUsageCollectionReadModelRefreshService(
+            projection_builder=FakeBuilder(), queue_repository=queue
+        )
         event = RuntimeQueueEvent(
             event_id="event-1",
             tenant_id="tenant-a",
@@ -2537,7 +2658,9 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                 raise AssertionError(f"all scope should enqueue shards before rebuild: {scope_key}")
 
         queue = QueueRecorder()
-        service = InvoiceUsageCollectionReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        service = InvoiceUsageCollectionReadModelRefreshService(
+            projection_builder=FakeBuilder(), queue_repository=queue
+        )
         event = RuntimeQueueEvent(
             event_id="event-oa",
             tenant_id="tenant-a",
@@ -2584,7 +2707,9 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                 return False
 
         queue = StaleQueue()
-        service = InvoiceUsageCollectionReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        service = InvoiceUsageCollectionReadModelRefreshService(
+            projection_builder=FakeBuilder(), queue_repository=queue
+        )
         event = RuntimeQueueEvent(
             event_id="event-oa-stale",
             tenant_id="tenant-a",
