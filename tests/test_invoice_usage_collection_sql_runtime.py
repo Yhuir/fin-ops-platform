@@ -371,16 +371,24 @@ class InvoiceReadModelConnection:
                 row.setdefault("scope_key", "2026-05")
                 row.setdefault("source_versions", input_invoice_usage_source_versions())
                 return row
+            input_invoice_ids: set[str] = set()
+            for row in self.input_rows:
+                input_invoice_ids.update(self._invoice_row_ids(row))
             return {
                 "count": len(self.input_rows),
+                "invoice_count": len(input_invoice_ids),
                 "total_with_tax": "118.00",
                 "matched_oa_count": 1,
                 "matched_bank_transaction_count": 1,
                 "pending_count": 0,
             }
         if "from read_model.output_invoice_collection_rows" in normalized:
+            output_invoice_ids: set[str] = set()
+            for row in self.output_rows:
+                output_invoice_ids.update(self._invoice_row_ids(row))
             return {
                 "count": len(self.output_rows),
+                "invoice_count": len(output_invoice_ids),
                 "total_with_tax": "118.00",
                 "collected_amount": "118.00",
                 "pending_amount": "0.00",
@@ -471,6 +479,28 @@ class InvoiceReadModelConnection:
                 if oa_id:
                     ids.add(oa_id)
         fallback_id = str(oa_payload.get("id") or row.get("oa_id") or "").strip()
+        if fallback_id:
+            ids.add(fallback_id)
+        return ids
+
+    @staticmethod
+    def _invoice_row_ids(row: dict) -> set[str]:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        invoice_payload = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else {}
+        relation_payload = payload.get("invoiceRelations") if isinstance(payload.get("invoiceRelations"), dict) else {}
+        ids: set[str] = set()
+        for summary in list(relation_payload.get("summaries") or []):
+            if isinstance(summary, dict):
+                invoice_id = str(
+                    summary.get("invoiceId")
+                    or summary.get("id")
+                    or summary.get("primaryInvoiceId")
+                    or summary.get("relatedInvoiceId")
+                    or ""
+                ).strip()
+                if invoice_id:
+                    ids.add(invoice_id)
+        fallback_id = str(invoice_payload.get("id") or row.get("invoice_id") or payload.get("invoiceId") or "").strip()
         if fallback_id:
             ids.add(fallback_id)
         return ids
@@ -1011,6 +1041,38 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("bank_direction", executed_sql)
         self.assertIn("bank_account asc", executed_sql)
 
+    def test_input_repository_summary_counts_relation_invoice_members_not_rows(self) -> None:
+        connection = InvoiceReadModelConnection(
+            input_rows=[
+                {
+                    "payload": {
+                        "id": "input_invoice_usage_grouped_row_1",
+                        "invoiceId": "invoice-primary",
+                        "invoice": {"id": "invoice-primary", "invoiceNo": "1001", "totalWithTax": "300.00"},
+                        "invoiceRelations": {
+                            "summaries": [
+                                {"invoiceId": "invoice-primary"},
+                                {"invoiceId": "invoice-related-a"},
+                                {"invoiceId": "invoice-related-b"},
+                            ],
+                        },
+                        "paymentStatus": {"code": "pending", "label": "待处理"},
+                        "oa": {"relationCount": 1},
+                        "bankTransactions": {"relationCount": 1},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_input_invoice_usage_rows(month="2026-05", page=1, page_size=50)
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["summary"]["invoiceCount"], 3)
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("invoice_count_ids", executed_sql)
+
     def test_input_repository_filter_options_use_sql_aggregation_without_payload_rows(self) -> None:
         class FilterOptionConnection:
             def __init__(self) -> None:
@@ -1190,6 +1252,39 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
         self.assertIn("collection_status", executed_sql)
         self.assertIn("buyer_name asc", executed_sql)
+
+    def test_output_repository_summary_counts_relation_invoice_members_not_rows(self) -> None:
+        connection = InvoiceReadModelConnection(
+            output_rows=[
+                {
+                    "payload": {
+                        "id": "output_invoice_collection_grouped_row_1",
+                        "invoiceId": "output-primary",
+                        "invoice": {"id": "output-primary", "invoiceNo": "1001", "totalWithTax": "300.00"},
+                        "invoiceRelations": {
+                            "summaries": [
+                                {"relatedInvoiceId": "output-primary"},
+                                {"relatedInvoiceId": "output-related-a"},
+                                {"relatedInvoiceId": "output-related-b"},
+                            ],
+                        },
+                        "collectionStatus": {"code": "collected", "label": "已收款", "collectedAmount": "300.00", "pendingAmount": "0.00"},
+                        "bankTransactions": {"relationCount": 1},
+                        "redInvoiceRelation": {"relationCount": 0},
+                        "receipt": {"status": "pending", "label": "待出收据"},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_output_invoice_collection_rows(month="2026-05", page=1, page_size=50)
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["summary"]["invoiceCount"], 3)
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("invoice_count_ids", executed_sql)
 
     def test_output_repository_save_persists_oa_relation_columns(self) -> None:
         connection = WriteRecordingConnection()

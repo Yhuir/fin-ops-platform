@@ -201,6 +201,52 @@ textarea {
   gap: var(--fp-space-2);
 }
 
+.invoice-count-page-scaffold .page-header {
+  align-items: flex-start;
+  padding-bottom: var(--fp-space-3);
+  border-bottom: 1px solid var(--fp-border);
+}
+
+.invoice-count-page-scaffold .page-header > div:first-child {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--fp-space-3);
+  flex-wrap: wrap;
+}
+
+.invoice-count-page-scaffold .page-description {
+  margin: 0;
+}
+
+.invoice-count-segment {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.invoice-count-segment__item {
+  min-height: 30px;
+  min-width: 86px;
+  padding: 0 var(--fp-space-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.invoice-count-segment__item--active {
+  background: var(--fp-accent-soft);
+  color: var(--fp-accent);
+}
+
 .input-invoice-usage-page {
   min-width: 0;
   overflow-x: hidden;
@@ -1437,6 +1483,126 @@ textarea {
   display: flex;
   justify-content: flex-end;
   gap: var(--fp-space-2);
+}
+
+.input-invoice-usage-rules-drawer .finance-drawer__body {
+  padding: var(--fp-space-3) var(--fp-space-4);
+}
+
+.input-invoice-usage-rules-drawer .finance-drawer__footer {
+  background: var(--fp-surface-raised);
+  padding: var(--fp-space-3) var(--fp-space-4);
+}
+
+.input-invoice-usage-payment-rules-body {
+  gap: var(--fp-space-3);
+}
+
+.input-invoice-usage-payment-rules-body .input-invoice-usage-rules-meta {
+  gap: var(--fp-space-2);
+}
+
+.input-invoice-usage-payment-rules-body .input-invoice-usage-rules-tag {
+  max-width: 100%;
+}
+
+.input-invoice-usage-payment-rules-panel {
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.input-invoice-usage-payment-rules-panel__header {
+  border-bottom: 1px solid var(--fp-border);
+  background: var(--fp-table-header-bg);
+  padding: var(--fp-space-2) var(--fp-space-3);
+}
+
+.input-invoice-usage-payment-rules-panel__header h3 {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.input-invoice-usage-payment-rules-list {
+  display: grid;
+}
+
+.input-invoice-usage-payment-rule-row {
+  display: grid;
+  grid-template-columns: 104px minmax(220px, 1fr) minmax(220px, 0.9fr);
+  gap: var(--fp-space-3);
+  align-items: start;
+  border-bottom: 1px solid var(--fp-border);
+  padding: var(--fp-space-3);
+}
+
+.input-invoice-usage-payment-rule-row:last-child {
+  border-bottom: 0;
+}
+
+.input-invoice-usage-payment-rule-row__state,
+.input-invoice-usage-payment-rule-row__main,
+.input-invoice-usage-payment-rule-row__reason {
+  display: grid;
+  min-width: 0;
+  gap: var(--fp-space-2);
+}
+
+.input-invoice-usage-payment-rule-priority input {
+  width: 76px;
+}
+
+.input-invoice-usage-payment-rule-priority-tag {
+  justify-content: flex-start;
+  font-variant-numeric: tabular-nums;
+}
+
+.input-invoice-usage-payment-rule-chips {
+  min-width: 0;
+}
+
+.input-invoice-usage-payment-rule-row__reason textarea {
+  min-height: 62px;
+}
+
+.input-invoice-usage-payment-rule-readonly-field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.input-invoice-usage-payment-rule-readonly-field span {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.input-invoice-usage-payment-rule-readonly-field strong {
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.input-invoice-usage-payment-rules-footer {
+  align-items: center;
+}
+
+@media (max-width: 760px) {
+  .input-invoice-usage-payment-rule-row {
+    grid-template-columns: 1fr;
+  }
+
+  .input-invoice-usage-payment-rule-row__state {
+    grid-template-columns: repeat(2, max-content);
+    align-items: end;
+  }
 }
 
 .input-invoice-usage-oa-metrics {
@@ -9241,12 +9407,14 @@ textarea {
 }
 
 @media (max-width: 640px) {
+  .invoice-count-segment,
   .pending-invoices-direction-segment,
   .pending-invoices-toolbar-actions,
   .pending-invoices-pagination {
     width: 100%;
   }
 
+  .invoice-count-segment__item,
   .pending-invoices-direction-button {
     flex: 1 1 0;
     min-width: 0;

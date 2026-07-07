@@ -10611,40 +10611,91 @@ def _invoice_relation_order_sql(
 def _invoice_relation_summary_sql(*, table_name: str, where_sql: str, summary_kind: str) -> str:
     if summary_kind == "input":
         return f"""
+        with base_rows as (
+            select *
+            from {table_name}
+            where {where_sql}
+        ),
+        invoice_count_ids as (
+            select nullif(btrim(coalesce(
+                invoice_summary.value->>'invoiceId',
+                invoice_summary.value->>'id',
+                invoice_summary.value->>'primaryInvoiceId',
+                payload->'invoice'->>'id',
+                invoice_id
+            )), '') as invoice_id
+            from base_rows
+            left join lateral jsonb_array_elements(
+                case
+                    when jsonb_typeof(payload->'invoiceRelations'->'summaries') = 'array'
+                    then coalesce(
+                        nullif(payload->'invoiceRelations'->'summaries', '[]'::jsonb),
+                        jsonb_build_array(jsonb_build_object('invoiceId', coalesce(payload->'invoice'->>'id', invoice_id)))
+                    )
+                    else jsonb_build_array(jsonb_build_object('invoiceId', coalesce(payload->'invoice'->>'id', invoice_id)))
+                end
+            ) as invoice_summary(value) on true
+        )
         select
             count(*) as count,
+            (select count(distinct invoice_id) from invoice_count_ids) as invoice_count,
             coalesce(sum(total_with_tax), 0) as total_with_tax,
             coalesce(sum(case when oa_relation_count > 0 then 1 else 0 end), 0) as matched_oa_count,
             coalesce(sum(case when bank_relation_count > 0 then 1 else 0 end), 0) as matched_bank_transaction_count,
             coalesce(sum(case when payment_status = 'pending' then 1 else 0 end), 0) as pending_count
-        from {table_name}
-        where {where_sql}
+        from base_rows
         """
     return f"""
+    with base_rows as (
+        select *
+        from {table_name}
+        where {where_sql}
+    ),
+    invoice_count_ids as (
+        select nullif(btrim(coalesce(
+            invoice_summary.value->>'invoiceId',
+            invoice_summary.value->>'id',
+            invoice_summary.value->>'primaryInvoiceId',
+            invoice_summary.value->>'relatedInvoiceId',
+            payload->'invoice'->>'id',
+            invoice_id
+        )), '') as invoice_id
+        from base_rows
+        left join lateral jsonb_array_elements(
+            case
+                when jsonb_typeof(payload->'invoiceRelations'->'summaries') = 'array'
+                then coalesce(
+                    nullif(payload->'invoiceRelations'->'summaries', '[]'::jsonb),
+                    jsonb_build_array(jsonb_build_object('invoiceId', coalesce(payload->'invoice'->>'id', invoice_id)))
+                )
+                else jsonb_build_array(jsonb_build_object('invoiceId', coalesce(payload->'invoice'->>'id', invoice_id)))
+            end
+        ) as invoice_summary(value) on true
+    )
     select
         count(*) as count,
+        (select count(distinct invoice_id) from invoice_count_ids) as invoice_count,
         coalesce(sum(total_with_tax), 0) as total_with_tax,
         coalesce(sum(collected_amount), 0) as collected_amount,
         coalesce(sum(pending_amount), 0) as pending_amount,
         coalesce(sum(case when collection_status = 'pending_collection' then 1 else 0 end), 0) as pending_collection_count,
         coalesce(sum(case when collection_status = 'partial_collected' then 1 else 0 end), 0) as partial_collection_count,
         coalesce(sum(case when receipt_status = 'pending' then 1 else 0 end), 0) as receipt_pending_count
-    from {table_name}
-    where {where_sql}
+    from base_rows
     """
 
 
 def _invoice_relation_summary_payload(row: dict[str, Any], *, summary_kind: str, total: int) -> dict[str, Any]:
     if summary_kind == "input":
         return {
-            "invoiceCount": total,
+            "invoiceCount": int_value(row.get("invoice_count"), total),
             "totalWithTax": decimal_text(row.get("total_with_tax")) or "0.00",
             "matchedOaCount": int_value(row.get("matched_oa_count"), 0),
             "matchedBankTransactionCount": int_value(row.get("matched_bank_transaction_count"), 0),
             "pendingCount": int_value(row.get("pending_count"), 0),
         }
     return {
-        "invoiceCount": total,
+        "invoiceCount": int_value(row.get("invoice_count"), total),
         "totalWithTax": decimal_text(row.get("total_with_tax")) or "0.00",
         "collectedAmount": decimal_text(row.get("collected_amount")) or "0.00",
         "pendingAmount": decimal_text(row.get("pending_amount")) or "0.00",

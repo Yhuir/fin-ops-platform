@@ -219,6 +219,7 @@ export default function OutputInvoiceCollectionsPage() {
   const setQuery = querySession.setValue;
   const [rows, setRows] = useState<OutputInvoiceCollectionRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [invoiceCount, setInvoiceCount] = useState(0);
   const [filterConfigs, setFilterConfigs] = useState<OutputInvoiceCollectionFilterFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OutputInvoiceCollectionFilterOption[]>>({});
   const [statusRulesPayload, setStatusRulesPayload] = useState<OutputInvoiceCollectionStatusRulesResponse | null>(null);
@@ -272,6 +273,7 @@ export default function OutputInvoiceCollectionsPage() {
         }
         setRows(payload.rows);
         setTotal(payload.pagination.total);
+        setInvoiceCount(payload.summary?.invoiceCount ?? payload.pagination.total);
         setFilterConfigs(payload.filterConfig.length > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields));
         setFilterOptions(filterOptionsByField(optionsPayload.fields));
         setReadModelStatus(combineReadModelStatus(payload.readModelStatus, optionsPayload.readModelStatus));
@@ -282,6 +284,7 @@ export default function OutputInvoiceCollectionsPage() {
         }
         setRows([]);
         setTotal(0);
+        setInvoiceCount(0);
         setFilterConfigs([]);
         setFilterOptions({});
         setReadModelStatus("");
@@ -554,7 +557,13 @@ export default function OutputInvoiceCollectionsPage() {
     <>
     <div className="output-invoice-collections-page" data-testid="output-invoice-collections-page">
       <PageScaffold
+        className="invoice-count-page-scaffold"
         title="销项发票收款情况"
+        description={(
+          <div aria-label="销项发票数量统计" className="invoice-count-segment" role="group">
+            <span className="invoice-count-segment__item invoice-count-segment__item--active">销项票 {invoiceCount}</span>
+          </div>
+        )}
         actions={actions}
       >
         <div className="output-invoice-collections-content">

@@ -28,6 +28,8 @@
 | 销项发票收款情况 | `output_invoice` | `collection_status` |
 | 税金抵扣 | `input_invoice` | `certification_status` |
 
+进项发票使用情况和销项发票收款情况的页面表头发票数量用于核对发票拉取完整性，必须读取 rows summary 中按唯一发票 ID 统计的 `invoiceCount`；`pagination.total` 仍表示表格行数或配对组行数。同一 linked relation 折叠多张发票到一行时，表头发票数必须计入所有成员发票，不能用行数替代。
+
 ## 待找发票
 
 待找发票页面关注支出/收入流水的发票获取状态：

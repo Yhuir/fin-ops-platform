@@ -147,17 +147,44 @@ export default function PaymentStatusRulesDrawer({
     ? "编辑后保存会校验冲突并触发刷新"
     : "按后端权限展示规则和待处理方向";
 
+  const footer = payload && canSave ? (
+    <div className="input-invoice-usage-rules-actions input-invoice-usage-payment-rules-footer">
+      <button
+        className="input-invoice-usage-button"
+        disabled={saving || loading || !dirty}
+        onClick={() => {
+          setDraftRules(cloneRules(payload.rules));
+          setDraftPendingDirections(payload.pendingDirections.map((item) => ({ ...item })));
+          setError(null);
+          setFeedback(null);
+        }}
+        type="button"
+      >
+        还原
+      </button>
+      <button
+        className="input-invoice-usage-button input-invoice-usage-button--primary"
+        disabled={saving || loading || !dirty}
+        onClick={handleSave}
+        type="button"
+      >
+        {saving ? "保存中..." : "保存并刷新"}
+      </button>
+    </div>
+  ) : null;
+
   return (
     <AppDrawer
       className="input-invoice-usage-rules-drawer"
       closeLabel="关闭支付状态规则抽屉"
+      footer={footer}
       onClose={onClose}
       open={open}
       subtitle={subtitle}
       title="发票与支付状态规则设置"
       width="min(880px, 100vw)"
     >
-      <div className="input-invoice-usage-drawer-body">
+      <div className="input-invoice-usage-drawer-body input-invoice-usage-payment-rules-body">
         {loading ? (
           <div className="input-invoice-usage-drawer-loading">
             <span aria-label="正在加载支付状态规则" className="input-invoice-usage-drawer-spinner" role="progressbar" />
@@ -190,91 +217,91 @@ export default function PaymentStatusRulesDrawer({
                 当前暂未提供命中统计，保存后以刷新后的列表状态为准。
               </p>
             </section>
-            <div className="input-invoice-usage-rules-table-shell">
-              <table aria-label="Sheet4 支付状态规则" className="input-invoice-usage-rules-table">
-                <thead>
-                  <tr>
-                    <th scope="col">启用</th>
-                    <th scope="col">支付状态</th>
-                    <th scope="col">命中条件</th>
-                    <th scope="col">原因文案</th>
-                    <th scope="col">优先级</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {draftRules.map((rule, index) => (
-                    <tr key={rule.id || rule.code || rule.label}>
-                      <td className="input-invoice-usage-rules-table__enabled">
-                        {canSave ? (
-                          <label className="input-invoice-usage-rules-toggle">
-                            <input
-                              checked={rule.enabled !== false}
-                              onChange={(event) => updateRule(index, { enabled: event.target.checked }, setDraftRules)}
-                              type="checkbox"
-                            />
-                            <span>{rule.enabled === false ? "停用" : "启用"}</span>
-                          </label>
-                        ) : (
-                          <span className={rule.enabled === false ? "input-invoice-usage-rules-tag" : "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success"}>
-                            {rule.enabled === false ? "停用" : "启用"}
-                          </span>
-                        )}
-                      </td>
-                      <td className="input-invoice-usage-rules-table__status">
-                        {canSave ? (
-                          <label className="input-invoice-usage-rules-field">
-                            <span>支付状态</span>
-                            <input
-                              onChange={(event) => updateRule(index, { label: event.target.value }, setDraftRules)}
-                              value={rule.label}
-                            />
-                          </label>
-                        ) : rule.label}
-                      </td>
-                      <td>
-                        <div className="input-invoice-usage-rules-chip-list" aria-label={`${rule.label || "规则"}命中条件`}>
-                          {conditionChips(rule).map((chip) => (
-                            <span className="input-invoice-usage-rules-tag" key={`${rule.id || rule.label}:${chip}`}>
-                              {chip}
-                            </span>
-                          ))}
+            <section className="input-invoice-usage-payment-rules-panel">
+              <div className="input-invoice-usage-payment-rules-panel__header">
+                <h3>支付状态规则</h3>
+              </div>
+              <div aria-label="Sheet4 支付状态规则" className="input-invoice-usage-payment-rules-list" role="list">
+                {draftRules.map((rule, index) => (
+                  <article className="input-invoice-usage-payment-rule-row" key={rule.id || rule.code || rule.label} role="listitem">
+                    <div className="input-invoice-usage-payment-rule-row__state">
+                      {canSave ? (
+                        <label className="input-invoice-usage-rules-toggle">
+                          <input
+                            checked={rule.enabled !== false}
+                            onChange={(event) => updateRule(index, { enabled: event.target.checked }, setDraftRules)}
+                            type="checkbox"
+                          />
+                          <span>{rule.enabled === false ? "停用" : "启用"}</span>
+                        </label>
+                      ) : (
+                        <span className={rule.enabled === false ? "input-invoice-usage-rules-tag" : "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success"}>
+                          {rule.enabled === false ? "停用" : "启用"}
+                        </span>
+                      )}
+                      {canSave ? (
+                        <label className="input-invoice-usage-rules-field input-invoice-usage-payment-rule-priority">
+                          <span>优先级</span>
+                          <input
+                            min={1}
+                            onChange={(event) => updateRule(index, { priority: Number(event.target.value) }, setDraftRules)}
+                            type="number"
+                            value={rule.priority}
+                          />
+                        </label>
+                      ) : (
+                        <span className="input-invoice-usage-rules-tag input-invoice-usage-payment-rule-priority-tag">
+                          优先级 {rule.priority}
+                        </span>
+                      )}
+                    </div>
+                    <div className="input-invoice-usage-payment-rule-row__main">
+                      {canSave ? (
+                        <label className="input-invoice-usage-rules-field">
+                          <span>支付状态</span>
+                          <input
+                            onChange={(event) => updateRule(index, { label: event.target.value }, setDraftRules)}
+                            value={rule.label}
+                          />
+                        </label>
+                      ) : (
+                        <div className="input-invoice-usage-payment-rule-readonly-field">
+                          <span>支付状态</span>
+                          <strong>{rule.label}</strong>
                         </div>
-                      </td>
-                      <td>
-                        {canSave ? (
-                          <label className="input-invoice-usage-rules-field">
-                            <span>原因文案</span>
-                            <textarea
-                              onChange={(event) => updateRule(index, { reason: event.target.value, description: event.target.value }, setDraftRules)}
-                              rows={2}
-                              value={rule.reason ?? rule.description}
-                            />
-                          </label>
-                        ) : (rule.reason || rule.description)}
-                      </td>
-                      <td className="input-invoice-usage-rules-table__priority">
-                        {canSave ? (
-                          <label className="input-invoice-usage-rules-field">
-                            <span>优先级</span>
-                            <input
-                              min={1}
-                              onChange={(event) => updateRule(index, { priority: Number(event.target.value) }, setDraftRules)}
-                              type="number"
-                              value={rule.priority}
-                            />
-                          </label>
-                        ) : rule.priority}
-                      </td>
-                    </tr>
-                  ))}
-                  {draftRules.length === 0 ? (
-                    <tr>
-                      <td colSpan={5}>暂无规则。</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
+                      )}
+                      <div className="input-invoice-usage-rules-chip-list input-invoice-usage-payment-rule-chips" aria-label={`${rule.label || "规则"}命中条件`}>
+                        {conditionChips(rule).map((chip) => (
+                          <span className="input-invoice-usage-rules-tag" key={`${rule.id || rule.label}:${chip}`}>
+                            {chip}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="input-invoice-usage-payment-rule-row__reason">
+                      {canSave ? (
+                        <label className="input-invoice-usage-rules-field">
+                          <span>原因文案</span>
+                          <textarea
+                            onChange={(event) => updateRule(index, { reason: event.target.value, description: event.target.value }, setDraftRules)}
+                            rows={2}
+                            value={rule.reason ?? rule.description}
+                          />
+                        </label>
+                      ) : (
+                        <div className="input-invoice-usage-payment-rule-readonly-field">
+                          <span>原因文案</span>
+                          <strong>{rule.reason || rule.description}</strong>
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                ))}
+                {draftRules.length === 0 ? (
+                  <p className="input-invoice-usage-rules-empty">暂无规则。</p>
+                ) : null}
+              </div>
+            </section>
             <section className="input-invoice-usage-rules-section">
               <h3>待处理发票处理方向</h3>
               <p className="input-invoice-usage-rules-empty">
@@ -301,31 +328,6 @@ export default function PaymentStatusRulesDrawer({
                 ))}
               </div>
             </section>
-            {canSave ? (
-              <div className="input-invoice-usage-rules-actions">
-                <button
-                  className="input-invoice-usage-button"
-                  disabled={saving || loading}
-                  onClick={() => {
-                    setDraftRules(cloneRules(payload.rules));
-                    setDraftPendingDirections(payload.pendingDirections.map((item) => ({ ...item })));
-                    setError(null);
-                    setFeedback(null);
-                  }}
-                  type="button"
-                >
-                  还原
-                </button>
-                <button
-                  className="input-invoice-usage-button input-invoice-usage-button--primary"
-                  disabled={saving || loading || !dirty}
-                  onClick={handleSave}
-                  type="button"
-                >
-                  {saving ? "保存中..." : "保存并刷新"}
-                </button>
-              </div>
-            ) : null}
           </>
         ) : null}
       </div>

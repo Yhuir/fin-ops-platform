@@ -97,6 +97,13 @@ const rowsPayload = {
     pageSize: 20,
     total: 51,
   },
+  summary: {
+    invoiceCount: 787,
+    totalWithTax: "12345.67",
+    matchedOaCount: 1,
+    matchedBankTransactionCount: 1,
+    pendingCount: 1,
+  },
   filterConfig: [],
 };
 
@@ -610,6 +617,7 @@ describe("Input invoice usage page", () => {
     expect(initialRowsRequest.searchParams.get("page")).toBe("1");
     expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
     expect(within(page).getByRole("heading", { name: "进项发票使用情况" })).toBeInTheDocument();
+    expect(within(page).getByLabelText("进项发票数量统计")).toHaveTextContent("进项票 787");
     expect(within(page).queryByText("以进项发票为主对象反查支付状态、OA 和银行流水。")).not.toBeInTheDocument();
     expect(within(page).queryByText("关键字")).not.toBeInTheDocument();
     expect(within(page).queryByRole("grid")).not.toBeInTheDocument();

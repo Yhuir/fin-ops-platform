@@ -236,6 +236,15 @@ const rowsPayload = {
     pageSize: 20,
     total: 51,
   },
+  summary: {
+    invoiceCount: 20,
+    totalWithTax: "0.00",
+    collectedAmount: "5000.00",
+    pendingAmount: "7345.67",
+    pendingCollectionCount: 1,
+    partialCollectionCount: 1,
+    receiptPendingCount: 1,
+  },
   filterConfig: [],
   readModelStatus: "live_query",
   generatedAt: "2026-05-24T00:00:00Z",
@@ -728,6 +737,7 @@ describe("Output invoice collections page", () => {
     expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
     expect(initialRowsRequest.searchParams.get("month")).toBeNull();
     expect(within(page).getByRole("heading", { name: "销项发票收款情况" })).toBeInTheDocument();
+    expect(within(page).getByLabelText("销项发票数量统计")).toHaveTextContent("销项票 20");
     expect(within(page).getByRole("button", { name: "销项发票月份" })).toHaveTextContent("全部发票");
     expect(within(page).queryByText("以销项发票为主对象查看收款状态、收入流水和收据预览。")).not.toBeInTheDocument();
     const refreshButton = within(page).getByRole("button", { name: "刷新" });

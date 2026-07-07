@@ -1,6 +1,6 @@
 # 销项发票收款情况模块边界与 I/O
 
-日期：2026-07-01
+日期：2026-07-07
 
 ## 模块化状态
 
@@ -40,7 +40,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 收款 rows/details | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额 |
+| 收款 rows/details | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额；rows summary 的 `invoiceCount` 按唯一销项发票 ID 统计并驱动表头 `销项票 N`，`pagination.total` 仍是表格行数/配对组行数 |
 | lifecycle/status result | API | 写后可恢复、可审计 |
 | operation barrier targets | 前端页面 | lifecycle/receipt 写成功后用服务端返回 targets 等待 fresh；缺省时才回退当前查询月份 |
 | Dirty scope | runtime queue | `output_invoice_collection.read_model.refresh` |

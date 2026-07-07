@@ -40,7 +40,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 使用情况 rows/details | 前端页面 | fresh/status 可见 |
+| 使用情况 rows/details | 前端页面 | fresh/status 可见；rows summary 的 `invoiceCount` 按唯一进项发票 ID 统计并驱动表头 `进项票 N`，`pagination.total` 仍是表格行数/配对组行数 |
 | 支付状态 | rows/filter/export/read model | 只消费 `workbench_relation` distribution 中 confirmed/linked 关系；多 OA/多流水用 linked 合计与发票价税合计比对；无 active relation 或历史 candidate 兼容值不参与 `已付款` 判断 |
 | OA reverse 本地状态 | API/OA drawer | draft/staged/submitted/not_submitted 只落 `app.input_invoice_usage_oa_reverse_batches`，前端立即释放按钮；不等待 `input_invoice_usage` operation barrier |
 | OA reverse relation 结果 | Workbench relation / API / operation barrier | evidence detected 写入 relation 后触发 dirty scope，并返回 `read_model_key=input_invoice_usage`、`scope_key=<invoice month>` |

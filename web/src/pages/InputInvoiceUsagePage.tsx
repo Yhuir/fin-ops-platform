@@ -175,6 +175,7 @@ export default function InputInvoiceUsagePage() {
   const setQuery = querySession.setValue;
   const [rows, setRows] = useState<InputInvoiceUsageRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [invoiceCount, setInvoiceCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [readModelStatus, setReadModelStatus] = useState("");
@@ -228,6 +229,7 @@ export default function InputInvoiceUsagePage() {
         }
         setRows(payload.rows);
         setTotal(payload.pagination.total);
+        setInvoiceCount(payload.summary?.invoiceCount ?? payload.pagination.total);
         setFilterConfigs((payload.filterConfig?.length ?? 0) > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields ?? []));
         setFilterOptions(filterOptionsByField(optionsPayload.fields ?? []));
         setReadModelStatus(combineReadModelStatus(payload.readModelStatus, optionsPayload.readModelStatus));
@@ -239,6 +241,7 @@ export default function InputInvoiceUsagePage() {
         }
         setRows([]);
         setTotal(0);
+        setInvoiceCount(0);
         setReadModelStatus("");
         setError(caught instanceof Error ? caught.message : "进项发票使用情况加载失败，请稍后重试。");
       })
@@ -452,7 +455,13 @@ export default function InputInvoiceUsagePage() {
     <>
       <div className="input-invoice-usage-page" data-testid="input-invoice-usage-page">
         <PageScaffold
+          className="invoice-count-page-scaffold"
           title="进项发票使用情况"
+          description={(
+            <div aria-label="进项发票数量统计" className="invoice-count-segment" role="group">
+              <span className="invoice-count-segment__item invoice-count-segment__item--active">进项票 {invoiceCount}</span>
+            </div>
+          )}
           actions={actions}
         >
           <div className="input-invoice-usage-content">

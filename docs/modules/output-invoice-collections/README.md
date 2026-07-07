@@ -54,6 +54,7 @@
 - 生产 PostgreSQL runtime 下，`/rows/{row_id}/relation-details` 也必须优先读取 SQL read model detail row；SQL read repository 或 row detail lookup 缺失时返回 `202`、`read_model_status=refreshing` 并 enqueue `output_invoice_collection:all`，不能回退 live detail rebuild。legacy/local 模式保留 query service detail 作为开发兼容路径。
 - fresh SQL rows 在返回前叠加 lifecycle facts：`collectionStatus`、手动状态、提醒、红蓝票关系和正式收据摘要。
 - 页面展示统一关系事实源中的 OA、收入流水和销项发票项：rows 中 `oa`、`bankTransactions`、`invoiceRelations` 都携带 `relationCount`、`hasMultiple`、`detailMode` 和 `summaries`；同一 linked relation 下多张销项发票由 `output_invoice_collection` 投影为一条收款行，发票金额按成员净额汇总，负数/红字发票必须进入 `invoiceRelations.summaries`。多项对象在对应栏显示 `+N`，其中 `N=relationCount-1` 表示除主展示对象外的额外项数，点击 `/rows/{row_id}/relation-details?kind=oa|bank|invoice` 展开全部明细。销项发票栏多项时仍显示当前行的发票主信息和多张发票合计，避免只剩 `+N` 无合计。
+- 页面表头显示的 `销项票 N` 是 rows summary 的唯一销项发票数，用于核对销项发票数据拉取完整性；linked 多销项发票 relation 归并为一条 row 时，必须计入所有 `invoiceRelations.summaries` 成员。`pagination.total` 只代表表格行数/配对组行数，不能作为发票数量。
 - 收款状态规则由 `InvoiceLifecyclePolicy` 与 `OutputInvoiceCollectionStatusRuleService` 统一判定；页面不能自定义销项收款状态规则。
 - 写接口只通过 `OutputInvoiceCollectionLifecycleService` 与 `OutputInvoiceCollectionReceiptService` 写 lifecycle facts；service 不读取 HTTP header/cookie。
 - 手动收款状态、提醒、红蓝票关系、收据 create/void/reissue 必须 enqueue `output_invoice_collection` scope，并在 PostgreSQL 模式下通过 transaction-bound queue writer 与事实写入同事务提交。

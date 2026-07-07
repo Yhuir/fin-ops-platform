@@ -1200,6 +1200,8 @@ describe("Input invoice usage workflow drawers", () => {
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} onClose={() => undefined} />);
 
     await waitFor(() => expect(loadRules).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("list", { name: "Sheet4 支付状态规则" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Sheet4 支付状态规则" })).not.toBeInTheDocument();
     expect(await screen.findByText("待付款（自动识别有oa无流水）")).toBeInTheDocument();
     expect(screen.getByText("有发票、有 OA、无流水")).toBeInTheDocument();
     expect(screen.getAllByText("有 OA").length).toBeGreaterThanOrEqual(2);
@@ -1252,9 +1254,12 @@ describe("Input invoice usage workflow drawers", () => {
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
 
     expect(screen.queryByText(/版本\s*7/)).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "保存并刷新" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "还原" })).toBeDisabled();
     const ruleEditor = await screen.findByLabelText("原因文案");
     await user.clear(ruleEditor);
     await user.type(ruleEditor, "已更新规则");
+    await waitFor(() => expect(screen.getByRole("button", { name: "还原" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "保存并刷新" }));
 
     await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({

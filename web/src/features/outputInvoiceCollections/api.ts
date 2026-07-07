@@ -398,7 +398,7 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
         },
       };
     }),
-    summary: (() => {
+    summary: raw.summary && typeof raw.summary === "object" ? (() => {
       const summary = objectValue(raw.summary);
       return {
         invoiceCount: numberValue(camelOrSnake(summary, "invoiceCount", "invoice_count"), 0),
@@ -409,7 +409,7 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
         partialCollectionCount: numberValue(camelOrSnake(summary, "partialCollectionCount", "partial_collection_count"), 0),
         receiptPendingCount: numberValue(camelOrSnake(summary, "receiptPendingCount", "receipt_pending_count"), 0),
       };
-    })(),
+    })() : undefined,
     pagination: {
       page: numberValue(pagination.page, 1),
       pageSize: numberValue(camelOrSnake(pagination, "pageSize", "page_size"), 20),

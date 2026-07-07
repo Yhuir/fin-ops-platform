@@ -117,6 +117,13 @@ export type InputInvoiceUsageRow = {
 
 export type InputInvoiceUsageRowsResponse = {
   rows: InputInvoiceUsageRow[];
+  summary?: {
+    invoiceCount: number;
+    totalWithTax: string;
+    matchedOaCount: number;
+    matchedBankTransactionCount: number;
+    pendingCount: number;
+  };
   pagination: {
     page: number;
     pageSize: number;
