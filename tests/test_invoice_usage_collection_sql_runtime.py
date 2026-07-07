@@ -322,7 +322,7 @@ class InvoiceReadModelConnection:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
         if "from read_model.input_invoice_usage_rows" in normalized:
-            return self.input_rows
+            return self._input_rows_for_sql(normalized)
         if "from read_model.output_invoice_collection_rows" in normalized:
             return self.output_rows
         if "from read_model.oa_pending_payment_rows" in normalized:
@@ -395,10 +395,11 @@ class InvoiceReadModelConnection:
                 row.setdefault("source_versions", input_invoice_usage_source_versions())
                 return row
             input_invoice_ids: set[str] = set()
-            for row in self.input_rows:
+            rows = self._input_rows_for_sql(normalized)
+            for row in rows:
                 input_invoice_ids.update(self._invoice_row_ids(row))
             return {
-                "count": len(self.input_rows),
+                "count": len(rows),
                 "invoice_count": len(input_invoice_ids),
                 "total_with_tax": "118.00",
                 "matched_oa_count": 1,
@@ -458,6 +459,17 @@ class InvoiceReadModelConnection:
                 ),
             }
         return None
+
+    def _input_rows_for_sql(self, normalized_sql: str) -> list[dict]:
+        rows = list(self.input_rows)
+        if "deduped_invoice_relation_rows" not in normalized_sql:
+            return rows
+        rows_by_id: dict[str, dict] = {}
+        for row in rows:
+            row_id = str(row.get("row_id") or (row.get("payload") or {}).get("id") or "").strip()
+            if row_id:
+                rows_by_id.setdefault(row_id, row)
+        return list(rows_by_id.values())
 
     def _oa_rows_for_sql(self, normalized_sql: str) -> list[dict]:
         rows = list(self.oa_rows)
@@ -1040,6 +1052,39 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 50, "total": 0})
         self.assertEqual(payload["refresh_status"], "fresh")
+
+    def test_input_repository_all_scope_dedupes_cross_month_relation_group_rows(self) -> None:
+        duplicate_group_row = {
+            "row_id": "relation:component:zhou",
+            "payload": {
+                "id": "relation:component:zhou",
+                "invoiceId": "inv-zhou-600",
+                "invoice": {"id": "inv-zhou-600", "invoiceNo": "26532000000021026521", "totalWithTax": "800.00"},
+                "invoiceRelations": {
+                    "relationCount": 2,
+                    "summaries": [{"invoiceId": "inv-zhou-600"}, {"invoiceId": "inv-zhou-200"}],
+                },
+                "paymentStatus": {"code": "offset_zhou_jieying", "label": "冲"},
+                "oa": {"relationCount": 1},
+                "bankTransactions": {"relationCount": 0},
+            },
+            "raw_payload": {},
+        }
+        connection = InvoiceReadModelConnection(
+            input_rows=[
+                {**duplicate_group_row, "scope_key": "2026-01"},
+                {**duplicate_group_row, "scope_key": "2025-04"},
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_input_invoice_usage_rows(month=None, page=1, page_size=50)
+
+        self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 50, "total": 1})
+        self.assertEqual(len(payload["rows"]), 1)
+        self.assertEqual(payload["rows"][0]["paymentStatus"]["label"], "冲")
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("partition by row_id", executed_sql)
 
     def test_input_repository_uses_native_bank_account_and_direction_columns(self) -> None:
         connection = InvoiceReadModelConnection(

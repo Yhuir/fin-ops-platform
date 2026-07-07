@@ -43,13 +43,17 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 
 同一 linked relation 中存在多条 OA、银行流水或进项发票时，rows DTO 必须聚合为一条使用情况行，金额展示各自合计，并用 `relationCount`、`detailMode=list`、`summaries` 和 `invoiceRelations` 支持前端显示 `+N` 后打开关系明细。支付状态、已支付判断和已确认关系判断只能使用 `relationStatus='linked'` 的关系。
 
-页面表头显示的 `进项票 N` 是 rows summary 的唯一进项发票数，用于核对进项发票数据拉取完整性；同一 linked relation 多张进项发票折叠到一行时，必须计入所有 `invoiceRelations.summaries` 成员。`pagination.total` 只代表表格行数/配对组行数，不能作为发票数量。
+页面表头显示的 `进项票 N` 是 rows summary 的唯一进项发票数，用于核对进项发票数据拉取完整性；同一 linked relation 多张进项发票折叠到一行时，必须计入所有 `invoiceRelations.summaries` 成员。`pagination.total` 只代表表格行数/配对组行数，不能作为发票数量；默认 all scope 合并多个 month shard 时必须按 read model row id 去重，避免跨月同一配对组显示多行。
 
 支付状态中的 `已付款` 只能由 confirmed/linked relation 证明。单个 relation 内多条 OA 或多条银行流水时，`InputInvoiceUsageQueryService` 必须用 linked OA 合计和 linked 银行流水合计与发票价税合计比对；不能要求某一条 OA 或某一条流水单独等于整张发票，也不能让 candidate 关系参与支付状态。
 
 `/api/input-invoice-usage/rows/{row_id}/relation-details` 在 SQL read model 可用时必须按 `row_id` 读取单行 payload 并展开已有 summaries，不能为了打开 `+N` 详情触发全量 live rebuild；read model missing/stale/source mismatch 时返回 refreshing 状态并入队刷新。
 
 `/api/input-invoice-usage/rows`、filter-options、relation details 和 export 读路径必须依赖 `input_invoice_usage` read model repository/fresh gate。repository 缺失、SQL view miss、schema/source version mismatch 或 refresh_status 非 fresh 时都返回 `202`/`read_model_status=refreshing` 并 enqueue `input_invoice_usage` 对应 month/all scope；不得回退 `InputInvoiceUsageQueryService.list_rows(...)`、`filter_options(...)`、`row_relation_details(...)` 或返回 `live_query`。本地和测试环境也不保留 route/export live fallback；`InputInvoiceUsageQueryService` 只作为 projection/测试装配的业务 rows assembler。
+
+filter config、filters JSON 解析和排序字段校验由 `input_invoice_usage_query_contract.py` 维护。fresh gate 只能依赖该纯合同和 read model repository，不能接收 `InputInvoiceUsageQueryService` 或调用其私有解析方法。
+
+`InputInvoiceUsageApiRoutes` 不能接收完整 `InputInvoiceUsageQueryService`。invoice/bank/OA detail 和 payment rules 只能通过 Application 注入的窄 callable 进入，避免 route 可见面重新暴露 rows/filter/relation live 方法。
 
 `以发票反提 OA` preview 必须消费 `input_invoice_usage` SQL read model fresh gate：当前筛选打开 drawer 时复用 rows 查询合同并限制 `page_size=200`，显式发票选择时走 `invoice_id` 定向 lookup。read model 缺失、stale、schema/source version mismatch 或 refresh_status 非 fresh 时返回业务 refreshing 错误并入队刷新，不能回退全量 live scan 或在 Python 中全表过滤发票。
 

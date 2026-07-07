@@ -3852,6 +3852,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Invoice lifecycle policy is missing explicit input payment rules provider guard")
         if "payment_rules_provider=self._input_invoice_usage_payment_rules_provider()" not in service_factory_source:
             violations.append("Application input usage service factory must inject app-settings payment rules provider")
+        for forbidden_service_marker in (
+            "READ_MODEL_STATUS",
+            '"live_query"',
+            "'live_query'",
+        ):
+            if forbidden_service_marker in service_source:
+                violations.append(f"Input usage query service keeps removed live read marker {forbidden_service_marker}")
         for forbidden in (
             "Application",
             "_handle_api_input_invoice_usage_rows",
@@ -3865,7 +3872,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if forbidden in route_source:
                 violations.append(f"Input usage route owner leaks legacy/application ownership marker {forbidden}")
         for required in (
-            "query_service=query_service",
+            "invoice_detail_loader=query_service.invoice_detail",
+            "bank_transaction_detail_loader=query_service.bank_transaction_detail",
+            "oa_detail_loader=query_service.oa_detail",
+            "payment_status_rules_loader=query_service.payment_status_rules",
             "rows_from_sql_read_model=self._get_input_invoice_usage_rows_from_sql_read_model",
             "filter_options_from_sql_read_model=self._get_input_invoice_usage_filter_options_from_sql_read_model",
             "relation_details_from_sql_read_model=self._get_input_invoice_usage_relation_details_from_sql_read_model",
@@ -3904,6 +3914,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for forbidden_fallback in (
             "allow_live_fallback",
             "_allow_live_fallback",
+            "_query_service",
+            "query_service: InputInvoiceUsageQueryService",
+            "query_service=",
             "self._query_service.list_rows",
             "self._query_service.filter_options",
             "self._query_service.row_relation_details",
@@ -3938,6 +3951,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in route_source or forbidden in server_source or forbidden in fresh_gate_source:
                 violations.append(f"Input usage read path keeps removed all-rows filter-options path {forbidden}")
+        for forbidden_fresh_gate_dependency in (
+            "query_service:",
+            "query_service=",
+            "self._query_service",
+            "getattr(self._query_service",
+        ):
+            if forbidden_fresh_gate_dependency in fresh_gate_source:
+                violations.append(f"Input usage fresh gate keeps removed query service dependency {forbidden_fresh_gate_dependency}")
         for removed_handler in (
             "def _handle_api_input_invoice_usage_rows(",
             "def _handle_api_input_invoice_usage_filter_options(",

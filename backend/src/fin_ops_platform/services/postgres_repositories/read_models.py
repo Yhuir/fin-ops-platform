@@ -338,6 +338,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             page=page,
             page_size=page_size,
             summary_kind="input",
+            dedupe_all_scope_by_row_id=True,
         )
 
     def list_input_invoice_usage_filter_options(
@@ -950,8 +951,28 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         page: int | str | None,
         page_size: int | str | None,
         summary_kind: str,
+        dedupe_all_scope_by_row_id: bool = False,
     ) -> dict[str, Any] | None:
         scope_key = _invoice_relation_scope_key(month)
+        rows_table_sql = (
+            f"""
+            (
+                select *
+                from (
+                    select
+                        *,
+                        row_number() over (
+                            partition by row_id
+                            order by generated_at desc, scope_key desc, row_id
+                        ) as row_id_rank
+                    from {table_name}
+                ) deduped_invoice_relation_rows
+                where row_id_rank = 1
+            ) invoice_relation_rows
+            """
+            if dedupe_all_scope_by_row_id and scope_key == "all"
+            else table_name
+        )
         page_number = max(int_value(page, 1), 1)
         page_limit = min(max(int_value(page_size, 50), 1), 200)
         where: list[str] = []
@@ -973,7 +994,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             params.extend(clause_params)
         where_sql = " and ".join(where) if where else "true"
         summary_row = self._connection.fetch_one(
-            _invoice_relation_summary_sql(table_name=table_name, where_sql=where_sql, summary_kind=summary_kind),
+            _invoice_relation_summary_sql(table_name=rows_table_sql, where_sql=where_sql, summary_kind=summary_kind),
             tuple(params),
         )
         total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
@@ -1002,7 +1023,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         rows = self._connection.fetch_all(
             f"""
             select payload, raw_payload
-            from {table_name}
+            from {rows_table_sql}
             where {where_sql}
             order by {order_sql}
             limit %s offset %s

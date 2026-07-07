@@ -19,7 +19,6 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
                     "source_versions": {"schema": "v1"},
                 }
             ),
-            query_service=QueryServiceStub(),
             requires_sql_read_model_runtime=lambda: True,
             enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
             expected_source_versions=lambda **_: {"schema": "v1"},
@@ -50,7 +49,6 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
                     "source_versions": {"schema": "old"},
                 }
             ),
-            query_service=QueryServiceStub(),
             requires_sql_read_model_runtime=lambda: True,
             enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
             expected_source_versions=lambda **_: {"schema": "new"},
@@ -76,7 +74,6 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
         )
         service = InputInvoiceUsageReadModelFreshGateService(
             repository=repository,
-            query_service=QueryServiceStub(),
             requires_sql_read_model_runtime=lambda: True,
             enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
             expected_source_versions=lambda **_: {"schema": "v1"},
@@ -105,7 +102,6 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
         )
         service = InputInvoiceUsageReadModelFreshGateService(
             repository=repository,
-            query_service=QueryServiceStub(),
             requires_sql_read_model_runtime=lambda: True,
             enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
             expected_source_versions=lambda **_: {"schema": "v1"},
@@ -123,7 +119,6 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
         enqueued: list[tuple[str, str]] = []
         service = InputInvoiceUsageReadModelFreshGateService(
             repository=None,
-            query_service=ExplodingQueryServiceStub(),
             requires_sql_read_model_runtime=lambda: False,
             enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
             expected_source_versions=lambda **_: {"schema": "v1"},
@@ -169,28 +164,6 @@ class InvoiceIdLookupRepository:
 
     def list_input_invoice_usage_rows(self, **_: object) -> dict[str, object]:
         raise AssertionError("invoice id lookup must not load full input invoice usage rows")
-
-
-class QueryServiceStub:
-    def _parse_filters(self, _filters: object) -> list[object]:
-        return []
-
-    def _parse_sort(self, sort_field: object, sort_direction: object) -> tuple[str, str]:
-        return str(sort_field), str(sort_direction)
-
-    def _filter_config(self) -> list[object]:
-        return [
-            {"field": "payment_status", "label": "支付状态", "mode": "enum_multi", "operators": ["in"], "sortable": True},
-            {"field": "bank_direction", "label": "收支", "mode": "enum_multi", "operators": ["in"], "sortable": True},
-        ]
-
-    def list_rows(self, **_: object) -> dict[str, object]:
-        return {"rows": [], "pagination": {"page": 1, "pageSize": 50, "total": 0}, "summary": {}}
-
-
-class ExplodingQueryServiceStub(QueryServiceStub):
-    def list_rows(self, **_: object) -> dict[str, object]:
-        raise AssertionError("export page must not use live query fallback")
 
 
 if __name__ == "__main__":

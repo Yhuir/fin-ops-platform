@@ -5,6 +5,12 @@ from typing import Any, Callable
 from fin_ops_platform.services.input_invoice_usage_read_model_detail_service import (
     InputInvoiceUsageReadModelDetailService,
 )
+from fin_ops_platform.services.input_invoice_usage_query_contract import (
+    InputInvoiceUsageQueryContractError,
+    input_invoice_usage_filter_config,
+    parse_input_invoice_usage_filters,
+    parse_input_invoice_usage_sort,
+)
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageError
 from fin_ops_platform.services.read_model_freshness import (
     require_expected_source_versions,
@@ -17,13 +23,11 @@ class InputInvoiceUsageReadModelFreshGateService:
         self,
         *,
         repository: Any | None,
-        query_service: Any | None,
         requires_sql_read_model_runtime: Callable[[], bool],
         enqueue_refresh: Callable[[str, str], bool],
         expected_source_versions: Callable[..., dict[str, object]],
     ) -> None:
         self._repository = repository
-        self._query_service = query_service
         self._requires_sql_read_model_runtime = requires_sql_read_model_runtime
         self._enqueue_refresh = enqueue_refresh
         self._expected_source_versions = expected_source_versions
@@ -238,25 +242,20 @@ class InputInvoiceUsageReadModelFreshGateService:
                 return True
         return False
 
-    def _parse_filters(self, raw_filters: object) -> dict[str, object]:
-        parser = getattr(self._query_service, "_parse_filters", None)
-        if callable(parser):
-            return parser(raw_filters)
-        return {}
+    def _parse_filters(self, raw_filters: object) -> list[dict[str, object]]:
+        try:
+            return parse_input_invoice_usage_filters(raw_filters if isinstance(raw_filters, (str, list)) else None)
+        except InputInvoiceUsageQueryContractError as exc:
+            raise InputInvoiceUsageError(exc.error_code, str(exc), details=exc.details) from exc
 
     def _parse_sort(self, raw_field: object, raw_direction: object) -> tuple[str, str]:
-        parser = getattr(self._query_service, "_parse_sort", None)
-        if callable(parser):
-            return parser(raw_field, raw_direction)
-        field = str(raw_field or "invoice_date").strip() or "invoice_date"
-        direction = str(raw_direction or "desc").strip().lower()
-        return field, "asc" if direction == "asc" else "desc"
+        try:
+            return parse_input_invoice_usage_sort(raw_field, raw_direction)
+        except InputInvoiceUsageQueryContractError as exc:
+            raise InputInvoiceUsageError(exc.error_code, str(exc), details=exc.details) from exc
 
     def _filter_config(self) -> list[dict[str, object]]:
-        loader = getattr(self._query_service, "_filter_config", None)
-        if callable(loader):
-            return loader()
-        return []
+        return input_invoice_usage_filter_config()
 
     @staticmethod
     def scope_key_from_query(query: dict[str, list[str]]) -> str:

@@ -5,10 +5,7 @@ from typing import Any, Callable
 from urllib.parse import unquote
 
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
-from fin_ops_platform.services.input_invoice_usage_service import (
-    InputInvoiceUsageError,
-    InputInvoiceUsageQueryService,
-)
+from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageError
 from fin_ops_platform.services.input_invoice_usage_export_service import (
     InputInvoiceUsageExportError,
     InputInvoiceUsageExportService,
@@ -25,7 +22,10 @@ class InputInvoiceUsageApiRoutes:
     def __init__(
         self,
         *,
-        query_service: InputInvoiceUsageQueryService,
+        invoice_detail_loader: Callable[[str], dict[str, Any]],
+        bank_transaction_detail_loader: Callable[[str], dict[str, Any]],
+        oa_detail_loader: Callable[[str], dict[str, Any]],
+        payment_status_rules_loader: Callable[[], dict[str, Any]],
         rows_from_sql_read_model: Callable[[dict[str, list[str]]], dict[str, object] | None],
         filter_options_from_sql_read_model: Callable[[dict[str, list[str]]], dict[str, object] | Any | None],
         relation_details_from_sql_read_model: Callable[[str, dict[str, list[str]]], dict[str, object] | None],
@@ -41,8 +41,12 @@ class InputInvoiceUsageApiRoutes:
         payment_rules_error_response: Callable[[AppSettingsValidationError], Any],
         json_response: Callable[[HTTPStatus, object], Any],
         input_usage_error_response: Callable[[InputInvoiceUsageError], Any],
+        dependency_identity: object | None = None,
     ) -> None:
-        self._query_service = query_service
+        self._invoice_detail_loader = invoice_detail_loader
+        self._bank_transaction_detail_loader = bank_transaction_detail_loader
+        self._oa_detail_loader = oa_detail_loader
+        self._payment_status_rules_loader = payment_status_rules_loader
         self._rows_from_sql_read_model = rows_from_sql_read_model
         self._filter_options_from_sql_read_model = filter_options_from_sql_read_model
         self._relation_details_from_sql_read_model = relation_details_from_sql_read_model
@@ -58,6 +62,7 @@ class InputInvoiceUsageApiRoutes:
         self._payment_rules_error_response = payment_rules_error_response
         self._json_response = json_response
         self._input_usage_error_response = input_usage_error_response
+        self._dependency_identity = dependency_identity
 
     def route(
         self,
@@ -125,21 +130,21 @@ class InputInvoiceUsageApiRoutes:
 
     def invoice_detail(self, invoice_id: str) -> Any:
         try:
-            payload = self._query_service.invoice_detail(invoice_id)
+            payload = self._invoice_detail_loader(invoice_id)
         except InputInvoiceUsageError as exc:
             return self._input_usage_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> Any:
         try:
-            payload = self._query_service.bank_transaction_detail(bank_transaction_id)
+            payload = self._bank_transaction_detail_loader(bank_transaction_id)
         except InputInvoiceUsageError as exc:
             return self._input_usage_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
 
     def oa_detail(self, oa_id: str) -> Any:
         try:
-            payload = self._query_service.oa_detail(oa_id)
+            payload = self._oa_detail_loader(oa_id)
         except InputInvoiceUsageError as exc:
             return self._input_usage_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -160,7 +165,7 @@ class InputInvoiceUsageApiRoutes:
         return self._json_response(HTTPStatus.OK, payload)
 
     def payment_status_rules(self) -> Any:
-        return self._json_response(HTTPStatus.OK, self._query_service.payment_status_rules())
+        return self._json_response(HTTPStatus.OK, self._payment_status_rules_loader())
 
     def update_payment_status_rules(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
         session, auth_error = self._resolve_read_session(

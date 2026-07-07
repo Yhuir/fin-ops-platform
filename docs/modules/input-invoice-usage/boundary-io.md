@@ -6,9 +6,9 @@
 
 - 状态：partial
 - 当前边界可信度：high
-- 目标边界：进项发票使用情况通过 `input_invoice_usage` read model 查询；filter-options 和 OA reverse preview 通过 read model repository 窄端口读取；OA 反提本地 batch 状态与真正影响 rows 的 relation/evidence 写入分离。
+- 目标边界：进项发票使用情况通过 `input_invoice_usage` read model 查询；filter-options 和 OA reverse preview 通过 read model repository 窄端口读取；筛选字段/排序解析由 `input_invoice_usage_query_contract.py` 纯合同模块提供；OA 反提本地 batch 状态与真正影响 rows 的 relation/evidence 写入分离。
 - 当前缺口：OA reverse、applicant credentials 和 workbench relation 依赖交织，变更时必须同步权限和 freshness。
-- 旧代码删除条件：API route、export 和 OA reverse preview 不保留 live fallback；缺失 read model 时只返回 refreshing/业务错误并入队刷新，fresh gate 和 architecture guard tests 覆盖旧符号不得回归。
+- 旧代码删除条件：API route、export 和 OA reverse preview 不保留 live fallback；缺失 read model 时只返回 refreshing/业务错误并入队刷新；read route 只接收明细/规则窄 callable，不持有完整 `InputInvoiceUsageQueryService`；fresh gate 不接收 `InputInvoiceUsageQueryService`，不得保留 `live_query` 标记，architecture guard tests 覆盖旧符号不得回归。
 
 ## 职责边界
 
@@ -31,8 +31,8 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面查询/明细 | `InputInvoiceUsagePage.tsx`、`features/inputInvoiceUsage/api.ts` | 进入 read model service/fresh gate |
-| Filter options | `InputInvoiceUsageReadModelFreshGateService.filter_options(...)` | 生产路径调用 `InputInvoiceUsageReadModelRepositoryPort.list_input_invoice_usage_filter_options(...)`，由 PostgreSQL 结构化列聚合 enum options；禁止为 options 拉齐全部 row payload |
+| 页面查询/明细 | `InputInvoiceUsagePage.tsx`、`features/inputInvoiceUsage/api.ts` | rows/filter/export/relation-details 进入 read model service/fresh gate；invoice/bank/OA detail 和 payment rules 通过 route 显式注入的窄 callable 调用 |
+| Filter options | `InputInvoiceUsageReadModelFreshGateService.filter_options(...)` | 生产路径调用 `InputInvoiceUsageReadModelRepositoryPort.list_input_invoice_usage_filter_options(...)`，由 PostgreSQL 结构化列聚合 enum options；筛选字段配置和 query 解析来自 `input_invoice_usage_query_contract.py`；禁止为 options 拉齐全部 row payload 或依赖 `InputInvoiceUsageQueryService` 私有方法 |
 | OA reverse preview 读路径 | `InputInvoiceUsageOaReverseService.preview(...)` | 当前筛选走 `InputInvoiceUsageReadModelFreshGateService.rows(...)`；显式发票选择走 `rows_by_invoice_ids(...)` 和 repository `list_input_invoice_usage_rows_by_invoice_ids(...)`；非 fresh 或 repository 缺失时返回 refreshing 业务错误并入队刷新，不得接收 `InputInvoiceUsageQueryService` 或回退 live scan |
 | OA reverse 写操作 | `input_invoice_usage_oa_reverse_service.py` | 必须带 OA applicant context 和审计 |
 | OA reverse target envelope | `InputInvoiceUsageOaReverseService.batch_payload(..., include_write_targets=True)` | 仅用于 evidence detected / relation-impacting 写入；从 batch invoice display rows 提取 invoice month；无月份时退回 `all`，并返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
@@ -42,7 +42,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 使用情况 rows/details | 前端页面 | fresh/status 可见；confirmed relation group 是优先行边界，组内发票/OA/流水各显示一次合计与 `+N`，未 linked 发票按 identity 兜底；rows summary 的 `invoiceCount` 按唯一进项发票 ID 统计并驱动表头 `进项票 N`，`pagination.total` 仍是表格行数/配对组行数 |
+| 使用情况 rows/details | 前端页面 | fresh/status 可见；confirmed relation group 是优先行边界，组内发票/OA/流水各显示一次合计与 `+N`，未 linked 发票按 identity 兜底；all scope 读取多个 month shard 时按 read model row id 去重；rows summary 的 `invoiceCount` 按唯一进项发票 ID 统计并驱动表头 `进项票 N`，`pagination.total` 仍是表格行数/配对组行数 |
 | 支付状态 | rows/filter/export/read model | 只消费 `workbench_relation` distribution 中 confirmed/linked 关系；多 OA/多流水用 linked 合计与发票价税合计比对；无 active relation 或历史 candidate 兼容值不参与 `已付款` 判断 |
 | OA reverse 本地状态 | API/OA drawer | draft/staged/submitted/not_submitted 只落 `app.input_invoice_usage_oa_reverse_batches`，前端立即释放按钮；不等待 `input_invoice_usage` operation barrier |
 | OA reverse relation 结果 | Workbench relation / API / operation barrier | evidence detected 写入 relation 后触发 dirty scope，并返回 `read_model_key=input_invoice_usage`、`scope_key=<invoice month>` |
@@ -64,7 +64,7 @@
 | Frontend page | `web/src/pages/InputInvoiceUsagePage.tsx` |
 | Frontend feature/components | `web/src/features/inputInvoiceUsage/*`、`web/src/components/inputInvoiceUsage/*` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_input_invoice_usage.py`、`routes_input_invoice_usage_oa_reverse.py` |
-| Backend service | `input_invoice_usage_service.py`、`input_invoice_usage_oa_reverse_service.py`、`input_invoice_usage_payment_rules.py`、`input_invoice_usage_read_model_*` |
+| Backend service | `input_invoice_usage_service.py`、`input_invoice_usage_query_contract.py`、`input_invoice_usage_oa_reverse_service.py`、`input_invoice_usage_payment_rules.py`、`input_invoice_usage_read_model_*` |
 | Repository / SQL | `input_invoice_usage_read_model_repository.py`、`invoice_usage_collection_sql_projection.py`、`postgres_repositories/input_invoice_usage_oa_reverse.py`、`postgres_repositories/read_models.py` |
 | OA dependencies | `oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py`、`postgres_repositories/oa_applicant_credentials.py` |
 | Tests | `tests/test_input_invoice_usage*.py`、`web/src/test/InputInvoiceUsage*.test.*`、`web/e2e/input-invoice-*.spec.ts` |

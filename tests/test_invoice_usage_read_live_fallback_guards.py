@@ -14,7 +14,10 @@ class InvoiceUsageReadLiveFallbackGuardTests(unittest.TestCase):
     def test_input_usage_read_routes_fail_closed_when_sql_payload_is_missing(self) -> None:
         query_service = ExplodingInputUsageQueryService()
         routes = InputInvoiceUsageApiRoutes(
-            query_service=query_service,
+            invoice_detail_loader=query_service.invoice_detail,
+            bank_transaction_detail_loader=query_service.bank_transaction_detail,
+            oa_detail_loader=query_service.oa_detail,
+            payment_status_rules_loader=query_service.payment_status_rules,
             rows_from_sql_read_model=lambda _query: None,
             filter_options_from_sql_read_model=lambda _query: None,
             relation_details_from_sql_read_model=lambda _row_id, _query: None,
@@ -88,6 +91,22 @@ class ExplodingInputUsageQueryService:
     def row_relation_details(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         self.calls.append("row_relation_details")
         raise AssertionError("input usage relation details must not use live query fallback")
+
+    def invoice_detail(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        self.calls.append("invoice_detail")
+        raise AssertionError("input usage rows test must not call invoice detail")
+
+    def bank_transaction_detail(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        self.calls.append("bank_transaction_detail")
+        raise AssertionError("input usage rows test must not call bank detail")
+
+    def oa_detail(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        self.calls.append("oa_detail")
+        raise AssertionError("input usage rows test must not call oa detail")
+
+    def payment_status_rules(self) -> dict[str, object]:
+        self.calls.append("payment_status_rules")
+        raise AssertionError("input usage rows test must not call payment rules")
 
 
 class ExplodingOutputCollectionQueryService:

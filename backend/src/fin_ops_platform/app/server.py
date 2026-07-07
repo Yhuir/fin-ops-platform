@@ -6158,18 +6158,13 @@ class Application:
     def _input_invoice_usage_read_model_fresh_gate(self) -> InputInvoiceUsageReadModelFreshGateService:
         service = getattr(self, "_input_invoice_usage_read_model_fresh_gate_instance", None)
         repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
-        query_service = getattr(self, "_input_invoice_usage_query_service", None)
-        if query_service is None and getattr(self, "_import_service", None) is not None:
-            query_service = self._input_invoice_usage_service()
         if (
             isinstance(service, InputInvoiceUsageReadModelFreshGateService)
             and getattr(service, "_repository", None) is repository
-            and getattr(service, "_query_service", None) is query_service
         ):
             return service
         service = InputInvoiceUsageReadModelFreshGateService(
             repository=repository,
-            query_service=query_service,
             requires_sql_read_model_runtime=self._requires_sql_read_model_runtime,
             enqueue_refresh=lambda scope_key, reason: self._enqueue_input_invoice_usage_read_model_refresh(
                 scope_key,
@@ -6183,10 +6178,13 @@ class Application:
     def _input_invoice_usage_routes(self) -> InputInvoiceUsageApiRoutes:
         routes = getattr(self, "_input_invoice_usage_api_routes", None)
         query_service = self._input_invoice_usage_service()
-        if isinstance(routes, InputInvoiceUsageApiRoutes) and getattr(routes, "_query_service", None) is query_service:
+        if isinstance(routes, InputInvoiceUsageApiRoutes) and getattr(routes, "_dependency_identity", None) is query_service:
             return routes
         routes = InputInvoiceUsageApiRoutes(
-            query_service=query_service,
+            invoice_detail_loader=query_service.invoice_detail,
+            bank_transaction_detail_loader=query_service.bank_transaction_detail,
+            oa_detail_loader=query_service.oa_detail,
+            payment_status_rules_loader=query_service.payment_status_rules,
             rows_from_sql_read_model=self._get_input_invoice_usage_rows_from_sql_read_model,
             filter_options_from_sql_read_model=self._get_input_invoice_usage_filter_options_from_sql_read_model,
             relation_details_from_sql_read_model=self._get_input_invoice_usage_relation_details_from_sql_read_model,
@@ -6202,6 +6200,7 @@ class Application:
             payment_rules_error_response=self._input_invoice_usage_payment_rules_error_response,
             json_response=self._json_response,
             input_usage_error_response=self._input_invoice_usage_error_response,
+            dependency_identity=query_service,
         )
         self._input_invoice_usage_api_routes = routes
         return routes
