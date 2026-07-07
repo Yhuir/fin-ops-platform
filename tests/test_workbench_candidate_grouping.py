@@ -237,6 +237,77 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(complete["summary"]["paired_count"], 1)
         self.assertEqual(complete["summary"]["open_count"], 0)
 
+    def test_manual_confirmed_oa_three_bank_rows_use_policy_without_invoice(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        policy = bank_transaction_paired_policy(
+            tag_code="external_turnover",
+            requires_oa=True,
+            requires_invoice=False,
+        )
+
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[
+                {
+                    "id": "oa-policy-manual-001",
+                    "type": "oa",
+                    "case_id": "CASE-POLICY-MANUAL",
+                    "relation_mode": "manual_confirmed",
+                    "amount": "300000.00",
+                    "counterparty_name": "贾小花",
+                    "oa_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                    "special_metadata": policy,
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-policy-manual-return-001",
+                    "type": "bank",
+                    "case_id": "CASE-POLICY-MANUAL",
+                    "relation_mode": "manual_confirmed",
+                    "debit_amount": "300000.00",
+                    "credit_amount": "",
+                    "counterparty_name": "贾小花",
+                    "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                    "special_metadata": policy,
+                },
+                {
+                    "id": "bk-policy-manual-borrow-001",
+                    "type": "bank",
+                    "case_id": "CASE-POLICY-MANUAL",
+                    "relation_mode": "manual_confirmed",
+                    "debit_amount": "",
+                    "credit_amount": "100000.00",
+                    "counterparty_name": "贾小花",
+                    "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                    "special_metadata": policy,
+                },
+                {
+                    "id": "bk-policy-manual-borrow-002",
+                    "type": "bank",
+                    "case_id": "CASE-POLICY-MANUAL",
+                    "relation_mode": "manual_confirmed",
+                    "debit_amount": "",
+                    "credit_amount": "200000.00",
+                    "counterparty_name": "贾小花",
+                    "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                    "special_metadata": policy,
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["summary"]["open_count"], 0)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["relation_mode"], "manual_confirmed")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-policy-manual-001"])
+        self.assertCountEqual(
+            [row["id"] for row in group["bank_rows"]],
+            ["bk-policy-manual-return-001", "bk-policy-manual-borrow-001", "bk-policy-manual-borrow-002"],
+        )
+        self.assertEqual(group["invoice_rows"], [])
+
     def test_no_oa_bank_batch_group_collapses_to_summary_and_preserves_bank_rows(self) -> None:
         service = WorkbenchCandidateGroupingService()
         batch_id = "no_oa_batch_fee_001"

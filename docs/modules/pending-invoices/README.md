@@ -39,7 +39,7 @@
 
 OA/流水/发票配对关系不属于待找发票页面私有状态。读关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution；attach existing 单条和批量写关系必须委托 `WorkbenchRelationCommandService`。普通 relation read model 非 fresh 只影响读侧 freshness 和候选展示；写 API 的阻断条件必须来自权限/session、DB/目标写模型不可用、canonical relation version/idempotency/row occupation 冲突，不能因为 distribution 追赶中先写本模块半事实。历史 manual invoice command/service 只保留为旧数据恢复和迁移兼容事实，不再通过待找发票 HTTP API 或页面 UI 暴露新写入口。
 
-列表 rows 必须按统一 relation distribution 展示多项关系。`bank_transactions`、`input_invoices` 和 `oa` 三个分区都以 `relation_count` / `has_multiple` / `detail_mode` / `summaries` 表达 relation 成员；当某个分区成员数大于 1 时，该栏只显示代表全部成员的 `+N`，不再同时展示任一 primary 成员。多笔银行流水属于同一 relation 时，pending invoice read model 和 query service 只能输出一条聚合行，不能再把其它流水成员作为 standalone 行重复展示。点击 `+N` 时按 `kind=bank|invoice|oa` 打开对应类型明细，不能把其它分区混在同一次展开视图里。
+列表 rows 必须按统一 relation distribution 展示多项关系。`bank_transactions`、`input_invoices` 和 `oa` 三个分区都以 `relation_count` / `has_multiple` / `detail_mode` / `summaries` 表达 relation 成员。多笔银行流水属于同一 relation 时，pending invoice read model 和 query service 只能输出一条聚合行，不能再把其它流水成员作为 standalone 行重复展示；前端银行流水栏必须展示 `bank_transactions.summaries` 中真实对方户名列表，不用 `+N` 替代户名，也不在户名下显示交易时间。多张发票或多张 OA 仍只显示代表全部成员的 `+N`，不再同时展示任一 primary 成员。点击明细入口时按 `kind=bank|invoice|oa` 打开对应类型明细，不能把其它分区混在同一次展开视图里。
 
 选择已有进项发票只从表格上方的选中流水工具栏进入。页面可以选择一条或多条 eligible 支出流水，右侧抽屉通过批量 candidates/preview/confirm API 选择多张进项发票。候选表的“流水关联”chip 必须来自后端 `bank_relation_status` / `linked_bank_transaction_count`，不得用 `remaining_amount=0` 推断是否已关联流水；候选表不再展示“待支付”金额列。抽屉汇总展示已选流水金额、已选发票金额和“本次选择差额”，preview 后展示“关联后待付”；最终补付金额以 preview `payment_impact.remaining_amount_after` 为准。preview `can_confirm=false` 时必须展示后端 conflicts/warnings 原因，不能只禁用确认按钮。行内三点菜单和“补票”入口不是当前 UI/HTTP 契约。
 

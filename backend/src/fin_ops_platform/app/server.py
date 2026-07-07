@@ -2836,6 +2836,7 @@ class Application:
             persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
             consume_reconciliation_decisions_in_transaction=self._consume_workbench_reconciliation_decisions_in_transaction,
             bank_transaction_category_codes_for_row_ids=self._bank_transaction_category_codes_for_workbench_row_ids,
+            bank_flow_rule_tag_rules_payload=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
             submit_internal_transfer_rows_from_workbench=lambda **kwargs: (
                 self._no_oa_bank_batch_application_service().submit_internal_transfer_rows_from_workbench(**kwargs)
             ),

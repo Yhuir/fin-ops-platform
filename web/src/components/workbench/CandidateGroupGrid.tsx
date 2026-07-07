@@ -117,6 +117,25 @@ function resolveCollapsedSummaryCopy(
   };
 }
 
+function resolvePreviewExpansionCopy(paneId: WorkbenchRecordType): CollapsedSummaryCopy {
+  if (paneId === "oa") {
+    return {
+      detailLabel: "OA",
+      countUnit: "项",
+    };
+  }
+  if (paneId === "invoice") {
+    return {
+      detailLabel: "发票",
+      countUnit: "张",
+    };
+  }
+  return {
+    detailLabel: "银行流水",
+    countUnit: "条",
+  };
+}
+
 function CandidateGroupGrid({
   zoneId,
   panes,
@@ -146,8 +165,8 @@ function CandidateGroupGrid({
 }: CandidateGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [openFilterMenu, setOpenFilterMenu] = useState<{ paneId: WorkbenchRecordType; columnKey: string } | null>(null);
-  const [expandedCollapsedGroups, setExpandedCollapsedGroups] = useState<Set<string>>(() => new Set());
-  const [loadingCollapsedGroups, setLoadingCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const [expandedPaneGroups, setExpandedPaneGroups] = useState<Set<string>>(() => new Set());
+  const [loadingPaneGroups, setLoadingPaneGroups] = useState<Set<string>>(() => new Set());
   const pendingPreviewDetailRequestsRef = useRef<Set<string>>(new Set());
   const failedPreviewDetailRequestsRef = useRef<Set<string>>(new Set());
   const syncInFlightRef = useRef<Record<WorkbenchRecordType, boolean>>({
@@ -188,7 +207,7 @@ function CandidateGroupGrid({
       return;
     }
     groups.forEach((group) => {
-      const requestKey = buildPreviewDetailRequestKey(zoneId, group, panes);
+      const requestKey = buildCollapsedSummaryDetailRequestKey(zoneId, group, panes);
       if (!requestKey) {
         clearPreviewDetailRequestKeys(zoneId, group.id, pendingPreviewDetailRequestsRef.current);
         clearPreviewDetailRequestKeys(zoneId, group.id, failedPreviewDetailRequestsRef.current);
@@ -292,9 +311,9 @@ function CandidateGroupGrid({
     ));
   }, []);
 
-  const setCollapsedGroupExpanded = useCallback((groupId: string, paneId: WorkbenchRecordType, expanded: boolean) => {
+  const setPaneGroupExpanded = useCallback((groupId: string, paneId: WorkbenchRecordType, expanded: boolean) => {
     const key = `${groupId}:${paneId}`;
-    setExpandedCollapsedGroups((current) => {
+    setExpandedPaneGroups((current) => {
       const next = new Set(current);
       if (expanded) {
         next.add(key);
@@ -305,34 +324,37 @@ function CandidateGroupGrid({
     });
   }, []);
 
-  const toggleCollapsedGroup = useCallback(async (
+  const togglePaneGroupExpansion = useCallback(async (
     group: WorkbenchCandidateGroup,
     paneId: WorkbenchRecordType,
     isExpanded: boolean,
-    collapsedRowCount: number,
-    visibleCollapsedRowCount: number,
+    totalRowCount: number,
+    visibleRowCount: number,
   ) => {
     const key = `${group.id}:${paneId}`;
     if (isExpanded) {
-      setCollapsedGroupExpanded(group.id, paneId, false);
+      setPaneGroupExpanded(group.id, paneId, false);
       return;
     }
-    if (onEnsureGroupDetail && collapsedRowCount > visibleCollapsedRowCount) {
-      setLoadingCollapsedGroups((current) => new Set(current).add(key));
+    if (totalRowCount > visibleRowCount) {
+      if (!onEnsureGroupDetail) {
+        return;
+      }
+      setLoadingPaneGroups((current) => new Set(current).add(key));
       try {
         await onEnsureGroupDetail(zoneId, group.id);
       } catch {
         return;
       } finally {
-        setLoadingCollapsedGroups((current) => {
+        setLoadingPaneGroups((current) => {
           const next = new Set(current);
           next.delete(key);
           return next;
         });
       }
     }
-    setCollapsedGroupExpanded(group.id, paneId, true);
-  }, [onEnsureGroupDetail, setCollapsedGroupExpanded, zoneId]);
+    setPaneGroupExpanded(group.id, paneId, true);
+  }, [onEnsureGroupDetail, setPaneGroupExpanded, zoneId]);
 
   const clearDragClasses = useCallback(() => {
     const current = dragStateRef.current;
@@ -421,14 +443,26 @@ function CandidateGroupGrid({
         const renderCollapseControls = (paneId: WorkbenchRecordType): ReactNode => {
           const collapsedRows = group.collapsedRows?.[paneId] ?? [];
           const isCollapsedSummary = group.displayMode === "collapsed_summary" && collapsedRows.length > 0;
-          if (!isCollapsedSummary) {
+          const visibleRows = group.rows[paneId] ?? [];
+          const rowCount = group.rowCounts?.[paneId];
+          const totalRowCount = typeof rowCount === "number" && Number.isFinite(rowCount) ? rowCount : visibleRows.length;
+          const isPreviewTruncated = !isCollapsedSummary && totalRowCount > visibleRows.length;
+          if (!isCollapsedSummary && !isPreviewTruncated) {
             return null;
           }
           const collapseKey = `${group.id}:${paneId}`;
-          const isExpanded = expandedCollapsedGroups.has(collapseKey);
-          const isLoading = loadingCollapsedGroups.has(collapseKey);
+          const isExpanded = expandedPaneGroups.has(collapseKey);
+          const isLoading = loadingPaneGroups.has(collapseKey);
           const collapsedRowCount = group.rowCounts?.[paneId] ?? group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
-          const collapseCopy = resolveCollapsedSummaryCopy(group, paneId, collapsedRows);
+          const rowTotal = isCollapsedSummary ? collapsedRowCount : totalRowCount;
+          const visibleRowCount = isCollapsedSummary ? collapsedRows.length : visibleRows.length;
+          const hiddenRowCount = Math.max(0, rowTotal - visibleRowCount);
+          const collapseCopy = isCollapsedSummary
+            ? resolveCollapsedSummaryCopy(group, paneId, collapsedRows)
+            : resolvePreviewExpansionCopy(paneId);
+          const expandText = isCollapsedSummary
+            ? `展开 ${rowTotal} ${collapseCopy.countUnit}明细`
+            : `还有 ${hiddenRowCount} ${collapseCopy.countUnit}，展开`;
           return (
             <Fragment>
               <button
@@ -436,18 +470,20 @@ function CandidateGroupGrid({
                 aria-label={
                   isExpanded
                     ? `收起${collapseCopy.detailLabel}`
-                    : `展开${collapseCopy.detailLabel}，${collapsedRowCount} ${collapseCopy.countUnit}`
+                    : isCollapsedSummary
+                      ? `展开${collapseCopy.detailLabel}，${rowTotal} ${collapseCopy.countUnit}`
+                      : `展开全部${collapseCopy.detailLabel}，当前显示 ${visibleRowCount} ${collapseCopy.countUnit}，共 ${rowTotal} ${collapseCopy.countUnit}`
                 }
                 className="row-action-btn candidate-group-collapse-control"
                 disabled={isLoading}
                 type="button"
-                onClick={() => void toggleCollapsedGroup(group, paneId, isExpanded, collapsedRowCount, collapsedRows.length)}
+                onClick={() => void togglePaneGroupExpansion(group, paneId, isExpanded, rowTotal, visibleRowCount)}
               >
                 {isLoading
                   ? "加载中"
                   : isExpanded
                     ? "收起明细"
-                    : `展开 ${collapsedRowCount} ${collapseCopy.countUnit}明细`}
+                    : expandText}
               </button>
             </Fragment>
           );
@@ -595,7 +631,7 @@ function CandidateGroupGrid({
               const collapsedRows = group.collapsedRows?.[paneId] ?? [];
               const isCollapsedSummary = group.displayMode === "collapsed_summary" && collapsedRows.length > 0;
               const collapseKey = `${group.id}:${paneId}`;
-              const isExpanded = isCollapsedSummary && expandedCollapsedGroups.has(collapseKey);
+              const isExpanded = isCollapsedSummary && expandedPaneGroups.has(collapseKey);
               const visibleRecords = isExpanded ? collapsedRows : group.rows[paneId];
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
@@ -658,11 +694,11 @@ function CandidateGroupGrid({
     canMutateData,
     columnsByPane,
     displayState,
-    expandedCollapsedGroups,
+    expandedPaneGroups,
     getRowState,
     groups,
     highlightedRowId,
-    loadingCollapsedGroups,
+    loadingPaneGroups,
     linkedSearchQuery,
     onEnsureGroupDetail,
     onOpenDetail,
@@ -672,7 +708,7 @@ function CandidateGroupGrid({
     panes,
     rowTemplateColumns,
     trailingColumns,
-    toggleCollapsedGroup,
+    togglePaneGroupExpansion,
     zoneId,
   ]);
 
@@ -860,17 +896,15 @@ function isSourceSegmentedPane(paneId: WorkbenchRecordType, segments: ReturnType
   return Boolean(segments?.some((segment) => segment.rows[paneId].length > 0));
 }
 
-function buildPreviewDetailRequestKey(zoneId: "paired" | "open", group: WorkbenchCandidateGroup, panes: WorkbenchPane[]) {
+function buildCollapsedSummaryDetailRequestKey(zoneId: "paired" | "open", group: WorkbenchCandidateGroup, panes: WorkbenchPane[]) {
+  if (group.displayMode !== "collapsed_summary") {
+    return null;
+  }
   const truncatedPaneSignatures = panes.flatMap((pane) => {
     const paneId = pane.id as WorkbenchRecordType;
-    if (group.displayMode === "collapsed_summary") {
-      const visibleCollapsed = group.collapsedRows?.[paneId]?.length ?? 0;
-      const totalCollapsed = group.collapsedRowCounts?.[paneId] ?? group.rowCounts?.[paneId] ?? visibleCollapsed;
-      return totalCollapsed > visibleCollapsed ? [`${paneId}:collapsed:${visibleCollapsed}/${totalCollapsed}`] : [];
-    }
-    const visible = group.rows[paneId]?.length ?? 0;
-    const total = group.rowCounts?.[paneId] ?? visible;
-    return total > visible ? [`${paneId}:${visible}/${total}`] : [];
+    const visibleCollapsed = group.collapsedRows?.[paneId]?.length ?? 0;
+    const totalCollapsed = group.collapsedRowCounts?.[paneId] ?? group.rowCounts?.[paneId] ?? visibleCollapsed;
+    return totalCollapsed > visibleCollapsed ? [`${paneId}:collapsed:${visibleCollapsed}/${totalCollapsed}`] : [];
   });
   if (truncatedPaneSignatures.length === 0) {
     return null;

@@ -367,14 +367,6 @@ export default function InputInvoiceUsagePage() {
     loadRows("refresh");
   }, [loadRows, waitForInputInvoiceUsageBarrier]);
 
-  const handleOaReverseBatchChanged = useCallback(async () => {
-    const synced = await waitForInputInvoiceUsageBarrier();
-    if (!synced) {
-      return;
-    }
-    loadRows("refresh");
-  }, [loadRows, waitForInputInvoiceUsageBarrier]);
-
   const loadDetail = useCallback((target: InputInvoiceUsageDetailTarget) => {
     if (target.kind === "invoice") {
       return fetchInputInvoiceUsageInvoiceDetail(target.id);
@@ -394,7 +386,7 @@ export default function InputInvoiceUsagePage() {
       filters: isFilterArray(request.sourceFilters) ? request.sourceFilters : [],
       selectedInvoiceIds: request.selectedInvoiceIds,
       targetApplicantCode: request.targetApplicantCode || undefined,
-    })
+    }, request.signal)
   ), []);
 
   const exportRequest = useMemo(() => ({
@@ -569,7 +561,6 @@ export default function InputInvoiceUsagePage() {
         loadStagedDrafts={fetchInputInvoiceUsageOaReverseStagedDrafts}
         loadSubmittedHistory={fetchInputInvoiceUsageOaReverseSubmittedHistory}
         manualStatus={manualInputInvoiceUsageOaReverseStatus}
-        onBatchChanged={handleOaReverseBatchChanged}
         onClose={handleCloseWorkflow}
       />
       <PaymentStatusRulesDrawer

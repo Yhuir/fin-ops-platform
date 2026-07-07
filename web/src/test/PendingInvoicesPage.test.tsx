@@ -1022,7 +1022,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByText("发票获取状态")).toHaveClass("pending-invoices-table-group-header");
     expect(within(page).getByText("进项发票")).toHaveClass("pending-invoices-table-group-header");
     expect(within(page).getByText("OA")).toHaveClass("pending-invoices-table-group-header");
-    expect(within(page).getByRole("columnheader", { name: "对方户名 / 时间" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "对方户名" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "金额 / 银行账户" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "摘要 / 凭证" })).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "状态" })).not.toBeInTheDocument();
@@ -1043,7 +1043,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("button", { name: "支出待找发票规则设置" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "收入待找发票规则设置" })).toBeInTheDocument();
 
-    expect(within(page).getByText("2026-04-19 10:52:02")).toBeInTheDocument();
+    expect(within(page).queryByText("2026-04-19 10:52:02")).not.toBeInTheDocument();
     expect(within(page).getByText("货款 / 设备采购")).toBeInTheDocument();
     expect(within(page).getAllByText("支").length).toBeGreaterThan(0);
     expect(within(page).getAllByText("1,200.00").length).toBeGreaterThan(0);
@@ -1064,7 +1064,8 @@ describe("Pending invoices page", () => {
     expect(screen.queryByRole("menuitem", { name: "补票" })).not.toBeInTheDocument();
     expect(within(page).queryByText("DIG-001")).not.toBeInTheDocument();
     expect(within(page).queryByText("李四")).not.toBeInTheDocument();
-    expect(within(page).getAllByText("+2").length).toBeGreaterThanOrEqual(3);
+    expect(within(page).getByText(/分期供应商二号/)).toBeInTheDocument();
+    expect(within(page).getAllByText("+2")).toHaveLength(2);
     expect(within(page).getByText("2,800.00")).toBeInTheDocument();
     expect(within(page).getByText("已付 1,500.00")).toBeInTheDocument();
     expect(within(page).getByText("待付 1,300.00")).toBeInTheDocument();
@@ -1139,9 +1140,9 @@ describe("Pending invoices page", () => {
     const page = await findPendingInvoicesPage();
     await within(page).findByText("云南开票供应商");
 
-    await user.click(within(page).getByRole("button", { name: "筛选 对方户名 / 时间" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 对方户名" }));
     const filterMenu = await screen.findByRole("menu", { hidden: true });
-    expect(filterMenu).toHaveAttribute("aria-label", "对方户名 / 时间筛选");
+    expect(filterMenu).toHaveAttribute("aria-label", "对方户名筛选");
     await user.click(within(filterMenu).getByRole("menuitemcheckbox", { hidden: true, name: /对方户名：分期供应商/ }));
     await user.click(within(filterMenu).getByRole("menuitemcheckbox", { hidden: true, name: /流水标签：货款 \/ 设备采购/ }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
@@ -1262,7 +1263,7 @@ describe("Pending invoices page", () => {
     expect(screen.getByText("分期供应商二号")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
 
-    await user.click(within(page).getByRole("button", { name: "查看全部流水关系" }));
+    await user.click(within(page).getByRole("button", { name: /查看全部流水关系/ }));
     expect(await screen.findByRole("table", { name: "历史支付流水" })).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "已关联发票" })).not.toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "已关联 OA" })).not.toBeInTheDocument();

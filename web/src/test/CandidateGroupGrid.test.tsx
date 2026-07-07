@@ -351,6 +351,78 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
+  function createTurnoverBankRecord(
+    id: string,
+    counterparty: string,
+    amount: string,
+    direction: "收入" | "支出",
+    transactionTime: string,
+    note: string,
+  ): WorkbenchRecord {
+    const baseRecord = createBankRecord();
+    return {
+      ...baseRecord,
+      id,
+      caseId: "CASE-TURNOVER-202605",
+      label: direction,
+      status: "完全关联",
+      statusCode: "fully_linked",
+      statusTone: "success",
+      amount,
+      counterparty,
+      tableValues: {
+        ...baseRecord.tableValues,
+        counterparty,
+        amount,
+        direction,
+        transactionTime,
+        paymentAccount: "建设银行 8106",
+        note,
+        loanRepaymentDate: "--",
+      },
+    } as WorkbenchRecord;
+  }
+
+  function createTruncatedTurnoverGroup(): WorkbenchCandidateGroup {
+    return {
+      id: "case:turnover:turnover_rel_36266274e9235566",
+      groupType: "open",
+      rawGroupType: "candidate",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      relationMode: "manual_confirmed",
+      rows: {
+        oa: [createOaRecord("oa-turnover-20260522", "刘际涛", "150000")],
+        bank: [
+          createTurnoverBankRecord("txn_imported_0105", "杨丽萍", "150000", "支出", "2026-05-22 14:40:07", "还5月9-11日借入款"),
+          createTurnoverBankRecord("txn_imported_0077", "杨丽萍", "50000", "收入", "2026-05-11 09:06:40", "暂借款"),
+          createTurnoverBankRecord("txn_imported_0076", "杨丽萍", "50000", "收入", "2026-05-10 09:45:04", "暂借款"),
+        ],
+        invoice: [],
+      },
+      rowCounts: {
+        oa: 1,
+        bank: 4,
+        invoice: 0,
+        rows: 5,
+      },
+    };
+  }
+
+  function createFullTurnoverGroup(): WorkbenchCandidateGroup {
+    const group = createTruncatedTurnoverGroup();
+    return {
+      ...group,
+      rows: {
+        ...group.rows,
+        bank: [
+          ...group.rows.bank,
+          createTurnoverBankRecord("txn_imported_0058", "杨丽萍 5月9隐藏流水", "50000", "收入", "2026-05-09 10:14:06", "暂借款"),
+        ],
+      },
+    };
+  }
+
   function createEtcInvoiceRecord(id: string, invoiceNo: string, amount: string): WorkbenchRecord {
     return {
       id,
@@ -733,6 +805,16 @@ describe("Workbench candidate grouping layout", () => {
     expect(getStandaloneCssRuleBody(".record-card-cell.column-compact .cell-text-value-full")).toMatch(/word-break:\s*break-word/);
   });
 
+  test("keeps candidate expand controls in normal flow so they do not cover row text", () => {
+    const controlRule = getCssRuleBody(".candidate-group-collapse-control");
+
+    expect(controlRule).toMatch(/margin:\s*6px 10px 4px;/);
+    expect(controlRule).toMatch(/white-space:\s*normal;/);
+    expect(controlRule).not.toMatch(/\bposition:\s*absolute/);
+    expect(controlRule).not.toMatch(/\btop\s*:/);
+    expect(controlRule).not.toMatch(/\bleft\s*:/);
+  });
+
   test("shows zone titles with total item counts instead of group counts", async () => {
     mockWorkbenchPageFetch();
     renderWorkbenchPage();
@@ -742,7 +824,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("已配对 1 组")).not.toBeInTheDocument();
   });
 
-  test("auto-loads complete group detail when summary response truncates visible rows", async () => {
+  test("renders an explicit expand control when summary response truncates ordinary visible rows", async () => {
     const group = createTruncatedManualInvoiceGroup();
     const ensureGroupDetail = vi.fn().mockResolvedValue(undefined);
 
@@ -766,9 +848,14 @@ describe("Workbench candidate grouping layout", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", {
-      name: "显示完整组：进销项发票当前显示 3 条，共 5 条",
-    })).not.toBeInTheDocument();
+    const expandButton = screen.getByRole("button", {
+      name: "展开全部发票，当前显示 3 张，共 5 张",
+    });
+
+    expect(expandButton).toHaveTextContent("还有 2 张，展开");
+    expect(ensureGroupDetail).not.toHaveBeenCalled();
+
+    fireEvent.click(expandButton);
 
     await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("open", "case:CASE-MANUAL-INVOICE-MANY"));
   });
@@ -1077,6 +1164,79 @@ describe("Workbench candidate grouping layout", () => {
     expect(expandButton).toHaveTextContent("展开 15 条明细");
     expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
     expect(screen.queryByText("实际 15 条流水")).not.toBeInTheDocument();
+  });
+
+  test("renders a non-overlapping expand control for ordinary truncated bank previews and loads hidden rows", async () => {
+    const summaryGroup = createTruncatedTurnoverGroup();
+    const fullDetailGroup = createFullTurnoverGroup();
+    const ensureGroupDetail = vi.fn();
+    let resolveDetail!: () => void;
+    const detailLoaded = new Promise<void>((resolve) => {
+      resolveDetail = resolve;
+    });
+
+    function GridHarness() {
+      const [group, setGroup] = useState(summaryGroup);
+      return (
+        <CandidateGroupGrid
+          canMutateData
+          displayState={createEmptyWorkbenchZoneDisplayState()}
+          getRowState={() => "idle"}
+          groups={[group]}
+          onEnsureGroupDetail={async (zoneId, groupId) => {
+            ensureGroupDetail(zoneId, groupId);
+            await detailLoaded;
+            setGroup(fullDetailGroup);
+          }}
+          onOpenDetail={() => undefined}
+          onRowAction={() => undefined}
+          onSelectRow={() => undefined}
+          panes={[
+            { id: "oa", title: "OA", rows: group.rows.oa },
+            { id: "bank", title: "银行流水", rows: group.rows.bank },
+            { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+          ]}
+          rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+          zoneId="open"
+        />
+      );
+    }
+
+    render(<GridHarness />);
+
+    const bankCell = screen.getByTestId("candidate-scroll-open-case:turnover:turnover_rel_36266274e9235566-bank");
+    const expandButton = screen.getByRole("button", {
+      name: "展开全部银行流水，当前显示 3 条，共 4 条",
+    });
+
+    expect(screen.getByText("2026-05-22")).toBeInTheDocument();
+    expect(screen.getByText("14:40:07")).toBeInTheDocument();
+    expect(screen.getByText("2026-05-11")).toBeInTheDocument();
+    expect(screen.getByText("09:06:40")).toBeInTheDocument();
+    expect(screen.getByText("2026-05-10")).toBeInTheDocument();
+    expect(screen.getByText("09:45:04")).toBeInTheDocument();
+    expect(screen.queryByText("杨丽萍 5月9隐藏流水")).not.toBeInTheDocument();
+    expect(expandButton).toHaveTextContent("还有 1 条，展开");
+    expect(expandButton).toHaveClass("candidate-group-collapse-control");
+    expect(bankCell).not.toContainElement(expandButton);
+    expect(ensureGroupDetail).not.toHaveBeenCalled();
+
+    fireEvent.click(expandButton);
+
+    expect(screen.getByText("加载中")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(ensureGroupDetail).toHaveBeenCalledWith("open", "case:turnover:turnover_rel_36266274e9235566");
+    });
+
+    await act(async () => {
+      resolveDetail();
+      await detailLoaded;
+    });
+
+    expect(await screen.findByText("杨丽萍 5月9隐藏流水")).toBeInTheDocument();
+    expect(screen.getByText("2026-05-09")).toBeInTheDocument();
+    expect(screen.getByText("10:14:06")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /展开全部银行流水/ })).not.toBeInTheDocument();
   });
 
   test("waits for full collapsed detail before expanding truncated summary rows", async () => {

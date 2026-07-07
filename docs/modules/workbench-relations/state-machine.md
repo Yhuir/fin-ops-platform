@@ -6,7 +6,7 @@
 
 Workbench active generation 是面向关联台页面的派生投影；`workbench_relation` 是面向下游页面的关系分发 read model。二者都只能从 canonical relation fact、自动匹配内部结果和各业务事实表派生，不能互相作为写入事实源。active relation 的 `special_metadata`、`amount_check`、`display_tags` 和 `source_versions` 必须随投影传播，以便批量账务、ETC、待找发票、进项反提等外部 owner 的展示归属保持一致。
 
-confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirmed` OA+银行、OA+发票、银行+发票两栏 relation 必须继续作为 `app.workbench_pair_relations.status='active'` 分发给下游，`workbench_relation` 可读为 `relation_status='linked'`；但关联台 active generation 应把这类 partial relation 发布为 canonical `case:<case_id>` open group，等待第三栏补齐。只有 OA + 银行 + 发票三栏完整，或 no-OA、工资/个人自动闭合、内部转账、个人暂借款还清、OA invoice offset、批量账务、ETC summary/batch relation、processed/closed exception 等显式业务例外，才能进入关联台 paired zone。
+confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirmed` OA+银行、OA+发票、银行+发票两栏 relation 必须继续作为 `app.workbench_pair_relations.status='active'` 分发给下游，`workbench_relation` 可读为 `relation_status='linked'`。关联台 active generation 的 paired/open 分区由后端投影判定：含银行流水的 relation 只按 relation fact 中物化的 `requires_oa` / `requires_invoice` policy metadata 判定；不含银行流水的普通两栏 relation 保留 canonical `case:<case_id>` open group，等待三栏补齐或显式业务例外。
 
 页面和 downstream read model 不能把以下内容当作 confirmed relation：
 

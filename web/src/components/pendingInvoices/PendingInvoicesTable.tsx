@@ -87,6 +87,20 @@ function tagPathLabel(row: PendingInvoiceRow["bankTransaction"]) {
     .join(" / ") || row.effectiveTagLabel || row.effectiveTagCode || "未标注";
 }
 
+function uniqueCounterpartyLabel(row: PendingInvoiceRow) {
+  const seen = new Set<string>();
+  const names = row.bankTransactions.summaries
+    .map((item) => item.counterpartyName.trim())
+    .filter((name) => {
+      if (!name || seen.has(name)) {
+        return false;
+      }
+      seen.add(name);
+      return true;
+    });
+  return names.join("、") || row.bankTransaction.counterpartyName || "-";
+}
+
 function RelationStatusChip({ status }: { status?: string }) {
   if (status !== "candidate") {
     return null;
@@ -320,7 +334,7 @@ export default function PendingInvoicesTable({
   const invoiceGroupLabel = direction === "income" ? "销项发票" : direction === "all" ? "发票" : "进项发票";
   const invoicePartyLabel = direction === "income" ? "购方 / 识别号" : "供应商 / 识别号";
   const counterpartyFilter: ColumnFilterGroup = {
-    label: "对方户名 / 时间",
+    label: "对方户名",
     fields: [
       { field: "counterparty_name", label: "对方户名" },
       { field: "transaction_tag", label: "流水标签" },
@@ -398,8 +412,8 @@ export default function PendingInvoicesTable({
             </colgroup>
             <thead>
               <tr>
-                <th aria-label="对方户名 / 时间" aria-sort={ariaSortFor("counterparty_name")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-counterparty" id="counterparty_name" scope="col">
-                  {renderSortableHeader("counterparty_name", "对方户名 / 时间", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={counterpartyFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
+                <th aria-label="对方户名" aria-sort={ariaSortFor("counterparty_name")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-counterparty" id="counterparty_name" scope="col">
+                  {renderSortableHeader("counterparty_name", "对方户名", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={counterpartyFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
                 </th>
                 <th aria-label="金额 / 银行账户" aria-sort={ariaSortFor("amount")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-table-cell--amount pending-invoices-col-amount" id="amount" scope="col">
                   {renderSortableHeader("amount", "金额 / 银行账户", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={amountFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
@@ -512,6 +526,7 @@ function PendingInvoiceTableRow({
   const bankTotal = bankHasMultiple
     ? row.bankTransactions.paymentSummary?.paidTotal || row.bankTransaction.amount
     : row.bankTransaction.amount;
+  const counterpartyLabel = bankHasMultiple ? uniqueCounterpartyLabel(row) : row.bankTransaction.counterpartyName;
 
   return (
     <tr className="pending-invoices-table-row" id={row.id}>
@@ -531,18 +546,27 @@ function PendingInvoiceTableRow({
           <span className="pending-invoices-counterparty-content">
             {bankHasMultiple ? (
               <span className="pending-invoices-counterparty-row">
-                <DetailButton label="查看全部流水关系" onClick={() => onOpenRelation(row, "bank")}>
-                  +{bankRelationCount}
-                </DetailButton>
+                <span className="pending-invoices-counterparty-name" title={counterpartyLabel}>
+                  {counterpartyLabel}
+                </span>
+                <button
+                  aria-label={`查看全部流水关系 ${counterpartyLabel}`}
+                  className="pending-invoices-icon-button"
+                  onClick={() => onOpenRelation(row, "bank")}
+                  title="全部流水详情"
+                  type="button"
+                >
+                  <Info aria-hidden="true" size={14} strokeWidth={2.3} />
+                </button>
               </span>
             ) : (
               <>
                 <span className="pending-invoices-counterparty-row">
-                  <span className="pending-invoices-counterparty-name" title={row.bankTransaction.counterpartyName}>
-                    {row.bankTransaction.counterpartyName}
+                  <span className="pending-invoices-counterparty-name" title={counterpartyLabel}>
+                    {counterpartyLabel}
                   </span>
                   <button
-                    aria-label={`流水详情 ${row.bankTransaction.counterpartyName}`}
+                    aria-label={`流水详情 ${counterpartyLabel}`}
                     className="pending-invoices-icon-button"
                     onClick={() => onOpenObjectDetail({ kind: "bankTransaction", id: row.bankTransaction.id, rowId: row.id })}
                     title="流水详情"
@@ -551,7 +575,6 @@ function PendingInvoiceTableRow({
                     <Info aria-hidden="true" size={14} strokeWidth={2.3} />
                   </button>
                 </span>
-                <span className="pending-invoices-cell-secondary">{row.bankTransaction.tradeTime || "-"}</span>
                 <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
                   {tagPathLabel(row.bankTransaction)}
                 </span>

@@ -585,6 +585,83 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(metadata["paired_requirement_tag_codes"], ["external_turnover"])
         self.assertEqual(metadata["paired_requirement_source"], "no_oa_bank_batch_tag_selection")
 
+    def test_bank_flow_rule_update_syncs_manual_confirmed_bank_relation_requirements(self) -> None:
+        data_dir = Path(tempfile.mkdtemp(prefix="finops-test-manual-bank-policy-"))
+        self.addCleanup(shutil.rmtree, data_dir, ignore_errors=True)
+        app = build_application(data_dir=data_dir)
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="manual-turnover-bank-policy.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-10",
+                    "trade_time": "2026-05-10 10:20:00",
+                    "counterparty_name": "贾小花",
+                    "debit_amount": "",
+                    "credit_amount": "100000.00",
+                    "summary": "暂借款",
+                },
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-05-22",
+                    "trade_time": "2026-05-22 14:40:00",
+                    "counterparty_name": "贾小花",
+                    "debit_amount": "200000.00",
+                    "credit_amount": "",
+                    "summary": "还借款",
+                },
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_ids = [transaction.id for transaction in app._import_service.list_transactions()]
+        app._bank_transaction_category_service.apply_updates(
+            [
+                {"transaction_id": row_ids[0], "category_code": "borrow_in_company_pending_repayment"},
+                {"transaction_id": row_ids[1], "category_code": "borrow_in_company_repaid"},
+            ],
+            actor="tester",
+        )
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-MANUAL-TURNOVER-POLICY",
+            row_ids=[*row_ids, "oa-pay-turnover"],
+            row_types=["bank", "bank", "oa"],
+            relation_mode="manual_confirmed",
+            created_by="finance-user",
+            month_scope="all",
+            note="普通关联台手工关系",
+        )
+        app._state_store.save_workbench_pair_relations(app._workbench_pair_relation_service.snapshot())
+        app._workbench_pair_relation_service = WorkbenchPairRelationService()
+
+        current_rules = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
+        next_rules = [
+            {**rule, "requires_oa": True, "requires_invoice": False}
+            if rule["tag_code"] == "external_turnover"
+            else rule
+            for rule in current_rules["rules"]
+        ]
+        save_response = app.handle_request(
+            "PUT",
+            "/api/bank-flow-rule-batches/tag-rules",
+            body=json.dumps({"expected_version": current_rules["version"], "rules": next_rules}),
+            headers={"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(save_response.status_code, 200)
+        relation_snapshot = app._state_store.load_workbench_pair_relations()["pair_relations"][
+            "CASE-MANUAL-TURNOVER-POLICY"
+        ]
+        metadata = relation_snapshot["special_metadata"]
+        self.assertEqual(relation_snapshot["relation_mode"], "manual_confirmed")
+        self.assertTrue(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
+        self.assertEqual(metadata["paired_requirement_tag_codes"], ["external_turnover"])
+        self.assertEqual(metadata["paired_requirement_source"], "bank_transaction_paired_policy")
+
     def test_bank_flow_rule_reset_submitted_withdraws_all_submitted_batches(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(

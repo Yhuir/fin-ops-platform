@@ -129,13 +129,20 @@
 - 未测风险：本地测试不执行生产 deploy、explicit-scope rebuild 或 worker drain；生产 `expense:all` / no-OA 收敛仍需后续受控生产 runbook。
 - 后续事项：部署后用 bounded production runbook 对 pending invoice 显式 scope rebuild/convergence 取证，再处理 no-OA `bank_transaction_category_snapshot_version_mismatch`。
 
-## 2026-06-23 - 多 OA / 多流水 / 多发票 `+N` 聚合展示
+## 2026-07-07 - 多流水真实户名展示
 
-- 目标：让待找发票列表严格按统一 `workbench_relation` distribution 显示 OA、银行流水和发票配对关系；当同一 relation 下某类成员大于 1 时，该栏只显示代表全部成员的 `+N`，点击后只展开对应类型明细。
+- 目标：修复待找发票列表多流水聚合行在银行栏用 `+N` 替代真实对方户名、且户名下继续显示交易时间的问题。
+- 影响范围：`PendingInvoicesTable`、`web/src/test/PendingInvoicesPage.test.tsx`、待找发票产品/API/模块合同文档。
+- 关键决策：不新增前端私有事实源，也不改 pending invoice read model；继续消费 `bank_transactions.summaries`，多流水行展示去重后的真实对方户名列表，并保留 `kind=bank` 关系详情入口。发票/OA 多成员 `+N` 展开合同不变。
+- 测试覆盖：页面测试覆盖多流水真实户名可见、银行栏不再贡献 `+N`、对方户名单元格不显示交易时间，且发票/OA 的 `+N` 明细入口仍可用。
+
+## 2026-06-23 - 多 OA / 多流水 / 多发票聚合展示
+
+- 目标：让待找发票列表严格按统一 `workbench_relation` distribution 显示 OA、银行流水和发票配对关系；当同一 relation 下某类成员大于 1 时，点击后只展开对应类型明细。银行流水栏当时的 `+N` 展示已被 2026-07-07 合同替换为真实对方户名列表；发票/OA 多成员仍使用 `+N`。
 - 影响范围：`PendingInvoiceQueryService`、`SearchPendingSqlProjectionBuilder`、`PendingInvoiceApiRoutes.relation_detail`、pending invoice API mapper/types、`PendingInvoicesTable`、`PendingInvoiceRelationDrawer`、本模块文档和 API/product 合同。
 - 关键决策：不新建页面私有事实源；rows 新增向后兼容的 `bank_transactions` 分区，`input_invoices` / `oa` 沿用 relation count 和 summaries。多笔流水属于同一 relation 时只输出一条聚合行，成员不再重复作为 standalone 行；`kind=bank|invoice|oa` 只过滤关系详情的展示列表，不改变金额汇总和 relation case 事实。
 - 文档影响：更新 `docs/product-specs/invoice-lifecycle.md`、`docs/dev/api-contracts.md`、`README.md`、`state-machine.md`、`tests.md` 和本实施记录。
-- 测试覆盖：新增 query service fallback 和 SQL projection 多流水 relation 聚合测试；扩展 relation detail kind 过滤测试；扩展前端 API mapper 和页面测试，覆盖 `bankTransactions`、多项只显示 `+N`、不展示 primary 重复项，以及 `+N` 分栏抽屉只显示发票/流水/OA 对应列表。
+- 测试覆盖：新增 query service fallback 和 SQL projection 多流水 relation 聚合测试；扩展 relation detail kind 过滤测试；扩展前端 API mapper 和页面测试，覆盖 `bankTransactions`、多项不展示 primary 重复项，以及分栏抽屉只显示发票/流水/OA 对应列表。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service tests.test_search_pending_sql_runtime tests.test_pending_invoice_api -v`；`cd web && npm test -- --run src/test/PendingInvoicesApi.test.ts src/test/PendingInvoicesPage.test.tsx`。
 - 未测风险：本地未跑真实 Browser E2E、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain，也未用真实跨月 relation 样本验证“一个 relation 横跨多个 month shard”时的展示 owner 选择；当前实现按单次 rows 构建去重，跨月 aggregate scope 如存在同一 relation 的多个 owner month 仍需 staging 数据验证。
 - 后续事项：如生产确认存在跨月多流水 relation，应补充 owner month 规则和 SQL projection/repository 回归；导出是否完全镜像 grouped row 的明细拼接仍需在下一轮导出专项验证。

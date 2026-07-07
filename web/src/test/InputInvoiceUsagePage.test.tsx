@@ -104,7 +104,6 @@ function installInputInvoiceUsageFetch(
   payload: unknown = rowsPayload,
   options: {
     exportDownloadResponse?: (url: URL) => Response;
-    operationBarrierDelay?: Promise<void>;
   } = {},
 ) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -337,9 +336,6 @@ function installInputInvoiceUsageFetch(
       });
     }
     if (url.pathname === "/api/operation-barrier/status") {
-      if (options.operationBarrierDelay) {
-        await options.operationBarrierDelay;
-      }
       return new Response(JSON.stringify({
         status: "fresh",
         fresh: true,
@@ -379,14 +375,6 @@ function operationBarrierRequests(fetchMock: ReturnType<typeof installInputInvoi
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     return url.pathname === "/api/operation-barrier/status";
   });
-}
-
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
 }
 
 afterEach(() => {
@@ -947,10 +935,9 @@ describe("Input invoice usage page", () => {
     expect(screen.queryByText("oa_reverse_batch_page")).not.toBeInTheDocument();
   });
 
-  test("waits for input invoice usage barrier before reloading rows after OA reverse draft creation", async () => {
+  test("does not wait for input invoice usage barrier after OA reverse draft creation", async () => {
     const user = userEvent.setup();
-    const gate = deferred();
-    const fetchMock = installInputInvoiceUsageFetch(rowsPayload, { operationBarrierDelay: gate.promise });
+    const fetchMock = installInputInvoiceUsageFetch();
 
     renderAuthenticatedAppAt("/input-invoice-usage");
 
@@ -969,14 +956,9 @@ describe("Input invoice usage page", () => {
     const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
     expect(within(confirmDialog).getByRole("link", { name: "打开 OA 草稿" })).toBeInTheDocument();
 
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    expect(JSON.parse(String(operationBarrierRequests(fetchMock)[0][1]?.body))).toEqual({
-      targets: [{ read_model_key: "input_invoice_usage", scope_key: "all" }],
-    });
+    await act(async () => undefined);
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
     expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequests);
-
-    gate.resolve();
-    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(initialRowsRequests));
   });
 
   test("restores column filters and sort from table session state", async () => {

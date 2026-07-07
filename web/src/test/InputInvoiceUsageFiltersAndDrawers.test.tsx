@@ -555,11 +555,11 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.queryByText("候选数、合计、拒绝原因和目标申请人均以后端返回为准")).not.toBeInTheDocument();
 
     await waitFor(() => {
-      expect(loadPreview).toHaveBeenCalledWith({
+      expect(loadPreview).toHaveBeenCalledWith(expect.objectContaining({
         sourceFilters: [{ field: "payment_status", operator: "in", values: ["pending"] }],
         selectedInvoiceIds: ["inv-001", "inv-002"],
         targetApplicantCode: null,
-      });
+      }));
     });
     expect(await screen.findByText("2")).toBeInTheDocument();
     expect(screen.getAllByText("99.72").length).toBeGreaterThanOrEqual(1);
@@ -670,11 +670,11 @@ describe("Input invoice usage workflow drawers", () => {
     await user.click(await screen.findByRole("checkbox", { name: "选择候选发票 SD-INV-002" }));
     expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
-    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith({
+    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({
       sourceFilters: [],
       selectedInvoiceIds: ["inv-001"],
       targetApplicantCode: "chen_xiuyun",
-    }));
+    })));
     await waitFor(() => expect(createDraftFromSelection).toHaveBeenCalledWith(expect.objectContaining({
       previewId: "oa_reverse_preview_subset_001",
       expectedPreviewHash: "preview-hash-subset-001",
@@ -1002,6 +1002,65 @@ describe("Input invoice usage workflow drawers", () => {
     })));
   });
 
+  test("OA reverse drawer cancels stale target applicant preview requests", async () => {
+    const user = userEvent.setup();
+    let callCount = 0;
+    const previewSignals: AbortSignal[] = [];
+    const loadPreview = vi.fn((request) => {
+      callCount += 1;
+      previewSignals.push(request.signal as AbortSignal);
+      if (callCount === 1) {
+        return Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } });
+      }
+      if (callCount === 2) {
+        return new Promise<OaReversePreviewPayload>(() => undefined);
+      }
+      return Promise.resolve({
+        ...previewPayload,
+        previewHash: "preview-hash-returned-to-chen",
+        targetApplicantCode: "chen_xiuyun",
+        targetApplicantName: "陈秀云",
+        groups: [{
+          ...previewPayload.groups[0],
+          targetApplicantCode: "chen_xiuyun",
+          targetApplicantName: "陈秀云",
+        }],
+        canCreateDraft: true,
+        permissions: { canCreateDraft: true },
+      });
+    });
+
+    render(
+      <OaReverseWorkspaceDrawer
+        open
+        sourceFilters={[]}
+        selectedInvoiceIds={["inv-001", "inv-002"]}
+        loadPreview={loadPreview}
+        createDraftFromSelection={vi.fn()}
+        onClose={() => undefined}
+      />,
+    );
+
+    const selector = await screen.findByLabelText("目标 OA 申请人");
+    await user.click(selector);
+    await user.click(await screen.findByRole("option", { name: "周洁莹" }));
+    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({
+      targetApplicantCode: "zhou_jieying",
+    })));
+    expect(screen.getByRole("progressbar", { name: "正在加载反提 OA 预览" })).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("目标 OA 申请人"));
+    await user.click(await screen.findByRole("option", { name: "陈秀云" }));
+
+    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({
+      targetApplicantCode: "chen_xiuyun",
+    })));
+    expect(previewSignals[1].aborted).toBe(true);
+    await waitFor(() => {
+      expect(screen.queryByRole("progressbar", { name: "正在加载反提 OA 预览" })).not.toBeInTheDocument();
+    });
+  });
+
   test("OA reverse not-submitted confirmation returns to create state without visible rollback history", async () => {
     const user = userEvent.setup();
     const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } }));
@@ -1037,10 +1096,6 @@ describe("Input invoice usage workflow drawers", () => {
       oaDraftUrl: null,
       canCreateDraft: true,
     }));
-    const onBatchChanged = vi.fn()
-      .mockResolvedValueOnce(undefined)
-      .mockImplementationOnce(() => new Promise<void>(() => undefined));
-
     render(
       <OaReverseWorkspaceDrawer
         open
@@ -1049,7 +1104,6 @@ describe("Input invoice usage workflow drawers", () => {
         loadPreview={loadPreview}
         createDraftFromSelection={createDraftFromSelection}
         manualStatus={manualStatus}
-        onBatchChanged={onBatchChanged}
         onClose={() => undefined}
       />,
     );
@@ -1065,7 +1119,6 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.queryByRole("dialog", { name: "OA 草稿提交确认" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
     expect(screen.queryByText("oa_reverse_batch_not_submitted")).not.toBeInTheDocument();
-    expect(onBatchChanged).toHaveBeenCalledTimes(2);
   });
 
   test("OA reverse submitted tab renders compact business history without internal identifiers", async () => {
@@ -1104,6 +1157,8 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getByText("99.72")).toBeInTheDocument();
     expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.getByText("昆明供应商二")).toBeInTheDocument();
+    expect(screen.getByText("2026-06-10 10:30")).toBeInTheDocument();
+    expect(screen.queryByText("2026-06-10T10:30:00+08:00")).not.toBeInTheDocument();
     expect(screen.queryByText("batch-hidden")).not.toBeInTheDocument();
     expect(screen.queryByText("draft-hidden")).not.toBeInTheDocument();
     expect(screen.queryByText("submitted_confirmed")).not.toBeInTheDocument();

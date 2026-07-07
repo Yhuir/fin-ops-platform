@@ -224,6 +224,7 @@ class WorkbenchWriteFacade:
         persist_pair_relations_in_transaction: Callable[..., None] | None = None,
         consume_reconciliation_decisions_in_transaction: Callable[..., int] | None = None,
         bank_transaction_category_codes_for_row_ids: Callable[[list[str]], dict[str, str]] | None = None,
+        bank_flow_rule_tag_rules_payload: Callable[[], dict[str, object]] | None = None,
         submit_internal_transfer_rows_from_workbench: Callable[..., dict[str, object]] | None = None,
         relation_command_service: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
@@ -274,6 +275,7 @@ class WorkbenchWriteFacade:
         self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
         self._consume_reconciliation_decisions_in_transaction = consume_reconciliation_decisions_in_transaction
         self._bank_transaction_category_codes_for_row_ids = bank_transaction_category_codes_for_row_ids
+        self._bank_flow_rule_tag_rules_payload = bank_flow_rule_tag_rules_payload
         self._submit_internal_transfer_rows_from_workbench = submit_internal_transfer_rows_from_workbench
         self._relation_command_service = relation_command_service
         self._relation_command_service_factory = relation_command_service_factory
@@ -315,6 +317,12 @@ class WorkbenchWriteFacade:
             "relation_mode": "manual_confirmed",
             "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             "amount_check": amount_check,
+            "special_metadata": self._bank_transaction_paired_policy_metadata(
+                row_ids=row_ids,
+                row_types=row_types,
+                selected_rows=rows,
+                amount_check=amount_check,
+            ),
         }
         after_groups = self._relation_groups([after_relation], selected_rows=rows)
         requires_note = bool(amount_check.get("requires_note"))
@@ -575,6 +583,7 @@ class WorkbenchWriteFacade:
                     amount_check=amount_check,
                     history_before_relations=history_before_relations,
                     idempotency_key=self._idempotency_key_from_payload(payload),
+                    selected_rows=selected_rows,
                 )
             except WorkbenchRelationCommandError as exc:
                 return self._relation_command_error_result(exc)
@@ -731,6 +740,7 @@ class WorkbenchWriteFacade:
                 amount_check=amount_check,
                 history_before_relations=history_before_relations,
                 idempotency_key=None,
+                selected_rows=selected_rows,
             )
             self._emit_timing_if_requested(
                 request_id=request_id,
@@ -822,6 +832,7 @@ class WorkbenchWriteFacade:
         amount_check: dict[str, object],
         history_before_relations: list[dict[str, object]],
         idempotency_key: str | None,
+        selected_rows: list[dict[str, object]],
     ) -> dict[str, object]:
         confirm_relation = getattr(relation_command, "confirm_relation", None)
         if not callable(confirm_relation):
@@ -835,7 +846,12 @@ class WorkbenchWriteFacade:
             month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             note=note,
             amount_check=dict(amount_check or {}),
-            special_metadata={},
+            special_metadata=self._bank_transaction_paired_policy_metadata(
+                row_ids=row_ids,
+                row_types=row_types,
+                selected_rows=selected_rows,
+                amount_check=amount_check,
+            ),
             idempotency_key=idempotency_key,
             before_relations=list(history_before_relations),
             replace_existing=True,
@@ -993,9 +1009,19 @@ class WorkbenchWriteFacade:
             "relation_mode": "manual_confirmed",
             "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             "amount_check": dict(amount_check or {}),
+            "special_metadata": self._bank_transaction_paired_policy_metadata(
+                row_ids=row_ids,
+                row_types=row_types,
+                selected_rows=selected_rows,
+                amount_check=amount_check,
+            ),
         }
         after_groups = self._relation_groups([after_relation], selected_rows=selected_rows)
-        if self._confirm_link_projection_is_paired(row_types=row_types, amount_check=amount_check):
+        if self._confirm_link_projection_is_paired(
+            row_types=row_types,
+            amount_check=amount_check,
+            special_metadata=after_relation["special_metadata"],
+        ):
             paired_groups = after_groups
             open_groups: list[dict[str, object]] = []
         else:
@@ -1013,16 +1039,164 @@ class WorkbenchWriteFacade:
         *,
         row_types: list[str],
         amount_check: dict[str, object],
+        special_metadata: dict[str, object] | None = None,
     ) -> bool:
         normalized_types = {
             str(row_type or "").strip()
             for row_type in list(row_types or [])
             if str(row_type or "").strip()
         }
+        if "bank" in normalized_types:
+            metadata = special_metadata if isinstance(special_metadata, dict) else {}
+            requires_oa = bool(metadata.get("requires_oa", True))
+            requires_invoice = bool(metadata.get("requires_invoice", True))
+            return (
+                (not requires_oa or "oa" in normalized_types)
+                and (not requires_invoice or "invoice" in normalized_types)
+            )
         if {"oa", "bank", "invoice"}.issubset(normalized_types):
             return True
         external_etc_batch_id = str((amount_check or {}).get("external_etc_batch_id") or "").strip()
         return bool(external_etc_batch_id and {"oa", "bank"}.issubset(normalized_types))
+
+    def _bank_transaction_paired_policy_metadata(
+        self,
+        *,
+        row_ids: list[str],
+        row_types: list[str],
+        selected_rows: list[dict[str, object]],
+        amount_check: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        bank_row_ids = self._bank_row_ids_from_relation(row_ids=row_ids, row_types=row_types)
+        if not bank_row_ids:
+            return {}
+        payload = self._bank_flow_rule_tag_rules_payload() if self._bank_flow_rule_tag_rules_payload else {}
+        requirements_by_tag_code = self._bank_flow_rule_requirements_by_tag_code(payload)
+        category_codes = self._bank_category_codes_for_policy(bank_row_ids, selected_rows)
+        requires_oa = False
+        requires_invoice = False
+        tag_codes: list[str] = []
+        for row_id in bank_row_ids:
+            tag_code = str(category_codes.get(row_id) or "").strip()
+            if tag_code:
+                tag_codes.append(tag_code)
+            requirement = requirements_by_tag_code.get(tag_code)
+            if isinstance(requirement, dict):
+                row_requires_oa = bool(requirement.get("requires_oa"))
+                row_requires_invoice = bool(requirement.get("requires_invoice"))
+            elif self._is_etc_confirm_link_amount_check(amount_check) or self._selected_rows_include_etc_batch_oa(selected_rows):
+                row_requires_oa = True
+                row_requires_invoice = False
+            else:
+                row_requires_oa = True
+                row_requires_invoice = True
+            requires_oa = requires_oa or row_requires_oa
+            requires_invoice = requires_invoice or row_requires_invoice
+        metadata: dict[str, object] = {
+            "paired_requirement_source": "bank_transaction_paired_policy",
+            "paired_requirement_tag_codes": self._dedupe_ordered(tag_codes),
+            "paired_requirement_version": self._positive_int((payload or {}).get("version"), default=1),
+            "requires_oa": requires_oa,
+            "requires_invoice": requires_invoice,
+        }
+        if len(metadata["paired_requirement_tag_codes"]) == 1:
+            metadata["paired_requirement_tag_code"] = metadata["paired_requirement_tag_codes"][0]
+        return metadata
+
+    @staticmethod
+    def _is_etc_confirm_link_amount_check(amount_check: dict[str, object] | None) -> bool:
+        if not isinstance(amount_check, dict):
+            return False
+        return bool(str(amount_check.get("external_etc_batch_id") or amount_check.get("etc_batch_id") or "").strip())
+
+    @staticmethod
+    def _selected_rows_include_etc_batch_oa(selected_rows: list[dict[str, object]]) -> bool:
+        for row in selected_rows:
+            if not isinstance(row, dict) or str(row.get("type") or "").strip() != "oa":
+                continue
+            if str(row.get("source") or "").strip() == "etc_batch":
+                return True
+            if str(row.get("etc_batch_id") or row.get("etcBatchId") or "").strip():
+                return True
+        return False
+
+    def _bank_category_codes_for_policy(
+        self,
+        bank_row_ids: list[str],
+        selected_rows: list[dict[str, object]],
+    ) -> dict[str, str]:
+        categories_by_row_id: dict[str, str] = {}
+        for row in selected_rows:
+            if not isinstance(row, dict) or str(row.get("type") or "").strip() != "bank":
+                continue
+            row_id = str(row.get("id") or row.get("row_id") or "").strip()
+            if not row_id or categories_by_row_id.get(row_id):
+                continue
+            category_code = str(row.get("category_code") or row.get("effective_category_code") or "").strip()
+            if category_code:
+                categories_by_row_id[row_id] = category_code
+        missing_row_ids = [row_id for row_id in bank_row_ids if row_id and row_id not in categories_by_row_id]
+        if missing_row_ids and self._bank_transaction_category_codes_for_row_ids is not None:
+            categories_by_row_id.update(self._bank_transaction_category_codes_for_row_ids(missing_row_ids))
+        return categories_by_row_id
+
+    @staticmethod
+    def _bank_row_ids_from_relation(*, row_ids: list[str], row_types: list[str]) -> list[str]:
+        normalized_row_ids = [str(row_id or "").strip() for row_id in list(row_ids or [])]
+        normalized_row_types = [str(row_type or "").strip() for row_type in list(row_types or [])]
+        if len(normalized_row_ids) == len(normalized_row_types):
+            return [
+                row_id
+                for row_id, row_type in zip(normalized_row_ids, normalized_row_types)
+                if row_id and row_type == "bank"
+            ]
+        return [
+            row_id
+            for row_id in normalized_row_ids
+            if row_id and row_type_for_workbench_row_id(row_id) == "bank"
+        ]
+
+    @staticmethod
+    def _bank_flow_rule_requirements_by_tag_code(payload: dict[str, object]) -> dict[str, dict[str, bool]]:
+        requirements: dict[str, dict[str, bool]] = {}
+        for item in list((payload or {}).get("rules") or []):
+            if not isinstance(item, dict):
+                continue
+            tag_code = str(item.get("tag_code") or item.get("code") or "").strip()
+            if tag_code:
+                requirements[tag_code] = {
+                    "requires_oa": bool(item.get("requires_oa")),
+                    "requires_invoice": bool(item.get("requires_invoice")),
+                }
+        raw_requirements = (payload or {}).get("requirements_by_tag_code")
+        if isinstance(raw_requirements, dict):
+            for raw_code, item in raw_requirements.items():
+                tag_code = str(raw_code or "").strip()
+                if tag_code and isinstance(item, dict):
+                    requirements[tag_code] = {
+                        "requires_oa": bool(item.get("requires_oa")),
+                        "requires_invoice": bool(item.get("requires_invoice")),
+                    }
+        return requirements
+
+    @staticmethod
+    def _positive_int(value: object, *, default: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+
+    @staticmethod
+    def _dedupe_ordered(values: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            normalized = str(value or "").strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                result.append(normalized)
+        return result
 
     @staticmethod
     def _operation_affected_scope_keys(result: dict[str, object]) -> list[str]:

@@ -30,6 +30,8 @@ class RecordingNoOaRelationCommandService:
         self.preflight_calls: list[dict[str, object]] = []
         self.confirm_calls: list[dict[str, object]] = []
         self.cancel_calls: list[dict[str, object]] = []
+        self.metadata_update_calls: list[dict[str, object]] = []
+        self.active_relations: list[dict[str, object]] = []
 
     def assert_write_precondition(self, **kwargs: object) -> dict[str, object]:
         self.preflight_calls.append(dict(kwargs))
@@ -87,6 +89,16 @@ class RecordingNoOaRelationCommandService:
             "read_model_scope_keys": ["2026-03"],
             "refresh_enqueued": False,
             "idempotent_replay": False,
+        }
+
+    def list_active_relations(self) -> list[dict[str, object]]:
+        return deepcopy(self.active_relations)
+
+    def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
+        self.metadata_update_calls.append(dict(kwargs))
+        return {
+            "changed_case_ids": [str(kwargs["case_id"])],
+            "affected_months": ["2026-03"],
         }
 
 
@@ -206,6 +218,12 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                 }
             ),
             bank_transaction_category_service=SimpleNamespace(
+                bulk_get=lambda row_ids: {
+                    str(row_id): deepcopy(categories[str(row_id)])
+                    for row_id in list(row_ids or [])
+                    if str(row_id) in categories
+                },
+                category_semantics_for_code=lambda _code: {},
                 snapshot=lambda: {},
                 tag_dictionary_payload=lambda: {"definitions": []},
             ),
@@ -312,6 +330,50 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(detail["rows"][0]["category_label"], "手续费")
         self.assertEqual(detail["categories_by_transaction_id"]["fee-1"]["category_code"], "fee")
         self.assertEqual(detail["categories_by_transaction_id"]["fee-1"]["category_label"], "手续费")
+
+    def test_legacy_tag_sync_updates_manual_bank_relation_paired_policy_metadata(self) -> None:
+        rows = [no_oa_bank_row("fee-1", category_code="fee", debit_amount="3.00")]
+        service, _no_oa_service, relation_command = self._application_service(
+            rows=rows,
+            selected_tag_codes=["fee"],
+        )
+        relation_command.active_relations = [
+            {
+                "case_id": "CASE-LEGACY-MANUAL-FEE",
+                "row_ids": ["fee-1", "oa-fee-1"],
+                "row_types": ["bank", "oa"],
+                "relation_mode": "manual_confirmed",
+                "month_scope": "2026-03",
+                "special_metadata": {},
+            }
+        ]
+
+        result = service._sync_bank_flow_rule_relation_requirements(
+            {
+                "version": 2,
+                "requirements_by_tag_code": {
+                    "fee": {"requires_oa": True, "requires_invoice": False},
+                },
+            },
+            actor_id="tester",
+        )
+
+        self.assertEqual(result, {"changed_case_ids": ["CASE-LEGACY-MANUAL-FEE"], "affected_months": ["2026-03"]})
+        self.assertEqual(len(relation_command.metadata_update_calls), 1)
+        call = relation_command.metadata_update_calls[0]
+        self.assertEqual(call["case_id"], "CASE-LEGACY-MANUAL-FEE")
+        self.assertEqual(call["history_operation_type"], "bank_transaction_paired_policy_requirement_sync")
+        self.assertEqual(
+            call["special_metadata"],
+            {
+                "requires_oa": True,
+                "requires_invoice": False,
+                "paired_requirement_tag_codes": ["fee"],
+                "paired_requirement_source": "bank_transaction_paired_policy",
+                "paired_requirement_version": 2,
+                "paired_requirement_tag_code": "fee",
+            },
+        )
 
     def test_list_batches_explicit_pagination_protects_first_screen_slo(self) -> None:
         rows = [

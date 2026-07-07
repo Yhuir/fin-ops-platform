@@ -4774,6 +4774,99 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(stored_decision["decision_status"], DECISION_STATUS_CONSUMED)
         self.assertEqual(stored_decision["consumed_by_relation_id"], "CASE-PAIR-ONLY-001")
 
+    def test_confirm_link_writes_bank_transaction_paired_policy_metadata(self) -> None:
+        app = build_application()
+        rules_payload = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+        app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+            {
+                "expected_version": rules_payload["version"],
+                "rules": [
+                    {
+                        **rule,
+                        "requires_oa": True if rule["tag_code"] == "external_turnover" else rule["requires_oa"],
+                        "requires_invoice": False if rule["tag_code"] == "external_turnover" else rule["requires_invoice"],
+                    }
+                    for rule in rules_payload["rules"]
+                ],
+            },
+            actor_id="tester",
+        )
+        payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        group = next(group for group in payload["open"]["groups"] if group["oa_rows"] and group["bank_rows"])
+        oa_row = group["oa_rows"][0]
+        bank_row = group["bank_rows"][0]
+
+        with patch.object(
+            app,
+            "_bank_transaction_category_codes_for_workbench_row_ids",
+            return_value={bank_row["id"]: "external_turnover"},
+        ):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link",
+                json.dumps(
+                    {
+                        "month": "2026-03",
+                        "row_ids": [oa_row["id"], bank_row["id"]],
+                        "case_id": "CASE-POLICY-CONFIRM-001",
+                        "note": "外部往来按规则无需发票",
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200, response.body)
+        confirm_payload = json.loads(response.body)
+        after = confirm_payload["operation_projection"]["after"]
+        self.assertTrue(after["paired_groups"])
+        self.assertEqual(after["open_groups"], [])
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-POLICY-CONFIRM-001")
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        metadata = relation["special_metadata"]
+        self.assertEqual(metadata["paired_requirement_source"], "bank_transaction_paired_policy")
+        self.assertEqual(metadata["paired_requirement_tag_codes"], ["external_turnover"])
+        self.assertTrue(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
+
+    def test_bank_policy_metadata_uses_selected_row_category_before_resolver(self) -> None:
+        app = build_application()
+        rules_payload = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+        app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+            {
+                "expected_version": rules_payload["version"],
+                "rules": [
+                    {
+                        **rule,
+                        "requires_oa": True if rule["tag_code"] == "external_turnover" else rule["requires_oa"],
+                        "requires_invoice": False if rule["tag_code"] == "external_turnover" else rule["requires_invoice"],
+                    }
+                    for rule in rules_payload["rules"]
+                ],
+            },
+            actor_id="tester",
+        )
+
+        with patch.object(
+            app,
+            "_bank_transaction_category_codes_for_workbench_row_ids",
+            side_effect=AssertionError("selected row category should avoid resolver"),
+        ):
+            metadata = app._workbench_write_facade()._bank_transaction_paired_policy_metadata(
+                row_ids=["bank-fast-policy-1"],
+                row_types=["bank"],
+                selected_rows=[
+                    {
+                        "id": "bank-fast-policy-1",
+                        "type": "bank",
+                        "category_code": "external_turnover",
+                    }
+                ],
+            )
+
+        self.assertEqual(metadata["paired_requirement_tag_codes"], ["external_turnover"])
+        self.assertTrue(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
+
     def test_withdraw_link_preview_splits_reconciliation_decision_without_active_relation(self) -> None:
         app = build_application()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)

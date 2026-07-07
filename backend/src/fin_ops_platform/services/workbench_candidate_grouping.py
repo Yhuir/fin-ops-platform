@@ -33,13 +33,6 @@ MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
 OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
 OA_BANK_SETTLEMENT_PAIRED_CODES = {"personal_advance_repayment_settlement"}
 NO_OA_BANK_BATCH_PAIRED_CODES = {NO_OA_BANK_BATCH_RELATION_MODE, BANK_FLOW_RULE_BATCH_RELATION_MODE}
-BANK_TRANSACTION_PAIRED_POLICY_CODES = {
-    *SINGLE_BANK_AUTO_PAIRED_CODES,
-    *MULTI_BANK_AUTO_PAIRED_CODES,
-    *OA_BANK_SETTLEMENT_PAIRED_CODES,
-    *NO_OA_BANK_BATCH_PAIRED_CODES,
-    TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
-}
 BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND = "bank_flow_rule_batch_summary"
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
 BATCH_ACCOUNTING_RELATION_MODE = "batch_accounting"
@@ -1399,12 +1392,8 @@ class WorkbenchCandidateGroupingService:
         if any(self._is_processed_exception_projection_row(row) for row in rows):
             return True
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
-        if group.bank_rows and self._uses_bank_transaction_paired_policy(group):
+        if group.bank_rows:
             return self._bank_transaction_paired_policy_satisfied(group)
-        if row_type_count == 2 and group.oa_rows and group.bank_rows and any(self._is_etc_batch_oa_row(row) for row in group.oa_rows):
-            return True
-        if group.bank_rows and any(self._is_batch_accounting_relation_row(row) for row in rows):
-            return bool(group.oa_rows)
         if row_type_count == 2 and group.oa_rows and group.invoice_rows and not group.bank_rows:
             relation_codes = {
                 self._relation_code(row)
@@ -1414,21 +1403,20 @@ class WorkbenchCandidateGroupingService:
                 return True
         return row_type_count >= 3
 
-    def _uses_bank_transaction_paired_policy(self, group: CandidateGroup) -> bool:
-        relation_codes = {
-            self._relation_code(row)
-            for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
-            if self._relation_code(row)
-        }
-        return bool(relation_codes) and relation_codes.issubset(BANK_TRANSACTION_PAIRED_POLICY_CODES)
-
     def _bank_transaction_paired_policy_satisfied(self, group: CandidateGroup) -> bool:
         if not group.bank_rows:
             return False
-        row_requirements = [
-            self._bank_transaction_paired_policy_requirements(row)
-            for row in group.bank_rows
-        ]
+        if (
+            group.oa_rows
+            and any(self._is_etc_batch_oa_row(row) for row in group.oa_rows)
+            and not any(self._bank_transaction_paired_policy_has_requirement_metadata(row) for row in group.bank_rows)
+        ):
+            row_requirements = [{"requires_oa": True, "requires_invoice": False}]
+        else:
+            row_requirements = [
+                self._bank_transaction_paired_policy_requirements(row)
+                for row in group.bank_rows
+            ]
         requires_oa = any(requirement["requires_oa"] for requirement in row_requirements)
         requires_invoice = any(requirement["requires_invoice"] for requirement in row_requirements)
         return (not requires_oa or bool(group.oa_rows)) and (not requires_invoice or bool(group.invoice_rows))
@@ -1446,12 +1434,26 @@ class WorkbenchCandidateGroupingService:
             and requires_invoice is None
         ):
             return {"requires_oa": False, "requires_invoice": False}
-        if self._relation_code(row) in OA_BANK_SETTLEMENT_PAIRED_CODES and requires_oa is None and requires_invoice is None:
+        if (
+            (self._relation_code(row) in OA_BANK_SETTLEMENT_PAIRED_CODES or self._is_batch_accounting_relation_row(row))
+            and requires_oa is None
+            and requires_invoice is None
+        ):
             return {"requires_oa": True, "requires_invoice": False}
         return {
             "requires_oa": True if requires_oa is None else requires_oa,
             "requires_invoice": True if requires_invoice is None else requires_invoice,
         }
+
+    @staticmethod
+    def _bank_transaction_paired_policy_has_requirement_metadata(row: dict[str, Any]) -> bool:
+        metadata = row.get("special_metadata")
+        if not isinstance(metadata, dict):
+            return False
+        return any(
+            key in metadata
+            for key in ("paired_requires_oa", "requires_oa", "paired_requires_invoice", "requires_invoice")
+        )
 
     @staticmethod
     def _bank_transaction_paired_policy_value(row: dict[str, Any], *keys: str) -> bool | None:

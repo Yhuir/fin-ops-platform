@@ -16,6 +16,7 @@ export type OaReversePreviewRequest = {
   sourceFilters: unknown[];
   selectedInvoiceIds: string[];
   targetApplicantCode?: string | null;
+  signal?: AbortSignal;
 };
 
 export type OaReversePreviewGroup = {
@@ -85,7 +86,6 @@ type OaReverseWorkspaceDrawerProps = {
   loadStagedDrafts?: () => Promise<InputInvoiceUsageOaReverseStagedDraftsResponse>;
   loadSubmittedHistory?: () => Promise<InputInvoiceUsageOaReverseSubmittedHistoryResponse>;
   manualStatus?: (batchId: string, request: ManualInputInvoiceUsageOaReverseStatusRequest) => Promise<InputInvoiceUsageOaReverseBatch>;
-  onBatchChanged?: () => Promise<void> | void;
   onClose: () => void;
 };
 
@@ -98,7 +98,6 @@ export default function OaReverseWorkspaceDrawer({
   loadStagedDrafts,
   loadSubmittedHistory,
   manualStatus,
-  onBatchChanged,
   onClose,
 }: OaReverseWorkspaceDrawerProps) {
   const [preview, setPreview] = useState<OaReversePreviewPayload | null>(null);
@@ -122,6 +121,7 @@ export default function OaReverseWorkspaceDrawer({
   const [oaRelationFilterMenuOpen, setOaRelationFilterMenuOpen] = useState(false);
   const [candidateSearch, setCandidateSearch] = useState("");
   const confirmationOpenRef = useRef(false);
+  const previewRequestIdRef = useRef(0);
   const targetApplicantLabelId = useId();
   const selectedInvoiceIdsKey = selectedInvoiceIds.join("\n");
   const normalizedSelectedInvoiceIds = useMemo(
@@ -163,11 +163,14 @@ export default function OaReverseWorkspaceDrawer({
     }
 
     let active = true;
+    const requestId = previewRequestIdRef.current + 1;
+    previewRequestIdRef.current = requestId;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    loadPreview(request)
+    loadPreview({ ...request, signal: controller.signal })
       .then((payload) => {
-        if (active) {
+        if (active && requestId === previewRequestIdRef.current) {
           setPreview(payload);
           if (!confirmationOpenRef.current) {
             setBatch(null);
@@ -176,18 +179,22 @@ export default function OaReverseWorkspaceDrawer({
         }
       })
       .catch((reason: unknown) => {
-        if (active) {
+        if (controller.signal.aborted || isAbortError(reason)) {
+          return;
+        }
+        if (active && requestId === previewRequestIdRef.current) {
           setError(reason instanceof Error ? reason.message : "反提 OA 预览加载失败");
         }
       })
       .finally(() => {
-        if (active) {
+        if (active && requestId === previewRequestIdRef.current) {
           setLoading(false);
         }
       });
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [loadPreview, open, request]);
 
@@ -230,13 +237,6 @@ export default function OaReverseWorkspaceDrawer({
     [candidateInvoices.length, error, feedback, preview],
   );
 
-  const notifyBatchChanged = () => {
-    if (!onBatchChanged) {
-      return;
-    }
-    void Promise.resolve(onBatchChanged()).catch(() => undefined);
-  };
-
   const runBatchAction = (
     actionName: string,
     action: () => Promise<InputInvoiceUsageOaReverseBatch>,
@@ -251,7 +251,6 @@ export default function OaReverseWorkspaceDrawer({
         setBatch(nextBatch);
         setFeedback(successMessage);
         onSuccess?.(nextBatch);
-        notifyBatchChanged();
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : `${successMessage}失败。`);
@@ -322,13 +321,11 @@ export default function OaReverseWorkspaceDrawer({
           setBatch(nextBatch);
           setFeedback("已进入已提交历史。");
           setActiveTab("submitted");
-          notifyBatchChanged();
           return;
         }
         setBatch(null);
         setFeedback("已清除暂存批次，返回待处理后可重新创建 OA 草稿。");
         setActiveTab("pending");
-        notifyBatchChanged();
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : "OA 提交状态确认失败。");
@@ -857,6 +854,26 @@ function createIdempotencyKey(prefix: string) {
   return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
 }
 
+function isAbortError(reason: unknown) {
+  return typeof DOMException !== "undefined" && reason instanceof DOMException
+    ? reason.name === "AbortError"
+    : reason instanceof Error && reason.name === "AbortError";
+}
+
+function formatSubmittedAt(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "-";
+  }
+  const normalized = trimmed.replace(/\.(\d{3})\d+(?=Z|[+-]\d{2}:?\d{2}$)/, ".$1");
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    return trimmed;
+  }
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function SummaryMetric({ label, value }: { label: string; value: string }) {
   return (
     <article className="input-invoice-usage-oa-metric">
@@ -1090,7 +1107,7 @@ function SubmittedHistoryPanel({
         <article className="input-invoice-usage-oa-history-item" key={`${item.targetApplicantName}:${item.submittedAt}:${index}`}>
           <div className="input-invoice-usage-oa-history-item__header">
             <strong>{item.targetApplicantName || "目标申请人"}</strong>
-            <span>{item.submittedAt || "-"}</span>
+            <span>{formatSubmittedAt(item.submittedAt)}</span>
             <span className="input-invoice-usage-rules-tag">{item.invoiceCount} 张</span>
             <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{item.totalWithTax || "-"}</span>
           </div>
