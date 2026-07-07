@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 
 import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
@@ -28,6 +28,7 @@ type CandidateGroupCellProps = {
   showWorkflowActions: boolean;
   canMutateData: boolean;
   readOnly?: boolean;
+  leadingControl?: ReactNode;
 };
 
 function CandidateGroupCell({
@@ -49,6 +50,7 @@ function CandidateGroupCell({
   showWorkflowActions,
   canMutateData,
   readOnly = false,
+  leadingControl,
 }: CandidateGroupCellProps) {
   const isSingleRecord = records.length === 1;
 
@@ -59,6 +61,7 @@ function CandidateGroupCell({
         data-scroll-pane={scrollPaneId}
         data-testid={scrollTestId}
       >
+        {leadingControl ? <div className="candidate-group-empty-control">{leadingControl}</div> : null}
         <div className="candidate-group-empty-copy">-</div>
       </div>
     );
@@ -73,7 +76,7 @@ function CandidateGroupCell({
       <div
         className={`candidate-group-stack candidate-group-stack-sheet ${isSingleRecord ? "candidate-group-stack-sheet-single" : "candidate-group-stack-sheet-multi"}`}
       >
-        {records.map((row) => (
+        {records.map((row, index) => (
           <WorkbenchRecordCard
             actionMode={actionMode}
             columnGridStyle={columnGridStyle}
@@ -88,6 +91,7 @@ function CandidateGroupCell({
             row={row}
             rowState={getRowState(row, zoneId)}
             sheetRowMode={isSingleRecord ? "stretched" : "split"}
+            leadingControl={index === 0 ? leadingControl : undefined}
             showActionColumn={showActionColumn}
             showWorkflowActions={showWorkflowActions}
             canMutateData={canMutateData}

@@ -465,8 +465,24 @@ class OaPendingPaymentQueryService:
                 view_mode=view_mode,
                 payment_statuses_by_flow_id=payment_statuses_by_flow_id,
             )
-            counts[view_mode] = len(rows)
+            counts[view_mode] = self._unique_oa_count(rows)
         return counts
+
+    @staticmethod
+    def _unique_oa_count(rows: list[dict[str, Any]]) -> int:
+        oa_ids: set[str] = set()
+        for row in rows:
+            oa = row.get("oa") if isinstance(row.get("oa"), dict) else {}
+            for summary in list(oa.get("summaries") or []):
+                if not isinstance(summary, dict):
+                    continue
+                oa_id = str(summary.get("oaId") or summary.get("id") or "").strip()
+                if oa_id:
+                    oa_ids.add(oa_id)
+            fallback_id = str(oa.get("id") or "").strip()
+            if fallback_id:
+                oa_ids.add(fallback_id)
+        return len(oa_ids)
 
     def _build_rows(
         self,

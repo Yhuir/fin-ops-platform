@@ -38,6 +38,17 @@
 
 ## 历史记录
 
+## 2026-07-07 - OA reverse preview 使用 SQL read model 热路径
+
+- 目标：把 `以发票反提 OA` drawer 后端预览从约 8 秒的 live rows 构建/全量扫描路径切到有界 SQL read model 读取，降低大数据量下打开 drawer 的耗时。
+- 影响范围：`InputInvoiceUsageOaReverseService.preview`、`InputInvoiceUsageReadModelFreshGateService`、`InputInvoiceUsageReadModelRepositoryPort`、PostgreSQL `read_model.input_invoice_usage_rows` 查询与索引；不改变前端 DTO、OA 状态机、目标申请人凭据或外部 OA 草稿创建合同。
+- 关键决策：当前筛选 preview 复用 rows fresh gate 并限制 `page_size=200`；显式发票选择新增 `invoice_id` 定向 lookup，不再通过 `_all_input_invoice_usage_rows()` 全量加载后 Python 过滤。read model 非 fresh 时返回 `input_invoice_usage_oa_reverse_preview_refreshing` 并入队刷新，生产路径不回退 live scan。
+- 文档影响：更新 `README.md`、`boundary-io.md`、`tests.md` 和本实施记录；OA integration 边界不变。
+- 测试覆盖：新增 service 测试覆盖当前筛选不触发 live query、显式选择走 invoice-id lookup、read model refreshing fail-closed；新增 fresh gate/repository/migration 测试覆盖 source-version 校验、native column SQL lookup 和索引声明。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_oa_reverse_service tests.test_input_invoice_usage_read_model_fresh_gate_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime.InputInvoiceUsageReadModelRepositoryPortTests tests.test_invoice_usage_collection_sql_runtime.InvoiceUsageCollectionSqlRuntimeTests.test_input_repository_invoice_id_lookup_uses_native_column tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_expected_migration_files_are_present_and_ordered tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_input_invoice_usage_oa_reverse_preview_hot_path_index_is_declared -v`。
+- 未测风险：本地测试证明代码边界和 SQL shape，不证明生产 PostgreSQL 大表 EXPLAIN、索引创建耗时和真实 p95；发布前或发布后需要用生产只读 smoke/指标确认 drawer preview latency。
+- 后续事项：上线 migration 后采样 `/api/input-invoice-usage/oa-reverse/preview` 耗时和 `read_model.input_invoice_usage_rows` 索引使用情况；若仍慢，再用生产 EXPLAIN 细看 filter 条件和 payload 体积。
+
 ## 2026-07-05 - 月分片刷新避免全量银行流水扫描
 
 - 目标：修复 `input_invoice_usage` 月 scope read model refresh 在生产写操作 fan-out 后仍出现 4 秒级耗时的问题，减少 worker projection I/O。

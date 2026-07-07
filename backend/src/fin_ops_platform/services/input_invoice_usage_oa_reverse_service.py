@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from hashlib import sha256
+from http import HTTPStatus
 import json
 from threading import RLock
 from typing import Any, Callable, Protocol
@@ -307,6 +308,8 @@ class InputInvoiceUsageOaReverseService:
         relation_writer: Callable[[InputInvoiceUsageOaReverseBatch, InputInvoiceUsageOaEvidence], None] | None = None,
         audit_recorder: Callable[[dict[str, object]], None] | None = None,
         read_model_invalidator: Callable[[list[str], str], None] | None = None,
+        read_model_rows_loader: Callable[[dict[str, list[Any]]], dict[str, object] | None] | None = None,
+        read_model_rows_by_invoice_ids_loader: Callable[[list[str]], dict[str, object] | None] | None = None,
     ) -> None:
         self._query_service = query_service
         self._repository = repository
@@ -315,6 +318,8 @@ class InputInvoiceUsageOaReverseService:
         self._relation_writer = relation_writer
         self._audit_recorder = audit_recorder
         self._read_model_invalidator = read_model_invalidator
+        self._read_model_rows_loader = read_model_rows_loader
+        self._read_model_rows_by_invoice_ids_loader = read_model_rows_by_invoice_ids_loader
 
     def preview(self, request: dict[str, Any] | None, *, can_create_draft: bool = False) -> dict[str, object]:
         payload = dict(request or {})
@@ -787,10 +792,22 @@ class InputInvoiceUsageOaReverseService:
     def _rows_for_preview_payload(self, payload: dict[str, Any]) -> tuple[list[dict[str, object]], list[str]]:
         invoice_ids = _text_list(payload.get("invoiceIds"))
         if invoice_ids:
+            read_model_payload = self._read_model_rows_by_invoice_ids_loader(invoice_ids) if self._read_model_rows_by_invoice_ids_loader else None
+            read_model_rows = self._rows_from_read_model_payload(read_model_payload)
+            if read_model_rows is not None:
+                known = {str(row.get("invoiceId") or "") for row in read_model_rows}
+                missing_ids = _text_list(read_model_payload.get("missing_invoice_ids")) if isinstance(read_model_payload, dict) else []
+                if not missing_ids:
+                    missing_ids = [invoice_id for invoice_id in invoice_ids if invoice_id not in known]
+                return read_model_rows, missing_ids
             wanted = set(invoice_ids)
             rows = [row for row in self._all_input_invoice_usage_rows() if str(row.get("invoiceId") or "") in wanted]
             known = {str(row.get("invoiceId") or "") for row in rows}
             return rows, [invoice_id for invoice_id in invoice_ids if invoice_id not in known]
+        read_model_payload = self._read_model_rows_loader(_preview_query_from_payload(payload)) if self._read_model_rows_loader else None
+        read_model_rows = self._rows_from_read_model_payload(read_model_payload)
+        if read_model_rows is not None:
+            return read_model_rows, []
         list_payload = self._query_service.list_rows(
             page=1,
             page_size=200,
@@ -801,6 +818,24 @@ class InputInvoiceUsageOaReverseService:
             month=payload.get("month"),
         )
         return [row for row in list(list_payload.get("rows") or []) if isinstance(row, dict)], []
+
+    @staticmethod
+    def _rows_from_read_model_payload(payload: dict[str, object] | None) -> list[dict[str, object]] | None:
+        if not isinstance(payload, dict):
+            return None
+        status = str(payload.get("read_model_status") or payload.get("refresh_status") or "fresh")
+        if status != "fresh":
+            raise InputInvoiceUsageError(
+                "input_invoice_usage_oa_reverse_preview_refreshing",
+                "进项发票使用情况读模型正在刷新，请稍后重试。",
+                status_code=HTTPStatus.CONFLICT,
+                details={
+                    "read_model_status": status,
+                    "read_model_scope_key": payload.get("read_model_scope_key"),
+                    "read_model_stale_reasons": payload.get("read_model_stale_reasons"),
+                },
+            )
+        return [row for row in list(payload.get("rows") or []) if isinstance(row, dict)]
 
     def _all_input_invoice_usage_rows(self) -> list[dict[str, object]]:
         query_context = getattr(self._query_service, "_query_context", None)
@@ -1222,6 +1257,27 @@ def _text_list(value: Any) -> list[str]:
         seen.add(text)
         result.append(text)
     return result
+
+
+def _preview_query_from_payload(payload: dict[str, Any]) -> dict[str, list[Any]]:
+    query: dict[str, list[Any]] = {
+        "page": ["1"],
+        "page_size": ["200"],
+        "sort_field": ["invoice_date"],
+        "sort_direction": ["desc"],
+    }
+    for source_key, query_key in (
+        ("keyword", "keyword"),
+        ("invoiceDateFrom", "invoice_date_from"),
+        ("invoiceDateTo", "invoice_date_to"),
+        ("month", "month"),
+    ):
+        value = payload.get(source_key)
+        if value not in (None, ""):
+            query[query_key] = [value]
+    if payload.get("filters") not in (None, ""):
+        query["filters"] = [payload.get("filters")]
+    return query
 
 
 def _decimal(value: Any) -> Decimal:

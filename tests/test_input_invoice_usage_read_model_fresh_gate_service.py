@@ -92,6 +92,33 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
         self.assertEqual(repository.calls, [("list_input_invoice_usage_filter_options", {"month": "2026-05", "keyword": None, "invoice_date_from": None, "invoice_date_to": None, "filters": None})])
         self.assertEqual(enqueued, [])
 
+    def test_invoice_id_lookup_validates_source_versions_without_loading_all_rows(self) -> None:
+        enqueued: list[tuple[str, str]] = []
+        repository = InvoiceIdLookupRepository(
+            {
+                "rows": [{"id": "row-1", "invoiceId": "invoice-1"}],
+                "missing_invoice_ids": [],
+                "refresh_status": "fresh",
+                "source_versions_by_scope": {"2026-05": {"schema": "v1"}},
+                "read_model_scope_keys": ["2026-05"],
+            }
+        )
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=repository,
+            query_service=QueryServiceStub(),
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+        )
+
+        payload = service.rows_by_invoice_ids(["invoice-1"])
+
+        assert payload is not None
+        self.assertEqual(payload["rows"], [{"id": "row-1", "invoiceId": "invoice-1"}])
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(repository.calls, [("list_input_invoice_usage_rows_by_invoice_ids", ["invoice-1"])])
+        self.assertEqual(enqueued, [])
+
 
 class RowsRepository:
     def __init__(self, payload: dict[str, object]) -> None:
@@ -112,6 +139,19 @@ class FilterOptionsRepository:
 
     def list_input_invoice_usage_rows(self, **_: object) -> dict[str, object]:
         raise AssertionError("filter options must not load full input invoice usage rows")
+
+
+class InvoiceIdLookupRepository:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+        self.calls: list[tuple[str, object]] = []
+
+    def list_input_invoice_usage_rows_by_invoice_ids(self, invoice_ids: list[str]) -> dict[str, object]:
+        self.calls.append(("list_input_invoice_usage_rows_by_invoice_ids", list(invoice_ids)))
+        return dict(self._payload)
+
+    def list_input_invoice_usage_rows(self, **_: object) -> dict[str, object]:
+        raise AssertionError("invoice id lookup must not load full input invoice usage rows")
 
 
 class QueryServiceStub:

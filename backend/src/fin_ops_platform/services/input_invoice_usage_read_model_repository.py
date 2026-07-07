@@ -57,6 +57,10 @@ class InputInvoiceUsageReadModelRepositoryPort:
         payload = self._repository.get_input_invoice_usage_row_by_row_id(row_id)
         return dict(payload) if isinstance(payload, dict) else None
 
+    def list_input_invoice_usage_rows_by_invoice_ids(self, invoice_ids: list[str]) -> dict[str, object] | None:
+        payload = self._repository.list_input_invoice_usage_rows_by_invoice_ids(invoice_ids)
+        return dict(payload) if isinstance(payload, dict) else None
+
     def save_input_invoice_usage_rows(
         self,
         *,

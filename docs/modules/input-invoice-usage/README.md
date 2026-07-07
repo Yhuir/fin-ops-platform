@@ -49,6 +49,8 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 
 生产 PostgreSQL runtime 下，`/api/input-invoice-usage/rows` 和 filter/export 相关 all-rows helper 必须依赖 SQL read model repository。repository 缺失、SQL view miss、schema/source version mismatch 或 refresh_status 非 fresh 时都返回 `202`/`read_model_status=refreshing` 并 enqueue `input_invoice_usage` 对应 month/all scope；不得回退 `InputInvoiceUsageQueryService.list_rows(...)` 进行 live scan 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
 
+`以发票反提 OA` preview 在生产路径下也必须消费 `input_invoice_usage` SQL read model fresh gate：当前筛选打开 drawer 时复用 rows 查询合同并限制 `page_size=200`，显式发票选择时走 `invoice_id` 定向 lookup。read model 缺失、stale、schema/source version mismatch 或 refresh_status 非 fresh 时返回业务 refreshing 错误并入队刷新，不能回退全量 live scan 或在 Python 中全表过滤发票。
+
 `/api/input-invoice-usage/filter-options` 的生产路径必须调用 `list_input_invoice_usage_filter_options(...)`，由 PostgreSQL 结构化列直接聚合 enum options；禁止恢复旧的 `all_rows` 分页拉齐完整 row payload 后在 Python 聚合 options 的链路。
 
 页面首屏和筛选态由 rows 与 filter-options 两个读接口共同证明 fresh。前端必须合并两者的 `readModelStatus` / `read_model_status`：任一接口返回 `stale`、`missing`、`schema_mismatch`、`refreshing` 或等价非 fresh 状态时，页面整体进入刷新诊断，不展示普通空态，不启用导出，也不把另一接口的 fresh 空 rows 当成最终事实。

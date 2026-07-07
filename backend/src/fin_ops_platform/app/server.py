@@ -6305,6 +6305,8 @@ class Application:
             relation_writer=WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_relation_command_service()),
             audit_recorder=self._record_input_invoice_usage_oa_reverse_audit,
             read_model_invalidator=self._invalidate_input_invoice_usage_oa_reverse_read_models,
+            read_model_rows_loader=lambda query: self._input_invoice_usage_read_model_fresh_gate().rows(query),
+            read_model_rows_by_invoice_ids_loader=lambda invoice_ids: self._input_invoice_usage_read_model_fresh_gate().rows_by_invoice_ids(invoice_ids),
         )
         self._input_invoice_usage_oa_reverse_service_instance = service
         return service

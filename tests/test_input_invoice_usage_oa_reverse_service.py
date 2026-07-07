@@ -16,7 +16,7 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     InputInvoiceUsageOaReverseVersionConflictError,
     WorkbenchInputInvoiceUsageOaReverseRelationWriter,
 )
-from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
+from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageError, InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
@@ -69,6 +69,17 @@ class RecordingRelationCommandService:
     def confirm_relation(self, **kwargs: object) -> dict[str, object]:
         self.confirm_calls.append(dict(kwargs))
         return {"status": "confirmed", "relation": {"case_id": kwargs.get("case_id")}}
+
+
+class ExplodingInputInvoiceUsageQueryService:
+    def list_rows(self, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("OA reverse preview should use the SQL read model loader")
+
+    def _query_context(self, **_kwargs: object) -> object:
+        raise AssertionError("OA reverse preview should not build live query context")
+
+    def _build_rows(self, **_kwargs: object) -> list[dict[str, object]]:
+        raise AssertionError("OA reverse preview should not build live rows")
 
 
 class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
@@ -260,6 +271,74 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(candidate_rejection["reasonCode"], "already_has_candidate_oa")
         self.assertEqual(candidate_rejection["oaRelationStatus"], "candidate")
         self.assertEqual(candidate_rejection["invoiceNo"], "9501")
+
+    def test_preview_current_filters_uses_read_model_loader_without_live_query(self) -> None:
+        calls: list[dict[str, list[object]]] = []
+        service = InputInvoiceUsageOaReverseService(
+            query_service=ExplodingInputInvoiceUsageQueryService(),
+            repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
+            read_model_rows_loader=lambda query: calls.append(dict(query)) or {
+                "rows": [self._read_model_row("inv-fast", "9101")],
+                "read_model_status": "fresh",
+            },
+        )
+
+        preview = service.preview(
+            {
+                "source": "currentFilters",
+                "filters": [{"field": "seller_name", "operator": "in", "values": ["供应商"]}],
+                "targetApplicantCode": "chen_xiuyun",
+            },
+            can_create_draft=True,
+        )
+
+        self.assertEqual(preview["invoiceCount"], 1)
+        self.assertEqual(preview["invoiceRows"][0]["invoiceId"], "inv-fast")
+        self.assertEqual(calls[0]["page"], ["1"])
+        self.assertEqual(calls[0]["page_size"], ["200"])
+        self.assertEqual(calls[0]["filters"], [[{"field": "seller_name", "operator": "in", "values": ["供应商"]}]])
+
+    def test_preview_explicit_selection_uses_invoice_id_read_model_lookup(self) -> None:
+        calls: list[list[str]] = []
+        service = InputInvoiceUsageOaReverseService(
+            query_service=ExplodingInputInvoiceUsageQueryService(),
+            repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
+            read_model_rows_by_invoice_ids_loader=lambda invoice_ids: calls.append(list(invoice_ids)) or {
+                "rows": [self._read_model_row("inv-fast", "9101")],
+                "missing_invoice_ids": ["inv-missing"],
+                "read_model_status": "fresh",
+            },
+        )
+
+        preview = service.preview(
+            {
+                "source": "explicitSelection",
+                "invoiceIds": ["inv-fast", "inv-missing"],
+                "targetApplicantCode": "chen_xiuyun",
+            },
+            can_create_draft=True,
+        )
+
+        self.assertEqual(calls, [["inv-fast", "inv-missing"]])
+        self.assertEqual(preview["invoiceCount"], 1)
+        self.assertEqual(preview["invoiceRows"][0]["invoiceId"], "inv-fast")
+        self.assertEqual(preview["rejectedInvoices"], [{"invoiceId": "inv-missing", "reasonCode": "invoice_not_found", "reason": "发票不存在"}])
+
+    def test_preview_read_model_refreshing_returns_business_error_without_live_fallback(self) -> None:
+        service = InputInvoiceUsageOaReverseService(
+            query_service=ExplodingInputInvoiceUsageQueryService(),
+            repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
+            read_model_rows_loader=lambda _query: {
+                "rows": [],
+                "read_model_status": "refreshing",
+                "read_model_scope_key": "all",
+            },
+        )
+
+        with self.assertRaises(InputInvoiceUsageError) as context:
+            service.preview({"source": "currentFilters"}, can_create_draft=True)
+
+        self.assertEqual(context.exception.error_code, "input_invoice_usage_oa_reverse_preview_refreshing")
 
     def test_create_batch_is_idempotent_and_persists_audit_metadata(self) -> None:
         service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
@@ -695,6 +774,26 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             relation_label="进行中",
             relation_tone="success",
         )
+
+    @staticmethod
+    def _read_model_row(invoice_id: str, invoice_no: str) -> dict[str, object]:
+        return {
+            "id": f"input_invoice_usage_row_{invoice_id}",
+            "invoiceId": invoice_id,
+            "invoiceIdentityKey": f"identity:{invoice_id}",
+            "invoice": {
+                "invoiceNo": invoice_no,
+                "invoiceDate": "2026-05-20",
+                "sellerName": "供应商",
+                "sellerTaxNo": "91530000SELLER",
+                "totalWithTax": "100.00",
+                "taxRate": "6%",
+                "taxAmount": "6.00",
+                "taxableItemName": "服务费",
+            },
+            "paymentStatus": {"code": "pending", "label": "待处理", "reason": ""},
+            "oa": {"relationCount": 0, "summaries": []},
+        }
 
     @staticmethod
     def _relation(pair_service: WorkbenchPairRelationService, case_id: str, row_ids: list[str]) -> None:

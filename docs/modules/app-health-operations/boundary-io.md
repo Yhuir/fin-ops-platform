@@ -40,7 +40,7 @@
 | --- | --- | --- |
 | App health payload | 页面/indicator | 不伪装 readiness；OA pending/processing outbox 必须显示 refreshing，OA failed outbox/worker/run 必须显示 blocked/error |
 | Alert/status | shell/status page | 明确 stale/failed/degraded |
-| Dashboard payload | operations page | 只读聚合；`data_inventory.invoice.sources` 固定为 `manual`、`oa_attachment`，`oa_attachment.supplementary_count` 表示 OA 解析进入发票池但不在手工导入中的数量；`data_inventory.oa.sources` 包含 `oa_records`、`oa_records_completed`、`oa_records_in_progress`、`oa_items`，分别表示 OA 申请主表总数、已完成 OA、进行中 OA 和 OA 明细行数；`data_inventory.oa.latest_synced_at` 使用最近成功 OA projection run；`data_inventory.import_events` 只输出手工银行流水和发票导入历史，前端主页面截取最新 5 条并用抽屉展示全量；RabbitMQ 管理指标默认以 unknown 输出，不能阻塞 read model/worker 健康探针 |
+| Dashboard payload | operations page | 只读聚合；`data_inventory.invoice.sources` 固定为 `manual`、`oa_attachment`，`oa_attachment.supplementary_count` 表示 OA 解析进入发票池但不在手工导入中的数量；`data_inventory.oa.sources` 包含 `oa_records`、`oa_records_completed`、`oa_records_in_progress`、`oa_items`，分别表示 OA 申请主表总数、已完成 OA、进行中 OA 和 OA 明细行数；`oa_records_completed` 统计 `app.oa_applications` 的唯一完成态 OA 单据，`oa_records_in_progress` 统计 OA 待付款 read model all-scope 的 `viewCounts.in_progress` 等价唯一 OA ID，不能用 `app.oa_applications.workflow_status` 推导；`data_inventory.oa.latest_synced_at` 使用最近成功 OA projection run；`data_inventory.import_events` 只输出手工银行流水和发票导入历史，前端主页面截取最新 5 条并用抽屉展示全量；RabbitMQ 管理指标默认以 unknown 输出，不能阻塞 read model/worker 健康探针 |
 
 ## 持久化与投影
 

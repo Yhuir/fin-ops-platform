@@ -20,7 +20,14 @@
 
 - 变更类型：生产读路径收口。
 - 新增/更新测试：`tests/test_oa_pending_payment_api.py` rows/filter/detail read-model route 回归、`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_oa_repository_all_scope_dedupes_cross_scope_relation_rows`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_oa_pending_payment_routes_use_route_owner`。
-- 覆盖点：rows/filter-options/detail 不再回退 live query；read model service 缺失 fail closed；all scope 对跨月重复物理行按 `row_id` 去重后再计算 rows、summary 和 viewCounts。
+- 覆盖点：rows/filter-options/detail 不再回退 live query；read model service 缺失 fail closed；all scope 对跨月重复物理行按 `row_id` 去重后再计算 rows、summary，`viewCounts` 按去重行中的唯一 OA ID 计算。
+- 验证命令：见本轮最终说明。
+
+## 2026-07-07 - viewCounts 按唯一 OA 计数
+
+- 变更类型：OA 待付款 tab 计数合同修正。
+- 新增/更新测试：`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_oa_repository_all_scope_dedupes_cross_scope_relation_rows`、`tests/test_oa_pending_payment_service.py::OaPendingPaymentQueryServiceTests::test_active_relation_group_returns_one_row_with_aggregated_totals`。
+- 覆盖点：多张 OA 在同一配对组中只展示一行时，`pagination.total` / `summary.rowCount` 仍按行数计，`summary.viewCounts.completed/in_progress` 按 `oa.summaries` 中的唯一 OA ID 计。
 - 验证命令：见本轮最终说明。
 
 ## 修改前影响面清单
@@ -30,7 +37,7 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | 影响面 | 当前事实源 | 需要关注的旧功能 |
 | --- | --- | --- |
 | 主行身份 | completed: 普通 `app.oa_applications` / OA completed projection；in_progress: OA MySQL `t_payment_simple.flow_id` + payment-admitted OA projection / OA Mongo | completed 列表以统一 OA projection 中已完成/历史未知 OA 为主行；in_progress 列表以已进入支付状态管理准入表且能匹配 OA Mongo `_id` 的进行中 OA 为主行；缺少银行或发票时不能丢掉主行，未入表的重复/异常进行中 OA 不能进入页面。 |
-| 流程视图 | OA projection `workflow_status` + rows `summary.viewCounts` | `completed` 只含统一 completed projection 中已完成/历史未知 OA，`in_progress` 只含已准入且进行中 OA；OA sync/read model refresh 后已完成 OA 必须从进行中视图移除并进入 completed 统一 projection；切换按钮数量必须按同一筛选口径统计。 |
+| 流程视图 | OA projection `workflow_status` + rows `summary.viewCounts` | `completed` 只含统一 completed projection 中已完成/历史未知 OA，`in_progress` 只含已准入且进行中 OA；OA sync/read model refresh 后已完成 OA 必须从进行中视图移除并进入 completed 统一 projection；切换按钮数量必须按同一筛选口径统计唯一 OA ID，多 OA 配对组折叠成一行时不能按行数少计。 |
 | 付款状态 | `InvoiceLifecyclePolicy`、`OaPendingPaymentQueryService` | 只允许输出 `unpaid`、`paid`；`paid` 以 active linked 付款关系为准，金额差额、缺失银行事实和非支出流水只保留 reason/金额字段并阻断写回；不得输出 `partially_paid`、`pending_review`、`overpaid` 或 `merged_paid`。 |
 | OA 支付状态写回 | OA MySQL `t_payment_simple`、`OAPaymentStatusRepository` | `flow_id` 必须解析到 OA Mongo 文档 ID；`t_payment_simple.id` 不能当 OA ID；候选流水或未确认 relation 不能写回；completed/in-progress 只要有有效支出流水 active relation 且支出合计等于 OA 金额，就能由逐行 `writeback-paid` 命令写回同一 `flow_id` 的 `pay_status=1`；前端和后端都不再提供人工 confirm-paid 或旧自动匹配写回入口。 |
 | 支出流水证据 | `ImportNormalizationService`、completed Workbench relation read facade、in-progress OA pending payment relation、bank transaction relation claims | 只允许支出流水作为付款证据；收入流水或缺失流水事实必须进入异常/待复核，不得算已付。进行中 OA 抽屉关联创建 OA 待付款独立 pending relation 和 bank claim 后，若 outflow、金额和 `flow_id` 校验通过，必须自动写回 OA MySQL；该关系不能进入关联台，只有 OA completed 后通过 promotion 进入 Workbench active relation。 |
@@ -118,7 +125,7 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | OA MySQL 支付状态使用了错误 ID | `tests/test_oa_payment_status_service.py`、`tests/test_mongo_oa_adapter.py` | `t_payment_simple.flow_id` 使用 OA Mongo 文档 ID；流程实例 ID/流程请求 ID 不直接替代 Mongo 文档 ID。 |
 | 网络波动重复提交 OA 进入进行中视图 | `tests/test_oa_pending_payment_service.py::OaPendingPaymentQueryServiceTests::test_only_in_progress_view_uses_payment_status_admission_projection` | 只有 `t_payment_simple.flow_id` 中存在的进行中 OA Mongo `_id` 进入进行中视图；completed 不受该准入表限制；未入表的重复/异常进行中 OA 不展示。 |
 | 普通 OA projection 混入进行中 OA | `tests/test_oa_projection_sync_service.py`、`tests/test_oa_projection_sql_runtime.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | `oa.sync` 只写 completed/legacy 到 `app.oa_applications`，普通 list/read SQL 带 completed filter；待付款页面 completed 读取普通 projection，in-progress 另走 payment-admitted projection。 |
-| 切换按钮数量和表格当前视图不一致 | `tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` | SQL read model 返回同筛选条件下的 `summary.viewCounts`，前端展示 tab 数量。 |
+| 切换按钮数量和表格当前视图不一致 | `tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` | SQL read model 返回同筛选条件下按唯一 OA ID 统计的 `summary.viewCounts`，前端展示 tab 数量；`pagination.total` / `summary.rowCount` 继续表示配对组行数。 |
 
 ## 关键 Smoke Flows
 

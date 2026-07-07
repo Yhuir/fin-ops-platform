@@ -4162,6 +4162,49 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_repository_all_scope_group_detail_uses_all_scope_freshness_contract(self) -> None:
+        class AllScopeSourceGroupDetailConnection(ActiveWorkbenchGenerationConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                if "g.source_group_id = %s" in normalized and "gen.source_versions" in normalized:
+                    self.fetch_one_calls.append((normalized, params))
+                    return {
+                        "group_id": "scope:2026-05:temp:1",
+                        "source_group_id": "temp:1",
+                        "zone": "open",
+                        "scope_key": "2026-05",
+                        "generation_id": "gen-2026-05",
+                        "source_versions": {"source_version": 12},
+                        "payload": {
+                            "group_id": "temp:1",
+                            "group_type": "candidate",
+                            "match_confidence": "medium",
+                            "reason": "source group detail",
+                            "oa_rows": [{"id": "oa-1", "type": "oa"}],
+                            "bank_rows": [],
+                            "invoice_rows": [],
+                        },
+                    }
+                return super().fetch_one(sql, params)
+
+        connection = AllScopeSourceGroupDetailConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        group = repository.get_workbench_group_detail(scope_key="all", zone="open", group_id="temp:1")
+
+        self.assertIsNotNone(group)
+        self.assertEqual(group["group_id"], "scope:2026-05:temp:1")
+        self.assertEqual(group["scope_key"], "all")
+        self.assertEqual(group["source_scope_key"], "2026-05")
+        self.assertEqual(group["read_model_status"], "fresh")
+        detail_queries = [
+            (sql, params)
+            for sql, params in connection.fetch_one_calls
+            if "g.source_group_id = %s" in sql and "gen.source_versions" in sql
+        ]
+        self.assertTrue(detail_queries)
+        self.assertEqual(detail_queries[-1][1][-2:], ("temp:1", "temp:1"))
+
     def test_repository_reports_workbench_refresh_status(self) -> None:
         connection = WorkbenchSummaryGroupsConnection(dirty_status="failed")
         repository = PostgresReadModelRepository(connection)

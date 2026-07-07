@@ -427,6 +427,87 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             "read_model_scope_key": scope_key,
         }
 
+    def list_input_invoice_usage_rows_by_invoice_ids(self, invoice_ids: list[str]) -> dict[str, Any] | None:
+        normalized_ids = _dedupe_preserve_order(invoice_ids)
+        if not normalized_ids:
+            return {
+                "rows": [],
+                "missing_invoice_ids": [],
+                "refresh_status": "fresh",
+                "source_versions_by_scope": {},
+                "read_model_scope_keys": [],
+            }
+        rows = self._connection.fetch_all(
+            """
+            select distinct on (invoice_id)
+                   invoice_id, scope_key, source_versions, payload, raw_payload
+            from read_model.input_invoice_usage_rows
+            where invoice_id = any(%s)
+            order by invoice_id, generated_at desc, scope_key desc, row_id
+            """,
+            (normalized_ids,),
+        )
+        rows_by_invoice_id: dict[str, dict[str, Any]] = {}
+        source_versions_by_scope: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            payload = _read_model_payload(row)
+            if not isinstance(payload, dict):
+                continue
+            invoice_id = text(row.get("invoice_id")) or text(payload.get("invoiceId"))
+            if not invoice_id:
+                continue
+            rows_by_invoice_id[invoice_id] = payload
+            scope_key = text(row.get("scope_key")) or "all"
+            source_versions_by_scope.setdefault(
+                scope_key,
+                row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
+            )
+        if not source_versions_by_scope:
+            scope_row = self._invoice_relation_scope_row(
+                scope_table_name="read_model.input_invoice_usage_scopes",
+                scope_key="all",
+            )
+            if scope_row is None:
+                return None
+            source_versions_by_scope["all"] = (
+                scope_row.get("source_versions")
+                if isinstance(scope_row.get("source_versions"), dict)
+                else {}
+            )
+        missing_invoice_ids = [invoice_id for invoice_id in normalized_ids if invoice_id not in rows_by_invoice_id]
+        if missing_invoice_ids and "all" not in source_versions_by_scope:
+            scope_row = self._invoice_relation_scope_row(
+                scope_table_name="read_model.input_invoice_usage_scopes",
+                scope_key="all",
+            )
+            if scope_row is None:
+                return None
+            source_versions_by_scope["all"] = (
+                scope_row.get("source_versions")
+                if isinstance(scope_row.get("source_versions"), dict)
+                else {}
+            )
+        scope_keys = sorted(source_versions_by_scope) or ["all"]
+        refresh_status = "fresh"
+        for scope_key in scope_keys:
+            scope_status = self._invoice_relation_refresh_status(
+                scope_type="input_invoice_usage",
+                scope_key=scope_key,
+            )
+            if scope_status != "fresh":
+                refresh_status = scope_status
+                break
+        ordered_rows = [rows_by_invoice_id[invoice_id] for invoice_id in normalized_ids if invoice_id in rows_by_invoice_id]
+        return {
+            "rows": ordered_rows,
+            "missing_invoice_ids": missing_invoice_ids,
+            "refresh_status": refresh_status,
+            "source_versions_by_scope": source_versions_by_scope,
+            "read_model_scope_keys": scope_keys,
+        }
+
     def list_output_invoice_collection_rows(
         self,
         *,
@@ -586,10 +667,28 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         view_counts_row = self._connection.fetch_one(
             f"""
             select
-                coalesce(sum(case when oa_workflow_status is null or oa_workflow_status = '' or oa_workflow_status = 'completed' then 1 else 0 end), 0) as completed_count,
-                coalesce(sum(case when oa_workflow_status = 'in_progress' then 1 else 0 end), 0) as in_progress_count
-            from {rows_source_sql}
-            where {base_where_sql}
+                count(distinct oa_id) filter (where view_mode = 'completed') as completed_count,
+                count(distinct oa_id) filter (where view_mode = 'in_progress') as in_progress_count
+            from (
+                select
+                    case when oa_workflow_status = 'in_progress' then 'in_progress' else 'completed' end as view_mode,
+                    nullif(btrim(coalesce(
+                        oa_summary.value->>'oaId',
+                        oa_summary.value->>'id',
+                        payload->'oa'->>'id',
+                        oa_id
+                    )), '') as oa_id
+                from {rows_source_sql}
+                left join lateral jsonb_array_elements(
+                    case
+                        when jsonb_typeof(payload->'oa'->'summaries') = 'array'
+                            and jsonb_array_length(payload->'oa'->'summaries') > 0
+                        then payload->'oa'->'summaries'
+                        else jsonb_build_array(jsonb_build_object('oaId', coalesce(payload->'oa'->>'id', oa_id)))
+                    end
+                ) as oa_summary(value) on true
+                where {base_where_sql}
+            ) view_count_oa_ids
             """,
             tuple(base_params),
         )
@@ -5453,6 +5552,9 @@ class PostgresReadModelRepository:
     def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.get_input_invoice_usage_row_by_row_id(row_id)
 
+    def list_input_invoice_usage_rows_by_invoice_ids(self, invoice_ids: list[str]) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.list_input_invoice_usage_rows_by_invoice_ids(invoice_ids)
+
     def list_output_invoice_collection_rows(self, **kwargs: Any) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.list_output_invoice_collection_rows(**kwargs)
 
@@ -7358,6 +7460,7 @@ class PostgresReadModelRepository:
             generation_clause = "and g.generation_id = %s"
             generation_params.append(active_generation_id)
         group_scope_clause = "true" if composed_all_scope else f"g.{scope_where}"
+        group_id_clause = "(g.group_id = %s or g.source_group_id = %s)" if composed_all_scope else "g.group_id = %s"
         group_row_join_id_sql = "coalesce(g.source_group_id, g.group_id)" if composed_all_scope else "g.group_id"
         exclusion_clause = ""
         if normalized_zone == "open":
@@ -7383,12 +7486,18 @@ class PostgresReadModelRepository:
             where {group_scope_clause}
               {generation_clause}
               and g.zone = %s
-              and g.group_id = %s
+              and {group_id_clause}
               {exclusion_clause}
             order by g.scope_month desc nulls last, g.updated_at desc
             limit 1
             """,
-            (*scope_params, *generation_params, normalized_zone, normalized_group_id),
+            (
+                *scope_params,
+                *generation_params,
+                normalized_zone,
+                normalized_group_id,
+                *([normalized_group_id] if composed_all_scope else []),
+            ),
         )
         if not isinstance(row, dict):
             return None
@@ -7398,12 +7507,14 @@ class PostgresReadModelRepository:
         if not isinstance(group, dict):
             group = {"group_id": text(row.get("group_id"))}
         result = _with_workbench_group_counts(_sanitize_workbench_group_invoice_rows(group))
-        result["scope_key"] = resolved_scope_key
+        result["scope_key"] = "all" if composed_all_scope else resolved_scope_key
+        if composed_all_scope and resolved_scope_key and resolved_scope_key != "all":
+            result["source_scope_key"] = resolved_scope_key
         source_versions = self._workbench_all_active_source_versions() if composed_all_scope else row.get("source_versions")
         result["source_versions"] = dict(source_versions) if isinstance(source_versions, dict) else {}
         result["active_generation_id"] = active_generation_id
         result["read_model_version"] = active_generation_id
-        result["read_model_status"] = self._workbench_read_model_status_for_groups_page(scope_key=resolved_scope_key)
+        result["read_model_status"] = self._workbench_read_model_status_for_groups_page(scope_key=result["scope_key"])
         return result
 
     def get_workbench_row_detail(self, *, scope_key: str, row_id: str) -> dict[str, Any] | None:

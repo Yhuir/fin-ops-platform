@@ -477,7 +477,10 @@ function CandidateGroupGrid({
                 className="row-action-btn candidate-group-collapse-control"
                 disabled={isLoading}
                 type="button"
-                onClick={() => void togglePaneGroupExpansion(group, paneId, isExpanded, rowTotal, visibleRowCount)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void togglePaneGroupExpansion(group, paneId, isExpanded, rowTotal, visibleRowCount);
+                }}
               >
                 {isLoading
                   ? "加载中"
@@ -519,13 +522,13 @@ function CandidateGroupGrid({
                           gridRow: segmentIndex + 1,
                         }}
                       >
-                        {segmentIndex === 0 ? renderCollapseControls(paneId) : null}
                         <CandidateGroupCell
                           actionMode={actionMode}
                           columnGridStyle={paneGridStyleByPane[paneId]}
                           columns={columnsByPane[paneId]}
                           getRowState={getRowState}
                           highlightedRowId={highlightedRowId}
+                          leadingControl={segmentIndex === 0 ? renderCollapseControls(paneId) : null}
                           searchQuery={linkedSearchQuery || displayState.searchQueryByPane[paneId]}
                           onOpenDetail={onOpenDetail}
                           onRowAction={onRowAction}
@@ -558,13 +561,13 @@ function CandidateGroupGrid({
                       gridRow: `1 / span ${segmentCount}`,
                     }}
                   >
-                    {renderCollapseControls(paneId)}
                     <CandidateGroupCell
                       actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}
                       columns={columnsByPane[paneId]}
                       getRowState={getRowState}
                       highlightedRowId={highlightedRowId}
+                      leadingControl={renderCollapseControls(paneId)}
                       searchQuery={linkedSearchQuery || displayState.searchQueryByPane[paneId]}
                       onOpenDetail={onOpenDetail}
                       onRowAction={onRowAction}
@@ -636,13 +639,13 @@ function CandidateGroupGrid({
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
                   <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
-                    {renderCollapseControls(paneId)}
                     <CandidateGroupCell
                       actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}
                       columns={columnsByPane[paneId]}
                       getRowState={getRowState}
                       highlightedRowId={highlightedRowId}
+                      leadingControl={renderCollapseControls(paneId)}
                       searchQuery={linkedSearchQuery || displayState.searchQueryByPane[paneId]}
                       onOpenDetail={onOpenDetail}
                       onRowAction={onRowAction}

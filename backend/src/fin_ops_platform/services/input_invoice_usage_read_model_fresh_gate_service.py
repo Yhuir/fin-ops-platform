@@ -174,6 +174,50 @@ class InputInvoiceUsageReadModelFreshGateService:
         )
         return service.relation_details(row_id, kind=query.get("kind", [""])[0])
 
+    def rows_by_invoice_ids(self, invoice_ids: list[str]) -> dict[str, object] | None:
+        list_rows = getattr(self._repository, "list_input_invoice_usage_rows_by_invoice_ids", None)
+        if not callable(list_rows):
+            if self._requires_sql_read_model_runtime():
+                self._enqueue_refresh("all", "api_invoice_id_lookup_sql_repository_unavailable")
+                return self.refreshing_payload(scope_key="all")
+            return None
+        payload = list_rows(invoice_ids)
+        if not isinstance(payload, dict):
+            self._enqueue_refresh("all", "api_invoice_id_lookup_miss")
+            return self.refreshing_payload(scope_key="all")
+        scope_keys = [
+            str(scope_key or "all")
+            for scope_key in list(payload.get("read_model_scope_keys") or [])
+            if str(scope_key or "").strip()
+        ] or ["all"]
+        refresh_status = str(payload.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            for scope_key in scope_keys:
+                self._enqueue_refresh(scope_key, "api_invoice_id_lookup_stale")
+            return self.refreshing_payload(scope_key=scope_keys[0])
+
+        source_versions_by_scope = payload.get("source_versions_by_scope") if isinstance(payload.get("source_versions_by_scope"), dict) else {}
+        stale_reasons: list[str] = []
+        for scope_key in scope_keys:
+            actual_versions = source_versions_by_scope.get(scope_key) if isinstance(source_versions_by_scope.get(scope_key), dict) else {}
+            scope_stale_reasons = source_version_mismatch_reasons(
+                expected=require_expected_source_versions(
+                    self._expected_source_versions(scope_key=scope_key),
+                    context="input_invoice_usage_read_model",
+                ),
+                actual=actual_versions,
+            )
+            if scope_stale_reasons:
+                self._enqueue_refresh(scope_key, "api_invoice_id_lookup_source_versions_stale")
+                stale_reasons.extend(scope_stale_reasons)
+        if stale_reasons:
+            return self.refreshing_payload(scope_key=scope_keys[0], stale_reasons=stale_reasons)
+
+        result = dict(payload)
+        result["read_model_status"] = "fresh"
+        result.pop("refresh_status", None)
+        return result
+
     @staticmethod
     def export_query_from_kwargs(kwargs: dict[str, object]) -> dict[str, list[str]]:
         query: dict[str, list[str]] = {}

@@ -805,14 +805,17 @@ describe("Workbench candidate grouping layout", () => {
     expect(getStandaloneCssRuleBody(".record-card-cell.column-compact .cell-text-value-full")).toMatch(/word-break:\s*break-word/);
   });
 
-  test("keeps candidate expand controls in normal flow so they do not cover row text", () => {
+  test("keeps candidate expand controls inline with the first visible row", () => {
     const controlRule = getCssRuleBody(".candidate-group-collapse-control");
+    const inlineRule = getCssRuleBody(".record-card-cell-content-with-inline-control");
 
-    expect(controlRule).toMatch(/margin:\s*6px 10px 4px;/);
-    expect(controlRule).toMatch(/white-space:\s*normal;/);
+    expect(controlRule).toMatch(/margin:\s*0;/);
+    expect(controlRule).toMatch(/white-space:\s*nowrap;/);
     expect(controlRule).not.toMatch(/\bposition:\s*absolute/);
     expect(controlRule).not.toMatch(/\btop\s*:/);
     expect(controlRule).not.toMatch(/\bleft\s*:/);
+    expect(inlineRule).toMatch(/gap:\s*6px;/);
+    expect(inlineRule).toMatch(/flex-wrap:\s*wrap;/);
   });
 
   test("shows zone titles with total item counts instead of group counts", async () => {
@@ -1145,7 +1148,8 @@ describe("Workbench candidate grouping layout", () => {
     expect(expandButton).toHaveClass("candidate-group-collapse-control");
     expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
     expect(screen.queryByText("实际 2 条流水")).not.toBeInTheDocument();
-    expect(bankCell).not.toContainElement(expandButton);
+    expect(bankCell).toContainElement(expandButton);
+    expect(expandButton.closest(".record-card")).not.toBeNull();
     expect(within(bankCell).getAllByRole("row")).toHaveLength(1);
 
     fireEvent.click(expandButton);
@@ -1218,7 +1222,8 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("杨丽萍 5月9隐藏流水")).not.toBeInTheDocument();
     expect(expandButton).toHaveTextContent("还有 1 条，展开");
     expect(expandButton).toHaveClass("candidate-group-collapse-control");
-    expect(bankCell).not.toContainElement(expandButton);
+    expect(bankCell).toContainElement(expandButton);
+    expect(expandButton.closest(".record-card")).not.toBeNull();
     expect(ensureGroupDetail).not.toHaveBeenCalled();
 
     fireEvent.click(expandButton);
@@ -1360,7 +1365,8 @@ describe("Workbench candidate grouping layout", () => {
     expect(expandButton).toHaveTextContent("展开 2 张明细");
     expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
     expect(screen.queryByText("实际 2 张发票")).not.toBeInTheDocument();
-    expect(invoiceCell).not.toContainElement(expandButton);
+    expect(invoiceCell).toContainElement(expandButton);
+    expect(expandButton.closest(".record-card")).not.toBeNull();
     expect(within(invoiceCell).getAllByRole("row")).toHaveLength(1);
 
     fireEvent.click(expandButton);

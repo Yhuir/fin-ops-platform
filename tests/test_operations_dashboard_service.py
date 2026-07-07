@@ -39,10 +39,17 @@ class FakeDashboardConnection:
                 "oa_attachment_latest_synced_at": datetime(2026, 5, 22, 9, 0, tzinfo=UTC),
             }
         if "from app.oa_applications" in normalized and "oa_records_count" in normalized:
+            if "read_model.oa_pending_payment_rows" not in normalized:
+                raise AssertionError("OA in-progress inventory must use the OA pending payment read model")
+            if "count(distinct oa_id)" not in normalized or "jsonb_array_elements" not in normalized:
+                raise AssertionError("OA in-progress inventory must match OA pending payment viewCounts.in_progress")
+            if "where coalesce(nullif(workflow_status, ''), 'completed') <> all" in normalized:
+                raise AssertionError("OA in-progress inventory must not use app.oa_applications workflow status")
             return {
                 "oa_records_count": 7,
                 "oa_records_completed_count": 5,
-                "oa_records_in_progress_count": 2,
+                "oa_records_in_progress_count": 6,
+                "oa_pending_payment_in_progress_latest_synced_at": datetime(2026, 5, 20, 9, 45, tzinfo=UTC),
                 "oa_items_count": 30,
                 "oa_records_latest_synced_at": datetime(2026, 5, 19, 11, 0, tzinfo=UTC),
                 "latest_successful_sync_at": datetime(2026, 5, 20, 10, 5, tzinfo=UTC),
@@ -160,7 +167,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         oa_sources = {row["key"]: row for row in payload["data_inventory"]["oa"]["sources"]}
         self.assertEqual(oa_sources["oa_records"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
         self.assertEqual(oa_sources["oa_records_completed"]["count"], 5)
-        self.assertEqual(oa_sources["oa_records_in_progress"]["count"], 2)
+        self.assertEqual(oa_sources["oa_records_in_progress"]["count"], 6)
+        self.assertEqual(oa_sources["oa_records_in_progress"]["latest_synced_at"], "2026-05-20T09:45:00+00:00")
         self.assertEqual(oa_sources["oa_items"]["count"], 30)
         self.assertEqual(oa_sources["oa_items"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
         import_events = payload["data_inventory"]["import_events"]

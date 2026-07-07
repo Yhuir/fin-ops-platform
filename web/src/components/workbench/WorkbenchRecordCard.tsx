@@ -1,5 +1,5 @@
 import { Info } from "lucide-react";
-import { memo, useState, type FocusEvent, type MouseEvent, type TouchEvent } from "react";
+import { memo, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
 import type { WorkbenchRecord, WorkbenchRecordType, WorkbenchSourceKind } from "../../features/workbench/types";
@@ -49,6 +49,7 @@ type WorkbenchRecordCardProps = {
   showWorkflowActions: boolean;
   canMutateData: boolean;
   readOnly?: boolean;
+  leadingControl?: ReactNode;
 };
 
 function WorkbenchRecordCard({
@@ -69,6 +70,7 @@ function WorkbenchRecordCard({
   showWorkflowActions,
   canMutateData,
   readOnly = false,
+  leadingControl,
 }: WorkbenchRecordCardProps) {
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
   const hasActionColumn = !readOnly && showActionColumn;
@@ -92,15 +94,17 @@ function WorkbenchRecordCard({
       style={columnGridStyle}
       onClick={readOnly ? undefined : () => onSelectRow(row, zoneId)}
     >
-      {columns.map((column) => {
+      {columns.map((column, columnIndex) => {
         const value = row.tableValues[column.key] ?? "--";
+        const showLeadingControl = columnIndex === 0 && leadingControl;
         return (
           <div
             key={column.key}
             className={`record-card-cell cell-${column.kind ?? "text"}${column.className ? ` ${column.className}` : ""}`}
             role="cell"
           >
-            <div className="record-card-cell-content">
+            <div className={`record-card-cell-content${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
+              {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
               {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
             </div>
           </div>
@@ -145,6 +149,7 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.showWorkflowActions === nextProps.showWorkflowActions
   && previousProps.canMutateData === nextProps.canMutateData
   && previousProps.readOnly === nextProps.readOnly
+  && previousProps.leadingControl === nextProps.leadingControl
   && previousProps.onSelectRow === nextProps.onSelectRow
   && previousProps.onOpenDetail === nextProps.onOpenDetail
   && previousProps.onRowAction === nextProps.onRowAction

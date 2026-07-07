@@ -64,7 +64,7 @@ OA 待付款核对页用于对齐 OA 单据、付款流水和进项发票，并�
 - OA 范围以 OA MySQL `t_payment_simple.flow_id` 为准入事实源，不直接扫 OA Mongo 全量；`flow_id` 必须匹配 OA Mongo `form_data._id`，匹配成功后才进入本页面正常表格。
 - `view_mode=completed` 是原 OA 待付款核对视图，只展示已进入 `t_payment_simple` 且已完成或历史未带 workflow status 的 OA；`view_mode=in_progress` 只展示已进入 `t_payment_simple` 且 OA 系统仍为进行中的支付申请/日常报销。OA 后续完成后，下一次 OA sync/read model refresh 必须从进行中视图移除。
 - `t_payment_simple.id` 不是 OA ID；支付状态展示和写回使用同一 `flow_id`。OA 系统中因网络波动重复提交、但未进入 `t_payment_simple` 的 OA 不展示。
-- rows summary 必须提供 `viewCounts.completed/in_progress`，用于“已完成 OA N条 / 进行中 OA N条”切换按钮；该数量与当前搜索/筛选条件一致。
+- rows summary 必须提供 `viewCounts.completed/in_progress`，用于“已完成 OA N条 / 进行中 OA N条”切换按钮；该数量与当前搜索/筛选条件一致，并按唯一 OA ID 计数，不按表格配对组行数计数。同一 relation 下多条 OA 折叠成一行时，`viewCounts` 计多条 OA，`pagination.total` / `summary.rowCount` 仍计一行。
 - 普通 `app.oa_applications` 投影只承载已完成/历史未知 OA，供关联台、待找发票等页面消费；OA 待付款核对使用专用 payment-admitted OA projection/read model：先读 `t_payment_simple.flow_id`，再按 flow_id 精确读取 OA Mongo 当前记录，并按当前 workflow status 分流到 `completed` / `in_progress`。
 - filter-options 需要与列表事实一致，不能前端自造枚举。
 - 关联关系必须来自关联台 Workbench active relation；同一 relation 下出现多条 OA、支出流水或进项发票时，OA 待付款只展示一条核对行，金额为各自合计，并通过明细展开所有 OA、流水或发票。

@@ -185,6 +185,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["invoice"]["relationCount"], 1)
         self.assertEqual(payload["summary"]["oaAmountTotal"], "4450.00")
         self.assertEqual(payload["summary"]["bankPaidTotal"], "4450.00")
+        self.assertEqual(payload["summary"]["viewCounts"], {"completed": 3, "in_progress": 0})
 
     def test_paid_row_reads_oa_payment_status_writeback_state(self) -> None:
         bank = self._bank("bank-paid", "100.00")

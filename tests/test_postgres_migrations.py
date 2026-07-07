@@ -107,6 +107,7 @@ EXPECTED_MIGRATIONS = [
     "0091_import_file_ordering_hot_path.sql",
     "0092_cost_statistics_parent_rollup_hot_path.sql",
     "0093_workbench_relation_source_version_hot_paths.sql",
+    "0094_input_invoice_usage_oa_reverse_preview_hot_path.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -254,7 +255,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 94)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 95)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -398,6 +399,13 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("where status = 'active'", normalized_sql)
         self.assertIn("where status <> 'deleted'", normalized_sql)
         self.assertIn("where application_date is not null", normalized_sql)
+
+    def test_input_invoice_usage_oa_reverse_preview_hot_path_index_is_declared(self) -> None:
+        sql = (MIGRATIONS_DIR / "0094_input_invoice_usage_oa_reverse_preview_hot_path.sql").read_text().lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("input_invoice_usage_rows_invoice_id_generated_idx", normalized_sql)
+        self.assertIn("on read_model.input_invoice_usage_rows (invoice_id, generated_at desc)", normalized_sql)
 
     def test_oa_pending_payment_bank_relation_schema_and_migration_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

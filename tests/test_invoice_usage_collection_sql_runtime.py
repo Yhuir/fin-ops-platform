@@ -397,19 +397,19 @@ class InvoiceReadModelConnection:
                 row.setdefault("source_versions", oa_pending_payment_source_versions())
                 return row
             if "completed_count" in normalized or "in_progress_count" in normalized:
-                completed_count = 0
-                in_progress_count = 0
+                completed_oa_ids: set[str] = set()
+                in_progress_oa_ids: set[str] = set()
                 for row in self._oa_rows_for_sql(normalized):
                     payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
                     oa_payload = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
                     workflow_status = str(oa_payload.get("workflowStatus") or row.get("oa_workflow_status") or "")
                     if workflow_status == "in_progress":
-                        in_progress_count += 1
+                        in_progress_oa_ids.update(self._oa_row_ids(row))
                     else:
-                        completed_count += 1
+                        completed_oa_ids.update(self._oa_row_ids(row))
                 return {
-                    "completed_count": completed_count,
-                    "in_progress_count": in_progress_count,
+                    "completed_count": len(completed_oa_ids),
+                    "in_progress_count": len(in_progress_oa_ids),
                 }
             rows = self._oa_rows_for_sql(normalized)
             return {
@@ -459,6 +459,21 @@ class InvoiceReadModelConnection:
             return Decimal(str(section_payload.get(key) or "0"))
         except Exception:
             return Decimal("0")
+
+    @staticmethod
+    def _oa_row_ids(row: dict) -> set[str]:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        oa_payload = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+        ids: set[str] = set()
+        for summary in list(oa_payload.get("summaries") or []):
+            if isinstance(summary, dict):
+                oa_id = str(summary.get("oaId") or summary.get("id") or "").strip()
+                if oa_id:
+                    ids.add(oa_id)
+        fallback_id = str(oa_payload.get("id") or row.get("oa_id") or "").strip()
+        if fallback_id:
+            ids.add(fallback_id)
+        return ids
 
     @staticmethod
     def _oa_workflow_status(row: dict) -> str:
@@ -817,6 +832,10 @@ class InputInvoiceUsageReadModelRepositoryPortTests(unittest.TestCase):
                 self.calls.append(("get_input_invoice_usage_row_by_row_id", row_id))
                 return {"row": {"id": row_id}, "refresh_status": "fresh"}
 
+            def list_input_invoice_usage_rows_by_invoice_ids(self, invoice_ids: list[str]) -> dict[str, object]:
+                self.calls.append(("list_input_invoice_usage_rows_by_invoice_ids", list(invoice_ids)))
+                return {"rows": [{"invoiceId": invoice_ids[0]}], "refresh_status": "fresh"}
+
             def list_output_invoice_collection_rows(self, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("input invoice usage port must not expose output collection reads")
 
@@ -836,6 +855,10 @@ class InputInvoiceUsageReadModelRepositoryPortTests(unittest.TestCase):
         self.assertEqual(
             port.get_input_invoice_usage_row_by_row_id("input-1")["row"]["id"],
             "input-1",
+        )
+        self.assertEqual(
+            port.list_input_invoice_usage_rows_by_invoice_ids(["invoice-1"])["rows"][0]["invoiceId"],
+            "invoice-1",
         )
         self.assertEqual(
             port.list_input_invoice_usage_filter_options(month="2026-05")["options"]["payment_status"][0]["label"],
@@ -861,6 +884,7 @@ class InputInvoiceUsageReadModelRepositoryPortTests(unittest.TestCase):
             [
                 "list_input_invoice_usage_rows",
                 "get_input_invoice_usage_row_by_row_id",
+                "list_input_invoice_usage_rows_by_invoice_ids",
                 "list_input_invoice_usage_filter_options",
                 "save_input_invoice_usage_rows",
                 "mark_input_invoice_usage_scope",
@@ -1300,6 +1324,11 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                 "applicantName": "樊祖芳",
                 "amount": "270000.00",
                 "workflowStatus": "completed",
+                "summaries": [
+                    {"oaId": "oa-pay-2073"},
+                    {"oaId": "oa-pay-2214"},
+                    {"oaId": "oa-pay-2181"},
+                ],
             },
             "paymentStatus": {"code": "paid", "label": "已支付"},
             "bankTransaction": {"paidTotal": "270000.00", "tradeTime": "2026-05-25 15:00:03"},
@@ -1336,7 +1365,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["rowCount"], 1)
         self.assertEqual(payload["summary"]["oaAmountTotal"], "270000.00")
         self.assertEqual(payload["summary"]["bankPaidTotal"], "270000.00")
-        self.assertEqual(payload["summary"]["viewCounts"], {"completed": 1, "in_progress": 0})
+        self.assertEqual(payload["summary"]["viewCounts"], {"completed": 3, "in_progress": 0})
         self.assertEqual([row["id"] for row in payload["rows"]], ["oa_pending_payment_relation_cross_month"])
         executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
         self.assertIn("deduped_oa_pending_payment_rows", executed_sql)
@@ -1445,6 +1474,38 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         executed_sql = " ".join(sql for sql, _params in connection.fetch_one_calls)
         self.assertIn("from read_model.input_invoice_usage_rows", executed_sql)
         self.assertIn("row_id = %s", executed_sql)
+
+    def test_input_repository_invoice_id_lookup_uses_native_column(self) -> None:
+        connection = InvoiceReadModelConnection(
+            input_rows=[
+                {
+                    "scope_key": "2026-05",
+                    "invoice_id": "input-invoice-1",
+                    "source_versions": input_invoice_usage_source_versions(),
+                    "payload": {
+                        "id": "input_invoice_usage_row_1",
+                        "invoiceId": "input-invoice-1",
+                        "invoice": {"invoiceNo": "1001"},
+                        "oa": {"relationCount": 0},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        row_payload = repository.list_input_invoice_usage_rows_by_invoice_ids(["input-invoice-1", "missing-invoice"])
+
+        self.assertEqual(row_payload["rows"][0]["invoiceId"], "input-invoice-1")
+        self.assertEqual(row_payload["missing_invoice_ids"], ["missing-invoice"])
+        self.assertEqual(row_payload["refresh_status"], "fresh")
+        self.assertEqual(
+            row_payload["source_versions_by_scope"],
+            {"2026-05": input_invoice_usage_source_versions(), "all": input_invoice_usage_source_versions()},
+        )
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("from read_model.input_invoice_usage_rows", executed_sql)
+        self.assertIn("invoice_id = any(%s)", executed_sql)
 
     def test_input_api_miss_enqueues_refresh_without_live_scan(self) -> None:
         queue = QueueRecorder()
