@@ -14,12 +14,14 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilder:
         attachment_invoice_rows_for_oa: Callable[[dict[str, object], list[dict[str, object]]], list[dict[str, object]]],
         auto_pair_conflicts_with_manual_relation: Callable[[list[str]], bool],
         month_scope_for_relation: Callable[[list[dict[str, object]]], str],
+        amount_check_for_rows_by_type: Callable[[dict[str, list[dict[str, object]]]], dict[str, object]] | None = None,
     ) -> None:
         self._applicant_names_provider = applicant_names_provider
         self._serialize_value = serialize_value
         self._attachment_invoice_rows_for_oa = attachment_invoice_rows_for_oa
         self._auto_pair_conflicts_with_manual_relation = auto_pair_conflicts_with_manual_relation
         self._month_scope_for_relation = month_scope_for_relation
+        self._amount_check_for_rows_by_type = amount_check_for_rows_by_type
 
     def build(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
         applicant_names = self._applicant_names()
@@ -68,6 +70,7 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilder:
                 "row_ids": row_ids,
                 "row_types": ["oa", *(["invoice"] * (len(row_ids) - 1))],
                 "month_scope": month_scope,
+                "amount_check": self._amount_check(oa_row, attachment_invoice_rows),
             }
         return desired_relations
 
@@ -81,3 +84,19 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilder:
             for name in self._applicant_names_provider()
             if str(name).strip()
         }
+
+    def _amount_check(
+        self,
+        oa_row: dict[str, object],
+        attachment_invoice_rows: list[dict[str, object]],
+    ) -> dict[str, object]:
+        if self._amount_check_for_rows_by_type is None:
+            return {}
+        amount_check = self._amount_check_for_rows_by_type(
+            {
+                "oa": [oa_row],
+                "bank": [],
+                "invoice": list(attachment_invoice_rows),
+            }
+        )
+        return dict(amount_check) if isinstance(amount_check, dict) else {}

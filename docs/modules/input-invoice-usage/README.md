@@ -49,9 +49,9 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 
 `/api/input-invoice-usage/rows/{row_id}/relation-details` 在 SQL read model 可用时必须按 `row_id` 读取单行 payload 并展开已有 summaries，不能为了打开 `+N` 详情触发全量 live rebuild；read model missing/stale/source mismatch 时返回 refreshing 状态并入队刷新。
 
-生产 PostgreSQL runtime 下，`/api/input-invoice-usage/rows` 和 filter/export 相关 all-rows helper 必须依赖 SQL read model repository。repository 缺失、SQL view miss、schema/source version mismatch 或 refresh_status 非 fresh 时都返回 `202`/`read_model_status=refreshing` 并 enqueue `input_invoice_usage` 对应 month/all scope；不得回退 `InputInvoiceUsageQueryService.list_rows(...)` 进行 live scan 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
+`/api/input-invoice-usage/rows`、filter-options、relation details 和 export 读路径必须依赖 `input_invoice_usage` read model repository/fresh gate。repository 缺失、SQL view miss、schema/source version mismatch 或 refresh_status 非 fresh 时都返回 `202`/`read_model_status=refreshing` 并 enqueue `input_invoice_usage` 对应 month/all scope；不得回退 `InputInvoiceUsageQueryService.list_rows(...)`、`filter_options(...)`、`row_relation_details(...)` 或返回 `live_query`。本地和测试环境也不保留 route/export live fallback；`InputInvoiceUsageQueryService` 只作为 projection/测试装配的业务 rows assembler。
 
-`以发票反提 OA` preview 在生产路径下也必须消费 `input_invoice_usage` SQL read model fresh gate：当前筛选打开 drawer 时复用 rows 查询合同并限制 `page_size=200`，显式发票选择时走 `invoice_id` 定向 lookup。read model 缺失、stale、schema/source version mismatch 或 refresh_status 非 fresh 时返回业务 refreshing 错误并入队刷新，不能回退全量 live scan 或在 Python 中全表过滤发票。
+`以发票反提 OA` preview 必须消费 `input_invoice_usage` SQL read model fresh gate：当前筛选打开 drawer 时复用 rows 查询合同并限制 `page_size=200`，显式发票选择时走 `invoice_id` 定向 lookup。read model 缺失、stale、schema/source version mismatch 或 refresh_status 非 fresh 时返回业务 refreshing 错误并入队刷新，不能回退全量 live scan 或在 Python 中全表过滤发票。
 
 `/api/input-invoice-usage/filter-options` 的生产路径必须调用 `list_input_invoice_usage_filter_options(...)`，由 PostgreSQL 结构化列直接聚合 enum options；禁止恢复旧的 `all_rows` 分页拉齐完整 row payload 后在 Python 聚合 options 的链路。
 

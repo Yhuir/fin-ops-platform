@@ -120,6 +120,73 @@ class StaticInputInvoiceUsageReadRepository:
         }
 
 
+class QueryBackedInputInvoiceUsageReadRepository:
+    def __init__(self, query_service: InputInvoiceUsageQueryService) -> None:
+        self._query_service = query_service
+
+    def list_input_invoice_usage_rows(self, **kwargs: object) -> dict[str, object]:
+        payload = self._query_service.list_rows(
+            page=kwargs.get("page") or 1,
+            page_size=kwargs.get("page_size") or 50,
+            keyword=kwargs.get("keyword"),
+            invoice_date_from=kwargs.get("invoice_date_from"),
+            invoice_date_to=kwargs.get("invoice_date_to"),
+            month=kwargs.get("month"),
+            filters=kwargs.get("filters"),
+            sort_field=kwargs.get("sort_field") or "invoice_date",
+            sort_direction=kwargs.get("sort_direction") or "desc",
+        )
+        return {
+            **payload,
+            "refresh_status": "fresh",
+            "source_versions": input_invoice_usage_source_versions(),
+        }
+
+    def list_input_invoice_usage_filter_options(self, **kwargs: object) -> dict[str, object]:
+        payload = self._query_service.filter_options(
+            keyword=kwargs.get("keyword"),
+            invoice_date_from=kwargs.get("invoice_date_from"),
+            invoice_date_to=kwargs.get("invoice_date_to"),
+            month=kwargs.get("month"),
+            filters=kwargs.get("filters"),
+        )
+        fields = [field for field in list(payload.get("fields") or []) if isinstance(field, dict)]
+        return {
+            "options": {str(field.get("field") or ""): list(field.get("options") or []) for field in fields},
+            "refresh_status": "fresh",
+            "source_versions": input_invoice_usage_source_versions(),
+        }
+
+    def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, object] | None:
+        payload = self._query_service.list_rows(page=1, page_size=200)
+        for row in list(payload.get("rows") or []):
+            if isinstance(row, dict) and str(row.get("id") or "") == str(row_id):
+                return {
+                    "row": dict(row),
+                    "refresh_status": "fresh",
+                    "source_versions": input_invoice_usage_source_versions(),
+                    "read_model_scope_key": "all",
+                }
+        return None
+
+    def list_input_invoice_usage_rows_by_invoice_ids(self, invoice_ids: list[str]) -> dict[str, object]:
+        payload = self._query_service.list_rows(page=1, page_size=200)
+        wanted = {str(invoice_id) for invoice_id in invoice_ids}
+        rows = [
+            dict(row)
+            for row in list(payload.get("rows") or [])
+            if isinstance(row, dict) and str(row.get("invoiceId") or "") in wanted
+        ]
+        known = {str(row.get("invoiceId") or "") for row in rows}
+        return {
+            "rows": rows,
+            "missing_invoice_ids": [str(invoice_id) for invoice_id in invoice_ids if str(invoice_id) not in known],
+            "refresh_status": "fresh",
+            "source_versions_by_scope": {"all": input_invoice_usage_source_versions()},
+            "read_model_scope_keys": ["all"],
+        }
+
+
 class FailingInputInvoiceUsageQueryService(InputInvoiceUsageQueryService):
     def row_relation_details(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         raise AssertionError("relation detail must be served from input_invoice_usage read model")
@@ -1146,7 +1213,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         relation_service = pair_service or WorkbenchPairRelationService()
         app._import_service = import_service
         app._workbench_pair_relation_service = relation_service
-        app._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
+        query_service = InputInvoiceUsageQueryService(
             payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=import_service,
             relation_facade=relation_facade
@@ -1158,6 +1225,16 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             ),
             oa_projection=oa_projection,
         )
+        app._input_invoice_usage_query_service = query_service
+        app._input_invoice_usage_sql_read_repository = QueryBackedInputInvoiceUsageReadRepository(query_service)
+        for attr in (
+            "_input_invoice_usage_read_model_fresh_gate_instance",
+            "_input_invoice_usage_api_routes",
+            "_input_invoice_usage_export_service_instance",
+            "_input_invoice_usage_oa_reverse_service_instance",
+        ):
+            if hasattr(app, attr):
+                delattr(app, attr)
 
     @staticmethod
     def _invoice(

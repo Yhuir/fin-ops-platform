@@ -25,7 +25,7 @@ from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRe
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 READ_MODEL_STATUS = "live_query"
-SOURCE_VERSION = "input-invoice-usage:v2-linked-relation-amount-totals"
+SOURCE_VERSION = "input-invoice-usage:v3-confirmed-relation-component-groups"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
@@ -433,33 +433,12 @@ class InputInvoiceUsageQueryService:
         context.preload_relation_rows(relation_lookup_ids)
         source_invoice_ids = {invoice.id for invoice in invoices}
         source_lookup = self._invoice_lookup_by_relation_row_id(invoices)
-        all_lookup: dict[str, Invoice] | None = None
-        relation_groups: dict[str, dict[str, Any]] = {}
-        for relation in context.distributed_relations_for_row_ids(relation_lookup_ids):
-            if not self._relation_is_confirmed(relation):
-                continue
-            relation_line_items = self._relation_input_invoices(relation, source_lookup)
-            if self._relation_has_unloaded_input_invoice(relation, source_lookup):
-                if all_lookup is None:
-                    all_lookup = self._invoice_lookup_by_relation_row_id(
-                        context.list_invoices(month="all", invoice_type=InvoiceType.INPUT)
-                    )
-                relation_line_items = self._relation_input_invoices(relation, all_lookup)
-            if len(relation_line_items) < 2:
-                continue
-            group_key = self._relation_group_key(relation)
-            if not group_key:
-                continue
-            source_members = [invoice for invoice in relation_line_items if invoice.id in source_invoice_ids]
-            if not source_members:
-                continue
-            relation_groups[group_key] = {
-                "row_key": f"relation:{group_key}",
-                "identity_key": self._identity_key(sorted(source_members, key=lambda item: str(item.id))[0]),
-                "primary": sorted(source_members, key=lambda item: str(item.id))[0],
-                "line_items": sorted(relation_line_items, key=lambda item: str(item.id)),
-                "relation_group_id": group_key,
-            }
+        relation_groups = self._confirmed_relation_invoice_groups(
+            context=context,
+            relation_lookup_ids=relation_lookup_ids,
+            source_invoice_ids=source_invoice_ids,
+            source_lookup=source_lookup,
+        )
 
         groups: list[dict[str, Any]] = []
         assigned_invoice_ids: set[str] = set()
@@ -484,6 +463,127 @@ class InputInvoiceUsageQueryService:
             })
         groups.sort(key=lambda group: (str(group["primary"].invoice_date or ""), str(group["identity_key"])))
         return groups
+
+    def _confirmed_relation_invoice_groups(
+        self,
+        *,
+        context: DistributedInvoiceRelationContext,
+        relation_lookup_ids: list[str],
+        source_invoice_ids: set[str],
+        source_lookup: dict[str, Invoice],
+    ) -> dict[str, dict[str, Any]]:
+        relation_entries = self._confirmed_relation_group_entries(
+            context=context,
+            relation_lookup_ids=relation_lookup_ids,
+            source_lookup=source_lookup,
+        )
+        relation_groups: dict[str, dict[str, Any]] = {}
+        for component in self._relation_entry_components(relation_entries):
+            relation_line_items = self._component_line_items(component)
+            if len(relation_line_items) < 2:
+                continue
+            source_members = [invoice for invoice in relation_line_items if invoice.id in source_invoice_ids]
+            if not source_members:
+                continue
+            group_key = self._relation_component_group_key(component)
+            if not group_key:
+                continue
+            sorted_source_members = sorted(source_members, key=lambda item: str(item.id))
+            relation_groups[group_key] = {
+                "row_key": f"relation:{group_key}",
+                "identity_key": self._identity_key(sorted_source_members[0]),
+                "primary": sorted_source_members[0],
+                "line_items": sorted(relation_line_items, key=lambda item: str(item.id)),
+                "relation_group_id": group_key,
+            }
+        return relation_groups
+
+    def _confirmed_relation_group_entries(
+        self,
+        *,
+        context: DistributedInvoiceRelationContext,
+        relation_lookup_ids: list[str],
+        source_lookup: dict[str, Invoice],
+    ) -> list[dict[str, Any]]:
+        all_lookup: dict[str, Invoice] | None = None
+        relation_entries: list[dict[str, Any]] = []
+        for relation in context.distributed_relations_for_row_ids(relation_lookup_ids):
+            if not self._relation_is_confirmed(relation):
+                continue
+            relation_line_items = self._relation_input_invoices(relation, source_lookup)
+            if self._relation_has_unloaded_input_invoice(relation, source_lookup):
+                if all_lookup is None:
+                    all_lookup = self._invoice_lookup_by_relation_row_id(
+                        context.list_invoices(month="all", invoice_type=InvoiceType.INPUT)
+                    )
+                relation_line_items = self._relation_input_invoices(relation, all_lookup)
+            if not relation_line_items:
+                continue
+            group_key = self._relation_group_key(relation)
+            if not group_key:
+                continue
+            row_ids = {
+                row_id
+                for row_id, _row_type in self._typed_relation_rows(relation)
+                if str(row_id or "").strip()
+            }
+            component_keys = {
+                *row_ids,
+                *(f"invoice:{invoice.id}" for invoice in relation_line_items if str(invoice.id or "").strip()),
+            }
+            relation_entries.append(
+                {
+                    "group_key": group_key,
+                    "line_items": relation_line_items,
+                    "component_keys": component_keys,
+                }
+            )
+        return relation_entries
+
+    @staticmethod
+    def _relation_entry_components(relation_entries: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        remaining = list(relation_entries)
+        components: list[list[dict[str, Any]]] = []
+        while remaining:
+            component = [remaining.pop(0)]
+            component_keys = set(component[0].get("component_keys") or set())
+            changed = True
+            while changed:
+                changed = False
+                for entry in list(remaining):
+                    entry_keys = set(entry.get("component_keys") or set())
+                    if not component_keys.intersection(entry_keys):
+                        continue
+                    remaining.remove(entry)
+                    component.append(entry)
+                    component_keys.update(entry_keys)
+                    changed = True
+            components.append(component)
+        return components
+
+    @staticmethod
+    def _component_line_items(component: list[dict[str, Any]]) -> list[Invoice]:
+        invoices: dict[str, Invoice] = {}
+        for entry in component:
+            for invoice in list(entry.get("line_items") or []):
+                if isinstance(invoice, Invoice):
+                    invoices.setdefault(str(invoice.id), invoice)
+        return list(invoices.values())
+
+    @staticmethod
+    def _relation_component_group_key(component: list[dict[str, Any]]) -> str:
+        group_keys = sorted(
+            {
+                str(entry.get("group_key") or "").strip()
+                for entry in component
+                if str(entry.get("group_key") or "").strip()
+            }
+        )
+        if not group_keys:
+            return ""
+        if len(group_keys) == 1:
+            return group_keys[0]
+        return "component:" + sha1("|".join(group_keys).encode("utf-8")).hexdigest()[:16]
 
     def _invoice_group_for_invoice_id(
         self,
@@ -857,7 +957,10 @@ class InputInvoiceUsageQueryService:
         for relation in relations:
             if not self._relation_is_confirmed(relation):
                 continue
-            if not self._relation_amount_check_is_matched(relation):
+            if (
+                not self._relation_amount_check_is_matched(relation)
+                and not self._relation_is_oa_invoice_offset_auto_match(relation)
+            ):
                 continue
             oa_ids = [row_id for row_id, row_type in self._typed_relation_rows(relation) if row_type == "oa"]
             oa_records = context.oa_records_by_id(oa_ids)
@@ -1181,7 +1284,14 @@ class InputInvoiceUsageQueryService:
     @staticmethod
     def _relation_amount_check_is_matched(relation: dict[str, Any]) -> bool:
         amount_check = relation.get("amount_check")
-        return isinstance(amount_check, dict) and amount_check.get("matched") is True
+        return isinstance(amount_check, dict) and (
+            amount_check.get("matched") is True
+            or str(amount_check.get("status") or "").strip() == "matched"
+        )
+
+    @staticmethod
+    def _relation_is_oa_invoice_offset_auto_match(relation: dict[str, Any]) -> bool:
+        return str(relation.get("relation_mode") or "").strip() == "oa_invoice_offset_auto_match"
 
     def _relation_for_row_id(self, relations: list[dict[str, Any]], row_id: str) -> dict[str, Any] | None:
         for relation in relations:

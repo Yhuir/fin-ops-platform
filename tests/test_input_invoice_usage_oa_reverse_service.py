@@ -73,17 +73,6 @@ class RecordingRelationCommandService:
         return {"status": "confirmed", "relation": {"case_id": kwargs.get("case_id")}}
 
 
-class ExplodingInputInvoiceUsageQueryService:
-    def list_rows(self, **_kwargs: object) -> dict[str, object]:
-        raise AssertionError("OA reverse preview should use the SQL read model loader")
-
-    def _query_context(self, **_kwargs: object) -> object:
-        raise AssertionError("OA reverse preview should not build live query context")
-
-    def _build_rows(self, **_kwargs: object) -> list[dict[str, object]]:
-        raise AssertionError("OA reverse preview should not build live rows")
-
-
 class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
     def test_workbench_relation_writer_delegates_to_relation_command_service(self) -> None:
         command_service = RecordingRelationCommandService()
@@ -215,49 +204,18 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
     def test_preview_marks_oa_candidate_relations_without_treating_them_as_unlinked(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         invoice = self._invoice("inv-candidate-oa", "9501", vendor, total_with_tax="109.00")
-        oa_projection = StaticOAProjection([self._oa("oa-candidate-existing", "胡蓉", "109.00")])
-        relation_facade = FakeWorkbenchRelationFacade(
-            [
-                {
-                    "row_id": invoice.id,
-                    "row_type": "input_invoice",
-                    "relation_status": "candidate",
-                    "group_ids": ["decision-open-oa-candidate"],
-                    "linked_oa": [],
-                    "linked_bank_transactions": [],
-                    "linked_input_invoices": [],
-                    "linked_output_invoices": [],
-                }
-            ],
-            groups=[
-                {
-                    "group_id": "decision-open-oa-candidate",
-                    "scope_month": "2026-05",
-                    "relation_source": "automatic_decision",
-                    "relation_status": "candidate",
-                    "oa_row_ids": ["oa-candidate-existing"],
-                    "bank_transaction_ids": [],
-                    "input_invoice_ids": [invoice.id],
-                    "output_invoice_ids": [],
-                    "payload": {
-                        "group_id": "decision-open-oa-candidate",
-                        "row_ids": ["oa-candidate-existing", invoice.id],
-                        "row_types": ["oa", "invoice"],
-                        "relation_mode": "automatic_decision",
-                        "relation_status": "candidate",
-                        "amount_check": {"matched": True},
-                    },
-                }
-            ],
-        )
+        read_model_row = self._read_model_row(invoice.id, invoice.invoice_no)
+        read_model_row["oa"] = {
+            "relationCount": 1,
+            "summaries": [{"id": "oa-candidate-existing", "relationStatus": "candidate"}],
+        }
         service = InputInvoiceUsageOaReverseService(
-            query_service=InputInvoiceUsageQueryService(
-                payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
-                import_service=ImportNormalizationService(existing_invoices=[invoice]),
-                relation_facade=relation_facade,
-                oa_projection=oa_projection,
-            ),
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
+            read_model_rows_by_invoice_ids_loader=lambda _invoice_ids: {
+                "rows": [read_model_row],
+                "missing_invoice_ids": [],
+                "read_model_status": "fresh",
+            },
         )
 
         preview = service.preview(
@@ -280,7 +238,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
     def test_preview_current_filters_uses_read_model_loader_without_live_query(self) -> None:
         calls: list[dict[str, list[object]]] = []
         service = InputInvoiceUsageOaReverseService(
-            query_service=ExplodingInputInvoiceUsageQueryService(),
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
             read_model_rows_loader=lambda query: (
                 calls.append(dict(query))
@@ -309,7 +266,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
     def test_preview_explicit_selection_uses_invoice_id_read_model_lookup(self) -> None:
         calls: list[list[str]] = []
         service = InputInvoiceUsageOaReverseService(
-            query_service=ExplodingInputInvoiceUsageQueryService(),
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
             read_model_rows_by_invoice_ids_loader=lambda invoice_ids: (
                 calls.append(list(invoice_ids))
@@ -340,7 +296,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
 
     def test_preview_read_model_refreshing_returns_business_error_without_live_fallback(self) -> None:
         service = InputInvoiceUsageOaReverseService(
-            query_service=ExplodingInputInvoiceUsageQueryService(),
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
             read_model_rows_loader=lambda _query: {
                 "rows": [],
@@ -858,13 +813,45 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             oa_projection=oa_projection,
         )
         return InputInvoiceUsageOaReverseService(
-            query_service=query_service,
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
             oa_client=oa_client,
             evidence_provider=evidence_provider,
             relation_writer=relation_writer,
             read_model_invalidator=read_model_invalidator,
+            read_model_rows_loader=lambda query: query_service.list_rows(
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [200])[0],
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                month=query.get("month", [None])[0],
+                filters=query.get("filters", [None])[0],
+                sort_field=query.get("sort_field", ["invoice_date"])[0],
+                sort_direction=query.get("sort_direction", ["desc"])[0],
+            ),
+            read_model_rows_by_invoice_ids_loader=lambda invoice_ids: InputInvoiceUsageOaReverseServiceTests._rows_by_invoice_ids_payload(
+                query_service,
+                invoice_ids,
+            ),
         )
+
+    @staticmethod
+    def _rows_by_invoice_ids_payload(
+        query_service: InputInvoiceUsageQueryService,
+        invoice_ids: list[str],
+    ) -> dict[str, object]:
+        payload = query_service.list_rows(page=1, page_size=200)
+        rows = [
+            row
+            for row in list(payload.get("rows") or [])
+            if isinstance(row, dict) and str(row.get("invoiceId") or "") in set(invoice_ids)
+        ]
+        known = {str(row.get("invoiceId") or "") for row in rows}
+        return {
+            "rows": rows,
+            "missing_invoice_ids": [invoice_id for invoice_id in invoice_ids if invoice_id not in known],
+            "read_model_status": "fresh",
+        }
 
 
 if __name__ == "__main__":

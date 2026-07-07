@@ -3727,6 +3727,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Application does not inject WorkbenchRelationCommandService into OA reverse relation writer")
         if "WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_pair_relation_service)" in factory_source:
             violations.append("Application still injects WorkbenchPairRelationService into OA reverse relation writer")
+        for forbidden in (
+            "query_service:",
+            "query_service=",
+            "self._query_service",
+            "_all_input_invoice_usage_rows",
+        ):
+            if forbidden in service_source or forbidden in factory_source:
+                violations.append(f"OA reverse service keeps removed input usage live query fallback {forbidden}")
 
         self.assertEqual(violations, [])
 
@@ -3873,7 +3881,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "payment_rules_error_response=self._input_invoice_usage_payment_rules_error_response",
             "json_response=self._json_response",
             "input_usage_error_response=self._input_invoice_usage_error_response",
-            "allow_live_fallback=not self._requires_sql_read_model_runtime()",
         ):
             if required not in factory_source:
                 violations.append(f"Application input usage route factory is missing explicit port {required}")
@@ -3891,10 +3898,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "relation_details",
             "export_preview",
             "def export(",
-            "_allow_live_fallback",
         ):
             if required not in route_class:
                 violations.append(f"Input usage route owner is missing route/method marker {required}")
+        for forbidden_fallback in (
+            "allow_live_fallback",
+            "_allow_live_fallback",
+            "self._query_service.list_rows",
+            "self._query_service.filter_options",
+            "self._query_service.row_relation_details",
+        ):
+            if forbidden_fallback in route_class or forbidden_fallback in factory_source:
+                violations.append(f"Input usage route owner keeps removed live fallback {forbidden_fallback}")
         if "_input_invoice_usage_routes().route(method, route_path, query, body, headers)" not in server_source:
             violations.append("Application does not dispatch input usage read routes through route owner")
         for forbidden in (
@@ -3919,6 +3934,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "all_rows_from_sql_read_model=",
             "def _get_input_invoice_usage_all_rows_from_sql_read_model(",
             "def all_rows(",
+            "self._query_service.list_rows(",
         ):
             if forbidden in route_source or forbidden in server_source or forbidden in fresh_gate_source:
                 violations.append(f"Input usage read path keeps removed all-rows filter-options path {forbidden}")

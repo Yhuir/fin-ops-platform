@@ -119,6 +119,23 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
         self.assertEqual(repository.calls, [("list_input_invoice_usage_rows_by_invoice_ids", ["invoice-1"])])
         self.assertEqual(enqueued, [])
 
+    def test_export_page_without_repository_fails_closed_without_live_query(self) -> None:
+        enqueued: list[tuple[str, str]] = []
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=None,
+            query_service=ExplodingQueryServiceStub(),
+            requires_sql_read_model_runtime=lambda: False,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+        )
+
+        payload = service.export_page(month="2026-05")
+
+        assert payload is not None
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(enqueued, [("2026-05", "api_export_read_model_unavailable")])
+
 
 class RowsRepository:
     def __init__(self, payload: dict[str, object]) -> None:
@@ -169,6 +186,11 @@ class QueryServiceStub:
 
     def list_rows(self, **_: object) -> dict[str, object]:
         return {"rows": [], "pagination": {"page": 1, "pageSize": 50, "total": 0}, "summary": {}}
+
+
+class ExplodingQueryServiceStub(QueryServiceStub):
+    def list_rows(self, **_: object) -> dict[str, object]:
+        raise AssertionError("export page must not use live query fallback")
 
 
 if __name__ == "__main__":

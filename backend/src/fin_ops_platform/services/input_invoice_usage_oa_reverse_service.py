@@ -14,7 +14,6 @@ from uuid import uuid4
 from fin_ops_platform.services.etc_service import EtcOAFormFieldMapping
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
-    InputInvoiceUsageQueryService,
     TARGET_APPLICANTS,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -301,7 +300,6 @@ class InputInvoiceUsageOaReverseService:
     def __init__(
         self,
         *,
-        query_service: InputInvoiceUsageQueryService,
         repository: InputInvoiceUsageOaReverseBatchRepository,
         oa_client: InputInvoiceUsageOaDraftClient | None = None,
         evidence_provider: InputInvoiceUsageOaEvidenceProvider | None = None,
@@ -311,7 +309,6 @@ class InputInvoiceUsageOaReverseService:
         read_model_rows_loader: Callable[[dict[str, list[Any]]], dict[str, object] | None] | None = None,
         read_model_rows_by_invoice_ids_loader: Callable[[list[str]], dict[str, object] | None] | None = None,
     ) -> None:
-        self._query_service = query_service
         self._repository = repository
         self._oa_client = oa_client or NotConfiguredInputInvoiceUsageOaDraftClient()
         self._evidence_provider = evidence_provider
@@ -792,32 +789,39 @@ class InputInvoiceUsageOaReverseService:
     def _rows_for_preview_payload(self, payload: dict[str, Any]) -> tuple[list[dict[str, object]], list[str]]:
         invoice_ids = _text_list(payload.get("invoiceIds"))
         if invoice_ids:
-            read_model_payload = self._read_model_rows_by_invoice_ids_loader(invoice_ids) if self._read_model_rows_by_invoice_ids_loader else None
-            read_model_rows = self._rows_from_read_model_payload(read_model_payload)
-            if read_model_rows is not None:
-                known = {str(row.get("invoiceId") or "") for row in read_model_rows}
-                missing_ids = _text_list(read_model_payload.get("missing_invoice_ids")) if isinstance(read_model_payload, dict) else []
-                if not missing_ids:
-                    missing_ids = [invoice_id for invoice_id in invoice_ids if invoice_id not in known]
-                return read_model_rows, missing_ids
-            wanted = set(invoice_ids)
-            rows = [row for row in self._all_input_invoice_usage_rows() if str(row.get("invoiceId") or "") in wanted]
-            known = {str(row.get("invoiceId") or "") for row in rows}
-            return rows, [invoice_id for invoice_id in invoice_ids if invoice_id not in known]
-        read_model_payload = self._read_model_rows_loader(_preview_query_from_payload(payload)) if self._read_model_rows_loader else None
-        read_model_rows = self._rows_from_read_model_payload(read_model_payload)
-        if read_model_rows is not None:
-            return read_model_rows, []
-        list_payload = self._query_service.list_rows(
-            page=1,
-            page_size=200,
-            filters=payload.get("filters"),
-            keyword=payload.get("keyword"),
-            invoice_date_from=payload.get("invoiceDateFrom"),
-            invoice_date_to=payload.get("invoiceDateTo"),
-            month=payload.get("month"),
+            read_model_payload = (
+                self._read_model_rows_by_invoice_ids_loader(invoice_ids)
+                if self._read_model_rows_by_invoice_ids_loader
+                else None
+            )
+            read_model_rows = self._required_rows_from_read_model_payload(read_model_payload)
+            known = {str(row.get("invoiceId") or "") for row in read_model_rows}
+            missing_ids = _text_list(read_model_payload.get("missing_invoice_ids")) if isinstance(read_model_payload, dict) else []
+            if not missing_ids:
+                missing_ids = [invoice_id for invoice_id in invoice_ids if invoice_id not in known]
+            return read_model_rows, missing_ids
+        read_model_payload = (
+            self._read_model_rows_loader(_preview_query_from_payload(payload))
+            if self._read_model_rows_loader
+            else None
         )
-        return [row for row in list(list_payload.get("rows") or []) if isinstance(row, dict)], []
+        return self._required_rows_from_read_model_payload(read_model_payload), []
+
+    @classmethod
+    def _required_rows_from_read_model_payload(cls, payload: dict[str, object] | None) -> list[dict[str, object]]:
+        rows = cls._rows_from_read_model_payload(payload)
+        if rows is not None:
+            return rows
+        raise InputInvoiceUsageError(
+            "input_invoice_usage_oa_reverse_preview_refreshing",
+            "进项发票使用情况读模型正在刷新，请稍后重试。",
+            status_code=HTTPStatus.CONFLICT,
+            details={
+                "read_model_status": "missing",
+                "read_model_scope_key": None,
+                "read_model_stale_reasons": ["input_invoice_usage_read_model_unavailable"],
+            },
+        )
 
     @staticmethod
     def _rows_from_read_model_payload(payload: dict[str, object] | None) -> list[dict[str, object]] | None:
@@ -835,14 +839,6 @@ class InputInvoiceUsageOaReverseService:
                     "read_model_stale_reasons": payload.get("read_model_stale_reasons"),
                 },
             )
-        return [row for row in list(payload.get("rows") or []) if isinstance(row, dict)]
-
-    def _all_input_invoice_usage_rows(self) -> list[dict[str, object]]:
-        query_context = getattr(self._query_service, "_query_context", None)
-        build_rows = getattr(self._query_service, "_build_rows", None)
-        if callable(query_context) and callable(build_rows):
-            return [row for row in build_rows(month=None, context=query_context()) if isinstance(row, dict)]
-        payload = self._query_service.list_rows(page=1, page_size=200)
         return [row for row in list(payload.get("rows") or []) if isinstance(row, dict)]
 
     @staticmethod

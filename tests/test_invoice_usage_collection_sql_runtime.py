@@ -2338,6 +2338,55 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(row["oa"]["relationCount"], 1)
         self.assertEqual(row["bankTransactions"]["relationCount"], 1)
 
+    def test_input_projection_collapses_shared_oa_relation_component_to_one_row(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        first = self._invoice("inv-zhou-600", InvoiceType.INPUT, total="600.00")
+        first.invoice_no = "26532000000021026521"
+        second = self._invoice("inv-zhou-200", InvoiceType.INPUT, total="200.00")
+        second.invoice_no = "15312761"
+        relation_facade = FreshStaticWorkbenchRelationFacade(
+            [
+                {
+                    "case_id": "case-zhou-600",
+                    "row_ids": [first.id, "oa-zhou"],
+                    "row_types": ["invoice", "oa"],
+                    "amount_check": {"status": "matched"},
+                },
+                {
+                    "case_id": "case-zhou-200",
+                    "row_ids": [second.id, "oa-zhou"],
+                    "row_types": ["invoice", "oa"],
+                    "amount_check": {"status": "matched"},
+                },
+            ]
+        )
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=relation_facade,
+        )
+        builder._core_repository = ProjectionCoreRepository(invoices=[first, second])
+        builder._workbench_repository = EmptyWorkbenchRepository()
+        builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
+        builder._input_invoice_usage_read_model_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
+        builder._oa_projection_repository = StaticOAProjectionRepository(
+            [self._oa("oa-zhou", "周洁莹", "800.00")]
+        )
+
+        result = builder.rebuild_input_invoice_usage_read_model_scope("2026-05")
+
+        self.assertEqual(result["row_count"], 1)
+        self.assertIsNotNone(read_repository.saved_input)
+        rows = read_repository.saved_input["rows"]
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
+        self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
+        self.assertEqual(row["oa"]["relationCount"], 1)
+        self.assertEqual(row["oa"]["amount"], "800.00")
+        self.assertEqual(row["paymentStatus"]["label"], "冲")
+
     def test_projection_builder_persists_grouped_oa_pending_payment_relation_as_one_row(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
         bank = self._bank("bank-grouped-projection", "4450.00")

@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：进项发票使用情况通过 `input_invoice_usage` read model 查询；filter-options 和 OA reverse preview 通过 read model repository 窄端口读取；OA 反提本地 batch 状态与真正影响 rows 的 relation/evidence 写入分离。
 - 当前缺口：OA reverse、applicant credentials 和 workbench relation 依赖交织，变更时必须同步权限和 freshness。
-- 旧代码删除条件：旧 service 直读路径不再被 API 调用，fresh gate tests 覆盖。
+- 旧代码删除条件：API route、export 和 OA reverse preview 不保留 live fallback；缺失 read model 时只返回 refreshing/业务错误并入队刷新，fresh gate 和 architecture guard tests 覆盖旧符号不得回归。
 
 ## 职责边界
 
@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | 页面查询/明细 | `InputInvoiceUsagePage.tsx`、`features/inputInvoiceUsage/api.ts` | 进入 read model service/fresh gate |
 | Filter options | `InputInvoiceUsageReadModelFreshGateService.filter_options(...)` | 生产路径调用 `InputInvoiceUsageReadModelRepositoryPort.list_input_invoice_usage_filter_options(...)`，由 PostgreSQL 结构化列聚合 enum options；禁止为 options 拉齐全部 row payload |
-| OA reverse preview 读路径 | `InputInvoiceUsageOaReverseService.preview(...)` | 当前筛选走 `InputInvoiceUsageReadModelFreshGateService.rows(...)`；显式发票选择走 `rows_by_invoice_ids(...)` 和 repository `list_input_invoice_usage_rows_by_invoice_ids(...)`；非 fresh 时返回 refreshing 业务错误并入队刷新，生产路径不得回退 live scan |
+| OA reverse preview 读路径 | `InputInvoiceUsageOaReverseService.preview(...)` | 当前筛选走 `InputInvoiceUsageReadModelFreshGateService.rows(...)`；显式发票选择走 `rows_by_invoice_ids(...)` 和 repository `list_input_invoice_usage_rows_by_invoice_ids(...)`；非 fresh 或 repository 缺失时返回 refreshing 业务错误并入队刷新，不得接收 `InputInvoiceUsageQueryService` 或回退 live scan |
 | OA reverse 写操作 | `input_invoice_usage_oa_reverse_service.py` | 必须带 OA applicant context 和审计 |
 | OA reverse target envelope | `InputInvoiceUsageOaReverseService.batch_payload(..., include_write_targets=True)` | 仅用于 evidence detected / relation-impacting 写入；从 batch invoice display rows 提取 invoice month；无月份时退回 `all`，并返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | Refresh scope | `input_invoice_usage` manifest | month or `all`；`all` 是 fan-out command |

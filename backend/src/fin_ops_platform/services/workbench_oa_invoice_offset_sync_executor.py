@@ -59,6 +59,13 @@ class WorkbenchOaInvoiceOffsetSyncExecutor:
                 relation_mode=self._relation_mode,
                 actor_id=self._actor_id,
                 month_scope=str(desired_relation["month_scope"]),
+                amount_check=(
+                    dict(desired_relation["amount_check"])
+                    if isinstance(desired_relation.get("amount_check"), dict)
+                    else None
+                ),
+                before_relations=[existing_relation] if isinstance(existing_relation, dict) else None,
+                replace_existing=isinstance(existing_relation, dict),
                 history_operation_type=self._confirm_history_operation_type,
             )
             self._collect_changed_case_ids(changed_case_ids, command_result, fallback_case_id=case_id)
@@ -98,7 +105,19 @@ class WorkbenchOaInvoiceOffsetSyncExecutor:
             and str(existing_relation.get("relation_mode")) == self._relation_mode
             and str(existing_relation.get("month_scope")) == str(desired_relation["month_scope"])
             and str(existing_relation.get("status")) == "active"
+            and self._amount_check_already_matches(existing_relation, desired_relation)
         )
+
+    @staticmethod
+    def _amount_check_already_matches(
+        existing_relation: dict[str, Any],
+        desired_relation: dict[str, object],
+    ) -> bool:
+        desired_amount_check = desired_relation.get("amount_check")
+        if not isinstance(desired_amount_check, dict) or not desired_amount_check:
+            return True
+        existing_amount_check = existing_relation.get("amount_check")
+        return isinstance(existing_amount_check, dict) and existing_amount_check == desired_amount_check
 
     @staticmethod
     def _collect_changed_case_ids(

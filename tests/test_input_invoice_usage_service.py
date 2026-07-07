@@ -475,6 +475,123 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["oa"]["amount"], "800.00")
         self.assertEqual(row["paymentStatus"]["code"], "offset_zhou_jieying")
 
+    def test_confirmed_relation_component_with_shared_oa_collapses_to_one_payment_row(self) -> None:
+        vendor = self._counterparty("vendor", "云南城建物业运营集团")
+        first = self._invoice("inv-zhou-1", "26532000000021026521", vendor, total_with_tax="600.00")
+        second = self._invoice("inv-zhou-2", "15312761", vendor, total_with_tax="200.00")
+        oa_records = [self._oa("oa-zhou", "周洁莹", "800.00", project_name="云南溯源科技")]
+        relation_facade = FakeWorkbenchRelationFacade(
+            [
+                {"row_id": first.id, "row_type": "input_invoice", "relation_status": "linked", "group_ids": ["case-zhou-600"]},
+                {"row_id": second.id, "row_type": "input_invoice", "relation_status": "linked", "group_ids": ["case-zhou-200"]},
+            ],
+            groups=[
+                {
+                    "group_id": "case-zhou-600",
+                    "scope_month": "2026-05",
+                    "relation_status": "linked",
+                    "oa_row_ids": ["oa-zhou"],
+                    "bank_transaction_ids": [],
+                    "input_invoice_ids": [first.id],
+                    "output_invoice_ids": [],
+                    "payload": {
+                        "case_id": "case-zhou-600",
+                        "row_ids": [first.id, "oa-zhou"],
+                        "row_types": ["invoice", "oa"],
+                        "relation_mode": "manual_confirmed",
+                        "relation_status": "linked",
+                        "amount_check": {"status": "matched"},
+                    },
+                },
+                {
+                    "group_id": "case-zhou-200",
+                    "scope_month": "2026-05",
+                    "relation_status": "linked",
+                    "oa_row_ids": ["oa-zhou"],
+                    "bank_transaction_ids": [],
+                    "input_invoice_ids": [second.id],
+                    "output_invoice_ids": [],
+                    "payload": {
+                        "case_id": "case-zhou-200",
+                        "row_ids": [second.id, "oa-zhou"],
+                        "row_types": ["invoice", "oa"],
+                        "relation_mode": "manual_confirmed",
+                        "relation_status": "linked",
+                        "amount_check": {"status": "matched"},
+                    },
+                },
+            ],
+        )
+        service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
+            import_service=ImportNormalizationService(existing_invoices=[first, second]),
+            relation_facade=relation_facade,
+            oa_projection=StaticOAProjection(oa_records),
+        )
+
+        payload = service.list_rows(page_size=20)
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
+        self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
+        self.assertEqual(row["oa"]["relationCount"], 1)
+        self.assertEqual(row["oa"]["amount"], "800.00")
+        self.assertEqual(row["paymentStatus"]["label"], "冲")
+        self.assertEqual(row["paymentStatus"]["code"], "offset_zhou_jieying")
+
+    def test_payment_status_accepts_status_matched_amount_check_for_oa_invoice_offset(self) -> None:
+        vendor = self._counterparty("vendor", "云南城建物业运营集团")
+        first = self._invoice("inv-zhou-1", "26532000000021026521", vendor, total_with_tax="600.00")
+        second = self._invoice("inv-zhou-2", "15312761", vendor, total_with_tax="200.00")
+        oa_records = [self._oa("oa-zhou", "周洁莹", "800.00", project_name="云南溯源科技")]
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-zhou-group",
+            row_ids=[first.id, second.id, "oa-zhou"],
+            row_types=["invoice", "invoice", "oa"],
+            relation_mode="oa_invoice_offset_auto_match",
+            created_by="system_auto_match",
+            amount_check={"status": "matched", "invoice_total": "800.00", "oa_total": "800.00"},
+        )
+        service = self._service(
+            invoices=[first, second],
+            pair_service=pair_service,
+            oa_projection=StaticOAProjection(oa_records),
+        )
+
+        row = service.list_rows(page_size=20)["rows"][0]
+
+        self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
+        self.assertEqual(row["paymentStatus"]["code"], "offset_zhou_jieying")
+        self.assertEqual(row["paymentStatus"]["label"], "冲")
+
+    def test_payment_status_accepts_legacy_offset_relation_without_amount_check_when_totals_match(self) -> None:
+        vendor = self._counterparty("vendor", "云南城建物业运营集团")
+        first = self._invoice("inv-zhou-1", "26532000000021026521", vendor, total_with_tax="600.00")
+        second = self._invoice("inv-zhou-2", "15312761", vendor, total_with_tax="200.00")
+        oa_records = [self._oa("oa-zhou", "周洁莹", "800.00", project_name="云南溯源科技")]
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-zhou-legacy-offset",
+            row_ids=[first.id, second.id, "oa-zhou"],
+            row_types=["invoice", "invoice", "oa"],
+            relation_mode="oa_invoice_offset_auto_match",
+            created_by="system_auto_match",
+            amount_check={},
+        )
+        service = self._service(
+            invoices=[first, second],
+            pair_service=pair_service,
+            oa_projection=StaticOAProjection(oa_records),
+        )
+
+        row = service.list_rows(page_size=20)["rows"][0]
+
+        self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
+        self.assertEqual(row["paymentStatus"]["code"], "offset_zhou_jieying")
+        self.assertEqual(row["paymentStatus"]["label"], "冲")
+
     def test_one_to_many_oa_and_bank_relations_include_deterministic_primary_and_all_summaries(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         invoice = self._invoice("inv-many", "9201", vendor, total_with_tax="100.00")

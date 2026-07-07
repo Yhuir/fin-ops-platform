@@ -30,7 +30,6 @@ class InvoiceUsageReadLiveFallbackGuardTests(unittest.TestCase):
             payment_rules_error_response=lambda exc: exc,
             json_response=lambda status, payload: (status, payload),
             input_usage_error_response=lambda exc: exc,
-            allow_live_fallback=False,
         )
 
         rows_status, rows_payload = routes.rows({"month": ["2026-05"]})

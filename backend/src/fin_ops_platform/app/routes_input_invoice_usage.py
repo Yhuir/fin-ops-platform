@@ -41,7 +41,6 @@ class InputInvoiceUsageApiRoutes:
         payment_rules_error_response: Callable[[AppSettingsValidationError], Any],
         json_response: Callable[[HTTPStatus, object], Any],
         input_usage_error_response: Callable[[InputInvoiceUsageError], Any],
-        allow_live_fallback: bool = True,
     ) -> None:
         self._query_service = query_service
         self._rows_from_sql_read_model = rows_from_sql_read_model
@@ -59,7 +58,6 @@ class InputInvoiceUsageApiRoutes:
         self._payment_rules_error_response = payment_rules_error_response
         self._json_response = json_response
         self._input_usage_error_response = input_usage_error_response
-        self._allow_live_fallback = bool(allow_live_fallback)
 
     def route(
         self,
@@ -101,25 +99,12 @@ class InputInvoiceUsageApiRoutes:
             if sql_payload is not None:
                 status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
                 return self._json_response(status_code, sql_payload)
-            if not self._allow_live_fallback:
-                payload = InputInvoiceUsageReadModelFreshGateService.refreshing_payload(
-                    scope_key=InputInvoiceUsageReadModelFreshGateService.scope_key_from_query(query),
-                )
-                return self._json_response(HTTPStatus.ACCEPTED, payload)
-            payload = self._query_service.list_rows(
-                page=query.get("page", [1])[0],
-                page_size=query.get("page_size", [50])[0],
-                keyword=query.get("keyword", [None])[0],
-                invoice_date_from=query.get("invoice_date_from", [None])[0],
-                invoice_date_to=query.get("invoice_date_to", [None])[0],
-                month=query.get("month", [None])[0],
-                filters=query.get("filters", [None])[0],
-                sort_field=query.get("sort_field", ["invoice_date"])[0],
-                sort_direction=query.get("sort_direction", ["desc"])[0],
+            payload = InputInvoiceUsageReadModelFreshGateService.refreshing_payload(
+                scope_key=InputInvoiceUsageReadModelFreshGateService.scope_key_from_query(query),
             )
+            return self._json_response(HTTPStatus.ACCEPTED, payload)
         except InputInvoiceUsageError as exc:
             return self._input_usage_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
 
     def filter_options(self, query: dict[str, list[str]]) -> Any:
         try:
@@ -129,22 +114,14 @@ class InputInvoiceUsageApiRoutes:
             if isinstance(payload, dict):
                 if payload.get("read_model_status") == "refreshing":
                     return self._json_response(HTTPStatus.ACCEPTED, payload)
+                return self._json_response(HTTPStatus.OK, payload)
             else:
-                if not self._allow_live_fallback:
-                    payload = InputInvoiceUsageReadModelFreshGateService.refreshing_payload(
-                        scope_key=InputInvoiceUsageReadModelFreshGateService.scope_key_from_query(query),
-                    )
-                    return self._json_response(HTTPStatus.ACCEPTED, payload)
-                payload = self._query_service.filter_options(
-                    keyword=query.get("keyword", [None])[0],
-                    invoice_date_from=query.get("invoice_date_from", [None])[0],
-                    invoice_date_to=query.get("invoice_date_to", [None])[0],
-                    month=query.get("month", [None])[0],
-                    filters=query.get("filters", [None])[0],
+                payload = InputInvoiceUsageReadModelFreshGateService.refreshing_payload(
+                    scope_key=InputInvoiceUsageReadModelFreshGateService.scope_key_from_query(query),
                 )
+                return self._json_response(HTTPStatus.ACCEPTED, payload)
         except InputInvoiceUsageError as exc:
             return self._input_usage_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
 
     def invoice_detail(self, invoice_id: str) -> Any:
         try:
@@ -173,16 +150,11 @@ class InputInvoiceUsageApiRoutes:
             if sql_payload is not None:
                 status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
                 return self._json_response(status_code, sql_payload)
-            if not self._allow_live_fallback:
-                payload = InputInvoiceUsageReadModelDetailService.refreshing_payload(
-                    kind=query.get("kind", [""])[0],
-                    scope_key="all",
-                )
-                return self._json_response(HTTPStatus.ACCEPTED, payload)
-            payload = self._query_service.row_relation_details(
-                row_id,
+            payload = InputInvoiceUsageReadModelDetailService.refreshing_payload(
                 kind=query.get("kind", [""])[0],
+                scope_key="all",
             )
+            return self._json_response(HTTPStatus.ACCEPTED, payload)
         except InputInvoiceUsageError as exc:
             return self._input_usage_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)

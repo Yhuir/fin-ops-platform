@@ -33,17 +33,9 @@ class InputInvoiceUsageReadModelFreshGateService:
         sql_payload = self.rows(query)
         if sql_payload is not None:
             return sql_payload
-        return self._query_service.list_rows(
-            page=kwargs.get("page") or 1,
-            page_size=kwargs.get("page_size") or 50,
-            keyword=kwargs.get("keyword"),
-            invoice_date_from=kwargs.get("invoice_date_from"),
-            invoice_date_to=kwargs.get("invoice_date_to"),
-            month=kwargs.get("month"),
-            filters=kwargs.get("filters"),
-            sort_field=kwargs.get("sort_field") or "invoice_date",
-            sort_direction=kwargs.get("sort_direction") or "desc",
-        )
+        scope_key = self.scope_key_from_query(query)
+        self._enqueue_refresh(scope_key, "api_export_read_model_unavailable")
+        return self.refreshing_payload(scope_key=scope_key)
 
     def filter_options(self, query: dict[str, list[str]]) -> dict[str, object] | None:
         list_options = getattr(self._repository, "list_input_invoice_usage_filter_options", None)
@@ -61,6 +53,8 @@ class InputInvoiceUsageReadModelFreshGateService:
                 invoice_date_to=query.get("invoice_date_to", [None])[0],
                 filters=query.get("filters", [None])[0],
             )
+        except InputInvoiceUsageError:
+            raise
         except ValueError as exc:
             raise InputInvoiceUsageError("invalid_input_invoice_usage_query", str(exc)) from exc
         if not isinstance(payload, dict):
@@ -122,6 +116,8 @@ class InputInvoiceUsageReadModelFreshGateService:
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [50])[0],
             )
+        except InputInvoiceUsageError:
+            raise
         except ValueError as exc:
             raise InputInvoiceUsageError("invalid_input_invoice_usage_query", str(exc)) from exc
         if not isinstance(payload, dict):

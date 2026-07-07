@@ -6202,7 +6202,6 @@ class Application:
             payment_rules_error_response=self._input_invoice_usage_payment_rules_error_response,
             json_response=self._json_response,
             input_usage_error_response=self._input_invoice_usage_error_response,
-            allow_live_fallback=not self._requires_sql_read_model_runtime(),
         )
         self._input_invoice_usage_api_routes = routes
         return routes
@@ -6295,7 +6294,6 @@ class Application:
                 repository = InMemoryInputInvoiceUsageOaReverseBatchRepository()
             self._input_invoice_usage_oa_reverse_repository = repository
         service = InputInvoiceUsageOaReverseService(
-            query_service=self._input_invoice_usage_service(),
             repository=repository,
             evidence_provider=OAProjectionInputInvoiceUsageOaEvidenceProvider(
                 getattr(self._input_invoice_usage_service(), "_oa_projection", None)
@@ -12767,6 +12765,7 @@ class Application:
                 attachment_invoice_rows_for_oa=self._oa_attachment_invoice_rows_for_oa,
                 auto_pair_conflicts_with_manual_relation=self._auto_pair_conflicts_with_manual_relation,
                 month_scope_for_relation=self._month_scope_for_oa_invoice_offset_relation,
+                amount_check_for_rows_by_type=self._amount_check_for_rows_by_type,
             )
             self._workbench_oa_invoice_offset_desired_relation_builder_instance = builder
         return builder

@@ -81,6 +81,7 @@ class WorkbenchOaInvoiceOffsetSyncExecutorTests(unittest.TestCase):
                 "row_ids": ["oa-1", "inv-1"],
                 "row_types": ["oa", "invoice"],
                 "month_scope": "2026-03",
+                "amount_check": {"status": "matched", "invoice_total": "600.00", "oa_total": "600.00"},
             }
         }
         executor, command_service, persist_calls, lifecycle_calls = self._executor(desired_relations=desired)
@@ -90,10 +91,50 @@ class WorkbenchOaInvoiceOffsetSyncExecutorTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(command_service.confirm_calls[0]["case_id"], "CASE-OA-OFFSET-oa-1")
         self.assertEqual(command_service.confirm_calls[0]["actor_id"], "system_auto_match")
+        self.assertEqual(
+            command_service.confirm_calls[0]["amount_check"],
+            {"status": "matched", "invoice_total": "600.00", "oa_total": "600.00"},
+        )
         self.assertEqual(command_service.confirm_calls[0]["history_operation_type"], "oa_invoice_offset_auto_pair")
         self.assertEqual(persist_calls, [{"changed_case_ids": ["CASE-OA-OFFSET-oa-1"]}])
         self.assertEqual(lifecycle_calls[0]["event_name"], "pair_relation_changed")
         self.assertEqual(set(lifecycle_calls[0]["scope_keys"]), {"all", "2026-03"})
+
+    def test_sync_updates_existing_relation_when_amount_check_is_missing(self) -> None:
+        desired = {
+            "CASE-OA-OFFSET-oa-1": {
+                "case_id": "CASE-OA-OFFSET-oa-1",
+                "row_ids": ["oa-1", "inv-1"],
+                "row_types": ["oa", "invoice"],
+                "month_scope": "2026-03",
+                "amount_check": {"status": "matched", "invoice_total": "600.00", "oa_total": "600.00"},
+            }
+        }
+        active = [
+            {
+                **desired["CASE-OA-OFFSET-oa-1"],
+                "relation_mode": "oa_invoice_offset_auto_match",
+                "status": "active",
+                "amount_check": {},
+            }
+        ]
+        executor, command_service, persist_calls, lifecycle_calls = self._executor(
+            desired_relations=desired,
+            active_relations=active,
+        )
+
+        changed = executor.sync({})
+
+        self.assertTrue(changed)
+        self.assertEqual(len(command_service.confirm_calls), 1)
+        self.assertEqual(
+            command_service.confirm_calls[0]["amount_check"],
+            {"status": "matched", "invoice_total": "600.00", "oa_total": "600.00"},
+        )
+        self.assertEqual(command_service.confirm_calls[0]["before_relations"], active)
+        self.assertTrue(command_service.confirm_calls[0]["replace_existing"])
+        self.assertEqual(persist_calls, [{"changed_case_ids": ["CASE-OA-OFFSET-oa-1"]}])
+        self.assertEqual(lifecycle_calls[0]["event_name"], "pair_relation_changed")
 
     def test_sync_cancels_stale_active_relation_only_when_current_payload_intersects(self) -> None:
         active = [

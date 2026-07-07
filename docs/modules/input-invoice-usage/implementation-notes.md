@@ -38,11 +38,21 @@
 
 ## 历史记录
 
+## 2026-07-07 - 移除进项使用读路径 live fallback
+
+- 目标：全量识别并移除会污染 `input_invoice_usage` read model 链路的旧读取入口，防止 API、export 或 OA reverse preview 在 read model 缺失时绕回 live rows 构建。
+- 影响范围：`InputInvoiceUsageApiRoutes`、`InputInvoiceUsageReadModelFreshGateService.export_page`、`InputInvoiceUsageOaReverseService.preview`、`Application._input_invoice_usage_routes/_input_invoice_usage_oa_reverse_service`、architecture guard 和测试矩阵；不改变支付状态规则业务语义、relation command 写入或前端 DTO。
+- 关键决策：rows/filter-options/relation-details/export 缺 read model 时只返回 refreshing 并入队刷新；OA reverse preview 缺 read model 时返回 `input_invoice_usage_oa_reverse_preview_refreshing` 业务错误；`InputInvoiceUsageOaReverseService` 不再接收 `InputInvoiceUsageQueryService`，不保留 `_all_input_invoice_usage_rows()`；`InputInvoiceUsageQueryService` 仅保留为 SQL projection/测试装配的业务 rows assembler。
+- 文档影响：更新 `README.md`、`boundary-io.md`、`tests.md` 和本实施记录。
+- 测试覆盖：新增/更新 live fallback guard、fresh gate export fail-closed、OA reverse preview read model loader 和 architecture guard，覆盖旧符号不得回归。
+- 验证命令：见本轮最终回复。
+- 未测风险：本地验证覆盖代码边界和回归测试；真实生产仍需发布后确认 worker 刷新、当前 scope barrier 和页面 rows 是否 fresh。
+
 ## 2026-07-07 - OA reverse preview 使用 SQL read model 热路径
 
 - 目标：把 `以发票反提 OA` drawer 后端预览从约 8 秒的 live rows 构建/全量扫描路径切到有界 SQL read model 读取，降低大数据量下打开 drawer 的耗时。
 - 影响范围：`InputInvoiceUsageOaReverseService.preview`、`InputInvoiceUsageReadModelFreshGateService`、`InputInvoiceUsageReadModelRepositoryPort`、PostgreSQL `read_model.input_invoice_usage_rows` 查询与索引；不改变前端 DTO、OA 状态机、目标申请人凭据或外部 OA 草稿创建合同。
-- 关键决策：当前筛选 preview 复用 rows fresh gate 并限制 `page_size=200`；显式发票选择新增 `invoice_id` 定向 lookup，不再通过 `_all_input_invoice_usage_rows()` 全量加载后 Python 过滤。read model 非 fresh 时返回 `input_invoice_usage_oa_reverse_preview_refreshing` 并入队刷新，生产路径不回退 live scan。
+- 关键决策：当前筛选 preview 复用 rows fresh gate 并限制 `page_size=200`；显式发票选择新增 `invoice_id` 定向 lookup，不再通过 `_all_input_invoice_usage_rows()` 全量加载后 Python 过滤。read model 非 fresh 时返回 `input_invoice_usage_oa_reverse_preview_refreshing` 并入队刷新，不回退 live scan。
 - 文档影响：更新 `README.md`、`boundary-io.md`、`tests.md` 和本实施记录；OA integration 边界不变。
 - 测试覆盖：新增 service 测试覆盖当前筛选不触发 live query、显式选择走 invoice-id lookup、read model refreshing fail-closed；新增 fresh gate/repository/migration 测试覆盖 source-version 校验、native column SQL lookup 和索引声明。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_oa_reverse_service tests.test_input_invoice_usage_read_model_fresh_gate_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime.InputInvoiceUsageReadModelRepositoryPortTests tests.test_invoice_usage_collection_sql_runtime.InvoiceUsageCollectionSqlRuntimeTests.test_input_repository_invoice_id_lookup_uses_native_column tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_expected_migration_files_are_present_and_ordered tests.test_postgres_migrations.PostgresMigrationDiscoveryTests.test_input_invoice_usage_oa_reverse_preview_hot_path_index_is_declared -v`。
@@ -265,7 +275,7 @@
 
 - 目标：修复生产 PostgreSQL runtime 下 `/api/input-invoice-usage/rows/{row_id}/relation-details` 缺 SQL read repository 时可能 fallback 到 live detail rebuild 的缺口。
 - 影响范围：`Application._get_input_invoice_usage_relation_details_from_sql_read_model(...)`、`InputInvoiceUsageReadModelDetailService.refreshing_payload(...)` 和 input usage API 回归测试；不改变 OA reverse、支付规则、前端 UI、worker event 或 read model schema。
-- 关键决策：生产 SQL runtime 下缺少 `get_input_invoice_usage_row_by_row_id(...)` 时返回标准 detail refreshing payload，并通过 gateway-backed wrapper 入队 `input_invoice_usage:all`，reason 为 `api_detail_sql_repository_unavailable`。local/legacy runtime 仍可 fallback。
+- 关键决策：生产 SQL runtime 下缺少 `get_input_invoice_usage_row_by_row_id(...)` 时返回标准 detail refreshing payload，并通过 gateway-backed wrapper 入队 `input_invoice_usage:all`，reason 为 `api_detail_sql_repository_unavailable`。2026-07-07 起 local/legacy route fallback 也已移除，缺 read model 时继续返回 refreshing。
 - 文档影响：同步 read-models 实施记录、测试矩阵和 modular IO autonomous state。
 - 测试覆盖：新增 `tests/test_input_invoice_usage_api.py::InputInvoiceUsageApiTests::test_relation_details_require_sql_repository_in_production_without_live_rebuild`，并复跑 fresh detail、scoped source-version detail 和 rows repository unavailable 回归。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-input-invoice-usage-relation-detail-production-repository-fail-closed.md`。

@@ -14,6 +14,7 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilderTests(unittest.TestCase):
         *,
         applicant_names: list[str] | None = None,
         conflict_row_ids: set[str] | None = None,
+        amount_check: dict[str, object] | None = None,
     ) -> WorkbenchOaInvoiceOffsetDesiredRelationBuilder:
         conflicts = conflict_row_ids or set()
 
@@ -30,12 +31,19 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilderTests(unittest.TestCase):
             months = {str(row.get("month") or "").strip() for row in rows if str(row.get("month") or "").strip()}
             return next(iter(months)) if len(months) == 1 else "all"
 
+        def amount_check_for_rows(rows: dict[str, list[dict[str, object]]]) -> dict[str, object]:
+            return amount_check or {
+                "status": "matched",
+                "row_counts": {key: len(value) for key, value in rows.items()},
+            }
+
         return WorkbenchOaInvoiceOffsetDesiredRelationBuilder(
             applicant_names_provider=lambda: applicant_names if applicant_names is not None else [" 周洁莹 "],
             serialize_value=lambda value: deepcopy(value),
             attachment_invoice_rows_for_oa=attachment_rows,
             auto_pair_conflicts_with_manual_relation=lambda row_ids: bool(set(row_ids).intersection(conflicts)),
             month_scope_for_relation=month_scope,
+            amount_check_for_rows_by_type=amount_check_for_rows,
         )
 
     def test_build_returns_desired_relation_for_configured_applicant_attachment_rows(self) -> None:
@@ -65,6 +73,10 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilderTests(unittest.TestCase):
         self.assertEqual(desired["CASE-OA-OFFSET-oa-1"]["row_ids"], ["oa-1", "inv-1", "inv-2"])
         self.assertEqual(desired["CASE-OA-OFFSET-oa-1"]["row_types"], ["oa", "invoice", "invoice"])
         self.assertEqual(desired["CASE-OA-OFFSET-oa-1"]["month_scope"], "2026-03")
+        self.assertEqual(
+            desired["CASE-OA-OFFSET-oa-1"]["amount_check"],
+            {"status": "matched", "row_counts": {"oa": 1, "bank": 0, "invoice": 2}},
+        )
 
     def test_build_skips_unconfigured_applicant_missing_attachment_and_manual_conflict(self) -> None:
         payload = {
