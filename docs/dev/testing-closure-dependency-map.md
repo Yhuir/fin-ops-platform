@@ -37,7 +37,7 @@
 | `turnover-ledger` | `/turnover-ledger` | `web/src/pages/TurnoverLedgerPage.tsx` | `web/src/features/turnoverLedger/api.ts` | `routes_turnover_ledger.py`、`server.py` `/api/turnover-ledger*` | `turnover_ledger`、`turnover-ledger` | `tests/test_turnover_*`、`web/src/test/TurnoverLedger*.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` |
 | `etc-tickets` | `/etc-tickets` | `web/src/pages/EtcTicketManagementPage.tsx` | `web/src/features/etc/api.ts` | `routes_etc.py`、`server.py` `/api/etc*` | `import` worker、ETC import/business batch state | `tests/test_etc_*`、`web/src/test/Etc*.test.tsx`、`web/e2e/etc-tickets-flow.spec.ts` |
 | `settings` | `/settings` | `web/src/pages/SettingsPage.tsx` | `web/src/features/workbench/api.ts` | `server.py` `/api/workbench/settings*` | `oa-sync`、`settings_refresh`、`oa_identity`、`state_store` | `tests/test_app_settings_service.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/SettingsPage.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` |
-| `app-health-operations` | `/operations/app-health` | `web/src/pages/AppHealthOperationsPage.tsx` | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard` | App Status domains、runtime workers、queue、readiness | `tests/test_app_health_*`、`tests/test_app_status_*`、`web/src/test/AppHealth*.test.tsx` |
+| `app-health-operations` | `/operations/app-health` | `web/src/pages/AppHealthOperationsPage.tsx` | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/input-invoice-usage-audit` | App Status domains、runtime workers、queue、readiness、进项使用三边审计 | `tests/test_app_health_*`、`tests/test_app_status_*`、`tests/test_audit_input_invoice_usage_read_model_tool.py`、`web/src/test/AppHealth*.test.tsx` |
 | `imports-bank-transactions` | `/imports/bank-transactions` | `web/src/pages/imports/ImportBankTransactionsPage.tsx` | `web/src/features/imports/api.ts` | `server.py` import endpoints | `import` worker、`bank_transaction_import`、`import.process.requested` | `tests/test_import_*`、`web/src/test/ImportsApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` |
 | `imports-invoices` | `/imports/invoices` | `web/src/pages/imports/ImportInvoicesPage.tsx` | `web/src/features/imports/api.ts` | `server.py` import endpoints | `import` worker、`invoice_import`、`import.process.requested` | `tests/test_import_*`、`web/src/test/ImportsApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` |
 | `imports-etc-invoices` | `/imports/etc-invoices` | `web/src/pages/imports/ImportEtcInvoicesPage.tsx` | `web/src/features/imports/api.ts`、`web/src/features/etc/api.ts` | `server.py` `/api/etc/import*` | `import` worker、`etc_invoice_import` | `tests/test_etc_backend.py`、`tests/test_import_*`、`web/src/test/EtcApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-etc-invoices-flow.spec.ts` |
@@ -417,7 +417,7 @@
 | Frontend operations page | `web/src/pages/AppHealthOperationsPage.tsx` | admin-only、只读 dashboard、unknown 不等于 0、refresh failure 后保留旧 payload 并提示 stale |
 | Frontend global status | `web/src/components/shell/AppStatusIndicator.tsx`、`AppHealthStatusContext` | 状态必须来自全局 `app_status`；路由切换不改变 icon；admin 才显示运维入口 |
 | Frontend API mappers | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | malformed payload 不得默认 green；SSE/轮询/BroadcastChannel 只传播后端 snapshot |
-| HTTP routes | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard` | auth guard、SSE contract、dashboard cache、admin-only、`app_status` response shape |
+| HTTP routes | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/input-invoice-usage-audit` | auth guard、SSE contract、dashboard cache、admin-only、`app_status` response shape、进项使用审计只读 report shape |
 | Overview service | `AppStatusOverviewService` | green/yellow/red 优先级、readiness missing、critical failed/unavailable、worker/dependency/job/domain 映射 |
 | Runtime repository | `RuntimeMonitoringRepository` | dirty scopes/outbox/workers/readiness/RabbitMQ/API metrics 聚合；runtime unavailable 不能空 green |
 | Registries | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py`、`runtime_worker_registry.py` | 新页面/read model/worker/job/dependency 漏同步会让全局状态误判 |
@@ -439,7 +439,7 @@
 
 关键回归保护：
 
-- `tests/test_app_health_api.py` 保护 `/api/app-health`、SSE、dashboard admin-only、dirty scopes、jobs、dependencies、cache stale after error。
+- `tests/test_app_health_api.py` 保护 `/api/app-health`、SSE、dashboard admin-only、进项使用审计 admin-only/只读 report、dirty scopes、jobs、dependencies、cache stale after error。
 - `tests/test_app_status_overview_service.py` 保护 registry 一致性、状态优先级、readiness missing/failed、worker missing、runtime unavailable 和 API contract。
 - `tests/test_runtime_monitoring.py` 保护 queue backlog、failed jobs、stale dirty scopes、RabbitMQ、worker metrics 和 mismatch。
 - `tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_queue_ops.py` 保护 readiness 不伪造 fresh、dead letter resolve 前置条件。

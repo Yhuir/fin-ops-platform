@@ -43,6 +43,7 @@
 - `/api/app-health`：面向页面和 App Status provider 的运行健康 snapshot，包含 workbench/read model、background jobs、dependencies、alerts、`app_status`。
 - `/api/app-health/stream`：SSE snapshot/heartbeat，只负责通知 UI 更新状态，不替代 durable facts。
 - `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、导入历史、请求性能、runtime outbox/read model/worker 指标。RabbitMQ 管理接口是可选 transport 观测，不是 read model freshness 事实源；dashboard 默认不阻塞等待 RabbitMQ management API，需显式设置 `FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS=1` 才读取实时队列管理指标。
+- `/api/operations/app-health/input-invoice-usage-audit`：admin-only 只读三边对账入口，复用 App 后端 PostgreSQL 连接审计 `app.invoices`、`app.workbench_pair_relations`、`read_model.input_invoice_usage_*`、`read_model.workbench_relation_*` 和 `job.read_model_dirty_scopes`。该入口只输出 `pass/issues_found` 报告，不刷新、不修复、不写业务数据。
 - `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
@@ -58,6 +59,7 @@
 - Worker registry：`runtime_worker_registry.py`。
 - Domain/read model/job/dependency registries：`app_status_*_registry.py`。
 - 发票 inventory：读取 `app.invoices.source_links`，只统计已进入统一发票池且未删除的 canonical invoice facts；OA 附件 OCR cache 只作为解析缓存，不作为 App Health 发票 inventory 事实源。
+- 进项发票使用情况审计：只读 `app.invoices`、`app.workbench_pair_relations`、`read_model.input_invoice_usage_rows/scopes`、`read_model.workbench_relation_rows/groups/scopes` 和 `job.read_model_dirty_scopes`；真实库 `blocking_issue_count=0` 才能作为“进项发票使用情况页面全量数据和配对关系正确”的证据。
 - 导入历史：只读取 `app.import_batches` 的 `bank_transaction`、`input_invoice`、`output_invoice` 批次成功数。
 - 前端只展示后端事实；不能用当前 route、表格 loading、组件本地状态推导全局状态。
 

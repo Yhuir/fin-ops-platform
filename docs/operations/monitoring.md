@@ -5,6 +5,7 @@
 - `/health` 和 app health API。
 - `GET /metrics` Prometheus text exposition。
 - `GET /api/operations/app-health-dashboard` 管理员只读 Dashboard。
+- `GET /api/operations/app-health/input-invoice-usage-audit` 管理员只读进项使用三边对账审计。
 - OA 同步状态。
 - 工作台 dirty scopes。
 - 后台任务状态。
@@ -210,9 +211,22 @@ GET /api/operations/app-health-dashboard
 
 Dashboard 三个区域：
 
-- `数据`：`app.bank_transactions`、`app.invoices`、`app.oa_applications`、`app.oa_application_items` 的数量和最近同步时间。发票来源只拆为 `手工导入` 和 `OA 解析`；`OA 解析` 括号内数量表示 OA 解析来源且不在手工导入中的发票数。主页面还展示最新 5 条手工银行流水和发票导入历史，右侧抽屉展示全量历史。
+- `数据`：`app.bank_transactions`、`app.invoices`、`app.oa_applications`、`app.oa_application_items` 的数量和最近同步时间。发票来源固定拆为 `手工导入`、`进项发票`、`销项发票` 和 `OA 解析`；`进项发票` / `销项发票` 按 active canonical 发票的 `invoice_type` 统计，`OA 解析` 括号内数量表示 OA 解析来源且不在手工导入中的发票数。主页面还展示最新 5 条手工银行流水和发票导入历史，右侧抽屉展示全量历史。
 - `请求`：当前 API 进程内 rolling window 的 p95/p99，包括完整请求耗时、DB 总耗时、连接获取、SQL execute/fetch 和 SQL 次数。
 - `后台`：`job.outbox_events`、RabbitMQ queue/DLQ、`job.runtime_worker_heartbeats`、read model refresh duration 和 dirty scope 计数。
+
+## 进项发票使用情况全量审计
+
+部署包含该 API 的版本后，管理员可用 Admin Token 只读触发真实库对账：
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer ${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
+  -H "Accept: application/json" \
+  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/input-invoice-usage-audit"
+```
+
+报告 `overall_status=pass` 且 `summary.blocking_issue_count=0`，才可作为“进项发票使用情况页面全量数据和所有配对关系正确”的证据。`issues_found` 只说明发现不一致，不会自动刷新或修复；修复必须回到对应业务 runbook、read model rebuild 或明确审计/修复工具。
 
 Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS` 调整。缓存过期后刷新失败时，接口返回上一份 payload，并在 `freshness.warnings` 中加入 `dashboard_cache_stale_after_error`；权限校验和 PostgreSQL runtime 缺失不走缓存兜底。
 

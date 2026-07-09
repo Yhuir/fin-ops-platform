@@ -89,6 +89,45 @@ class FakeOperationsDashboardConnection:
         raise AssertionError(sql)
 
 
+class FakeInputInvoiceUsageAuditConnection:
+    def __init__(
+        self,
+        *,
+        rows_by_check: dict[str, list[dict[str, object]]] | None = None,
+        fail: bool = False,
+    ) -> None:
+        self.rows_by_check = rows_by_check or {}
+        self.fail = fail
+        self.executed: list[tuple[str, tuple[object, ...]]] = []
+        self.fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
+        if self.fail:
+            raise RuntimeError("audit database timeout")
+        self.fetch_one_calls.append((sql, params))
+        return {
+            "active_input_invoice_count": 2,
+            "active_input_invoice_total_with_tax": "300.00",
+            "read_model_invoice_member_count": 2,
+            "read_model_row_count": 1,
+            "input_invoice_usage_scope_count": 1,
+            "workbench_relation_scope_count": 1,
+            "active_workbench_pair_relation_count": 1,
+            "linked_workbench_relation_group_count": 1,
+        }
+
+    def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+        if self.fail:
+            raise RuntimeError("audit database timeout")
+        self.fetch_all_calls.append((sql, params))
+        return [dict(row) for row in self.rows_by_check.get(_audit_check_name(sql), [])]
+
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
+        self.executed.append((sql, params))
+        raise AssertionError("audit endpoint must be read-only")
+
+
 def inject_oa_sync_runtime_status(
     app,
     *,
@@ -677,6 +716,85 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(second_payload["data_inventory"]["bank"]["total_count"], 1)
         self.assertIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])
+
+    def test_operations_input_invoice_usage_audit_is_admin_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "admin_only")
+
+    def test_operations_input_invoice_usage_audit_returns_read_only_report_for_admin(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakeInputInvoiceUsageAuditConnection()
+            setattr(app._state_store, "_connection", connection)
+
+            response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["mode"], "dry-run")
+        self.assertEqual(payload["overall_status"], "pass")
+        self.assertEqual(payload["tenant_id"], "default")
+        self.assertEqual(payload["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
+        self.assertIn("app.invoices", payload["audit_contract"]["source_tables"])
+        self.assertIn("read_model.input_invoice_usage_rows", payload["audit_contract"]["source_tables"])
+        self.assertIn("read_model.workbench_relation_rows", payload["audit_contract"]["source_tables"])
+        self.assertEqual(connection.executed, [])
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
+        self.assertIn("app.invoices", queried_sql)
+        self.assertIn("app.workbench_pair_relations", queried_sql)
+
+    def test_operations_input_invoice_usage_audit_reports_relation_issues_without_writes(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakeInputInvoiceUsageAuditConnection(
+                rows_by_check={
+                    "active_relation_missing_workbench_group": [
+                        {
+                            "case_id": "case-1",
+                            "scope_key": "2026-05",
+                            "invoice_id": "inv-1",
+                            "relation_row_id": "inv-1",
+                        }
+                    ]
+                }
+            )
+            setattr(app._state_store, "_connection", connection)
+
+            response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["overall_status"], "issues_found")
+        self.assertEqual(payload["summary"]["blocking_issue_count"], 1)
+        self.assertEqual(
+            payload["summary"]["issue_counts_by_code"],
+            {"active_relation_missing_workbench_relation_group": 1},
+        )
+        self.assertEqual(connection.executed, [])
+
+    def test_operations_input_invoice_usage_audit_requires_postgres_connection(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["error"], "postgres_required")
+
+
+def _audit_check_name(sql: str) -> str:
+    marker = "/* check:"
+    if marker not in sql:
+        return ""
+    return sql.split(marker, 1)[1].split("*/", 1)[0].strip()
 
 
 if __name__ == "__main__":

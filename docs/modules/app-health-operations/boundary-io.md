@@ -33,6 +33,7 @@
 | Runtime registry | app status services | 聚合 worker/read model/job/dependency 状态；operations dashboard 默认不等待 RabbitMQ management API，RabbitMQ queue metrics 作为可选 transport 观测以 unknown 降级 |
 | Dashboard inventory facts | `app.bank_transactions`、`app.invoices` / `source_links`、`app.import_batches`、`app.oa_*`、`app.oa_sync_runs` | 发票 inventory 按 canonical invoice source link 和 `invoice_type` 统计；OA 上次读取时间优先使用 `app.oa_sync_runs(sync_type='oa_projection')` 的成功 run；导入历史只读 `app.import_batches` 中手工银行流水和发票导入批次 |
 | OA sync runtime facts | `job.outbox_events(event_type='oa.sync')`、`runtime_worker_heartbeats`、`app.oa_sync_runs` | `/api/oa-sync/status` 和 AppHealth `oa_sync` 只读 durable queue、worker 和 projection run facts；不得依赖 HTTP 进程内内存状态 |
+| 进项使用全量审计 | `app.invoices`、`app.workbench_pair_relations`、`read_model.input_invoice_usage_*`、`read_model.workbench_relation_*`、`job.read_model_dirty_scopes` | `/api/operations/app-health/input-invoice-usage-audit` admin-only 只读；检查页面 read model、canonical 进项发票和 Workbench relation 分发是否一致；不得刷新、修复或写入 |
 
 ## 输出 I/O
 
@@ -41,6 +42,7 @@
 | App health payload | 页面/indicator | 不伪装 readiness；OA pending/processing outbox 必须显示 refreshing，OA failed outbox/worker/run 必须显示 blocked/error |
 | Alert/status | shell/status page | 明确 stale/failed/degraded |
 | Dashboard payload | operations page | 只读聚合；`data_inventory.invoice.sources` 固定为 `manual`、`input_invoice`、`output_invoice`、`oa_attachment`，`input_invoice` / `output_invoice` 按 active canonical 发票的 `invoice_type` 统计，`oa_attachment.supplementary_count` 表示 OA 解析进入发票池但不在手工导入中的数量；`data_inventory.oa.sources` 包含 `oa_records`、`oa_records_completed`、`oa_records_in_progress`、`oa_items`，分别表示 OA 申请主表总数、已完成 OA、进行中 OA 和 OA 明细行数；`oa_records_completed` 统计 `app.oa_applications` 的唯一完成态 OA 单据，`oa_records_in_progress` 统计 OA 待付款 read model all-scope 的 `viewCounts.in_progress` 等价唯一 OA ID，不能用 `app.oa_applications.workflow_status` 推导；`data_inventory.oa.latest_synced_at` 使用最近成功 OA projection run；`data_inventory.import_events` 只输出手工银行流水和发票导入历史，前端主页面截取最新 5 条并用抽屉展示全量；RabbitMQ 管理指标默认以 unknown 输出，不能阻塞 read model/worker 健康探针 |
+| 进项使用审计报告 | admin/API consumer | `overall_status=pass` 且 `summary.blocking_issue_count=0` 才能证明当前真实库进项发票使用情况页面全量数据和配对关系一致；`issues_found` 只报告问题样本，不做自动修复 |
 
 ## 持久化与投影
 
@@ -56,10 +58,10 @@
 | Frontend page | `web/src/pages/AppHealthOperationsPage.tsx` |
 | Frontend feature/context | `web/src/features/appHealth/*`、`features/appStatus/*`、`contexts/AppHealthStatusContext.tsx` |
 | Shell | `web/src/components/shell/AppStatusIndicator.tsx` |
-| Backend route | `/api/app-health*`、`/api/operations/app-health-dashboard` in `server.py` |
+| Backend route | `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/input-invoice-usage-audit` in `server.py` |
 | Backend service | `app_health_service.py`、`app_health_alert_service.py`、`app_status_overview_service.py`、`runtime_monitoring.py` |
 | Registries | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py` |
-| Tools/tests | `tools/app_status_readiness_backfill.py`、`tests/test_app_health*.py`、`tests/test_app_status*.py` |
+| Tools/tests | `tools/app_status_readiness_backfill.py`、`tools/audit_input_invoice_usage_read_model.py`、`tests/test_app_health*.py`、`tests/test_app_status*.py`、`tests/test_audit_input_invoice_usage_read_model_tool.py` |
 
 ## 依赖方向
 
@@ -73,6 +75,7 @@
 - `tests/test_app_health_service.py`
 - `tests/test_app_status_overview_service.py`
 - `tests/test_operations_dashboard_service.py`
+- `tests/test_audit_input_invoice_usage_read_model_tool.py`
 - `web/src/test/AppHealthOperationsPage.test.tsx`
 
 ## 当前缺口和删除条件

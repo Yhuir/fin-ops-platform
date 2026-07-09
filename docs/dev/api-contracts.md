@@ -23,6 +23,7 @@
 - `/api/background-jobs*`：后台任务。
 - `/api/app-health*`：健康状态。
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
+- `/api/operations/app-health/input-invoice-usage-audit`：管理员只读进项使用三边对账审计。
 
 ## Workbench 设置 API
 
@@ -1097,6 +1098,65 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - Dashboard API 可返回短 TTL 缓存 payload。缓存刷新失败但已有旧 payload 时，响应仍为 `200`，并在 `freshness.warnings` 中包含 `dashboard_cache_stale_after_error`。
 - `runtime_performance.read_models[*].historical_refresh_duration_ms` 是 bounded history，当前基于最近 7 天或每个 event type 最近 512 条完成事件，不代表永久全历史。
 - unknown 指标用 `null` 和 `status="unknown"` 表示。前端显示 `--`，不得把 unknown 当成 `0`。
+
+## AppHealth 进项使用审计 API
+
+`GET /api/operations/app-health/input-invoice-usage-audit`
+
+权限：
+
+- 复用 OA session。
+- 仅 `can_admin_access=true` 的管理员可访问。
+- 未登录或登录态失效返回现有 `401 invalid_oa_session`。
+- 非管理员返回 `403 admin_only`。
+
+该接口是只读审计入口，复用 App 后端已有 PostgreSQL 连接，不要求调用方提供 DB URL。无 PostgreSQL runtime connection 时返回 `503 postgres_required`；审计 SQL 失败时返回 `500 input_invoice_usage_audit_failed`。该接口不得刷新 read model、不得自动修复 relation、不得写入业务表。
+
+成功响应始终为 `200`，审计是否通过由 payload 判断：
+
+```json
+{
+  "mode": "dry-run",
+  "tenant_id": "default",
+  "overall_status": "pass",
+  "summary": {
+    "active_input_invoice_count": 807,
+    "read_model_invoice_member_count": 807,
+    "read_model_row_count": 764,
+    "input_invoice_usage_scope_count": 6,
+    "workbench_relation_scope_count": 6,
+    "active_workbench_pair_relation_count": 196,
+    "linked_workbench_relation_group_count": 196,
+    "issue_count": 0,
+    "error_count": 0,
+    "warning_count": 0,
+    "blocking_issue_count": 0,
+    "issue_counts_by_code": {}
+  },
+  "issues": [],
+  "audit_contract": {
+    "source_tables": [
+      "app.invoices",
+      "app.workbench_pair_relations",
+      "read_model.input_invoice_usage_rows",
+      "read_model.input_invoice_usage_scopes",
+      "read_model.workbench_relation_rows",
+      "read_model.workbench_relation_groups",
+      "read_model.workbench_relation_scopes",
+      "job.read_model_dirty_scopes"
+    ],
+    "pass_condition": "blocking_issue_count == 0",
+    "write_policy": "read_only"
+  },
+  "generated_at": "2026-07-10T00:00:00+00:00"
+}
+```
+
+契约要求：
+
+- `overall_status="pass"` 且 `summary.blocking_issue_count=0` 才能声明当前真实库“进项发票使用情况”页面全量数据和配对关系一致。
+- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本，方便运维记录；修复必须走对应业务 runbook 或明确修复工具。
+- 审计覆盖 canonical 进项发票、`input_invoice_usage` rows/scopes、`workbench_relation` rows/groups/scopes、active Workbench relation、dirty scopes、source_versions、重复/孤儿/缺失 member、金额合计、跨 scope relation 分发和 candidate 误入。
 
 ## 版本和兼容
 

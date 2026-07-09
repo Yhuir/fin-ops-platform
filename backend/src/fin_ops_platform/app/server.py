@@ -218,6 +218,9 @@ from fin_ops_platform.services.input_invoice_usage_service import (
 from fin_ops_platform.services.input_invoice_usage_read_model_fresh_gate_service import (
     InputInvoiceUsageReadModelFreshGateService,
 )
+from fin_ops_platform.tools.audit_input_invoice_usage_read_model import (
+    audit_input_invoice_usage_read_model,
+)
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_best_source_link,
@@ -2002,6 +2005,8 @@ class Application:
             return self._handle_api_operation_barrier_status(body, headers)
         if method == "GET" and route_path == "/api/operations/app-health-dashboard":
             return self._handle_api_operations_app_health_dashboard(headers)
+        if method == "GET" and route_path == "/api/operations/app-health/input-invoice-usage-audit":
+            return self._handle_api_operations_input_invoice_usage_audit(headers)
         if method == "GET" and route_path == "/api/search":
             q = query.get("q", [""])[0]
             scope = query.get("scope", ["all"])[0]
@@ -3862,6 +3867,35 @@ class Application:
             api_performance_recorder=self._api_performance_recorder,
         )
         return self._json_response(HTTPStatus.OK, self._cached_operations_app_health_dashboard_payload(service))
+
+    def _handle_api_operations_input_invoice_usage_audit(self, headers: dict[str, str] | None) -> Response:
+        session, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        connection = getattr(getattr(self, "_state_store", None), "_connection", None)
+        if connection is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "postgres_required",
+                    "message": "Input invoice usage audit requires PostgreSQL runtime facts.",
+                },
+            )
+        try:
+            payload = audit_input_invoice_usage_read_model(
+                connection,
+                tenant_id=tenant_id_for_session(session),
+                example_limit=50,
+            )
+        except Exception as exc:
+            return self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {
+                    "error": "input_invoice_usage_audit_failed",
+                    "message": str(exc) or "Input invoice usage audit failed.",
+                },
+            )
+        return self._json_response(HTTPStatus.OK, payload)
 
     def _cached_operations_app_health_dashboard_payload(self, service: OperationsDashboardService) -> dict[str, object]:
         ttl_seconds = self._app_health_dashboard_cache_ttl_seconds()
