@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, Button, Spinner, Tooltip } from "@heroui/react";
-import { History, RefreshCw } from "lucide-react";
+import { ClipboardCheck, History, RefreshCw } from "lucide-react";
 
 import AppDrawer from "../components/common/AppDrawer";
 import {
@@ -16,8 +16,9 @@ import {
 } from "../components/common/FinanceTable";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
-import { fetchAppHealthDashboard } from "../features/appHealth/api";
+import { fetchAppHealthDashboard, fetchInputInvoiceUsageAudit } from "../features/appHealth/api";
 import type {
+  InputInvoiceUsageAuditPayload,
   OperationsDashboardEndpointPerformance,
   OperationsDashboardImportEvent,
   OperationsDashboardInventoryBlock,
@@ -196,6 +197,97 @@ function importEventState(row: OperationsDashboardImportEvent) {
     return { label: rawStatus, tone: "danger" as const };
   }
   return { label: rawStatus || "unknown", tone: "neutral" as const };
+}
+
+function auditStatus(payload: InputInvoiceUsageAuditPayload | null) {
+  if (!payload) {
+    return { label: "未验证", tone: "neutral" as const };
+  }
+  const status = String(payload.overall_status || "unknown");
+  const blockingIssueCount = payload.summary?.blocking_issue_count ?? 0;
+  const errorCount = payload.summary?.error_count ?? 0;
+  if (status === "pass" && blockingIssueCount === 0 && errorCount === 0) {
+    return { label: "pass", tone: "success" as const };
+  }
+  if (blockingIssueCount > 0 || errorCount > 0) {
+    return { label: status, tone: "danger" as const };
+  }
+  if (status === "issues_found") {
+    return { label: status, tone: "warning" as const };
+  }
+  return { label: status, tone: "neutral" as const };
+}
+
+function AuditMetric({ label, value }: { label: string; value: number | null | undefined }) {
+  return (
+    <div className="app-health-audit-metric">
+      <span>{label}</span>
+      <strong>{formatNumber(value)}</strong>
+    </div>
+  );
+}
+
+function InputInvoiceUsageAuditPanel({
+  payload,
+  error,
+  isLoading,
+  onRun,
+}: {
+  payload: InputInvoiceUsageAuditPayload | null;
+  error: string | null;
+  isLoading: boolean;
+  onRun: () => void;
+}) {
+  const state = auditStatus(payload);
+  const summary = payload?.summary;
+  const issueCodeEntries = Object.entries(summary?.issue_counts_by_code ?? {})
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 4);
+  const visibleIssues = (payload?.issues ?? []).slice(0, 3);
+  return (
+    <Section title="Audit" testId="app-health-input-usage-audit">
+      <div className="app-health-audit-card">
+        <div className="app-health-audit-header">
+          <div className="app-health-audit-heading">
+            <h3>进项发票使用情况</h3>
+            <p>{payload?.generated_at ? formatTimestamp(payload.generated_at) : "未验证"}</p>
+          </div>
+          <div className="app-health-audit-actions">
+            <FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag>
+            <Button
+              className="app-health-audit-button"
+              isDisabled={isLoading}
+              onPress={onRun}
+              size="sm"
+              variant="tertiary"
+            >
+              {isLoading ? <Spinner color="current" size="sm" /> : <ClipboardCheck aria-hidden="true" size={15} strokeWidth={2.2} />}
+              Audit 进项使用
+            </Button>
+          </div>
+        </div>
+        {error ? <AppHealthNotice status="danger">{error}</AppHealthNotice> : null}
+        <div className="app-health-audit-grid">
+          <AuditMetric label="进项发票" value={summary?.active_input_invoice_count} />
+          <AuditMetric label="Read model 发票" value={summary?.read_model_invoice_member_count} />
+          <AuditMetric label="Read model rows" value={summary?.read_model_row_count} />
+          <AuditMetric label="Active relation" value={summary?.active_workbench_pair_relation_count} />
+          <AuditMetric label="Relation groups" value={summary?.linked_workbench_relation_group_count} />
+          <AuditMetric label="Blocking issues" value={summary?.blocking_issue_count} />
+        </div>
+        {issueCodeEntries.length > 0 || visibleIssues.length > 0 ? (
+          <div className="app-health-audit-issues" aria-label="进项使用 Audit 问题">
+            {issueCodeEntries.map(([code, count]) => (
+              <FinanceStatusTag key={code} tone={state.tone === "danger" ? "danger" : "warning"}>{`${code}: ${formatNumber(count)}`}</FinanceStatusTag>
+            ))}
+            {visibleIssues.map((issue, index) => (
+              <span key={`${issue.code || "issue"}:${index}`}>{[issue.code, issue.scope_key, issue.subject_id].filter(Boolean).join(" / ") || issue.message || "issue"}</span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </Section>
+  );
 }
 
 function RuntimeOverview({ payload }: { payload: OperationsDashboardPayload }) {
@@ -540,8 +632,12 @@ export default function AppHealthOperationsPage() {
   const [payload, setPayload] = useState<OperationsDashboardPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [auditPayload, setAuditPayload] = useState<InputInvoiceUsageAuditPayload | null>(null);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [isAuditLoading, setAuditLoading] = useState(false);
   const [isImportHistoryOpen, setImportHistoryOpen] = useState(false);
   const inFlightRef = useRef<AbortController | null>(null);
+  const auditInFlightRef = useRef<AbortController | null>(null);
 
   const loadDashboard = useCallback(async () => {
     if (!permissions.canAdminAccess || inFlightRef.current) {
@@ -567,6 +663,30 @@ export default function AppHealthOperationsPage() {
     }
   }, [permissions.canAdminAccess]);
 
+  const runInputUsageAudit = useCallback(async () => {
+    if (!permissions.canAdminAccess || auditInFlightRef.current) {
+      return;
+    }
+    const controller = new AbortController();
+    auditInFlightRef.current = controller;
+    setAuditLoading(true);
+    try {
+      const nextPayload = await fetchInputInvoiceUsageAudit(controller.signal);
+      setAuditPayload(nextPayload);
+      setAuditError(null);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      setAuditError(error instanceof Error && error.message.trim() ? error.message : "进项使用 Audit 失败。");
+    } finally {
+      if (auditInFlightRef.current === controller) {
+        auditInFlightRef.current = null;
+      }
+      setAuditLoading(false);
+    }
+  }, [permissions.canAdminAccess]);
+
   useEffect(() => {
     if (!permissions.canAdminAccess || !active) {
       return undefined;
@@ -579,6 +699,8 @@ export default function AppHealthOperationsPage() {
       window.clearInterval(timer);
       inFlightRef.current?.abort();
       inFlightRef.current = null;
+      auditInFlightRef.current?.abort();
+      auditInFlightRef.current = null;
     };
   }, [active, loadDashboard, permissions.canAdminAccess]);
 
@@ -628,6 +750,12 @@ export default function AppHealthOperationsPage() {
       {payload ? (
         <>
           <DataInventory payload={payload} onOpenImportHistory={() => setImportHistoryOpen(true)} />
+          <InputInvoiceUsageAuditPanel
+            error={auditError}
+            isLoading={isAuditLoading}
+            onRun={runInputUsageAudit}
+            payload={auditPayload}
+          />
           <RequestPerformance rows={payload.request_performance.endpoints} />
           <RuntimePerformance payload={payload} />
           <AppDrawer

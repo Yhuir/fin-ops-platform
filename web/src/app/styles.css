@@ -9647,6 +9647,115 @@ textarea {
   outline: none;
 }
 
+.app-health-audit-card {
+  display: grid;
+  gap: var(--fp-space-2);
+  min-width: 0;
+}
+
+.app-health-audit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-2);
+  min-width: 0;
+}
+
+.app-health-audit-heading {
+  min-width: 0;
+}
+
+.app-health-audit-heading h3 {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-title);
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.app-health-audit-heading p {
+  margin: var(--fp-space-1) 0 0;
+  color: var(--fp-text-muted);
+  font-family: var(--fp-font-data);
+  font-size: var(--fp-text-label);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+.app-health-audit-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.app-health-audit-button {
+  border: 1px solid var(--fp-border);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  font-weight: 750;
+}
+
+.app-health-audit-button:hover,
+.app-health-audit-button:focus-visible {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+  outline: none;
+}
+
+.app-health-audit-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--fp-space-2);
+  min-width: 0;
+}
+
+.app-health-audit-metric {
+  display: grid;
+  gap: var(--fp-space-1);
+  min-width: 0;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  padding: 10px 12px;
+}
+
+.app-health-audit-metric span {
+  overflow: hidden;
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-label);
+  font-weight: 750;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-health-audit-metric strong {
+  color: var(--fp-text-primary);
+  font-family: var(--fp-font-data);
+  font-size: var(--fp-text-title);
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.app-health-audit-issues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fp-space-2);
+  min-width: 0;
+  color: var(--fp-text-secondary);
+  font-family: var(--fp-font-data);
+  font-size: var(--fp-text-label);
+  line-height: 1.4;
+}
+
+.app-health-audit-issues > span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .app-health-runtime-grid--primary {
   grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.2fr);
 }
@@ -9729,6 +9838,7 @@ textarea {
 
 @media (max-width: 1024px) {
   .app-health-source-grid,
+  .app-health-audit-grid,
   .app-health-runtime-overview,
   .app-health-runtime-grid--primary,
   .app-health-runtime-grid--secondary {
@@ -9760,6 +9870,16 @@ textarea {
   .app-health-import-events__header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .app-health-audit-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .app-health-audit-actions {
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 
   .app-health-history-button {

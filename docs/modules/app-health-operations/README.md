@@ -25,7 +25,7 @@
 - `web/src/features/appStatus/*`
 - `web/src/contexts/AppHealthStatusContext.tsx`
 - `web/src/components/shell/AppStatusIndicator.tsx`
-- `backend/src/fin_ops_platform/app/server.py` 中 `/api/app-health*`、`/api/operations/app-health-dashboard`
+- `backend/src/fin_ops_platform/app/server.py` 中 `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/input-invoice-usage-audit`、`/api/operations/app-health/input-invoice-usage-refresh`
 - `backend/src/fin_ops_platform/services/app_health_service.py`
 - `backend/src/fin_ops_platform/services/app_health_alert_service.py`
 - `backend/src/fin_ops_platform/services/app_status_overview_service.py`
@@ -43,7 +43,8 @@
 - `/api/app-health`：面向页面和 App Status provider 的运行健康 snapshot，包含 workbench/read model、background jobs、dependencies、alerts、`app_status`。
 - `/api/app-health/stream`：SSE snapshot/heartbeat，只负责通知 UI 更新状态，不替代 durable facts。
 - `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、导入历史、请求性能、runtime outbox/read model/worker 指标。RabbitMQ 管理接口是可选 transport 观测，不是 read model freshness 事实源；dashboard 默认不阻塞等待 RabbitMQ management API，需显式设置 `FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS=1` 才读取实时队列管理指标。
-- `/api/operations/app-health/input-invoice-usage-audit`：admin-only 只读三边对账入口，复用 App 后端 PostgreSQL 连接审计 `app.invoices`、`app.workbench_pair_relations`、`read_model.input_invoice_usage_*`、`read_model.workbench_relation_*` 和 `job.read_model_dirty_scopes`。该入口只输出 `pass/issues_found` 报告，不刷新、不修复、不写业务数据。
+- `/api/operations/app-health/input-invoice-usage-audit`：admin-only 只读三边对账入口，App Health 页面提供 `Audit 进项使用` 按钮触发；后端复用 App 自身 PostgreSQL 连接审计 `app.invoices`、`app.workbench_pair_relations`、`read_model.input_invoice_usage_*`、`read_model.workbench_relation_*` 和 `job.read_model_dirty_scopes`。该入口只输出 `pass/issues_found` 报告，不刷新、不修复、不写业务数据。
+- `/api/operations/app-health/input-invoice-usage-refresh`：admin-only 受控刷新入队入口，只通过 `ReadModelRefreshGateway` / durable runtime queue 入队 `input_invoice_usage` scope refresh；返回 `202` 后必须继续用 Audit 或 operation barrier 复核。
 - `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。

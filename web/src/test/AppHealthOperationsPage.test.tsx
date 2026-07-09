@@ -41,6 +41,7 @@ describe("AppHealthOperationsPage", () => {
     expect(styles).toMatch(/\.app-health-title\s*\{[\s\S]*font-size:\s*var\(--fp-text-display\)/);
     expect(styles).toMatch(/\.app-health-section__header\s*\{[\s\S]*background:\s*var\(--fp-surface-muted\)/);
     expect(styles).toMatch(/\.app-health-inventory-card__value\s*\{[\s\S]*font-family:\s*var\(--fp-font-data\)/);
+    expect(styles).toMatch(/\.app-health-audit-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)/);
     expect(styles).toMatch(/\.app-health-refresh-button\s*\{[\s\S]*transition:[\s\S]*border-color var\(--motion-fast\) var\(--ease-standard\)/);
   });
 
@@ -90,6 +91,22 @@ describe("AppHealthOperationsPage", () => {
     expect(within(data).getByRole("grid", { name: "发票来源" })).toBeInTheDocument();
     expect(within(data).getByRole("grid", { name: "OA来源" })).toBeInTheDocument();
 
+    const audit = screen.getByTestId("app-health-input-usage-audit");
+    expectProjectSection(audit);
+    expect(audit).toHaveTextContent("Audit");
+    expect(audit).toHaveTextContent("进项发票使用情况");
+    expect(audit).toHaveTextContent("未验证");
+    const auditButton = within(audit).getByRole("button", { name: "Audit 进项使用" });
+    expect(auditButton).toHaveClass("app-health-audit-button");
+    await userEvent.click(auditButton);
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health/input-invoice-usage-audit"))).toBe(true);
+    });
+    expect(audit).toHaveTextContent("pass");
+    expect(audit).toHaveTextContent("Read model 发票");
+    expect(audit).toHaveTextContent("Blocking issues");
+    expect(within(audit).getAllByText("236").length).toBeGreaterThanOrEqual(1);
+
     const requests = screen.getByTestId("app-health-requests");
     expectProjectSection(requests);
     expect(requests).toHaveTextContent("请求");
@@ -136,6 +153,13 @@ describe("AppHealthOperationsPage", () => {
     expect(
       fetchMock.mock.calls.some(([url, init]) => String(url).includes("/api/background-jobs") && String(init?.method ?? "GET").toUpperCase() === "POST"),
     ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).includes("/api/operations/app-health/input-invoice-usage-audit")
+          && String(init?.method ?? "GET").toUpperCase() !== "GET",
+      ),
+    ).toBe(false);
   });
 
   test("blocks non admin users without fetching dashboard data", async () => {
@@ -149,6 +173,7 @@ describe("AppHealthOperationsPage", () => {
     expectProjectNotice(permissionMessage);
     expect(screen.queryByTestId("app-health-data")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health-dashboard"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health/input-invoice-usage-audit"))).toBe(false);
   });
 
   test("renders unknown metrics as dashes instead of zero", async () => {

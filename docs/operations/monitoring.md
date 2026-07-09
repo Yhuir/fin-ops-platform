@@ -6,6 +6,7 @@
 - `GET /metrics` Prometheus text exposition。
 - `GET /api/operations/app-health-dashboard` 管理员只读 Dashboard。
 - `GET /api/operations/app-health/input-invoice-usage-audit` 管理员只读进项使用三边对账审计。
+- `POST /api/operations/app-health/input-invoice-usage-refresh` 管理员受控入队刷新进项使用 read model scope。
 - OA 同步状态。
 - 工作台 dirty scopes。
 - 后台任务状态。
@@ -227,6 +228,20 @@ curl -sS \
 ```
 
 报告 `overall_status=pass` 且 `summary.blocking_issue_count=0`，才可作为“进项发票使用情况页面全量数据和所有配对关系正确”的证据。`issues_found` 只说明发现不一致，不会自动刷新或修复；修复必须回到对应业务 runbook、read model rebuild 或明确审计/修复工具。
+
+若审计发现的是 `input_invoice_usage` scope 与依赖 read model source_versions 不一致，并且当前操作者只有 Admin Token、没有生产 DB URL/root runtime env，可通过 App 内受控入口入队刷新指定 scope：
+
+```bash
+curl -sS \
+  -X POST \
+  -H "Authorization: Bearer ${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  --data '{"scope_keys":["2025-09","2025-11"],"reason":"production_audit_repair","metadata":{"audit":"input_invoice_usage"}}' \
+  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/input-invoice-usage-refresh"
+```
+
+该接口只通过 durable runtime queue 入队 `input_invoice_usage.read_model.refresh`，返回 `202` 不代表数据已经正确。刷新后必须继续用 audit API 复跑，直到 `overall_status=pass` 且 `blocking_issue_count=0`。
 
 Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS` 调整。缓存过期后刷新失败时，接口返回上一份 payload，并在 `freshness.warnings` 中加入 `dashboard_cache_stale_after_error`；权限校验和 PostgreSQL runtime 缺失不走缓存兜底。
 

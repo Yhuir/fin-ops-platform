@@ -58,6 +58,10 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertIn("read_model.workbench_relation_rows", queried_sql)
         self.assertIn("read_model.workbench_relation_groups", queried_sql)
 
+    def test_sql_literal_percent_is_escaped_for_psycopg_placeholders(self) -> None:
+        self.assertIn("进项%%", audit_input_invoice_usage_read_model.INPUT_INVOICE_PREDICATE)
+        self.assertNotIn("进项%'", audit_input_invoice_usage_read_model.INPUT_INVOICE_PREDICATE)
+
     def test_reports_full_data_and_relation_invariant_failures(self) -> None:
         connection = FakeConnection(
             rows_by_check={

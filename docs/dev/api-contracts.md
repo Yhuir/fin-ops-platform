@@ -24,6 +24,7 @@
 - `/api/app-health*`：健康状态。
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
 - `/api/operations/app-health/input-invoice-usage-audit`：管理员只读进项使用三边对账审计。
+- `/api/operations/app-health/input-invoice-usage-refresh`：管理员受控入队刷新进项使用 read model scope。
 
 ## Workbench 设置 API
 
@@ -1157,6 +1158,50 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `overall_status="pass"` 且 `summary.blocking_issue_count=0` 才能声明当前真实库“进项发票使用情况”页面全量数据和配对关系一致。
 - `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本，方便运维记录；修复必须走对应业务 runbook 或明确修复工具。
 - 审计覆盖 canonical 进项发票、`input_invoice_usage` rows/scopes、`workbench_relation` rows/groups/scopes、active Workbench relation、dirty scopes、source_versions、重复/孤儿/缺失 member、金额合计、跨 scope relation 分发和 candidate 误入。
+
+## AppHealth 进项使用刷新 API
+
+`POST /api/operations/app-health/input-invoice-usage-refresh`
+
+权限：
+
+- 复用 OA session。
+- 仅 `can_admin_access=true` 的管理员可访问。
+- 未登录或登录态失效返回现有 `401 invalid_oa_session`。
+- 非管理员返回 `403 admin_only`。
+
+请求体：
+
+```json
+{
+  "scope_keys": ["2025-09", "2026-06"],
+  "reason": "production_audit_repair",
+  "metadata": {
+    "audit": "input_invoice_usage"
+  }
+}
+```
+
+契约要求：
+
+- 只允许 `scope_keys` 为 `all` 或 `YYYY-MM`，同一请求最多 36 个 scope；非法 scope 返回 `400 invalid_input_invoice_usage_refresh_scope`。
+- 接口只通过 `ReadModelRefreshGateway` 写入 durable runtime queue，入队 `input_invoice_usage.read_model.refresh`；不得直接写 `read_model.input_invoice_usage_*`、不得直接修复 relation、不得绕过 scope policy。
+- runtime queue 不可用时返回 `503 runtime_queue_required`。
+- 成功返回 `202 Accepted`，表示 refresh job 已入队，实际完成状态必须继续用 App Health、operation barrier 或 `/api/operations/app-health/input-invoice-usage-audit` 复核。
+
+成功响应：
+
+```json
+{
+  "read_model_key": "input_invoice_usage",
+  "scope_type": "input_invoice_usage",
+  "scope_keys": ["2025-09", "2026-06"],
+  "enqueued_scope_keys": ["2025-09", "2026-06"],
+  "enqueued_count": 2,
+  "tenant_id": "default",
+  "reason": "production_audit_repair"
+}
+```
 
 ## 版本和兼容
 

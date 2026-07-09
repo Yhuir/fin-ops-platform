@@ -22,7 +22,7 @@ INPUT_INVOICE_PREDICATE = """
     and (
         i.invoice_type = 'input'
         or i.invoice_type = 'input_invoice'
-        or i.invoice_type like '进项%'
+        or i.invoice_type like '进项%%'
     )
 """
 

@@ -75,6 +75,9 @@ type MockApiOptions = {
   appHealthDashboardSequence?: Array<{ status?: number; body: Record<string, unknown> }>;
   appHealthDashboardErrorStatus?: number;
   appHealthDashboardErrorBody?: Record<string, unknown>;
+  appHealthInputInvoiceUsageAudit?: Record<string, unknown>;
+  appHealthInputInvoiceUsageAuditStatus?: number;
+  appHealthInputInvoiceUsageAuditBody?: Record<string, unknown>;
   workbenchExceptionPreview?: Record<string, unknown>;
   workbenchExceptionApply?: Record<string, unknown>;
   workbenchConfirmPreview?: Record<string, unknown>;
@@ -5041,6 +5044,35 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             ],
           },
           freshness: { warnings: [] },
+        },
+      };
+    },
+    "/api/operations/app-health/input-invoice-usage-audit": () => {
+      if (options.appHealthInputInvoiceUsageAuditStatus) {
+        return {
+          status: options.appHealthInputInvoiceUsageAuditStatus,
+          body: options.appHealthInputInvoiceUsageAuditBody ?? { message: "input invoice usage audit failed" },
+        };
+      }
+      return {
+        body: options.appHealthInputInvoiceUsageAudit ?? {
+          mode: "app_health_api",
+          tenant_id: "default",
+          generated_at: "2026-05-23T10:01:00+08:00",
+          overall_status: "pass",
+          summary: {
+            active_input_invoice_count: 236,
+            read_model_invoice_member_count: 236,
+            read_model_row_count: 212,
+            active_workbench_pair_relation_count: 31,
+            linked_workbench_relation_group_count: 31,
+            blocking_issue_count: 0,
+            issue_count: 0,
+            error_count: 0,
+            warning_count: 0,
+            issue_counts_by_code: {},
+          },
+          issues: [],
         },
       };
     },

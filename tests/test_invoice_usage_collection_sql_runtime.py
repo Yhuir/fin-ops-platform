@@ -1891,7 +1891,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         old_relation_versions = {"source_version": "1"}
         current_relation_versions = {"source_version": "2"}
-        app._input_invoice_usage_sql_read_repository = PostgresReadModelRepository(
+        repository = PostgresReadModelRepository(
             InvoiceReadModelConnection(
                 input_rows=[
                     {
@@ -1920,6 +1920,64 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                 ],
             )
         )
+        app._input_invoice_usage_sql_read_repository = repository
+        app._workbench_relation_sql_read_repository = repository
+
+        response = _input_invoice_usage_rows_response(app, {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
+        self.assertEqual(queue.refreshes, [("input_invoice_usage", "2026-05", "api_source_versions_stale")])
+
+    def test_input_api_relation_source_versions_come_from_workbench_relation_repository(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._import_service = ImportNormalizationService()
+        app._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
+            payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
+            import_service=ImportNormalizationService(),
+        )
+        old_relation_versions = {"source_version": "1"}
+        current_relation_versions = {"source_version": "2"}
+        input_repository = PostgresReadModelRepository(
+            InvoiceReadModelConnection(
+                input_rows=[
+                    {
+                        "payload": {
+                            "id": "stale-relation-row",
+                            "invoice": {},
+                            "paymentStatus": {},
+                            "oa": {},
+                            "bankTransactions": {},
+                        },
+                        "raw_payload": {},
+                    }
+                ],
+                input_scope_rows=[
+                    {
+                        "scope_key": "2026-05",
+                        "source_versions": {
+                            **input_invoice_usage_source_versions(),
+                            "workbench_relation_source_versions": old_relation_versions,
+                        },
+                        "cache_status": "fresh",
+                    }
+                ],
+            )
+        )
+        workbench_relation_repository = PostgresReadModelRepository(
+            InvoiceReadModelConnection(
+                workbench_relation_scope_rows=[
+                    {"scope_key": "2026-05", "source_versions": current_relation_versions, "cache_status": "fresh"}
+                ],
+            )
+        )
+        app._input_invoice_usage_sql_read_repository = InputInvoiceUsageReadModelRepositoryPort(input_repository)
+        app._workbench_relation_sql_read_repository = workbench_relation_repository
 
         response = _input_invoice_usage_rows_response(app, {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]})
         payload = json.loads(response.body)

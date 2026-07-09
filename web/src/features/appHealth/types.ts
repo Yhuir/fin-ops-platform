@@ -256,3 +256,35 @@ export type OperationsDashboardPayload = {
     warnings: string[];
   };
 };
+
+export type InputInvoiceUsageAuditStatus = "pass" | "issues_found" | string;
+
+export type InputInvoiceUsageAuditSummary = {
+  active_input_invoice_count?: number | null;
+  read_model_invoice_member_count?: number | null;
+  read_model_row_count?: number | null;
+  active_workbench_pair_relation_count?: number | null;
+  linked_workbench_relation_group_count?: number | null;
+  blocking_issue_count?: number | null;
+  issue_count?: number | null;
+  error_count?: number | null;
+  warning_count?: number | null;
+  issue_counts_by_code?: Record<string, number>;
+};
+
+export type InputInvoiceUsageAuditIssue = {
+  severity?: string;
+  code?: string;
+  message?: string;
+  subject_id?: string | null;
+  scope_key?: string | null;
+};
+
+export type InputInvoiceUsageAuditPayload = {
+  mode?: string;
+  tenant_id?: string;
+  generated_at?: string;
+  overall_status?: InputInvoiceUsageAuditStatus;
+  summary?: InputInvoiceUsageAuditSummary;
+  issues?: InputInvoiceUsageAuditIssue[];
+};
