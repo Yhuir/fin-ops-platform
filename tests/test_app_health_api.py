@@ -27,10 +27,14 @@ class FakeOperationsDashboardConnection:
             return {
                 "total_count": 2,
                 "manual_count": 1,
+                "input_invoice_count": 1,
+                "output_invoice_count": 1,
                 "oa_attachment_count": 1,
                 "oa_attachment_non_manual_count": 1,
                 "latest_synced_at": "2026-05-20T10:00:00+00:00",
                 "manual_latest_synced_at": "2026-05-20T10:00:00+00:00",
+                "input_invoice_latest_synced_at": "2026-05-20T10:00:00+00:00",
+                "output_invoice_latest_synced_at": "2026-05-20T10:00:00+00:00",
                 "oa_attachment_latest_synced_at": "2026-05-20T10:00:00+00:00",
             }
         if "oa_records_count" in normalized:
@@ -632,7 +636,9 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertNotIn("status", payload)
         self.assertEqual(payload["data_inventory"]["bank"]["total_count"], 1)
         invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
-        self.assertEqual(set(invoice_sources), {"manual", "oa_attachment"})
+        self.assertEqual(set(invoice_sources), {"manual", "input_invoice", "output_invoice", "oa_attachment"})
+        self.assertEqual(invoice_sources["input_invoice"]["count"], 1)
+        self.assertEqual(invoice_sources["output_invoice"]["count"], 1)
         self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 1)
         oa_sources = {row["key"]: row for row in payload["data_inventory"]["oa"]["sources"]}
         self.assertEqual(set(oa_sources), {"oa_records", "oa_records_completed", "oa_records_in_progress", "oa_items"})

@@ -69,6 +69,10 @@ describe("AppHealthOperationsPage", () => {
     expect(data).toHaveTextContent("发票");
     expect(data).toHaveTextContent("256");
     expect(data).toHaveTextContent("手工导入");
+    expect(data).toHaveTextContent("进项发票");
+    expect(data).toHaveTextContent("236");
+    expect(data).toHaveTextContent("销项发票");
+    expect(data).toHaveTextContent("20");
     expect(data).toHaveTextContent("OA 解析（进入统一发票池的数量）");
     expect(data).toHaveTextContent("40（5）");
     expect(data).not.toHaveTextContent("普通导入");
@@ -164,6 +168,8 @@ describe("AppHealthOperationsPage", () => {
             status: "unknown",
             sources: [
               { key: "manual", label: "手工导入", count: null, latest_synced_at: null, status: "unknown" },
+              { key: "input_invoice", label: "进项发票", count: null, latest_synced_at: null, status: "unknown" },
+              { key: "output_invoice", label: "销项发票", count: null, latest_synced_at: null, status: "unknown" },
               { key: "oa_attachment", label: "OA 解析", count: null, supplementary_count: null, latest_synced_at: null, status: "unknown" },
             ],
           },
@@ -259,6 +265,8 @@ describe("AppHealthOperationsPage", () => {
                 status: "available",
                 sources: [
                   { key: "manual", label: "手工导入", count: 6, latest_synced_at: "2026-05-23T09:20:00+08:00", status: "available" },
+                  { key: "input_invoice", label: "进项发票", count: 236, latest_synced_at: "2026-05-23T09:46:00+08:00", status: "available" },
+                  { key: "output_invoice", label: "销项发票", count: 20, latest_synced_at: "2026-05-23T09:42:00+08:00", status: "available" },
                   { key: "oa_attachment", label: "OA 解析", count: 40, supplementary_count: 5, latest_synced_at: "2026-05-23T09:48:00+08:00", status: "available" },
                 ],
               },

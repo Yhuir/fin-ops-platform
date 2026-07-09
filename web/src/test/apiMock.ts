@@ -4897,6 +4897,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               status: "available",
               sources: [
                 { key: "manual", label: "手工导入", count: 216, latest_synced_at: "2026-05-23T09:44:00+08:00", status: "available" },
+                { key: "input_invoice", label: "进项发票", count: 236, latest_synced_at: "2026-05-23T09:46:00+08:00", status: "available" },
+                { key: "output_invoice", label: "销项发票", count: 20, latest_synced_at: "2026-05-23T09:42:00+08:00", status: "available" },
                 { key: "oa_attachment", label: "OA 解析", count: 40, supplementary_count: 5, latest_synced_at: "2026-05-23T09:48:00+08:00", status: "available" },
               ],
             },

@@ -26,6 +26,15 @@
 - 后续事项：
 ```
 
+## 2026-07-09 - 发票 inventory 增加进销项数量
+
+- 目标：AppHealth 运维状态的发票卡片在总数和来源统计外，直接展示进项发票和销项发票数量，便于核对统一发票池方向结构。
+- 影响范围：`OperationsDashboardService._invoice_inventory()`、`/api/operations/app-health-dashboard` 的 `data_inventory.invoice.sources`、前端 AppHealth dashboard mock/test、App Health 模块文档和 API 合同文档。
+- 关键决策：不新增 read model，不改变 `total_count`；复用 canonical `app.invoices.invoice_type`，按 active 发票统计 `input_invoice` / `output_invoice`，并保留 `manual` 和 `oa_attachment` 来源行及 OA 解析括号口径。
+- 文档影响：已更新 `README.md`、`boundary-io.md`、`tests.md` 和 `docs/dev/api-contracts.md`。
+- 测试覆盖：后端 service/API contract 和前端 dashboard 组件测试覆盖新增 source keys、数量和 UI 展示。
+- 未测风险：本地 fake connection 只验证 SQL contract 和 UI shape；真实生产数量仍依赖当前 `app.invoices.invoice_type` 历史数据是否已规范为 `input` / `output` 或兼容别名。
+
 ## 历史记录
 
 ## 2026-07-07 - 最近导入记录排除 OA 同步

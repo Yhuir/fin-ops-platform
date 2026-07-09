@@ -89,6 +89,7 @@ class OperationsDashboardService:
             with invoice_flags as (
               select
                 invoices.id,
+                lower(coalesce(nullif(invoices.invoice_type, ''), '')) as invoice_type,
                 coalesce(import_batches.imported_at, invoices.updated_at, invoices.created_at) as latest_synced_at,
                 exists (
                   select 1
@@ -129,10 +130,14 @@ class OperationsDashboardService:
             select
               count(*)::bigint as total_count,
               count(*) filter (where is_manual)::bigint as manual_count,
+              count(*) filter (where invoice_type in ('input', 'input_invoice'))::bigint as input_invoice_count,
+              count(*) filter (where invoice_type in ('output', 'output_invoice'))::bigint as output_invoice_count,
               count(*) filter (where is_oa_attachment)::bigint as oa_attachment_count,
               count(*) filter (where is_oa_attachment and not is_manual)::bigint as oa_attachment_non_manual_count,
               max(latest_synced_at) as latest_synced_at,
               max(latest_synced_at) filter (where is_manual) as manual_latest_synced_at,
+              max(latest_synced_at) filter (where invoice_type in ('input', 'input_invoice')) as input_invoice_latest_synced_at,
+              max(latest_synced_at) filter (where invoice_type in ('output', 'output_invoice')) as output_invoice_latest_synced_at,
               max(latest_synced_at) filter (where is_oa_attachment) as oa_attachment_latest_synced_at
             from invoice_flags
             """
@@ -147,6 +152,18 @@ class OperationsDashboardService:
                     label="手工导入",
                     count=_optional_int(row.get("manual_count")),
                     latest_synced_at=_isoformat(row.get("manual_latest_synced_at")),
+                ),
+                _inventory_source(
+                    key="input_invoice",
+                    label="进项发票",
+                    count=_optional_int(row.get("input_invoice_count")),
+                    latest_synced_at=_isoformat(row.get("input_invoice_latest_synced_at")),
+                ),
+                _inventory_source(
+                    key="output_invoice",
+                    label="销项发票",
+                    count=_optional_int(row.get("output_invoice_count")),
+                    latest_synced_at=_isoformat(row.get("output_invoice_latest_synced_at")),
                 ),
                 _inventory_source(
                     key="oa_attachment",

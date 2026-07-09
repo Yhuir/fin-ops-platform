@@ -32,10 +32,14 @@ class FakeDashboardConnection:
             return {
                 "total_count": 20,
                 "manual_count": 14,
+                "input_invoice_count": 17,
+                "output_invoice_count": 3,
                 "oa_attachment_count": 6,
                 "oa_attachment_non_manual_count": 2,
                 "latest_synced_at": datetime(2026, 5, 21, 8, 0, tzinfo=UTC),
                 "manual_latest_synced_at": datetime(2026, 5, 18, 8, 0, tzinfo=UTC),
+                "input_invoice_latest_synced_at": datetime(2026, 5, 21, 8, 0, tzinfo=UTC),
+                "output_invoice_latest_synced_at": datetime(2026, 5, 17, 8, 0, tzinfo=UTC),
                 "oa_attachment_latest_synced_at": datetime(2026, 5, 22, 9, 0, tzinfo=UTC),
             }
         if "from app.oa_applications" in normalized and "oa_records_count" in normalized:
@@ -160,8 +164,12 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(payload["data_inventory"]["invoice"]["total_count"], 20)
         self.assertEqual(payload["data_inventory"]["oa"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
         invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
-        self.assertEqual(set(invoice_sources), {"manual", "oa_attachment"})
+        self.assertEqual(set(invoice_sources), {"manual", "input_invoice", "output_invoice", "oa_attachment"})
         self.assertEqual(invoice_sources["manual"]["count"], 14)
+        self.assertEqual(invoice_sources["input_invoice"]["count"], 17)
+        self.assertEqual(invoice_sources["input_invoice"]["latest_synced_at"], "2026-05-21T08:00:00+00:00")
+        self.assertEqual(invoice_sources["output_invoice"]["count"], 3)
+        self.assertEqual(invoice_sources["output_invoice"]["latest_synced_at"], "2026-05-17T08:00:00+00:00")
         self.assertEqual(invoice_sources["oa_attachment"]["count"], 6)
         self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 2)
         oa_sources = {row["key"]: row for row in payload["data_inventory"]["oa"]["sources"]}

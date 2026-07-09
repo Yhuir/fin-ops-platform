@@ -887,8 +887,8 @@ test.describe("input invoice usage browser flow", () => {
     let requestBody: { invoiceIds?: string[] } | undefined;
     let subsetPreviewResponseStatus: number | undefined;
     let draftResponseStatus: number | undefined;
-    let draftRowsRefreshStatus: number | undefined;
     const confirmDialog = page.getByRole("dialog", { name: "OA 草稿提交确认" });
+    const rowsCountBeforeDraft = api.count("GET /api/input-invoice-usage/rows");
     await recordLatency({
       operationId: "input-invoice-usage.create-oa-reverse-draft",
       visibleLabel: "创建 OA 草稿",
@@ -901,13 +901,11 @@ test.describe("input invoice usage browser flow", () => {
       );
       const subsetPreviewResponse = waitForInputInvoiceUsageOaReversePreview(page);
       const draftResponse = waitForInputInvoiceUsageOaDraft(page);
-      const draftRowsRefresh = waitForInputInvoiceUsageRows(page);
       await workflow.getByRole("button", { name: "创建 OA 草稿" }).click();
 
       requestBody = JSON.parse((await subsetPreviewRequest).postData() ?? "{}") as { invoiceIds?: string[] };
       subsetPreviewResponseStatus = (await subsetPreviewResponse).status();
       draftResponseStatus = (await mark("apiLatencyMs", draftResponse)).status();
-      draftRowsRefreshStatus = (await mark("operationBarrierLatencyMs", draftRowsRefresh)).status();
       await mark("finalSettledLatencyMs", expect(confirmDialog).toBeVisible());
     });
     if (!requestBody) {
@@ -916,9 +914,9 @@ test.describe("input invoice usage browser flow", () => {
     expect(requestBody.invoiceIds).toEqual(["input-oa-invoice-e2e-001"]);
     expect(subsetPreviewResponseStatus).toBe(200);
     expect(draftResponseStatus).toBe(200);
-    expect(draftRowsRefreshStatus).toBe(200);
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/preview")).toBeGreaterThanOrEqual(2);
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(1);
+    expect(api.count("GET /api/input-invoice-usage/rows")).toBe(rowsCountBeforeDraft);
 
     await expect(confirmDialog).toBeVisible();
     await expect(confirmDialog.getByRole("link", { name: "打开 OA 草稿" })).toHaveAttribute(
@@ -928,21 +926,19 @@ test.describe("input invoice usage browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
 
     let manualStatusResponseStatus: number | undefined;
-    let manualStatusRowsRefreshStatus: number | undefined;
+    const rowsCountBeforeManualStatus = api.count("GET /api/input-invoice-usage/rows");
     await recordLatency({
       operationId: "input-invoice-usage.confirm-oa-reverse-submitted",
       visibleLabel: "我已在OA系统提交该草稿 OA正在进行中",
       actionType: "click",
     }, async (mark) => {
       const manualStatusResponse = waitForInputInvoiceUsageManualStatus(page);
-      const manualStatusRowsRefresh = waitForInputInvoiceUsageRows(page);
       await confirmDialog.getByRole("button", { name: /我已在OA系统提交该草稿\s+OA正在进行中/ }).click();
       manualStatusResponseStatus = (await mark("apiLatencyMs", manualStatusResponse)).status();
-      manualStatusRowsRefreshStatus = (await mark("operationBarrierLatencyMs", manualStatusRowsRefresh)).status();
       await mark("finalSettledLatencyMs", expect(page.getByRole("tab", { name: "已提交" })).toHaveAttribute("aria-selected", "true"));
     });
     expect(manualStatusResponseStatus).toBe(200);
-    expect(manualStatusRowsRefreshStatus).toBe(200);
+    expect(api.count("GET /api/input-invoice-usage/rows")).toBe(rowsCountBeforeManualStatus);
 
     await expect(page.getByLabel("以发票反提 OA 提示").getByText("已进入已提交历史。")).toBeVisible();
     await expect(page.getByRole("tab", { name: "已提交" })).toHaveAttribute("aria-selected", "true");
@@ -951,7 +947,7 @@ test.describe("input invoice usage browser flow", () => {
     await expect(workflow.getByText("浏览器进项供应商一")).toBeVisible();
     await expect(workflow.getByText("input-oa-reverse-batch-e2e-001")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
-    expect(api.count("GET /api/input-invoice-usage/rows")).toBeGreaterThanOrEqual(3);
+    expect(api.count("GET /api/input-invoice-usage/rows")).toBe(rowsCountBeforeDraft);
     expect(api.count("GET /api/input-invoice-usage/oa-reverse/submitted-history")).toBeGreaterThanOrEqual(1);
     expect(browserErrors).toEqual([]);
   });
