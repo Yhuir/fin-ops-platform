@@ -96,7 +96,7 @@ describe("AppHealthOperationsPage", () => {
     expect(audit).toHaveTextContent("Audit");
     expect(audit).toHaveTextContent("进项发票使用情况");
     expect(audit).toHaveTextContent("未验证");
-    const auditButton = within(audit).getByRole("button", { name: "Audit 进项使用" });
+    const auditButton = within(audit).getByRole("button", { name: "Audit 进项发票使用情况" });
     expect(auditButton).toHaveClass("app-health-audit-button");
     await userEvent.click(auditButton);
     await waitFor(() => {

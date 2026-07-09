@@ -8,6 +8,7 @@ import type {
   AppHealthWorkbenchSource,
   InputInvoiceUsageAuditPayload,
   OperationsDashboardPayload,
+  OutputInvoiceCollectionAuditPayload,
 } from "./types";
 
 async function requestJson<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -93,6 +94,10 @@ export async function fetchAppHealthDashboard(signal?: AbortSignal): Promise<Ope
 
 export async function fetchInputInvoiceUsageAudit(signal?: AbortSignal): Promise<InputInvoiceUsageAuditPayload> {
   return requestJson<InputInvoiceUsageAuditPayload>("/api/operations/app-health/input-invoice-usage-audit", signal);
+}
+
+export async function fetchOutputInvoiceCollectionAudit(signal?: AbortSignal): Promise<OutputInvoiceCollectionAuditPayload> {
+  return requestJson<OutputInvoiceCollectionAuditPayload>("/api/operations/app-health/output-invoice-collection-audit", signal);
 }
 
 export type AppHealthSubscription = {

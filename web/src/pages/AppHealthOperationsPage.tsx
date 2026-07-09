@@ -254,16 +254,22 @@ function InputInvoiceUsageAuditPanel({
           </div>
           <div className="app-health-audit-actions">
             <FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag>
-            <Button
-              className="app-health-audit-button"
-              isDisabled={isLoading}
-              onPress={onRun}
-              size="sm"
-              variant="tertiary"
-            >
-              {isLoading ? <Spinner color="current" size="sm" /> : <ClipboardCheck aria-hidden="true" size={15} strokeWidth={2.2} />}
-              Audit 进项使用
-            </Button>
+            <Tooltip delay={0}>
+              <Tooltip.Trigger>
+                <Button
+                  aria-label="Audit 进项发票使用情况"
+                  className="app-health-audit-button"
+                  isDisabled={isLoading}
+                  isIconOnly
+                  onPress={onRun}
+                  size="sm"
+                  variant="tertiary"
+                >
+                  {isLoading ? <Spinner color="current" size="sm" /> : <ClipboardCheck aria-hidden="true" size={15} strokeWidth={2.2} />}
+                </Button>
+              </Tooltip.Trigger>
+              <Tooltip.Content>Audit 进项发票使用情况</Tooltip.Content>
+            </Tooltip>
           </div>
         </div>
         {error ? <AppHealthNotice status="danger">{error}</AppHealthNotice> : null}

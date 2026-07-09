@@ -1988,6 +1988,66 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
         self.assertEqual(queue.refreshes, [("input_invoice_usage", "2026-05", "api_source_versions_stale")])
 
+    def test_output_api_relation_source_versions_come_from_workbench_relation_repository(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._output_invoice_collection_query_service = object()
+        old_relation_versions = {"source_version": "1"}
+        current_relation_versions = {"source_version": "2"}
+        output_repository = PostgresReadModelRepository(
+            InvoiceReadModelConnection(
+                output_rows=[
+                    {
+                        "payload": {
+                            "id": "stale-output-relation-row",
+                            "invoice": {},
+                            "collectionStatus": {},
+                            "oa": {},
+                            "bankTransactions": {},
+                            "invoiceRelations": {},
+                            "redInvoiceRelation": {},
+                            "receipt": {},
+                        },
+                        "raw_payload": {},
+                    }
+                ],
+                output_scope_rows=[
+                    {
+                        "scope_key": "2026-05",
+                        "source_versions": {
+                            **output_invoice_collection_source_versions(),
+                            "workbench_relation_source_versions": old_relation_versions,
+                        },
+                        "cache_status": "fresh",
+                    }
+                ],
+            )
+        )
+        workbench_relation_repository = PostgresReadModelRepository(
+            InvoiceReadModelConnection(
+                workbench_relation_scope_rows=[
+                    {"scope_key": "2026-05", "source_versions": current_relation_versions, "cache_status": "fresh"}
+                ],
+            )
+        )
+        app._output_invoice_collection_sql_read_repository = OutputInvoiceCollectionReadModelRepositoryPort(
+            output_repository
+        )
+        app._workbench_relation_sql_read_repository = workbench_relation_repository
+
+        response = _output_invoice_collection_rows_response(
+            app,
+            {"month": ["2026-05"], "page": ["1"], "page_size": ["50"]},
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
+        self.assertEqual(queue.refreshes, [("output_invoice_collection", "2026-05", "api_source_versions_stale")])
+
     def test_input_api_all_scope_uses_rows_when_month_relation_versions_differ(self) -> None:
         base_versions = input_invoice_usage_source_versions()
         queue = QueueRecorder()

@@ -128,6 +128,23 @@ class FakeInputInvoiceUsageAuditConnection:
         raise AssertionError("audit endpoint must be read-only")
 
 
+class FakeOutputInvoiceCollectionAuditConnection(FakeInputInvoiceUsageAuditConnection):
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
+        if self.fail:
+            raise RuntimeError("audit database timeout")
+        self.fetch_one_calls.append((sql, params))
+        return {
+            "active_output_invoice_count": 2,
+            "active_output_invoice_total_with_tax": "300.00",
+            "read_model_invoice_member_count": 2,
+            "read_model_row_count": 1,
+            "output_invoice_collection_scope_count": 1,
+            "workbench_relation_scope_count": 1,
+            "active_workbench_pair_relation_count": 1,
+            "linked_workbench_relation_group_count": 1,
+        }
+
+
 class FakeRuntimeQueueRepository:
     def __init__(self) -> None:
         self.enqueued: list[dict[str, object]] = []
@@ -761,6 +778,27 @@ class AppHealthApiTests(unittest.TestCase):
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
         self.assertIn("app.invoices", queried_sql)
         self.assertIn("app.workbench_pair_relations", queried_sql)
+
+    def test_operations_output_invoice_collection_audit_returns_read_only_report_for_admin(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakeOutputInvoiceCollectionAuditConnection()
+            setattr(app._state_store, "_connection", connection)
+
+            response = app.handle_request("GET", "/api/operations/app-health/output-invoice-collection-audit")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["mode"], "dry-run")
+        self.assertEqual(payload["overall_status"], "pass")
+        self.assertEqual(payload["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
+        self.assertIn("read_model.output_invoice_collection_rows", payload["audit_contract"]["source_tables"])
+        self.assertIn("read_model.workbench_relation_rows", payload["audit_contract"]["source_tables"])
+        self.assertEqual(connection.executed, [])
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
+        self.assertIn("read_model.output_invoice_collection_rows", queried_sql)
+        self.assertIn("output_invoice_ids", queried_sql)
 
     def test_operations_input_invoice_usage_audit_reports_relation_issues_without_writes(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:

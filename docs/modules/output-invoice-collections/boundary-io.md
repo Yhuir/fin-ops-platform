@@ -40,7 +40,8 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 收款 rows/details | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额；rows summary 的 `invoiceCount` 按唯一销项发票 ID 统计并驱动表头 `销项票 N`，`pagination.total` 仍是表格行数/配对组行数 |
+| 收款 rows/details | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额；rows summary 的 `invoiceCount` 按唯一销项发票 ID 统计并驱动标题右侧 `销项票 N`，`pagination.total` 仍是表格行数/配对组行数；标题统计表示全量销项票数，不随当前 keyword/filter/month/sort 的表格筛选结果变化 |
+| 页面 Audit icon | AppHealth operations audit API | admin-only；标题右侧 icon 调用 `/api/operations/app-health/output-invoice-collection-audit` 只读审计，成功后显示 Audit 是否通过、全部数据/配对关系是否正确以及 Fresh 状态；不得在页面内直接修复或刷新 read model |
 | lifecycle/status result | API | 写后可恢复、可审计 |
 | operation barrier targets | 前端页面 | lifecycle/receipt 写成功后用服务端返回 targets 等待 fresh；缺省时才回退当前查询月份 |
 | Dirty scope | runtime queue | `output_invoice_collection.read_model.refresh` |
@@ -80,6 +81,7 @@
 - `web/src/test/OutputInvoiceCollectionsPage.test.tsx` 覆盖页面等待 operation barrier 行为。
 - `web/e2e/output-invoice-collections-flow.spec.ts`
 - `tests/test_output_invoice_collection_service.py::OutputInvoiceCollectionQueryServiceTests.test_multi_output_relation_emits_single_net_collection_row` 覆盖 linked 多销项发票 relation 只输出一条净额收款行，且负数发票进入 summaries。
+- `tests/test_audit_output_invoice_collection_read_model_tool.py` 覆盖销项收款真实库只读审计 invariant。
 
 ## 当前缺口和删除条件
 

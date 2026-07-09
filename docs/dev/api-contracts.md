@@ -24,6 +24,7 @@
 - `/api/app-health*`：健康状态。
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
 - `/api/operations/app-health/input-invoice-usage-audit`：管理员只读进项使用三边对账审计。
+- `/api/operations/app-health/output-invoice-collection-audit`：管理员只读销项收款三边对账审计。
 - `/api/operations/app-health/input-invoice-usage-refresh`：管理员受控入队刷新进项使用 read model scope。
 
 ## Workbench 设置 API
@@ -1158,6 +1159,65 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `overall_status="pass"` 且 `summary.blocking_issue_count=0` 才能声明当前真实库“进项发票使用情况”页面全量数据和配对关系一致。
 - `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本，方便运维记录；修复必须走对应业务 runbook 或明确修复工具。
 - 审计覆盖 canonical 进项发票、`input_invoice_usage` rows/scopes、`workbench_relation` rows/groups/scopes、active Workbench relation、dirty scopes、source_versions、重复/孤儿/缺失 member、金额合计、跨 scope relation 分发和 candidate 误入。
+
+## AppHealth 销项收款审计 API
+
+`GET /api/operations/app-health/output-invoice-collection-audit`
+
+权限：
+
+- 复用 OA session。
+- 仅 `can_admin_access=true` 的管理员可访问。
+- 未登录或登录态失效返回现有 `401 invalid_oa_session`。
+- 非管理员返回 `403 admin_only`。
+
+该接口是只读审计入口，复用 App 后端已有 PostgreSQL 连接，不要求调用方提供 DB URL。无 PostgreSQL runtime connection 时返回 `503 postgres_required`；审计 SQL 失败时返回 `500 output_invoice_collection_audit_failed`。该接口不得刷新 read model、不得自动修复 relation、不得写入业务表。
+
+成功响应始终为 `200`，审计是否通过由 payload 判断：
+
+```json
+{
+  "mode": "dry-run",
+  "tenant_id": "default",
+  "overall_status": "pass",
+  "summary": {
+    "active_output_invoice_count": 807,
+    "read_model_invoice_member_count": 807,
+    "read_model_row_count": 764,
+    "output_invoice_collection_scope_count": 6,
+    "workbench_relation_scope_count": 6,
+    "active_workbench_pair_relation_count": 196,
+    "linked_workbench_relation_group_count": 196,
+    "issue_count": 0,
+    "error_count": 0,
+    "warning_count": 0,
+    "blocking_issue_count": 0,
+    "issue_counts_by_code": {}
+  },
+  "issues": [],
+  "audit_contract": {
+    "source_tables": [
+      "app.invoices",
+      "app.workbench_pair_relations",
+      "read_model.output_invoice_collection_rows",
+      "read_model.output_invoice_collection_scopes",
+      "read_model.workbench_relation_rows",
+      "read_model.workbench_relation_groups",
+      "read_model.workbench_relation_scopes",
+      "job.read_model_dirty_scopes"
+    ],
+    "pass_condition": "blocking_issue_count == 0",
+    "write_policy": "read_only"
+  },
+  "generated_at": "2026-07-10T00:00:00+00:00"
+}
+```
+
+契约要求：
+
+- `overall_status="pass"` 且 `summary.blocking_issue_count=0` 才能声明当前真实库“销项发票收款情况”页面全量数据和配对关系一致。
+- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本，方便运维记录；修复必须走对应业务 runbook 或明确修复工具。
+- 审计覆盖 canonical 销项发票、`output_invoice_collection` rows/scopes、`workbench_relation` rows/groups/scopes、active Workbench relation、dirty scopes、source_versions、重复/孤儿/缺失 member、金额合计、跨 scope relation 分发和 candidate 误入。
 
 ## AppHealth 进项使用刷新 API
 

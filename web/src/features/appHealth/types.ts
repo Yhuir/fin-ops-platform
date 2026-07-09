@@ -259,8 +259,7 @@ export type OperationsDashboardPayload = {
 
 export type InputInvoiceUsageAuditStatus = "pass" | "issues_found" | string;
 
-export type InputInvoiceUsageAuditSummary = {
-  active_input_invoice_count?: number | null;
+export type PageAuditSummary = {
   read_model_invoice_member_count?: number | null;
   read_model_row_count?: number | null;
   active_workbench_pair_relation_count?: number | null;
@@ -272,7 +271,15 @@ export type InputInvoiceUsageAuditSummary = {
   issue_counts_by_code?: Record<string, number>;
 };
 
-export type InputInvoiceUsageAuditIssue = {
+export type InputInvoiceUsageAuditSummary = PageAuditSummary & {
+  active_input_invoice_count?: number | null;
+};
+
+export type OutputInvoiceCollectionAuditSummary = PageAuditSummary & {
+  active_output_invoice_count?: number | null;
+};
+
+export type PageAuditIssue = {
   severity?: string;
   code?: string;
   message?: string;
@@ -280,11 +287,19 @@ export type InputInvoiceUsageAuditIssue = {
   scope_key?: string | null;
 };
 
-export type InputInvoiceUsageAuditPayload = {
+export type PageAuditPayload = {
   mode?: string;
   tenant_id?: string;
   generated_at?: string;
   overall_status?: InputInvoiceUsageAuditStatus;
+  summary?: PageAuditSummary;
+  issues?: PageAuditIssue[];
+};
+
+export type InputInvoiceUsageAuditPayload = PageAuditPayload & {
   summary?: InputInvoiceUsageAuditSummary;
-  issues?: InputInvoiceUsageAuditIssue[];
+};
+
+export type OutputInvoiceCollectionAuditPayload = PageAuditPayload & {
+  summary?: OutputInvoiceCollectionAuditSummary;
 };

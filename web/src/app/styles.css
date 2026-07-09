@@ -181,6 +181,20 @@ textarea {
   line-height: 1.25;
 }
 
+.page-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--fp-space-3);
+  flex-wrap: wrap;
+}
+
+.page-title-accessory {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+
 .page-description {
   margin-top: 6px;
   color: var(--fp-text-secondary);
@@ -208,11 +222,9 @@ textarea {
 }
 
 .invoice-count-page-scaffold .page-header > div:first-child {
-  display: flex;
+  display: grid;
   min-width: 0;
-  align-items: center;
-  gap: var(--fp-space-3);
-  flex-wrap: wrap;
+  gap: var(--fp-space-2);
 }
 
 .invoice-count-page-scaffold .page-description {
@@ -245,6 +257,58 @@ textarea {
 .invoice-count-segment__item--active {
   background: var(--fp-accent-soft);
   color: var(--fp-accent);
+}
+
+.page-title-accessory-group {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--fp-space-2);
+  flex-wrap: wrap;
+}
+
+.page-audit-control {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.page-audit-icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  color: var(--fp-text-secondary);
+  background: var(--fp-surface);
+}
+
+.page-audit-icon-button:hover:not(:disabled),
+.page-audit-icon-button:focus-visible {
+  border-color: var(--fp-primary);
+  color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+}
+
+.page-audit-status {
+  max-width: min(520px, 100vw - 64px);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.page-audit-status[data-tone="success"] {
+  color: var(--fp-success);
+}
+
+.page-audit-status[data-tone="warning"] {
+  color: var(--fp-warning);
+}
+
+.page-audit-status[data-tone="danger"] {
+  color: var(--fp-danger);
 }
 
 .input-invoice-usage-page {
@@ -9690,6 +9754,9 @@ textarea {
 }
 
 .app-health-audit-button {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
   border: 1px solid var(--fp-border);
   background: var(--fp-surface);
   color: var(--fp-text-primary);

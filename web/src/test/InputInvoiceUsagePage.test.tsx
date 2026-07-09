@@ -108,7 +108,7 @@ const rowsPayload = {
 };
 
 function installInputInvoiceUsageFetch(
-  payload: unknown = rowsPayload,
+  payload: unknown | ((url: URL) => unknown) = rowsPayload,
   options: {
     exportDownloadResponse?: (url: URL) => Response;
   } = {},
@@ -116,7 +116,21 @@ function installInputInvoiceUsageFetch(
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/input-invoice-usage/rows") {
-      return new Response(JSON.stringify(payload), {
+      const responsePayload = typeof payload === "function" ? payload(url) : payload;
+      return new Response(JSON.stringify(responsePayload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.pathname === "/api/operations/app-health/input-invoice-usage-audit") {
+      return new Response(JSON.stringify({
+        overall_status: "pass",
+        summary: {
+          blocking_issue_count: 0,
+          issue_count: 0,
+        },
+        issues: [],
+      }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -596,6 +610,48 @@ describe("Input invoice usage page", () => {
     expect(await screen.findByTestId("input-invoice-usage-page")).toBeInTheDocument();
 
     expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
+  });
+
+  test("keeps title invoice count stable when filters change", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installInputInvoiceUsageFetch((url) => {
+      const filtered = Boolean(url.searchParams.get("keyword"));
+      return {
+        ...rowsPayload,
+        pagination: { ...rowsPayload.pagination, total: filtered ? 71 : 787 },
+        summary: { ...rowsPayload.summary, invoiceCount: filtered ? 71 : 787 },
+      };
+    });
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
+    expect(within(page).getByLabelText("进项发票数量统计")).toHaveTextContent("进项票 787");
+
+    await user.type(within(page).getByLabelText("进项发票使用情况搜索"), "已支付");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
+    await waitFor(() => expect(rowsRequests(fetchMock).some((url) => url.searchParams.get("keyword") === "已支付")).toBe(true));
+    expect(within(page).getByLabelText("进项发票数量统计")).toHaveTextContent("进项票 787");
+  });
+
+  test("admin can run title audit icon and see data relation freshness result", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installInputInvoiceUsageFetch();
+
+    renderAuthenticatedAppAt("/input-invoice-usage", { session: { canAdminAccess: true } });
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    const auditButton = await within(page).findByRole("button", { name: "Audit 进项发票使用情况" });
+    await user.click(auditButton);
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/operations/app-health/input-invoice-usage-audit"))).toBe(true);
+    });
+    const status = await within(page).findByText(/Audit 成功/);
+    expect(status).toHaveTextContent("全部数据正确");
+    expect(status).toHaveTextContent("全部配对关系正确");
+    expect(status).toHaveTextContent("Fresh");
   });
 
   test("adds sidebar route and renders the project dense table contract", async () => {

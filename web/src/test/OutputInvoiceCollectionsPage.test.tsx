@@ -251,11 +251,22 @@ const rowsPayload = {
   sourceVersion: "output-invoice-collections:v1",
 };
 
-function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?: Promise<void>; rowsPayloadOverride?: unknown } = {}) {
+function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?: Promise<void>; rowsPayloadOverride?: unknown | ((url: URL) => unknown) } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/output-invoice-collections/rows") {
-      return jsonResponse(options.rowsPayloadOverride ?? rowsPayload);
+      const override = options.rowsPayloadOverride;
+      return jsonResponse(typeof override === "function" ? override(url) : override ?? rowsPayload);
+    }
+    if (url.pathname === "/api/operations/app-health/output-invoice-collection-audit") {
+      return jsonResponse({
+        overall_status: "pass",
+        summary: {
+          blocking_issue_count: 0,
+          issue_count: 0,
+        },
+        issues: [],
+      });
     }
     if (url.pathname === "/api/output-invoice-collections/filter-options") {
       return jsonResponse({
@@ -715,6 +726,50 @@ describe("Output invoice collections page", () => {
     expect(await screen.findByTestId("output-invoice-collections-page")).toBeInTheDocument();
 
     expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
+  });
+
+  test("keeps title invoice count stable when filters change", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installOutputInvoiceCollectionsFetch({
+      rowsPayloadOverride: (url) => {
+        const filtered = Boolean(url.searchParams.get("keyword"));
+        return {
+          ...rowsPayload,
+          pagination: { ...rowsPayload.pagination, total: filtered ? 6 : 20 },
+          summary: { ...rowsPayload.summary, invoiceCount: filtered ? 6 : 20 },
+        };
+      },
+    });
+
+    renderAuthenticatedAppAt("/output-invoice-collections");
+
+    const page = await screen.findByTestId("output-invoice-collections-page");
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
+    expect(within(page).getByLabelText("销项发票数量统计")).toHaveTextContent("销项票 20");
+
+    await user.type(within(page).getByLabelText("搜索销项发票收款情况"), "已收");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
+    await waitFor(() => expect(rowsRequests(fetchMock).some((url) => url.searchParams.get("keyword") === "已收")).toBe(true));
+    expect(within(page).getByLabelText("销项发票数量统计")).toHaveTextContent("销项票 20");
+  });
+
+  test("admin can run title audit icon and see data relation freshness result", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installOutputInvoiceCollectionsFetch();
+
+    renderAuthenticatedAppAt("/output-invoice-collections", { session: { canAdminAccess: true } });
+
+    const page = await screen.findByTestId("output-invoice-collections-page");
+    const auditButton = await within(page).findByRole("button", { name: "Audit 销项发票收款情况" });
+    await user.click(auditButton);
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/operations/app-health/output-invoice-collection-audit"))).toBe(true);
+    });
+    const status = await within(page).findByText(/Audit 成功/);
+    expect(status).toHaveTextContent("全部数据正确");
+    expect(status).toHaveTextContent("全部配对关系正确");
+    expect(status).toHaveTextContent("Fresh");
   });
 
   test("adds sidebar route and renders grouped project table layout with real export entry", async () => {
