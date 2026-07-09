@@ -25,7 +25,9 @@
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
 - `/api/operations/app-health/input-invoice-usage-audit`：管理员只读进项使用三边对账审计。
 - `/api/operations/app-health/output-invoice-collection-audit`：管理员只读销项收款三边对账审计。
+- `/api/operations/app-health/page-audit`：管理员只读页面业务 read model / relation 全量对账审计。
 - `/api/operations/app-health/input-invoice-usage-refresh`：管理员受控入队刷新进项使用 read model scope。
+- `/api/operations/app-health/output-invoice-collection-refresh`：管理员受控入队刷新销项收款 read model scope。
 
 ## Workbench 设置 API
 
@@ -1219,6 +1221,75 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本，方便运维记录；修复必须走对应业务 runbook 或明确修复工具。
 - 审计覆盖 canonical 销项发票、`output_invoice_collection` rows/scopes、`workbench_relation` rows/groups/scopes、active Workbench relation、dirty scopes、source_versions、重复/孤儿/缺失 member、金额合计、跨 scope relation 分发和 candidate 误入。
 
+## AppHealth 页面业务审计 API
+
+`GET /api/operations/app-health/page-audit?domain=<domain_key>`
+
+权限：
+
+- 复用 OA session。
+- 仅 `can_admin_access=true` 的管理员可访问。
+- 未登录或登录态失效返回现有 `401 invalid_oa_session`。
+- 非管理员返回 `403 admin_only`。
+
+支持的 `domain_key`：
+
+- `pending_invoices`：代找发票页面。
+- `turnover_ledger`：外部往来款管理页面。
+- `batch_accounting`：批量账务页面。
+- `bank_flow_rule_batches`：流水规则批量处理页面。
+- `oa_pending_payments`：OA 代付款核对页面。
+- `bank_details`：银行明细页面。
+- `cost_statistics`：成本统计页面。
+
+该接口是只读页面业务审计入口，复用 App 后端已有 PostgreSQL 连接，不要求调用方提供 DB URL。无 PostgreSQL runtime connection 时返回 `503 postgres_required`；未知 `domain` 返回 `400 unsupported_page_audit_domain`；审计 SQL 失败时返回 `500 page_audit_failed`。该接口不得刷新 read model、不得自动修复 relation、不得写入业务表。
+
+成功响应始终为 `200`，审计是否通过由 payload 判断：
+
+```json
+{
+  "mode": "page-business-read-model-audit",
+  "tenant_id": "default",
+  "domain_key": "bank_details",
+  "label": "银行明细",
+  "overall_status": "pass",
+  "summary": {
+    "source_fact_count": 910,
+    "read_model_row_count": 910,
+    "read_model_scope_count": 6,
+    "active_relation_count": 196,
+    "linked_relation_group_count": 196,
+    "dirty_scope_count": 0,
+    "outbox_backlog_count": 0,
+    "issue_count": 0,
+    "error_count": 0,
+    "warning_count": 0,
+    "blocking_issue_count": 0,
+    "issue_counts_by_code": {},
+    "fresh": true
+  },
+  "issues": [],
+  "audit_contract": {
+    "source_tables": ["app.bank_transactions", "app.bank_transaction_categories"],
+    "read_model_tables": ["read_model.bank_detail_rows", "read_model.bank_detail_scopes", "read_model.bank_account_balances"],
+    "relation_tables": ["read_model.workbench_relation_rows", "read_model.workbench_relation_groups"],
+    "scope_types": ["bank_detail", "bank_account_balance", "workbench_relation"],
+    "event_types": ["bank_detail.read_model.refresh", "bank_account_balance.read_model.refresh", "workbench_relation.read_model.refresh"],
+    "pass_condition": "blocking_issue_count == 0",
+    "guarantee_boundary": "App-internal canonical facts, read_model rows/scopes/source_versions, durable refresh state, and projected relation distribution agree for this page.",
+    "write_policy": "read_only"
+  },
+  "generated_at": "2026-07-10T00:00:00+00:00"
+}
+```
+
+契约要求：
+
+- `overall_status="pass"` 且 `summary.blocking_issue_count=0` 才能声明该页面在 App 内部 canonical facts、页面 read model、refresh queue 和 Workbench relation 投影上全量一致。
+- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本；修复必须走对应业务 runbook、read model rebuild 或明确修复工具。
+- 审计覆盖页面 source facts、read model rows/scopes/source_versions、dirty scopes/outbox backlog、缺失/孤儿/重复 row、scope row_count、active relation 分发和非 active relation 误投影为 linked。
+- 该接口只能证明 App 内部事实、read model 和 relation 投影一致；不能证明外部银行/OA 系统本身没有漏同步。外部源完整性仍必须由对应导入/OA sync runbook 和来源系统对账证明。
+
 ## AppHealth 进项使用刷新 API
 
 `POST /api/operations/app-health/input-invoice-usage-refresh`
@@ -1257,6 +1328,50 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
   "scope_type": "input_invoice_usage",
   "scope_keys": ["2025-09", "2026-06"],
   "enqueued_scope_keys": ["2025-09", "2026-06"],
+  "enqueued_count": 2,
+  "tenant_id": "default",
+  "reason": "production_audit_repair"
+}
+```
+
+## AppHealth 销项收款刷新 API
+
+`POST /api/operations/app-health/output-invoice-collection-refresh`
+
+权限：
+
+- 复用 OA session。
+- 仅 `can_admin_access=true` 的管理员可访问。
+- 未登录或登录态失效返回现有 `401 invalid_oa_session`。
+- 非管理员返回 `403 admin_only`。
+
+请求体：
+
+```json
+{
+  "scope_keys": ["2026-01", "2026-06"],
+  "reason": "production_audit_repair",
+  "metadata": {
+    "audit": "output_invoice_collection"
+  }
+}
+```
+
+契约要求：
+
+- 只允许 `scope_keys` 为 `all` 或 `YYYY-MM`，同一请求最多 36 个 scope；非法 scope 返回 `400 invalid_output_invoice_collection_refresh_scope`。
+- 接口只通过 `ReadModelRefreshGateway` 写入 durable runtime queue，入队 `output_invoice_collection.read_model.refresh`；不得直接写 `read_model.output_invoice_collection_*`、不得直接修复 relation、不得绕过 scope policy。
+- runtime queue 不可用时返回 `503 runtime_queue_required`。
+- 成功返回 `202 Accepted`，表示 refresh job 已入队，实际完成状态必须继续用 App Health、operation barrier 或 `/api/operations/app-health/output-invoice-collection-audit` 复核。
+
+成功响应：
+
+```json
+{
+  "read_model_key": "output_invoice_collection",
+  "scope_type": "output_invoice_collection",
+  "scope_keys": ["2026-01", "2026-06"],
+  "enqueued_scope_keys": ["2026-01", "2026-06"],
   "enqueued_count": 2,
   "tenant_id": "default",
   "reason": "production_audit_repair"

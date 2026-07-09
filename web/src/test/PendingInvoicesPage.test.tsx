@@ -1039,7 +1039,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("button", { name: "全部 431" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出 356" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "收入 75" })).toBeInTheDocument();
-    expect(within(page).getByRole("heading", { name: "待找发票" }).parentElement).toContainElement(within(page).getByRole("button", { name: "全部 431" }));
+    expect(within(page).getByRole("heading", { name: "待找发票" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出待找发票规则设置" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "收入待找发票规则设置" })).toBeInTheDocument();
 

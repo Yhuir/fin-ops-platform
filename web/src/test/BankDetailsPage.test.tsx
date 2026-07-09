@@ -165,7 +165,7 @@ describe("Bank details page", () => {
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
-    expect(within(page).queryByRole("heading", { name: "银行明细" })).not.toBeInTheDocument();
+    expect(within(page).getByRole("heading", { name: "银行明细" })).toBeInTheDocument();
     expect(within(page).getByRole("heading", { name: "全部流水" })).toBeInTheDocument();
     expect(within(page).getByText("总余额")).toBeInTheDocument();
     expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);

@@ -25,7 +25,7 @@
 - `web/src/features/appStatus/*`
 - `web/src/contexts/AppHealthStatusContext.tsx`
 - `web/src/components/shell/AppStatusIndicator.tsx`
-- `backend/src/fin_ops_platform/app/server.py` 中 `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/input-invoice-usage-audit`、`/api/operations/app-health/input-invoice-usage-refresh`
+- `backend/src/fin_ops_platform/app/server.py` 中 `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/input-invoice-usage-audit`、`/api/operations/app-health/output-invoice-collection-audit`、`/api/operations/app-health/page-audit`、`/api/operations/app-health/input-invoice-usage-refresh`、`/api/operations/app-health/output-invoice-collection-refresh`
 - `backend/src/fin_ops_platform/services/app_health_service.py`
 - `backend/src/fin_ops_platform/services/app_health_alert_service.py`
 - `backend/src/fin_ops_platform/services/app_status_overview_service.py`
@@ -44,7 +44,10 @@
 - `/api/app-health/stream`：SSE snapshot/heartbeat，只负责通知 UI 更新状态，不替代 durable facts。
 - `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、导入历史、请求性能、runtime outbox/read model/worker 指标。RabbitMQ 管理接口是可选 transport 观测，不是 read model freshness 事实源；dashboard 默认不阻塞等待 RabbitMQ management API，需显式设置 `FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS=1` 才读取实时队列管理指标。
 - `/api/operations/app-health/input-invoice-usage-audit`：admin-only 只读三边对账入口，App Health 页面提供 `Audit 进项使用` 按钮触发；后端复用 App 自身 PostgreSQL 连接审计 `app.invoices`、`app.workbench_pair_relations`、`read_model.input_invoice_usage_*`、`read_model.workbench_relation_*` 和 `job.read_model_dirty_scopes`。该入口只输出 `pass/issues_found` 报告，不刷新、不修复、不写业务数据。
+- `/api/operations/app-health/output-invoice-collection-audit`：admin-only 只读三边对账入口，销项收款页面 Audit icon 触发；后端复用 App 自身 PostgreSQL 连接审计 `app.invoices`、`app.workbench_pair_relations`、`read_model.output_invoice_collection_*`、`read_model.workbench_relation_*` 和 `job.read_model_dirty_scopes`。该入口只输出 `pass/issues_found` 报告，不刷新、不修复、不写业务数据。
+- `/api/operations/app-health/page-audit`：admin-only 只读页面业务审计入口，待找发票、外部往来款管理、批量账务、流水规则批量处理、OA 待付款核对、银行明细和成本统计页面标题右侧 Audit icon 触发；后端复用 App 自身 PostgreSQL 连接审计该页面 canonical facts、页面 read model rows/scopes/source_versions、durable refresh state 和相关 Workbench relation 分发。该入口只输出 `pass/issues_found` 报告，不刷新、不修复、不写业务数据；通过时证明 App 内部事实和投影一致，不证明外部银行/OA 系统本身没有漏同步。
 - `/api/operations/app-health/input-invoice-usage-refresh`：admin-only 受控刷新入队入口，只通过 `ReadModelRefreshGateway` / durable runtime queue 入队 `input_invoice_usage` scope refresh；返回 `202` 后必须继续用 Audit 或 operation barrier 复核。
+- `/api/operations/app-health/output-invoice-collection-refresh`：admin-only 受控刷新入队入口，只通过 `ReadModelRefreshGateway` / durable runtime queue 入队 `output_invoice_collection` scope refresh；返回 `202` 后必须继续用 Audit 或 operation barrier 复核。
 - `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
@@ -61,6 +64,8 @@
 - Domain/read model/job/dependency registries：`app_status_*_registry.py`。
 - 发票 inventory：读取 `app.invoices.source_links`，只统计已进入统一发票池且未删除的 canonical invoice facts；OA 附件 OCR cache 只作为解析缓存，不作为 App Health 发票 inventory 事实源。
 - 进项发票使用情况审计：只读 `app.invoices`、`app.workbench_pair_relations`、`read_model.input_invoice_usage_rows/scopes`、`read_model.workbench_relation_rows/groups/scopes` 和 `job.read_model_dirty_scopes`；真实库 `blocking_issue_count=0` 才能作为“进项发票使用情况页面全量数据和配对关系正确”的证据。
+- 销项发票收款情况审计：只读 `app.invoices`、`app.workbench_pair_relations`、`read_model.output_invoice_collection_rows/scopes`、`read_model.workbench_relation_rows/groups/scopes` 和 `job.read_model_dirty_scopes`；真实库 `blocking_issue_count=0` 才能作为“销项发票收款情况页面全量数据和配对关系正确”的证据。
+- 页面业务审计：只读 `PAGE_AUDIT_CONTRACTS` 登记的 source/read model/relation/job 表；真实库 `overall_status=pass` 且 `blocking_issue_count=0` 才能作为对应页面 App 内部 canonical facts、read model 和 relation 投影一致的证据。OA 待付款等依赖外部 OA/银行系统的页面仍需要外部 sync/runbook 证明来源系统本身完整。
 - 导入历史：只读取 `app.import_batches` 的 `bank_transaction`、`input_invoice`、`output_invoice` 批次成功数。
 - 前端只展示后端事实；不能用当前 route、表格 loading、组件本地状态推导全局状态。
 

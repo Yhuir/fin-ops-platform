@@ -3,6 +3,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, Search, X } from "
 
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
@@ -302,7 +303,7 @@ function AmountMismatchWarning({
 
 export default function BatchAccountingPage() {
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const [bankYear, setBankYear] = useState(currentYear);
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
   const [payload, setPayload] = useState<BatchAccountingResponse>(EMPTY_PAYLOAD);
@@ -634,9 +635,19 @@ export default function BatchAccountingPage() {
     }
   };
 
+  const titleAccessory = canAdminAccess ? (
+    <PageBusinessAuditIcon
+      ariaLabel="Audit 日常报销批量账务管理"
+      domainKey="batch_accounting"
+      label="日常报销批量账务管理"
+      readModelStatus={readModelStatus}
+    />
+  ) : null;
+
   return (
     <PageScaffold
       title="日常报销批量账务管理"
+      titleAccessory={titleAccessory}
       actions={(
         <button
           className="batch-accounting-button batch-accounting-button--secondary"

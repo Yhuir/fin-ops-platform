@@ -9,6 +9,8 @@ type PageAuditIconProps = {
   label: string;
   readModelStatus?: string;
   runAudit: (signal?: AbortSignal) => Promise<PageAuditPayload>;
+  successText?: string;
+  notFreshText?: string;
 };
 
 function normalizeStatus(status: string | undefined) {
@@ -20,7 +22,12 @@ function isFreshStatus(status: string | undefined) {
   return !normalized || normalized === "fresh" || normalized === "live_query";
 }
 
-function auditMessage(payload: PageAuditPayload | null, readModelStatus: string | undefined) {
+function auditMessage(
+  payload: PageAuditPayload | null,
+  readModelStatus: string | undefined,
+  successText: string,
+  notFreshText: string,
+) {
   if (!payload) {
     return null;
   }
@@ -30,15 +37,22 @@ function auditMessage(payload: PageAuditPayload | null, readModelStatus: string 
   const passed = payload.overall_status === "pass" && blocking === 0 && issues === 0;
   const fresh = isFreshStatus(readModelStatus);
   if (passed && fresh) {
-    return { tone: "success", text: "Audit 成功 · 全部数据正确 · 全部配对关系正确 · Fresh" };
+    return { tone: "success", text: successText };
   }
   if (passed) {
-    return { tone: "warning", text: "Audit 成功 · 全部数据正确 · 全部配对关系正确 · Not fresh" };
+    return { tone: "warning", text: notFreshText };
   }
   return { tone: "danger", text: `Audit 未通过 · blocking ${blocking} · issues ${issues}` };
 }
 
-export default function PageAuditIcon({ ariaLabel, label, readModelStatus, runAudit }: PageAuditIconProps) {
+export default function PageAuditIcon({
+  ariaLabel,
+  label,
+  readModelStatus,
+  runAudit,
+  successText = "Audit 成功 · 全部数据正确 · 全部配对关系正确 · Fresh",
+  notFreshText = "Audit 成功 · 全部数据正确 · 全部配对关系正确 · Not fresh",
+}: PageAuditIconProps) {
   const [payload, setPayload] = useState<PageAuditPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -60,7 +74,7 @@ export default function PageAuditIcon({ ariaLabel, label, readModelStatus, runAu
     }
   }, [isLoading, runAudit]);
 
-  const message = auditMessage(payload, readModelStatus);
+  const message = auditMessage(payload, readModelStatus, successText, notFreshText);
 
   return (
     <span className="page-audit-control">

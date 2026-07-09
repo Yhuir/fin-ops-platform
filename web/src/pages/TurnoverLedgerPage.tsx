@@ -3,6 +3,7 @@ import { Download, RefreshCw } from "lucide-react";
 
 import AppDrawer from "../components/common/AppDrawer";
 import PageScaffold from "../components/common/PageScaffold";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
 import TurnoverLedgerExportDialog from "../components/turnoverLedger/TurnoverLedgerExportDialog";
 import TurnoverLedgerExtraDrawer from "../components/turnoverLedger/TurnoverLedgerExtraDrawer";
@@ -391,7 +392,7 @@ function tagSubLabel(tag: TurnoverLedgerTagDefinition) {
 
 export default function TurnoverLedgerPage() {
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
   const [tagSelection, setTagSelection] = useState<TurnoverLedgerTagSelection>(EMPTY_TAG_SELECTION);
@@ -961,10 +962,20 @@ export default function TurnoverLedgerPage() {
     }
   };
 
+  const titleAccessory = canAdminAccess ? (
+    <PageBusinessAuditIcon
+      ariaLabel="Audit 外部往来款管理"
+      domainKey="turnover_ledger"
+      label="外部往来款管理"
+      readModelStatus={readModelStatus}
+    />
+  ) : null;
+
   return (
     <div className="turnover-ledger-page" data-testid="turnover-ledger-page">
       <PageScaffold
         title="外部往来款管理"
+        titleAccessory={titleAccessory}
         actions={(
           <>
             <button

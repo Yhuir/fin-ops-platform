@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageToolbar from "../components/common/PageToolbar";
 import PendingInvoiceDetailDrawer from "../components/pendingInvoices/PendingInvoiceDetailDrawer";
 import PendingInvoiceExportDrawer from "../components/pendingInvoices/PendingInvoiceExportDrawer";
@@ -210,7 +211,7 @@ function displayedPendingInvoiceRange(page: number, pageSize: number, total: num
 export default function PendingInvoicesPage() {
   const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const pageActiveRef = useRef(active);
   const pendingTagRefreshRef = useRef(false);
   const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
@@ -740,6 +741,15 @@ export default function PendingInvoicesPage() {
     </div>
   );
 
+  const titleAccessory = canAdminAccess ? (
+    <PageBusinessAuditIcon
+      ariaLabel="Audit 待找发票"
+      domainKey="pending_invoices"
+      label="待找发票"
+      readModelStatus={readModelStatus}
+    />
+  ) : null;
+
   return (
     <div className="pending-invoices-page" data-testid="pending-invoices-page">
       <PageScaffold
@@ -782,6 +792,7 @@ export default function PendingInvoicesPage() {
         )}
         className="pending-invoices-page__scaffold"
         title="待找发票"
+        titleAccessory={titleAccessory}
       >
         <PageToolbar
           className="pending-invoices-toolbar"

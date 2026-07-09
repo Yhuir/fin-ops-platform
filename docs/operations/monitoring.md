@@ -7,7 +7,9 @@
 - `GET /api/operations/app-health-dashboard` 管理员只读 Dashboard。
 - `GET /api/operations/app-health/input-invoice-usage-audit` 管理员只读进项使用三边对账审计。
 - `GET /api/operations/app-health/output-invoice-collection-audit` 管理员只读销项收款三边对账审计。
+- `GET /api/operations/app-health/page-audit?domain=<domain_key>` 管理员只读页面业务 read model / relation 全量对账审计。
 - `POST /api/operations/app-health/input-invoice-usage-refresh` 管理员受控入队刷新进项使用 read model scope。
+- `POST /api/operations/app-health/output-invoice-collection-refresh` 管理员受控入队刷新销项收款 read model scope。
 - OA 同步状态。
 - 工作台 dirty scopes。
 - 后台任务状态。
@@ -223,7 +225,7 @@ Dashboard 三个区域：
 
 ```bash
 curl -sS \
-  -H "Authorization: Bearer ${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
+  -b "Admin-Token=${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
   -H "Accept: application/json" \
   "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/input-invoice-usage-audit"
 ```
@@ -235,7 +237,7 @@ curl -sS \
 ```bash
 curl -sS \
   -X POST \
-  -H "Authorization: Bearer ${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
+  -b "Admin-Token=${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   --data '{"scope_keys":["2025-09","2025-11"],"reason":"production_audit_repair","metadata":{"audit":"input_invoice_usage"}}' \
@@ -250,12 +252,41 @@ curl -sS \
 
 ```bash
 curl -sS \
-  -H "Authorization: Bearer ${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
+  -b "Admin-Token=${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
   -H "Accept: application/json" \
   "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/output-invoice-collection-audit"
 ```
 
 报告 `overall_status=pass` 且 `summary.blocking_issue_count=0`，才可作为“销项发票收款情况页面全量数据和所有配对关系正确”的证据。`issues_found` 只说明发现不一致，不会自动刷新或修复；修复必须回到对应业务 runbook、read model rebuild 或明确审计/修复工具。
+
+若审计发现的是 `output_invoice_collection` scope 与依赖 read model source_versions 不一致，并且当前操作者只有 Admin Token、没有生产 DB URL/root runtime env，可通过 App 内受控入口入队刷新指定 scope：
+
+```bash
+curl -sS \
+  -X POST \
+  -b "Admin-Token=${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  --data '{"scope_keys":["2026-01","2026-02","2026-03","2026-04","2026-05","2026-06"],"reason":"production_audit_repair","metadata":{"audit":"output_invoice_collection"}}' \
+  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/output-invoice-collection-refresh"
+```
+
+该接口只通过 durable runtime queue 入队 `output_invoice_collection.read_model.refresh`，返回 `202` 不代表数据已经正确。刷新后必须继续用 audit API 复跑，直到 `overall_status=pass` 且 `blocking_issue_count=0`。
+
+## 页面业务全量审计
+
+部署包含该 API 的版本后，管理员可用 Admin Token 只读触发 7 个页面的 App 内部全量对账：
+
+```bash
+curl -sS \
+  -b "Admin-Token=${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
+  -H "Accept: application/json" \
+  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/page-audit?domain=bank_details"
+```
+
+支持的 `domain`：`pending_invoices`、`turnover_ledger`、`batch_accounting`、`bank_flow_rule_batches`、`oa_pending_payments`、`bank_details`、`cost_statistics`。
+
+报告 `overall_status=pass` 且 `summary.blocking_issue_count=0`，才可作为“该页面 App 内部 canonical facts、read model 和配对关系投影一致”的证据。`issues_found` 只说明发现不一致，不会自动刷新或修复；修复必须回到对应业务 runbook、read model rebuild 或明确审计/修复工具。该审计不能证明外部银行/OA 系统本身没有漏同步；外部来源完整性仍必须由导入/OA sync runbook 和来源系统对账证明。
 
 Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS` 调整。缓存过期后刷新失败时，接口返回上一份 payload，并在 `freshness.warnings` 中加入 `dashboard_cache_stale_after_error`；权限校验和 PostgreSQL runtime 缺失不走缓存兜底。
 

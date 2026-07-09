@@ -224,6 +224,9 @@ from fin_ops_platform.tools.audit_input_invoice_usage_read_model import (
 from fin_ops_platform.tools.audit_output_invoice_collection_read_model import (
     audit_output_invoice_collection_read_model,
 )
+from fin_ops_platform.tools.audit_page_business_read_model import (
+    audit_page_business_read_model,
+)
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_best_source_link,
@@ -2012,8 +2015,12 @@ class Application:
             return self._handle_api_operations_input_invoice_usage_audit(headers)
         if method == "GET" and route_path == "/api/operations/app-health/output-invoice-collection-audit":
             return self._handle_api_operations_output_invoice_collection_audit(headers)
+        if method == "GET" and route_path == "/api/operations/app-health/page-audit":
+            return self._handle_api_operations_page_audit(query, headers)
         if method == "POST" and route_path == "/api/operations/app-health/input-invoice-usage-refresh":
             return self._handle_api_operations_input_invoice_usage_refresh(body, headers)
+        if method == "POST" and route_path == "/api/operations/app-health/output-invoice-collection-refresh":
+            return self._handle_api_operations_output_invoice_collection_refresh(body, headers)
         if method == "GET" and route_path == "/api/search":
             q = query.get("q", [""])[0]
             scope = query.get("scope", ["all"])[0]
@@ -3933,6 +3940,57 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, payload)
 
+    def _handle_api_operations_page_audit(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        domain_key = _operation_text((query.get("domain") or [""])[0])
+        if not domain_key:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "page_audit_domain_required",
+                    "message": "domain is required.",
+                },
+            )
+        connection = getattr(getattr(self, "_state_store", None), "_connection", None)
+        if connection is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "postgres_required",
+                    "message": "Page business audit requires PostgreSQL runtime facts.",
+                },
+            )
+        try:
+            payload = audit_page_business_read_model(
+                connection,
+                domain_key=domain_key,
+                tenant_id=tenant_id_for_session(session),
+                example_limit=50,
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "unsupported_page_audit_domain",
+                    "message": str(exc),
+                },
+            )
+        except Exception as exc:
+            return self._json_response(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {
+                    "error": "page_audit_failed",
+                    "message": str(exc) or "Page business audit failed.",
+                },
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
     def _handle_api_operations_input_invoice_usage_refresh(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         session, admin_error = self._resolve_admin_session(headers)
         if admin_error is not None:
@@ -3940,7 +3998,7 @@ class Application:
         payload, body_error = self._load_json_body(body)
         if body_error is not None:
             return body_error
-        scope_keys = _operation_input_invoice_usage_refresh_scope_keys(payload)
+        scope_keys = _operation_read_model_refresh_scope_keys(payload)
         if not scope_keys:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -3994,6 +4052,75 @@ class Application:
             {
                 "read_model_key": "input_invoice_usage",
                 "scope_type": "input_invoice_usage",
+                "scope_keys": normalized_scope_keys,
+                "enqueued_scope_keys": normalized_scope_keys,
+                "enqueued_count": len(normalized_scope_keys),
+                "tenant_id": tenant_id_for_session(session),
+                "reason": reason,
+            },
+        )
+
+    def _handle_api_operations_output_invoice_collection_refresh(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        session, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        payload, body_error = self._load_json_body(body)
+        if body_error is not None:
+            return body_error
+        scope_keys = _operation_read_model_refresh_scope_keys(payload)
+        if not scope_keys:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "output_invoice_collection_refresh_scope_required",
+                    "message": "scope_keys must include at least one output_invoice_collection scope.",
+                },
+            )
+        if len(scope_keys) > 36:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "output_invoice_collection_refresh_scope_limit_exceeded",
+                    "message": "At most 36 output_invoice_collection scopes can be enqueued in one request.",
+                },
+            )
+        reason = _operation_text(payload.get("reason")) or "operations_output_invoice_collection_audit_refresh"
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        gateway = self._read_model_refresh_gateway()
+        if not gateway.can_enqueue():
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "runtime_queue_required",
+                    "message": "Output invoice collection refresh requires the runtime queue repository.",
+                },
+            )
+        try:
+            normalized_scope_keys = gateway.enqueue_many(
+                "output_invoice_collection",
+                scope_keys,
+                reason=reason,
+                tenant_id=tenant_id_for_session(session),
+                priority="high",
+                metadata={
+                    "source": "operations_app_health",
+                    "requested_by": str(getattr(session.identity, "username", None) or getattr(session.identity, "user_id", None) or "admin"),
+                    **dict(metadata),
+                },
+            )
+        except ReadModelScopeError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_output_invoice_collection_refresh_scope",
+                    "message": str(exc),
+                },
+            )
+        return self._json_response(
+            HTTPStatus.ACCEPTED,
+            {
+                "read_model_key": "output_invoice_collection",
+                "scope_type": "output_invoice_collection",
                 "scope_keys": normalized_scope_keys,
                 "enqueued_scope_keys": normalized_scope_keys,
                 "enqueued_count": len(normalized_scope_keys),
@@ -15023,7 +15150,7 @@ def build_application(*, data_dir: Path | None = None, bootstrap_mode: str | Non
     return Application(data_dir=data_dir, bootstrap_mode=bootstrap_mode)
 
 
-def _operation_input_invoice_usage_refresh_scope_keys(payload: object) -> list[str]:
+def _operation_read_model_refresh_scope_keys(payload: object) -> list[str]:
     if not isinstance(payload, dict):
         return []
     raw_scope_keys = payload.get("scope_keys", payload.get("scopes", payload.get("scopeKeys", [])))

@@ -145,6 +145,22 @@ class FakeOutputInvoiceCollectionAuditConnection(FakeInputInvoiceUsageAuditConne
         }
 
 
+class FakePageBusinessAuditConnection(FakeInputInvoiceUsageAuditConnection):
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
+        if self.fail:
+            raise RuntimeError("page audit database timeout")
+        self.fetch_one_calls.append((sql, params))
+        return {
+            "source_fact_count": 2,
+            "read_model_row_count": 2,
+            "read_model_scope_count": 1,
+            "active_relation_count": 1,
+            "linked_relation_group_count": 1,
+            "dirty_scope_count": 0,
+            "outbox_backlog_count": 0,
+        }
+
+
 class FakeRuntimeQueueRepository:
     def __init__(self) -> None:
         self.enqueued: list[dict[str, object]] = []
@@ -839,6 +855,98 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(payload["error"], "postgres_required")
 
+    def test_operations_page_audit_is_admin_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_details")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "admin_only")
+
+    def test_operations_page_audit_returns_page_business_report_for_admin(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakePageBusinessAuditConnection()
+            setattr(app._state_store, "_connection", connection)
+
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_details")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["mode"], "page-business-read-model-audit")
+        self.assertEqual(payload["domain_key"], "bank_details")
+        self.assertEqual(payload["overall_status"], "pass")
+        self.assertEqual(payload["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
+        self.assertIn("app.bank_transactions", payload["audit_contract"]["source_tables"])
+        self.assertIn("read_model.bank_detail_rows", payload["audit_contract"]["read_model_tables"])
+        self.assertEqual(connection.executed, [])
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
+        self.assertIn("app.bank_transactions", queried_sql)
+        self.assertIn("read_model.bank_detail_rows", queried_sql)
+        self.assertIn("read_model.workbench_relation_groups", queried_sql)
+
+    def test_operations_page_audit_reports_page_invariants_without_writes(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakePageBusinessAuditConnection(
+                rows_by_check={
+                    "missing_read_model_row": [
+                        {
+                            "subject_id": "batch-1",
+                            "scope_key": "2026-05",
+                        }
+                    ],
+                    "relation_distribution": [
+                        {
+                            "subject_id": "case-1",
+                            "scope_key": "2026-05",
+                            "row_id": "bank-1",
+                            "row_type": "bank_transaction",
+                        }
+                    ],
+                }
+            )
+            setattr(app._state_store, "_connection", connection)
+
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_flow_rule_batches")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["overall_status"], "issues_found")
+        self.assertEqual(payload["summary"]["blocking_issue_count"], 2)
+        self.assertEqual(
+            payload["summary"]["issue_counts_by_code"],
+            {
+                "bank_flow_rule_batches_active_relation_missing_distribution": 1,
+                "bank_flow_rule_batches_missing_read_model_row": 1,
+            },
+        )
+        self.assertEqual(connection.executed, [])
+
+    def test_operations_page_audit_rejects_unsupported_domain(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            setattr(app._state_store, "_connection", FakePageBusinessAuditConnection())
+
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=unknown")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "unsupported_page_audit_domain")
+
+    def test_operations_page_audit_requires_postgres_connection(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_details")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["error"], "postgres_required")
+
     def test_operations_input_invoice_usage_refresh_is_admin_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -883,6 +991,36 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(queue.enqueued[0]["metadata"]["source"], "operations_app_health")
         self.assertEqual(queue.enqueued[0]["metadata"]["audit"], "input_invoice_usage")
 
+    def test_operations_output_invoice_collection_refresh_enqueues_valid_scopes_for_admin(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            queue = FakeRuntimeQueueRepository()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+
+            response = app.handle_request(
+                "POST",
+                "/api/operations/app-health/output-invoice-collection-refresh",
+                json.dumps(
+                    {
+                        "scope_keys": ["2026-01", "2026-01", "2026-06"],
+                        "reason": "production_audit_repair",
+                        "metadata": {"audit": "output_invoice_collection"},
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["read_model_key"], "output_invoice_collection")
+        self.assertEqual(payload["enqueued_scope_keys"], ["2026-01", "2026-06"])
+        self.assertEqual(payload["enqueued_count"], 2)
+        self.assertEqual([item["scope_type"] for item in queue.enqueued], ["output_invoice_collection", "output_invoice_collection"])
+        self.assertEqual([item["scope_key"] for item in queue.enqueued], ["2026-01", "2026-06"])
+        self.assertTrue(all(item["priority"] == "high" for item in queue.enqueued))
+        self.assertTrue(all(item["reason"] == "production_audit_repair" for item in queue.enqueued))
+        self.assertEqual(queue.enqueued[0]["metadata"]["source"], "operations_app_health")
+        self.assertEqual(queue.enqueued[0]["metadata"]["audit"], "output_invoice_collection")
+
     def test_operations_input_invoice_usage_refresh_rejects_invalid_scope(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -900,6 +1038,23 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_input_invoice_usage_refresh_scope")
         self.assertEqual(queue.enqueued, [])
 
+    def test_operations_output_invoice_collection_refresh_rejects_invalid_scope(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            queue = FakeRuntimeQueueRepository()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+
+            response = app.handle_request(
+                "POST",
+                "/api/operations/app-health/output-invoice-collection-refresh",
+                json.dumps({"scope_keys": ["not-a-month"]}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_output_invoice_collection_refresh_scope")
+        self.assertEqual(queue.enqueued, [])
+
     def test_operations_input_invoice_usage_refresh_requires_runtime_queue(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -908,6 +1063,21 @@ class AppHealthApiTests(unittest.TestCase):
             response = app.handle_request(
                 "POST",
                 "/api/operations/app-health/input-invoice-usage-refresh",
+                json.dumps({"scope_keys": ["2026-06"]}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["error"], "runtime_queue_required")
+
+    def test_operations_output_invoice_collection_refresh_requires_runtime_queue(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._runtime_repositories = SimpleNamespace(queue_repository=object())
+
+            response = app.handle_request(
+                "POST",
+                "/api/operations/app-health/output-invoice-collection-refresh",
                 json.dumps({"scope_keys": ["2026-06"]}),
             )
             payload = json.loads(response.body)

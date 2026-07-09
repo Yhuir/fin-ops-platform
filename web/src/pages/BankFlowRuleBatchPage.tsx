@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import {
@@ -100,7 +101,7 @@ const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 200;
 export default function BankFlowRuleBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
   const { active } = useOptionalPageActivation("bank-flow-rule-batches");
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<BankFlowRuleBatchStatusBucket>("unsubmitted");
   const [payload, setPayload] = useState<BankFlowRuleBatchesResponse>(EMPTY_BATCHES);
@@ -812,9 +813,19 @@ export default function BankFlowRuleBatchPage() {
     setBatchPage(Math.max(1, nextPage));
   };
 
+  const titleAccessory = canAdminAccess ? (
+    <PageBusinessAuditIcon
+      ariaLabel="Audit 流水规则批量处理"
+      domainKey="bank_flow_rule_batches"
+      label="流水规则批量处理"
+      readModelStatus={readModelStatus}
+    />
+  ) : null;
+
   return (
     <PageScaffold
       title="流水规则批量处理"
+      titleAccessory={titleAccessory}
       actions={(
         <div className="bank-flow-rule-batches-actions">
           <button

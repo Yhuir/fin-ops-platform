@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, PanelRightOpen, SlidersHorizontal } from "lu
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
@@ -150,7 +151,7 @@ function normalizeSummary(summary: OaPendingPaymentSummary | undefined, fallback
 }
 
 export default function OaPendingPaymentsPage() {
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const [query, setQuery] = useState<OaPendingPaymentQuery>(initialQuery);
   const [rows, setRows] = useState<OaPendingPaymentRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -387,11 +388,19 @@ export default function OaPendingPaymentsPage() {
   const showReadModelState = isEmpty && !isReadModelFresh(readModelStatus);
   const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
   const inProgressCountLabel = formatViewCount(summary.viewCounts?.in_progress);
+  const titleAccessory = canAdminAccess ? (
+    <PageBusinessAuditIcon
+      ariaLabel="Audit OA 待付款核对"
+      domainKey="oa_pending_payments"
+      label="OA 待付款核对"
+      readModelStatus={readModelStatus}
+    />
+  ) : null;
 
   return (
     <>
       <div className="oa-pending-payments-page" data-testid="oa-pending-payments-page">
-        <PageScaffold title="OA 待付款核对" actions={actions}>
+        <PageScaffold title="OA 待付款核对" titleAccessory={titleAccessory} actions={actions}>
           <div className="oa-pending-payments-content">
             <PageToolbar
               className="oa-pending-payments-query"

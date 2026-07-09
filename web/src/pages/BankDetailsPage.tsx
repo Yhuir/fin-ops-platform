@@ -11,6 +11,7 @@ import {
   FinanceTableHeader,
   FinanceTableRow,
 } from "../components/common/FinanceTable";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
@@ -1542,7 +1543,7 @@ function BankTextCell({ value }: { value: string }) {
 export default function BankDetailsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("bank-details");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const pageActiveRef = useRef(active);
   const pendingTagRefreshRef = useRef(false);
   const selectedAccountSession = usePageSessionState<string | null>({
@@ -2417,9 +2418,23 @@ export default function BankDetailsPage() {
 
   const datePickerYears = createYearOptions(activeDatePickerYear);
   const selectedDateFilterLabel = dateFilterLabel(dateFilter);
+  const titleAccessory = canAdminAccess ? (
+    <PageBusinessAuditIcon
+      ariaLabel="Audit 银行明细"
+      domainKey="bank_details"
+      label="银行明细"
+      readModelStatus={readModelStatus}
+    />
+  ) : null;
 
   return (
     <div className="bank-details-page" data-testid="bank-details-page">
+      <header className="page-header bank-details-page-header">
+        <div className="page-title-row">
+          <h1 className="page-title">银行明细</h1>
+          {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
+        </div>
+      </header>
       <div className="bank-details-workbench">
         {error ? (
           <div className="bank-details-error-live" role="alert" aria-live="polite">

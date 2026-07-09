@@ -2,6 +2,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import { useNavigate } from "react-router-dom";
 
 import { formatMonthLabel } from "../components/MonthPicker";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
 import ExportCenterModal, {
   type ExportCenterMode,
@@ -586,7 +587,7 @@ function isCostStatisticsPageSession(value: unknown): value is CostStatisticsPag
 export default function CostStatisticsPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const defaultMonthBounds = buildMonthDateBounds(DEFAULT_MONTH);
   const costPageSession = usePageSessionState<CostStatisticsPageSession>({
     pageKey: "cost-statistics",
@@ -1476,12 +1477,23 @@ export default function CostStatisticsPage() {
     ?? selectedExpenseTransactionId
     ?? selectedBankTagTransactionId;
   const isExportActionBusy = isExporting || isPreviewLoading || Boolean(detailLoadingMessage);
+  const titleAccessory = canAdminAccess ? (
+    <PageBusinessAuditIcon
+      ariaLabel="Audit 成本统计"
+      domainKey="cost_statistics"
+      label="成本统计"
+      readModelStatus={readModelStatus}
+    />
+  ) : null;
 
   return (
     <div className="page-stack cost-page">
 	      <header className="page-header">
 	        <div>
-	          <h1>成本统计</h1>
+	          <div className="page-title-row">
+	            <h1 className="page-title">成本统计</h1>
+	            {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
+	          </div>
 	        </div>
         <div className="page-header-actions cost-header-actions">
           <button

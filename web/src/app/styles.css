@@ -21072,6 +21072,11 @@ body.column-layout-dragging {
   color: var(--bank-text);
 }
 
+.bank-details-page-header {
+  flex: 0 0 auto;
+  padding: 16px 20px 12px;
+}
+
 .bank-details-workbench {
   position: relative;
   flex: 1 1 auto;

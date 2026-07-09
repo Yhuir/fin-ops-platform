@@ -260,8 +260,15 @@ export type OperationsDashboardPayload = {
 export type InputInvoiceUsageAuditStatus = "pass" | "issues_found" | string;
 
 export type PageAuditSummary = {
+  source_fact_count?: number | null;
+  active_relation_count?: number | null;
+  linked_relation_group_count?: number | null;
+  dirty_scope_count?: number | null;
+  outbox_backlog_count?: number | null;
+  read_model_count?: number | null;
   read_model_invoice_member_count?: number | null;
   read_model_row_count?: number | null;
+  read_model_scope_count?: number | null;
   active_workbench_pair_relation_count?: number | null;
   linked_workbench_relation_group_count?: number | null;
   blocking_issue_count?: number | null;
@@ -290,6 +297,8 @@ export type PageAuditIssue = {
 export type PageAuditPayload = {
   mode?: string;
   tenant_id?: string;
+  domain_key?: string;
+  label?: string;
   generated_at?: string;
   overall_status?: InputInvoiceUsageAuditStatus;
   summary?: PageAuditSummary;
