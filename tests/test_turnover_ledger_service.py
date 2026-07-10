@@ -1065,6 +1065,30 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(len(group["lot_rows"]), 2)
         self.assertEqual(group["rows"][0], group["summary_row"])
 
+    def test_grouped_ledger_excludes_withdrawn_relation_from_current_financial_totals(self) -> None:
+        ledger_service, _, relation_service = self._service()
+        ledger_service.list_grouped_ledger()
+        confirmed = relation_service.confirm_relation(
+            ["txn-borrow-in", "txn-borrow-repaid"],
+            actor="YNSYLP005",
+        )
+        relation_service.withdraw_relation(
+            str(confirmed["relation_id"]),
+            actor="YNSYLP006",
+            note="撤回后恢复系统关系",
+        )
+
+        payload = ledger_service.list_grouped_ledger(family="company")
+
+        group = next(item for item in payload["groups"] if item["counterparty_name"] == "梁希涛")
+        self.assertEqual(group["repaid_amount"], "200000.00")
+        self.assertEqual(group["summary_row"]["balance_amount"], "0.00")
+        self.assertEqual(
+            [row["source_bank_row_id"] for row in group["flow_rows"]],
+            ["txn-borrow-in", "txn-borrow-repaid"],
+        )
+        self.assertTrue(any(relation["status"] == "withdrawn" for relation in relation_service.relations()))
+
     def test_grouped_ledger_calculates_annual_interest_and_borrow_in_directions(self) -> None:
         ledger_service = self._grouped_service()
 

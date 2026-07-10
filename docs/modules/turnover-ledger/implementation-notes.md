@@ -620,3 +620,10 @@ git diff --check
 - 决策：provider 存在时直接信任 provider records，不再逐笔回读 legacy category service；只有无 provider 的 local/legacy path 保留 `bulk_get(...)` 后的 manual fallback。将 `TURNOVER_LEDGER_SCHEMA_VERSION` bump 到 `2026-07-turnover-ledger-v3`，发布后旧投影必须重建。
 - 测试覆盖：新增 `tests/test_turnover_ledger_service.py::TurnoverLedgerServiceTests::test_provider_backed_grouped_ledger_does_not_per_row_read_legacy_categories`；更新 `tests/test_turnover_ledger_source_versions.py` schema version 期望。
 - 未测风险：真实生产 1s SLO 需发布后重跑；跨月往来关系仍不能简单按月份窄读银行流水，否则会丢失后续还款/收款事实。
+
+## 2026-07-10 - Audit 证明闭环：撤回关系去污染与 leaf 余额重算
+
+- 触发事实：生产 9 页只读 Audit 中，外部往来台账剩余三条 business-field mismatch；两条是只有结算 leaf 的组被 Audit 错误按 pending amount `0` 校验，另一条是已撤回人工 relation 与恢复的系统 relation 同时进入 grouped totals，导致同一还款流水重复累计。
+- 决策：relation snapshot/audit log 继续保留 `withdrawn` 历史，但 grouped 当前台账不再消费 withdrawn relation。Audit 从 bank-detail canonical leaves 分方向重算余额：有本金时结算最多冲减到零，纯结算组保留负余额；同时继续分别校验待还、已还、待收、已收字段，不以放宽断言掩盖重复聚合。
+- 版本：`TURNOVER_LEDGER_SCHEMA_VERSION` 升至 `2026-07-turnover-ledger-v4`，发布后必须通过正式 read-model gateway 重建受影响 scope；禁止直接改 `read_model.turnover_ledger_rows`。
+- 测试：新增撤回后 grouped totals/flow leaf 不重复的业务核心回归，并扩展 Audit SQL 合同测试覆盖 `expected_balance`。

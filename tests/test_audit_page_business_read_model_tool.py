@@ -331,6 +331,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         business_sql = next(sql for sql, _params in connection.fetch_all_calls if "source_business_fields_mismatch" in sql)
         self.assertIn("expected_pending_repayment", business_sql)
         self.assertIn("expected_pending_collection", business_sql)
+        self.assertIn("expected_balance", business_sql)
         self.assertIn("ledger.payload->>'pending_repayment_amount'", business_sql)
         self.assertIn("ledger.payload->>'collected_amount'", business_sql)
 
@@ -345,6 +346,23 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
         self.assertIn("where project_scope = 'all'", canonical_sql)
         self.assertNotIn("project_scope = 'all' and cache_status = 'fresh'", canonical_sql)
+
+    def test_cost_statistics_expected_set_uses_builder_payload_eligibility_contract(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="cost_statistics",
+        )
+
+        canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
+        self.assertIn("group_row.source_kinds && array['oa', 'bank']::text[]", canonical_sql)
+        self.assertIn("has_candidate_member", canonical_sql)
+        self.assertIn("has_linked_oa", canonical_sql)
+        self.assertIn("member.member_payload->>'project_id'", canonical_sql)
+        self.assertIn("member.member_payload->>'applicant'", canonical_sql)
+        self.assertIn("member.member_payload->>'debit_amount'", canonical_sql)
+        self.assertNotIn("join app.bank_transactions bank_source", canonical_sql)
 
     def test_pending_invoice_relation_audit_uses_scope_aware_bidirectional_edge_equality(self) -> None:
         connection = FakeConnection()

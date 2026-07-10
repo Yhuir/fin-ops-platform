@@ -12,6 +12,7 @@
 - 成本统计 export-preview/export 是同步生成路径；time、month、project、expense_type 导出超过 20,000 行时必须返回 `cost_statistics_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 - 成本统计月份 shard 的 Workbench 输入来自 active generation 的 `workbench_group_rows + workbench_rows` 结构化成员，不再读取 `workbench_groups.payload` 里的 `oa_rows/bank_rows` 旧 JSON 成员数组。
 - 成本统计模块边界已 closed：query service 只读 SQL read model/Redis fresh cache；miss/stale 不同步 rebuild；runtime 不持有 live explorer loader；历史 warmup job 只作兼容桥接；live export helper 和 `ProjectDetailExportService` 已删除。
+- 页面 Audit 的 paired-cost canonical expected-set 读取 active Workbench generation 的结构化 group/member payload，严格遵循 builder 的 candidate/linked-open 判断、完整 OA context tuple 和 bank payload 方向/金额语义；禁止退回 `app.bank_transactions` 近似 Workbench 成员，或用 group 列值替代 payload 业务状态。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖成本归因、API/导出、SQL read model、parent/shard readiness、scope gateway、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
 
 ## 记录模板

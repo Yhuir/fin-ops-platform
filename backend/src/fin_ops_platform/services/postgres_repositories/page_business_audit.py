@@ -715,12 +715,23 @@ def _read_model_source_version_mismatch_issues(
                            greatest(borrow_in_principal - borrow_in_settled, 0)::numeric
                                as expected_pending_repayment,
                            greatest(borrow_out_principal - borrow_out_settled, 0)::numeric
-                               as expected_pending_collection
+                               as expected_pending_collection,
+                           (
+                               case
+                                   when borrow_in_principal > 0
+                                   then greatest(borrow_in_principal - borrow_in_settled, 0)
+                                   else -borrow_in_settled
+                               end
+                               + case
+                                   when borrow_out_principal > 0
+                                   then greatest(borrow_out_principal - borrow_out_settled, 0)
+                                   else -borrow_out_settled
+                               end
+                           )::numeric as expected_balance
                     from leaf_totals
                 )
                 select ledger.relation_id as subject_id, recomputed.scope_key,
-                       (recomputed.expected_pending_repayment + recomputed.expected_pending_collection)::text
-                           as source_amount,
+                       recomputed.expected_balance::text as source_amount,
                        ledger.amount::text as read_model_amount,
                        recomputed.expected_family as source_family,
                        ledger.family as read_model_family,
@@ -738,7 +749,7 @@ def _read_model_source_version_mismatch_issues(
                 join recomputed on recomputed.relation_id = ledger.relation_id
                 where abs(
                         coalesce(ledger.amount, 0)
-                        - (recomputed.expected_pending_repayment + recomputed.expected_pending_collection)
+                        - recomputed.expected_balance
                       ) > 0.01
                    or recomputed.family_count <> 1
                    or coalesce(ledger.family, '') <> coalesce(recomputed.expected_family, '')
@@ -1401,92 +1412,166 @@ def _canonical_expected_set_issues(
               and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
             order by scope_key, activated_at desc nulls last, updated_at desc
         ),
-        eligible_groups as (
-            select generation.generation_id, generation.scope_key, group_row.group_id, group_row.zone
+        group_candidates as (
+            select generation.generation_id, generation.scope_key, group_row.group_id, group_row.zone,
+                   case
+                       when group_row.payload is not null then
+                           case
+                               when jsonb_typeof(group_row.payload->'normalized_payload') = 'object'
+                               then coalesce(group_row.payload->'normalized_payload', '{}'::jsonb)
+                               else group_row.payload
+                           end
+                       when group_row.raw_payload is not null then
+                           case
+                               when jsonb_typeof(group_row.raw_payload->'normalized_payload') = 'object'
+                               then coalesce(group_row.raw_payload->'normalized_payload', '{}'::jsonb)
+                               else group_row.raw_payload
+                           end
+                       else '{}'::jsonb
+                   end as group_payload
             from active_generations generation
             join read_model.workbench_groups group_row
               on group_row.generation_id = generation.generation_id
              and group_row.scope_key = generation.scope_key
             where group_row.zone in ('paired', 'open')
-              and exists (
-                    select 1
-                    from read_model.workbench_group_rows oa_member
-                    where oa_member.generation_id = group_row.generation_id
-                      and oa_member.scope_key = group_row.scope_key
-                      and oa_member.group_id = group_row.group_id
-                      and oa_member.pane = 'oa'
-                      and coalesce(oa_member.row_role, '') <> 'collapsed'
-              )
-              and exists (
-                    select 1
-                    from read_model.workbench_group_rows bank_member
-                    where bank_member.generation_id = group_row.generation_id
-                      and bank_member.scope_key = group_row.scope_key
-                      and bank_member.group_id = group_row.group_id
-                      and bank_member.pane = 'bank'
-                      and coalesce(bank_member.row_role, '') <> 'collapsed'
-              )
-              and lower(coalesce(group_row.status, '')) <> 'candidate'
-              and lower(coalesce(group_row.group_type, '')) <> 'candidate'
+              and group_row.source_kinds && array['oa', 'bank']::text[]
+        ),
+        member_payloads as (
+            select group_row.generation_id, group_row.scope_key, group_row.group_id,
+                   group_row.zone, group_row.group_payload,
+                   member.pane, member.row_id,
+                   case
+                       when source.payload is not null then
+                           case
+                               when jsonb_typeof(source.payload->'normalized_payload') = 'object'
+                               then coalesce(source.payload->'normalized_payload', '{}'::jsonb)
+                               else source.payload
+                           end
+                       when source.raw_payload is not null then
+                           case
+                               when jsonb_typeof(source.raw_payload->'normalized_payload') = 'object'
+                               then coalesce(source.raw_payload->'normalized_payload', '{}'::jsonb)
+                               else source.raw_payload
+                           end
+                       when member.payload is not null then
+                           case
+                               when jsonb_typeof(member.payload->'normalized_payload') = 'object'
+                               then coalesce(member.payload->'normalized_payload', '{}'::jsonb)
+                               else member.payload
+                           end
+                       when member.raw_payload is not null then
+                           case
+                               when jsonb_typeof(member.raw_payload->'normalized_payload') = 'object'
+                               then coalesce(member.raw_payload->'normalized_payload', '{}'::jsonb)
+                               else member.raw_payload
+                           end
+                       else '{}'::jsonb
+                   end as member_payload
+            from group_candidates group_row
+            join read_model.workbench_group_rows member
+              on member.generation_id = group_row.generation_id
+             and member.scope_key = group_row.scope_key
+             and member.group_id = group_row.group_id
+             and member.pane in ('oa', 'bank')
+             and coalesce(member.row_role, '') <> 'collapsed'
+            left join read_model.workbench_rows source
+              on source.generation_id = member.generation_id
+             and source.scope_key = member.scope_key
+             and source.row_id = member.row_id
+        ),
+        group_facts as (
+            select generation_id, scope_key, group_id, zone, group_payload,
+                   bool_or(pane = 'oa') as has_oa,
+                   bool_or(pane = 'bank') as has_bank,
+                   bool_or(
+                       lower(btrim(coalesce(
+                           nullif(member_payload->>'relation_status', ''),
+                           nullif(member_payload->>'relationStatus', ''),
+                           nullif(member_payload->>'status', ''),
+                           ''
+                       ))) = 'candidate'
+                   ) as has_candidate_member,
+                   bool_or(
+                       pane = 'oa'
+                       and member_payload->'oa_bank_relation'->>'code'
+                           in ('fully_linked', 'automatic_match')
+                   ) as has_linked_oa,
+                   bool_or(
+                       pane = 'bank'
+                       and member_payload->'available_actions' ? 'cancel_link'
+                   ) as has_cancel_link
+            from member_payloads
+            group by generation_id, scope_key, group_id, zone, group_payload
+        ),
+        eligible_groups as (
+            select generation_id, scope_key, group_id, zone
+            from group_facts
+            where has_oa
+              and has_bank
+              and lower(btrim(coalesce(
+                    nullif(group_payload->>'relation_status', ''),
+                    nullif(group_payload->>'relationStatus', ''),
+                    nullif(group_payload->>'status', ''),
+                    ''
+                  ))) <> 'candidate'
+              and not has_candidate_member
               and (
-                    group_row.zone = 'paired'
-                 or exists (
-                        select 1
-                        from read_model.workbench_group_rows linked_oa
-                        left join read_model.workbench_rows linked_oa_source
-                          on linked_oa_source.generation_id = linked_oa.generation_id
-                         and linked_oa_source.scope_key = linked_oa.scope_key
-                         and linked_oa_source.row_id = linked_oa.row_id
-                        where linked_oa.generation_id = group_row.generation_id
-                          and linked_oa.scope_key = group_row.scope_key
-                          and linked_oa.group_id = group_row.group_id
-                          and linked_oa.pane = 'oa'
-                          and coalesce(linked_oa_source.payload, linked_oa.payload)
-                              ->'oa_bank_relation'->>'code'
-                              in ('fully_linked', 'automatic_match')
-                    )
-                 or exists (
-                        select 1
-                        from read_model.workbench_group_rows linked_bank
-                        left join read_model.workbench_rows linked_bank_source
-                          on linked_bank_source.generation_id = linked_bank.generation_id
-                         and linked_bank_source.scope_key = linked_bank.scope_key
-                         and linked_bank_source.row_id = linked_bank.row_id
-                        where linked_bank.generation_id = group_row.generation_id
-                          and linked_bank.scope_key = group_row.scope_key
-                          and linked_bank.group_id = group_row.group_id
-                          and linked_bank.pane = 'bank'
-                          and coalesce(linked_bank_source.payload, linked_bank.payload)
-                              ->'available_actions' ? 'cancel_link'
-                    )
+                    has_linked_oa
+                 or lower(btrim(coalesce(group_payload->>'group_type', ''))) <> 'candidate'
+              )
+              and (
+                    zone = 'paired'
+                 or has_linked_oa
+                 or has_cancel_link
               )
         ),
         oa_contexts as (
             select group_row.generation_id, group_row.scope_key, group_row.group_id,
                    coalesce(
-                       nullif(coalesce(source.payload, oa_member.payload)->>'project_name', ''),
-                       nullif(coalesce(source.payload, oa_member.payload)->'detail_fields'->>'项目名称', '')
+                       nullif(case when btrim(member.member_payload->>'project_name') in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->>'project_name') end, ''),
+                       nullif(case when btrim(member.member_payload->'detail_fields'->>'项目名称')
+                                            in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->'detail_fields'->>'项目名称') end, '')
                    ) as project_name,
                    coalesce(
-                       nullif(coalesce(source.payload, oa_member.payload)->>'expense_type', ''),
-                       nullif(coalesce(source.payload, oa_member.payload)->'detail_fields'->>'费用类型', '')
+                       nullif(case when btrim(member.member_payload->>'project_id') in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->>'project_id') end, ''),
+                       nullif(case when btrim(member.member_payload->'detail_fields'->>'项目编号')
+                                            in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->'detail_fields'->>'项目编号') end, ''),
+                       ''
+                   ) as project_id,
+                   coalesce(
+                       nullif(case when btrim(member.member_payload->>'expense_type') in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->>'expense_type') end, ''),
+                       nullif(case when btrim(member.member_payload->'detail_fields'->>'费用类型')
+                                            in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->'detail_fields'->>'费用类型') end, '')
                    ) as expense_type,
                    coalesce(
-                       nullif(coalesce(source.payload, oa_member.payload)->>'expense_content', ''),
-                       nullif(coalesce(source.payload, oa_member.payload)->>'reason', ''),
-                       nullif(coalesce(source.payload, oa_member.payload)->'detail_fields'->>'费用内容', '')
-                   ) as expense_content
+                       nullif(case when btrim(member.member_payload->>'expense_content') in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->>'expense_content') end, ''),
+                       nullif(case when btrim(member.member_payload->>'reason') in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->>'reason') end, ''),
+                       nullif(case when btrim(member.member_payload->'detail_fields'->>'费用内容')
+                                            in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->'detail_fields'->>'费用内容') end, '')
+                   ) as expense_content,
+                   coalesce(
+                       nullif(case when btrim(member.member_payload->>'applicant') in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->>'applicant') end, ''),
+                       nullif(case when btrim(member.member_payload->'detail_fields'->>'申请人')
+                                            in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->'detail_fields'->>'申请人') end, ''),
+                       ''
+                   ) as applicant
             from eligible_groups group_row
-            join read_model.workbench_group_rows oa_member
-              on oa_member.generation_id = group_row.generation_id
-             and oa_member.scope_key = group_row.scope_key
-             and oa_member.group_id = group_row.group_id
-             and oa_member.pane = 'oa'
-             and coalesce(oa_member.row_role, '') <> 'collapsed'
-            left join read_model.workbench_rows source
-              on source.generation_id = oa_member.generation_id
-             and source.scope_key = oa_member.scope_key
-             and source.row_id = oa_member.row_id
+            join member_payloads member
+              on member.generation_id = group_row.generation_id
+             and member.scope_key = group_row.scope_key
+             and member.group_id = group_row.group_id
+             and member.pane = 'oa'
         ),
         eligible_context_groups as (
             select generation_id, scope_key, group_id
@@ -1496,26 +1581,51 @@ def _canonical_expected_set_issues(
               and nullif(expense_content, '') is not null
               and expense_type not in ('借款', '还款')
             group by generation_id, scope_key, group_id
-            having count(distinct concat_ws(chr(31), project_name, expense_type, expense_content)) = 1
+            having count(distinct concat_ws(
+                       chr(31), project_name, project_id, expense_type, expense_content, applicant
+                   )) = 1
+        ),
+        expected_cost_members as (
+            select group_row.scope_key,
+                   coalesce(
+                       nullif(member.member_payload->>'id', ''),
+                       nullif(member.member_payload->>'row_id', ''),
+                       member.row_id
+                   ) as transaction_id,
+                   lower(btrim(coalesce(
+                       nullif(member.member_payload->>'direction', ''),
+                       nullif(member.member_payload->>'txn_direction', ''),
+                       ''
+                   ))) as direction_value,
+                   replace(
+                       coalesce(
+                           nullif(member.member_payload->>'debit_amount', ''),
+                           member.member_payload->>'amount'
+                       ),
+                       ',', ''
+                   ) as amount_value
+            from eligible_context_groups group_row
+            join member_payloads member
+              on member.generation_id = group_row.generation_id
+             and member.scope_key = group_row.scope_key
+             and member.group_id = group_row.group_id
+             and member.pane = 'bank'
         ),
         expected_cost as (
-            select group_row.scope_key,
-                   bank_member.row_id as transaction_id,
+            select scope_key, transaction_id,
                    count(*)::integer as expected_count,
-                   sum(abs(coalesce(bank_source.amount, 0)))::numeric as expected_amount
-            from eligible_context_groups group_row
-            join read_model.workbench_group_rows bank_member
-              on bank_member.generation_id = group_row.generation_id
-             and bank_member.scope_key = group_row.scope_key
-             and bank_member.group_id = group_row.group_id
-             and bank_member.pane = 'bank'
-             and coalesce(bank_member.row_role, '') <> 'collapsed'
-            join app.bank_transactions bank_source
-              on coalesce(bank_source.legacy_mongo_id, bank_source.id::text) = bank_member.row_id
-             and bank_source.status <> 'deleted'
-             and bank_source.txn_direction = 'outflow'
-             and coalesce(bank_source.amount, 0) <> 0
-            group by group_row.scope_key, bank_member.row_id
+                   sum(abs(amount_value::numeric))::numeric as expected_amount
+            from expected_cost_members
+            where (
+                    direction_value = ''
+                 or position('out' in direction_value) > 0
+                 or position('支出' in direction_value) > 0
+                 or position('付款' in direction_value) > 0
+                 or position('debit' in direction_value) > 0
+            )
+              and amount_value ~ '^-?[0-9]+([.][0-9]+)?$'
+              and amount_value::numeric <> 0
+            group by scope_key, transaction_id
         ),
         projected_cost as (
             select substring(scope_key from '([0-9]{4}-[0-9]{2})$') as scope_key,

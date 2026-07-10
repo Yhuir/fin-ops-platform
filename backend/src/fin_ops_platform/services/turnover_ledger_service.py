@@ -22,7 +22,7 @@ MONEY_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.000001")
 ZERO = Decimal("0.00")
 ZERO_RATE = Decimal("0.000000")
-TURNOVER_LEDGER_SCHEMA_VERSION = "2026-07-turnover-ledger-v3"
+TURNOVER_LEDGER_SCHEMA_VERSION = "2026-07-turnover-ledger-v4"
 TURNOVER_FAMILY_LABELS = {
     "personal": "个人往来",
     "company": "公司往来",
@@ -132,6 +132,8 @@ class TurnoverLedgerService:
         rows_by_id = {str(row.get("id") or ""): row for row in bank_rows}
         items: list[dict[str, Any]] = []
         for relation in relations:
+            if str(relation.get("status") or "") == "withdrawn":
+                continue
             legacy_row = self._row_payload(relation, rows_by_id)
             if legacy_row is None:
                 continue
