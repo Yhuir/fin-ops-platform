@@ -107,6 +107,7 @@ EXPECTED_MIGRATION_FILES = [
     "0093_workbench_relation_source_version_hot_paths.sql",
     "0094_input_invoice_usage_oa_reverse_preview_hot_path.sql",
     "0095_oa_pending_payment_admissions.sql",
+    "0096_oa_pending_payment_admission_runtime_grants.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

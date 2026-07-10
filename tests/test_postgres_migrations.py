@@ -109,6 +109,7 @@ EXPECTED_MIGRATIONS = [
     "0093_workbench_relation_source_version_hot_paths.sql",
     "0094_input_invoice_usage_oa_reverse_preview_hot_path.sql",
     "0095_oa_pending_payment_admissions.sql",
+    "0096_oa_pending_payment_admission_runtime_grants.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -257,7 +258,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 96)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 97)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -429,6 +430,16 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("special_metadata->>'origin' = 'oa_pending_payment_in_progress'", sql)
         self.assertIn("migrated_to_pending_relation_id", sql)
         self.assertIn("oa_pending_payment_in_progress_relation_migrated", sql)
+
+    def test_oa_pending_payment_admission_runtime_role_can_replace_scopes(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("create table if not exists app.oa_pending_payment_admissions", normalized_sql)
+        self.assertIn(
+            "grant select, insert, update, delete on app.oa_pending_payment_admissions to fin_ops_app_runtime",
+            normalized_sql,
+        )
 
     def test_bank_flow_rule_batch_independent_storage_schema_and_backfill_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

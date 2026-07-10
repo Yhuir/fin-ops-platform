@@ -53,6 +53,7 @@
 - Worker：`invoice-usage-collection`
 - Query owner：`OaPendingPaymentReadModelService`
 - Repository owner：`OaPendingPaymentReadModelRepositoryPort`
+- Runtime DB permission：生产 worker 使用共享 `fin_ops_app_runtime` 连接角色；该角色必须对 `app.oa_pending_payment_admissions` 具备 `SELECT/INSERT/UPDATE/DELETE`，否则 admission replace 必须失败并由 durable queue/Audit 暴露，禁止降级为跳过登记。
 
 ## 文件范围
 
