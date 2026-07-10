@@ -2477,6 +2477,8 @@ def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dic
     case_ids = _normalized_metadata_list(metadata.get("case_ids"))
     if case_ids:
         result["case_ids"] = case_ids
+    if metadata.get("force_refresh") is True:
+        result["force_refresh"] = True
     return result
 
 

@@ -593,7 +593,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         source_versions = builder._source_versions()
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-10-active-relations-only-v1",
+            "2026-07-10-active-relations-force-rebuild-v2",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         repository.existing_scope_summary = {
@@ -613,7 +613,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         saved = repository.saved[0]
         self.assertEqual(
             saved["source_versions"]["workbench_relation_schema_version"],
-            "2026-07-10-active-relations-only-v1",
+            "2026-07-10-active-relations-force-rebuild-v2",
         )
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
         self.assertIn("input-invoice-nanjing", rows_by_id)
@@ -629,7 +629,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
 
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-10-active-relations-only-v1",
+            "2026-07-10-active-relations-force-rebuild-v2",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         self.assertEqual(connection.fetch_one_calls[0][1], ("2026-04-01",))

@@ -879,6 +879,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "action_name": "confirm_relation",
                 "row_ids": ["txn-1", "txn-1", ""],
                 "case_ids": ["CASE-1"],
+                "force_refresh": True,
                 "actor_id": "finance-user",
                 "cookie": "secret",
                 "authorization": "Bearer secret",
@@ -891,7 +892,12 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             "scope_type": "workbench",
             "scope_key": "2026-05",
             "reason": "confirm_link",
-            "metadata": {"action_name": "confirm_relation", "row_ids": ["txn-1"], "case_ids": ["CASE-1"]},
+            "metadata": {
+                "action_name": "confirm_relation",
+                "row_ids": ["txn-1"],
+                "case_ids": ["CASE-1"],
+                "force_refresh": True,
+            },
             "action_name": "confirm_relation",
         }
         self.assertEqual(dirty_params[4], expected_payload)

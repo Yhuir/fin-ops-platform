@@ -32,15 +32,16 @@ class WorkbenchRelationReadModelRefreshService:
         scope_key = str(event.scope_key or event.payload.get("scope_key") or event.aggregate_id or "").strip()
         if scope_type != WORKBENCH_RELATION_SCOPE_TYPE or not scope_key:
             raise ValueError("Workbench relation refresh requires scope_type='workbench_relation' and scope_key.")
+        force_refresh = _event_force_refresh(event)
         if scope_key == "all":
-            shard_result = self._enqueue_scope_shards(event, scope_key)
+            shard_result = self._enqueue_scope_shards(event, scope_key, force_refresh=force_refresh)
             if shard_result is not None:
                 return shard_result
         row_ids = _event_text_list(event.payload, "row_ids")
         if not row_ids:
             metadata = event.payload.get("metadata")
             row_ids = _event_text_list(metadata if isinstance(metadata, dict) else {}, "row_ids")
-        if row_ids:
+        if row_ids and not force_refresh:
             rebuild_rows = getattr(self._projection_builder, "rebuild_workbench_relation_read_model_rows", None)
             if callable(rebuild_rows):
                 result = rebuild_rows(scope_key, row_ids=row_ids)
@@ -52,14 +53,20 @@ class WorkbenchRelationReadModelRefreshService:
         rebuild = getattr(self._projection_builder, "rebuild_workbench_relation_read_model_scope", None)
         if not callable(rebuild):
             raise RuntimeError("Projection builder does not expose rebuild_workbench_relation_read_model_scope.")
-        result = rebuild(scope_key)
+        result = rebuild(scope_key, force_refresh=force_refresh)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type=scope_type, scope_key=scope_key)
         return payload
 
-    def _enqueue_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
+    def _enqueue_scope_shards(
+        self,
+        event: RuntimeQueueEvent,
+        scope_key: str,
+        *,
+        force_refresh: bool,
+    ) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_workbench_relation_scope_shards", None)
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not callable(list_shards) or not refresh_gateway.can_enqueue():
@@ -73,6 +80,7 @@ class WorkbenchRelationReadModelRefreshService:
             WORKBENCH_RELATION_SCOPE_TYPE,
             shard_keys,
             reason="workbench_relation_month_shard",
+            metadata={"force_refresh": True} if force_refresh else None,
         )
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
@@ -97,3 +105,10 @@ def _event_text_list(payload: dict[str, Any], name: str) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def _event_force_refresh(event: RuntimeQueueEvent) -> bool:
+    if event.payload.get("force_refresh") is True:
+        return True
+    metadata = event.payload.get("metadata")
+    return isinstance(metadata, dict) and metadata.get("force_refresh") is True

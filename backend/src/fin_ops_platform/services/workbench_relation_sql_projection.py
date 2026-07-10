@@ -13,7 +13,7 @@ from fin_ops_platform.services.workbench_relation_read_model_repository import W
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-10-active-relations-only-v1"
+WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-10-active-relations-force-rebuild-v2"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
@@ -52,17 +52,23 @@ class WorkbenchRelationSqlProjectionBuilder:
         )
         return [text(row.get("scope_key")) for row in rows if MONTH_RE.match(text(row.get("scope_key")) or "")]
 
-    def rebuild_workbench_relation_read_model_scope(self, scope_key: str) -> dict[str, Any]:
+    def rebuild_workbench_relation_read_model_scope(
+        self,
+        scope_key: str,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
         normalized_scope = text(scope_key) or ""
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench relation SQL projection scope_key must be a month shard YYYY-MM.")
         source_versions = self._source_versions(normalized_scope)
-        unchanged = self._unchanged_scope_result(
-            scope_key=normalized_scope,
-            source_versions=source_versions,
-        )
-        if unchanged is not None:
-            return unchanged
+        if not force_refresh:
+            unchanged = self._unchanged_scope_result(
+                scope_key=normalized_scope,
+                source_versions=source_versions,
+            )
+            if unchanged is not None:
+                return unchanged
         pending_claimed_bank_ids = set(self._pending_claimed_bank_transaction_ids_for_month(normalized_scope))
         monthly_objects = self._source_objects_for_month(
             normalized_scope,
