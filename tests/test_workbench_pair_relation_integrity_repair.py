@@ -162,6 +162,50 @@ class WorkbenchPairRelationIntegrityRepairTests(unittest.TestCase):
         self.assertEqual(relation["row_types"], ["oa", "bank", "invoice"])
         self.assertEqual(plan["snapshot"]["pair_relation_history"][0]["operation_type"], "repair_relation_rows")
 
+    def test_repair_plan_only_changes_explicit_case_allowlist(self) -> None:
+        snapshot = {
+            "pair_relations": {
+                "case-target": {
+                    "case_id": "case-target",
+                    "status": "active",
+                    "relation_mode": "manual_confirmed",
+                    "row_ids": ["oa-exp-1", "bank-1", "invoice-missing"],
+                    "row_types": ["oa", "bank", "invoice"],
+                    "special_metadata": {},
+                },
+                "case-out-of-scope": {
+                    "case_id": "case-out-of-scope",
+                    "status": "active",
+                    "relation_mode": "manual_confirmed",
+                    "row_ids": ["oa-exp-2", "bank-2", "invoice-missing-2"],
+                    "row_types": ["oa", "bank", "invoice"],
+                    "special_metadata": {},
+                },
+            },
+            "pair_relation_history": [],
+        }
+
+        plan = build_repair_plan(
+            snapshot,
+            current_rows=[
+                {"row_id": "oa-exp-1", "source_kind": "oa"},
+                {"row_id": "bank-1", "source_kind": "bank"},
+                {"row_id": "oa-exp-2", "source_kind": "oa"},
+                {"row_id": "bank-2", "source_kind": "bank"},
+            ],
+            existing_oa_row_ids={"oa-exp-1", "oa-exp-2"},
+            actor_id="test",
+            case_ids=["case-target", "case-missing", "case-target"],
+        )
+
+        self.assertEqual(plan["requested_case_ids"], ["case-target", "case-missing"])
+        self.assertEqual(plan["missing_requested_case_ids"], ["case-missing"])
+        self.assertEqual(plan["changed_case_ids"], ["case-target"])
+        self.assertEqual(
+            plan["snapshot"]["pair_relations"]["case-out-of-scope"],
+            snapshot["pair_relations"]["case-out-of-scope"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

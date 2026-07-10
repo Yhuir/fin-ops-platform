@@ -58,6 +58,10 @@
 | Dirty scope/outbox | runtime queue | 通过 gateway 或等价事务合同进入 durable queue |
 | 下游影响 | workbench relation、tax offset、pending invoice、bank-flow-rule-batches、no-OA、turnover 等 | 由关系事实源和 lifecycle/worker 扇出 |
 
+生产 orphan relation 修复只能使用专用 `repair_workbench_pair_relation_integrity`，先 dry-run 并用重复
+`--case-id` 精确限制到 `audit_object_identity` 已确认的 case。工具保留 relation history；read model 恢复仍必须
+经过 `ReadModelRefreshGateway`，不得由 repair 工具直接改 projection 或 readiness。
+
 ## 持久化与投影
 
 - Read model：`workbench`

@@ -26,6 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--execute", action="store_true", help="Persist changes. Without this flag the command is a dry run.")
     parser.add_argument("--actor-id", default="system:workbench-relation-integrity-repair")
     parser.add_argument("--limit", type=int, default=0, help="Maximum number of changed relations to persist; 0 means no limit.")
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        default=[],
+        help="Only repair this exact relation case id. Repeatable; omitted means scan all active relations.",
+    )
     return parser
 
 
@@ -39,6 +45,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         existing_oa_row_ids=_load_existing_oa_row_ids(connection),
         actor_id=str(args.actor_id),
         limit=max(0, int(args.limit or 0)),
+        case_ids=[str(case_id).strip() for case_id in args.case_id if str(case_id).strip()],
     )
     if args.execute and repair["changed_case_ids"]:
         repository = PostgresWorkbenchRepository(connection)
@@ -57,10 +64,22 @@ def build_repair_plan(
     existing_oa_row_ids: set[str],
     actor_id: str,
     limit: int = 0,
+    case_ids: list[str] | None = None,
 ) -> dict[str, Any]:
+    requested_case_ids = list(dict.fromkeys(str(case_id).strip() for case_id in (case_ids or []) if str(case_id).strip()))
+    requested_case_id_set = set(requested_case_ids)
     pair_relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
     if not isinstance(pair_relations, dict):
-        return {"status": "ok", "changed_case_ids": [], "cancelled_case_ids": [], "repaired_case_ids": [], "snapshot": snapshot}
+        return {
+            "status": "ok",
+            "requested_case_ids": requested_case_ids,
+            "missing_requested_case_ids": requested_case_ids,
+            "changed_case_ids": [],
+            "cancelled_case_ids": [],
+            "repaired_case_ids": [],
+            "snapshot": snapshot,
+        }
+    missing_requested_case_ids = [case_id for case_id in requested_case_ids if case_id not in pair_relations]
 
     rows_by_id = _rows_by_id(current_rows)
     amount_check_service = WorkbenchAmountCheckService()
@@ -80,6 +99,8 @@ def build_repair_plan(
     timestamp = datetime.now(UTC).isoformat()
 
     for case_id, relation in list(repaired_relations.items()):
+        if requested_case_id_set and str(case_id) not in requested_case_id_set:
+            continue
         if limit and len(changed_case_ids) >= limit:
             break
         if not isinstance(relation, dict) or str(relation.get("status") or "") != "active":
@@ -172,6 +193,8 @@ def build_repair_plan(
 
     return {
         "status": "ok",
+        "requested_case_ids": requested_case_ids,
+        "missing_requested_case_ids": missing_requested_case_ids,
         "changed_case_ids": changed_case_ids,
         "repaired_case_ids": repaired_case_ids,
         "cancelled_case_ids": cancelled_case_ids,
