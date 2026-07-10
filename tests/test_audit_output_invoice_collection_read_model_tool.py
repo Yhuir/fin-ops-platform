@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from fin_ops_platform.tools import audit_output_invoice_collection_read_model
+from fin_ops_platform.services.postgres_repositories.output_invoice_collection_audit import (
+    OUTPUT_INVOICE_PREDICATE,
+    audit_output_invoice_collection_read_model as run_output_invoice_collection_audit,
+)
 
 
 class FakeConnection:
@@ -44,10 +47,10 @@ class AuditOutputInvoiceCollectionReadModelToolTests(unittest.TestCase):
     def test_clean_audit_passes_without_writes(self) -> None:
         connection = FakeConnection()
 
-        report = audit_output_invoice_collection_read_model.audit_output_invoice_collection_read_model(connection)
+        report = run_output_invoice_collection_audit(connection)
 
         self.assertEqual(report["overall_status"], "pass")
-        self.assertEqual(report["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(report["issues"], [])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
@@ -58,8 +61,8 @@ class AuditOutputInvoiceCollectionReadModelToolTests(unittest.TestCase):
         self.assertIn("output_invoice_ids", queried_sql)
 
     def test_sql_literal_percent_is_escaped_for_psycopg_placeholders(self) -> None:
-        self.assertIn("销项%%", audit_output_invoice_collection_read_model.OUTPUT_INVOICE_PREDICATE)
-        self.assertNotIn("销项%'", audit_output_invoice_collection_read_model.OUTPUT_INVOICE_PREDICATE)
+        self.assertIn("销项%%", OUTPUT_INVOICE_PREDICATE)
+        self.assertNotIn("销项%'", OUTPUT_INVOICE_PREDICATE)
 
     def test_reports_full_data_and_relation_invariant_failures(self) -> None:
         connection = FakeConnection(
@@ -91,15 +94,15 @@ class AuditOutputInvoiceCollectionReadModelToolTests(unittest.TestCase):
             }
         )
 
-        report = audit_output_invoice_collection_read_model.audit_output_invoice_collection_read_model(connection)
+        report = run_output_invoice_collection_audit(connection)
 
         self.assertEqual(report["overall_status"], "issues_found")
-        issue_codes = set(report["summary"]["issue_counts_by_code"])
+        issue_codes = set(report["summary"]["issue_sample_counts_by_code"])
         self.assertIn("missing_output_invoice_collection_member", issue_codes)
         self.assertIn("output_collection_relation_source_versions_mismatch", issue_codes)
         self.assertIn("candidate_relation_projected_into_output_collection", issue_codes)
         self.assertIn("candidate_workbench_relation_group_for_output_invoice", issue_codes)
-        self.assertEqual(report["summary"]["blocking_issue_count"], 4)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 4)
         self.assertEqual(connection.executed, [])
 
 

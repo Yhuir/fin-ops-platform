@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from tests.app_test_support import build_local_state_application as build_application
 
 
@@ -203,6 +204,13 @@ def inject_oa_sync_runtime_status(
         "worker_statuses": {"oa-sync": {"status": worker_status}},
     }
     app._postgres_oa_projection_latest_sync_run = lambda: latest_run
+
+
+def inject_operations_audit_connection(app, connection: object) -> None:
+    app._runtime_repositories = SimpleNamespace(
+        operations_audit_repository=PostgresOperationsAuditRepository(connection),
+        queue_repository=getattr(app._runtime_repositories, "queue_repository", None),
+    )
 
 
 class AppHealthApiTests(unittest.TestCase):
@@ -776,7 +784,7 @@ class AppHealthApiTests(unittest.TestCase):
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeInputInvoiceUsageAuditConnection()
-            setattr(app._state_store, "_connection", connection)
+            inject_operations_audit_connection(app, connection)
 
             response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
             payload = json.loads(response.body)
@@ -785,7 +793,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "dry-run")
         self.assertEqual(payload["overall_status"], "pass")
         self.assertEqual(payload["tenant_id"], "default")
-        self.assertEqual(payload["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
         self.assertIn("app.invoices", payload["audit_contract"]["source_tables"])
         self.assertIn("read_model.input_invoice_usage_rows", payload["audit_contract"]["source_tables"])
@@ -799,7 +807,7 @@ class AppHealthApiTests(unittest.TestCase):
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeOutputInvoiceCollectionAuditConnection()
-            setattr(app._state_store, "_connection", connection)
+            inject_operations_audit_connection(app, connection)
 
             response = app.handle_request("GET", "/api/operations/app-health/output-invoice-collection-audit")
             payload = json.loads(response.body)
@@ -807,7 +815,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["mode"], "dry-run")
         self.assertEqual(payload["overall_status"], "pass")
-        self.assertEqual(payload["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
         self.assertIn("read_model.output_invoice_collection_rows", payload["audit_contract"]["source_tables"])
         self.assertIn("read_model.workbench_relation_rows", payload["audit_contract"]["source_tables"])
@@ -831,16 +839,16 @@ class AppHealthApiTests(unittest.TestCase):
                     ]
                 }
             )
-            setattr(app._state_store, "_connection", connection)
+            inject_operations_audit_connection(app, connection)
 
             response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["overall_status"], "issues_found")
-        self.assertEqual(payload["summary"]["blocking_issue_count"], 1)
+        self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 1)
         self.assertEqual(
-            payload["summary"]["issue_counts_by_code"],
+            payload["summary"]["issue_sample_counts_by_code"],
             {"active_relation_missing_workbench_relation_group": 1},
         )
         self.assertEqual(connection.executed, [])
@@ -869,7 +877,7 @@ class AppHealthApiTests(unittest.TestCase):
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakePageBusinessAuditConnection()
-            setattr(app._state_store, "_connection", connection)
+            inject_operations_audit_connection(app, connection)
 
             response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_details")
             payload = json.loads(response.body)
@@ -878,7 +886,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "page-business-read-model-audit")
         self.assertEqual(payload["domain_key"], "bank_details")
         self.assertEqual(payload["overall_status"], "pass")
-        self.assertEqual(payload["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
         self.assertIn("app.bank_transactions", payload["audit_contract"]["source_tables"])
         self.assertIn("read_model.bank_detail_rows", payload["audit_contract"]["read_model_tables"])
@@ -909,16 +917,16 @@ class AppHealthApiTests(unittest.TestCase):
                     ],
                 }
             )
-            setattr(app._state_store, "_connection", connection)
+            inject_operations_audit_connection(app, connection)
 
             response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_flow_rule_batches")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["overall_status"], "issues_found")
-        self.assertEqual(payload["summary"]["blocking_issue_count"], 2)
+        self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 2)
         self.assertEqual(
-            payload["summary"]["issue_counts_by_code"],
+            payload["summary"]["issue_sample_counts_by_code"],
             {
                 "bank_flow_rule_batches_active_relation_missing_distribution": 1,
                 "bank_flow_rule_batches_missing_read_model_row": 1,
@@ -929,7 +937,7 @@ class AppHealthApiTests(unittest.TestCase):
     def test_operations_page_audit_rejects_unsupported_domain(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            setattr(app._state_store, "_connection", FakePageBusinessAuditConnection())
+            inject_operations_audit_connection(app, FakePageBusinessAuditConnection())
 
             response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=unknown")
             payload = json.loads(response.body)

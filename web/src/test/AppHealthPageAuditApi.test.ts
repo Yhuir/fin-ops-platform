@@ -15,9 +15,10 @@ describe("app health page business audit API", () => {
         mode: "page-business-read-model-audit",
         domain_key: "bank_details",
         overall_status: "pass",
+        audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
         summary: {
-          blocking_issue_count: 0,
-          issue_count: 0,
+          blocking_issue_sample_count: 0,
+          issue_sample_count: 0,
         },
         issues: [],
       }), {

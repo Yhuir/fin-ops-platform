@@ -38,6 +38,7 @@
 | 外部往来闭环 relation metadata | `workbench_relation` / turnover manual closure and tag-rule sync | `relation_mode=turnover_manual_closure` 仍是外部往来闭环事实类型，但 paired/open 分区不再由 relation mode 直接决定；必须满足上面的 Bank Transaction Paired Policy。旧 `turnover:* manual_confirmed` 必须由规则 owner 通过 relation command 升级，Workbench 不回读当前标签设置。 |
 | no-OA relation metadata | `workbench_relation` / no-OA submit | legacy `special_metadata.paired_requires_oa`、`paired_requires_invoice` 决定 no-OA relation 是否具备进入 paired 区的 row type |
 | 写后 target envelope | `WorkbenchWriteFacade` | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；`read_model_key=workbench_relation` |
+| API 失败 envelope | backend error response -> `features/workbench/api.ts` | 结构化 `message` 映射为用户错误时必须保留 `requestId` / `request_id`，便于从页面错误定位后端日志；不得把 `ApiClientError` 降级成丢失关联 ID 的普通错误 |
 | 外部 OA 手工导入影响 | settings/OA manual import API | 不属于 `WorkbenchWriteFacade`，但必须返回并等待 `workbench`/`workbench_relation` 等受影响 read model targets |
 | Refresh scope | `workbench` manifest | month or `all`；普通写路径只刷新受影响 month shard，`month=all` 查询组合 active 月度 generation；显式 rebuild/repair/backfill 才使用 materialized all aggregate |
 
@@ -73,7 +74,7 @@
 | --- | --- |
 | Frontend page | `web/src/pages/ReconciliationWorkbenchPage.tsx` |
 | Frontend components | `web/src/components/workbench/*` |
-| Frontend API/tests | `web/src/features/workbench/*`、`web/src/test/Workbench*.test.*`、`web/e2e/workbench-*.spec.ts` |
+| Frontend API/tests | `web/src/features/workbench/*`、`web/src/test/Workbench*.test.*`（含 500 `requestId` 保留回归）、`web/e2e/workbench-*.spec.ts` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_workbench.py`、`backend/src/fin_ops_platform/app/routes_workbench_actions.py` |
 | Backend service | `backend/src/fin_ops_platform/services/workbench_*`、`backend/src/fin_ops_platform/services/live_workbench_service.py`、`backend/src/fin_ops_platform/services/matching.py` |
 | Repository / SQL | `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`、`backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py`、`backend/src/fin_ops_platform/services/workbench_sql_projection.py` |

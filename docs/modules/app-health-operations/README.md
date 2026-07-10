@@ -63,9 +63,9 @@
 - Worker registry：`runtime_worker_registry.py`。
 - Domain/read model/job/dependency registries：`app_status_*_registry.py`。
 - 发票 inventory：读取 `app.invoices.source_links`，只统计已进入统一发票池且未删除的 canonical invoice facts；OA 附件 OCR cache 只作为解析缓存，不作为 App Health 发票 inventory 事实源。
-- 进项发票使用情况审计：只读 `app.invoices`、`app.workbench_pair_relations`、`read_model.input_invoice_usage_rows/scopes`、`read_model.workbench_relation_rows/groups/scopes` 和 `job.read_model_dirty_scopes`；真实库 `blocking_issue_count=0` 才能作为“进项发票使用情况页面全量数据和配对关系正确”的证据。
-- 销项发票收款情况审计：只读 `app.invoices`、`app.workbench_pair_relations`、`read_model.output_invoice_collection_rows/scopes`、`read_model.workbench_relation_rows/groups/scopes` 和 `job.read_model_dirty_scopes`；真实库 `blocking_issue_count=0` 才能作为“销项发票收款情况页面全量数据和配对关系正确”的证据。
-- 页面业务审计：只读 `PAGE_AUDIT_CONTRACTS` 登记的 source/read model/relation/job 表；真实库 `overall_status=pass` 且 `blocking_issue_count=0` 才能作为对应页面 App 内部 canonical facts、read model 和 relation 投影一致的证据。OA 待付款等依赖外部 OA/银行系统的页面仍需要外部 sync/runbook 证明来源系统本身完整。
+- 进项发票使用情况审计：只读 canonical facts、`input_invoice_usage`、`workbench_relation` 和 dirty scopes；仅当 `overall_status=pass`、`audit_status.integrity=pass`、`audit_status.freshness=fresh` 时可作为已登记 invariant 一致的证据。
+- 销项发票收款情况审计：只读 canonical facts、`output_invoice_collection`、`workbench_relation` 和 dirty scopes；同样以结构化 `audit_status` 为准。
+- 页面业务审计：只读 `PAGE_AUDIT_CONTRACTS` 登记的 source/read model/relation/job 表，dirty/outbox 均按 tenant 隔离；`*_sample_count` 只是有上限的问题样本，不能把 50/100/150 当成精确问题总数。OA 待付款等依赖外部 OA/银行系统的页面仍需要外部 sync/runbook 证明来源系统本身完整。
 - 导入历史：只读取 `app.import_batches` 的 `bank_transaction`、`input_invoice`、`output_invoice` 批次成功数。
 - 前端只展示后端事实；不能用当前 route、表格 loading、组件本地状态推导全局状态。
 

@@ -217,15 +217,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
 from fin_ops_platform.services.input_invoice_usage_read_model_fresh_gate_service import (
     InputInvoiceUsageReadModelFreshGateService,
 )
-from fin_ops_platform.tools.audit_input_invoice_usage_read_model import (
-    audit_input_invoice_usage_read_model,
-)
-from fin_ops_platform.tools.audit_output_invoice_collection_read_model import (
-    audit_output_invoice_collection_read_model,
-)
-from fin_ops_platform.tools.audit_page_business_read_model import (
-    audit_page_business_read_model,
-)
+from fin_ops_platform.services.operations_audit_service import OperationsAuditService
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_best_source_link,
@@ -3887,12 +3879,16 @@ class Application:
         )
         return self._json_response(HTTPStatus.OK, self._cached_operations_app_health_dashboard_payload(service))
 
+    def _operations_audit_service(self) -> OperationsAuditService | None:
+        repository = getattr(getattr(self, "_runtime_repositories", None), "operations_audit_repository", None)
+        return OperationsAuditService(repository) if repository is not None else None
+
     def _handle_api_operations_input_invoice_usage_audit(self, headers: dict[str, str] | None) -> Response:
         session, admin_error = self._resolve_admin_session(headers)
         if admin_error is not None:
             return admin_error
-        connection = getattr(getattr(self, "_state_store", None), "_connection", None)
-        if connection is None:
+        service = self._operations_audit_service()
+        if service is None:
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
@@ -3901,10 +3897,9 @@ class Application:
                 },
             )
         try:
-            payload = audit_input_invoice_usage_read_model(
-                connection,
+            payload = service.audit_input_invoice_usage(
                 tenant_id=tenant_id_for_session(session),
-                example_limit=50,
+                sample_limit=50,
             )
         except Exception as exc:
             return self._json_response(
@@ -3920,8 +3915,8 @@ class Application:
         session, admin_error = self._resolve_admin_session(headers)
         if admin_error is not None:
             return admin_error
-        connection = getattr(getattr(self, "_state_store", None), "_connection", None)
-        if connection is None:
+        service = self._operations_audit_service()
+        if service is None:
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
@@ -3930,10 +3925,9 @@ class Application:
                 },
             )
         try:
-            payload = audit_output_invoice_collection_read_model(
-                connection,
+            payload = service.audit_output_invoice_collection(
                 tenant_id=tenant_id_for_session(session),
-                example_limit=50,
+                sample_limit=50,
             )
         except Exception as exc:
             return self._json_response(
@@ -3962,8 +3956,8 @@ class Application:
                     "message": "domain is required.",
                 },
             )
-        connection = getattr(getattr(self, "_state_store", None), "_connection", None)
-        if connection is None:
+        service = self._operations_audit_service()
+        if service is None:
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
@@ -3972,11 +3966,10 @@ class Application:
                 },
             )
         try:
-            payload = audit_page_business_read_model(
-                connection,
+            payload = service.audit_page_business(
                 domain_key=domain_key,
                 tenant_id=tenant_id_for_session(session),
-                example_limit=50,
+                sample_limit=50,
             )
         except ValueError as exc:
             return self._json_response(

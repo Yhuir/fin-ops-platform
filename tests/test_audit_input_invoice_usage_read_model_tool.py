@@ -4,7 +4,11 @@ import io
 import json
 import unittest
 
-from fin_ops_platform.tools import audit_input_invoice_usage_read_model
+from fin_ops_platform.services.postgres_repositories.input_invoice_usage_audit import (
+    INPUT_INVOICE_PREDICATE,
+    audit_input_invoice_usage_read_model as run_input_invoice_usage_audit,
+)
+from fin_ops_platform.tools import audit_input_invoice_usage_read_model as audit_tool
 
 
 class FakeConnection:
@@ -46,10 +50,10 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
     def test_clean_audit_passes_without_writes(self) -> None:
         connection = FakeConnection()
 
-        report = audit_input_invoice_usage_read_model.audit_input_invoice_usage_read_model(connection)
+        report = run_input_invoice_usage_audit(connection)
 
         self.assertEqual(report["overall_status"], "pass")
-        self.assertEqual(report["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(report["issues"], [])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
@@ -59,8 +63,8 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertIn("read_model.workbench_relation_groups", queried_sql)
 
     def test_sql_literal_percent_is_escaped_for_psycopg_placeholders(self) -> None:
-        self.assertIn("进项%%", audit_input_invoice_usage_read_model.INPUT_INVOICE_PREDICATE)
-        self.assertNotIn("进项%'", audit_input_invoice_usage_read_model.INPUT_INVOICE_PREDICATE)
+        self.assertIn("进项%%", INPUT_INVOICE_PREDICATE)
+        self.assertNotIn("进项%'", INPUT_INVOICE_PREDICATE)
 
     def test_reports_full_data_and_relation_invariant_failures(self) -> None:
         connection = FakeConnection(
@@ -125,10 +129,10 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
             }
         )
 
-        report = audit_input_invoice_usage_read_model.audit_input_invoice_usage_read_model(connection)
+        report = run_input_invoice_usage_audit(connection)
 
         self.assertEqual(report["overall_status"], "issues_found")
-        issue_codes = set(report["summary"]["issue_counts_by_code"])
+        issue_codes = set(report["summary"]["issue_sample_counts_by_code"])
         self.assertIn("missing_input_invoice_usage_member", issue_codes)
         self.assertIn("duplicate_input_invoice_usage_member", issue_codes)
         self.assertIn("input_invoice_usage_amount_mismatch", issue_codes)
@@ -137,13 +141,13 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertIn("cross_scope_relation_member_not_distributed", issue_codes)
         self.assertIn("candidate_relation_projected_into_input_usage", issue_codes)
         self.assertIn("candidate_workbench_relation_for_input_invoice", issue_codes)
-        self.assertEqual(report["summary"]["blocking_issue_count"], 8)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 8)
         self.assertEqual(connection.executed, [])
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()
 
-        exit_code = audit_input_invoice_usage_read_model.main(
+        exit_code = audit_tool.main(
             ["--json", "--fail-on-issues"],
             connection=FakeConnection(
                 rows_by_check={
@@ -162,7 +166,7 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["overall_status"], "issues_found")
-        self.assertEqual(payload["summary"]["issue_counts_by_code"], {"read_model_scope_not_fresh": 1})
+        self.assertEqual(payload["summary"]["issue_sample_counts_by_code"], {"read_model_scope_not_fresh": 1})
 
     def test_example_limit_is_applied_per_issue_code(self) -> None:
         rows = [
@@ -170,13 +174,14 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
             for index in range(3)
         ]
 
-        report = audit_input_invoice_usage_read_model.audit_input_invoice_usage_read_model(
+        report = run_input_invoice_usage_audit(
             FakeConnection(rows_by_check={"missing_read_model_member": rows}),
             example_limit=2,
         )
 
-        self.assertEqual(report["summary"]["issue_counts_by_code"], {"missing_input_invoice_usage_member": 3})
+        self.assertEqual(report["summary"]["issue_sample_counts_by_code"], {"missing_input_invoice_usage_member": 2})
         self.assertEqual(len(report["issues"]), 2)
+        self.assertTrue(report["summary"]["issue_samples_truncated"])
 
 
 def _check_name(sql: str) -> str:

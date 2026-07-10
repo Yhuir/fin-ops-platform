@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fin_ops_platform.services.object_storage import ObjectStorageSettings
+from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
 
@@ -11,6 +12,7 @@ from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeR
 @dataclass(frozen=True)
 class RuntimeRepositoryContext:
     state_store: Any | None
+    operations_audit_repository: PostgresOperationsAuditRepository | None
     queue_repository: RuntimeQueueRepository | None
     queue_settings: RuntimeQueueSettings
     redis_helper: RuntimeRedisHelper
@@ -21,6 +23,7 @@ class RuntimeRepositoryContext:
         connection = getattr(state_store, "_connection", None)
         return cls(
             state_store=state_store,
+            operations_audit_repository=PostgresOperationsAuditRepository(connection) if connection is not None else None,
             queue_repository=RuntimeQueueRepository(connection) if connection is not None else None,
             queue_settings=RuntimeQueueSettings.from_env(),
             redis_helper=RuntimeRedisHelper.from_settings(RuntimeRedisSettings.from_env()),

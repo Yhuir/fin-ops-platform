@@ -9,6 +9,7 @@ import type {
   InputInvoiceUsageAuditPayload,
   OperationsDashboardPayload,
   OutputInvoiceCollectionAuditPayload,
+  PageAuditDomainKey,
   PageAuditPayload,
 } from "./types";
 
@@ -101,10 +102,9 @@ export async function fetchOutputInvoiceCollectionAudit(signal?: AbortSignal): P
   return requestJson<OutputInvoiceCollectionAuditPayload>("/api/operations/app-health/output-invoice-collection-audit", signal);
 }
 
-export async function fetchPageBusinessAudit(domainKey: string, signal?: AbortSignal): Promise<PageAuditPayload> {
-  const normalizedDomainKey = String(domainKey || "").trim();
+export async function fetchPageBusinessAudit(domainKey: PageAuditDomainKey, signal?: AbortSignal): Promise<PageAuditPayload> {
   return requestJson<PageAuditPayload>(
-    `/api/operations/app-health/page-audit?domain=${encodeURIComponent(normalizedDomainKey)}`,
+    `/api/operations/app-health/page-audit?domain=${encodeURIComponent(domainKey)}`,
     signal,
   );
 }

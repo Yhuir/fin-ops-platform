@@ -104,7 +104,7 @@ describe("AppHealthOperationsPage", () => {
     });
     expect(audit).toHaveTextContent("pass");
     expect(audit).toHaveTextContent("Read model 发票");
-    expect(audit).toHaveTextContent("Blocking issues");
+    expect(audit).toHaveTextContent("Blocking samples");
     expect(within(audit).getAllByText("236").length).toBeGreaterThanOrEqual(1);
 
     const requests = screen.getByTestId("app-health-requests");

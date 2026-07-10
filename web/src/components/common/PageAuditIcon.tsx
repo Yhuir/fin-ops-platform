@@ -18,8 +18,7 @@ function normalizeStatus(status: string | undefined) {
 }
 
 function isFreshStatus(status: string | undefined) {
-  const normalized = normalizeStatus(status);
-  return !normalized || normalized === "fresh" || normalized === "live_query";
+  return normalizeStatus(status) === "fresh";
 }
 
 function auditMessage(
@@ -32,17 +31,23 @@ function auditMessage(
     return null;
   }
   const summary = payload.summary;
-  const blocking = summary?.blocking_issue_count ?? 0;
-  const issues = summary?.issue_count ?? 0;
-  const passed = payload.overall_status === "pass" && blocking === 0 && issues === 0;
-  const fresh = isFreshStatus(readModelStatus);
-  if (passed && fresh) {
+  const blockingSamples = summary?.blocking_issue_sample_count ?? 0;
+  const issueSamples = summary?.issue_sample_count ?? 0;
+  const integrityPassed = payload.audit_status?.integrity === "pass";
+  const auditFresh = payload.audit_status?.freshness === "fresh";
+  const pageFresh = isFreshStatus(readModelStatus);
+  if (payload.overall_status === "pass" && integrityPassed && auditFresh && pageFresh && blockingSamples === 0) {
     return { tone: "success", text: successText };
   }
-  if (passed) {
-    return { tone: "warning", text: notFreshText };
+  if (integrityPassed && blockingSamples === 0) {
+    const freshness = auditFresh && pageFresh ? "fresh" : "not_fresh";
+    return { tone: "warning", text: `${notFreshText} · freshness ${freshness}` };
   }
-  return { tone: "danger", text: `Audit 未通过 · blocking ${blocking} · issues ${issues}` };
+  const truncated = summary?.issue_samples_truncated ? "+" : "";
+  return {
+    tone: "danger",
+    text: `Audit 未通过 · integrity issues_found · blocking samples ${blockingSamples}${truncated} · issue samples ${issueSamples}${truncated}`,
+  };
 }
 
 export default function PageAuditIcon({

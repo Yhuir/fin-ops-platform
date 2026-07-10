@@ -2598,7 +2598,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if _function_source(server_tree, server_source, removed_handler):
                 violations.append(f"server.py still owns cost statistics route callback {removed_handler}")
-        if "self._cost_statistics_routes().route(method, route_path, query)" not in server_source:
+        if "self._cost_statistics_routes().route(method, route_path, query, body, headers)" not in server_source:
             violations.append("server.py does not delegate cost statistics routing to the route owner")
 
         self.assertEqual(violations, [])
@@ -8826,6 +8826,43 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         worker_source = (APP_ROOT / "worker.py").read_text(encoding="utf-8")
 
         self.assertNotIn("load_workbench_read_models()", worker_source)
+
+    def test_operations_audit_uses_service_repository_boundary(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        audit_handler_source = server_source[
+            server_source.index("    def _operations_audit_service"):
+            server_source.index("    def _handle_api_operations_input_invoice_usage_refresh")
+        ]
+        repository_source = (
+            SERVICES_ROOT / "postgres_repositories" / "operations_audit.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("fin_ops_platform.tools.audit_", server_source)
+        self.assertNotIn("_state_store", audit_handler_source)
+        self.assertNotIn("fin_ops_platform.tools", repository_source)
+        self.assertIn("OperationsAuditService", audit_handler_source)
+
+    def test_operations_audit_cli_files_do_not_own_sql_or_database_reads(self) -> None:
+        for file_name in (
+            "audit_input_invoice_usage_read_model.py",
+            "audit_output_invoice_collection_read_model.py",
+            "audit_page_business_read_model.py",
+        ):
+            path = TOOLS_ROOT / file_name
+            source = path.read_text(encoding="utf-8")
+            with self.subTest(file_name=file_name):
+                self.assertNotIn("/* check:", source)
+                self.assertNotIn("_PREDICATE", source)
+                self.assertEqual(_attribute_calls(_parse(path), {"fetch_one", "fetch_all", "execute"}), [])
+
+        repository_root = SERVICES_ROOT / "postgres_repositories"
+        common_source = (repository_root / "invoice_read_model_audit.py").read_text(encoding="utf-8")
+        self.assertIn("class InvoiceReadModelAuditContract", common_source)
+        for file_name in ("input_invoice_usage_audit.py", "output_invoice_collection_audit.py"):
+            wrapper_source = (repository_root / file_name).read_text(encoding="utf-8")
+            with self.subTest(repository_file=file_name):
+                self.assertNotIn("/* check:", wrapper_source)
+                self.assertIn("audit_invoice_read_model", wrapper_source)
 
     def test_raw_postgres_sql_in_services_is_classified_by_platform_boundary(self) -> None:
         allowed_exact_paths = {

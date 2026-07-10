@@ -26,6 +26,7 @@
 | `APP-HEALTH-E2E-008` | registry completeness | P0 | 新增页面、read model、worker、job type 或 dependency 必须同步 registry 和测试；缺 registry 不能让状态 plane 漏报。 |
 | `APP-HEALTH-E2E-009` | dashboard stale/error behavior | P1 | dashboard refresh 失败时保留上一份 payload 并显示 stale/warning，不把失败状态显示为 fresh；App Status icon 不因 route 切换改变状态。 |
 | `APP-HEALTH-E2E-010` | 真实基础设施 runtime closure | P1 | 真实 PostgreSQL/RabbitMQ/Redis/systemd/Nginx/OA iframe 环境下，worker heartbeat、queue backlog、read model readiness、SSE、ready payload、大库 metrics 和 write-operation SLO 都必须有真实证据；该项必须在 staging/runtime smoke 验证。 |
+| `APP-HEALTH-E2E-011` | admin 只读 Audit 响应合同 | P0 | admin 点击进项发票使用 Audit 后只发送 GET；结构化 `audit_status` 全部通过时显示 pass 和 `Blocking samples`，不得继续显示旧的精确问题数文案，也不得产生 refresh/mutation 请求。 |
 
 ## 不属于本地 deterministic E2E 的风险
 

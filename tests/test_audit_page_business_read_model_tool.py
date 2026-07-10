@@ -53,7 +53,9 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 )
 
                 self.assertEqual(report["overall_status"], "pass")
-                self.assertEqual(report["summary"]["blocking_issue_count"], 0)
+                self.assertEqual(report["audit_status"]["integrity"], "pass")
+                self.assertEqual(report["audit_status"]["freshness"], "fresh")
+                self.assertEqual(report["summary"]["blocking_issue_sample_count"], 0)
                 self.assertEqual(report["issues"], [])
                 self.assertEqual(report["audit_contract"]["write_policy"], "read_only")
                 self.assertEqual(connection.executed, [])
@@ -145,7 +147,10 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
 
         self.assertEqual(report["overall_status"], "issues_found")
-        issue_codes = set(report["summary"]["issue_counts_by_code"])
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(report["audit_status"]["freshness"], "not_fresh")
+        self.assertEqual(report["audit_status"]["queue"], "backlog")
+        issue_codes = set(report["summary"]["issue_sample_counts_by_code"])
         self.assertIn("read_model_scope_not_fresh", issue_codes)
         self.assertIn("read_model_outbox_not_drained", issue_codes)
         self.assertIn("bank_details_scope_row_count_mismatch", issue_codes)
@@ -157,8 +162,13 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("bank_details_duplicate_read_model_identity", issue_codes)
         self.assertIn("bank_details_active_relation_missing_distribution", issue_codes)
         self.assertIn("bank_details_candidate_relation_projected_as_linked", issue_codes)
-        self.assertEqual(report["summary"]["blocking_issue_count"], 11)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 11)
         self.assertEqual(connection.executed, [])
+
+        summary_params = connection.fetch_one_calls[0][1]
+        self.assertEqual(summary_params[-2:], ("default", "default"))
+        outbox_params = next(params for sql, params in connection.fetch_all_calls if "outbox_backlog" in sql)
+        self.assertEqual(outbox_params, ("default", 51))
 
     def test_bank_flow_rule_batch_audit_compares_business_fields_not_raw_version_shape(self) -> None:
         connection = FakeConnection(
@@ -183,7 +193,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
 
         self.assertEqual(report["overall_status"], "issues_found")
         self.assertEqual(
-            report["summary"]["issue_counts_by_code"],
+            report["summary"]["issue_sample_counts_by_code"],
             {"bank_flow_rule_batches_business_fields_mismatch": 1},
         )
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
@@ -256,7 +266,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["overall_status"], "issues_found")
-        self.assertEqual(payload["summary"]["issue_counts_by_code"], {"read_model_scope_not_fresh": 1})
+        self.assertEqual(payload["summary"]["issue_sample_counts_by_code"], {"read_model_scope_not_fresh": 1})
 
 
 def _check_name(sql: str) -> str:

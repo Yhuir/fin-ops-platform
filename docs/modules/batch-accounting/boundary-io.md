@@ -30,6 +30,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面批量选择/操作 | `BatchAccountingPage.tsx`、`features/batchAccounting/api.ts` | 进入 batch accounting API/service |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=batch_accounting`；与批量提交/撤回 command 隔离，不触发 relation 或 read model 写入 |
 | 批量账务候选 payload | Workbench SQL active read model，fallback 为 Workbench payload builder | 未提交 GET 列表优先走 `load_batch_accounting_workbench_payload(bank_year=...)`；该全量候选读口只服务列表，不得进入提交 command 热路径 |
 | 提交 command 窄 payload | Workbench SQL active read model | `POST /api/batch-accounting/submit` 必须优先走 `load_batch_accounting_submit_workbench_payload(bank_year, bank_row_id, oa_row_ids)`，只读取本次选中银行流水、OA 主单和这些 OA 的附件发票；禁止为单次提交扫描整年银行/OA/发票候选 |
 | 已提交银行列表 payload | Workbench SQL active read model | `bucket=submitted` 的银行行上下文优先走 `load_batch_accounting_submitted_bank_workbench_payload(bank_year)`，只读取批量账务银行行；OA/发票明细来自 relation DTO，不再用整页候选 payload 补齐 |
@@ -49,6 +50,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 批量账务操作结果 | 前端页面 | 返回成功/失败、受影响对象、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。提交/撤回 command 成功后，后置 barrier/reload 只影响读侧收敛提示，不能把 command 成功改写成失败。`affected_months`/`affected_scope_keys` 必须优先是具体月份集合，不得无条件包含 `all`。撤回语义是通过 relation command repository 取消当前 batch relation，并记录 `withdraw_link` history；不得走旧 restore-style withdraw 或进程内 fallback。 |
+| 页面 Audit 状态 | 标题附件 | integrity/freshness/queue 分栏判断；问题数量只显示 sample |
 | Relation dirty scopes | workbench relation/read model | 不直接写下游 payload |
 | 关联台已配对展示 | `workbench` active generation / `WorkbenchCandidateGroupingService` | active `relation_mode=batch_accounting` 且 `special_metadata.source=batch_accounting` 的 row-set 是已确认批量账务关系；即使行级 relation code 是 `batch_accounting` 而不是旧 `fully_linked`，也必须进入 paired 区，不得被 `existing_case_candidate` open 旧候选链路接管 |
 | Audit/result | audit/job status | 重要批量操作可追踪 |

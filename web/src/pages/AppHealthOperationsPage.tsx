@@ -204,15 +204,21 @@ function auditStatus(payload: InputInvoiceUsageAuditPayload | null) {
     return { label: "未验证", tone: "neutral" as const };
   }
   const status = String(payload.overall_status || "unknown");
-  const blockingIssueCount = payload.summary?.blocking_issue_count ?? 0;
-  const errorCount = payload.summary?.error_count ?? 0;
-  if (status === "pass" && blockingIssueCount === 0 && errorCount === 0) {
+  const blockingIssueSampleCount = payload.summary?.blocking_issue_sample_count ?? 0;
+  const errorSampleCount = payload.summary?.error_sample_count ?? 0;
+  if (
+    status === "pass"
+    && payload.audit_status?.integrity === "pass"
+    && payload.audit_status?.freshness === "fresh"
+    && blockingIssueSampleCount === 0
+    && errorSampleCount === 0
+  ) {
     return { label: "pass", tone: "success" as const };
   }
-  if (blockingIssueCount > 0 || errorCount > 0) {
+  if (payload.audit_status?.integrity === "issues_found" || blockingIssueSampleCount > 0 || errorSampleCount > 0) {
     return { label: status, tone: "danger" as const };
   }
-  if (status === "issues_found") {
+  if (payload.audit_status?.freshness === "not_fresh" || status === "issues_found") {
     return { label: status, tone: "warning" as const };
   }
   return { label: status, tone: "neutral" as const };
@@ -240,7 +246,7 @@ function InputInvoiceUsageAuditPanel({
 }) {
   const state = auditStatus(payload);
   const summary = payload?.summary;
-  const issueCodeEntries = Object.entries(summary?.issue_counts_by_code ?? {})
+  const issueCodeEntries = Object.entries(summary?.issue_sample_counts_by_code ?? {})
     .sort((left, right) => right[1] - left[1])
     .slice(0, 4);
   const visibleIssues = (payload?.issues ?? []).slice(0, 3);
@@ -279,7 +285,7 @@ function InputInvoiceUsageAuditPanel({
           <AuditMetric label="Read model rows" value={summary?.read_model_row_count} />
           <AuditMetric label="Active relation" value={summary?.active_workbench_pair_relation_count} />
           <AuditMetric label="Relation groups" value={summary?.linked_workbench_relation_group_count} />
-          <AuditMetric label="Blocking issues" value={summary?.blocking_issue_count} />
+          <AuditMetric label="Blocking samples" value={summary?.blocking_issue_sample_count} />
         </div>
         {issueCodeEntries.length > 0 || visibleIssues.length > 0 ? (
           <div className="app-health-audit-issues" aria-label="进项使用 Audit 问题">

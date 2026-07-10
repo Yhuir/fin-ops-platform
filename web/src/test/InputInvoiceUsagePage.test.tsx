@@ -105,6 +105,7 @@ const rowsPayload = {
     pendingCount: 1,
   },
   filterConfig: [],
+  readModelStatus: "fresh",
 };
 
 function installInputInvoiceUsageFetch(
@@ -125,9 +126,10 @@ function installInputInvoiceUsageFetch(
     if (url.pathname === "/api/operations/app-health/input-invoice-usage-audit") {
       return new Response(JSON.stringify({
         overall_status: "pass",
+        audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
         summary: {
-          blocking_issue_count: 0,
-          issue_count: 0,
+          blocking_issue_sample_count: 0,
+          issue_sample_count: 0,
         },
         issues: [],
       }), {

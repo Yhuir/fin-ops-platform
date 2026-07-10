@@ -1123,6 +1123,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
   "mode": "dry-run",
   "tenant_id": "default",
   "overall_status": "pass",
+  "audit_status": { "integrity": "pass", "freshness": "fresh", "queue": "drained" },
   "summary": {
     "active_input_invoice_count": 807,
     "read_model_invoice_member_count": 807,
@@ -1131,11 +1132,14 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
     "workbench_relation_scope_count": 6,
     "active_workbench_pair_relation_count": 196,
     "linked_workbench_relation_group_count": 196,
-    "issue_count": 0,
-    "error_count": 0,
-    "warning_count": 0,
-    "blocking_issue_count": 0,
-    "issue_counts_by_code": {}
+    "issue_sample_count": 0,
+    "error_sample_count": 0,
+    "warning_sample_count": 0,
+    "blocking_issue_sample_count": 0,
+    "issue_sample_counts_by_code": {},
+    "issue_sample_limit_per_code": 50,
+    "issue_samples_truncated": false,
+    "detected_issue_code_count": 0
   },
   "issues": [],
   "audit_contract": {
@@ -1149,7 +1153,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
       "read_model.workbench_relation_scopes",
       "job.read_model_dirty_scopes"
     ],
-    "pass_condition": "blocking_issue_count == 0",
+    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh'",
     "write_policy": "read_only"
   },
   "generated_at": "2026-07-10T00:00:00+00:00"
@@ -1158,8 +1162,8 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 契约要求：
 
-- `overall_status="pass"` 且 `summary.blocking_issue_count=0` 才能声明当前真实库“进项发票使用情况”页面全量数据和配对关系一致。
-- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本，方便运维记录；修复必须走对应业务 runbook 或明确修复工具。
+- `overall_status="pass"`、`audit_status.integrity="pass"` 且 `audit_status.freshness="fresh"` 才能声明当前真实库“进项发票使用情况”页面在已登记 invariant 内数据和配对关系一致。
+- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本。所有 `*_sample_count` 都是最多每个 issue code 50 条的样本数，不是全量问题总数；`issue_samples_truncated=true` 时 UI/运维记录必须显示为截断样本，不能把 50/100/150 当成精确总数。
 - 审计覆盖 canonical 进项发票、`input_invoice_usage` rows/scopes、`workbench_relation` rows/groups/scopes、active Workbench relation、dirty scopes、source_versions、重复/孤儿/缺失 member、金额合计、跨 scope relation 分发和 candidate 误入。
 
 ## AppHealth 销项收款审计 API
@@ -1182,6 +1186,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
   "mode": "dry-run",
   "tenant_id": "default",
   "overall_status": "pass",
+  "audit_status": { "integrity": "pass", "freshness": "fresh", "queue": "drained" },
   "summary": {
     "active_output_invoice_count": 807,
     "read_model_invoice_member_count": 807,
@@ -1190,11 +1195,14 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
     "workbench_relation_scope_count": 6,
     "active_workbench_pair_relation_count": 196,
     "linked_workbench_relation_group_count": 196,
-    "issue_count": 0,
-    "error_count": 0,
-    "warning_count": 0,
-    "blocking_issue_count": 0,
-    "issue_counts_by_code": {}
+    "issue_sample_count": 0,
+    "error_sample_count": 0,
+    "warning_sample_count": 0,
+    "blocking_issue_sample_count": 0,
+    "issue_sample_counts_by_code": {},
+    "issue_sample_limit_per_code": 50,
+    "issue_samples_truncated": false,
+    "detected_issue_code_count": 0
   },
   "issues": [],
   "audit_contract": {
@@ -1208,7 +1216,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
       "read_model.workbench_relation_scopes",
       "job.read_model_dirty_scopes"
     ],
-    "pass_condition": "blocking_issue_count == 0",
+    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh'",
     "write_policy": "read_only"
   },
   "generated_at": "2026-07-10T00:00:00+00:00"
@@ -1217,8 +1225,8 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 契约要求：
 
-- `overall_status="pass"` 且 `summary.blocking_issue_count=0` 才能声明当前真实库“销项发票收款情况”页面全量数据和配对关系一致。
-- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本，方便运维记录；修复必须走对应业务 runbook 或明确修复工具。
+- `overall_status="pass"`、`audit_status.integrity="pass"` 且 `audit_status.freshness="fresh"` 才能声明当前真实库“销项发票收款情况”页面在已登记 invariant 内数据和配对关系一致。
+- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和有上限的 `issues` 样本；`*_sample_count` 不得作为全量问题总数。
 - 审计覆盖 canonical 销项发票、`output_invoice_collection` rows/scopes、`workbench_relation` rows/groups/scopes、active Workbench relation、dirty scopes、source_versions、重复/孤儿/缺失 member、金额合计、跨 scope relation 分发和 candidate 误入。
 
 ## AppHealth 页面业务审计 API
@@ -1253,6 +1261,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
   "domain_key": "bank_details",
   "label": "银行明细",
   "overall_status": "pass",
+  "audit_status": { "integrity": "pass", "freshness": "fresh", "queue": "drained" },
   "summary": {
     "source_fact_count": 910,
     "read_model_row_count": 910,
@@ -1261,12 +1270,14 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
     "linked_relation_group_count": 196,
     "dirty_scope_count": 0,
     "outbox_backlog_count": 0,
-    "issue_count": 0,
-    "error_count": 0,
-    "warning_count": 0,
-    "blocking_issue_count": 0,
-    "issue_counts_by_code": {},
-    "fresh": true
+    "issue_sample_count": 0,
+    "error_sample_count": 0,
+    "warning_sample_count": 0,
+    "blocking_issue_sample_count": 0,
+    "issue_sample_counts_by_code": {},
+    "issue_sample_limit_per_code": 50,
+    "issue_samples_truncated": false,
+    "detected_issue_code_count": 0
   },
   "issues": [],
   "audit_contract": {
@@ -1275,7 +1286,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
     "relation_tables": ["read_model.workbench_relation_rows", "read_model.workbench_relation_groups"],
     "scope_types": ["bank_detail", "bank_account_balance", "workbench_relation"],
     "event_types": ["bank_detail.read_model.refresh", "bank_account_balance.read_model.refresh", "workbench_relation.read_model.refresh"],
-    "pass_condition": "blocking_issue_count == 0",
+    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh'",
     "guarantee_boundary": "App-internal canonical facts, read_model rows/scopes/source_versions, durable refresh state, and projected relation distribution agree for this page.",
     "write_policy": "read_only"
   },
@@ -1285,8 +1296,8 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 契约要求：
 
-- `overall_status="pass"` 且 `summary.blocking_issue_count=0` 才能声明该页面在 App 内部 canonical facts、页面 read model、refresh queue 和 Workbench relation 投影上全量一致。
-- `overall_status="issues_found"` 表示发现阻断性数据/投影不一致，仍返回 `200` 和 `issues` 样本；修复必须走对应业务 runbook、read model rebuild 或明确修复工具。
+- `overall_status="pass"`、`audit_status.integrity="pass"`、`audit_status.freshness="fresh"` 且 `audit_status.queue="drained"` 才能声明该页面在 App 内部 canonical facts、页面 read model、refresh queue 和 Workbench relation 投影上全量一致。
+- `audit_status` 分开表达完整性、freshness 和 durable outbox queue；`overall_status="issues_found"` 时返回有上限的 `issues` 样本，样本字段不可解释为精确总数。
 - 审计覆盖页面 source facts、read model rows/scopes/source_versions、dirty scopes/outbox backlog、缺失/孤儿/重复 row、scope row_count、active relation 分发和非 active relation 误投影为 linked。
 - 该接口只能证明 App 内部事实、read model 和 relation 投影一致；不能证明外部银行/OA 系统本身没有漏同步。外部源完整性仍必须由对应导入/OA sync runbook 和来源系统对账证明。
 

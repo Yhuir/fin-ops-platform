@@ -29,6 +29,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面筛选、方向、规则操作 | `PendingInvoicesPage.tsx`、`features/pendingInvoices/api.ts` | scope 必须落到 direction/filter/month |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=pending_invoices`；页面只消费结构化 integrity/freshness/queue 与有上限 issue samples，不直接读取审计表或触发修复 |
 | 关联/规则写入 | pending invoice services | 写后触发 pending_invoice/search/invoice_lifecycle 相关 scope |
 | 关联台关系分发 | `WorkbenchRelationReadFacade` / `workbench_relation` read model | 待找发票只按银行流水 row id 读取 `linked_oa`、`linked_input_invoices`、`linked_output_invoices`、`group_ids` 等 relation distribution；不得自行从发票附件、OA payload 或关联台 raw payload 反推 OA。若 `workbench_relation` non-fresh，必须保持 refreshing/stale 状态而不是伪装 fresh。 |
 | Worker 关系源端快路径 | `WorkbenchRelationReadModelRepositoryPort` | `search-pending` / `pending-invoice` projection 可通过 `list_active_workbench_relation_source_rows(...)` / `workbench_relation_source_summary_from_source(...)` 读取 active relation source rows/source summary，构造待找发票 relation context 与 source-version proof；待找发票 source fast path 必须请求成员源摘要，至少补齐银行金额、OA 申请人/项目和发票号码/供应商/金额，不能只用 relation row_ids/row_types 计算 `paid_invoiced` 状态却输出空展示字段；API expected-source gate 必须按当前 pending invoice rows 命中的月份和 row id 调同一个 source summary，不能再拿 `read_model.workbench_relation_scopes.source_versions` 和 source-fast-path 写入值比较；SQL owner 仍归 workbench-relations repository，下游不得直接读 relation 表，也不得把源端快路径用于页面 fresh payload 或关系写状态机。 |
@@ -40,6 +41,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 待找发票 rows/summary | 前端页面 | fresh/status 可见；缺少/未知 read model status 保持 refreshing/non-fresh |
+| 页面 Audit 状态 | 标题附件 | 仅 integrity pass、freshness fresh、queue drained 且页面 read model 明确 fresh 才显示成功 |
 | 规则保存结果 | API | 持久化规则并触发刷新 |
 | 发票关联/收入状态写结果 | API/frontend | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | Dirty scope | runtime queue | 不允许无界全量 |

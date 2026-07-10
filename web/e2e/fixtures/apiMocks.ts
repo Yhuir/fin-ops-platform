@@ -560,6 +560,40 @@ function operationsDashboardPayload() {
   };
 }
 
+function inputInvoiceUsageAuditPayload() {
+  return {
+    mode: "dry-run",
+    tenant_id: "default",
+    overall_status: "pass",
+    audit_status: {
+      integrity: "pass",
+      freshness: "fresh",
+      queue: "drained",
+    },
+    summary: {
+      active_input_invoice_count: 236,
+      read_model_invoice_member_count: 236,
+      read_model_row_count: 212,
+      active_workbench_pair_relation_count: 31,
+      linked_workbench_relation_group_count: 31,
+      issue_sample_count: 0,
+      error_sample_count: 0,
+      warning_sample_count: 0,
+      blocking_issue_sample_count: 0,
+      issue_sample_counts_by_code: {},
+      issue_sample_limit_per_code: 50,
+      issue_samples_truncated: false,
+      detected_issue_code_count: 0,
+    },
+    issues: [],
+    audit_contract: {
+      pass_condition: "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh'",
+      write_policy: "read_only",
+    },
+    generated_at: "2026-07-10T08:00:00Z",
+  };
+}
+
 function oaApplicantCredentialsPayload() {
   return {
     credentials: [
@@ -9737,6 +9771,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         return json(route, { error: "dashboard_unavailable", message: "dashboard unavailable" }, 503);
       }
       return json(route, operationsDashboardPayload());
+    }
+
+    if (path === "/api/operations/app-health/input-invoice-usage-audit") {
+      return json(route, inputInvoiceUsageAuditPayload());
     }
 
     return json(route, {});

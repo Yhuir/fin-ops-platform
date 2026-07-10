@@ -259,6 +259,21 @@ export type OperationsDashboardPayload = {
 
 export type InputInvoiceUsageAuditStatus = "pass" | "issues_found" | string;
 
+export type PageAuditDomainKey =
+  | "pending_invoices"
+  | "turnover_ledger"
+  | "batch_accounting"
+  | "bank_flow_rule_batches"
+  | "oa_pending_payments"
+  | "bank_details"
+  | "cost_statistics";
+
+export type PageAuditStatus = {
+  integrity?: "pass" | "issues_found";
+  freshness?: "fresh" | "not_fresh";
+  queue?: "drained" | "backlog";
+};
+
 export type PageAuditSummary = {
   source_fact_count?: number | null;
   active_relation_count?: number | null;
@@ -271,11 +286,14 @@ export type PageAuditSummary = {
   read_model_scope_count?: number | null;
   active_workbench_pair_relation_count?: number | null;
   linked_workbench_relation_group_count?: number | null;
-  blocking_issue_count?: number | null;
-  issue_count?: number | null;
-  error_count?: number | null;
-  warning_count?: number | null;
-  issue_counts_by_code?: Record<string, number>;
+  blocking_issue_sample_count?: number | null;
+  issue_sample_count?: number | null;
+  error_sample_count?: number | null;
+  warning_sample_count?: number | null;
+  issue_sample_counts_by_code?: Record<string, number>;
+  issue_sample_limit_per_code?: number | null;
+  issue_samples_truncated?: boolean;
+  detected_issue_code_count?: number | null;
 };
 
 export type InputInvoiceUsageAuditSummary = PageAuditSummary & {
@@ -292,17 +310,31 @@ export type PageAuditIssue = {
   message?: string;
   subject_id?: string | null;
   scope_key?: string | null;
+  details?: Record<string, unknown> | null;
+};
+
+export type PageAuditContract = {
+  source_tables?: string[];
+  read_model_tables?: string[];
+  relation_tables?: string[];
+  scope_types?: string[];
+  event_types?: string[];
+  pass_condition?: string;
+  guarantee_boundary?: string;
+  write_policy?: "read_only" | string;
 };
 
 export type PageAuditPayload = {
   mode?: string;
   tenant_id?: string;
-  domain_key?: string;
+  domain_key?: PageAuditDomainKey;
   label?: string;
   generated_at?: string;
   overall_status?: InputInvoiceUsageAuditStatus;
+  audit_status?: PageAuditStatus;
   summary?: PageAuditSummary;
   issues?: PageAuditIssue[];
+  audit_contract?: PageAuditContract;
 };
 
 export type InputInvoiceUsageAuditPayload = PageAuditPayload & {

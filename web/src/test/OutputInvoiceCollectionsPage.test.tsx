@@ -246,7 +246,7 @@ const rowsPayload = {
     receiptPendingCount: 1,
   },
   filterConfig: [],
-  readModelStatus: "live_query",
+  readModelStatus: "fresh",
   generatedAt: "2026-05-24T00:00:00Z",
   sourceVersion: "output-invoice-collections:v1",
 };
@@ -261,9 +261,10 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
     if (url.pathname === "/api/operations/app-health/output-invoice-collection-audit") {
       return jsonResponse({
         overall_status: "pass",
+        audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
         summary: {
-          blocking_issue_count: 0,
-          issue_count: 0,
+          blocking_issue_sample_count: 0,
+          issue_sample_count: 0,
         },
         issues: [],
       });

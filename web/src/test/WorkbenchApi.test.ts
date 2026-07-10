@@ -114,6 +114,23 @@ describe("workbench api bank amount mapping", () => {
     expect(preview.submitExpectedVersions).toEqual({ "relation:relation-1": 3 });
   });
 
+  test("preserves backend requestId in workbench API errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "internal_server_error",
+          message: "接口处理失败，请联系管理员查看后端日志。",
+          requestId: "req-500-audit",
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(fetchWorkbenchGroupsPage("all", "open", 1, 50)).rejects.toThrow(
+      "接口处理失败，请联系管理员查看后端日志。 · requestId req-500-audit",
+    );
+  });
+
   test("maps two-pane confirm operation projection as an open manual partial relation", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

@@ -33,6 +33,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面筛选/月份/父级聚合查询 | `CostStatisticsPage.tsx`、`features/cost-statistics/api.ts` | 进入成本统计 API/query service；页面主时间范围只暴露单一按钮选择 `all` / `year` / `month`，不再暴露主页面自定义日期范围；精确日期范围只属于导出中心 |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=cost_statistics`；审计只读，不能触发成本统计 rebuild/export 或读取旧 live service |
 | 银行账户全集 | `AppSettingsService.get_cost_statistics_source_settings_payload()` / `app.app_settings.bank_account_mappings` | 仅后端投影层读取 settings owner 输出，写入 explorer payload 的 `bank_accounts`；页面不得直接读取 settings API 或设置页面状态 |
 | 银行自动标签规则版本 | `AppSettingsService.get_cost_statistics_source_settings_payload()` / `app.app_settings.bank_transaction_tags` | 进入 `source_versions.bank_auto_tag_rules_version`；规则更新由 `bank_auto_tag_rules_changed` lifecycle 入队 `cost_statistics.read_model.refresh` |
 | 银行明细有效标签 | `BankTransactionTagReadFacade` / fresh `bank_detail` read model | 成本统计 worker 按月份批量读取银行流水 `effective_category_*`，写入 `time_rows.bank_tag_*`；`bank_detail_source_versions` 纳入成本统计 source_versions，非 fresh 时 worker fail-closed 并等待依赖刷新 |
@@ -50,6 +51,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 成本统计 rows/summary | 前端页面 | query gateway 后返回 freshness；`time_rows` 输出 OA 配对成本流水字段和流水标签 `bank_tag_*` 字段，供 `按项目`、`按银行`、`按OA费用类型` 使用；`bank_flow_time_rows` 输出全部银行支出流水标签字段，供 `按标签`、`按时间` 使用 |
+| 页面 Audit 状态 | 标题附件 | 只有 audit status 与 explorer read model 均明确 fresh/pass 才显示成功；问题数量是有上限 sample |
 | Explorer bank accounts | 前端页面 | `bank_accounts` 输出设置中的银行账户全集，字段为 `bank_name`、`account_last4`、`payment_account_label`、`source`；按银行统计必须展示这些账户，即使当前范围金额为 0 |
 | Source versions | read model/query gateway | `source_versions` 必须包含 workbench/input 版本、`bank_auto_tag_rules_version` 和 `bank_account_mappings_fingerprint`；任一变化都使旧 payload 失配并刷新 |
 | Project/detail/export payload | 前端页面 / 下载 | 由 fresh `cost_statistics` explorer read model 组装；导出保留 filename/workbook/row-limit contract；live `CostStatisticsService` 不再拥有 export-preview/export 输出 |

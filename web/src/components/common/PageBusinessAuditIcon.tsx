@@ -1,12 +1,13 @@
 import { useCallback } from "react";
 
 import { fetchPageBusinessAudit } from "../../features/appHealth/api";
+import type { PageAuditDomainKey } from "../../features/appHealth/types";
 import PageAuditIcon from "./PageAuditIcon";
 
 type PageBusinessAuditIconProps = {
   ariaLabel: string;
   label: string;
-  domainKey: string;
+  domainKey: PageAuditDomainKey;
   readModelStatus?: string;
 };
 

@@ -93,6 +93,14 @@ test.describe("app shell browser smoke", () => {
       await mark("finalSettledLatencyMs", expect(page.getByTestId("app-health-runtime")).toBeVisible());
     });
     expect(api.count("GET /api/operations/app-health-dashboard")).toBeGreaterThan(dashboardCountBeforeRefresh);
+
+    const auditPanel = page.getByTestId("app-health-input-usage-audit");
+    await auditPanel.getByLabel("Audit 进项发票使用情况").click();
+    await expect(auditPanel).toContainText("pass");
+    await expect(auditPanel).toContainText("Blocking samples");
+    await expect(auditPanel).not.toContainText("Blocking issues");
+    expect(api.count("GET /api/operations/app-health/input-invoice-usage-audit")).toBe(1);
+    expect(api.count("POST /api/operations/app-health/input-invoice-usage-audit")).toBe(0);
     expect(browserErrors).toEqual([]);
   });
 

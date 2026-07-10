@@ -2154,20 +2154,28 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
 };
 
 function resolveWorkbenchApiErrorMessage(payload: unknown, rawText: string) {
+  let resolvedMessage = "";
+  let requestId = "";
   if (payload && typeof payload === "object") {
     const errorCode = String((payload as { error?: unknown }).error ?? "").trim();
+    requestId = String(
+      (payload as { requestId?: unknown; request_id?: unknown }).requestId
+      ?? (payload as { requestId?: unknown; request_id?: unknown }).request_id
+      ?? "",
+    ).trim();
     if (errorCode && WORKBENCH_API_ERROR_MESSAGES[errorCode]) {
-      return WORKBENCH_API_ERROR_MESSAGES[errorCode];
+      resolvedMessage = WORKBENCH_API_ERROR_MESSAGES[errorCode];
     }
     const message = String((payload as { message?: unknown }).message ?? "").trim();
-    if (message) {
-      return message;
+    if (!resolvedMessage && message) {
+      resolvedMessage = message;
     }
-    if (errorCode) {
-      return errorCode;
+    if (!resolvedMessage && errorCode) {
+      resolvedMessage = errorCode;
     }
   }
-  return rawText.trim() || "request failed";
+  resolvedMessage = resolvedMessage || rawText.trim() || "request failed";
+  return requestId ? `${resolvedMessage} · requestId ${requestId}` : resolvedMessage;
 }
 
 function withWorkbenchAuthHeaders(headers?: HeadersInit) {
