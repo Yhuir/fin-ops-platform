@@ -30,6 +30,10 @@ from fin_ops_platform.services.postgres_repositories import (
 from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
     build_output_invoice_collection_lifecycle_repository,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (
+    PostgresOaPendingPaymentAdmissionRepository,
+    oa_pending_payment_records_signature,
+)
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
@@ -47,6 +51,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         input_invoice_usage_read_model_repository: Any | None = None,
         output_invoice_collection_read_model_repository: Any | None = None,
         oa_pending_payment_read_model_repository: Any | None = None,
+        oa_pending_payment_admission_repository: Any | None = None,
     ) -> None:
         self._connection = connection
         self._core_repository = PostgresCoreRepository(connection)
@@ -62,6 +67,10 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         self._oa_pending_payment_read_model_repository = (
             oa_pending_payment_read_model_repository
             or OaPendingPaymentReadModelRepositoryPort(self._read_repository)
+        )
+        self._oa_pending_payment_admission_repository = (
+            oa_pending_payment_admission_repository
+            or PostgresOaPendingPaymentAdmissionRepository(connection)
         )
         self._oa_projection_repository = PostgresOAProjectionRepository(connection)
         self._payment_status_repository = payment_status_repository
@@ -101,6 +110,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return sorted(months, reverse=True)
 
     def prune_oa_pending_payment_scope_shards(self, current_scope_keys: list[str]) -> None:
+        self._oa_pending_payment_admission_repository.prune_scopes(current_scope_keys)
         self._oa_pending_payment_read_model_repository.prune_oa_pending_payment_scope_shards(current_scope_keys)
 
     def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
@@ -173,7 +183,36 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
 
     def rebuild_oa_pending_payment_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
-        source_versions = oa_pending_payment_source_versions()
+        payment_statuses_by_flow_id: dict[str, Any] | None = None
+        in_progress_projection = self._oa_pending_payment_projection(
+            payment_statuses_provider=lambda: payment_statuses_by_flow_id,
+        )
+        service = self._oa_pending_payment_service(
+            payment_statuses_provider=lambda: payment_statuses_by_flow_id,
+            in_progress_oa_projection=in_progress_projection,
+        )
+        context = service._query_context(month_hint=normalized_scope_key)
+        payment_statuses_by_flow_id = service._payment_statuses_by_flow_id()
+        completed_records = service._oa_records(
+            month=normalized_scope_key,
+            view_mode="completed",
+            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+        )
+        in_progress_records = service._oa_records(
+            month=normalized_scope_key,
+            view_mode="in_progress",
+            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+        )
+        self._oa_pending_payment_admission_repository.replace_scope(
+            scope_key=normalized_scope_key,
+            records=in_progress_records,
+        )
+        source_versions = {
+            **oa_pending_payment_source_versions(),
+            "completed_oa_signature": oa_pending_payment_records_signature(completed_records),
+            "in_progress_admission_signature": oa_pending_payment_records_signature(in_progress_records),
+            "in_progress_admission_count": len(in_progress_records),
+        }
         relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
         if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
@@ -185,23 +224,19 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         )
         if unchanged is not None:
             return unchanged
-        payment_statuses_by_flow_id: dict[str, Any] | None = None
-        service = self._oa_pending_payment_service(
-            payment_statuses_provider=lambda: payment_statuses_by_flow_id,
-        )
-        context = service._query_context(month_hint=normalized_scope_key)
-        payment_statuses_by_flow_id = service._payment_statuses_by_flow_id()
         completed_rows = service._build_rows(
             month=normalized_scope_key,
             context=context,
             view_mode="completed",
             payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+            records=completed_records,
         )
         in_progress_rows = service._build_rows(
             month=normalized_scope_key,
             context=context,
             view_mode="in_progress",
             payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+            records=in_progress_records,
         )
         cleanup_result = self._cancel_oa_pending_relations_missing_admission(
             month_scope=normalized_scope_key,
@@ -237,6 +272,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         )
 
     def mark_oa_pending_payment_scope_empty(self, scope_key: str) -> None:
+        self._oa_pending_payment_admission_repository.replace_scope(scope_key=scope_key, records=[])
         self._oa_pending_payment_read_model_repository.mark_oa_pending_payment_scope(
             scope_key=scope_key,
             row_count=0,
@@ -291,15 +327,15 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         self,
         *,
         payment_statuses_provider: Callable[[], dict[str, Any] | None] | None = None,
+        in_progress_oa_projection: PaymentAdmittedOAProjectionAdapter | None = None,
     ) -> OaPendingPaymentQueryService:
         return OaPendingPaymentQueryService(
             import_service=self._import_service(),
             relation_facade=self._workbench_relation_read_facade,
             pending_relation_service=PostgresOaPendingPaymentRelationRepository(self._connection),
             oa_projection=self._oa_projection_repository,
-            in_progress_oa_projection=self._oa_pending_payment_projection(
-                payment_statuses_provider=payment_statuses_provider,
-            ),
+            in_progress_oa_projection=in_progress_oa_projection
+            or self._oa_pending_payment_projection(payment_statuses_provider=payment_statuses_provider),
             payment_status_repository=self._payment_status_repository,
             require_fresh_relations=True,
         )

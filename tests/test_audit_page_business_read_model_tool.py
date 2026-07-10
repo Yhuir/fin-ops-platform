@@ -307,8 +307,32 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             domain_key="bank_flow_rule_batches",
         )
         rule_batch_sql = " ".join(sql for sql, _params in rule_batch_connection.fetch_all_calls)
-        self.assertIn("when batch.batch_type = 'internal_transfer'", rule_batch_sql)
+        self.assertIn("batch.raw_payload->'normalized_payload'->>'batch_type'", rule_batch_sql)
+        self.assertIn("when batch.canonical_batch_type = 'internal_transfer'", rule_batch_sql)
         self.assertIn("then coalesce(max(abs(bank.amount)), 0)", rule_batch_sql)
+
+    def test_turnover_audit_uses_effective_bank_detail_leaves_as_independent_expected_set(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="turnover_ledger",
+        )
+
+        canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
+        self.assertIn("from read_model.bank_detail_rows detail", canonical_sql)
+        self.assertIn("join app.bank_transactions source", canonical_sql)
+        self.assertIn("app.app_settings", canonical_sql)
+        self.assertIn("array_agg(row_id order by row_id) as bank_row_ids", canonical_sql)
+        self.assertIn("projected.bank_row_ids <> canonical.bank_row_ids", canonical_sql)
+        self.assertIn("canonical_missing_projection", canonical_sql)
+        self.assertIn("projection_not_canonical", canonical_sql)
+
+        business_sql = next(sql for sql, _params in connection.fetch_all_calls if "source_business_fields_mismatch" in sql)
+        self.assertIn("expected_pending_repayment", business_sql)
+        self.assertIn("expected_pending_collection", business_sql)
+        self.assertIn("ledger.payload->>'pending_repayment_amount'", business_sql)
+        self.assertIn("ledger.payload->>'collected_amount'", business_sql)
 
     def test_cost_statistics_expected_set_does_not_treat_ready_rows_as_missing(self) -> None:
         connection = FakeConnection()

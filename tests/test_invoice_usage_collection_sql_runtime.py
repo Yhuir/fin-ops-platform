@@ -27,6 +27,10 @@ from fin_ops_platform.services.output_invoice_collection_read_model_repository i
     OutputInvoiceCollectionReadModelRepositoryPort,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (
+    PostgresOaPendingPaymentAdmissionRepository,
+    oa_pending_payment_records_signature,
+)
 from fin_ops_platform.services.rabbitmq_runtime import SUPPORTED_EVENT_TYPES
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES, RuntimeQueueEvent
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
@@ -89,6 +93,23 @@ class EmptyTransactionConnection:
 
     def fetch_all(self, *_args: object, **_kwargs: object) -> list[dict]:
         return []
+
+    def execute(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+
+class RecordingOaPendingPaymentAdmissionRepository:
+    def __init__(self) -> None:
+        self.replaced: list[tuple[str, list[object]]] = []
+        self.pruned: list[str] | None = None
+
+    def replace_scope(self, *, scope_key: str, records: list[object], tenant_id: str = "default") -> None:
+        _ = tenant_id
+        self.replaced.append((scope_key, list(records)))
+
+    def prune_scopes(self, current_scope_keys: list[str], *, tenant_id: str = "default") -> None:
+        _ = tenant_id
+        self.pruned = list(current_scope_keys)
 
 
 class FreshEmptyWorkbenchRelationFacade:
@@ -2349,7 +2370,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         app._workbench_pair_relation_service = WorkbenchPairRelationService()
         old_relation_versions = {"source_version": "1"}
         current_relation_versions = {"source_version": "2"}
-        app._output_invoice_collection_sql_read_repository = PostgresReadModelRepository(
+        output_repository = PostgresReadModelRepository(
             InvoiceReadModelConnection(
                 output_rows=[
                     {
@@ -2385,6 +2406,8 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                 ],
             )
         )
+        app._output_invoice_collection_sql_read_repository = output_repository
+        app._workbench_relation_sql_read_repository = output_repository
 
         response = _output_invoice_collection_rows_response(
             app,
@@ -2420,7 +2443,10 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         builder._oa_projection_repository = type(
             "OaProjection",
             (),
-            {"list_all_application_records": lambda _self: []},
+            {
+                "list_all_application_records": lambda _self: [],
+                "list_application_records": lambda _self, _month: [],
+            },
         )()
 
         input_result = builder.rebuild_input_invoice_usage_read_model_scope("2026-05")
@@ -2429,13 +2455,19 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(input_result["source_versions"], input_invoice_usage_source_versions())
         self.assertEqual(output_result["source_versions"], output_invoice_collection_source_versions())
-        self.assertEqual(oa_result["source_versions"], oa_pending_payment_source_versions())
+        expected_oa_source_versions = {
+            **oa_pending_payment_source_versions(),
+            "completed_oa_signature": oa_pending_payment_records_signature([]),
+            "in_progress_admission_signature": oa_pending_payment_records_signature([]),
+            "in_progress_admission_count": 0,
+        }
+        self.assertEqual(oa_result["source_versions"], expected_oa_source_versions)
         self.assertIsNotNone(read_repository.saved_input)
         self.assertIsNotNone(read_repository.saved_output)
         self.assertIsNotNone(read_repository.saved_oa)
         self.assertEqual(read_repository.saved_input["source_versions"], input_invoice_usage_source_versions())
         self.assertEqual(read_repository.saved_output["source_versions"], output_invoice_collection_source_versions())
-        self.assertEqual(read_repository.saved_oa["source_versions"], oa_pending_payment_source_versions())
+        self.assertEqual(read_repository.saved_oa["source_versions"], expected_oa_source_versions)
         self.assertEqual(input_result["row_count"], 1)
         self.assertEqual(output_result["row_count"], 1)
         self.assertEqual(oa_result["row_count"], 0)
@@ -2618,7 +2650,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(row["bankTransaction"]["paidTotal"], "4450.00")
         self.assertEqual(row["invoice"]["totalWithTax"], "4450.00")
-        self.assertEqual(read_repository.saved_oa["source_versions"], oa_pending_payment_source_versions())
+        saved_source_versions = read_repository.saved_oa["source_versions"]
+        for key, value in oa_pending_payment_source_versions().items():
+            self.assertEqual(saved_source_versions[key], value)
+        self.assertEqual(saved_source_versions["in_progress_admission_count"], 0)
+        self.assertRegex(str(saved_source_versions["completed_oa_signature"]), r"^[0-9a-f]{64}$")
+        self.assertRegex(str(saved_source_versions["in_progress_admission_signature"]), r"^[0-9a-f]{64}$")
 
     def test_projection_builder_uses_payment_status_table_as_oa_admission_source(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
@@ -2773,9 +2810,46 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(builder.list_oa_pending_payment_scope_shards("all"), ["2026-05", "2026-04"])
 
+    def test_oa_pending_payment_admission_repository_replaces_and_prunes_canonical_scopes(self) -> None:
+        connection = WriteRecordingConnection()
+        repository = PostgresOaPendingPaymentAdmissionRepository(connection)
+
+        repository.replace_scope(
+            scope_key="2026-05",
+            records=[
+                {
+                    "id": "oa-admitted-1",
+                    "workflow_status": "in_progress",
+                    "applicant": "张三",
+                    "project_name": "项目甲",
+                    "project_name_display": "项目甲",
+                    "amount": "1,200.00",
+                }
+            ],
+        )
+
+        self.assertEqual(len(connection.executed), 2)
+        self.assertIn("delete from app.oa_pending_payment_admissions", connection.executed[0][0])
+        self.assertIn("insert into app.oa_pending_payment_admissions", connection.executed[1][0])
+        insert_params = connection.executed[1][1]
+        self.assertEqual(insert_params[0:3], ("default", "2026-05", "oa-admitted-1"))
+        self.assertEqual(insert_params[7], "1200.00")
+        self.assertRegex(str(insert_params[8]), r"^[0-9a-f]{64}$")
+
+        prune_connection = WriteRecordingConnection()
+        PostgresOaPendingPaymentAdmissionRepository(prune_connection).prune_scopes(["2026-05", "2026-04"])
+
+        self.assertEqual(len(prune_connection.executed), 1)
+        self.assertIn("scope_key not in (%s, %s)", prune_connection.executed[0][0])
+        self.assertEqual(prune_connection.executed[0][1], ("default", "2026-05", "2026-04"))
+
     def test_projection_builder_marks_empty_scopes_with_source_versions(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
-        builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
+        admission_repository = RecordingOaPendingPaymentAdmissionRepository()
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=object(),
+            oa_pending_payment_admission_repository=admission_repository,
+        )
         builder._read_repository = read_repository
         builder._output_invoice_collection_read_model_repository = read_repository
         builder._input_invoice_usage_read_model_repository = read_repository
@@ -2788,10 +2862,15 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(read_repository.marked_input["source_versions"], input_invoice_usage_source_versions())
         self.assertEqual(read_repository.marked_output["source_versions"], output_invoice_collection_source_versions())
         self.assertEqual(read_repository.marked_oa["source_versions"], oa_pending_payment_source_versions())
+        self.assertEqual(admission_repository.replaced, [("2026-05", [])])
 
     def test_projection_builder_prunes_invoice_usage_collection_scope_shards(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
-        builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
+        admission_repository = RecordingOaPendingPaymentAdmissionRepository()
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=object(),
+            oa_pending_payment_admission_repository=admission_repository,
+        )
         builder._read_repository = read_repository
         builder._output_invoice_collection_read_model_repository = read_repository
         builder._input_invoice_usage_read_model_repository = read_repository
@@ -2804,6 +2883,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(read_repository.pruned_input, ["2026-06"])
         self.assertEqual(read_repository.pruned_output, ["2026-05"])
         self.assertEqual(read_repository.pruned_oa, ["2026-04"])
+        self.assertEqual(admission_repository.pruned, ["2026-04"])
 
     def test_refresh_handler_expands_all_scopes_and_completes_with_source_version(self) -> None:
         class FakeBuilder:

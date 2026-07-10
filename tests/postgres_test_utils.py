@@ -105,6 +105,8 @@ EXPECTED_MIGRATION_FILES = [
     "0091_import_file_ordering_hot_path.sql",
     "0092_cost_statistics_parent_rollup_hot_path.sql",
     "0093_workbench_relation_source_version_hot_paths.sql",
+    "0094_input_invoice_usage_oa_reverse_preview_hot_path.sql",
+    "0095_oa_pending_payment_admissions.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -162,6 +164,7 @@ TEST_TABLES = (
     "app.oa_sync_watermarks",
     "app.oa_attachment_invoice_cache",
     "app.oa_attachment_invoice_cache_sources",
+    "app.oa_pending_payment_admissions",
     "app.manual_oa_imports",
     "app.tax_certified_import_sessions",
     "app.tax_certified_import_batches",

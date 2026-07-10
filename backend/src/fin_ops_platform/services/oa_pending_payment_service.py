@@ -30,7 +30,7 @@ from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRe
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
-SOURCE_VERSION = "oa-pending-payment:v3"
+SOURCE_VERSION = "oa-pending-payment:admission-proof-v4"
 READ_MODEL_STATUS = "live_query"
 VIEW_MODE_COMPLETED = "completed"
 VIEW_MODE_IN_PROGRESS = "in_progress"
@@ -491,8 +491,9 @@ class OaPendingPaymentQueryService:
         context: DistributedInvoiceRelationContext,
         view_mode: str = VIEW_MODE_COMPLETED,
         payment_statuses_by_flow_id: dict[str, Any] | None = None,
+        records: list[OAApplicationRecord] | None = None,
     ) -> list[dict[str, Any]]:
-        records = self._oa_records(
+        records = list(records) if records is not None else self._oa_records(
             month=month,
             view_mode=view_mode,
             payment_statuses_by_flow_id=payment_statuses_by_flow_id,

@@ -48,7 +48,8 @@
 ## 持久化与投影
 
 - Read model：`oa_pending_payment`
-- Projection：`scoped_incremental`；月份 refresh 必须使用月份 OA projection、context 级事实索引复用、payment-admitted 准入边界、批量支付状态 map 和 admitted OA record cache，避免同一 refresh 重复全量读取 completed OA、进项发票、支付状态表或 OA source adapter。
+- App 内部 canonical admission：`app.oa_pending_payment_admissions` 按 `(tenant_id, scope_key, oa_id)` 保存已经通过 `t_payment_simple` 准入的 in-progress OA 快照；它只登记已经进入 App 的事实，不宣称外部 OA / MySQL 来源完整。worker 必须先按月份 replace admission，再用同一批 records 构建目标 rows；记录内容签名、completed OA 签名和 admission count 进入 target source_versions，使 admission 已变化但目标未变化时不能被 unchanged skip 掩盖。
+- Projection：`scoped_incremental`；月份 refresh 必须使用月份 OA projection、context 级事实索引复用、payment-admitted 准入边界、批量支付状态 map 和 admitted OA record cache，避免同一 refresh 重复全量读取 completed OA、进项发票、支付状态表或 OA source adapter。空 scope 必须同步清空 admission；all fan-out 分片清理必须同时 prune admission 与 read model scope，不能留下 orphan canonical facts。
 - Worker：`invoice-usage-collection`
 - Query owner：`OaPendingPaymentReadModelService`
 - Repository owner：`OaPendingPaymentReadModelRepositoryPort`
@@ -61,7 +62,7 @@
 | Frontend feature/components | `web/src/features/oaPendingPayments/*`、`web/src/components/oaPendingPayments/*` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_oa_pending_payments.py` |
 | Backend service | `oa_pending_payment_service.py`、`oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py`、`oa_pending_payment_read_model_*`、`oa_payment_*` |
-| Repository / SQL | `oa_pending_payment_read_model_repository.py`、`postgres_repositories/oa_pending_payment_relation.py`、`invoice_usage_collection_sql_projection.py` |
+| Repository / SQL | `oa_pending_payment_read_model_repository.py`、`postgres_repositories/oa_pending_payment_relation.py`、`postgres_repositories/oa_pending_payment_admission.py`、`invoice_usage_collection_sql_projection.py` |
 | External/OA | `mongo_oa_adapter.py`、`oa_projection_sync.py` |
 | Tests | `tests/test_oa_pending_payment*.py`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-*.spec.ts` |
 
@@ -87,8 +88,8 @@
 
 ## Canonical facts ownership
 
-- Owned facts: `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims`、`app.oa_pending_payment_bank_relation_events`。
-- Allowed writes: OA pending payment relation service、明确 application/UoW boundary。
+- Owned facts: `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims`、`app.oa_pending_payment_bank_relation_events`、`app.oa_pending_payment_admissions`。
+- Allowed writes: OA pending payment relation service、明确 application/UoW boundary、invoice-usage-collection worker 的 admission repository。
 - Allowed reads: OA pending payment read/query ports、relation claim read ports。
 - Downstream outputs: oa_pending_payment、bank_detail、turnover_ledger、workbench_relation dirty scopes 或 owner producer 输出。
 - Forbidden paths: 其它模块不得直接 claim 银行流水关系；workbench relation migration 不得保留为 normal write path。

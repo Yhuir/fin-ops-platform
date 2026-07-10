@@ -29,7 +29,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面查询/筛选 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | 进入 `TurnoverLedgerApiRoutes` route owner，再由 `TurnoverLedgerQueryService` 读取 read model |
-| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=turnover_ledger`；canonical turnover relations 与 ledger extras 必须双向覆盖 read model，金额/状态/关系类型/银行成员和利息扩展字段必须重算一致，并要求共享 relation 双向 edge equality 与只读一致性快照；只消费结构化 audit status 与 issue samples，不进入本模块写 facade |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=turnover_ledger`；canonical expected-set 从 active bank facts + fresh bank-detail effective turnover fields + 当前 tag selection 独立形成，并按 `family + counterparty` 聚合完整 bank member set，与页面 group 双向相等；余额及待还/已还/待收/已收字段从 leaf action/amount 重算，ledger extras 另行核对，并要求共享 relation 双向 edge equality 与只读一致性快照；只消费结构化 audit status 与 issue samples，不进入本模块写 facade |
 | 确认/撤回写操作 | write facade/UoW | 已知 affected months 的写路径触发 turnover/workbench/workbench_relation/cost/search affected month scopes；未知月份例外才允许 `all` fan-out |
 | Workbench relation requirement | `TurnoverLedgerWorkbenchPairPort` | 创建 `turnover_manual_closure` 时必须写入 `requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`；这些字段是关联台分区的唯一输入，不能由关联台查询当前设置兜底 |
 | Refresh scope | `turnover_ledger` manifest | month or `all`；`all` 是 fan-out command，不是普通写操作默认 scope。`all`/month scope 在 own source_versions 未变化、仅 Workbench relation source_versions 追平时，可以从现有 rows 重套 relation context 后保存，避免 relation-version 追平重建整本台账。`all` 查询由月度/行级 rows 拼接时允许 mixed row source_versions，freshness 以 repository 返回的 durable `refresh_status` 为准；dirty scope 非 fresh 时仍必须返回 refreshing/stale |
@@ -90,7 +90,7 @@
 ## Canonical facts ownership
 
 - Owned facts: `app.turnover_relations`、`app.turnover_relation_events`、`app.turnover_ledger_extras`。
-- Shared facts: relation facts 由 `workbench-relations` owner 管理；银行分类 facts 由 `bank-details` owner 管理。
+- Shared facts: relation facts 由 `workbench-relations` owner 管理；银行分类与 effective turnover leaf facts 由 `bank-details` owner 管理，Audit 只读消费，不反向写入。
 - Allowed writes: turnover write facade、write UoW、turnover relation service。
 - Allowed reads: turnover query service/read ports、turnover ledger read model boundary。
 - Downstream outputs: turnover_ledger、workbench_relation、workbench、cost、search dirty scopes 或 owner producer 输出。
