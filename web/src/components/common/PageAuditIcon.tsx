@@ -35,11 +35,29 @@ function auditMessage(
   const issueSamples = summary?.issue_sample_count ?? 0;
   const integrityPassed = payload.audit_status?.integrity === "pass";
   const auditFresh = payload.audit_status?.freshness === "fresh";
+  const queueDrained = payload.audit_status?.queue === "drained";
+  const snapshotConsistent =
+    payload.audit_contract?.database_snapshot === true &&
+    payload.audit_contract?.snapshot_consistency === "repeatable_read_read_only";
   const pageFresh = isFreshStatus(readModelStatus);
-  if (payload.overall_status === "pass" && integrityPassed && auditFresh && pageFresh && blockingSamples === 0) {
+  if (
+    payload.overall_status === "pass" &&
+    integrityPassed &&
+    auditFresh &&
+    queueDrained &&
+    snapshotConsistent &&
+    pageFresh &&
+    blockingSamples === 0
+  ) {
     return { tone: "success", text: successText };
   }
   if (integrityPassed && blockingSamples === 0) {
+    if (!snapshotConsistent) {
+      return { tone: "danger", text: "Audit 证明不足 · consistency snapshot unavailable" };
+    }
+    if (!queueDrained) {
+      return { tone: "warning", text: `${notFreshText} · queue backlog` };
+    }
     const freshness = auditFresh && pageFresh ? "fresh" : "not_fresh";
     return { tone: "warning", text: `${notFreshText} · freshness ${freshness}` };
   }
@@ -55,8 +73,8 @@ export default function PageAuditIcon({
   label,
   readModelStatus,
   runAudit,
-  successText = "Audit 成功 · 全部数据正确 · 全部配对关系正确 · Fresh",
-  notFreshText = "Audit 成功 · 全部数据正确 · 全部配对关系正确 · Not fresh",
+  successText = "Audit 通过 · 已登记 App 内部数据完整正确 · 配对关系完整正确 · Fresh",
+  notFreshText = "Audit 完整性通过 · 已登记 App 内部合同 · Not fresh",
 }: PageAuditIconProps) {
   const [payload, setPayload] = useState<PageAuditPayload | null>(null);
   const [error, setError] = useState<string | null>(null);

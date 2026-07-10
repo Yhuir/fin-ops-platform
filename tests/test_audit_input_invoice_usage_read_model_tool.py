@@ -55,12 +55,38 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["overall_status"], "pass")
         self.assertEqual(report["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(report["issues"], [])
+        self.assertEqual(report["audit_contract"]["snapshot_consistency"], "caller_managed")
+        self.assertFalse(report["audit_contract"]["database_snapshot"])
+        self.assertIn("canonical == relation_groups == relation_rows", report["audit_contract"]["relation_edge_equality"])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
         self.assertIn("app.invoices", queried_sql)
         self.assertIn("read_model.input_invoice_usage_rows", queried_sql)
         self.assertIn("read_model.workbench_relation_rows", queried_sql)
         self.assertIn("read_model.workbench_relation_groups", queried_sql)
+
+    def test_shared_relation_edge_mismatch_is_a_blocking_invoice_issue(self) -> None:
+        report = run_input_invoice_usage_audit(
+            FakeConnection(
+                rows_by_check={
+                    "relation_edge_equality": [
+                        {
+                            "subject_id": "case-1",
+                            "scope_key": "2026-05",
+                            "row_id": "inv-1",
+                            "row_type": "input_invoice",
+                            "mismatch_kind": "canonical_missing_group_edge",
+                        }
+                    ]
+                }
+            )
+        )
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"input_invoice_usage_relation_edge_mismatch": 1},
+        )
 
     def test_sql_literal_percent_is_escaped_for_psycopg_placeholders(self) -> None:
         self.assertIn("进项%%", INPUT_INVOICE_PREDICATE)
@@ -88,28 +114,13 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
                         "payload_total_with_tax": "200.00",
                     }
                 ],
-                "active_relation_missing_workbench_row": [
+                "relation_edge_equality": [
                     {
-                        "case_id": "case-1",
-                        "scope_key": "2026-05",
-                        "invoice_id": "inv-1",
-                        "relation_row_id": "inv-1",
-                    }
-                ],
-                "active_relation_missing_workbench_group": [
-                    {
-                        "case_id": "case-2",
-                        "scope_key": "2026-06",
-                        "invoice_id": "inv-2",
-                        "relation_row_id": "inv-2",
-                    }
-                ],
-                "cross_scope_relation_distribution": [
-                    {
-                        "case_id": "case-cross",
+                        "subject_id": "case-cross",
                         "scope_key": "2026-04",
-                        "invoice_id": "inv-cross",
-                        "relation_row_id": "inv-cross",
+                        "row_id": "inv-cross",
+                        "row_type": "input_invoice",
+                        "mismatch_kind": "canonical_missing_group_edge",
                     }
                 ],
                 "candidate_relation_in_input_usage": [
@@ -136,12 +147,10 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertIn("missing_input_invoice_usage_member", issue_codes)
         self.assertIn("duplicate_input_invoice_usage_member", issue_codes)
         self.assertIn("input_invoice_usage_amount_mismatch", issue_codes)
-        self.assertIn("active_relation_missing_workbench_relation_row", issue_codes)
-        self.assertIn("active_relation_missing_workbench_relation_group", issue_codes)
-        self.assertIn("cross_scope_relation_member_not_distributed", issue_codes)
+        self.assertIn("input_invoice_usage_relation_edge_mismatch", issue_codes)
         self.assertIn("candidate_relation_projected_into_input_usage", issue_codes)
         self.assertIn("candidate_workbench_relation_for_input_invoice", issue_codes)
-        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 8)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 6)
         self.assertEqual(connection.executed, [])
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:

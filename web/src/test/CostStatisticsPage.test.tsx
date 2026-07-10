@@ -232,7 +232,7 @@ describe("Cost statistics page", () => {
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Audit 成本统计" }));
 
-    expect(await screen.findByText("Audit 成功 · 全量对账通过 · Fresh")).toBeInTheDocument();
+    expect(await screen.findByText("Audit 通过 · 已登记 App 内部全量合同正确 · Fresh")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/operations/app-health/page-audit?domain=cost_statistics",
       expect.any(Object),

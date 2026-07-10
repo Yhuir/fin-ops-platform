@@ -11,8 +11,8 @@ type PageBusinessAuditIconProps = {
   readModelStatus?: string;
 };
 
-const BUSINESS_AUDIT_SUCCESS_TEXT = "Audit 成功 · 全量对账通过 · Fresh";
-const BUSINESS_AUDIT_NOT_FRESH_TEXT = "Audit 成功 · 全量对账通过 · Not fresh";
+const BUSINESS_AUDIT_SUCCESS_TEXT = "Audit 通过 · 已登记 App 内部全量合同正确 · Fresh";
+const BUSINESS_AUDIT_NOT_FRESH_TEXT = "Audit 完整性通过 · 已登记 App 内部合同 · Not fresh";
 
 export default function PageBusinessAuditIcon({
   ariaLabel,

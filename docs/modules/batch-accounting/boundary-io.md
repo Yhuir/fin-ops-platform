@@ -30,7 +30,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面批量选择/操作 | `BatchAccountingPage.tsx`、`features/batchAccounting/api.ts` | 进入 batch accounting API/service |
-| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=batch_accounting`；与批量提交/撤回 command 隔离，不触发 relation 或 read model 写入 |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=batch_accounting`；active batch-accounting relation 是 canonical expected-set，relation mode、special metadata 与全部成员 edge 必须双向等价，并在只读一致性快照中执行；与批量提交/撤回 command 隔离，不触发 relation 或 read model 写入 |
 | 批量账务候选 payload | Workbench SQL active read model，fallback 为 Workbench payload builder | 未提交 GET 列表优先走 `load_batch_accounting_workbench_payload(bank_year=...)`；该全量候选读口只服务列表，不得进入提交 command 热路径 |
 | 提交 command 窄 payload | Workbench SQL active read model | `POST /api/batch-accounting/submit` 必须优先走 `load_batch_accounting_submit_workbench_payload(bank_year, bank_row_id, oa_row_ids)`，只读取本次选中银行流水、OA 主单和这些 OA 的附件发票；禁止为单次提交扫描整年银行/OA/发票候选 |
 | 已提交银行列表 payload | Workbench SQL active read model | `bucket=submitted` 的银行行上下文优先走 `load_batch_accounting_submitted_bank_workbench_payload(bank_year)`，只读取批量账务银行行；OA/发票明细来自 relation DTO，不再用整页候选 payload 补齐 |

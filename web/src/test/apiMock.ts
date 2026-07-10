@@ -5067,6 +5067,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           generated_at: "2026-05-23T10:01:00+08:00",
           overall_status: "pass",
           audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
+          audit_contract: { database_snapshot: true, snapshot_consistency: "repeatable_read_read_only" },
           summary: {
             active_input_invoice_count: 236,
             read_model_invoice_member_count: 236,
@@ -5097,6 +5098,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           generated_at: "2026-05-23T10:02:00+08:00",
           overall_status: "pass",
           audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
+          audit_contract: { database_snapshot: true, snapshot_consistency: "repeatable_read_read_only" },
           summary: {
             active_output_invoice_count: 20,
             read_model_invoice_member_count: 20,
@@ -5119,6 +5121,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         domain_key: url.searchParams.get("domain") ?? "",
         overall_status: "pass",
         audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
+        audit_contract: { database_snapshot: true, snapshot_consistency: "repeatable_read_read_only" },
         summary: {
           blocking_issue_sample_count: 0,
           issue_sample_count: 0,

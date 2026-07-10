@@ -829,12 +829,13 @@ class AppHealthApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeInputInvoiceUsageAuditConnection(
                 rows_by_check={
-                    "active_relation_missing_workbench_group": [
+                    "relation_edge_equality": [
                         {
-                            "case_id": "case-1",
+                            "subject_id": "case-1",
                             "scope_key": "2026-05",
-                            "invoice_id": "inv-1",
-                            "relation_row_id": "inv-1",
+                            "row_id": "inv-1",
+                            "row_type": "input_invoice",
+                            "mismatch_kind": "canonical_missing_group_edge",
                         }
                     ]
                 }
@@ -849,7 +850,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 1)
         self.assertEqual(
             payload["summary"]["issue_sample_counts_by_code"],
-            {"active_relation_missing_workbench_relation_group": 1},
+            {"input_invoice_usage_relation_edge_mismatch": 1},
         )
         self.assertEqual(connection.executed, [])
 
@@ -907,12 +908,13 @@ class AppHealthApiTests(unittest.TestCase):
                             "scope_key": "2026-05",
                         }
                     ],
-                    "relation_distribution": [
+                    "relation_edge_equality": [
                         {
                             "subject_id": "case-1",
                             "scope_key": "2026-05",
                             "row_id": "bank-1",
                             "row_type": "bank_transaction",
+                            "mismatch_kind": "canonical_missing_group_edge",
                         }
                     ],
                 }
@@ -928,7 +930,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(
             payload["summary"]["issue_sample_counts_by_code"],
             {
-                "bank_flow_rule_batches_active_relation_missing_distribution": 1,
+                "bank_flow_rule_batches_relation_edge_mismatch": 1,
                 "bank_flow_rule_batches_missing_read_model_row": 1,
             },
         )

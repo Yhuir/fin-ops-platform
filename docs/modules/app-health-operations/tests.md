@@ -147,6 +147,7 @@ Nightly full suite 应覆盖本模块的后端 app health/status/runtime tests�
 
 - 系统状态页已补 Spec-first E2E 合同和覆盖映射；本地 covered 不代表真实 PostgreSQL/RabbitMQ/Redis/systemd/Nginx/OA iframe、真实大库 metrics 或 authenticated HTTP/SSE/write-operation SLO 已完成。
 - 真实 PostgreSQL/RabbitMQ/Redis/systemd worker 的 heartbeat、queue backlog、DLQ、readiness convergence 需要 staging 或生产 smoke；本地测试使用 fake repository/connection 证明 contract。
+- `tests/test_operations_audit_report.py` 锁定 Audit 使用单一 `REPEATABLE READ READ ONLY` transaction snapshot；`tests/test_audit_page_business_read_model_tool.py` 锁定 canonical expected-set、关键字段/账户余额重算和双向 relation edge mismatch 都是 blocking integrity gate；进/销项 Audit 工具测试锁定共享 relation edge equality 参与 pass gate。
 - SSE 经过 Nginx/OA iframe 代理后是否缓冲、断线、回退轮询，需要真实部署 smoke。
 - `/api/operations/app-health-dashboard` 的真实大库指标性能、pg_stat_statements 可用性和短 TTL cache 行为需要生产观测；生产 admin Browser smoke 已有脚本和只读 guard，但仍需要真实 admin token/cookie 才能执行通过。
 - App Status 和现有 Playwright smoke 只能证明全局运行事实 plane 与 AppHealth dashboard 浏览器 gate，不替代每个业务页面自己的 stale/error/loading 交互测试。

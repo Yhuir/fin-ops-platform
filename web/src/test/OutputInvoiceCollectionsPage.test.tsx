@@ -262,6 +262,7 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
       return jsonResponse({
         overall_status: "pass",
         audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
+        audit_contract: { database_snapshot: true, snapshot_consistency: "repeatable_read_read_only" },
         summary: {
           blocking_issue_sample_count: 0,
           issue_sample_count: 0,
@@ -767,9 +768,9 @@ describe("Output invoice collections page", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/operations/app-health/output-invoice-collection-audit"))).toBe(true);
     });
-    const status = await within(page).findByText(/Audit 成功/);
-    expect(status).toHaveTextContent("全部数据正确");
-    expect(status).toHaveTextContent("全部配对关系正确");
+    const status = await within(page).findByText(/Audit 通过/);
+    expect(status).toHaveTextContent("已登记 App 内部数据完整正确");
+    expect(status).toHaveTextContent("配对关系完整正确");
     expect(status).toHaveTextContent("Fresh");
   });
 

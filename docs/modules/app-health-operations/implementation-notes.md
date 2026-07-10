@@ -521,3 +521,11 @@
 - 验证命令：见 `tests.md` 和 `docs/dev/testing-closure-state.md` 最近验证命令。
 - 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker、Nginx/OA iframe SSE、真实大库 dashboard metrics、pg_stat_statements 配置。
 - 后续事项：如果生产出现状态误判，先补 regression test 到 App Status overview 或 runtime repository，再登记到 `docs/dev/regression-bug-bank.md`。
+## 2026-07-10 - 页面 Audit 证明能力闭环
+
+- 目标：把 9 个页面 Audit 从 scope/source-version/有限 missing 检查提升为可证明“已登记 App 内部合同”的只读一致性审计，避免 freshness=fresh 但 relation 或页面字段已漂移时误报通过。
+- 影响范围：进项使用、销项收款、待找发票、外部往来款、批量账务、流水规则批量处理、OA 待付款、银行明细、成本统计的 operations Audit；不改变业务页面查询、写接口、projection builder、worker 或 refresh scope policy。
+- 关键决策：每次 Audit 在单一 PostgreSQL `REPEATABLE READ READ ONLY` 快照中执行；报告登记 canonical expected-set、关键展示字段、proof checks 和 external boundary。共享 relation 使用 relation 自身月份加 canonical 成员月份生成 scope，并验证 canonical relation、group arrays、row index 的双向 typed edge equality。待找发票/OA 展开 collapsed 成员；银行账户余额从 canonical 流水重算；成本统计分别从 active Workbench OA-bank 与 fresh bank-detail 支出流水重算 paired/full-flow 集合和金额。
+- 修复边界：Audit handler 保持只读。生产 drift 只允许通过正式 `ReadModelRefreshGateway` / durable queue 按 `workbench_relation -> invoice_lifecycle -> downstream page read models` 分阶段重建；每阶段必须等待 queue drained，再复跑 9 个 Audit。
+- 测试覆盖：`tests/test_operations_audit_report.py`、`tests/test_audit_page_business_read_model_tool.py`、`tests/test_audit_input_invoice_usage_read_model_tool.py`、`tests/test_audit_output_invoice_collection_read_model_tool.py`、`tests/test_app_health_api.py`。
+- 保证边界：全部 Audit 通过只能证明已登记 App 内部 canonical facts、read models、relation edges、freshness 与 queue 一致；不能证明银行/OA/发票源系统或 `t_payment_simple` 没有漏同步。

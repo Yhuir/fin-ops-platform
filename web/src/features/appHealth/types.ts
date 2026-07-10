@@ -321,6 +321,13 @@ export type PageAuditContract = {
   event_types?: string[];
   pass_condition?: string;
   guarantee_boundary?: string;
+  canonical_expected_set?: string;
+  key_display_fields?: string[];
+  relation_edge_equality?: string;
+  snapshot_consistency?: "repeatable_read_read_only" | "caller_managed" | string;
+  database_snapshot?: boolean;
+  external_source_boundary?: string;
+  proof_checks?: string[];
   write_policy?: "read_only" | string;
 };
 

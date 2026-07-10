@@ -4,7 +4,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from fin_ops_platform.services.postgres_repositories.audit_report import AuditIssue, evaluate_audit_issues
+from fin_ops_platform.services.postgres_repositories.audit_report import (
+    AuditIssue,
+    evaluate_audit_issues,
+    read_only_audit_snapshot,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_relation_audit import (
+    workbench_relation_edge_equality_issues,
+)
 
 
 @dataclass(frozen=True)
@@ -223,7 +230,27 @@ def audit_invoice_read_model(
 ) -> dict[str, Any]:
     normalized_tenant_id = str(tenant_id or "default").strip() or "default"
     limit = max(int(example_limit or 50), 1)
-    summary = _fetch_summary(connection, contract=contract, tenant_id=normalized_tenant_id)
+    with read_only_audit_snapshot(connection) as snapshot:
+        return _audit_invoice_read_model_snapshot(
+            snapshot.connection,
+            contract=contract,
+            tenant_id=normalized_tenant_id,
+            limit=limit,
+            snapshot_consistency=snapshot.consistency,
+            database_snapshot=snapshot.database_snapshot,
+        )
+
+
+def _audit_invoice_read_model_snapshot(
+    connection: Any,
+    *,
+    contract: InvoiceReadModelAuditContract,
+    tenant_id: str,
+    limit: int,
+    snapshot_consistency: str,
+    database_snapshot: bool,
+) -> dict[str, Any]:
+    summary = _fetch_summary(connection, contract=contract, tenant_id=tenant_id)
     issues: list[AuditIssue] = []
     checks = (
         _noncanonical_invoice_type_issues,
@@ -236,21 +263,19 @@ def audit_invoice_read_model(
         _orphan_read_model_member_issues,
         _duplicate_invoice_member_issues,
         _amount_mismatch_issues,
-        _active_relation_missing_workbench_row_issues,
-        _active_relation_missing_workbench_group_issues,
-        _cross_scope_relation_distribution_issues,
+        _relation_edge_equality_issues,
         _relation_member_split_row_issues,
         _candidate_relation_in_projection_issues,
         _candidate_workbench_relation_issues,
     )
     for check in checks:
-        issues.extend(check(connection, contract=contract, tenant_id=normalized_tenant_id, limit=limit + 1))
+        issues.extend(check(connection, contract=contract, tenant_id=tenant_id, limit=limit + 1))
 
     evaluation = evaluate_audit_issues(issues, sample_limit=limit)
     summary.update(evaluation.summary)
     return {
         "mode": "dry-run",
-        "tenant_id": normalized_tenant_id,
+        "tenant_id": tenant_id,
         "overall_status": evaluation.overall_status,
         "audit_status": evaluation.audit_status,
         "summary": summary,
@@ -266,11 +291,53 @@ def audit_invoice_read_model(
                 "read_model.workbench_relation_scopes",
                 "job.read_model_dirty_scopes",
             ],
-            "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh'",
+            "pass_condition": (
+                "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh' "
+                "and audit_status.queue == 'drained' and audit_contract.database_snapshot == true"
+            ),
+            "canonical_expected_set": (
+                f"all active canonical {contract.direction} invoices, including every collapsed invoice member"
+            ),
+            "key_display_fields": [
+                "invoice_id",
+                "scope_key",
+                "invoice_type",
+                "invoice_no",
+                "total_with_tax",
+                "relation members",
+            ],
+            "relation_edge_equality": "canonical == relation_groups == relation_rows, including affected month scopes",
+            "snapshot_consistency": snapshot_consistency,
+            "database_snapshot": database_snapshot,
+            "external_source_boundary": "invoice/OA source completeness before App import",
+            "proof_checks": [
+                "canonical_expected_set_equality",
+                "missing_or_orphan_identity",
+                "key_display_field_recalculation",
+                "scope_count_and_source_version_equality",
+                "bidirectional_relation_edge_equality",
+                "durable_queue_and_freshness_gate",
+            ],
             "write_policy": "read_only",
         },
         "generated_at": datetime.now(UTC).isoformat(),
     }
+
+
+def _relation_edge_equality_issues(
+    connection: Any,
+    contract: InvoiceReadModelAuditContract,
+    *,
+    tenant_id: str,
+    limit: int,
+) -> list[AuditIssue]:
+    return workbench_relation_edge_equality_issues(
+        connection,
+        tenant_id=tenant_id,
+        limit=limit,
+        code_prefix=contract.read_model_key,
+        label=contract.title,
+    )
 
 
 def _fetch_summary(
@@ -687,146 +754,6 @@ def _amount_mismatch_issues(
                 "payload_total_with_tax",
                 "invoice_member_count",
             ),
-        )
-        for row in rows
-    ]
-
-
-def _active_relation_missing_workbench_row_issues(
-    connection: Any,
-    contract: InvoiceReadModelAuditContract,
-    *,
-    tenant_id: str,
-    limit: int,
-) -> list[AuditIssue]:
-    rows = connection.fetch_all(
-        f"""
-        /* check: active_relation_missing_workbench_row */
-        with {_active_relation_members_cte(contract)}
-        select
-            member.case_id,
-            member.invoice_id,
-            member.relation_row_id,
-            member.invoice_scope_key as scope_key,
-            member.relation_updated_at
-        from active_relation_invoice_members member
-        left join read_model.workbench_relation_rows relation_row
-          on relation_row.tenant_id = %s
-         and relation_row.row_id = member.relation_row_id
-         and relation_row.relation_status = 'linked'
-         and member.case_id = any(relation_row.group_ids)
-        where relation_row.row_id is null
-        order by member.case_id, member.relation_row_id
-        limit %s
-        """,
-        (tenant_id, limit),
-    )
-    return [
-        AuditIssue(
-            severity="error",
-            code="active_relation_missing_workbench_relation_row",
-            message=f"An active Workbench relation {contract.direction} invoice member is not projected as a linked workbench_relation row.",
-            subject_id=_text(row.get("case_id")),
-            scope_key=_text(row.get("scope_key")),
-            details=_details(row, "invoice_id", "relation_row_id", "relation_updated_at"),
-        )
-        for row in rows
-    ]
-
-
-def _active_relation_missing_workbench_group_issues(
-    connection: Any,
-    contract: InvoiceReadModelAuditContract,
-    *,
-    tenant_id: str,
-    limit: int,
-) -> list[AuditIssue]:
-    rows = connection.fetch_all(
-        f"""
-        /* check: active_relation_missing_workbench_group */
-        with {_active_relation_members_cte(contract)}
-        select
-            member.case_id,
-            member.invoice_id,
-            member.relation_row_id,
-            member.invoice_scope_key as scope_key
-        from active_relation_invoice_members member
-        left join read_model.workbench_relation_groups relation_group
-          on relation_group.tenant_id = %s
-         and relation_group.group_id = member.case_id
-         and relation_group.relation_status = 'linked'
-         and (
-                member.relation_row_id = any(relation_group.{contract.relation_group_ids_column})
-             or member.invoice_id = any(relation_group.{contract.relation_group_ids_column})
-         )
-        where relation_group.group_id is null
-        order by member.case_id, member.relation_row_id
-        limit %s
-        """,
-        (tenant_id, limit),
-    )
-    return [
-        AuditIssue(
-            severity="error",
-            code="active_relation_missing_workbench_relation_group",
-            message=f"An active Workbench relation {contract.direction} invoice member is not projected in a linked relation group.",
-            subject_id=_text(row.get("case_id")),
-            scope_key=_text(row.get("scope_key")),
-            details=_details(row, "invoice_id", "relation_row_id"),
-        )
-        for row in rows
-    ]
-
-
-def _cross_scope_relation_distribution_issues(
-    connection: Any,
-    contract: InvoiceReadModelAuditContract,
-    *,
-    tenant_id: str,
-    limit: int,
-) -> list[AuditIssue]:
-    rows = connection.fetch_all(
-        f"""
-        /* check: cross_scope_relation_distribution */
-        with
-        {_active_relation_members_cte(contract)},
-        relation_scopes as (
-            select distinct case_id, invoice_scope_key as scope_key
-            from active_relation_invoice_members
-            where invoice_scope_key is not null
-            union
-            select distinct case_id, relation_scope_key as scope_key
-            from active_relation_invoice_members
-            where relation_scope_key is not null
-        )
-        select
-            member.case_id,
-            member.invoice_id,
-            member.relation_row_id,
-            relation_scopes.scope_key
-        from active_relation_invoice_members member
-        join relation_scopes
-          on relation_scopes.case_id = member.case_id
-        left join read_model.workbench_relation_rows relation_row
-          on relation_row.tenant_id = %s
-         and relation_row.scope_key = relation_scopes.scope_key
-         and relation_row.row_id = member.relation_row_id
-         and relation_row.relation_status = 'linked'
-         and member.case_id = any(relation_row.group_ids)
-        where relation_row.row_id is null
-        order by member.case_id, relation_scopes.scope_key, member.relation_row_id
-        limit %s
-        """,
-        (tenant_id, limit),
-    )
-    return [
-        AuditIssue(
-            severity="error",
-            code="cross_scope_relation_member_not_distributed",
-            message="A cross-scope active relation member is missing from one affected workbench_relation scope.",
-            subject_id=_text(row.get("case_id")),
-            scope_key=_text(row.get("scope_key")),
-            details=_details(row, "invoice_id", "relation_row_id"),
         )
         for row in rows
     ]

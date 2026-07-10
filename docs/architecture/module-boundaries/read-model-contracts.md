@@ -13,6 +13,16 @@
 - Incremental Projection：写操作只污染受影响 scope；worker 投影只重算受影响范围，除非 manifest 明确把 all 定义为 fan-out 或可查询父聚合。
 
 查询端必须经过 freshness/status/enqueue 边界；页面不能读取旧 read model 却返回 fresh。Redis 只能缓存 fresh gate 之后的 payload；RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
+
+## 页面 Audit 证明合同
+
+- 页面 Audit 的 `pass` 不是“SQL 可运行”或“readiness=fresh”的别名。每个登记页面必须声明 independent canonical expected-set、关键展示字段、共享 relation 依赖和外部来源边界。
+- 一次 Audit 的全部 canonical、read model、relation、dirty scope 和 outbox 查询必须运行在同一 PostgreSQL `REPEATABLE READ READ ONLY` transaction snapshot；报告必须返回 `snapshot_consistency=repeatable_read_read_only` 与 `database_snapshot=true`。
+- expected-set 必须做 canonical → projection 缺失检查和 projection → canonical orphan 检查；collapsed/grouped 页面必须展开全部业务成员，不能只检查 primary row。
+- 关键展示字段至少覆盖 identity、scope、状态、金额及该页面决定性业务字段；金额/summary/账户余额等派生值必须从 canonical facts 或已登记 upstream contract 重算，不能只比较两个由同一 payload 复制出的字段。
+- `workbench_relation` 作为共享依赖时，必须按 relation 自身月份与所有 canonical 成员月份生成受影响 scope，验证 `app.workbench_pair_relations == read_model.workbench_relation_groups == read_model.workbench_relation_rows` 的双向 typed edge equality；只验证 group 存在或单向 missing 不足以通过。
+- 只有 `integrity=pass`、`freshness=fresh`、`queue=drained` 且 database snapshot 启用时，才能证明“已登记的 App 内部合同”完整正确。该结论不替代银行流水、OA、`t_payment_simple` 或发票外部来源的独立对账。
+- Audit 永远只读。发现 drift 后必须按 upstream → downstream 依赖顺序，通过 `ReadModelRefreshGateway` / durable queue 分阶段重建并在每阶段 drain 后复审；禁止 Audit handler 或 repair 脚本直接写 read model 表或伪造 fresh readiness。
 `job.outbox_events.available_at` 是 write-operation / read-model refresh enqueue-to-done SLO 的起点；事务内 refresh writer 必须用 statement-time `clock_timestamp()` 写 `available_at`/当前更新时间，不能让 PostgreSQL transaction-level `now()` 把业务写事务耗时污染到 worker drain 指标里。active pending refresh 被同 scope 新 source_version 合并时，outbox 必须重置当前 active event 的 `created_at`/`updated_at`，但 SLO 工具仍以 `available_at -> processed_at` 为准。
 
 ## Freshness / Version 合同

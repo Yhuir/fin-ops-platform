@@ -29,7 +29,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面查询/过滤 | `OaPendingPaymentsPage.tsx`、`features/oaPendingPayments/api.ts` | 必须进入 `OaPendingPaymentReadModelService` fresh gate；read model service 未配置或 payload 不 fresh 时 fail closed，不回退 live query |
-| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=oa_pending_payments`；只证明 App 内部事实/投影一致，不替代外部 OA 来源完整性对账 |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=oa_pending_payments`；completed App OA 与已进入 App 的 externally admitted in-progress OA 构成可证明 expected-set，collapsed OA 成员、申请人/项目/金额/payment status 结构与共享 relation edge 必须双向一致，并在只读一致性快照中执行；只证明 App 内部事实/投影一致，不替代外部 OA 或 `t_payment_simple` 来源完整性对账 |
 | 关联支出流水候选查询 | `GET /api/oa-pending-payments/bank-transaction-candidates` | `oa_row_ids` 只作为后续提交关联的目标 OA 上下文；候选读取全部支出流水，不按 OA 月份收敛 |
 | 已支付写回/银行关联 | command service | 写操作必须审计并触发 read model scopes；逐行写回只能由 `writeback-paid` 触发，且后端必须重新校验已存在的 Workbench active relation 或 in-progress active pending relation、outflow、金额合计和 `flow_id`；`link-bank-transactions` 成功创建关系后仍可自动写回 |
 | OA projection sync | OA sync/projection services | 输入必须带 source version |

@@ -41,7 +41,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 收款 rows/details | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额；rows summary 的 `invoiceCount` 按唯一销项发票 ID 统计并驱动标题右侧 `销项票 N`，`pagination.total` 仍是表格行数/配对组行数；标题统计表示全量销项票数，不随当前 keyword/filter/month/sort 的表格筛选结果变化 |
-| 页面 Audit icon | AppHealth operations audit API | admin-only；标题右侧 icon 调用只读 audit；只有结构化 integrity/freshness 通过且页面明确 `read_model_status=fresh` 才显示成功，unknown/live-query 不得伪装 fresh，问题数显示为 sample |
+| 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 销项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等；只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功，unknown/live-query 不得伪装 fresh，问题数显示为 sample |
 | lifecycle/status result | API | 写后可恢复、可审计 |
 | operation barrier targets | 前端页面 | lifecycle/receipt 写成功后用服务端返回 targets 等待 fresh；缺省时才回退当前查询月份 |
 | Dirty scope | runtime queue | `output_invoice_collection.read_model.refresh` |

@@ -58,10 +58,72 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 self.assertEqual(report["summary"]["blocking_issue_sample_count"], 0)
                 self.assertEqual(report["issues"], [])
                 self.assertEqual(report["audit_contract"]["write_policy"], "read_only")
+                self.assertTrue(report["audit_contract"]["canonical_expected_set"])
+                self.assertTrue(report["audit_contract"]["key_display_fields"])
+                self.assertEqual(report["audit_contract"]["snapshot_consistency"], "caller_managed")
+                self.assertFalse(report["audit_contract"]["database_snapshot"])
                 self.assertEqual(connection.executed, [])
                 queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
                 self.assertIn(contract.source_tables[0], queried_sql)
                 self.assertIn(contract.read_model_tables[0], queried_sql)
+                self.assertIn("/* check: relation_edge_equality */", queried_sql)
+
+    def test_proof_checks_are_blocking_integrity_gates(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "key_display_fields": [
+                        {"subject_id": "bank-1", "scope_key": "2026-05", "source_amount": "10", "projected_amount": "9"}
+                    ],
+                    "bank_account_balance_equality": [
+                        {"subject_id": "acct:1", "scope_key": "all", "expected_count": 2, "projected_count": 1}
+                    ],
+                    "relation_edge_equality": [
+                        {
+                            "subject_id": "case-1",
+                            "scope_key": "2026-05",
+                            "row_id": "bank-1",
+                            "row_type": "bank_transaction",
+                            "mismatch_kind": "canonical_missing_group_edge",
+                        }
+                    ],
+                }
+            ),
+            domain_key="bank_details",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {
+                "bank_details_account_balance_mismatch": 1,
+                "bank_details_key_display_fields_mismatch": 1,
+                "bank_details_relation_edge_mismatch": 1,
+            },
+        )
+
+    def test_pending_invoice_canonical_member_gap_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "canonical_expected_set": [
+                        {
+                            "subject_id": "bank-missing",
+                            "scope_key": "2026-05",
+                            "direction": "expense",
+                            "mismatch_kind": "canonical_missing_projection",
+                        }
+                    ]
+                }
+            ),
+            domain_key="pending_invoices",
+        )
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"pending_invoices_canonical_expected_set_mismatch": 1},
+        )
 
     def test_reports_page_data_relation_and_freshness_failures(self) -> None:
         connection = FakeConnection(
@@ -122,20 +184,13 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                         "row_count": 2,
                     }
                 ],
-                "relation_distribution": [
+                "relation_edge_equality": [
                     {
                         "subject_id": "case-1",
                         "scope_key": "2026-05",
                         "row_id": "bank-1",
                         "row_type": "bank_transaction",
-                    }
-                ],
-                "candidate_relation_projection": [
-                    {
-                        "subject_id": "case-candidate",
-                        "scope_key": "2026-05",
-                        "relation_status": "linked",
-                        "canonical_status": "candidate",
+                        "mismatch_kind": "canonical_missing_group_edge",
                     }
                 ],
             }
@@ -160,9 +215,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("bank_details_missing_read_model_row", issue_codes)
         self.assertIn("bank_details_orphan_read_model_row", issue_codes)
         self.assertIn("bank_details_duplicate_read_model_identity", issue_codes)
-        self.assertIn("bank_details_active_relation_missing_distribution", issue_codes)
-        self.assertIn("bank_details_candidate_relation_projected_as_linked", issue_codes)
-        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 11)
+        self.assertIn("bank_details_relation_edge_mismatch", issue_codes)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 10)
         self.assertEqual(connection.executed, [])
 
         summary_params = connection.fetch_one_calls[0][1]
@@ -223,7 +277,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertNotIn("source.txn_direction in ('outflow', 'inflow')", queried_sql)
         self.assertNotIn("pending_invoices_relation_source_versions_mismatch", queried_sql)
 
-    def test_pending_invoice_relation_audit_uses_active_exists_and_any_distribution_scope(self) -> None:
+    def test_pending_invoice_relation_audit_uses_scope_aware_bidirectional_edge_equality(self) -> None:
         connection = FakeConnection()
 
         audit_page_business_read_model.audit_page_business_read_model(
@@ -231,18 +285,15 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             domain_key="pending_invoices",
         )
 
-        relation_sql = next(sql for sql, _params in connection.fetch_all_calls if "relation_distribution" in sql)
-        self.assertIn("where not exists", relation_sql.lower())
-        self.assertIn("join read_model.pending_invoice_rows pending_row", relation_sql)
-        self.assertIn("relation.row_types[member.ordinality] in ('bank', 'bank_transaction')", relation_sql)
-        self.assertIn("from read_model.workbench_relation_rows relation_row", relation_sql)
-        self.assertIn("join read_model.workbench_relation_groups relation_group", relation_sql)
-
-        candidate_sql = next(sql for sql, _params in connection.fetch_all_calls if "candidate_relation_projection" in sql)
-        self.assertIn("not exists", candidate_sql.lower())
-        self.assertIn("active_relation.status = 'active'", candidate_sql)
-        self.assertIn("from unnest(group_row.bank_transaction_ids)", " ".join(candidate_sql.split()))
-        self.assertIn("join read_model.pending_invoice_rows pending_row", " ".join(candidate_sql.split()))
+        relation_sql = next(sql for sql, _params in connection.fetch_all_calls if "relation_edge_equality" in sql)
+        self.assertIn("relation_scope_candidates", relation_sql)
+        self.assertIn("expected_edges", relation_sql)
+        self.assertIn("projected_group_edges", relation_sql)
+        self.assertIn("projected_index_edges", relation_sql)
+        self.assertIn("canonical_missing_group_edge", relation_sql)
+        self.assertIn("projected_group_edge_not_canonical", relation_sql)
+        self.assertIn("group_edge_missing_row_index", relation_sql)
+        self.assertIn("row_index_edge_missing_group", relation_sql)
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()

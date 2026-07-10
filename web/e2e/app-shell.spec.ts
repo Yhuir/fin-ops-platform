@@ -2,6 +2,7 @@ import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 function startStrictBrowserErrorCapture(page: Page, options: { allowExpectedAuthResourceError?: boolean } = {}) {
   const errors: string[] = [];
@@ -101,6 +102,7 @@ test.describe("app shell browser smoke", () => {
     await expect(auditPanel).not.toContainText("Blocking issues");
     expect(api.count("GET /api/operations/app-health/input-invoice-usage-audit")).toBe(1);
     expect(api.count("POST /api/operations/app-health/input-invoice-usage-audit")).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page, { allowText: /Read model/gi });
     expect(browserErrors).toEqual([]);
   });
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -25,6 +27,39 @@ class AuditEvaluation:
     audit_status: dict[str, str]
     summary: dict[str, Any]
     issue_samples: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class AuditSnapshot:
+    connection: Any
+    consistency: str
+    database_snapshot: bool
+
+
+@contextmanager
+def read_only_audit_snapshot(connection: Any) -> Iterator[AuditSnapshot]:
+    """Keep every query in one stable PostgreSQL snapshot.
+
+    Lightweight test doubles do not expose ``transaction``; production
+    ``PostgresConnection`` always does.  The fallback is intentionally
+    identified in the report instead of pretending to be a DB snapshot.
+    """
+
+    transaction = getattr(connection, "transaction", None)
+    if not callable(transaction):
+        yield AuditSnapshot(
+            connection=connection,
+            consistency="caller_managed",
+            database_snapshot=False,
+        )
+        return
+    with transaction() as snapshot_connection:
+        snapshot_connection.execute("set transaction isolation level repeatable read read only")
+        yield AuditSnapshot(
+            connection=snapshot_connection,
+            consistency="repeatable_read_read_only",
+            database_snapshot=True,
+        )
 
 
 def evaluate_audit_issues(issues: list[AuditIssue], *, sample_limit: int) -> AuditEvaluation:

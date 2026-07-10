@@ -52,6 +52,8 @@ class AuditOutputInvoiceCollectionReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["overall_status"], "pass")
         self.assertEqual(report["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(report["issues"], [])
+        self.assertEqual(report["audit_contract"]["snapshot_consistency"], "caller_managed")
+        self.assertFalse(report["audit_contract"]["database_snapshot"])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
         self.assertIn("app.invoices", queried_sql)
@@ -59,6 +61,7 @@ class AuditOutputInvoiceCollectionReadModelToolTests(unittest.TestCase):
         self.assertIn("read_model.workbench_relation_rows", queried_sql)
         self.assertIn("read_model.workbench_relation_groups", queried_sql)
         self.assertIn("output_invoice_ids", queried_sql)
+        self.assertIn("/* check: relation_edge_equality */", queried_sql)
 
     def test_sql_literal_percent_is_escaped_for_psycopg_placeholders(self) -> None:
         self.assertIn("销项%%", OUTPUT_INVOICE_PREDICATE)

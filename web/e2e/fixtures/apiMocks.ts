@@ -587,7 +587,9 @@ function inputInvoiceUsageAuditPayload() {
     },
     issues: [],
     audit_contract: {
-      pass_condition: "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh'",
+      pass_condition: "integrity=pass and freshness=fresh and queue=drained and database_snapshot=true",
+      snapshot_consistency: "repeatable_read_read_only",
+      database_snapshot: true,
       write_policy: "read_only",
     },
     generated_at: "2026-07-10T08:00:00Z",
