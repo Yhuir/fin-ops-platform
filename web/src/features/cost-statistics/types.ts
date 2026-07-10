@@ -50,6 +50,8 @@ export type CostStatisticsExplorer = {
   month: string;
   summary: CostSummary;
   timeRows: CostTimeRow[];
+  bankFlowSummary: CostSummary;
+  bankFlowTimeRows: CostTimeRow[];
   bankAccounts: CostBankAccount[];
   projectRows: CostProjectExplorerRow[];
   expenseTypeRows: CostExpenseTypeExplorerRow[];
@@ -130,4 +132,32 @@ export type CostStatisticsExportPreview = {
   sheetNames: string[];
   columns: string[];
   rows: string[][];
+};
+
+export type CostStatisticsTagRuleTag = {
+  code: string;
+  label: string;
+  path: string[];
+  source: string;
+  status: string;
+  direction: string;
+  outputPrimaryLabel: string;
+  outputSubLabel: string;
+};
+
+export type CostStatisticsTagRules = {
+  version: number;
+  bankAutoTagRulesVersion: number;
+  defaultSelectionApplied: boolean;
+  selectedTagCodes: string[];
+  effectiveSelectedTagCodes: string[];
+  inactiveSelectedTagCodes: string[];
+  activeTags: CostStatisticsTagRuleTag[];
+  canSave: boolean;
+};
+
+export type SaveCostStatisticsTagRulesRequest = {
+  expectedVersion: number;
+  selectedTagCodes: string[];
+  currentScopeKey: string;
 };

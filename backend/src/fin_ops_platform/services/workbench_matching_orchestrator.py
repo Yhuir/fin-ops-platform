@@ -7,14 +7,18 @@ from time import perf_counter
 from typing import Any, Callable, Protocol
 
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
+from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_reconciliation_engine import (
+    AUTO_PAIR_ACTOR,
+    AUTO_PAIR_HISTORY_OPERATION,
     WorkbenchMatchingRelationReadPort,
     WorkbenchReconciliationEngine,
 )
 from fin_ops_platform.services.workbench_reconciliation_models import expand_scope_month_window
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_special_reconciliation_adapter import WorkbenchSpecialReconciliationAdapter
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
     WORKBENCH_SPECIAL_RULES_VERSION,
@@ -72,6 +76,7 @@ class WorkbenchMatchingOrchestrator:
         self._settings_provider = settings_provider
         self._source_versions_provider = source_versions_provider
         self._logger = logger or LOGGER
+        self._amount_check_service = WorkbenchAmountCheckService()
 
     def run(
         self,
@@ -96,6 +101,7 @@ class WorkbenchMatchingOrchestrator:
             "suppressed_by_exception_case_count": 0,
             "suppressed_by_pair_relation_count": 0,
             "candidate_attached_to_exception_case_count": 0,
+            "auto_linked_relation_count": 0,
             "duration_ms": 0,
         }
 
@@ -127,11 +133,14 @@ class WorkbenchMatchingOrchestrator:
                 candidates = self._generate_candidates(scope_month, oa_rows, bank_rows, invoice_rows)
                 candidates = self._suppress_candidates_for_active_exception_cases(candidates, summary)
                 self._accumulate_rule_summary(summary)
+                rows_by_id = self._rows_by_id([*oa_rows, *bank_rows, *invoice_rows])
                 for candidate in candidates:
                     upserted = self._candidate_match_service.upsert_candidate(candidate)
                     summary["candidate_count"] += 1
                     if upserted.get("status") == "auto_closed":
                         summary["auto_closed_count"] += 1
+                        if self._auto_link_candidate(upserted, rows_by_id=rows_by_id, scope_month=scope_month):
+                            summary["auto_linked_relation_count"] += 1
                     if upserted.get("status") == "conflict":
                         summary["conflict_count"] += 1
 
@@ -245,6 +254,106 @@ class WorkbenchMatchingOrchestrator:
             if not isinstance(skipped_rule, dict):
                 raise ValueError("rules.last_summary().skipped_rules values must be dicts.")
             summary["skipped_rules"].append(deepcopy(skipped_rule))
+
+    def _auto_link_candidate(
+        self,
+        candidate: dict[str, Any],
+        *,
+        rows_by_id: dict[str, dict[str, Any]],
+        scope_month: str,
+    ) -> bool:
+        confirm_relation = getattr(self._relation_command_service, "confirm_relation", None)
+        if not callable(confirm_relation):
+            return False
+        if str(candidate.get("status") or "").strip() != "auto_closed":
+            return False
+        if str(candidate.get("confidence") or "").strip() != "high":
+            return False
+        if list(candidate.get("conflict_candidate_keys") or []):
+            return False
+        row_ids = [str(row_id or "").strip() for row_id in list(candidate.get("row_ids") or []) if str(row_id or "").strip()]
+        if len(row_ids) < 2 or any(row_id not in rows_by_id for row_id in row_ids):
+            return False
+        row_types = self._candidate_row_types(candidate, row_ids, rows_by_id)
+        if len({row_type for row_type in row_types if row_type}) < 2:
+            return False
+        if self._relation_read_port.active_relations_for_row_ids(row_ids):
+            return False
+        if self._relation_read_port.has_withdrawn_relation_for_row_ids(row_ids):
+            return False
+        rows_by_type = self._candidate_rows_by_type(row_ids, row_types, rows_by_id)
+        amount_check = self._amount_check_service.check(rows_by_type)
+        if str(amount_check.get("status") or "") != "matched":
+            return False
+        case_id = self._auto_link_case_id(candidate)
+        source_versions = candidate.get("source_versions") if isinstance(candidate.get("source_versions"), dict) else {}
+        try:
+            confirm_relation(
+                case_id=case_id,
+                row_ids=row_ids,
+                row_types=row_types,
+                relation_mode=MANUAL_CONFIRMED_RELATION_MODE,
+                actor_id=AUTO_PAIR_ACTOR,
+                month_scope=scope_month,
+                note="系统自动配对",
+                amount_check=amount_check,
+                special_metadata={"auto_pair": {"candidate_key": candidate.get("candidate_key"), "rule_code": candidate.get("rule_code")}},
+                evidence=deepcopy(candidate.get("special_metadata") or {}),
+                rule_version=str(source_versions.get("workbench_matching_rules_version") or ""),
+                relation_created_by=AUTO_PAIR_ACTOR,
+                history_note="系统自动配对",
+                idempotency_key=f"workbench:auto-pair-candidate:{candidate.get('candidate_key')}",
+                history_operation_type=AUTO_PAIR_HISTORY_OPERATION,
+            )
+        except (WorkbenchRelationCommandError, ValueError):
+            return False
+        self._candidate_match_service.mark_candidates_consumed(
+            candidate_keys=[str(candidate.get("candidate_key") or "")],
+            consumed_by_case_id=case_id,
+            consumed_by_relation_case_id=case_id,
+        )
+        return True
+
+    @staticmethod
+    def _auto_link_case_id(candidate: dict[str, Any]) -> str:
+        candidate_key = str(candidate.get("candidate_key") or "").strip()
+        digest = candidate_key.removeprefix("candidate:")[:16]
+        return f"CASE-AUTO-{digest}" if digest else "CASE-AUTO-CANDIDATE"
+
+    @classmethod
+    def _candidate_row_types(
+        cls,
+        candidate: dict[str, Any],
+        row_ids: list[str],
+        rows_by_id: dict[str, dict[str, Any]],
+    ) -> list[str]:
+        oa_ids = set(cls._text_list(candidate.get("oa_row_ids")))
+        bank_ids = set(cls._text_list(candidate.get("bank_row_ids")))
+        invoice_ids = set(cls._text_list(candidate.get("invoice_row_ids")))
+        row_types: list[str] = []
+        for row_id in row_ids:
+            if row_id in oa_ids:
+                row_types.append("oa")
+            elif row_id in bank_ids:
+                row_types.append("bank")
+            elif row_id in invoice_ids:
+                row_types.append("invoice")
+            else:
+                row_type = str((rows_by_id.get(row_id) or {}).get("type") or "").strip()
+                row_types.append(row_type if row_type in {"oa", "bank", "invoice"} else "")
+        return row_types
+
+    @staticmethod
+    def _candidate_rows_by_type(
+        row_ids: list[str],
+        row_types: list[str],
+        rows_by_id: dict[str, dict[str, Any]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        rows_by_type: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
+        for row_id, row_type in zip(row_ids, row_types):
+            if row_type in rows_by_type:
+                rows_by_type[row_type].append(deepcopy(rows_by_id[row_id]))
+        return rows_by_type
 
     @staticmethod
     def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -417,9 +526,17 @@ class WorkbenchMatchingOrchestrator:
                 deduped[row_id] = deepcopy(row)
         return list(deduped.values())
 
+    @classmethod
+    def _rows_by_id(cls, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        return {row_id: deepcopy(row) for row in rows if (row_id := cls._row_id(row))}
+
     @staticmethod
     def _row_id(row: dict[str, Any]) -> str:
         return str(row.get("id") or row.get("row_id") or "").strip()
+
+    @staticmethod
+    def _text_list(values: Any) -> list[str]:
+        return [str(value or "").strip() for value in list(values or []) if str(value or "").strip()]
 
     @staticmethod
     def _normalize_rows(row_type: str, rows: Any) -> list[dict[str, Any]]:

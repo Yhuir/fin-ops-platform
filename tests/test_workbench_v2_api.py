@@ -1129,7 +1129,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(grouped["paired"]["groups"], [])
         self.assertEqual(len(grouped["open"]["groups"]), 2)
 
-    def test_apply_candidate_matches_links_multi_row_auto_closed_candidate(self) -> None:
+    def test_apply_candidate_matches_does_not_link_multi_row_auto_closed_candidate(self) -> None:
         app = build_application()
         candidate = app._workbench_candidate_match_service.upsert_candidate(
             {
@@ -1191,12 +1191,21 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         bank_row = payload["open"]["bank"][0]
         invoice_row = payload["open"]["invoice"][0]
 
-        self.assertEqual(bank_row["case_id"], candidate["candidate_key"])
-        self.assertEqual(invoice_row["case_id"], candidate["candidate_key"])
-        self.assertEqual(bank_row["invoice_relation"]["code"], "automatic_match")
-        self.assertEqual(invoice_row["invoice_bank_relation"]["code"], "automatic_match")
-        self.assertEqual(len(grouped["open"]["groups"]), 1)
-        self.assertEqual(grouped["open"]["groups"][0]["group_type"], "candidate")
+        self.assertNotEqual(bank_row.get("case_id"), candidate["candidate_key"])
+        self.assertNotEqual(invoice_row.get("case_id"), candidate["candidate_key"])
+        self.assertEqual(bank_row["invoice_relation"]["code"], "pending_invoice_match")
+        self.assertEqual(invoice_row["invoice_bank_relation"]["code"], "pending_collection")
+        self.assertEqual(grouped["paired"]["groups"], [])
+        self.assertEqual(len(grouped["open"]["groups"]), 2)
+        self.assertEqual(
+            {
+                row["id"]
+                for group in grouped["open"]["groups"]
+                for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+            },
+            {"bank-001", "invoice-001"},
+        )
+        self.assertTrue(all(group["group_type"] == "open" for group in grouped["open"]["groups"]))
 
     def test_import_file_confirm_returns_preview_stale_when_existing_records_change(self) -> None:
         app = build_application()
@@ -1240,7 +1249,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(confirm_response.status_code, 409)
         self.assertEqual(json.loads(confirm_response.body)["error"], "preview_stale")
 
-    def test_get_api_workbench_uses_auto_closed_candidate_matches_in_paired_section(self) -> None:
+    def test_get_api_workbench_auto_links_safe_auto_closed_candidate_as_paired_section(self) -> None:
         app = build_application()
         app._workbench_candidate_match_service.upsert_candidate(
             {
@@ -1320,13 +1329,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         ):
             payload = app._build_api_workbench_payload("2026-05")
 
-        paired_groups = payload["paired"]["groups"]
-        self.assertEqual(len(paired_groups), 1)
-        self.assertEqual([row["id"] for row in paired_groups[0]["oa_rows"]], ["oa-auto"])
-        self.assertEqual([row["id"] for row in paired_groups[0]["bank_rows"]], ["bank-auto"])
-        self.assertCountEqual(
-            [row["id"] for row in paired_groups[0]["invoice_rows"]],
-            ["invoice-auto-1", "invoice-auto-2"],
+        assert_auto_linked_group(
+            self,
+            payload,
+            {"oa-auto", "bank-auto", "invoice-auto-1", "invoice-auto-2"},
         )
         self.assertEqual(payload["open"]["groups"], [])
 
@@ -1401,11 +1407,23 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             payload = app._build_api_workbench_payload("2026-05")
 
         self.assertEqual(payload["paired"]["groups"], [])
-        self.assertEqual(len(payload["open"]["groups"]), 1)
-        self.assertEqual([row["id"] for row in payload["open"]["groups"][0]["oa_rows"]], ["oa-open"])
-        self.assertCountEqual(
-            [row["id"] for row in payload["open"]["groups"][0]["invoice_rows"]],
-            ["invoice-open-1", "invoice-open-2"],
+        open_groups = payload["open"]["groups"]
+        self.assertEqual(len(open_groups), 3)
+        self.assertEqual(
+            {
+                row["id"]
+                for group in open_groups
+                for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+            },
+            {"oa-open", "invoice-open-1", "invoice-open-2"},
+        )
+        self.assertTrue(all(group["group_type"] == "open" for group in open_groups))
+        self.assertFalse(
+            any(
+                row.get("case_id")
+                for group in open_groups
+                for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+            )
         )
 
     def test_oa_bank_incomplete_candidate_beats_single_row_no_confident_match(self) -> None:
@@ -1487,16 +1505,24 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         self.assertNotEqual(oa_bank_candidate["candidate_key"], no_confident_candidate["candidate_key"])
         self.assertEqual(payload["paired"]["groups"], [])
-        self.assertEqual(len(payload["open"]["groups"]), 1)
-        open_group = payload["open"]["groups"][0]
-        self.assertEqual(open_group["group_type"], "candidate")
-        self.assertEqual([row["id"] for row in open_group["oa_rows"]], ["oa-open"])
-        self.assertEqual([row["id"] for row in open_group["bank_rows"]], ["bank-open"])
-        self.assertEqual(open_group["invoice_rows"], [])
-        self.assertEqual(open_group["group_id"], f"case:{oa_bank_candidate['candidate_key']}")
-        self.assertEqual(open_group["oa_rows"][0]["case_id"], oa_bank_candidate["candidate_key"])
-        self.assertEqual(open_group["bank_rows"][0]["case_id"], oa_bank_candidate["candidate_key"])
-        self.assertEqual(open_group["oa_rows"][0]["oa_bank_relation"]["code"], "candidate_incomplete")
+        open_groups = payload["open"]["groups"]
+        self.assertEqual(len(open_groups), 2)
+        self.assertEqual(
+            {
+                row["id"]
+                for group in open_groups
+                for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+            },
+            {"oa-open", "bank-open"},
+        )
+        self.assertTrue(all(group["group_type"] == "open" for group in open_groups))
+        self.assertFalse(
+            any(
+                row.get("case_id") == oa_bank_candidate["candidate_key"]
+                for group in open_groups
+                for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+            )
+        )
 
     def test_get_api_workbench_keeps_oa_bank_exact_sum_candidate_in_one_open_group(self) -> None:
         app = build_application()
@@ -1567,20 +1593,23 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             payload = app._build_api_workbench_payload("2026-04")
 
         self.assertEqual(payload["paired"]["groups"], [])
-        self.assertEqual(len(payload["open"]["groups"]), 1)
-        open_group = payload["open"]["groups"][0]
-        self.assertEqual(open_group["group_type"], "candidate")
-        self.assertEqual(open_group["group_id"], f"case:{candidate['candidate_key']}")
-        self.assertEqual([row["id"] for row in open_group["oa_rows"]], ["oa-dali-prepay"])
-        self.assertCountEqual(
-            [row["id"] for row in open_group["bank_rows"]],
-            ["bank-jh-64996", "bank-gd-23053"],
-        )
-        self.assertEqual(open_group["invoice_rows"], [])
-        self.assertEqual(open_group["oa_rows"][0]["oa_bank_relation"]["code"], "candidate_incomplete")
+        open_groups = payload["open"]["groups"]
+        self.assertEqual(len(open_groups), 3)
         self.assertEqual(
-            {row["invoice_relation"]["code"] for row in open_group["bank_rows"]},
-            {"candidate_incomplete"},
+            {
+                row["id"]
+                for group in open_groups
+                for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+            },
+            {"oa-dali-prepay", "bank-jh-64996", "bank-gd-23053"},
+        )
+        self.assertTrue(all(group["group_type"] == "open" for group in open_groups))
+        self.assertFalse(
+            any(
+                row.get("case_id") == candidate["candidate_key"]
+                for group in open_groups
+                for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+            )
         )
 
     def test_oa_bank_candidate_attaches_to_existing_oa_attachment_case_group(self) -> None:
@@ -1604,6 +1633,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "source_versions": {},
             }
         )
+        mark_workbench_candidate_scope_fresh(app, "2026-01")
         raw_payload = {
             "month": "2026-01",
             "oa_status": {"code": "ready", "message": "OA 已同步"},
@@ -1668,15 +1698,15 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             payload = app._build_api_workbench_payload("2026-01")
 
-        self.assertEqual(payload["open"]["groups"], [])
-        self.assertEqual(len(payload["paired"]["groups"]), 1)
-        group = payload["paired"]["groups"][0]
-        self.assertEqual(group["group_type"], "auto_closed")
-        self.assertEqual(group["group_id"], "case:CASE-OA-ATT-oa-tian-196")
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-tian-196"])
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-tian-196"])
+        self.assertEqual(payload["paired"]["groups"], [])
+        self.assertEqual(len(payload["open"]["groups"]), 2)
+        source_group = next(group for group in payload["open"]["groups"] if group["group_id"] == "case:CASE-OA-ATT-oa-tian-196")
+        bank_group = next(group for group in payload["open"]["groups"] if group["bank_rows"])
+        self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-tian-196"])
+        self.assertEqual(bank_group["bank_rows"][0]["id"], "bank-tian-196")
+        self.assertIsNone(bank_group["bank_rows"][0].get("case_id"))
         self.assertCountEqual(
-            [row["id"] for row in group["invoice_rows"]],
+            [row["id"] for row in source_group["invoice_rows"]],
             ["invoice-oa-70", "invoice-oa-126"],
         )
 
@@ -1750,14 +1780,19 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             payload = app._build_api_workbench_payload("2026-03")
 
         self.assertEqual(payload["paired"]["groups"], [])
-        self.assertEqual(len(payload["open"]["groups"]), 1)
-        group = payload["open"]["groups"][0]
-        self.assertEqual(group["group_id"], "case:CASE-COST-CONFIRMED")
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-cost-confirmed"])
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-cost-confirmed"])
-        self.assertEqual(group["oa_rows"][0]["oa_bank_relation"]["code"], "fully_linked")
-        self.assertEqual(group["bank_rows"][0]["case_id"], "CASE-COST-CONFIRMED")
-        self.assertEqual(group["bank_rows"][0]["invoice_relation"]["code"], "candidate_incomplete")
+        self.assertEqual(len(payload["open"]["groups"]), 2)
+        case_group = next(group for group in payload["open"]["groups"] if group["oa_rows"])
+        bank_group = next(group for group in payload["open"]["groups"] if group["bank_rows"])
+        self.assertTrue(case_group["group_id"].startswith("open:case:CASE-COST-CONFIRMED:oa:"))
+        self.assertEqual(case_group["group_type"], "open")
+        self.assertEqual([row["id"] for row in case_group["oa_rows"]], ["oa-cost-confirmed"])
+        self.assertNotEqual(
+            (case_group["oa_rows"][0].get("oa_bank_relation") or {}).get("code"),
+            "fully_linked",
+        )
+        self.assertEqual([row["id"] for row in bank_group["bank_rows"]], ["bank-cost-confirmed"])
+        self.assertIsNone(bank_group["bank_rows"][0].get("case_id"))
+        self.assertEqual(bank_group["bank_rows"][0]["invoice_relation"]["code"], "pending_match")
 
     def test_all_scope_cached_read_model_rebuilds_when_candidate_snapshot_is_missing(self) -> None:
         app = build_application()
@@ -1881,14 +1916,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             payload = app._build_api_workbench_payload("all")
 
         build_raw.assert_any_call("all")
-        self.assertEqual(payload["open"]["groups"], [])
-        self.assertEqual(len(payload["paired"]["groups"]), 1)
-        group = payload["paired"]["groups"][0]
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-tian-196"])
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-tian-196"])
-        self.assertCountEqual(
-            [row["id"] for row in group["invoice_rows"]],
-            ["invoice-oa-70", "invoice-oa-126"],
+        assert_auto_linked_group(
+            self,
+            payload,
+            {"oa-tian-196", "bank-tian-196", "invoice-oa-70", "invoice-oa-126"},
         )
 
     def test_all_scope_refreshes_stale_candidate_run_before_using_matching_cache(self) -> None:
@@ -2024,15 +2055,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             payload = app._build_api_workbench_payload("all")
 
         build_raw.assert_any_call("2026-01", supplement_missing_pair_relation_rows=False)
-        build_raw.assert_any_call("all")
-        self.assertEqual(payload["open"]["groups"], [])
-        self.assertEqual(len(payload["paired"]["groups"]), 1)
-        group = payload["paired"]["groups"][0]
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-tian-196"])
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-tian-196"])
-        self.assertCountEqual(
-            [row["id"] for row in group["invoice_rows"]],
-            ["invoice-oa-70", "invoice-oa-126"],
+        assert_auto_linked_group(
+            self,
+            payload,
+            {"oa-tian-196", "bank-tian-196", "invoice-oa-70", "invoice-oa-126"},
         )
 
     def test_monthly_matching_uses_imported_bank_rows_without_month_limit_for_oa_attachment_closure(self) -> None:
@@ -2197,13 +2223,13 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             },
         }
         grouped = app._group_row_payload(app._apply_candidate_matches_to_payload(all_payload, "all"))
-        self.assertEqual(grouped["open"]["groups"], [])
-        self.assertEqual(len(grouped["paired"]["groups"]), 1)
-        group = grouped["paired"]["groups"][0]
-        self.assertEqual(group["group_type"], "auto_closed")
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-tian-318"])
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-tian-318"])
-        self.assertCountEqual([row["id"] for row in group["invoice_rows"]], ["invoice-oa-174", "invoice-oa-145"])
+        self.assertEqual(grouped["paired"]["groups"], [])
+        self.assertEqual(len(grouped["open"]["groups"]), 2)
+        source_group = next(group for group in grouped["open"]["groups"] if group["group_type"] == "source_linked")
+        bank_group = next(group for group in grouped["open"]["groups"] if group["bank_rows"])
+        self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-tian-318"])
+        self.assertEqual([row["id"] for row in bank_group["bank_rows"]], ["bank-tian-318"])
+        self.assertCountEqual([row["id"] for row in source_group["invoice_rows"]], ["invoice-oa-174", "invoice-oa-145"])
 
     def test_amount_only_oa_bank_rows_do_not_share_case_id_or_open_group(self) -> None:
         app = build_application()
@@ -2286,7 +2312,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         rows_by_id = {row["id"]: row for row in open_rows}
         oa_row_payload = rows_by_id["oa-hurong-350"]
         bank_row_payload = rows_by_id["bank-batch-350"]
-        self.assertNotEqual(oa_row_payload.get("case_id"), bank_row_payload.get("case_id"))
+        self.assertIsNone(oa_row_payload.get("case_id"))
+        self.assertIsNone(bank_row_payload.get("case_id"))
         self.assertFalse(
             any(
                 [row["id"] for row in group["oa_rows"]] == ["oa-hurong-350"]
@@ -3754,17 +3781,20 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         matching_groups = [
             group
-            for group in payload["paired"]["groups"]
+            for group in payload["open"]["groups"]
             if any(row["id"] == "oa-attach-202603-001" for row in group["oa_rows"])
         ]
         self.assertEqual(len(matching_groups), 1)
         group = matching_groups[0]
-        self.assertEqual(group["group_type"], "auto_closed")
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn-live-202603-001"])
+        self.assertEqual(group["group_type"], "source_linked")
+        self.assertEqual(group["bank_rows"], [])
         self.assertEqual(len(group["invoice_rows"]), 1)
         self.assertEqual(group["invoice_rows"][0]["detail_fields"]["来源OA单号"], "OA-ATT-001")
         self.assertTrue(group["oa_rows"][0]["special_metadata"]["immutable_oa_attachment_binding"])
-        self.assertFalse(payload["open"]["groups"])
+        self.assertEqual(payload["paired"]["groups"], [])
+        bank_groups = [group for group in payload["open"]["groups"] if group["bank_rows"]]
+        self.assertEqual(len(bank_groups), 1)
+        self.assertEqual([row["id"] for row in bank_groups[0]["bank_rows"]], ["txn-live-202603-001"])
 
         invoice_row_id = group["invoice_rows"][0]["id"]
         invoice_detail_response = app.handle_request("GET", f"/api/workbench/rows/{invoice_row_id}")
@@ -4792,9 +4822,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             actor_id="tester",
         )
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
-        group = next(group for group in payload["open"]["groups"] if group["oa_rows"] and group["bank_rows"])
-        oa_row = group["oa_rows"][0]
-        bank_row = group["bank_rows"][0]
+        oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
+        bank_row = flatten_groups(payload["open"]["groups"], "bank")[0]
 
         with patch.object(
             app,
@@ -4867,7 +4896,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(metadata["requires_oa"])
         self.assertFalse(metadata["requires_invoice"])
 
-    def test_withdraw_link_preview_splits_reconciliation_decision_without_active_relation(self) -> None:
+    def test_withdraw_link_preview_rejects_reconciliation_decision_without_active_relation(self) -> None:
         app = build_application()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
 
@@ -4897,13 +4926,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(preview_response.status_code, 200, preview_response.body)
+        self.assertEqual(preview_response.status_code, 400, preview_response.body)
         preview_payload = json.loads(preview_response.body)
-        self.assertEqual(preview_payload["operation_type"], "split_candidate")
-        self.assertEqual(preview_payload["candidate_keys"], ["decision-withdraw-split"])
-        self.assertEqual(preview_payload["affected_row_ids"], [bank_row["id"], invoice_row["id"]])
-        self.assertEqual(preview_payload["affected_scope_keys"], ["2026-03"])
-        self.assertIn("decision:decision-withdraw-split", preview_payload["submit_expected_versions"])
+        self.assertEqual(preview_payload["error"], "workbench_relation_not_found")
 
         submit_response = app.handle_request(
             "POST",
@@ -4913,20 +4938,17 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "month": "2026-03",
                     "row_ids": [bank_row["id"], invoice_row["id"]],
                     "operation_type": "split_candidate",
-                    "preview_id": preview_payload["preview_id"],
-                    "expected_versions": preview_payload["submit_expected_versions"],
                     "idempotency_key": "api-split-decision-1",
                 }
             ),
         )
 
-        self.assertEqual(submit_response.status_code, 200, submit_response.body)
+        self.assertEqual(submit_response.status_code, 400, submit_response.body)
         submit_payload = json.loads(submit_response.body)
-        self.assertEqual(submit_payload["operation"], "split_candidate")
-        self.assertEqual(submit_payload["affected_months"], ["2026-03"])
+        self.assertEqual(submit_payload["error"], "invalid_withdraw_link_request")
         stored_decision = decision_store.list_decisions("2026-03")[0]
-        self.assertEqual(stored_decision["decision_status"], "suppressed")
-        self.assertEqual(stored_decision["suppressed_by_exception_case_id"], "workbench_split_candidate")
+        self.assertEqual(stored_decision["decision_status"], "paired")
+        self.assertIsNone(stored_decision.get("suppressed_by_exception_case_id"))
 
     def test_confirm_link_returns_503_and_rolls_back_when_pair_relation_persist_fails(self) -> None:
         app = build_application()
@@ -5475,17 +5497,20 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         raw_payload["open"]["invoice"][0]["case_id"] = "CASE-OA-ATT-oa-exp-202605-attachment"
         raw_payload["open"]["invoice"][0]["source_kind"] = "oa_attachment_invoice"
         raw_payload["open"]["invoice"][0]["derived_from_oa_id"] = "oa-exp-202605-attachment"
+        mark_workbench_candidate_scope_fresh(app, "2026-05")
 
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-05").body)
 
         source_group = next(
             group
-            for group in initial_payload["paired"]["groups"]
+            for group in initial_payload["open"]["groups"]
             if group["group_id"] == "case:CASE-OA-ATT-oa-exp-202605-attachment"
         )
-        self.assertEqual(source_group["reason"], "existing_case_group")
+        self.assertEqual(source_group["group_type"], "source_linked")
+        self.assertEqual(source_group["reason"], "oa_attachment_source_relation")
         self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-exp-202605-attachment"])
+        self.assertEqual(source_group["bank_rows"], [])
         self.assertEqual(
             [row["id"] for row in source_group["invoice_rows"]],
             ["oa-att-inv-oa-exp-202605-attachment-01"],
@@ -5557,15 +5582,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         raw_payload["open"]["invoice"][0]["source_kind"] = "oa_attachment_invoice"
         raw_payload["open"]["invoice"][0]["derived_from_oa_id"] = "oa-exp-202605-invoice-first"
         raw_payload["open"]["invoice"][0]["total_with_tax"] = "145.00"
+        mark_workbench_candidate_scope_fresh(app, "2026-05")
 
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-05").body)
 
         source_group = next(
             group
-            for group in initial_payload["paired"]["groups"]
+            for group in initial_payload["open"]["groups"]
             if group["group_id"] == "case:CASE-OA-ATT-oa-exp-202605-invoice-first"
         )
+        self.assertEqual(source_group["group_type"], "source_linked")
+        self.assertEqual(source_group["reason"], "oa_attachment_source_relation")
         self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-exp-202605-invoice-first"])
         self.assertEqual(
             [row["id"] for row in source_group["invoice_rows"]],
@@ -6175,14 +6203,11 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         self.assertEqual(confirm_response.status_code, 200)
         schedule_pair_relation_persist.assert_called_once()
-        self.assertEqual(
-            schedule_pair_relation_persist.call_args.kwargs,
-            {
-                "changed_case_ids": ["CASE-202603-102", "CASE-ASYNC-PERSIST-001"],
-                "request_id": None,
-                "action_name": "confirm_link",
-            },
-        )
+        persist_kwargs = schedule_pair_relation_persist.call_args.kwargs
+        self.assertEqual(persist_kwargs["request_id"], None)
+        self.assertEqual(persist_kwargs["action_name"], "confirm_link")
+        self.assertIn("CASE-ASYNC-PERSIST-001", persist_kwargs["changed_case_ids"])
+        self.assertEqual(len(persist_kwargs["changed_case_ids"]), 2)
         schedule_read_model_persist.assert_called_once()
         self.assertCountEqual(
             schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
@@ -7208,10 +7233,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         refreshed_oa_ids = [row["id"] for row in flatten_groups(refreshed_payload["open"]["groups"], "oa")]
         refreshed_bank_ids = [row["id"] for row in flatten_groups(all_groups(refreshed_payload), "bank")]
 
-        self.assertIn("oa-old-001", refreshed_oa_ids)
+        self.assertNotIn("oa-old-001", refreshed_oa_ids)
         self.assertIn("oa-recent-001", refreshed_oa_ids)
         self.assertIn("bank-recent-001", refreshed_bank_ids)
-        self.assertEqual(refreshed_payload["summary"]["oa_count"], 2)
+        self.assertEqual(refreshed_payload["summary"]["oa_count"], 1)
 
     def test_oa_retention_keeps_manual_imported_oa_and_derived_attachment_invoice_in_grouped_payload(self) -> None:
         app = build_application()
@@ -7698,7 +7723,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(preview_payload["requires_note"])
         self.assertTrue(preview_payload["can_submit"])
         self.assertEqual(preview_payload["amount_summary"]["status"], "mismatch")
-        self.assertEqual(len(preview_payload["before"]["groups"]), 2)
+        self.assertEqual(len(preview_payload["before"]["groups"]), 3)
         self.assertEqual(len(preview_payload["after"]["groups"]), 1)
 
         rejected_response = app.handle_request(
@@ -7955,6 +7980,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         raw_payload["open"]["oa"][0]["case_id"] = "CASE-EXISTING-PARTIAL"
         raw_payload["open"]["invoice"][0]["case_id"] = "CASE-EXISTING-PARTIAL"
         raw_payload["open"]["bank"][0]["case_id"] = ""
+        mark_workbench_candidate_scope_fresh(app, "2026-05")
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             app.handle_request("GET", "/api/workbench?month=2026-05")
 
@@ -7979,6 +8005,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview(self) -> None:
         app = build_application()
         raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
+        mark_workbench_candidate_scope_fresh(app, "2026-05")
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             app.handle_request("GET", "/api/workbench?month=2026-05")
         app._workbench_pair_relation_service.create_active_relation(
@@ -8018,6 +8045,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
     def test_withdraw_link_restores_previous_relation_snapshot(self) -> None:
         app = build_application()
         raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
+        mark_workbench_candidate_scope_fresh(app, "2026-05")
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             app.handle_request("GET", "/api/workbench?month=2026-05")
 
@@ -8077,6 +8105,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         raw_payload["open"]["oa"][0]["case_id"] = "CASE-EXISTING-PARTIAL"
         raw_payload["open"]["invoice"][0]["case_id"] = "CASE-EXISTING-PARTIAL"
         raw_payload["open"]["bank"][0]["case_id"] = ""
+        mark_workbench_candidate_scope_fresh(app, "2026-05")
         with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
             app.handle_request("GET", "/api/workbench?month=2026-05")
 
@@ -8595,6 +8624,53 @@ def flatten_groups(groups: list[dict[str, object]], record_type: str) -> list[di
 
 def all_groups(payload: dict[str, object]) -> list[dict[str, object]]:
     return [*payload["paired"]["groups"], *payload["open"]["groups"]]
+
+
+def mark_workbench_candidate_scope_fresh(app: Application, scope_month: str) -> None:
+    candidates = app._workbench_candidate_match_service.list_candidates_by_month(scope_month)
+    app._workbench_candidate_match_service.mark_scope_processed(
+        scope_month,
+        source_versions=app._workbench_matching_source_versions(),
+        candidate_count=len(candidates),
+        request_id="test-fresh-candidate-scope",
+        reason="test-fresh-candidate-scope",
+    )
+
+
+def assert_auto_linked_group(
+    testcase: unittest.TestCase,
+    payload: dict[str, object],
+    expected_row_ids: set[str],
+) -> dict[str, object]:
+    paired = payload["paired"]
+    assert isinstance(paired, dict)
+    groups = paired["groups"]
+    assert isinstance(groups, list)
+    testcase.assertEqual(len(groups), 1)
+    group = groups[0]
+    assert isinstance(group, dict)
+    testcase.assertEqual(group["group_type"], "manual_confirmed")
+    testcase.assertEqual(group.get("relation_note"), "系统自动配对")
+    amount_check = group.get("amount_check")
+    testcase.assertIsInstance(amount_check, dict)
+    assert isinstance(amount_check, dict)
+    testcase.assertEqual(amount_check.get("status"), "matched")
+    actual_row_ids = {
+        str(row.get("id"))
+        for key in ("oa_rows", "bank_rows", "invoice_rows")
+        for row in list(group.get(key) or [])
+        if isinstance(row, dict)
+    }
+    testcase.assertEqual(actual_row_ids, expected_row_ids)
+    for key in ("oa_rows", "bank_rows", "invoice_rows"):
+        for row in list(group.get(key) or []):
+            assert isinstance(row, dict)
+            testcase.assertTrue(str(row.get("case_id") or "").startswith("CASE-AUTO-"))
+            relation_amount_check = row.get("relation_amount_check")
+            testcase.assertIsInstance(relation_amount_check, dict)
+            assert isinstance(relation_amount_check, dict)
+            testcase.assertEqual(relation_amount_check.get("status"), "matched")
+    return group
 
 
 def build_personal_advance_repayment_raw_payload(

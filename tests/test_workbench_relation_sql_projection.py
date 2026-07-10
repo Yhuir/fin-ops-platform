@@ -593,8 +593,9 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         source_versions = builder._source_versions()
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-06-scoped-source-versions-v1",
+            "2026-07-10-active-relations-only-v1",
         )
+        self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         repository.existing_scope_summary = {
             "scope_key": "2026-04",
             "row_count": 2,
@@ -612,7 +613,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         saved = repository.saved[0]
         self.assertEqual(
             saved["source_versions"]["workbench_relation_schema_version"],
-            "2026-07-06-scoped-source-versions-v1",
+            "2026-07-10-active-relations-only-v1",
         )
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
         self.assertIn("input-invoice-nanjing", rows_by_id)
@@ -628,8 +629,9 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
 
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-06-scoped-source-versions-v1",
+            "2026-07-10-active-relations-only-v1",
         )
+        self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         self.assertEqual(connection.fetch_one_calls[0][1], ("2026-04-01",))
         sql = connection.fetch_one_calls[0][0]
         self.assertIn("with scope as", sql)
@@ -639,6 +641,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertIn("where status = 'active'", sql)
         self.assertIn("application_date >= scope.scope_month", sql)
         self.assertIn("application_date < scope.scope_month + interval '1 month'", sql)
+        self.assertNotIn("workbench_reconciliation_decisions", sql)
 
     def test_rebuild_keeps_oa_summary_for_legacy_completed_workflow_status(self) -> None:
         repository = CaptureWorkbenchRelationRepository()

@@ -103,6 +103,7 @@ class ApplicationStateStore:
             "pending_invoice_tag_groups": {},
             "pending_output_invoice_tag_groups": {},
             "bank_flow_rule_batch_tag_rules": {},
+            "cost_statistics_tag_selection": {},
             "input_invoice_usage_payment_status_rules": {},
         }
         if not self._app_settings_path.exists():
@@ -129,6 +130,7 @@ class ApplicationStateStore:
             "pending_invoice_tag_groups": dict(loaded.get("pending_invoice_tag_groups") or {}),
             "pending_output_invoice_tag_groups": dict(loaded.get("pending_output_invoice_tag_groups") or {}),
             "bank_flow_rule_batch_tag_rules": dict(loaded.get("bank_flow_rule_batch_tag_rules") or {}),
+            "cost_statistics_tag_selection": dict(loaded.get("cost_statistics_tag_selection") or {}),
             "input_invoice_usage_payment_status_rules": dict(
                 loaded.get("input_invoice_usage_payment_status_rules") or {}
             ),
@@ -160,6 +162,7 @@ class ApplicationStateStore:
             "pending_invoice_tag_groups": dict(payload.get("pending_invoice_tag_groups") or {}),
             "pending_output_invoice_tag_groups": dict(payload.get("pending_output_invoice_tag_groups") or {}),
             "bank_flow_rule_batch_tag_rules": dict(payload.get("bank_flow_rule_batch_tag_rules") or {}),
+            "cost_statistics_tag_selection": dict(payload.get("cost_statistics_tag_selection") or {}),
             "input_invoice_usage_payment_status_rules": dict(
                 payload.get("input_invoice_usage_payment_status_rules") or {}
             ),

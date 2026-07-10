@@ -5,7 +5,9 @@ import {
   exportCostStatisticsView,
   fetchCostStatisticsExplorer,
   fetchCostStatisticsExportPreview,
+  fetchCostStatisticsTagRules,
   getCachedCostStatisticsExplorer,
+  saveCostStatisticsTagRules,
 } from "../features/cost-statistics/api";
 
 const originalFetch = global.fetch;
@@ -207,6 +209,163 @@ describe("Cost statistics export API", () => {
         source: "settings",
       },
     ]);
+  });
+
+  test("maps bank flow time rows separately from OA paired time rows", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        month: "2026-03",
+        summary: {
+          row_count: 1,
+          transaction_count: 1,
+          total_amount: "100.00",
+        },
+        time_rows: [
+          {
+            transaction_id: "oa-fee",
+            trade_time: "2026-03-18 17:02:09",
+            direction: "支出",
+            project_name: "云南溯源科技",
+            expense_type: "材料",
+            expense_content: "设备",
+            amount: "100.00",
+            counterparty_name: "供应商",
+            payment_account_label: "建行 8106",
+            remark: "",
+            bank_tag_code: "fee",
+          },
+        ],
+        bank_flow_summary: {
+          row_count: 2,
+          transaction_count: 2,
+          total_amount: "130.00",
+        },
+        bank_flow_time_rows: [
+          {
+            transaction_id: "oa-fee",
+            trade_time: "2026-03-18 17:02:09",
+            direction: "支出",
+            project_name: "云南溯源科技",
+            expense_type: "材料",
+            expense_content: "设备",
+            amount: "100.00",
+            counterparty_name: "供应商",
+            payment_account_label: "建行 8106",
+            remark: "",
+            bank_tag_code: "fee",
+          },
+          {
+            transaction_id: "flow-fee",
+            trade_time: "2026-03-19 09:00:00",
+            direction: "支出",
+            project_name: "未配对OA",
+            expense_type: "材料",
+            expense_content: "耗材",
+            amount: "30.00",
+            counterparty_name: "供应商",
+            payment_account_label: "建行 8106",
+            remark: "",
+            bank_tag_code: "fee",
+          },
+        ],
+        bank_accounts: [],
+        project_rows: [],
+        expense_type_rows: [],
+      }), { status: 200 }),
+    ) as typeof fetch;
+
+    const payload = await fetchCostStatisticsExplorer("2026-03", undefined, "active");
+
+    expect(payload.summary.totalAmount).toBe("100.00");
+    expect(payload.bankFlowSummary.totalAmount).toBe("130.00");
+    expect(payload.timeRows.map((row) => row.transactionId)).toEqual(["oa-fee"]);
+    expect(payload.bankFlowTimeRows.map((row) => row.transactionId)).toEqual(["oa-fee", "flow-fee"]);
+  });
+
+  test("loads and saves cost statistics tag rules with operation barrier targets", async () => {
+    global.fetch = vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/cost-statistics/tag-rules" && init?.method === "PUT") {
+        return new Response(JSON.stringify({
+          version: 2,
+          bank_auto_tag_rules_version: 8,
+          default_selection_applied: false,
+          selected_tag_codes: ["fee"],
+          effective_selected_tag_codes: ["fee"],
+          inactive_selected_tag_codes: [],
+          active_tags: [
+            {
+              code: "fee",
+              label: "费用",
+              path: ["费用", "材料"],
+              output_primary_label: "费用",
+              output_sub_label: "材料",
+            },
+          ],
+          can_save: true,
+          operation_barrier_targets: [
+            {
+              read_model_key: "cost_statistics",
+              scope_key: "active:2026-03",
+              scope_type: "cost_statistics",
+            },
+          ],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        version: 1,
+        bank_auto_tag_rules_version: 8,
+        default_selection_applied: true,
+        selected_tag_codes: ["fee", "__uncategorized__"],
+        effective_selected_tag_codes: ["fee", "__uncategorized__"],
+        inactive_selected_tag_codes: [],
+        active_tags: [
+          {
+            code: "fee",
+            label: "费用",
+            path: ["费用", "材料"],
+            output_primary_label: "费用",
+            output_sub_label: "材料",
+          },
+          {
+            code: "__uncategorized__",
+            label: "未分类",
+            path: ["未分类", "未分类"],
+            output_primary_label: "未分类",
+            output_sub_label: "未分类",
+          },
+        ],
+        can_save: true,
+      }), { status: 200 });
+    }) as typeof fetch;
+
+    const rules = await fetchCostStatisticsTagRules();
+    const saved = await saveCostStatisticsTagRules({
+      expectedVersion: rules.version,
+      selectedTagCodes: ["fee"],
+      currentScopeKey: "active:2026-03",
+    });
+
+    expect(rules.activeTags.map((tag) => tag.label)).toEqual(["费用", "未分类"]);
+    expect(saved.selectedTagCodes).toEqual(["fee"]);
+    expect(saved.operationBarrierTargets).toEqual([
+      {
+        readModelKey: "cost_statistics",
+        scopeKey: "active:2026-03",
+        scopeType: "cost_statistics",
+      },
+    ]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/cost-statistics/tag-rules",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          expected_version: 1,
+          selected_tag_codes: ["fee"],
+          current_scope_key: "active:2026-03",
+        }),
+      }),
+    );
   });
 
   test("caches explorer payloads by month and project scope for fast page re-entry", async () => {

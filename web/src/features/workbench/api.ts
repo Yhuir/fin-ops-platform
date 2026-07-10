@@ -475,15 +475,13 @@ type ApiWorkbenchAmountSummary = {
 };
 
 type ApiWorkbenchRelationPreview = {
-  operation?: "confirm_link" | "withdraw_link" | "split_candidate";
-  operation_type?: "confirm_link" | "withdraw_relation" | "split_candidate";
-  operationType?: "confirm_link" | "withdraw_relation" | "split_candidate";
+  operation?: "confirm_link" | "withdraw_link";
+  operation_type?: "confirm_link" | "withdraw_relation";
+  operationType?: "confirm_link" | "withdraw_relation";
   preview_id?: string | null;
   previewId?: string | null;
   submit_expected_versions?: Record<string, unknown> | null;
   submitExpectedVersions?: Record<string, unknown> | null;
-  candidate_keys?: unknown[];
-  candidateKeys?: unknown[];
   can_submit?: boolean;
   requires_note?: boolean;
   message?: string;
@@ -712,7 +710,7 @@ type WithdrawLinkPayload = {
   month: string;
   rowIds: string[];
   note?: string;
-  operationType?: "withdraw_relation" | "split_candidate";
+  operationType?: "withdraw_relation";
   previewId?: string;
   expectedVersions?: Record<string, unknown>;
 };
@@ -1649,12 +1647,12 @@ function mapAmountTotals(totals: ApiWorkbenchAmountSummary["before"] | undefined
 function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRelationPreview {
   const amountSummary = payload.amount_summary ?? {};
   const hasAmountSummary = Boolean(payload.amount_summary);
-  const operation = payload.operation === "withdraw_link" || payload.operation === "split_candidate"
+  const operation = payload.operation === "withdraw_link"
     ? payload.operation
     : "confirm_link";
-  const operationType = payload.operation_type === "withdraw_relation" || payload.operation_type === "split_candidate"
+  const operationType = payload.operation_type === "withdraw_relation"
     ? payload.operation_type
-    : payload.operationType === "withdraw_relation" || payload.operationType === "split_candidate"
+    : payload.operationType === "withdraw_relation"
       ? payload.operationType
       : operation === "withdraw_link"
         ? "withdraw_relation"
@@ -1666,7 +1664,6 @@ function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRela
     submitExpectedVersions: {
       ...(payload.submit_expected_versions ?? payload.submitExpectedVersions ?? {}),
     },
-    candidateKeys: (payload.candidate_keys ?? payload.candidateKeys ?? []).map((key) => String(key)),
     canSubmit: payload.can_submit !== false,
     requiresNote: Boolean(payload.requires_note),
     message: String(payload.message ?? "").trim(),
@@ -3251,7 +3248,7 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
     month: string;
     row_ids: string[];
     note?: string;
-    operation_type?: "withdraw_relation" | "split_candidate";
+    operation_type?: "withdraw_relation";
     preview_id?: string;
     expected_versions?: Record<string, unknown>;
   } = {

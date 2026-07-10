@@ -2,10 +2,19 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-10 - 成本统计标签规则和双统计口径
+
+- 变更类型：settings-backed rule contract + read model payload contract + frontend drawer interaction。
+- 架构结论：成本统计标签规则由 `AppSettingsService` 持久化，暴露主/子标签 leaf code 与虚拟 `__uncategorized__` 未分类标签；默认未配置等价于全选当前有效支出标签 + 未分类，显式空数组表示全部不进入成本统计。`按项目`、`按银行`、`按OA费用类型` 只统计规则过滤后的 OA 配对 `time_rows`；`按标签`、`按时间` 只统计规则过滤后的全部银行支出 `bank_flow_time_rows`。规则保存不触发 read model rebuild，只返回当前成本统计 scope 的 operation barrier target；页面等待 fresh 后关闭抽屉。
+- 新增/更新测试：`tests/test_app_settings_service.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx`。
+- 覆盖点：默认标签选择包含有效支出标签和未分类；保存空选择可持久化；API 读写标签规则并返回 operation barrier target，且缺少写权限时不调用 settings service；query service 对 OA 配对行和全银行支出行按同一标签规则过滤，并证明两组统计口径总额可不同、组内总额一致；前端 mapper 支持 `bank_flow_time_rows`；规则抽屉保存后等待 `cost_statistics` fresh 才关闭，且 API 标记只读时禁用保存。
+- 七类测试决策：business core 适用，覆盖标签选择和金额口径过滤；service-layer 适用，覆盖 settings 持久化、query service 过滤和 read model payload 使用；API contract 适用，覆盖 `GET/PUT /api/cost-statistics/tag-rules` 与 explorer 新字段；read model/cache/background job 适用，覆盖 v5 payload、query-time filtering 和不触发 rebuild 的边界；frontend interaction 适用，覆盖紧凑抽屉和等待 fresh；end-to-end business-flow 本轮用 API/service/component 闭环，真实 worker/browser 写流沿用既有成本统计 e2e；existing regression 适用，覆盖旧 explorer mapper、旧五视图按钮和导出/详情不会回退 live fallback。
+- 验证命令：见本轮最终说明。
+
 ## 2026-07-06 - 按流水标签类型读取银行明细有效主/子标签
 
 - 变更类型：read model payload contract + cross-module read boundary。
-- 架构结论：成本统计 `time_rows.bank_tag_*` 不再信任 Workbench 行内旧标签字段；月份 shard 使用 `BankTransactionTagReadFacade` 从 fresh `bank_detail` scoped read model 批量读取银行明细有效分类，并把 `bank_detail_source_versions` 写入成本统计 source_versions。payload schema 升级为 `2026-07-cost-statistics-bank-tags-v4`；旧 v3 父 scope 即使仍被标记 fresh，也必须返回空刷新态并入队重建，不能继续把旧 `未标记` 行交给页面。`bank_detail` 非 fresh 时成本统计 worker 抛 `bank_detail_read_model_not_fresh`，由 runtime dependency retry 处理，不发布旧标签 payload。
+- 架构结论：成本统计 `time_rows.bank_tag_*` 不再信任 Workbench 行内旧标签字段；月份 shard 使用 `BankTransactionTagReadFacade` 从 fresh `bank_detail` scoped read model 批量读取银行明细有效分类，并把 `bank_detail_source_versions` 写入成本统计 source_versions。当时 payload schema 升级为 `2026-07-cost-statistics-bank-tags-v4`，当前 schema 已在 2026-07-10 升级到 v5；旧 v3/v4 父 scope 即使仍被标记 fresh，也必须返回空刷新态并入队重建，不能继续把旧 `未标记` 行交给页面。`bank_detail` 非 fresh 时成本统计 worker 抛 `bank_detail_read_model_not_fresh`，由 runtime dependency retry 处理，不发布旧标签 payload。
 - 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py`、`tests/test_runtime_bootstrap.py`。
 - 覆盖点：Workbench bank row 不携带标签字段时，成本统计仍从银行明细 facade 写入主标签、子标签和 label path；成本统计 expected source_versions 包含 bank detail scope 版本；worker wiring 向 `CostStatisticsSqlProjectionBuilder` 传入 `bank_transaction_tag_read_facade`；旧 v3 `active:all` payload 不向页面返回旧行并入队重建；依赖非 fresh 时不保存成本统计 read model。
 - 七类测试决策：service-layer、API contract、read model/cache/background job、existing regression 适用并覆盖；frontend interaction 由既有 `CostStatisticsPage.test.tsx::bank tag view drills down from primary tag to sub tag to transaction` 覆盖，本轮 UI 未变；business core 金额归因不变；E2E 写流继续沿用银行明细/成本统计既有 Browser flows，本轮不新增跨模块浏览器用例。
@@ -14,7 +23,7 @@
 ## 2026-07-05 - 银行账户全集、标签规则联动、时间格式与表头总金额
 
 - 变更类型：read model payload contract + frontend interaction/layout + cross-module lifecycle。
-- 架构结论：按银行统计的银行全集由 settings owner 的 `bank_account_mappings` 经成本统计 SQL projection 写入 explorer `bank_accounts`，页面只合并 `bank_accounts + time_rows`，不再只从当前流水推断银行列表。按流水标签类型继续只读 `time_rows.bank_tag_*`；自动标签规则变化通过 `bank_auto_tag_rules_changed -> cost_statistics.read_model.refresh` 刷新 read model。按时间展示格式化后的 `YYYY-MM-DD HH:mm:ss`，过滤仍使用原始 `trade_time`。五种统计口径表头均展示当前范围总金额。
+- 架构结论：按银行统计的银行全集由 settings owner 的 `bank_account_mappings` 经成本统计 SQL projection 写入 explorer `bank_accounts`，页面只合并 `bank_accounts + time_rows`，不再只从当前流水推断银行列表。当时按流水标签类型只读 `time_rows.bank_tag_*`；2026-07-10 后 `按标签` / `按时间` 改为读取 `bank_flow_time_rows`。自动标签规则变化通过 `bank_auto_tag_rules_changed -> cost_statistics.read_model.refresh` 刷新 read model。按时间展示格式化后的 `YYYY-MM-DD HH:mm:ss`，过滤仍使用原始 `trade_time`。五种统计口径表头均展示当前范围总金额。
 - 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_bank_details_sql_runtime.py`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx`、`web/src/test/AppSidebar.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts`。
 - 覆盖点：explorer payload 必须包含 `bank_accounts`；settings 银行账户映射进入 `source_versions.bank_account_mappings_fingerprint`；标签规则版本继续进入 `source_versions.bank_auto_tag_rules_version`；`bank_auto_tag_rules_changed` lifecycle 计划包含 `cost_statistics.read_model.refresh`；前端 mapper 归一 `bank_accounts`；按银行统计展示设置中的零金额账户；时间列不直出 ISO/T 字符串；各视图表头展示总金额；sidebar 深蓝背景有组件回归断言。
 - 七类测试决策：service-layer、API contract、read model/cache/background job、frontend interaction、existing regression 适用并覆盖；business core 金额归因口径不变，不新增独立业务规则测试；end-to-end business-flow 使用既有成本统计/银行明细/settings browser flows，本轮新增的是读模型合同与页面交互，不新增跨模块写流 e2e。

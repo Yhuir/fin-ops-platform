@@ -33,7 +33,7 @@
 | `RECON-WB-E2E-002` | 关联台 confirm 后银行明细 relation tags 更新 | P0 | 从关联台确认后，银行明细重新读取并显示 `有oa` / `有发票`，请求次数增加，不能只依赖前端 event。 |
 | `RECON-WB-E2E-003` | 关联台 confirm 后待找发票状态更新 | P0 | 待找发票从 `已支付待开票` 变为 `已支付已开票`，显示发票号码和 OA 申请人。 |
 | `RECON-WB-E2E-004` | 关联台 withdraw preview/submit | P0 | 已配对 group 可撤回；preview 锁定 `operation_type`、`preview_id`、`submit_expected_versions`；提交后未恢复 row 独立回 open；弹窗内阻塞直到 fresh refetch。 |
-| `RECON-WB-E2E-005` | 自动候选 split_candidate | P0 | 未配对区纯 automatic decision/candidate 点击统一按钮时，后端 preview 判定 `split_candidate`，submit 后 suppress 候选并刷新，不能当 active relation withdraw。 |
+| `RECON-WB-E2E-005` | 自动候选不作为可见关系 | P0 | 未正式化 automatic decision/candidate 不应显示为同一行 linked group；没有 active relation 时撤回 preview 必须拒绝，不能 suppress 候选或当 active relation withdraw。 |
 | `RECON-WB-E2E-006` | stale/refreshing/read model failed 状态 | P0 | stale/refreshing 时页面提示状态；不能把空 rows 当真实无候选；OA sync dirty/refreshing 禁写，普通 Workbench stale 不全局禁用无关 group。 |
 | `RECON-WB-E2E-007` | 写 API 失败或 fresh refetch 失败 | P0 | 写 API 失败不移动行、不发成功 toast；写成功但 refetch 失败时停留在弹窗错误状态，提示不要重复写入。 |
 | `RECON-WB-E2E-008` | 权限 gate | P0 | `read_export_only` 不显示或禁用确认/撤回/异常写入口，并且不会发出 mutation API。 |

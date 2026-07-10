@@ -125,6 +125,29 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertIn("relation_bank_row_missing_source_oa_alignment", issue_codes)
         self.assertGreater(report["summary"]["blocking_issue_count"], 0)
 
+    def test_reports_visible_automatic_decision_rows_without_active_relation(self) -> None:
+        connection = FakeConnection(
+            relations=[],
+            generations=[_generation("all", "2026-07-10 09:00:00+08")],
+            group_rows=[
+                _group_row(
+                    "all",
+                    "invoice-decision-1",
+                    group_id="case:decision:decision-1",
+                    payload_case_id="decision:decision-1",
+                    relation_mode="automatic_decision",
+                ),
+            ],
+        )
+
+        report = audit_workbench_relation_display.audit_workbench_relation_display(connection)
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertEqual(report["summary"]["visible_automatic_decision_row_count"], 1)
+        issue_codes = {issue["code"] for issue in report["issues"]}
+        self.assertIn("visible_automatic_decision_group", issue_codes)
+        self.assertEqual(connection.executed, [])
+
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()
 

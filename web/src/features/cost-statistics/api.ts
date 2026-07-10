@@ -5,10 +5,13 @@ import type {
   CostProjectExplorerRow,
   CostStatisticsExportPreview,
   CostStatisticsExplorer,
+  CostStatisticsTagRules,
+  CostStatisticsTagRuleTag,
   CostMonthStatistics,
   CostProjectStatistics,
   CostTimeRow,
   CostTransactionDetail,
+  SaveCostStatisticsTagRulesRequest,
 } from "./types";
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 
@@ -76,6 +79,8 @@ type ApiCostStatisticsExplorer = {
   month: string;
   summary: ApiCostSummary;
   time_rows: ApiCostTimeRow[];
+  bank_flow_summary?: ApiCostSummary | null;
+  bank_flow_time_rows?: ApiCostTimeRow[] | null;
   bank_accounts?: ApiCostBankAccount[] | null;
   project_rows: ApiCostProjectExplorerRow[];
   expense_type_rows: ApiCostExpenseTypeExplorerRow[];
@@ -139,6 +144,30 @@ type ApiCostStatisticsExportPreview = {
   rows: string[][];
 };
 
+type ApiCostStatisticsTagRuleTag = {
+  code: string;
+  label?: string | null;
+  path?: string[] | null;
+  source?: string | null;
+  status?: string | null;
+  direction?: string | null;
+  output_primary_label?: string | null;
+  output_sub_label?: string | null;
+};
+
+type ApiCostStatisticsTagRules = {
+  version: number;
+  bank_auto_tag_rules_version: number;
+  default_selection_applied?: boolean | null;
+  selected_tag_codes?: string[] | null;
+  effective_selected_tag_codes?: string[] | null;
+  inactive_selected_tag_codes?: string[] | null;
+  active_tags?: ApiCostStatisticsTagRuleTag[] | null;
+  can_save?: boolean | null;
+  operation_barrier_targets?: unknown;
+  freshness_targets?: unknown;
+};
+
 type ExplorerCacheEntry = {
   payload: CostStatisticsExplorer;
   cachedAt: number;
@@ -191,6 +220,48 @@ function mapBankAccount(row: ApiCostBankAccount): CostBankAccount {
     bankName: optionalString(row.bank_name),
     accountLast4: optionalString(row.account_last4),
     source: optionalString(row.source),
+  };
+}
+
+function mapCostTimeRow(row: ApiCostTimeRow): CostTimeRow {
+  return {
+    transactionId: row.transaction_id,
+    tradeTime: row.trade_time,
+    direction: row.direction,
+    projectName: row.project_name,
+    expenseType: row.expense_type,
+    expenseContent: row.expense_content,
+    amount: row.amount,
+    counterpartyName: row.counterparty_name,
+    paymentAccountLabel: row.payment_account_label,
+    remark: row.remark,
+    ...bankTagFields(row),
+  };
+}
+
+function mapTagRuleTag(row: ApiCostStatisticsTagRuleTag): CostStatisticsTagRuleTag {
+  return {
+    code: row.code,
+    label: optionalString(row.label) ?? row.code,
+    path: stringList(row.path) ?? [],
+    source: optionalString(row.source) ?? "",
+    status: optionalString(row.status) ?? "active",
+    direction: optionalString(row.direction) ?? "any",
+    outputPrimaryLabel: optionalString(row.output_primary_label) ?? optionalString(row.label) ?? row.code,
+    outputSubLabel: optionalString(row.output_sub_label) ?? optionalString(row.label) ?? "",
+  };
+}
+
+function mapTagRules(payload: ApiCostStatisticsTagRules): CostStatisticsTagRules {
+  return {
+    version: Number(payload.version || 1),
+    bankAutoTagRulesVersion: Number(payload.bank_auto_tag_rules_version || 1),
+    defaultSelectionApplied: Boolean(payload.default_selection_applied),
+    selectedTagCodes: stringList(payload.selected_tag_codes) ?? [],
+    effectiveSelectedTagCodes: stringList(payload.effective_selected_tag_codes) ?? stringList(payload.selected_tag_codes) ?? [],
+    inactiveSelectedTagCodes: stringList(payload.inactive_selected_tag_codes) ?? [],
+    activeTags: (payload.active_tags ?? []).map(mapTagRuleTag).filter((tag) => tag.code.trim()),
+    canSave: payload.can_save !== false,
   };
 }
 
@@ -274,22 +345,13 @@ export async function fetchCostStatisticsExplorer(
     },
   );
 
+  const timeRows = payload.time_rows.map<CostTimeRow>(mapCostTimeRow);
   const mappedPayload = {
     month: payload.month,
     summary: mapSummary(payload.summary),
-    timeRows: payload.time_rows.map<CostTimeRow>((row) => ({
-      transactionId: row.transaction_id,
-      tradeTime: row.trade_time,
-      direction: row.direction,
-      projectName: row.project_name,
-      expenseType: row.expense_type,
-      expenseContent: row.expense_content,
-      amount: row.amount,
-      counterpartyName: row.counterparty_name,
-      paymentAccountLabel: row.payment_account_label,
-      remark: row.remark,
-      ...bankTagFields(row),
-    })),
+    timeRows,
+    bankFlowSummary: mapSummary(payload.bank_flow_summary ?? payload.summary),
+    bankFlowTimeRows: (payload.bank_flow_time_rows ?? payload.time_rows).map<CostTimeRow>(mapCostTimeRow),
     bankAccounts: (payload.bank_accounts ?? []).map(mapBankAccount),
     projectRows: payload.project_rows.map<CostProjectExplorerRow>((row) => ({
       projectName: row.project_name,
@@ -313,6 +375,47 @@ export async function fetchCostStatisticsExplorer(
     cachedAt: Date.now(),
   });
   return mappedPayload;
+}
+
+export async function fetchCostStatisticsTagRules(signal?: AbortSignal): Promise<CostStatisticsTagRules> {
+  const payload = await requestJson<ApiCostStatisticsTagRules>("/api/cost-statistics/tag-rules", {
+    method: "GET",
+    signal,
+  });
+  return mapTagRules(payload);
+}
+
+export async function saveCostStatisticsTagRules(
+  request: SaveCostStatisticsTagRulesRequest,
+): Promise<CostStatisticsTagRules & { operationBarrierTargets: Array<{ readModelKey: string; scopeKey: string; scopeType?: string }> }> {
+  const payload = await requestJson<ApiCostStatisticsTagRules>("/api/cost-statistics/tag-rules", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      expected_version: request.expectedVersion,
+      selected_tag_codes: request.selectedTagCodes,
+      current_scope_key: request.currentScopeKey,
+    }),
+  });
+  const targets = Array.isArray(payload.operation_barrier_targets) ? payload.operation_barrier_targets : [];
+  return {
+    ...mapTagRules(payload),
+    operationBarrierTargets: targets
+      .map((target) => {
+        if (!target || typeof target !== "object") {
+          return null;
+        }
+        const record = target as Record<string, unknown>;
+        const readModelKey = optionalString(record.read_model_key) ?? optionalString(record.readModelKey);
+        const scopeKey = optionalString(record.scope_key) ?? optionalString(record.scopeKey);
+        const scopeType = optionalString(record.scope_type) ?? optionalString(record.scopeType);
+        if (!readModelKey || !scopeKey) {
+          return null;
+        }
+        return { readModelKey, scopeKey, ...(scopeType ? { scopeType } : {}) };
+      })
+      .filter((target): target is { readModelKey: string; scopeKey: string; scopeType?: string } => target !== null),
+  };
 }
 
 export async function fetchProjectCostStatistics(

@@ -946,6 +946,118 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(preview_payload["details"], expected_details)
         self.assertEqual(export_payload["details"], expected_details)
 
+    def test_cost_statistics_tag_rules_route_reads_and_saves_selection_with_barrier_target(self) -> None:
+        from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
+        from fin_ops_platform.app.server import Response
+
+        class SettingsService:
+            def __init__(self) -> None:
+                self.saved_payload: dict[str, object] | None = None
+
+            def get_cost_statistics_tag_selection_payload(self, *, can_save: bool = True) -> dict[str, object]:
+                return {
+                    "version": 3,
+                    "bank_auto_tag_rules_version": 8,
+                    "selected_tag_codes": ["fee", "__uncategorized__"],
+                    "effective_selected_tag_codes": ["fee", "__uncategorized__"],
+                    "inactive_selected_tag_codes": [],
+                    "active_tags": [
+                        {"code": "fee", "label": "费用", "path": ["费用", "材料"]},
+                        {"code": "__uncategorized__", "label": "未分类", "path": ["未分类", "未分类"]},
+                    ],
+                    "can_save": can_save,
+                }
+
+            def update_cost_statistics_tag_selection(self, payload: dict[str, object], *, actor_id: str) -> dict[str, object]:
+                self.saved_payload = {**payload, "actor_id": actor_id}
+                return {
+                    **self.get_cost_statistics_tag_selection_payload(can_save=True),
+                    "version": 4,
+                    "selected_tag_codes": list(payload.get("selected_tag_codes") or []),
+                    "effective_selected_tag_codes": list(payload.get("selected_tag_codes") or []),
+                }
+
+        settings = SettingsService()
+        routes = CostStatisticsApiRoutes(
+            query_service=object(),
+            app_settings_service=settings,
+            json_response=lambda status, payload: Response(status_code=int(status), body=json.dumps(payload)),
+            file_response=lambda _filename, _content: Response(status_code=200, body=b""),
+            resolve_read_session=lambda _headers: (None, None),
+            resolve_write_session=lambda _headers: (None, None),
+            load_json_body=lambda body: (json.loads(body or "{}"), None),
+        )
+
+        get_response = routes.route("GET", "/api/cost-statistics/tag-rules", {}, None, {})
+        put_response = routes.route(
+            "PUT",
+            "/api/cost-statistics/tag-rules",
+            {},
+            json.dumps({
+                "expected_version": 3,
+                "selected_tag_codes": ["fee"],
+                "current_scope_key": "active:2026-05",
+            }),
+            {},
+        )
+
+        get_payload = json.loads(get_response.body)
+        put_payload = json.loads(put_response.body)
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(get_payload["active_tags"][1]["label"], "未分类")
+        self.assertEqual(put_response.status_code, 200)
+        self.assertEqual(settings.saved_payload["selected_tag_codes"], ["fee"])
+        self.assertEqual(put_payload["selected_tag_codes"], ["fee"])
+        self.assertIn(
+            {
+                "read_model_key": "cost_statistics",
+                "scope_key": "active:2026-05",
+                "scope_type": "cost_statistics",
+            },
+            put_payload["operation_barrier_targets"],
+        )
+
+    def test_cost_statistics_tag_rules_update_rejects_missing_write_permission(self) -> None:
+        from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
+        from fin_ops_platform.app.server import Response
+
+        class SettingsService:
+            called = False
+
+            def update_cost_statistics_tag_selection(self, _payload: dict[str, object], *, actor_id: str) -> dict[str, object]:
+                self.called = True
+                return {}
+
+        settings = SettingsService()
+        permission_error = Response(
+            status_code=403,
+            body=json.dumps({
+                "error": "forbidden",
+                "message": "当前账户没有保存成本统计标签规则权限。",
+            }),
+        )
+        routes = CostStatisticsApiRoutes(
+            query_service=object(),
+            app_settings_service=settings,
+            json_response=lambda status, payload: Response(status_code=int(status), body=json.dumps(payload)),
+            file_response=lambda _filename, _content: Response(status_code=200, body=b""),
+            resolve_write_session=lambda _headers: (None, permission_error),
+            load_json_body=lambda body: (json.loads(body or "{}"), None),
+        )
+
+        response = routes.route(
+            "PUT",
+            "/api/cost-statistics/tag-rules",
+            {},
+            json.dumps({"selected_tag_codes": ["fee"]}),
+            {},
+        )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "forbidden")
+        self.assertFalse(settings.called)
+
     def test_project_export_honors_advanced_export_options(self) -> None:
         from fin_ops_platform.domain.enums import BatchType
 

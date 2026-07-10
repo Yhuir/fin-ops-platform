@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from hmac import compare_digest
-import hashlib
 import json
 import os
 import re
@@ -313,10 +312,7 @@ from fin_ops_platform.services.no_oa_bank_batch_workbench_payload_decorator impo
     NoOaBankBatchWorkbenchPayloadDecorator,
 )
 from fin_ops_platform.services.no_oa_managed_rule_policy import (
-    NO_OA_MANAGED_BATCH_TYPE_ORDER,
     NO_OA_MANAGED_LABELS,
-    is_no_oa_managed_old_relation_mode,
-    workbench_mode_may_auto_close,
 )
 from fin_ops_platform.services.oa_applicant_credentials import (
     InMemoryOaApplicantCredentialRepository,
@@ -592,6 +588,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 )
 from fin_ops_platform.services.workbench_sql_projection import (
     MONTH_RE as WORKBENCH_SQL_MONTH_RE,
+    WorkbenchSqlProjectionBuilder,
     WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
 )
 from fin_ops_platform.services.seeds import build_demo_seed
@@ -602,7 +599,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-06-22-turnover-manual-closure-open-until-three-way-v2"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-07-10-visible-linked-relations-v1"
 PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
 PROMETHEUS_BEARER_TOKEN_ENV = "FIN_OPS_PROMETHEUS_BEARER_TOKEN"
@@ -1546,6 +1543,7 @@ class Application:
             runtime_service=self._cost_statistics_runtime_service,
             redis_helper=getattr(runtime_repositories, "redis_helper", None),
             sql_read_repository=getattr(self, "_cost_statistics_sql_read_repository", None),
+            tag_selection_provider=getattr(self, "_app_settings_service", None),
         )
         self._cost_statistics_api_routes = CostStatisticsApiRoutes(
             query_service=self._cost_statistics_query_service,
@@ -1555,6 +1553,10 @@ class Application:
             entry_count=CostStatisticsQueryService.explorer_entry_count,
             duration_ms=self._duration_ms,
             optional_bool_parser=lambda value: self._parse_optional_bool(value, default=True),
+            app_settings_service=getattr(self, "_app_settings_service", None),
+            resolve_read_session=self._resolve_cost_statistics_read_session,
+            resolve_write_session=self._resolve_cost_statistics_write_session,
+            load_json_body=self._load_json_body,
         )
         self._cost_statistics_dependency_key = self._cost_statistics_current_dependency_key()
 
@@ -1569,6 +1571,7 @@ class Application:
             id(getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None))
             if getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None) is not None
             else None,
+            id(getattr(self, "_app_settings_service", None)) if getattr(self, "_app_settings_service", None) is not None else None,
         )
 
     def _ensure_cost_statistics_application_services(self) -> None:
@@ -2019,6 +2022,8 @@ class Application:
             return self._handle_api_operations_page_audit(query, headers)
         if method == "POST" and route_path == "/api/operations/app-health/input-invoice-usage-refresh":
             return self._handle_api_operations_input_invoice_usage_refresh(body, headers)
+        if method == "POST" and route_path == "/api/operations/app-health/pending-invoice-refresh":
+            return self._handle_api_operations_pending_invoice_refresh(body, headers)
         if method == "POST" and route_path == "/api/operations/app-health/output-invoice-collection-refresh":
             return self._handle_api_operations_output_invoice_collection_refresh(body, headers)
         if method == "GET" and route_path == "/api/search":
@@ -2132,7 +2137,7 @@ class Application:
             if tax_offset_response is not None:
                 return tax_offset_response
         if route_path == "/api/cost-statistics" or route_path.startswith("/api/cost-statistics/"):
-            cost_statistics_response = self._cost_statistics_routes().route(method, route_path, query)
+            cost_statistics_response = self._cost_statistics_routes().route(method, route_path, query, body, headers)
             if cost_statistics_response is not None:
                 return cost_statistics_response
         if method == "GET" and route_path == "/integrations/oa":
@@ -4052,6 +4057,75 @@ class Application:
             {
                 "read_model_key": "input_invoice_usage",
                 "scope_type": "input_invoice_usage",
+                "scope_keys": normalized_scope_keys,
+                "enqueued_scope_keys": normalized_scope_keys,
+                "enqueued_count": len(normalized_scope_keys),
+                "tenant_id": tenant_id_for_session(session),
+                "reason": reason,
+            },
+        )
+
+    def _handle_api_operations_pending_invoice_refresh(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        session, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        payload, body_error = self._load_json_body(body)
+        if body_error is not None:
+            return body_error
+        scope_keys = _operation_read_model_refresh_scope_keys(payload)
+        if not scope_keys:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "pending_invoice_refresh_scope_required",
+                    "message": "scope_keys must include at least one pending_invoice scope.",
+                },
+            )
+        if len(scope_keys) > 36:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "pending_invoice_refresh_scope_limit_exceeded",
+                    "message": "At most 36 pending_invoice scopes can be enqueued in one request.",
+                },
+            )
+        reason = _operation_text(payload.get("reason")) or "operations_pending_invoice_audit_refresh"
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        gateway = self._read_model_refresh_gateway()
+        if not gateway.can_enqueue():
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "runtime_queue_required",
+                    "message": "Pending invoice refresh requires the runtime queue repository.",
+                },
+            )
+        try:
+            normalized_scope_keys = gateway.enqueue_many(
+                "pending_invoice",
+                scope_keys,
+                reason=reason,
+                tenant_id=tenant_id_for_session(session),
+                priority="high",
+                metadata={
+                    "source": "operations_app_health",
+                    "requested_by": str(getattr(session.identity, "username", None) or getattr(session.identity, "user_id", None) or "admin"),
+                    **dict(metadata),
+                },
+            )
+        except ReadModelScopeError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_pending_invoice_refresh_scope",
+                    "message": str(exc),
+                },
+            )
+        return self._json_response(
+            HTTPStatus.ACCEPTED,
+            {
+                "read_model_key": "pending_invoice",
+                "scope_type": "pending_invoice",
                 "scope_keys": normalized_scope_keys,
                 "enqueued_scope_keys": normalized_scope_keys,
                 "enqueued_count": len(normalized_scope_keys),
@@ -7218,6 +7292,26 @@ class Application:
         headers: dict[str, str] | None,
     ) -> tuple[OARequestSession | None, Response | None]:
         return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问税金抵扣页面权限。")
+
+    def _resolve_cost_statistics_read_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问成本统计页面权限。")
+
+    def _resolve_cost_statistics_write_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        session, auth_error = self._resolve_cost_statistics_read_session(headers)
+        if auth_error is not None:
+            return None, auth_error
+        if session is not None and not session.can_mutate_data:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有保存成本统计标签规则权限。"},
+            )
+        return session, None
 
     def _resolve_tax_offset_mutation_session(
         self,
@@ -11444,7 +11538,7 @@ class Application:
         ignored_rows = self._extract_ignored_rows(candidate_payload)
         if not self._can_persist_workbench_payload(grouped_payload):
             if fallback_read_model is not None:
-                return fallback_read_model
+                return self._sanitize_workbench_read_model_for_return(fallback_read_model)
             self._workbench_read_model_service.delete_read_model(read_model_scope_key)
             return {
                 "scope_key": read_model_scope_key,
@@ -11466,6 +11560,13 @@ class Application:
                 operation="get_or_build_read_model",
             )
         return read_model
+
+    def _sanitize_workbench_read_model_for_return(self, read_model: dict[str, object]) -> dict[str, object]:
+        result = self._serialize_value(read_model)
+        payload = result.get("payload")
+        if isinstance(payload, dict):
+            WorkbenchSqlProjectionBuilder._demote_visible_candidate_groups(payload)
+        return result
 
     def _get_persisted_workbench_read_model(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
         read_model_scope_key = self._workbench_read_model_scope_key(month, visibility_key=visibility_key)
@@ -12017,36 +12118,8 @@ class Application:
             payload["oa_attachment_invoice_parser_version"] = parser_version
 
     def _workbench_candidate_snapshot_hash(self, month: str) -> str:
-        candidate_payload = [
-            {
-                "candidate_key": str(candidate.get("candidate_key") or ""),
-                "schema_version": str(candidate.get("schema_version") or ""),
-                "scope_month": str(candidate.get("scope_month") or ""),
-                "rule_code": str(candidate.get("rule_code") or ""),
-                "status": str(candidate.get("status") or ""),
-                "confidence": str(candidate.get("confidence") or ""),
-                "row_ids": [str(row_id) for row_id in list(candidate.get("row_ids") or [])],
-                "amount": str(candidate.get("amount") or ""),
-                "amount_delta": str(candidate.get("amount_delta") or ""),
-            }
-            for candidate in self._candidate_matches_for_scope(month)
-            if isinstance(candidate, dict)
-        ]
-        encoded = json.dumps(
-            sorted(
-                candidate_payload,
-                key=lambda candidate: (
-                    candidate["scope_month"],
-                    candidate["candidate_key"],
-                    candidate["rule_code"],
-                    candidate["row_ids"],
-                ),
-            ),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+        _ = month
+        return "visible-linked-relations-v1"
 
     def _current_oa_attachment_invoice_parser_version(self) -> str:
         return attachment_invoice_cache_parser_version()
@@ -12432,10 +12505,12 @@ class Application:
         *,
         turnover_relations: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
-        return WorkbenchGroupRowPayloadHelper(
+        grouped = WorkbenchGroupRowPayloadHelper(
             grouping_service=WorkbenchCandidateGroupingService(),
             serialize_value=Application._serialize_value,
         ).group(payload, turnover_relations=turnover_relations)
+        WorkbenchSqlProjectionBuilder._demote_visible_candidate_groups(grouped)
+        return grouped
 
     def _can_use_cached_workbench_payload(self, payload: dict[str, object]) -> bool:
         return self._workbench_cache_read_payload_helper().can_use_cached_payload(payload)
@@ -12676,271 +12751,8 @@ class Application:
         return result
 
     def _apply_candidate_matches_to_payload(self, payload: dict[str, object], month: str) -> dict[str, object]:
-        result = self._serialize_value(payload)
-        candidates = self._candidate_matches_for_scope(month)
-        if not candidates:
-            return result
-
-        rows_by_id: dict[str, dict[str, object]] = {}
-        for section_name in ("paired", "open"):
-            section = result.get(section_name)
-            if not isinstance(section, dict):
-                continue
-            for row_type in ("oa", "bank", "invoice"):
-                for row in list(section.get(row_type) or []):
-                    if isinstance(row, dict):
-                        row_id = str(row.get("id") or row.get("row_id") or "").strip()
-                        if row_id:
-                            rows_by_id[row_id] = row
-
-        claimed_row_ids: set[str] = set()
-        for candidate in sorted(candidates, key=self._candidate_display_sort_key):
-            if not isinstance(candidate, dict):
-                continue
-            row_ids = [
-                str(row_id).strip()
-                for row_id in list(candidate.get("row_ids") or [])
-                if str(row_id).strip()
-            ]
-            if not row_ids:
-                continue
-            rule_code = str(candidate.get("rule_code") or "").strip()
-            if is_no_oa_managed_old_relation_mode(rule_code) and not workbench_mode_may_auto_close(rule_code):
-                continue
-            if rule_code == CASH_TURNOVER_DETECTED:
-                self._apply_cash_turnover_candidate_metadata(candidate, rows_by_id)
-                continue
-            extends_existing_active_case = False
-            if any(self._row_has_active_pair_relation(rows_by_id.get(row_id)) for row_id in row_ids):
-                if not self._candidate_can_extend_existing_active_case(candidate, row_ids, rows_by_id):
-                    continue
-                extends_existing_active_case = True
-            if any(row_id in claimed_row_ids for row_id in row_ids):
-                continue
-            applicable_row_ids = [row_id for row_id in row_ids if isinstance(rows_by_id.get(row_id), dict)]
-            if not self._candidate_can_apply_to_rows(candidate, applicable_row_ids):
-                continue
-
-            relation = self._candidate_relation_payload(candidate)
-            case_id = self._candidate_application_case_id(candidate, row_ids, rows_by_id)
-            if not case_id:
-                continue
-            for row_id in row_ids:
-                row = rows_by_id.get(row_id)
-                if not isinstance(row, dict):
-                    continue
-                row["case_id"] = case_id
-                relation_field = self._workbench_query_service.relation_field_name(str(row.get("type") or ""))
-                if not (extends_existing_active_case and self._row_has_active_pair_relation(row)):
-                    row[relation_field] = self._serialize_value(relation)
-                if rule_code == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
-                    tags = [
-                        str(tag).strip()
-                        for tag in list(row.get("tags") or [])
-                        if str(tag).strip()
-                    ]
-                    if OA_INVOICE_OFFSET_TAG not in tags:
-                        tags.append(OA_INVOICE_OFFSET_TAG)
-                    row["tags"] = tags
-                    row["cost_excluded"] = True
-            claimed_row_ids.update(row_ids)
-        return result
-
-    def _candidate_can_extend_existing_active_case(
-        self,
-        candidate: dict[str, object],
-        row_ids: list[str],
-        rows_by_id: dict[str, dict[str, object]],
-    ) -> bool:
-        if not Application._candidate_is_determined(candidate):
-            return False
-        rule_code = str(candidate.get("rule_code") or "").strip()
-        candidate_type = str(candidate.get("candidate_type") or "").strip()
-        if rule_code != "oa_bank_exact_amount" or candidate_type != "oa_bank":
-            return False
-        if not candidate.get("oa_row_ids") or not candidate.get("bank_row_ids"):
-            return False
-        existing_case_ids = {
-            case_id
-            for row_id in row_ids
-            if isinstance(row := rows_by_id.get(row_id), dict)
-            and (case_id := str(row.get("case_id") or "").strip())
-        }
-        if len(existing_case_ids) != 1:
-            return False
-        existing_case_id = next(iter(existing_case_ids))
-        if existing_case_id.startswith("candidate:"):
-            return False
-        has_active_pair_relation = False
-        for row_id in row_ids:
-            row = rows_by_id.get(row_id)
-            if not isinstance(row, dict):
-                continue
-            if not self._row_has_active_pair_relation(row):
-                continue
-            has_active_pair_relation = True
-            if str(row.get("case_id") or "").strip() != existing_case_id:
-                return False
-        return has_active_pair_relation
-
-    @staticmethod
-    def _candidate_can_apply_to_rows(candidate: dict[str, object], row_ids: list[str]) -> bool:
-        unique_row_ids = {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
-        if len(unique_row_ids) <= 1:
-            return True
-        return Application._candidate_is_determined(candidate)
-
-    @staticmethod
-    def _candidate_is_determined(candidate: dict[str, object]) -> bool:
-        return str(candidate.get("status") or "").strip() in {"auto_closed", "incomplete"}
-
-    def _candidate_application_case_id(
-        self,
-        candidate: dict[str, object],
-        row_ids: list[str],
-        rows_by_id: dict[str, dict[str, object]],
-    ) -> str:
-        existing_case_ids = {
-            case_id
-            for row_id in row_ids
-            if isinstance(row := rows_by_id.get(row_id), dict)
-            and (case_id := str(row.get("case_id") or "").strip())
-        }
-        if len(existing_case_ids) > 1:
-            return ""
-        if existing_case_ids:
-            case_id = next(iter(existing_case_ids))
-            if Application._candidate_can_extend_existing_case(candidate, case_id):
-                return case_id
-            if self._candidate_can_extend_existing_active_case(candidate, row_ids, rows_by_id):
-                return case_id
-            return ""
-        return str(candidate.get("candidate_key") or candidate.get("candidate_id") or "").strip()
-
-    @staticmethod
-    def _candidate_can_extend_existing_case(candidate: dict[str, object], case_id: str) -> bool:
-        if not case_id.startswith("CASE-OA-ATT-"):
-            return False
-        candidate_type = str(candidate.get("candidate_type") or "").strip()
-        if candidate_type not in {"oa_bank", "oa_bank_invoice"}:
-            return False
-        return bool(candidate.get("oa_row_ids")) and bool(candidate.get("bank_row_ids"))
-
-    @staticmethod
-    def _apply_cash_turnover_candidate_metadata(
-        candidate: dict[str, object],
-        rows_by_id: dict[str, dict[str, object]],
-    ) -> None:
-        special_metadata = candidate.get("special_metadata")
-        metadata = dict(special_metadata) if isinstance(special_metadata, dict) else {}
-        for row_id in list(candidate.get("bank_row_ids") or []):
-            row = rows_by_id.get(str(row_id))
-            if not isinstance(row, dict):
-                continue
-            tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
-            if CASH_TURNOVER_TAG not in tags:
-                tags.append(CASH_TURNOVER_TAG)
-            row["tags"] = tags
-            row["special_metadata"] = {
-                **dict(row.get("special_metadata") if isinstance(row.get("special_metadata"), dict) else {}),
-                CASH_TURNOVER_DETECTED: metadata,
-            }
-
-    def _candidate_matches_for_scope(self, month: str) -> list[dict[str, object]]:
-        normalized_month = str(month or "").strip()
-        if SEARCH_MONTH_RE.match(normalized_month):
-            return self._workbench_candidate_match_service.list_candidates_by_month(normalized_month)
-        snapshot = self._workbench_candidate_match_service.snapshot()
-        candidates = snapshot.get("candidates")
-        if not isinstance(candidates, dict):
-            return []
-        return [
-            self._serialize_value(candidate)
-            for candidate in candidates.values()
-            if isinstance(candidate, dict)
-        ]
-
-    @staticmethod
-    def _candidate_display_sort_key(candidate: dict[str, object]) -> tuple[int, int, int, str, str]:
-        rule_code = str(candidate.get("rule_code") or "")
-        row_count = Application._candidate_row_count(candidate)
-        status_priority = {
-            "auto_closed": 0,
-            "conflict": 1,
-            "incomplete": 2,
-            "needs_review": 3,
-        }
-        status_rank = status_priority.get(str(candidate.get("status") or ""), 9)
-        has_special_metadata = bool(candidate.get("special_metadata"))
-        if rule_code == "no_confident_match":
-            quality_rank = 9
-        elif status_rank <= 1:
-            quality_rank = status_rank
-        elif row_count > 1:
-            quality_rank = 2
-        elif has_special_metadata:
-            quality_rank = 3
-        else:
-            quality_rank = 4
-        return (
-            quality_rank,
-            -row_count,
-            status_rank,
-            rule_code,
-            str(candidate.get("candidate_key") or candidate.get("candidate_id") or ""),
-        )
-
-    @staticmethod
-    def _candidate_row_count(candidate: dict[str, object]) -> int:
-        row_ids = {
-            str(row_id).strip()
-            for row_id in list(candidate.get("row_ids") or [])
-            if str(row_id).strip()
-        }
-        if row_ids:
-            return len(row_ids)
-        for field_name in ("oa_row_ids", "bank_row_ids", "invoice_row_ids"):
-            row_ids.update(
-                str(row_id).strip()
-                for row_id in list(candidate.get(field_name) or [])
-                if str(row_id).strip()
-            )
-        return len(row_ids)
-
-    def _candidate_relation_payload(self, candidate: dict[str, object]) -> dict[str, str]:
-        status = str(candidate.get("status") or "").strip()
-        rule_code = str(candidate.get("rule_code") or "").strip()
-        if status == "auto_closed":
-            if rule_code == "salary_personal_auto_match":
-                return {"code": rule_code, "label": "已匹配：工资", "tone": "success"}
-            if rule_code == "internal_transfer_pair":
-                return {"code": rule_code, "label": "已匹配：内部往来款", "tone": "success"}
-            if rule_code == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
-                return {"code": rule_code, "label": "冲", "tone": "success"}
-            return {"code": "automatic_match", "label": "自动匹配", "tone": "success"}
-        if status == "conflict":
-            return {"code": "candidate_conflict", "label": "候选冲突", "tone": "danger"}
-        if status == "incomplete":
-            return {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"}
-        return {"code": "suggested_match", "label": "待人工确认", "tone": "warn"}
-
-    def _row_has_active_pair_relation(self, row: dict[str, object] | None) -> bool:
-        if not isinstance(row, dict):
-            return False
-        row_type = str(row.get("type") or "")
-        try:
-            relation_field = self._workbench_query_service.relation_field_name(row_type)
-        except KeyError:
-            return False
-        relation = row.get(relation_field)
-        if not isinstance(relation, dict):
-            return False
-        relation_code = str(relation.get("code") or "").strip()
-        return relation_code in {
-            "fully_linked",
-            "automatic_match",
-            *SYSTEM_AUTO_PAIR_RELATION_MODES,
-        }
+        _ = month
+        return self._serialize_value(payload)
 
     def _sync_oa_invoice_offset_auto_pair_relations(self, payload: dict[str, object]) -> None:
         self._workbench_oa_invoice_offset_sync_executor().sync(payload)
@@ -13071,8 +12883,13 @@ class Application:
         if relation_mode:
             payload["relation_mode"] = relation_mode
         special_metadata = relation.get("special_metadata")
+        existing_metadata = payload.get("special_metadata")
+        merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+        merged_metadata["active_pair_relation"] = True
+        merged_metadata["active_relation_case_id"] = str(relation.get("case_id") or "")
         if isinstance(special_metadata, dict) and special_metadata:
-            payload["special_metadata"] = self._serialize_value(special_metadata)
+            merged_metadata.update(self._serialize_value(special_metadata))
+        payload["special_metadata"] = merged_metadata
         relation_note = str(relation.get("note") or "").strip()
         if relation_note:
             payload["relation_note"] = relation_note
@@ -14091,7 +13908,7 @@ class Application:
     @staticmethod
     def _workbench_group_preserves_existing_pair_context(group: dict[str, object]) -> bool:
         reason = str(group.get("reason") or "").strip()
-        if reason in {"relation_snapshot", "oa_attachment_source_relation", "unique_candidate_chain"}:
+        if reason in {"relation_snapshot", "oa_attachment_source_relation"}:
             return True
         group_type = str(group.get("group_type") or "").strip()
         if group_type in {"", "candidate", "selection", "processed_exception"}:

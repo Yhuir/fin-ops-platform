@@ -13,7 +13,7 @@ from fin_ops_platform.services.workbench_relation_read_model_repository import W
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-06-scoped-source-versions-v1"
+WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-10-active-relations-only-v1"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
@@ -70,14 +70,7 @@ class WorkbenchRelationSqlProjectionBuilder:
             excluded_bank_transaction_ids=pending_claimed_bank_ids,
         )
         monthly_row_ids = sorted(monthly_objects)
-        relations = [
-            *self._active_relations_for_scope(month=normalized_scope, row_ids=monthly_row_ids),
-            *self._automatic_decision_relations_for_scope(
-                month=normalized_scope,
-                row_ids=monthly_row_ids,
-                excluded_bank_transaction_ids=pending_claimed_bank_ids,
-            ),
-        ]
+        relations = self._active_relations_for_scope(month=normalized_scope, row_ids=monthly_row_ids)
         relation_row_ids = _dedupe_preserve_order(row_id for relation in relations for row_id in text_list(relation.get("row_ids")))
         objects = dict(monthly_objects)
         missing_relation_row_ids = [row_id for row_id in relation_row_ids if row_id not in objects]
@@ -371,15 +364,6 @@ class WorkbenchRelationSqlProjectionBuilder:
             (month_start(month), row_ids),
         )
 
-    def _automatic_decision_relations_for_scope(
-        self,
-        *,
-        month: str,
-        row_ids: list[str],
-        excluded_bank_transaction_ids: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        return []
-
     def _pending_claimed_bank_transaction_ids_for_month(self, month: str) -> list[str]:
         rows = self._connection.fetch_all(
             """
@@ -401,7 +385,6 @@ class WorkbenchRelationSqlProjectionBuilder:
                 """
                 select
                   (select max(updated_at)::text from app.workbench_pair_relations) as pair_relations_updated_at,
-                  (select max(updated_at)::text from read_model.workbench_reconciliation_decisions) as reconciliation_decisions_updated_at,
                   (select max(updated_at)::text from app.bank_transaction_relation_claims where status = 'active') as oa_pending_payment_bank_claims_updated_at,
                   (select max(updated_at)::text from app.bank_transactions) as bank_transactions_updated_at,
                   (select max(updated_at)::text from app.invoices) as invoices_updated_at,
@@ -460,11 +443,6 @@ class WorkbenchRelationSqlProjectionBuilder:
                   (select max(updated_at)::text from scoped_relations) as pair_relations_updated_at,
                   (
                     select max(updated_at)::text
-                    from read_model.workbench_reconciliation_decisions decisions, scope
-                    where decisions.scope_month = scope.scope_month
-                  ) as reconciliation_decisions_updated_at,
-                  (
-                    select max(updated_at)::text
                     from app.bank_transaction_relation_claims claims, scope
                     where claims.status = 'active'
                       and claims.scope_month = scope.scope_month
@@ -508,7 +486,6 @@ class WorkbenchRelationSqlProjectionBuilder:
         return {
             "workbench_relation_schema_version": WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
             "workbench_pair_relations_updated_at": text(payload.get("pair_relations_updated_at")),
-            "workbench_reconciliation_decisions_updated_at": text(payload.get("reconciliation_decisions_updated_at")),
             "oa_pending_payment_bank_claims_updated_at": text(payload.get("oa_pending_payment_bank_claims_updated_at")),
             "bank_transactions_updated_at": text(payload.get("bank_transactions_updated_at")),
             "invoices_updated_at": text(payload.get("invoices_updated_at")),
@@ -810,9 +787,6 @@ def _relation_kind(typed_ids: dict[str, list[str]]) -> str:
 
 
 def _relation_source(relation: dict[str, Any]) -> str:
-    mode = text(relation.get("relation_mode")) or ""
-    if mode == "automatic_decision":
-        return "automatic_decision"
     return "manual"
 
 

@@ -8,6 +8,7 @@ from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
 from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
+from fin_ops_platform.services.cost_statistics_query_service import CostStatisticsQueryService
 from fin_ops_platform.services.cost_tax_sql_projection import CostStatisticsSqlProjectionBuilder
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
@@ -58,6 +59,52 @@ class CostStatisticsAppSettingsStub:
             "bank_account_mappings": self.get_bank_account_mappings_payload(),
         }
 
+    def get_cost_statistics_tag_selection_payload(self, *, can_save: bool = False) -> dict[str, object]:
+        del can_save
+        return {
+            "version": 1,
+            "bank_auto_tag_rules_version": 7,
+            "effective_selected_tag_codes": None,
+            "selected_tag_codes": None,
+        }
+
+
+class CostStatisticsRuntimeStub:
+    def request_scope_key(self, month: str, project_scope: str) -> str:
+        return f"{project_scope}:{month}"
+
+    def expected_source_versions(self, scope_key: str) -> dict[str, object]:
+        return {"scope_key": scope_key, "schema": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION}
+
+    def redis_cache_key(self, scope_key: str, *, source_versions: dict[str, object]) -> str:
+        return f"explorer:{scope_key}:{json.dumps(source_versions, sort_keys=True)}"
+
+    def month_redis_cache_key(self, scope_key: str, *, source_versions: dict[str, object]) -> str:
+        return f"month:{scope_key}:{json.dumps(source_versions, sort_keys=True)}"
+
+    def redis_ttl_seconds(self) -> int:
+        return 120
+
+    def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+        del scope_key, reason
+        return True
+
+
+class CostStatisticsSqlReadRepositoryStub:
+    def __init__(self, payload: dict[str, object], source_versions: dict[str, object]) -> None:
+        self.payload = payload
+        self.source_versions = source_versions
+
+    def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object]:
+        return {
+            "scope_key": scope_key,
+            "payload": self.payload,
+            "refresh_status": "fresh",
+            "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            "generated_at": "2026-05-21T09:00:00+00:00",
+            "source_versions": self.source_versions,
+        }
+
 
 def redis_fresh_payload(
     payload: dict[str, object],
@@ -79,6 +126,138 @@ def redis_fresh_payload(
             "source_versions": dict(source_versions),
         },
     }
+
+
+class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
+    def test_tag_rules_filter_oa_and_bank_flow_totals_with_separate_contracts(self) -> None:
+        runtime = CostStatisticsRuntimeStub()
+        source_versions = runtime.expected_source_versions("active:2026-05")
+        payload = {
+            "month": "2026-05",
+            "summary": {"row_count": 2, "transaction_count": 2, "total_amount": "130.00"},
+            "time_rows": [
+                {
+                    "transaction_id": "oa-fee",
+                    "trade_time": "2026-05-21 09:00:00",
+                    "direction": "支出",
+                    "project_name": "项目A",
+                    "expense_type": "材料",
+                    "expense_content": "钢材",
+                    "amount": "100.00",
+                    "counterparty_name": "供应商",
+                    "payment_account_label": "工行",
+                    "remark": "",
+                    "bank_tag_code": "fee",
+                    "bank_tag_label": "费用",
+                    "bank_tag_primary_label": "费用",
+                    "bank_tag_sub_label": "材料",
+                    "bank_tag_label_path": ["费用", "材料"],
+                },
+                {
+                    "transaction_id": "oa-travel",
+                    "trade_time": "2026-05-22 09:00:00",
+                    "direction": "支出",
+                    "project_name": "项目B",
+                    "expense_type": "交通",
+                    "expense_content": "打车",
+                    "amount": "30.00",
+                    "counterparty_name": "司机",
+                    "payment_account_label": "工行",
+                    "remark": "",
+                    "bank_tag_code": "travel",
+                    "bank_tag_label": "交通",
+                    "bank_tag_primary_label": "差旅",
+                    "bank_tag_sub_label": "交通",
+                    "bank_tag_label_path": ["差旅", "交通"],
+                },
+            ],
+            "bank_flow_summary": {"row_count": 3, "transaction_count": 3, "total_amount": "155.00"},
+            "bank_flow_time_rows": [
+                {
+                    "transaction_id": "oa-fee",
+                    "trade_time": "2026-05-21 09:00:00",
+                    "direction": "支出",
+                    "project_name": "项目A",
+                    "expense_type": "材料",
+                    "expense_content": "钢材",
+                    "amount": "100.00",
+                    "counterparty_name": "供应商",
+                    "payment_account_label": "工行",
+                    "remark": "",
+                    "bank_tag_code": "fee",
+                    "bank_tag_label": "费用",
+                    "bank_tag_primary_label": "费用",
+                    "bank_tag_sub_label": "材料",
+                    "bank_tag_label_path": ["费用", "材料"],
+                },
+                {
+                    "transaction_id": "flow-fee",
+                    "trade_time": "2026-05-23 09:00:00",
+                    "direction": "支出",
+                    "project_name": "未配对OA",
+                    "expense_type": "材料",
+                    "expense_content": "耗材",
+                    "amount": "50.00",
+                    "counterparty_name": "供应商",
+                    "payment_account_label": "工行",
+                    "remark": "",
+                    "bank_tag_code": "fee",
+                    "bank_tag_label": "费用",
+                    "bank_tag_primary_label": "费用",
+                    "bank_tag_sub_label": "材料",
+                    "bank_tag_label_path": ["费用", "材料"],
+                },
+                {
+                    "transaction_id": "flow-uncategorized",
+                    "trade_time": "2026-05-24 09:00:00",
+                    "direction": "支出",
+                    "project_name": "未配对OA",
+                    "expense_type": "未分类",
+                    "expense_content": "其他",
+                    "amount": "5.00",
+                    "counterparty_name": "供应商",
+                    "payment_account_label": "工行",
+                    "remark": "",
+                    "bank_tag_code": "",
+                    "bank_tag_label": "未标记",
+                    "bank_tag_primary_label": "未标记",
+                    "bank_tag_sub_label": "未标记",
+                    "bank_tag_label_path": ["未标记"],
+                },
+            ],
+            "bank_accounts": [],
+            "project_rows": [],
+            "expense_type_rows": [],
+        }
+        provider = type(
+            "Provider",
+            (),
+            {
+                "get_cost_statistics_tag_selection_payload": lambda self, *, can_save=False: {
+                    "version": 2,
+                    "bank_auto_tag_rules_version": 7,
+                    "effective_selected_tag_codes": ["fee"],
+                    "selected_tag_codes": ["fee"],
+                }
+            },
+        )()
+        service = CostStatisticsQueryService(
+            runtime_service=runtime,
+            sql_read_repository=CostStatisticsSqlReadRepositoryStub(payload, source_versions),
+            tag_selection_provider=provider,
+        )
+
+        explorer, _cache_hit = service.get_explorer("2026-05", "active")
+
+        self.assertEqual([row["transaction_id"] for row in explorer["time_rows"]], ["oa-fee"])
+        self.assertEqual(explorer["summary"]["total_amount"], "100.00")
+        self.assertEqual(explorer["project_rows"][0]["total_amount"], "100.00")
+        self.assertEqual(explorer["expense_type_rows"][0]["total_amount"], "100.00")
+        self.assertEqual(
+            [row["transaction_id"] for row in explorer["bank_flow_time_rows"]],
+            ["oa-fee", "flow-fee"],
+        )
+        self.assertEqual(explorer["bank_flow_summary"]["total_amount"], "150.00")
 
 
 class CostStatisticsReadConnection:

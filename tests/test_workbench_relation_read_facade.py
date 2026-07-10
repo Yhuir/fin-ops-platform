@@ -603,7 +603,7 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(repository.month_calls[0]["relation_status"], "unlinked")
         self.assertEqual(repository.month_calls[0]["row_types"], ["bank_transaction"])
 
-    def test_distribution_mapper_preserves_candidate_relation_status(self) -> None:
+    def test_distribution_mapper_drops_candidate_relation_groups(self) -> None:
         relations_by_row_id = relation_dicts_by_row_id_from_distribution_payload(
             {
                 "rows": [
@@ -631,11 +631,7 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
             }
         )
 
-        relation = relations_by_row_id["txn-candidate"][0]
-        self.assertEqual(relation["status"], "candidate")
-        self.assertEqual(relation["relation_status"], "candidate")
-        self.assertEqual(relation["relationStatus"], "candidate")
-        self.assertEqual(relation["relation_source"], "automatic_decision")
+        self.assertEqual(relations_by_row_id["txn-candidate"], [])
 
 
 if __name__ == "__main__":

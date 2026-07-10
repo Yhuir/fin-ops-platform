@@ -10,6 +10,7 @@ import re
 import sys
 from typing import Any, TextIO
 
+from fin_ops_platform.services.pending_invoice_status import pending_invoice_filter_status_codes
 from fin_ops_platform.services.postgres_connection import (
     PostgresConfigurationError,
     PostgresConnection,
@@ -278,11 +279,39 @@ def _summary_sql(contract: PageAuditContract, *, tenant_id: str) -> tuple[str, t
         linked_sql = "select count(*) from read_model.workbench_relation_groups where tenant_id = %s and relation_status = 'linked'"
         params: tuple[Any, ...] = (tenant_id, tenant_id, tenant_id)
     elif domain == "pending_invoices":
-        source_sql = "select count(*) from app.bank_transactions where status <> 'deleted' and txn_direction in ('outflow', 'inflow')"
+        source_sql = """
+        select count(*)
+        from read_model.pending_invoice_rows row
+        join app.bank_transactions source
+          on coalesce(source.legacy_mongo_id, source.id::text) = row.row_id
+         and source.status <> 'deleted'
+         and source.txn_direction = case when row.direction = 'expense' then 'outflow' else 'inflow' end
+        """
         row_sql = "select count(*) from read_model.pending_invoice_rows"
         scope_sql = "select count(*) from read_model.pending_invoice_scopes"
-        relation_sql = "select count(*) from app.workbench_pair_relations where status = 'active'"
-        linked_sql = "select count(*) from read_model.workbench_relation_groups where tenant_id = %s and relation_status = 'linked'"
+        relation_sql = """
+        select count(distinct relation.case_id)
+        from app.workbench_pair_relations relation
+        join lateral unnest(relation.row_ids) with ordinality as member(row_id, ordinality) on true
+        join read_model.pending_invoice_rows pending_row
+          on pending_row.row_id = member.row_id
+        where relation.status = 'active'
+          and relation.row_types[member.ordinality] in ('bank', 'bank_transaction')
+        """
+        linked_sql = """
+        select count(distinct relation_group.group_id)
+        from read_model.workbench_relation_rows relation_row
+        join read_model.pending_invoice_rows pending_row
+          on pending_row.row_id = relation_row.row_id
+        join read_model.workbench_relation_groups relation_group
+          on relation_group.tenant_id = relation_row.tenant_id
+         and relation_group.scope_key = relation_row.scope_key
+         and relation_group.group_id = any(relation_row.group_ids)
+         and relation_group.relation_status = 'linked'
+        where relation_row.tenant_id = %s
+          and relation_row.row_type = 'bank_transaction'
+          and relation_row.relation_status = 'linked'
+        """
         params = (tenant_id,)
     elif domain == "oa_pending_payments":
         source_sql = "select count(*) from app.oa_applications where status <> 'deleted'"
@@ -429,14 +458,18 @@ def _scope_row_count_mismatch_issues(
     elif domain == "pending_invoices":
         sql = """
         /* check: scope_row_count_mismatch */
+        with scopes as (
+            select scope_key, direction, filter_group, row_count,
+                   substring(scope_key from '([0-9]{4}-[0-9]{2})$') as scope_month_key
+            from read_model.pending_invoice_scopes
+        )
         select scope.scope_key, scope.row_count::integer as scope_row_count,
                count(row.row_id)::integer as actual_row_count
-        from read_model.pending_invoice_scopes scope
+        from scopes scope
         left join read_model.pending_invoice_rows row
-          on (
-                row.scope_key = scope.scope_key
-             or (scope.scope_key !~ ':[0-9]{4}-[0-9]{2}$' and row.scope_key like scope.scope_key || ':%')
-          )
+          on row.direction = scope.direction
+         and (scope.scope_month_key is null or row.scope_month = (scope.scope_month_key || '-01')::date)
+         and (""" + _pending_invoice_visible_scope_condition_sql() + """)
         group by scope.scope_key, scope.row_count
         having scope.row_count <> count(row.row_id)
         order by scope.scope_key
@@ -536,8 +569,7 @@ def _read_model_source_version_mismatch_issues(
         )
         queries.append(_embedded_relation_versions_query(domain, "read_model.bank_detail_scopes", "scope", tenant_id, limit))
     elif domain == "pending_invoices":
-        queries.append(_embedded_relation_versions_query(domain, "read_model.pending_invoice_scopes", "scope", tenant_id, limit))
-        queries.append(_embedded_bank_detail_versions_query(domain, "read_model.pending_invoice_scopes", "scope", tenant_id, limit))
+        queries = []
     elif domain == "oa_pending_payments":
         queries.append(
             (
@@ -793,25 +825,7 @@ def _missing_read_model_row_issues(
         """
         params = (tenant_id, limit)
     elif domain == "pending_invoices":
-        sql = """
-        /* check: missing_read_model_row */
-        select
-            coalesce(source.legacy_mongo_id, source.id::text) as subject_id,
-            case when source.txn_direction = 'outflow' then 'expense' else 'income' end
-                || ':all:' || to_char(source.txn_month, 'YYYY-MM') as scope_key,
-            source.txn_direction,
-            source.amount::text as amount
-        from app.bank_transactions source
-        left join read_model.pending_invoice_rows row
-          on row.row_id = coalesce(source.legacy_mongo_id, source.id::text)
-         and row.direction = case when source.txn_direction = 'outflow' then 'expense' else 'income' end
-        where source.status <> 'deleted'
-          and source.txn_direction in ('outflow', 'inflow')
-          and row.row_id is null
-        order by source.txn_month, source.id
-        limit %s
-        """
-        params = (limit,)
+        return []
     elif domain == "bank_flow_rule_batches":
         sql = """
         /* check: missing_read_model_row */
@@ -1107,6 +1121,56 @@ def _relation_distribution_issues(
     relation_filter = "true"
     if domain == "batch_accounting":
         relation_filter = "relation.special_metadata->>'source' = 'batch_accounting'"
+    if domain == "pending_invoices":
+        rows = connection.fetch_all(
+            f"""
+            /* check: relation_distribution */
+            with active_relation_members as (
+                select distinct
+                    relation.case_id,
+                    coalesce(to_char(relation.month_scope, 'YYYY-MM'), '') as scope_key,
+                    member.row_id,
+                    relation.row_types[member.ordinality] as row_type,
+                    relation.updated_at::text as relation_updated_at
+                from app.workbench_pair_relations relation
+                join lateral unnest(relation.row_ids) with ordinality as member(row_id, ordinality) on true
+                join read_model.pending_invoice_rows pending_row
+                  on pending_row.row_id = member.row_id
+                where relation.status = 'active'
+                  and relation.row_types[member.ordinality] in ('bank', 'bank_transaction')
+                  and {relation_filter}
+            )
+            select member.case_id as subject_id, member.scope_key, member.row_id, member.row_type, member.relation_updated_at
+            from active_relation_members member
+            where not exists (
+                select 1
+                from read_model.workbench_relation_rows relation_row
+                join read_model.workbench_relation_groups relation_group
+                  on relation_group.tenant_id = relation_row.tenant_id
+                 and relation_group.scope_key = relation_row.scope_key
+                 and relation_group.group_id = member.case_id
+                 and relation_group.relation_status = 'linked'
+                where relation_row.tenant_id = %s
+                  and relation_row.row_id = member.row_id
+                  and relation_row.relation_status = 'linked'
+                  and member.case_id = any(relation_row.group_ids)
+            )
+            order by member.case_id, member.row_id
+            limit %s
+            """,
+            (tenant_id, limit),
+        )
+        return [
+            AuditIssue(
+                severity="error",
+                code=f"{domain}_active_relation_missing_distribution",
+                message=f"{contract.label} has active Workbench relations missing from the relation read model distribution.",
+                subject_id=_text(row.get("subject_id")),
+                scope_key=_text(row.get("scope_key")),
+                details=_details(row, "row_id", "row_type", "relation_updated_at"),
+            )
+            for row in rows
+        ]
     rows = connection.fetch_all(
         f"""
         /* check: relation_distribution */
@@ -1166,14 +1230,23 @@ def _candidate_relation_projection_issues(
         f"""
         /* check: candidate_relation_projection */
         select group_row.group_id as subject_id, group_row.scope_key, group_row.relation_status,
-               relation.status as canonical_status
+               coalesce((
+                   select relation.status
+                   from app.workbench_pair_relations relation
+                   where relation.case_id = group_row.group_id
+                   order by relation.updated_at desc
+                   limit 1
+               ), '') as canonical_status
         from read_model.workbench_relation_groups group_row
-        left join app.workbench_pair_relations relation
-          on relation.case_id = group_row.group_id
         where group_row.tenant_id = %s
           and group_row.relation_status = 'linked'
-          and {group_filter}
-          and coalesce(relation.status, '') <> 'active'
+          and ({group_filter})
+          and not exists (
+              select 1
+              from app.workbench_pair_relations active_relation
+              where active_relation.case_id = group_row.group_id
+                and active_relation.status = 'active'
+          )
         order by group_row.scope_key, group_row.group_id
         limit %s
         """,
@@ -1201,9 +1274,12 @@ def _relation_group_filter(domain: str) -> str:
         return "cardinality(group_row.bank_transaction_ids) > 0"
     if domain == "pending_invoices":
         return (
-            "cardinality(group_row.bank_transaction_ids) > 0 "
-            "or cardinality(group_row.input_invoice_ids) > 0 "
-            "or cardinality(group_row.output_invoice_ids) > 0"
+            "exists ("
+            "select 1 "
+            "from unnest(group_row.bank_transaction_ids) as pending_bank(row_id) "
+            "join read_model.pending_invoice_rows pending_row "
+            "on pending_row.row_id = pending_bank.row_id"
+            ")"
         )
     return "true"
 
@@ -1295,6 +1371,26 @@ def _quoted_list(values: tuple[str, ...]) -> str:
     if not safe_values:
         return "''"
     return ", ".join(safe_values)
+
+
+def _pending_invoice_visible_scope_condition_sql() -> str:
+    conditions = ["scope.filter_group = 'all'"]
+    for direction, filters in (
+        ("expense", ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required")),
+        ("income", ("requires_invoice", "no_invoice_required", "cash_income")),
+    ):
+        for filter_name in filters:
+            status_codes = pending_invoice_filter_status_codes(direction=direction, filter_name=filter_name)
+            if not status_codes:
+                continue
+            conditions.append(
+                "("
+                f"scope.direction = '{direction}' "
+                f"and scope.filter_group = '{filter_name}' "
+                f"and row.status_code in ({_quoted_list(tuple(status_codes))})"
+                ")"
+            )
+    return " or ".join(conditions)
 
 
 def _assert_identifier(value: str) -> None:

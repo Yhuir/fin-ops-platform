@@ -37,7 +37,8 @@
 | 销项收款全量审计 | `app.invoices`、`app.workbench_pair_relations`、`read_model.output_invoice_collection_*`、`read_model.workbench_relation_*`、`job.read_model_dirty_scopes` | `/api/operations/app-health/output-invoice-collection-audit` admin-only 只读；检查页面 read model、canonical 销项发票和 Workbench relation 分发是否一致；不得刷新、修复或写入 |
 | 进项使用受控刷新 | admin request body `scope_keys` | `/api/operations/app-health/input-invoice-usage-refresh` admin-only；只允许 `all` 或 `YYYY-MM` scope，通过 `ReadModelRefreshGateway` 入队 `input_invoice_usage.read_model.refresh`，不直接写 `read_model.input_invoice_usage_*` 或 relation |
 | 销项收款受控刷新 | admin request body `scope_keys` | `/api/operations/app-health/output-invoice-collection-refresh` admin-only；只允许 `all` 或 `YYYY-MM` scope，通过 `ReadModelRefreshGateway` 入队 `output_invoice_collection.read_model.refresh`，不直接写 `read_model.output_invoice_collection_*` 或 relation |
-| 页面业务全量审计 | `PAGE_AUDIT_CONTRACTS` 登记的 `app.*`、`read_model.*`、`job.*` source/read model/relation tables | `/api/operations/app-health/page-audit?domain=<domain_key>` admin-only 只读；待找发票、外部往来款管理、批量账务、流水规则批量处理、OA 待付款核对、银行明细、成本统计页面标题 Audit icon 使用该入口检查 App 内部 canonical facts、read model rows/scopes/source_versions、durable refresh state 和 relation distribution；不得刷新、修复或写入 |
+| 待找发票受控刷新 | admin request body `scope_keys` | `/api/operations/app-health/pending-invoice-refresh` admin-only；只允许 `direction:filter_group[:YYYY-MM]` scope，通过 `ReadModelRefreshGateway` 入队 `pending_invoice.read_model.refresh`，不直接写 `read_model.pending_invoice_*` 或 relation |
+| 页面业务全量审计 | `PAGE_AUDIT_CONTRACTS` 登记的 `app.*`、`read_model.*`、`job.*` source/read model/relation tables | `/api/operations/app-health/page-audit?domain=<domain_key>` admin-only 只读；待找发票、外部往来款管理、批量账务、流水规则批量处理、OA 待付款核对、银行明细、成本统计页面标题 Audit icon 使用该入口检查 App 内部 canonical facts、read model rows/scopes/source_versions、durable refresh state 和 relation distribution；待找发票 relation audit 以页面主行 `read_model.pending_invoice_rows.row_id` 对应的银行流水为边界，不把页面外 OA 附件发票成员当作待找发票页面缺口；不得刷新、修复或写入 |
 
 ## 输出 I/O
 
@@ -51,6 +52,7 @@
 | 页面业务审计报告 | 页面标题 Audit icon / admin API consumer | `overall_status=pass` 且 `summary.blocking_issue_count=0` 才能证明该页面 App 内部 canonical facts、read model 和 relation 投影一致；不能证明外部银行/OA 系统本身没有漏同步 |
 | 进项使用刷新入队结果 | runtime queue / admin caller | 返回 `202`、规范化 scope 列表和 enqueue count；完成与否必须继续通过 App Health、operation barrier 或审计 API 复核 |
 | 销项收款刷新入队结果 | runtime queue / admin caller | 返回 `202`、规范化 scope 列表和 enqueue count；完成与否必须继续通过 App Health、operation barrier 或审计 API 复核 |
+| 待找发票刷新入队结果 | runtime queue / admin caller | 返回 `202`、规范化 scope 列表和 enqueue count；完成与否必须继续通过 App Health、operation barrier 或审计 API 复核 |
 
 ## 持久化与投影
 
@@ -66,7 +68,7 @@
 | Frontend page | `web/src/pages/AppHealthOperationsPage.tsx` |
 | Frontend feature/context | `web/src/features/appHealth/*`、`features/appStatus/*`、`contexts/AppHealthStatusContext.tsx` |
 | Shell | `web/src/components/shell/AppStatusIndicator.tsx` |
-| Backend route | `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/input-invoice-usage-audit`、`/api/operations/app-health/output-invoice-collection-audit`、`/api/operations/app-health/page-audit`、`/api/operations/app-health/input-invoice-usage-refresh`、`/api/operations/app-health/output-invoice-collection-refresh` in `server.py` |
+| Backend route | `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/input-invoice-usage-audit`、`/api/operations/app-health/output-invoice-collection-audit`、`/api/operations/app-health/page-audit`、`/api/operations/app-health/input-invoice-usage-refresh`、`/api/operations/app-health/output-invoice-collection-refresh`、`/api/operations/app-health/pending-invoice-refresh` in `server.py` |
 | Backend service | `app_health_service.py`、`app_health_alert_service.py`、`app_status_overview_service.py`、`runtime_monitoring.py` |
 | Registries | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py` |
 | Tools/tests | `tools/app_status_readiness_backfill.py`、`tools/audit_input_invoice_usage_read_model.py`、`tools/audit_output_invoice_collection_read_model.py`、`tools/audit_page_business_read_model.py`、`tests/test_app_health*.py`、`tests/test_app_status*.py`、`tests/test_audit_input_invoice_usage_read_model_tool.py`、`tests/test_audit_output_invoice_collection_read_model_tool.py`、`tests/test_audit_page_business_read_model_tool.py` |

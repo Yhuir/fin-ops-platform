@@ -35,8 +35,8 @@ BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 1
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
 BANK_DETAIL_NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
-WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.same_case_visible_paired_owner.v1"
-WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = "workbench_sql_projection.composed_active_month_shards.visible_owner.v2"
+WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.visible_linked_relations.v1"
+WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = "workbench_sql_projection.composed_active_month_shards.visible_linked_relations.v1"
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
@@ -2414,7 +2414,10 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                     self._refresh_status(scope_type="pending_invoice", scope_key="income:all", connection=connection),
                 ]
                 refresh_status = "refreshing" if "refreshing" in direction_refresh_statuses else ("stale" if "stale" in direction_refresh_statuses else "fresh")
-                scope_row = next((row for row in direction_scope_rows if isinstance(row, dict)), None)
+                scope_row = _merge_pending_invoice_direction_scope_rows(
+                    scope_key=scope_key,
+                    rows=[row for row in direction_scope_rows if isinstance(row, dict)],
+                )
             else:
                 refresh_status = self._refresh_status(
                     scope_type="pending_invoice",
@@ -2703,13 +2706,10 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                     row_count=len(rows_to_save),
                     source_versions=normalized_source_versions,
                 )
-                filter_counts = {filter_group: 0 for filter_group in _pending_invoice_filter_groups_for_direction(normalized_direction)}
-                for row in rows_to_save:
-                    row_payload = dict(row) if isinstance(row, dict) else {}
-                    payload = row_payload.get("payload") if isinstance(row_payload.get("payload"), dict) else row_payload
-                    row_filter_group = text(row_payload.get("filter_group") or payload.get("filter_group")) or "all"
-                    if row_filter_group in filter_counts:
-                        filter_counts[row_filter_group] += 1
+                filter_counts = _pending_invoice_filter_group_counts_for_rows(
+                    rows_to_save,
+                    direction=normalized_direction,
+                )
                 for filter_group, row_count in filter_counts.items():
                     if filter_group == "all":
                         continue
@@ -7193,6 +7193,7 @@ class PostgresReadModelRepository:
             params.append(normalized)
         excludes_linked_etc_summary_groups = normalized_zone == "open"
         if excludes_linked_etc_summary_groups:
+            clauses.append("g.group_id not like 'case:decision:%'")
             clauses.append(_workbench_open_linked_etc_summary_group_exclusion_sql(group_id_sql=group_row_join_id_sql))
         normalized_search = text(search)
         if (
@@ -7348,6 +7349,8 @@ class PostgresReadModelRepository:
             group = materialized_group
             if not isinstance(group, dict):
                 group = {"group_id": text(row.get("group_id"))}
+            if normalized_zone == "open" and _is_workbench_automatic_decision_group(group):
+                continue
             group = _sanitize_workbench_group_invoice_rows(group)
             group = _with_workbench_group_counts(group)
             if normalized_detail_level == "summary":
@@ -10552,6 +10555,33 @@ def _pending_invoice_filter_groups_for_direction(direction: str) -> tuple[str, .
     return ("all", "requires_invoice", "bank_statement_as_invoice", "no_invoice_required")
 
 
+def _pending_invoice_filter_group_counts_for_rows(rows: list[dict[str, Any]], *, direction: str) -> dict[str, int]:
+    normalized_direction = text(direction) or "expense"
+    filter_counts = {filter_group: 0 for filter_group in _pending_invoice_filter_groups_for_direction(normalized_direction)}
+    for row in rows:
+        row_payload = dict(row) if isinstance(row, dict) else {}
+        payload = row_payload.get("payload") if isinstance(row_payload.get("payload"), dict) else row_payload
+        status = payload.get("invoice_acquisition_status") if isinstance(payload.get("invoice_acquisition_status"), dict) else {}
+        status_code = text(row_payload.get("status_code") or status.get("code"))
+        counted = False
+        if status_code:
+            for filter_group in filter_counts:
+                if filter_group == "all":
+                    continue
+                if status_code in pending_invoice_filter_status_codes(
+                    direction=normalized_direction,
+                    filter_name=filter_group,
+                ):
+                    filter_counts[filter_group] += 1
+                    counted = True
+                    break
+        if not counted and not status_code:
+            row_filter_group = text(row_payload.get("filter_group") or payload.get("filter_group")) or "all"
+            if row_filter_group in filter_counts:
+                filter_counts[row_filter_group] += 1
+    return filter_counts
+
+
 def _invoice_relation_scope_key(value: str | None) -> str:
     raw = str(value or "").strip()
     if not raw or raw == "all":
@@ -11148,6 +11178,8 @@ def _cost_statistics_payload_from_rows(
 ) -> dict[str, Any]:
     parent_model_payload = parent_payload.get("payload") if isinstance(parent_payload.get("payload"), dict) else parent_payload
     bank_accounts = parent_model_payload.get("bank_accounts")
+    bank_flow_time_rows = parent_model_payload.get("bank_flow_time_rows")
+    bank_flow_summary = parent_model_payload.get("bank_flow_summary")
     project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=parent_model_payload)
     if rows:
         scope_month_text = text(rows[0].get("scope_month")) or scope_month_text
@@ -11204,6 +11236,12 @@ def _cost_statistics_payload_from_rows(
             "total_amount": _format_decimal(total_amount),
         },
         "time_rows": time_rows,
+        "bank_flow_summary": deepcopy(bank_flow_summary) if isinstance(bank_flow_summary, dict) else {
+            "row_count": 0,
+            "transaction_count": 0,
+            "total_amount": "0.00",
+        },
+        "bank_flow_time_rows": deepcopy(bank_flow_time_rows) if isinstance(bank_flow_time_rows, list) else [],
         "bank_accounts": deepcopy(bank_accounts) if isinstance(bank_accounts, list) else [],
         "project_rows": [
             {
@@ -11633,10 +11671,11 @@ def _suppress_all_scope_open_rows_claimed_by_paired(
                 visible_paired_identity_keys.add(identity)
 
     if not paired_row_keys and not paired_identity_keys:
+        for group in open_groups:
+            _drop_all_scope_automatic_decision_group(group)
         return
 
     for group in open_groups:
-        before_row_count = _workbench_group_fact_row_counts(group)["rows"]
         _remove_workbench_rows_from_group(
             group,
             paired_row_keys=paired_row_keys,
@@ -11645,7 +11684,7 @@ def _suppress_all_scope_open_rows_claimed_by_paired(
             visible_paired_identity_keys=visible_paired_identity_keys,
             canonical_relation_claims_by_row_key=relation_claims_by_row_key,
         )
-        _drop_partial_all_scope_automatic_decision_group(group, before_row_count=before_row_count)
+        _drop_all_scope_automatic_decision_group(group)
         _finalize_all_scope_group(group, zone="open")
 
 
@@ -11672,13 +11711,12 @@ def _suppress_all_scope_open_rows_claimed_by_other_open_groups(open_groups: list
         _finalize_all_scope_group(group, zone="open")
 
 
-def _drop_partial_all_scope_automatic_decision_group(group: dict[str, Any], *, before_row_count: int) -> None:
-    after_row_count = _workbench_group_fact_row_counts(group)["rows"]
-    if 0 < after_row_count < before_row_count and _is_all_scope_automatic_decision_group(group):
+def _drop_all_scope_automatic_decision_group(group: dict[str, Any]) -> None:
+    if _is_workbench_automatic_decision_group(group):
         _clear_workbench_group_rows(group)
 
 
-def _is_all_scope_automatic_decision_group(group: dict[str, Any]) -> bool:
+def _is_workbench_automatic_decision_group(group: dict[str, Any]) -> bool:
     group_id = text(group.get("group_id") or group.get("id")) or ""
     if group_id.startswith("case:decision:"):
         return True
@@ -11709,21 +11747,18 @@ def _all_scope_open_group_claim_rank(group: dict[str, Any]) -> tuple[Any, ...]:
     has_reconciliation_decision = any(
         isinstance(row.get("workbench_reconciliation_decision"), dict) for row in _iter_group_rows(group)
     )
-    automatic_decision_group = _is_all_scope_automatic_decision_group(group)
     if group_type == "source_linked":
         group_type_priority = 0
     elif group_type in {"auto_closed", "manual_confirmed", "open_exception", "ignored", "legacy_exception"}:
         group_type_priority = 1
-    elif automatic_decision_group and pane_count >= 2:
-        group_type_priority = 2
     elif group_type == "open" and (reason == "reconciliation_decision_open" or has_reconciliation_decision):
-        group_type_priority = 3
+        group_type_priority = 2
     elif group_type == "candidate":
-        group_type_priority = 4
+        group_type_priority = 3
     elif group_type == "open":
-        group_type_priority = 5
+        group_type_priority = 4
     else:
-        group_type_priority = 6
+        group_type_priority = 5
     confidence_priority = {"high": 0, "medium": 1, "low": 2}.get(text(group.get("match_confidence")) or "", 3)
     stable_group_id = text(group.get("group_id") or group.get("id")) or ""
     return (group_type_priority, -pane_count, -row_count, confidence_priority, stable_group_id)
@@ -13534,6 +13569,43 @@ def _pending_invoice_scope_source_versions_row(scope_key: str, rows: list[dict[s
         aggregate["bank_detail_source_versions"] = bank_detail_by_month
     if workbench_relation_by_month:
         aggregate["workbench_relation_source_versions"] = workbench_relation_by_month
+    return {"scope_key": scope_key, "source_versions": aggregate}
+
+
+def _merge_pending_invoice_direction_scope_rows(scope_key: str, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    normalized_rows = [row for row in list(rows or []) if isinstance(row, dict)]
+    if not normalized_rows:
+        return None
+    if len(normalized_rows) == 1:
+        row = normalized_rows[0]
+        return {
+            "scope_key": text(row.get("scope_key")) or scope_key,
+            "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
+        }
+    effective_rows = [
+        row
+        for row in normalized_rows
+        if int_value(row.get("row_count"), 0) > 0
+    ] or normalized_rows
+    first_versions = (
+        effective_rows[0].get("source_versions")
+        if isinstance(effective_rows[0].get("source_versions"), dict)
+        else {}
+    )
+    aggregate = dict(first_versions)
+    for dependency_key in ("bank_detail_source_versions", "workbench_relation_source_versions"):
+        dependency_versions_by_direction: dict[str, Any] = {}
+        for row in effective_rows:
+            row_scope_key = text(row.get("scope_key")) or ""
+            row_direction, _filter_group, _scope_month = _parse_pending_invoice_scope_key(row_scope_key)
+            if row_direction not in {"expense", "income"}:
+                continue
+            source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+            dependency_versions = source_versions.get(dependency_key)
+            if isinstance(dependency_versions, dict):
+                dependency_versions_by_direction[row_direction] = dict(dependency_versions)
+        if dependency_versions_by_direction:
+            aggregate[dependency_key] = dependency_versions_by_direction
     return {"scope_key": scope_key, "source_versions": aggregate}
 
 

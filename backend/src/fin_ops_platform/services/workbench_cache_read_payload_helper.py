@@ -30,6 +30,8 @@ class WorkbenchCacheReadPayloadHelper:
             return False
         if self._cached_payload_needs_oa_invoice_offset_rebuild(payload):
             return False
+        if self._payload_has_visible_legacy_candidate_group(payload):
+            return False
         cached_candidate_hash = str(payload.get("workbench_candidate_snapshot_hash") or "").strip()
         if cached_candidate_hash:
             expected_candidate_hash = self._workbench_candidate_snapshot_hash(
@@ -78,3 +80,43 @@ class WorkbenchCacheReadPayloadHelper:
         if self._is_mongo_oa_adapter():
             return isinstance(oa_status, dict) and str(oa_status.get("code", "")).strip() == "ready"
         return not isinstance(oa_status, dict) or str(oa_status.get("code", "")).strip() == "ready"
+
+    @classmethod
+    def _payload_has_visible_legacy_candidate_group(cls, payload: dict[str, object]) -> bool:
+        for section_name in ("paired", "open"):
+            section = payload.get(section_name)
+            if not isinstance(section, dict):
+                continue
+            for group in list(section.get("groups") or []):
+                if not isinstance(group, dict):
+                    continue
+                group_type = str(group.get("group_type") or "").strip()
+                if group_type == "candidate":
+                    return True
+                if group_type != "auto_closed":
+                    continue
+                relation_mode = str(group.get("relation_mode") or "").strip()
+                if relation_mode in {"bank_flow_rule_batch", "no_oa_bank_batch"}:
+                    continue
+                rows = cls._group_rows(group)
+                if rows and all(cls._row_has_active_pair_relation_marker(row) for row in rows):
+                    continue
+                return True
+        return False
+
+    @staticmethod
+    def _group_rows(group: dict[str, object]) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for key in ("oa_rows", "bank_rows", "invoice_rows"):
+            rows.extend(row for row in list(group.get(key) or []) if isinstance(row, dict))
+        return rows
+
+    @staticmethod
+    def _row_has_active_pair_relation_marker(row: dict[str, object]) -> bool:
+        metadata = row.get("special_metadata")
+        if not isinstance(metadata, dict):
+            return False
+        return (
+            bool(metadata.get("active_pair_relation"))
+            or bool(str(metadata.get("active_relation_case_id") or "").strip())
+        )

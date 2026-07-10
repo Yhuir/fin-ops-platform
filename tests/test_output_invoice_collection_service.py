@@ -297,7 +297,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["out-red"]["collectionStatus"]["code"], "collected_red_refunded")
         self.assertEqual(rows["out-paid"]["redInvoiceRelation"]["relationCount"], 1)
 
-    def test_candidate_bank_relation_is_visible_without_marking_invoice_collected(self) -> None:
+    def test_candidate_bank_relation_is_not_visible_or_marked_collected(self) -> None:
         buyer = self._counterparty("buyer", "候选客户")
         invoice = self._invoice("out-candidate", "9005", buyer, total_with_tax="100.00")
         bank = self._bank("bank-candidate", "100.00", TransactionDirection.INFLOW)
@@ -348,8 +348,8 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
 
         row = service.list_rows(page_size=20)["rows"][0]
 
-        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
-        self.assertEqual(row["bankTransactions"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["bankTransactions"]["relationCount"], 0)
+        self.assertEqual(row["bankTransactions"]["summaries"], [])
         self.assertEqual(row["bankTransactions"]["receivedTotal"], "0.00")
         self.assertEqual(row["collectionStatus"]["code"], "pending_collection")
         self.assertEqual(row["receipt"]["status"], "not_available")

@@ -1890,14 +1890,11 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     const operationCopy = relationPreviewOperationCopy(preview);
-    const syncingMessage = preview.operation === "split_candidate"
-      ? "系统建议已取消，正在同步关联台最新数据..."
-      : "关系已写入，正在同步关联台最新数据...";
     let submittedResult: WorkbenchActionResult | null = null;
     let deferredWorkbenchFreshApplied = false;
     const message = await executeWorkbenchActionWithFreshness({
       loadingMessage: operationCopy.submittingMessage,
-      syncingMessage,
+      syncingMessage: "关系已写入，正在同步关联台最新数据...",
       onProgress,
       waitForFreshWorkbenchLoad: true,
       deferFreshWorkbenchApply: true,
@@ -1911,7 +1908,7 @@ export default function ReconciliationWorkbenchPage() {
           month: WORKBENCH_VIEW_MONTH,
           rowIds,
           note,
-          operationType: preview.operationType === "split_candidate" ? "split_candidate" : "withdraw_relation",
+          operationType: "withdraw_relation",
           previewId: preview.previewId,
           expectedVersions: preview.submitExpectedVersions,
         });
@@ -1924,7 +1921,7 @@ export default function ReconciliationWorkbenchPage() {
       clearOpenSelection();
       emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
         affectedMonths: actionAffectedMonths(submittedResult),
-        source: preview.operation === "split_candidate" ? "workbench_split_candidate" : "workbench_withdraw_link",
+        source: "workbench_withdraw_link",
       });
     }
     setLastActionMessage(message);
@@ -2444,14 +2441,6 @@ function countRelationPreviewRows(groups: WorkbenchCandidateGroup[]) {
 }
 
 function relationPreviewOperationCopy(preview: WorkbenchRelationPreview) {
-  if (preview.operation === "split_candidate") {
-    return {
-      title: "取消系统建议预览",
-      submitLabel: "确认取消",
-      submittingMessage: "正在取消...",
-      statusLabel: "待取消",
-    };
-  }
   if (preview.operation === "withdraw_link") {
     return {
       title: "撤回关联预览",

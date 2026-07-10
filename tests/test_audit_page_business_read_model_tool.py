@@ -190,6 +190,50 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("source_business_fields_mismatch", queried_sql)
         self.assertNotIn("read_model.source_versions as row_source_versions", queried_sql)
 
+    def test_pending_invoice_audit_uses_page_read_model_scope_contract(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="pending_invoices",
+        )
+
+        queried_summary_sql = " ".join(sql for sql, _params in connection.fetch_one_calls)
+        self.assertIn("from read_model.pending_invoice_rows row", queried_summary_sql)
+        self.assertIn("join app.bank_transactions source", queried_summary_sql)
+        self.assertIn("count(distinct relation.case_id)", queried_summary_sql)
+        self.assertIn("join read_model.pending_invoice_rows pending_row", queried_summary_sql)
+
+        scope_sql = next(sql for sql, _params in connection.fetch_all_calls if "scope_row_count_mismatch" in sql)
+        self.assertIn("row.direction = scope.direction", scope_sql)
+        self.assertIn("row.status_code in", scope_sql)
+        self.assertNotIn("row.scope_key like scope.scope_key", scope_sql)
+
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertNotIn("source.txn_direction in ('outflow', 'inflow')", queried_sql)
+        self.assertNotIn("pending_invoices_relation_source_versions_mismatch", queried_sql)
+
+    def test_pending_invoice_relation_audit_uses_active_exists_and_any_distribution_scope(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="pending_invoices",
+        )
+
+        relation_sql = next(sql for sql, _params in connection.fetch_all_calls if "relation_distribution" in sql)
+        self.assertIn("where not exists", relation_sql.lower())
+        self.assertIn("join read_model.pending_invoice_rows pending_row", relation_sql)
+        self.assertIn("relation.row_types[member.ordinality] in ('bank', 'bank_transaction')", relation_sql)
+        self.assertIn("from read_model.workbench_relation_rows relation_row", relation_sql)
+        self.assertIn("join read_model.workbench_relation_groups relation_group", relation_sql)
+
+        candidate_sql = next(sql for sql, _params in connection.fetch_all_calls if "candidate_relation_projection" in sql)
+        self.assertIn("not exists", candidate_sql.lower())
+        self.assertIn("active_relation.status = 'active'", candidate_sql)
+        self.assertIn("from unnest(group_row.bank_transaction_ids)", " ".join(candidate_sql.split()))
+        self.assertIn("join read_model.pending_invoice_rows pending_row", " ".join(candidate_sql.split()))
+
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()
 

@@ -96,6 +96,7 @@ def _default_app_settings_payload() -> dict[str, Any]:
         "pending_invoice_tag_groups": {},
         "pending_output_invoice_tag_groups": {},
         "bank_flow_rule_batch_tag_rules": {},
+        "cost_statistics_tag_selection": {},
         "input_invoice_usage_payment_status_rules": {},
     }
 

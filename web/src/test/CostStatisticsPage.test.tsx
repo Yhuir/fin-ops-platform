@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { MemoryRouter } from "react-router-dom";
@@ -94,11 +94,11 @@ function findCostStatisticsHeading() {
   return screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT });
 }
 
-function renderCostStatisticsPage() {
+function renderCostStatisticsPage(session: SessionContextValue = staticSession) {
   return render(
     <MemoryRouter initialEntries={["/cost-statistics"]}>
       <AppChromeProvider>
-        <SessionContext.Provider value={staticSession}>
+        <SessionContext.Provider value={session}>
           <PageSessionStateProvider>
             <CostStatisticsPage />
           </PageSessionStateProvider>
@@ -167,6 +167,76 @@ describe("Cost statistics page", () => {
     expect(within(nextTimeGrid).getByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=2026-04&project_scope=active", expect.any(Object));
+  });
+
+  test("keeps tag rules drawer open until cost statistics read model is fresh after save", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    let resolveBarrier!: () => void;
+    const barrierDelay = new Promise<void>((resolve) => {
+      resolveBarrier = resolve;
+    });
+    const fetchMock = installMockApiFetch({ operationBarrierDelay: barrierDelay });
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "成本统计标签规则" }));
+    const drawer = await screen.findByRole("dialog", { name: "成本统计标签规则" });
+    expect(within(drawer).getAllByText("未分类").length).toBeGreaterThan(0);
+
+    await user.click(within(drawer).getByRole("button", { name: "保存并同步" }));
+
+    expect(screen.getByRole("dialog", { name: "成本统计标签规则" })).toBeInTheDocument();
+    expect(await within(drawer).findByText("规则已保存，正在等待成本统计同步...")).toBeInTheDocument();
+    resolveBarrier();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "成本统计标签规则" })).not.toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operation-barrier/status",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?month=2026-03&project_scope=active",
+      expect.any(Object),
+    );
+  });
+
+  test("disables tag rules save when API marks the rule set read-only", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costTagRulesCanSave: false });
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "成本统计标签规则" }));
+    const drawer = await screen.findByRole("dialog", { name: "成本统计标签规则" });
+
+    expect(within(drawer).getByRole("button", { name: "保存并同步" })).toBeDisabled();
+  });
+
+  test("admin can run the cost statistics title audit icon", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderCostStatisticsPage({
+      ...staticSession,
+      session: {
+        ...defaultSession,
+        canAdminAccess: true,
+      },
+    });
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Audit 成本统计" }));
+
+    expect(await screen.findByText("Audit 成功 · 全量对账通过 · Fresh")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/operations/app-health/page-audit?domain=cost_statistics",
+      expect.any(Object),
+    );
   });
 
   test("project view drills down from project to expense type to transaction from left to right", async () => {
@@ -299,7 +369,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按费用类型" }));
+    await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
 
     const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
     expect(expenseLane).not.toBeNull();
@@ -332,9 +402,9 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按流水标签类型" }));
+    await user.click(screen.getByRole("button", { name: "按标签" }));
 
-    expect(screen.getByRole("heading", { name: "按流水标签类型统计" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "按标签统计" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeInTheDocument();
     const primaryLane = screen.getByRole("heading", { name: "主标签" }).closest(".cost-explorer-lane");
     expect(primaryLane).not.toBeNull();
@@ -438,9 +508,9 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "按费用类型" }));
-    await chooseScopeOption(user, "费用类型统计时间范围：2026年3月", "2026年");
-    expect(screen.getByRole("button", { name: "费用类型统计时间范围：2026年" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
+    await chooseScopeOption(user, "OA费用类型统计时间范围：2026年3月", "2026年");
+    expect(screen.getByRole("button", { name: "OA费用类型统计时间范围：2026年" })).toBeInTheDocument();
     expect(await screen.findByText("交通费")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "按时间" }));
@@ -673,7 +743,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按费用类型" }));
+    await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
     await user.click(screen.getByRole("button", { name: "导出中心" }));
 
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });

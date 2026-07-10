@@ -467,17 +467,7 @@ class PendingInvoiceSourceVersionsProvider:
         source_versions_loader = getattr(self._repository, "pending_invoice_bank_detail_source_versions", None)
         if not callable(source_versions_loader):
             return {}
-        return dict(
-            source_versions_loader(
-                direction=str(query.get("direction", [payload.get("direction") or "expense"])[0] or "expense"),
-                filter=str(query.get("filter", [payload.get("filter") or "all"])[0] or "all"),
-                date_from=query.get("date_from", [None])[0],
-                date_to=query.get("date_to", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                filters=query.get("filters", [None])[0],
-            )
-            or {}
-        )
+        return self._dependency_source_versions(source_versions_loader, query=query, payload=payload)
 
     def _workbench_relation_source_versions(
         self,
@@ -488,14 +478,22 @@ class PendingInvoiceSourceVersionsProvider:
         source_versions_loader = getattr(self._repository, "pending_invoice_workbench_relation_source_versions", None)
         if not callable(source_versions_loader):
             return {}
-        return dict(
-            source_versions_loader(
-                direction=str(query.get("direction", [payload.get("direction") or "expense"])[0] or "expense"),
-                filter=str(query.get("filter", [payload.get("filter") or "all"])[0] or "all"),
-                date_from=query.get("date_from", [None])[0],
-                date_to=query.get("date_to", [None])[0],
-                keyword=query.get("keyword", [None])[0],
-                filters=query.get("filters", [None])[0],
-            )
-            or {}
-        )
+        return self._dependency_source_versions(source_versions_loader, query=query, payload=payload)
+
+    @staticmethod
+    def _dependency_source_versions(
+        source_versions_loader: Callable[..., Any],
+        *,
+        query: dict[str, list[str]],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        direction = str(query.get("direction", [payload.get("direction") or "expense"])[0] or "expense").strip()
+        filter_name = str(query.get("filter", [payload.get("filter") or "all"])[0] or "all").strip() or "all"
+        if direction == "all":
+            result: dict[str, Any] = {}
+            for child_direction in ("expense", "income"):
+                child_versions = source_versions_loader(direction=child_direction, filter="all") or {}
+                if isinstance(child_versions, dict) and child_versions:
+                    result[child_direction] = dict(child_versions)
+            return result
+        return dict(source_versions_loader(direction=direction, filter=filter_name) or {})

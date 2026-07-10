@@ -116,8 +116,13 @@ class CostStatisticsSqlProjectionBuilder:
             project_scope, month = _parse_cost_scope_key(scope_key)
             if month != "all":
                 raise ValueError("parent scope rebuild requires an all scope.")
-            entries, shard_versions = self._cost_entries_from_materialized_shards(project_scope=project_scope)
-            payload = self._build_explorer_payload_from_entries(entries, month="all", project_scope=project_scope)
+            entries, bank_flow_entries, shard_versions = self._cost_entries_from_materialized_shards(project_scope=project_scope)
+            payload = self._build_explorer_payload_from_entries(
+                entries,
+                month="all",
+                project_scope=project_scope,
+                bank_flow_entries=bank_flow_entries,
+            )
             source_versions = {
                 **self._source_versions("all"),
                 "cost_statistics_parent_source": "materialized_shards",
@@ -306,7 +311,13 @@ class CostStatisticsSqlProjectionBuilder:
 
     def _build_explorer_payload(self, month: str, *, project_scope: str) -> dict[str, Any]:
         entries = self._cost_entries_from_workbench(month, project_scope=project_scope)
-        return self._build_explorer_payload_from_entries(entries, month=month, project_scope=project_scope)
+        bank_flow_entries = self._bank_flow_entries_from_bank_detail(month)
+        return self._build_explorer_payload_from_entries(
+            entries,
+            month=month,
+            project_scope=project_scope,
+            bank_flow_entries=bank_flow_entries,
+        )
 
     def _build_explorer_payload_from_entries(
         self,
@@ -314,8 +325,14 @@ class CostStatisticsSqlProjectionBuilder:
         *,
         month: str,
         project_scope: str,
+        bank_flow_entries: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         sorted_entries = sorted(entries, key=lambda item: (str(item["trade_time"]), str(item["transaction_id"])), reverse=True)
+        sorted_bank_flow_entries = sorted(
+            bank_flow_entries or [],
+            key=lambda item: (str(item["trade_time"]), str(item["transaction_id"])),
+            reverse=True,
+        )
         project_groups: dict[str, dict[str, Any]] = {}
         expense_type_groups: dict[str, dict[str, Any]] = {}
         for entry in sorted_entries:
@@ -342,6 +359,14 @@ class CostStatisticsSqlProjectionBuilder:
                 "total_amount": format_decimal(sum((entry["amount_decimal"] for entry in sorted_entries), start=ZERO)),
             },
             "time_rows": [_serialize_cost_entry(entry) for entry in sorted_entries],
+            "bank_flow_summary": {
+                "row_count": len(sorted_bank_flow_entries),
+                "transaction_count": len(sorted_bank_flow_entries),
+                "total_amount": format_decimal(
+                    sum((entry["amount_decimal"] for entry in sorted_bank_flow_entries), start=ZERO)
+                ),
+            },
+            "bank_flow_time_rows": [_serialize_cost_entry(entry) for entry in sorted_bank_flow_entries],
             "bank_accounts": self._bank_accounts_from_settings(),
             "project_rows": [
                 {
@@ -490,6 +515,57 @@ class CostStatisticsSqlProjectionBuilder:
                 )
         return entries
 
+    def _bank_flow_entries_from_bank_detail(self, month: str) -> list[dict[str, Any]]:
+        if month == "all":
+            return []
+        facade = self._bank_transaction_tag_read_facade
+        list_by_month = getattr(facade, "list_by_month", None)
+        if not callable(list_by_month):
+            return []
+        payload = list_by_month(
+            month,
+            direction="expense",
+            require_fresh=True,
+            reason="cost_statistics_bank_flow_rows",
+        )
+        if not isinstance(payload, dict) or str(payload.get("status") or "").strip().lower() != "fresh":
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+        entries: list[dict[str, Any]] = []
+        for index, row in enumerate(list(payload.get("rows") or [])):
+            if not isinstance(row, dict):
+                continue
+            transaction_id = str(row.get("transaction_id") or row.get("id") or row.get("row_id") or f"bank-flow-{index}").strip()
+            amount = _decimal(row.get("amount") or row.get("signed_amount") or row.get("debit_amount"))
+            if amount in (None, ZERO):
+                continue
+            bank_tag_context = bank_tag_context_from_row(row)
+            label = str(
+                bank_tag_context.get("bank_tag_sub_label")
+                or bank_tag_context.get("bank_tag_label")
+                or bank_tag_context.get("bank_tag_primary_label")
+                or "未分类"
+            )
+            summary = _clean_text(row.get("summary")) or _clean_text(row.get("purpose")) or _clean_text(row.get("remark"))
+            entries.append(
+                {
+                    "group_id": "",
+                    "transaction_id": transaction_id,
+                    "trade_time": str(row.get("trade_time") or row.get("trade_date") or ""),
+                    "counterparty_name": str(row.get("counterparty_name") or ""),
+                    "payment_account_label": _bank_detail_payment_account_label(row),
+                    "direction": "支出",
+                    "remark": str(row.get("purpose") or row.get("remark") or row.get("summary") or ""),
+                    "project_name": "未配对OA",
+                    "project_id": "",
+                    "expense_type": label,
+                    "expense_content": summary or label,
+                    "oa_applicant": "—",
+                    "amount_decimal": abs(amount),
+                    **bank_tag_context,
+                }
+            )
+        return entries
+
     def _bank_tag_contexts_for_rows(self, bank_rows: list[dict[str, Any]], *, month: str) -> dict[str, dict[str, Any]]:
         facade = self._bank_transaction_tag_read_facade
         category_records_by_transaction_ids = getattr(facade, "category_records_by_transaction_ids", None)
@@ -519,7 +595,11 @@ class CostStatisticsSqlProjectionBuilder:
             if isinstance(record, dict)
         }
 
-    def _cost_entries_from_materialized_shards(self, *, project_scope: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def _cost_entries_from_materialized_shards(
+        self,
+        *,
+        project_scope: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
         rows = self._connection.fetch_all(
             """
             select
@@ -546,7 +626,37 @@ class CostStatisticsSqlProjectionBuilder:
             if scope_key and scope_key not in shard_versions:
                 versions = row.get("source_versions")
                 shard_versions[scope_key] = versions if isinstance(versions, dict) else {}
-        return entries, shard_versions
+        bank_flow_entries: list[dict[str, Any]] = []
+        shard_rows = self._connection.fetch_all(
+            """
+            select scope_key, source_versions, payload, raw_payload
+            from read_model.cost_statistics_read_models
+            where project_scope = %s
+              and scope_key <> %s
+              and scope_key like %s
+            order by scope_key desc
+            """,
+            (project_scope, f"{project_scope}:all", f"{project_scope}:%"),
+        )
+        for shard_index, row in enumerate(shard_rows):
+            scope_key = str(row.get("scope_key") or "").strip()
+            if scope_key and scope_key not in shard_versions:
+                versions = row.get("source_versions")
+                shard_versions[scope_key] = versions if isinstance(versions, dict) else {}
+            payload = row_payload(row, "payload", "raw_payload")
+            if isinstance(payload, dict) and isinstance(payload.get("payload"), dict):
+                payload = payload["payload"]
+            if not isinstance(payload, dict):
+                continue
+            for row_index, raw_row in enumerate(list(payload.get("bank_flow_time_rows") or [])):
+                if isinstance(raw_row, dict):
+                    bank_flow_entries.append(
+                        _cost_entry_from_payload_row(
+                            raw_row,
+                            fallback_index=(shard_index * 100_000) + row_index,
+                        )
+                    )
+        return entries, bank_flow_entries, shard_versions
 
     def _workbench_payload(self, month: str) -> dict[str, Any]:
         row = self._connection.fetch_one(
@@ -865,6 +975,38 @@ def _cost_entry_from_materialized_row(row: dict[str, Any], *, fallback_index: in
         "amount_decimal": amount,
         **bank_tag_context_from_row(payload),
     }
+
+
+def _cost_entry_from_payload_row(row: dict[str, Any], *, fallback_index: int) -> dict[str, Any]:
+    amount = _decimal(row.get("amount")) or ZERO
+    transaction_id = str(row.get("transaction_id") or row.get("id") or f"payload-row-{fallback_index}")
+    return {
+        "group_id": str(row.get("group_id") or ""),
+        "transaction_id": transaction_id,
+        "trade_time": str(row.get("trade_time") or ""),
+        "counterparty_name": str(row.get("counterparty_name") or ""),
+        "payment_account_label": str(row.get("payment_account_label") or ""),
+        "direction": str(row.get("direction") or "支出"),
+        "remark": str(row.get("remark") or ""),
+        "project_name": str(row.get("project_name") or "未配对OA"),
+        "project_id": str(row.get("project_id") or ""),
+        "expense_type": str(row.get("expense_type") or "未分类"),
+        "expense_content": str(row.get("expense_content") or ""),
+        "oa_applicant": str(row.get("oa_applicant") or "—"),
+        "amount_decimal": amount,
+        **bank_tag_context_from_row(row),
+    }
+
+
+def _bank_detail_payment_account_label(row: dict[str, Any]) -> str:
+    explicit_label = _clean_text(row.get("payment_account_label"))
+    if explicit_label:
+        return explicit_label
+    bank_name = _clean_text(row.get("bank_name"))
+    account_last4 = _clean_text(row.get("account_last4"))
+    if bank_name and account_last4:
+        return f"{bank_name} 账户 {account_last4}"
+    return bank_name or account_last4
 
 
 def _tax_invoice_item(row: dict[str, Any], *, output: bool) -> dict[str, Any]:

@@ -7,9 +7,11 @@ import unittest
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
+from fin_ops_platform.services.postgres_repositories import read_models as read_models_module
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.pending_invoice_read_model_service import (
     PendingInvoiceReadModelService,
+    PendingInvoiceSourceVersionsProvider,
     pending_invoice_source_versions,
 )
 from fin_ops_platform.services.pending_invoice_service import (
@@ -1127,6 +1129,98 @@ class PendingIncomeProjectionConnection:
 
 
 class SearchPendingSqlRuntimeTests(unittest.TestCase):
+    def test_pending_invoice_all_direction_merges_expense_and_income_source_versions(self) -> None:
+        merged = read_models_module._merge_pending_invoice_direction_scope_rows(
+            "all:all",
+            [
+                {
+                    "scope_key": "expense:all",
+                    "row_count": 2,
+                    "source_versions": {
+                        "pending_invoice_read_model_schema_version": "schema-v1",
+                        "workbench_relation_source_versions": {
+                            "2026-01": {"source_version": "expense-jan"},
+                        },
+                    },
+                },
+                {
+                    "scope_key": "income:all",
+                    "row_count": 1,
+                    "source_versions": {
+                        "pending_invoice_read_model_schema_version": "schema-v1",
+                        "workbench_relation_source_versions": {
+                            "2026-01": {"source_version": "income-jan"},
+                        },
+                    },
+                },
+            ],
+        )
+
+        self.assertEqual(merged["scope_key"], "all:all")
+        self.assertEqual(
+            merged["source_versions"]["workbench_relation_source_versions"],
+            {
+                "expense": {"2026-01": {"source_version": "expense-jan"}},
+                "income": {"2026-01": {"source_version": "income-jan"}},
+            },
+        )
+
+    def test_pending_invoice_all_direction_source_provider_uses_child_scopes(self) -> None:
+        class PendingSourceVersionRepository:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object]]] = []
+
+            def pending_invoice_bank_detail_source_versions(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("bank", dict(kwargs)))
+                return {"2026-01": {"source": f"bank-{kwargs['direction']}"}}
+
+            def pending_invoice_workbench_relation_source_versions(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("relation", dict(kwargs)))
+                return {"2026-01": {"source": f"relation-{kwargs['direction']}"}}
+
+        repository = PendingSourceVersionRepository()
+        provider = PendingInvoiceSourceVersionsProvider(
+            settings_provider=lambda: {},
+            attachment_invoice_parser_version_provider=lambda: "parser-v1",
+            oa_projection_sync_version_provider=lambda: "oa-sync-v1",
+            repository=repository,
+        )
+
+        source_versions = provider(
+            query={
+                "direction": ["all"],
+                "filter": ["all"],
+                "date_from": ["2026-01-01"],
+                "keyword": ["ignored-view-filter"],
+                "filters": ["[]"],
+            },
+            payload={},
+        )
+
+        self.assertEqual(
+            source_versions["bank_detail_source_versions"],
+            {
+                "expense": {"2026-01": {"source": "bank-expense"}},
+                "income": {"2026-01": {"source": "bank-income"}},
+            },
+        )
+        self.assertEqual(
+            source_versions["workbench_relation_source_versions"],
+            {
+                "expense": {"2026-01": {"source": "relation-expense"}},
+                "income": {"2026-01": {"source": "relation-income"}},
+            },
+        )
+        self.assertEqual(
+            repository.calls,
+            [
+                ("bank", {"direction": "expense", "filter": "all"}),
+                ("bank", {"direction": "income", "filter": "all"}),
+                ("relation", {"direction": "expense", "filter": "all"}),
+                ("relation", {"direction": "income", "filter": "all"}),
+            ],
+        )
+
     def test_pending_invoice_writer_and_api_source_version_contracts_match(self) -> None:
         connection = SearchPendingConnection()
         builder = SearchPendingSqlProjectionBuilder(connection=connection)
@@ -1557,6 +1651,22 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                         "can_create_invoice": False,
                     }
                 },
+                {
+                    "payload": {
+                        "id": "txn-requires-from-status",
+                        "bank_transaction": {
+                            "id": "txn-requires-from-status",
+                            "trade_time": "2026-05-22",
+                            "amount": "188.00",
+                        },
+                        "filter_group": "all",
+                        "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                        "input_invoices": {"primary": None, "payment_summary": {}},
+                        "oa": {"primary": None},
+                        "invoices": [],
+                        "can_create_invoice": True,
+                    }
+                },
             ],
             source_versions={"schema": "v1"},
         )
@@ -1569,8 +1679,8 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(
             [(params[0], params[3]) for params in scope_upserts],
             [
-                ("expense:all:2026-05", 2),
-                ("expense:requires_invoice:2026-05", 1),
+                ("expense:all:2026-05", 3),
+                ("expense:requires_invoice:2026-05", 2),
                 ("expense:bank_statement_as_invoice:2026-05", 1),
                 ("expense:no_invoice_required:2026-05", 0),
             ],
@@ -2166,6 +2276,92 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             [
                 ("pending_invoice", "expense:all", "api_miss"),
                 ("pending_invoice", "income:all", "api_miss"),
+            ],
+        )
+
+    def test_pending_invoice_all_direction_nested_child_source_versions_are_fresh(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+
+        bank_versions = {
+            "expense": {"2026-01": {"source": "bank-expense"}},
+            "income": {"2026-01": {"source": "bank-income"}},
+        }
+        relation_versions = {
+            "expense": {"2026-01": {"source": "relation-expense"}},
+            "income": {"2026-01": {"source": "relation-income"}},
+        }
+
+        class PendingRepo:
+            def __init__(self) -> None:
+                self.version_calls: list[tuple[str, dict[str, object]]] = []
+
+            def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "direction": "all",
+                    "filter": "all",
+                    "rows": [
+                        {
+                            "id": "txn-all-fresh",
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "summary": {
+                        "total_rows": 1,
+                        "missing_invoice_rows": 1,
+                        "create_invoice_available_rows": 1,
+                        "source_summary": {
+                            "bank_transaction_rows": 1,
+                            "expense_rows": 1,
+                            "income_rows": 0,
+                            "current_direction_rows": 1,
+                            "excluded_direction_rows": 0,
+                        },
+                    },
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                    "source_versions": {
+                        **_pending_invoice_expected_source_versions(),
+                        "bank_detail_source_versions": bank_versions,
+                        "workbench_relation_source_versions": relation_versions,
+                    },
+                }
+
+            def pending_invoice_bank_detail_source_versions(self, **kwargs: object) -> dict[str, object]:
+                self.version_calls.append(("bank", dict(kwargs)))
+                return bank_versions.get(str(kwargs.get("direction") or ""), {})
+
+            def pending_invoice_workbench_relation_source_versions(self, **kwargs: object) -> dict[str, object]:
+                self.version_calls.append(("relation", dict(kwargs)))
+                return relation_versions.get(str(kwargs.get("direction") or ""), {})
+
+        pending_repo = PendingRepo()
+        app._pending_invoice_sql_read_repository = pending_repo
+        app._pending_invoice_query_service = type(
+            "PendingService",
+            (),
+            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("fresh all-direction API must not scan in-memory state"))},
+        )()
+
+        response = _pending_invoice_rows_response(app, {"direction": ["all"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(
+            pending_repo.version_calls,
+            [
+                ("bank", {"direction": "expense", "filter": "all"}),
+                ("bank", {"direction": "income", "filter": "all"}),
+                ("relation", {"direction": "expense", "filter": "all"}),
+                ("relation", {"direction": "income", "filter": "all"}),
             ],
         )
 

@@ -1715,7 +1715,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual([row["id"] for row in rows], ["bank-unclaimed"])
 
-    def test_sql_projection_excludes_candidate_decisions_claimed_by_in_progress_oa_relation(self) -> None:
+    def test_sql_projection_does_not_read_reconciliation_decisions_as_visible_candidates(self) -> None:
         read_model_repository = SimpleNamespace(
             list_workbench_reconciliation_decisions=lambda **_kwargs: [
                 {
@@ -1744,7 +1744,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             excluded_bank_transaction_ids={"bank-claimed-by-progress-oa"},
         )
 
-        self.assertEqual([decision["decision_key"] for decision in decisions], ["decision-unclaimed"])
+        self.assertEqual(decisions, [])
 
     def test_sql_projection_invoice_row_preserves_canonical_oa_attachment_source_metadata(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(connection=WorkbenchProjectionSettingsConnection())
@@ -3621,7 +3621,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-    def test_repository_composed_all_open_page_suppresses_single_conflict_claimed_by_automatic_decision(self) -> None:
+    def test_repository_composed_all_open_page_drops_visible_automatic_decision_group(self) -> None:
         class DuplicateOpenOwnerConnection(ActiveWorkbenchGenerationConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 normalized = " ".join(sql.lower().split())
@@ -3710,13 +3710,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
 
         self.assertEqual(page["total"], 1)
-        self.assertEqual(page["row_counts"], {"oa": 1, "bank": 1, "invoice": 0, "rows": 2})
+        self.assertEqual(page["row_counts"], {"oa": 1, "bank": 0, "invoice": 0, "rows": 1})
         self.assertEqual(
             [group["group_id"] for group in page["groups"]],
-            ["case:decision:2026-07:oa_bank_exact_amount:oa-pay-2309:txn_imported_0472"],
+            ["scope:2026-06:temp:0003"],
         )
         self.assertEqual(page["groups"][0]["oa_rows"][0]["id"], "oa-pay-2309")
-        self.assertEqual(page["groups"][0]["bank_rows"][0]["id"], "txn_imported_0472")
+        self.assertEqual(page["groups"][0]["bank_rows"], [])
 
     def test_repository_bounds_all_scope_groups_page_query(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
@@ -5185,7 +5185,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertIn("case:no_oa_batch_1", [group["group_id"] for group in aggregate_group_payloads])
 
-    def test_repository_all_scope_open_automatic_decision_wins_over_single_conflict_row(self) -> None:
+    def test_repository_all_scope_open_automatic_decision_is_dropped_over_single_conflict_row(self) -> None:
         class AggregateAllOpenAutomaticDecisionOwnerConnection(WorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 normalized = " ".join(sql.lower().split())
@@ -5258,11 +5258,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
         ]
         payloads_by_id = {group["group_id"]: group for group in aggregate_group_payloads}
-        self.assertIn("case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419", payloads_by_id)
-        self.assertNotIn("scope:2026-03:temp:0001", payloads_by_id)
-        decision_group = payloads_by_id["case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419"]
-        self.assertEqual(all_scope_group_row_ids(connection, decision_group["group_id"], "oa"), ["oa-pay-2068"])
-        self.assertEqual(all_scope_group_row_ids(connection, decision_group["group_id"], "bank"), ["txn_imported_1419"])
+        self.assertNotIn("case:decision:2026-04:oa_bank_exact_amount:oa-pay-2068:txn_imported_1419", payloads_by_id)
+        self.assertIn("scope:2026-03:temp:0001", payloads_by_id)
+        open_group = payloads_by_id["scope:2026-03:temp:0001"]
+        self.assertEqual(all_scope_group_row_ids(connection, open_group["group_id"], "oa"), ["oa-pay-2068"])
+        self.assertEqual(all_scope_group_row_ids(connection, open_group["group_id"], "bank"), [])
 
     def test_repository_all_scope_suppresses_open_invoice_rows_claimed_by_stronger_open_group(self) -> None:
         class AggregateAllOpenInvoiceDuplicateConnection(WorkbenchWriteConnection):
@@ -8874,7 +8874,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         ]
         self.assertEqual(paired_invoice_rows[0]["identity_alias_rows"]["invoice"][0]["id"], "invoice-formal-project-1")
 
-    def test_sql_projection_projects_paired_reconciliation_decisions_without_candidate_write(self) -> None:
+    def test_sql_projection_does_not_project_paired_reconciliation_decisions_as_visible_links(self) -> None:
         recorder = CandidateSnapshotRecorder()
         builder = WorkbenchSqlProjectionBuilder(
             connection=WorkbenchProjectionSettingsConnection(),
@@ -8925,26 +8925,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         payload = builder._group_payload("2026-05", rows_by_id, [], decisions=[decision])
 
         self.assertEqual(recorder.saved_snapshots, [])
-        self.assertEqual(payload["open"]["groups"], [])
-        paired_groups = payload["paired"]["groups"]
-        self.assertEqual(len(paired_groups), 1)
-        self.assertNotEqual(paired_groups[0]["group_type"], "candidate")
-        paired_rows = [
+        self.assertEqual(payload["paired"]["groups"], [])
+        row_payloads = [
             row
-            for group in paired_groups
+            for section in ("paired", "open")
+            for group in payload[section]["groups"]
             for row in [*group.get("oa_rows", []), *group.get("bank_rows", []), *group.get("invoice_rows", [])]
         ]
-        self.assertEqual({row["id"] for row in paired_rows}, {"oa-1", "bank-1", "invoice-1"})
-        self.assertTrue(all(row["status"] == "paired" for row in paired_rows))
-        self.assertTrue(all(row["case_id"] == "decision-paired" for row in paired_rows))
-        self.assertTrue(
-            all(
-                row["workbench_reconciliation_decision"]["warnings"][0]["code"] == WARNING_INVOICE_AMOUNT_MISMATCH
-                for row in paired_rows
-            )
-        )
+        self.assertEqual({row["id"] for row in row_payloads}, {"oa-1", "bank-1", "invoice-1"})
+        self.assertTrue(all(row.get("case_id") != "decision-paired" for row in row_payloads))
+        self.assertTrue(all(row.get("relation_mode") != "automatic_decision" for row in row_payloads))
+        self.assertTrue(all("workbench_reconciliation_decision" not in row for row in row_payloads))
 
-    def test_sql_projection_groups_multi_payment_single_invoice_decision(self) -> None:
+    def test_sql_projection_does_not_group_multi_payment_single_invoice_decision(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(
             connection=WorkbenchProjectionSettingsConnection(),
             read_model_repository=CandidateSnapshotRecorder(),
@@ -9004,15 +8997,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         payload = builder._group_payload("2026-05", rows_by_id, [], decisions=[decision])
 
-        paired_groups = payload["paired"]["groups"]
-        self.assertEqual(len(paired_groups), 1)
-        group = paired_groups[0]
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-a", "oa-b"])
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-a", "bank-b"])
-        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["invoice-combined"])
-        paired_rows = [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
-        self.assertTrue(all(row["status"] == "paired" for row in paired_rows))
-        self.assertTrue(all(row["case_id"] == "decision-multi-payment-invoice" for row in paired_rows))
+        self.assertEqual(payload["paired"]["groups"], [])
+        row_payloads = [
+            row
+            for section in ("paired", "open")
+            for group in payload[section]["groups"]
+            for row in [*group.get("oa_rows", []), *group.get("bank_rows", []), *group.get("invoice_rows", [])]
+        ]
+        self.assertEqual(
+            {row["id"] for row in row_payloads},
+            {"oa-a", "oa-b", "bank-a", "bank-b", "invoice-combined"},
+        )
+        self.assertTrue(all(row.get("case_id") != "decision-multi-payment-invoice" for row in row_payloads))
+        self.assertTrue(all(row.get("relation_mode") != "automatic_decision" for row in row_payloads))
 
     def test_sql_projection_projects_open_reconciliation_decisions_as_independent_open_rows(self) -> None:
         recorder = CandidateSnapshotRecorder()
@@ -9053,9 +9050,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(recorder.saved_snapshots, [])
         self.assertEqual(payload["paired"]["groups"], [])
         open_groups = payload["open"]["groups"]
-        self.assertEqual(len(open_groups), 2)
         self.assertTrue(all(group["group_type"] == "open" for group in open_groups))
-        self.assertTrue(all(sum(len(group[f"{kind}_rows"]) for kind in ("oa", "bank", "invoice")) == 1 for group in open_groups))
         self.assertEqual(
             {
                 row["id"]
@@ -9063,6 +9058,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
             },
             {"oa-1", "bank-1"},
+        )
+        self.assertTrue(
+            all(
+                "workbench_reconciliation_decision" not in row
+                for group in open_groups
+                for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+            )
         )
 
     def test_sql_projection_ignores_non_projectable_reconciliation_decisions(self) -> None:

@@ -58,7 +58,7 @@ Spec-first Browser e2e 审计入口：
 - `tests/test_workbench_pair_relation_service.py`：领域规则、row 去重、row type 对齐、active overlap、cancel、withdraw 可恢复关系策略、ETC 删除不恢复旧二栏 relation。
 - `tests/test_workbench_relation_command_service.py`：command service confirm/cancel/withdraw 基座、withdraw preview lock、row-id batch cancel、metadata update、freshness precondition、idempotency、mode registry 和 active row conflict。
 - `tests/test_platform_runtime_boundary_guards.py`：legacy pair runtime 依赖边界 guard，覆盖 no-OA legacy migration、ETC repair/link/migration、Workbench exception application 和 batch accounting 不得重新接收或保存 `pair_relation_service`，必须通过 `WorkbenchRelationCommandService` canonical read/write 边界。
-- `tests/test_workbench_auth_context_idempotency.py`：workbench confirm/cancel/withdraw actor/tenant/idempotency、withdraw 写入委托 command service、withdraw route 复用 request-local OA session actor/tenant，以及 legacy candidate / reconciliation decision 纯候选 `split_candidate` suppress 边界。
+- `tests/test_workbench_auth_context_idempotency.py`：workbench confirm/cancel/withdraw actor/tenant/idempotency、withdraw 写入委托 command service、withdraw route 复用 request-local OA session actor/tenant，以及 legacy candidate / reconciliation decision 纯候选不再进入可见 relation 或 suppress 写入口的拒绝边界。
 - `tests/test_workbench_reconciliation_engine.py::WorkbenchReconciliationEngineTests::test_paired_free_decision_creates_active_relation`、`test_withdrawn_auto_pair_row_set_is_not_auto_created_again`：free paired decision 通过 command service 自动正式化；用户撤回同一 row set 后不再自动重建。
 - `tests/test_workbench_reconciliation_decision_store.py::WorkbenchReconciliationDecisionStoreTests::test_upsert_does_not_revive_suppressed_decision`：decision upsert 不复活已 suppressed 的用户取消建议。
 - `tests/test_workbench_write_characterization.py`：confirm/withdraw UoW、idempotency、rollback、stale precondition、目标月 Workbench refresh，以及已知 affected month 时 `all` 只能走 aggregate-only 收敛，不能触发 full all shard fan-out。
@@ -85,7 +85,7 @@ Spec-first Browser e2e 审计入口：
 - `web/e2e/workbench-relations-tax-offset-fanout.spec.ts`：真实 Chromium 中先进入税金抵扣页确认 relation 影响前无目标进项计划行，再从 Workbench confirm，回到税金抵扣页验证重新请求 `/api/tax-offset`、显示 relation 影响后的 fresh 进项计划行且无读模型错误，并检查无成功后的错误残留。
 - `web/e2e/workbench-relations-oa-pending-fanout.spec.ts`：真实 Chromium 中先进入 OA 待付款确认未正式化匹配仍为 `未支付`，再从 Workbench confirm，回到 OA 待付款验证 rows 重新读取、状态变为 `已支付` 并显示 `关联台已确认`，并检查无成功后的错误残留。
 - `web/e2e/workbench-withdraw-flow.spec.ts`：真实 Chromium 中先建立 paired group，再从关联台自身执行 withdraw preview/submit；断言 submit 带回 `operation_type`、`preview_id`、`expected_versions`，弹窗内 busy 锁定，等待 `workbench_relation` barrier 和 Workbench fresh refetch 后恢复 open group，并检查成功后无操作失败/同步失败/read model 失败残留。
-- `web/e2e/workbench-candidate-split-flow.spec.ts`：真实 Chromium 中从未配对自动建议点击任意 row，preview 判定内部兼容 operation `split_candidate`，submit 后等待 `workbench_relation` barrier 和 Workbench fresh refetch 并隐藏建议；该用例保护 automatic decision 不被误当作 active relation withdraw，不写 relation lifecycle，并检查成功后无错误残留。
+- `tests/test_workbench_sql_runtime.py`、`tests/test_audit_workbench_relation_display_tool.py`：覆盖 automatic decision/candidate 不再投影为可见 linked group；旧 active generation 中残留 visible automatic decision rows 会被 groups page/all-scope 过滤并被 display audit 标为 blocking issue。
 - `web/e2e/workbench-exception-flow.spec.ts`：真实 Chromium 中覆盖异常处理 apply/cancel 和 ignore/unignore 的 barrier/fresh refetch；每个成功节点都会检查无操作失败/同步失败/read model 失败残留。
 - `web/e2e/workbench-network-recovery-flow.spec.ts`：真实 Chromium 中覆盖 confirm-link transient network retry 成功、confirm/split/withdraw duplicate-submit guard 成功；成功节点检查无错误残留，409 stale preview 继续作为 negative path 断言错误可见。
 - `web/e2e/batch-accounting-flow.spec.ts`：真实 Chromium 中从批量账务未提交 bucket 选择银行流水和 OA，submit 后等待 `workbench_relation` operation barrier，再进入已提交 bucket 验证 relation 与 OA 明细；随后 withdraw 等待同一 freshness barrier 并恢复未提交状态。
@@ -125,7 +125,7 @@ Spec-first Browser e2e 审计入口：
 
 - workbench confirm/cancel。
 - workbench withdraw 必须和 confirm/cancel 一样解析 request-local OA session actor/tenant，并把 actor/tenant 传入 UoW replay/run command 与 relation command service；不得落到 fallback actor。
-- workbench withdraw 统一按钮不能把 automatic decision 当作 active relation 撤回；无 active relation 且命中 legacy candidate 或 reconciliation decision 时，preview/submit 必须锁定为 `split_candidate` 并 suppress 候选事实源。
+- workbench withdraw 统一按钮不能把 automatic decision 当作 active relation 撤回；无 active relation 且命中 legacy candidate 或 reconciliation decision 时，preview/submit 必须拒绝，不能 suppress 候选事实源。
 - workbench confirm/withdraw 写入后必须刷新 affected month scopes；affected month 已知时，Workbench `all` 页面只能通过 aggregate-only refresh 从 active month shards 收敛，不能用普通 `all` refresh 触发全量 shard fan-out 阻塞目标写链路。只有完全无法推导 affected month 时才允许普通 `all` fallback。
 - pending invoice attach/create 已覆盖 application service command delegation、canonical write safety 和 API 旧 shape 回归；读侧 non-fresh response shape 仍由 read model/facade 测试保护。
 - no-OA submit/withdraw 已覆盖 success、rollback、version conflict 和 relation freshness 诊断；legacy migration/repair/consolidation 已覆盖 command delegation、active row occupation、single-source case reuse 和 read model worker 不隐式 repair。

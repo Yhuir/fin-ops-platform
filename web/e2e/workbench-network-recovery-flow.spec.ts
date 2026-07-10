@@ -47,24 +47,6 @@ async function openConfirmRelationPreview(page: Page) {
   return { openZone, openGroup, previewDialog };
 }
 
-async function openSplitCandidatePreview(page: Page) {
-  const openZone = page.getByTestId("zone-open");
-  const openGroup = page.getByTestId("candidate-group-open-case:CASE-202603-101");
-  await expect(openZone).toBeVisible();
-  await expect(openGroup).toBeVisible();
-
-  await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
-  await expect(openZone.getByText("已选 1")).toBeVisible();
-  await expect(openZone.getByText("带入 2")).toBeVisible();
-
-  await openZone.getByRole("button", { name: "撤回关联" }).click();
-  const previewDialog = page.getByRole("dialog", { name: "关联预览" });
-  await expect(previewDialog).toBeVisible();
-  await expect(previewDialog.getByText("取消系统建议预览")).toBeVisible();
-  await expect(previewDialog.getByTestId("relation-preview-before").getByText("待找流水与发票").first()).toBeVisible();
-  return { openZone, openGroup, previewDialog };
-}
-
 async function openWithdrawRelationPreview(page: Page) {
   const pairedZone = page.getByTestId("zone-paired");
   const pairedGroup = page.getByTestId("candidate-group-paired-case:CASE-202603-101");
@@ -158,35 +140,6 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     expect(submitBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(submitBody.row_ids).toHaveLength(workbenchRowIds.length);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    await expectNoUnexpectedSuccessUiErrors(page);
-  });
-
-  test("prevents duplicate split-candidate submissions while the preview is submitting", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-      workbenchWithdrawSubmitDelayMs: 500,
-    });
-
-    await page.goto("/");
-    const { openGroup, previewDialog } = await openSplitCandidatePreview(page);
-    const submitButton = previewDialog.getByRole("button", { name: "确认取消" });
-
-    await clickTwiceAtCenter(page, submitButton);
-
-    await expect(previewDialog).toHaveAttribute("aria-busy", "true");
-    await expect(submitButton).toBeDisabled();
-    await expect(openGroup).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
-    await expect(page.getByTestId("candidate-group-open-case:CASE-202603-101")).toHaveCount(0);
-    await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
-    const submitBody = api.lastBody("POST /api/workbench/actions/withdraw-link");
-    expect(submitBody).toMatchObject({
-      operation_type: "split_candidate",
-      preview_id: "split_candidate:CASE-202603-101",
-    });
-    expect(submitBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
-    expect(submitBody.row_ids).toHaveLength(workbenchRowIds.length);
-    expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 

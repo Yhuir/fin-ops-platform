@@ -75,6 +75,11 @@ def audit_workbench_relation_display(
         }
     )
     group_rows = _fetch_active_group_rows(connection, tenant_id=tenant_id, row_ids=relation_row_ids)
+    automatic_decision_group_rows = _fetch_visible_automatic_decision_group_rows(
+        connection,
+        tenant_id=tenant_id,
+        limit=example_limit,
+    )
     generation_by_scope = {str(row.get("scope_key") or ""): row for row in active_generations}
     rows_by_scope_and_id = _rows_by_scope_and_row_id(group_rows)
     issues: list[RelationDisplayIssue] = []
@@ -98,6 +103,7 @@ def audit_workbench_relation_display(
                 generation_by_scope=generation_by_scope,
             )
         )
+    issues.extend(_visible_automatic_decision_issues(automatic_decision_group_rows))
 
     limited_issues = _limit_issue_examples(issues, example_limit=example_limit)
     error_count = sum(1 for issue in issues if issue.severity == "error")
@@ -112,6 +118,7 @@ def audit_workbench_relation_display(
             "active_generation_scope_count": len(active_generations),
             "audited_relation_row_id_count": len(relation_row_ids),
             "active_group_row_count": len(group_rows),
+            "visible_automatic_decision_row_count": len(automatic_decision_group_rows),
             "issue_count": len(issues),
             "error_count": error_count,
             "warning_count": warning_count,
@@ -200,6 +207,42 @@ def _fetch_active_group_rows(connection: Any, *, tenant_id: str, row_ids: list[s
     )
 
 
+def _fetch_visible_automatic_decision_group_rows(connection: Any, *, tenant_id: str, limit: int) -> list[dict[str, Any]]:
+    rows = connection.fetch_all(
+        """
+        select
+          gen.scope_key,
+          gen.generation_id,
+          gen.activated_at::text as generation_activated_at,
+          gr.group_id,
+          gr.zone,
+          gr.pane,
+          gr.row_id,
+          gr.row_role,
+          gr.source_kind,
+          gr.status,
+          gr.payload
+        from read_model.workbench_generations gen
+        join read_model.workbench_group_rows gr
+          on gr.generation_id = gen.generation_id
+         and gr.scope_key = gen.scope_key
+        where gen.tenant_id = %s
+          and gen.status = 'active'
+          and gr.row_role <> 'summary'
+          and (
+            gr.group_id like 'case:decision:%%'
+            or gr.payload->>'relation_mode' = 'automatic_decision'
+            or gr.payload->>'case_id' like 'decision:%%'
+            or gr.payload ? 'workbench_reconciliation_decision'
+          )
+        order by gen.scope_key, gr.group_id, gr.row_id
+        limit %s
+        """,
+        (tenant_id, limit),
+    )
+    return [row for row in rows if _row_is_visible_automatic_decision(row)]
+
+
 def _normalize_relation(row: dict[str, Any]) -> dict[str, Any]:
     payload = row_payload(row, "raw_payload")
     relation_payload = payload if isinstance(payload, dict) else {}
@@ -224,6 +267,47 @@ def _rows_by_scope_and_row_id(rows: list[dict[str, Any]]) -> dict[tuple[str, str
         if scope_key and row_id:
             grouped[(scope_key, row_id)].append(row)
     return grouped
+
+
+def _visible_automatic_decision_issues(rows: list[dict[str, Any]]) -> list[RelationDisplayIssue]:
+    issues: list[RelationDisplayIssue] = []
+    for row in rows:
+        payload = row_payload(row, "payload")
+        payload_dict = payload if isinstance(payload, dict) else {}
+        group_id = text(row.get("group_id")) or ""
+        row_id = text(row.get("row_id")) or text(payload_dict.get("id")) or ""
+        pane = text(row.get("pane") or payload_dict.get("type") or payload_dict.get("source_kind")) or ""
+        issues.append(
+            RelationDisplayIssue(
+                severity="error",
+                code="visible_automatic_decision_group",
+                message="Active Workbench generation contains visible automatic decision rows; same-row display must come from active linked relations only.",
+                case_id=group_id,
+                scope_key=text(row.get("scope_key")) or "",
+                row_id=row_id,
+                row_type=pane,
+                details={
+                    "group_id": group_id,
+                    "payload_case_id": text(payload_dict.get("case_id")) or "",
+                    "payload_relation_mode": text(payload_dict.get("relation_mode")) or "",
+                },
+            )
+        )
+    return issues
+
+
+def _row_is_visible_automatic_decision(row: dict[str, Any]) -> bool:
+    group_id = text(row.get("group_id")) or ""
+    if group_id.startswith("case:decision:"):
+        return True
+    payload = row_payload(row, "payload")
+    payload_dict = payload if isinstance(payload, dict) else {}
+    if text(payload_dict.get("relation_mode")) == "automatic_decision":
+        return True
+    case_id = text(payload_dict.get("case_id"))
+    if case_id and case_id.startswith("decision:"):
+        return True
+    return isinstance(payload_dict.get("workbench_reconciliation_decision"), dict)
 
 
 def _relation_display_issues(

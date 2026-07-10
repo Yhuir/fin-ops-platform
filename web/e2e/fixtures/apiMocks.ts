@@ -1085,7 +1085,6 @@ function ignoredWorkbenchRows(rowIgnored: boolean) {
 function workbenchGroups(
   zone: WorkbenchZone,
   relationConfirmed: boolean,
-  candidateSplitSuppressed = false,
   exceptionApplied = false,
   rowIgnored = false,
   largeDataset = false,
@@ -1096,9 +1095,6 @@ function workbenchGroups(
   }
   if (zone === "paired") {
     return relationConfirmed ? [buildWorkbenchGroup("paired", true, includeCashSpecialActions)] : [];
-  }
-  if (candidateSplitSuppressed) {
-    return [];
   }
   if (exceptionApplied) {
     return [buildProcessedExceptionGroup()];
@@ -1123,7 +1119,6 @@ function countWorkbenchRows(groups: Array<{ oa_rows: unknown[]; bank_rows: unkno
 
 function workbenchSummary(
   relationConfirmed: boolean,
-  candidateSplitSuppressed = false,
   exceptionApplied = false,
   rowIgnored = false,
   pageEmpty = false,
@@ -1156,7 +1151,7 @@ function workbenchSummary(
     bank_count: 1,
     invoice_count: 1,
     paired_count: relationConfirmed ? 1 : 0,
-    open_count: relationConfirmed || candidateSplitSuppressed || exceptionApplied ? 0 : 1,
+    open_count: relationConfirmed || exceptionApplied ? 0 : 1,
     exception_count: exceptionApplied ? 3 : 0,
     ignored_count: rowIgnored ? 1 : 0,
   };
@@ -1164,7 +1159,6 @@ function workbenchSummary(
 
 function workbenchSummaryPayload(
   relationConfirmed: boolean,
-  candidateSplitSuppressed = false,
   exceptionApplied = false,
   rowIgnored = false,
   pageStatus: WorkbenchPageMockStatus = "fresh",
@@ -1173,7 +1167,7 @@ function workbenchSummaryPayload(
 ) {
   return {
     month: "all",
-    summary: workbenchSummary(relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
+    summary: workbenchSummary(relationConfirmed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
     oa_status: { code: "ready", message: "OA 已同步" },
     invoice_inventory: {
       system_total: largeDataset ? 210 : 1,
@@ -1192,7 +1186,6 @@ function workbenchSummaryPayload(
 function workbenchGroupsPayload(
   zone: WorkbenchZone,
   relationConfirmed: boolean,
-  candidateSplitSuppressed = false,
   exceptionApplied = false,
   rowIgnored = false,
   pageStatus: WorkbenchPageMockStatus = "fresh",
@@ -1208,7 +1201,6 @@ function workbenchGroupsPayload(
     : workbenchGroups(
       zone,
       relationConfirmed,
-      candidateSplitSuppressed,
       exceptionApplied,
       rowIgnored,
       largeDataset,
@@ -1238,7 +1230,6 @@ function workbenchGroupsPayload(
 function findWorkbenchRow(
   rowId: string,
   relationConfirmed: boolean,
-  candidateSplitSuppressed = false,
   exceptionApplied = false,
   rowIgnored = false,
   largeDataset = false,
@@ -1248,13 +1239,12 @@ function findWorkbenchRow(
     ...workbenchGroups(
       "paired",
       relationConfirmed,
-      candidateSplitSuppressed,
       exceptionApplied,
       rowIgnored,
       largeDataset,
       includeCashSpecialActions,
     ),
-    ...workbenchGroups("open", relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, largeDataset),
+    ...workbenchGroups("open", relationConfirmed, exceptionApplied, rowIgnored, largeDataset),
   ];
   return groups
     .flatMap((group) => [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows])
@@ -1328,7 +1318,6 @@ function workbenchSettingsPayload(
 
 function legacyWorkbenchPayload(
   relationConfirmed: boolean,
-  candidateSplitSuppressed = false,
   exceptionApplied = false,
   rowIgnored = false,
   pageStatus: WorkbenchPageMockStatus = "fresh",
@@ -1338,7 +1327,7 @@ function legacyWorkbenchPayload(
 ) {
   return {
     month: "all",
-    summary: workbenchSummary(relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
+    summary: workbenchSummary(relationConfirmed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
     oa_status: { code: "ready", message: "OA 已同步" },
     invoice_inventory: {
       system_total: largeDataset ? 210 : 1,
@@ -1355,14 +1344,13 @@ function legacyWorkbenchPayload(
         : workbenchGroups(
           "paired",
           relationConfirmed,
-          candidateSplitSuppressed,
           exceptionApplied,
           rowIgnored,
           largeDataset,
           includeCashSpecialActions,
         ),
     },
-    open: { groups: pageEmpty ? [] : workbenchGroups("open", relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, largeDataset) },
+    open: { groups: pageEmpty ? [] : workbenchGroups("open", relationConfirmed, exceptionApplied, rowIgnored, largeDataset) },
     read_model_status: pageStatus,
     generated_at: "2026-06-17T01:00:00Z",
   };
@@ -5933,48 +5921,6 @@ function withdrawResultPayload() {
   };
 }
 
-function splitCandidatePreviewPayload() {
-  return {
-    operation: "split_candidate",
-    operation_type: "split_candidate",
-    preview_id: "split_candidate:CASE-202603-101",
-    submit_expected_versions: { "decision:CASE-202603-101": 1 },
-    candidate_keys: ["CASE-202603-101"],
-    can_submit: true,
-    requires_note: false,
-    message: "该组是自动候选，确认后会拆分并隐藏这条候选。",
-    before: { groups: [buildWorkbenchGroup("open", false)] },
-    after: { groups: [] },
-    amount_summary: amountSummary(),
-  };
-}
-
-function splitCandidateResultPayload() {
-  return {
-    success: true,
-    action: "split_candidate",
-    operation: "split_candidate",
-    month: "all",
-    affected_row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-    case_id: "CASE-202603-101",
-    affected_months: ["2026-03"],
-    affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
-    operation_projection: {
-      after: {
-        paired_groups: [],
-        open_groups: [],
-      },
-    },
-    message: "已拆分并隐藏自动候选。",
-  };
-}
-
 function workbenchExceptionPreviewPayload() {
   return {
     rule_version: "exception_rules_browser_e2e_v1",
@@ -7762,7 +7708,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   const calls: string[] = [];
   const requestBodies = new Map<string, Record<string, unknown>[]>();
   let relationConfirmed = options.workbenchInitialRelationConfirmed === true;
-  let candidateSplitSuppressed = false;
   let workbenchExceptionApplied = options.workbenchInitialExceptionApplied === true;
   let workbenchRowIgnored = options.workbenchInitialRowIgnored === true;
   let workbenchConfirmSubmitAttempts = 0;
@@ -9102,7 +9047,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       return json(route, legacyWorkbenchPayload(
         relationConfirmed,
-        candidateSplitSuppressed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
         workbenchPageStatus,
@@ -9252,7 +9196,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       return json(route, workbenchSummaryPayload(
         relationConfirmed,
-        candidateSplitSuppressed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
         workbenchPageStatus,
@@ -9292,7 +9235,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, workbenchGroupsPayload(
         zone,
         relationConfirmed,
-        candidateSplitSuppressed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
         workbenchPageStatus,
@@ -9311,7 +9253,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const row = findWorkbenchRow(
         rowId,
         relationConfirmed,
-        candidateSplitSuppressed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
         options.workbenchLargeDataset === true,
@@ -9370,7 +9311,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         }, 500);
       }
       relationConfirmed = true;
-      candidateSplitSuppressed = false;
       if (options.workbenchBankFlowRuleBatchScenario) {
         return json(route, bankFlowRuleConfirmResultPayload());
       }
@@ -9378,19 +9318,18 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/actions/withdraw-link/preview") {
-      return json(route, relationConfirmed ? withdrawPreviewPayload() : splitCandidatePreviewPayload());
+      if (!relationConfirmed) {
+        return json(route, {
+          error: "workbench_relation_not_found",
+          message: "Selected rows do not belong to an active relation.",
+        }, 400);
+      }
+      return json(route, withdrawPreviewPayload());
     }
 
     if (path === "/api/workbench/actions/withdraw-link") {
       await delay(Math.max(0, options.workbenchWithdrawSubmitDelayMs ?? 200));
-      const body = parseJsonBody(request.postData());
-      if (body.operation_type === "split_candidate") {
-        relationConfirmed = false;
-        candidateSplitSuppressed = true;
-        return json(route, splitCandidateResultPayload());
-      }
       relationConfirmed = false;
-      candidateSplitSuppressed = false;
       return json(route, withdrawResultPayload());
     }
 
@@ -9401,7 +9340,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/exception/apply") {
       await delay(200);
       relationConfirmed = false;
-      candidateSplitSuppressed = false;
       workbenchRowIgnored = false;
       workbenchExceptionApplied = true;
       return json(route, workbenchExceptionApplyResultPayload());
@@ -9410,7 +9348,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/actions/cancel-exception") {
       await delay(200);
       workbenchExceptionApplied = false;
-      candidateSplitSuppressed = false;
       relationConfirmed = false;
       return json(route, workbenchExceptionActionResultPayload("cancel_exception"));
     }
@@ -9420,7 +9357,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       workbenchRowIgnored = true;
       workbenchExceptionApplied = false;
       relationConfirmed = false;
-      candidateSplitSuppressed = false;
       return json(route, workbenchExceptionActionResultPayload("ignore_row"));
     }
 
@@ -9433,7 +9369,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/actions/confirm-cash-pass-through") {
       await delay(200);
       relationConfirmed = true;
-      candidateSplitSuppressed = false;
       workbenchExceptionApplied = false;
       workbenchRowIgnored = false;
       return json(route, workbenchCashSpecialResultPayload("confirm_cash_pass_through"));
@@ -9442,7 +9377,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/actions/confirm-cash-ticket-purchase") {
       await delay(200);
       relationConfirmed = true;
-      candidateSplitSuppressed = false;
       workbenchExceptionApplied = false;
       workbenchRowIgnored = false;
       return json(route, workbenchCashSpecialResultPayload("confirm_cash_ticket_purchase"));
@@ -9451,7 +9385,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/actions/cancel-cash-special") {
       await delay(200);
       relationConfirmed = true;
-      candidateSplitSuppressed = false;
       workbenchExceptionApplied = false;
       workbenchRowIgnored = false;
       return json(route, workbenchCashSpecialResultPayload("cancel_cash_special"));

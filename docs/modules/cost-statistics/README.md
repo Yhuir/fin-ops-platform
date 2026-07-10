@@ -31,13 +31,15 @@
 
 ## 当前边界
 
-关注项目范围、费用归因、导出 shape、cost read model freshness 和 query/runtime I/O。成本统计 read model refresh scope 必须是 `active:YYYY-MM`、`all:YYYY-MM`、`active:all` 或 `all:all`；旧的裸月份/裸 `all` 只能在统一 read model refresh scope gateway 中归一化，不能直接进入 durable queue。生产旧 readiness、dirty scope 或 outbox 中残留的裸 scope 使用 `scripts/check-read-model-scope-contracts.py` 检查和受控清理。
+关注项目范围、费用归因、导出 shape、成本统计标签规则、cost read model freshness 和 query/runtime I/O。成本统计 read model refresh scope 必须是 `active:YYYY-MM`、`all:YYYY-MM`、`active:all` 或 `all:all`；旧的裸月份/裸 `all` 只能在统一 read model refresh scope gateway 中归一化，不能直接进入 durable queue。生产旧 readiness、dirty scope 或 outbox 中残留的裸 scope 使用 `scripts/check-read-model-scope-contracts.py` 检查和受控清理。
 
 模块状态为 `closed`：API/query miss 只返回 `refreshing` 并入队 `cost_statistics.read_model.refresh`，不再同步调用 live `CostStatisticsService` 或本地 read model fallback；live export helper 和 `ProjectDetailExportService` 已删除。历史 `cost_statistics_cache_warmup` job type 仅作为兼容识别入口，不得写成本统计 read model。
 
 生产刷新由专用 `cost-statistics` RabbitMQ consumer 承担独立性能 lane；旧 `cost-tax` 成本统计兼容消费者已移除，`cost-tax` 只保留税金抵扣兼容链路。当前 P2/P3 closure 按首屏 API 或 direct refresh p95 <= 1000ms 验收，写操作链路还要求 operation-to-fresh p99 <= 3000ms。`cost_statistics` freshness 仍以 PostgreSQL dirty scope/outbox/readiness 为事实源，不能为了达标把 stale 伪装成 fresh。
 
 月度 scope projection 只能消费对应 `read_model.workbench_generations` 的 active generation，并必须把 active generation 的 `source_versions` 纳入自身 `source_versions`。禁止直接按 `scope_key` 扫描 `read_model.workbench_groups` / `workbench_rows` 的历史 generation；父 scope shard 枚举也只能来自 active `workbench_generations`。当 SQL read model 已经 fresh 且 `source_versions` 完全一致时，worker 可以返回 `skipped/source_versions_unchanged`，不得扫描 Workbench groups 或重写 payload；缺少读取接口或版本不一致时必须按 active generation 重建。
+
+2026-07-10 后成本统计页面有两组统计口径：`按项目`、`按银行`、`按OA费用类型` 是 OA 配对流水统计，只消费规则选中后的 `time_rows`；`按标签`、`按时间` 是全银行支出流水统计，只消费规则选中后的 `bank_flow_time_rows`。两组总金额可以不同，但组内视图总金额必须一致。成本统计标签规则由右侧紧凑抽屉维护，数据来自 `AppSettingsService.get_cost_statistics_tag_selection_payload()` 归一后的银行主/子标签和虚拟 `__uncategorized__` 未分类标签；保存规则只持久化 app settings，不触发 read model rebuild，页面等待当前 `cost_statistics` scope fresh 后关闭抽屉。
 
 ## 维护触发器
 

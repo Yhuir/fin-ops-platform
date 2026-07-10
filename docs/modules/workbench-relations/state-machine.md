@@ -34,7 +34,8 @@ confirmed relation fact 不等于关联台 paired zone。普通 `manual_confirme
 | `etc_historical_repair` | ETC repair | 是 | 历史 ETC 修复工具创建或修复的关系。 |
 | `etc_batch_invoice_link` | ETC repair/link | 是 | 历史 ETC 批次补关联或 existing batch link 兼容关系；新增写入必须通过 command service，不允许页面 service 直接写 pair snapshot。 |
 | `input_invoice_oa_reverse` | 进项发票使用 | 是 | 以发票反提 OA 后的本地确认关系。 |
-| `automatic_decision` | 自动匹配内部 read model | 否 | 不能作为 active relation mode 写入。`free + paired + paired display` 且金额校验 matched、无 active 冲突、同 row-set 未被撤回的 decision，会通过 `manual_confirmed` active relation 落库并标记 consumed；open/proposed decision 不进入下游业务关系。 |
+
+`automatic_decision` 不是合法 relation mode，不能写入 active relation，也不能作为页面或下游 read model 的 linked 关系分发。`free + paired + paired display` 且金额校验 matched、无 active 冲突、同 row-set 未被撤回的 decision，如需成为 linked 关系，必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写成 `manual_confirmed` active relation 并标记 consumed；open/proposed decision 不进入下游业务关系。
 
 新增 mode 必须同时定义：
 

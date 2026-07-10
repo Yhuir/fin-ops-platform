@@ -624,7 +624,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(failed_payload["status"], "oa_draft_failed")
         self.assertEqual(failed_payload["version"], 2)
 
-    def test_oa_reverse_preview_marks_candidate_oa_relation_as_non_selectable(self) -> None:
+    def test_oa_reverse_preview_ignores_candidate_oa_relation_as_existing_link(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             invoice = self._invoice("inv-candidate-oa", "3002", "候选供应商", total_with_tax="109.00")
@@ -684,16 +684,11 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["invoiceCount"], 0)
-        self.assertFalse(payload["canCreateDraft"])
-        self.assertEqual(payload["nextAction"], "no_valid_candidates")
-        self.assertEqual(payload["invoiceRows"], [])
-        self.assertEqual(len(payload["rejectedInvoices"]), 1)
-        rejected = payload["rejectedInvoices"][0]
-        self.assertEqual(rejected["invoiceId"], invoice.id)
-        self.assertEqual(rejected["invoiceNo"], "3002")
-        self.assertEqual(rejected["reasonCode"], "already_has_candidate_oa")
-        self.assertEqual(rejected["oaRelationStatus"], "candidate")
+        self.assertEqual(payload["invoiceCount"], 1)
+        self.assertTrue(payload["canCreateDraft"])
+        self.assertEqual(payload["nextAction"], "create_batch")
+        self.assertEqual([row["invoiceId"] for row in payload["invoiceRows"]], [invoice.id])
+        self.assertEqual(payload["rejectedInvoices"], [])
 
     def test_oa_reverse_draft_route_creates_draft_then_waits_for_user_submission_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -28,6 +28,7 @@ type MockApiOptions = {
   costRefreshingMonths?: string[];
   costExportErrorViews?: string[];
   costDuplicateTransactionRows?: boolean;
+  costTagRulesCanSave?: boolean;
   sessionMode?: "authorized" | "forbidden" | "expired" | "error";
   sessionAccessTier?: "admin" | "full_access" | "read_export_only" | "denied";
   sessionUsername?: string;
@@ -5108,6 +5109,18 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/operations/app-health/page-audit": ({ url }) => ({
+      body: {
+        mode: "page-business-read-model-audit",
+        domain_key: url.searchParams.get("domain") ?? "",
+        overall_status: "pass",
+        summary: {
+          blocking_issue_count: 0,
+          issue_count: 0,
+        },
+        issues: [],
+      },
+    }),
     "/api/background-jobs/active": () => ({
       body: {
         jobs: cloneJson(backgroundJobs),
@@ -5414,6 +5427,51 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return { status: 500, body: { message: "cost statistics failed" } };
       }
       return { body: buildCostStatisticsMonthPayload(month, projectScope) };
+    },
+    "/api/cost-statistics/tag-rules": ({ init, jsonBody }) => {
+      const selectedCodes = Array.isArray(jsonBody?.selected_tag_codes)
+        ? jsonBody.selected_tag_codes.map((code) => String(code))
+        : ["fee", "__uncategorized__"];
+      return {
+        body: {
+          version: init?.method === "PUT" ? 2 : 1,
+          bank_auto_tag_rules_version: 8,
+          default_selection_applied: init?.method !== "PUT",
+          selected_tag_codes: selectedCodes,
+          effective_selected_tag_codes: selectedCodes,
+          inactive_selected_tag_codes: [],
+          active_tags: [
+            {
+              code: "fee",
+              label: "材料费",
+              path: ["费用", "材料费"],
+              source: "custom",
+              status: "active",
+              direction: "expense",
+              output_primary_label: "费用",
+              output_sub_label: "材料费",
+            },
+            {
+              code: "__uncategorized__",
+              label: "未分类",
+              path: ["未分类", "未分类"],
+              source: "system",
+              status: "active",
+              direction: "expense",
+              output_primary_label: "未分类",
+              output_sub_label: "未分类",
+            },
+          ],
+          can_save: options.costTagRulesCanSave ?? true,
+          operation_barrier_targets: [
+            {
+              read_model_key: "cost_statistics",
+              scope_key: String(jsonBody?.current_scope_key ?? "active:2026-03"),
+              scope_type: "cost_statistics",
+            },
+          ],
+        },
+      };
     },
     "/api/cost-statistics/explorer": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";

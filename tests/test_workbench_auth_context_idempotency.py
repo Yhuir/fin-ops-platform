@@ -1243,7 +1243,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             self.assertEqual(group["oa_rows"], [])
             self.assertFalse(group["bank_rows"] and group["invoice_rows"])
 
-    def test_withdraw_link_splits_pure_candidate_group_without_relation_history(self) -> None:
+    def test_withdraw_link_rejects_pure_candidate_group_without_relation_history(self) -> None:
         candidate_service = WorkbenchCandidateMatchService()
         candidate = candidate_service.upsert_candidate(
             {
@@ -1287,23 +1287,21 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 "month": "all",
                 "row_ids": ["bank-candidate"],
                 "operation_type": "split_candidate",
-                "preview_id": preview.payload["preview_id"],
-                "expected_versions": preview.payload["submit_expected_versions"],
                 "idempotency_key": "split-candidate:1",
             },
             request_id="req-split-candidate",
         )
 
-        self.assertEqual(preview.status_code, HTTPStatus.OK)
-        self.assertEqual(preview.payload["operation_type"], "split_candidate")
-        self.assertEqual(preview.payload["candidate_keys"], [candidate["candidate_key"]])
-        self.assertEqual(submit.status_code, HTTPStatus.OK)
+        self.assertEqual(preview.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(preview.payload["error"], "workbench_relation_not_found")
+        self.assertEqual(submit.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(submit.payload["error"], "invalid_withdraw_link_request")
         stored = candidate_service.list_candidates_by_month("2026-05")[0]
-        self.assertEqual(stored["status"], "suppressed")
-        self.assertEqual(stored["suppressed_reason"], "manual_override")
-        self.assertEqual(persist_calls, [{"operation": "split_candidate"}])
+        self.assertEqual(stored["status"], candidate["status"])
+        self.assertEqual(stored.get("suppressed_reason"), candidate.get("suppressed_reason"))
+        self.assertEqual(persist_calls, [])
 
-    def test_withdraw_link_preview_splits_reconciliation_decision_when_no_active_relation(self) -> None:
+    def test_withdraw_link_preview_rejects_reconciliation_decision_when_no_active_relation(self) -> None:
         decision = {
             "decision_id": "decision-bank-invoice",
             "decision_key": "decision-bank-invoice",
@@ -1344,14 +1342,11 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(preview.status_code, HTTPStatus.OK)
-        self.assertEqual(preview.payload["operation_type"], "split_candidate")
-        self.assertEqual(preview.payload["candidate_keys"], ["decision-bank-invoice"])
-        self.assertEqual(preview.payload["affected_row_ids"], ["bank-decision", "invoice-decision"])
-        self.assertIn("decision:decision-bank-invoice", preview.payload["submit_expected_versions"])
-        self.assertIn("2026-02", [call["scope_month"] for call in decision_store.list_calls])
+        self.assertEqual(preview.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(preview.payload["error"], "workbench_relation_not_found")
+        self.assertEqual(decision_store.list_calls, [])
 
-    def test_withdraw_link_submit_suppresses_reconciliation_decision_candidate(self) -> None:
+    def test_withdraw_link_submit_rejects_reconciliation_decision_candidate_operation(self) -> None:
         decision = {
             "decision_id": "decision-bank-invoice",
             "decision_key": "decision-bank-invoice",
@@ -1398,27 +1393,18 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 "month": "all",
                 "row_ids": ["bank-decision", "invoice-decision"],
                 "operation_type": "split_candidate",
-                "preview_id": preview.payload["preview_id"],
-                "expected_versions": preview.payload["submit_expected_versions"],
                 "idempotency_key": "split-decision:1",
             },
             request_id="req-split-decision",
         )
 
-        self.assertEqual(submit.status_code, HTTPStatus.OK)
-        self.assertEqual(submit.payload["operation"], "split_candidate")
-        self.assertEqual(decision_store.decisions[0]["decision_status"], "suppressed")
-        self.assertEqual(
-            decision_store.suppress_calls,
-            [
-                {
-                    "row_ids": ["bank-decision", "invoice-decision"],
-                    "exception_case_id": "workbench_split_candidate",
-                }
-            ],
-        )
-        self.assertEqual(lifecycle_calls[0]["args"][0], "candidate_match_changed")
-        self.assertEqual(lifecycle_calls[0]["kwargs"]["scope_keys"], ["2026-02"])
+        self.assertEqual(preview.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(preview.payload["error"], "workbench_relation_not_found")
+        self.assertEqual(submit.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(submit.payload["error"], "invalid_withdraw_link_request")
+        self.assertEqual(decision_store.decisions[0]["decision_status"], "paired")
+        self.assertEqual(decision_store.suppress_calls, [])
+        self.assertEqual(lifecycle_calls, [])
 
     def test_confirm_and_cancel_link_fail_fast_without_relation_command_service(self) -> None:
         facade = _new_facade()

@@ -625,7 +625,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             [summary["bankTransactionId"] for summary in relation_detail["summaries"]], ["bank-exact", "bank-old"]
         )
 
-    def test_candidate_relations_are_displayed_without_marking_invoice_paid(self) -> None:
+    def test_candidate_relations_are_not_displayed_or_marked_paid(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         invoice = self._invoice("inv-candidate", "9202", vendor, total_with_tax="100.00")
         bank = self._bank_transaction("bank-candidate", "100.00")
@@ -676,10 +676,10 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         row = service.list_rows()["rows"][0]
 
-        self.assertEqual(row["oa"]["relationCount"], 1)
-        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
-        self.assertEqual(row["oa"]["summaries"][0]["relationStatus"], "candidate")
-        self.assertEqual(row["bankTransactions"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["oa"]["relationCount"], 0)
+        self.assertEqual(row["bankTransactions"]["relationCount"], 0)
+        self.assertEqual(row["oa"]["summaries"], [])
+        self.assertEqual(row["bankTransactions"]["summaries"], [])
         self.assertEqual(row["paymentStatus"]["code"], "pending")
 
     def test_month_scope_unlinked_row_does_not_hide_cross_month_linked_relation(self) -> None:
@@ -762,7 +762,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(repository.transaction_page_calls[0]["date_to"], "2026-05-31")
         self.assertEqual(repository.transaction_get_calls, [april_bank.id])
 
-    def test_oa_attachment_source_relation_displays_for_promoted_formal_invoice(self) -> None:
+    def test_oa_attachment_source_candidate_relation_is_not_displayed_for_promoted_formal_invoice(self) -> None:
         vendor = self._counterparty("vendor", "安徽德易智莱科技有限公司")
         invoice = self._invoice(
             "inv-formal-promoted",
@@ -827,13 +827,13 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         row = service.list_rows()["rows"][0]
 
         self.assertEqual(row["invoice"]["sellerName"], "安徽德易智莱科技有限公司")
-        self.assertEqual(row["oa"]["relationCount"], 1)
-        self.assertEqual(row["oa"]["primaryOaId"], "oa-deyizhilai")
-        self.assertEqual(row["oa"]["applicantName"], "樊相芳")
-        self.assertEqual(row["oa"]["summaries"][0]["relationStatus"], "candidate")
-        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
-        self.assertEqual(row["bankTransactions"]["primaryBankTransactionId"], bank.id)
-        self.assertEqual(row["bankTransactions"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["oa"]["relationCount"], 0)
+        self.assertIsNone(row["oa"]["primaryOaId"])
+        self.assertEqual(row["oa"]["applicantName"], "")
+        self.assertEqual(row["oa"]["summaries"], [])
+        self.assertEqual(row["bankTransactions"]["relationCount"], 0)
+        self.assertIsNone(row["bankTransactions"]["primaryBankTransactionId"])
+        self.assertEqual(row["bankTransactions"]["summaries"], [])
         self.assertEqual(row["paymentStatus"]["code"], "pending")
 
     def test_details_and_filter_options_have_complete_contract_shape(self) -> None:

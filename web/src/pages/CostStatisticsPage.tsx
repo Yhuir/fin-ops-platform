@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { formatMonthLabel } from "../components/MonthPicker";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
+import CostStatisticsTagRulesDrawer from "../components/cost-statistics/CostStatisticsTagRulesDrawer";
 import ExportCenterModal, {
   type ExportCenterMode,
   type ExportRangeMode,
@@ -19,10 +20,12 @@ import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   exportCostStatisticsView,
   fetchCostStatisticsExplorer,
+  fetchCostStatisticsTagRules,
   fetchCostStatisticsExportPreview,
   fetchCostTransactionDetail,
   getCachedCostStatisticsExplorer,
   clearCostStatisticsExplorerCache,
+  saveCostStatisticsTagRules,
   type CostExportParams,
   type PreviewCostExportParams,
 } from "../features/cost-statistics/api";
@@ -30,6 +33,7 @@ import { ApiClientError } from "../features/apiClient";
 import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { importWorkflowPath } from "../features/imports/importRoutes";
+import { waitForOperationFreshness, type OperationBarrierTarget } from "../features/operationBarrier/api";
 import type {
   CostBankAccount,
   CostExpenseTypeExplorerRow,
@@ -37,6 +41,7 @@ import type {
   CostProjectExplorerRow,
   CostStatisticsExplorer,
   CostStatisticsExportPreview,
+  CostStatisticsTagRules,
   CostTimeRow,
   CostTransactionDetail,
 } from "../features/cost-statistics/types";
@@ -452,6 +457,42 @@ function getCostStatisticsLoadErrorMessage(error: unknown) {
   return "成本统计数据加载失败，请点击刷新重试。";
 }
 
+function getCostStatisticsActionErrorMessage(error: unknown) {
+  if (error instanceof ApiClientError) {
+    const message = error.message.trim();
+    if (message) {
+      return message;
+    }
+  }
+  return "成本统计规则保存失败，请稍后重试。";
+}
+
+function localCostTransactionDetailFromRow(row: CostTimeRow, month: string): CostTransactionDetail {
+  return {
+    month: row.tradeTime.slice(0, 7) || month,
+    transaction: {
+      id: row.transactionId,
+      projectName: row.projectName || "未配对OA",
+      expenseType: row.expenseType,
+      expenseContent: row.expenseContent,
+      tradeTime: row.tradeTime,
+      direction: row.direction,
+      amount: row.amount,
+      counterpartyName: row.counterpartyName,
+      paymentAccountLabel: row.paymentAccountLabel,
+      oaApplicant: "—",
+      remark: row.remark,
+      summaryFields: {},
+      detailFields: {},
+      bankTagCode: row.bankTagCode,
+      bankTagLabel: row.bankTagLabel,
+      bankTagPrimaryLabel: row.bankTagPrimaryLabel,
+      bankTagSubLabel: row.bankTagSubLabel,
+      bankTagLabelPath: row.bankTagLabelPath,
+    },
+  };
+}
+
 function ScopeRangePicker({
   ariaLabel,
   label,
@@ -655,6 +696,13 @@ export default function CostStatisticsPage() {
   const [exportPreview, setExportPreview] = useState<CostStatisticsExportPreview | null>(null);
   const [exportCenterMode, setExportCenterMode] = useState<ExportCenterMode>("time");
   const [domainRefreshNonce, setDomainRefreshNonce] = useState(0);
+  const [isTagRulesDrawerOpen, setIsTagRulesDrawerOpen] = useState(false);
+  const [tagRules, setTagRules] = useState<CostStatisticsTagRules | null>(null);
+  const [tagRuleDraftCodes, setTagRuleDraftCodes] = useState<string[]>([]);
+  const [isTagRulesLoading, setIsTagRulesLoading] = useState(false);
+  const [isTagRulesSaving, setIsTagRulesSaving] = useState(false);
+  const [tagRulesError, setTagRulesError] = useState<string | null>(null);
+  const [tagRulesSyncMessage, setTagRulesSyncMessage] = useState<string | null>(null);
 
   const [timeRangeMode, setTimeRangeMode] = useState<ExportRangeMode>("month");
   const [timeMonth, setTimeMonth] = useState(DEFAULT_MONTH);
@@ -738,6 +786,7 @@ export default function CostStatisticsPage() {
         : expenseTypeScopeMode === "month"
           ? expenseTypeScopeMonth
           : "all";
+  const currentCostStatisticsScopeKey = `${costProjectScope}:${explorerMonth}`;
   function resetDetailSelection() {
     setTransactionDetail(null);
     setSelectedTimeTransactionId(null);
@@ -755,11 +804,121 @@ export default function CostStatisticsPage() {
     clearCostStatisticsExplorerCache();
     setDomainRefreshNonce((current) => current + 1);
   }, []);
+  const openTagRulesDrawer = useCallback(() => {
+    setTagRulesError(null);
+    setTagRulesSyncMessage(null);
+    setIsTagRulesDrawerOpen(true);
+  }, []);
+  const closeTagRulesDrawer = useCallback(() => {
+    if (isTagRulesSaving) {
+      return;
+    }
+    setIsTagRulesDrawerOpen(false);
+    setTagRulesError(null);
+    setTagRulesSyncMessage(null);
+  }, [isTagRulesSaving]);
+  const toggleTagRuleCode = useCallback((code: string) => {
+    setTagRuleDraftCodes((current) => (
+      current.includes(code)
+        ? current.filter((item) => item !== code)
+        : [...current, code]
+    ));
+  }, []);
+  const toggleTagRuleGroup = useCallback((codes: string[], checked: boolean) => {
+    setTagRuleDraftCodes((current) => {
+      const next = new Set(current);
+      for (const code of codes) {
+        if (checked) {
+          next.add(code);
+        } else {
+          next.delete(code);
+        }
+      }
+      return Array.from(next);
+    });
+  }, []);
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleDomainMutation);
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleDomainMutation);
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, handleDomainMutation);
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleDomainMutation);
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, handleDomainMutation);
+
+  useEffect(() => {
+    if (!isTagRulesDrawerOpen) {
+      return undefined;
+    }
+    const controller = new AbortController();
+    async function loadTagRules() {
+      setIsTagRulesLoading(true);
+      setTagRulesError(null);
+      try {
+        const payload = await fetchCostStatisticsTagRules(controller.signal);
+        if (!controller.signal.aborted) {
+          setTagRules(payload);
+          setTagRuleDraftCodes(payload.effectiveSelectedTagCodes);
+        }
+      } catch (caught) {
+        if (!controller.signal.aborted) {
+          setTagRulesError(getCostStatisticsLoadErrorMessage(caught));
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsTagRulesLoading(false);
+        }
+      }
+    }
+    void loadTagRules();
+    return () => controller.abort();
+  }, [isTagRulesDrawerOpen]);
+
+  const saveTagRules = useCallback(async () => {
+    if (!tagRules || isTagRulesSaving) {
+      return;
+    }
+    setIsTagRulesSaving(true);
+    setTagRulesError(null);
+    setTagRulesSyncMessage("正在保存规则...");
+    try {
+      const result = await saveCostStatisticsTagRules({
+        expectedVersion: tagRules.version,
+        selectedTagCodes: tagRuleDraftCodes,
+        currentScopeKey: currentCostStatisticsScopeKey,
+      });
+      setTagRules(result);
+      setTagRuleDraftCodes(result.effectiveSelectedTagCodes);
+      clearCostStatisticsExplorerCache();
+      const targets: OperationBarrierTarget[] = result.operationBarrierTargets.length > 0
+        ? result.operationBarrierTargets
+        : [{ readModelKey: "cost_statistics", scopeKey: currentCostStatisticsScopeKey, scopeType: "cost_statistics" }];
+      setTagRulesSyncMessage("规则已保存，正在等待成本统计同步...");
+      await waitForOperationFreshness(targets, {
+        timeoutMs: 6_000,
+        intervalMs: 200,
+        onStatus: (status) => {
+          setTagRulesSyncMessage(status.fresh ? "成本统计已同步，正在刷新页面..." : "规则已保存，正在等待成本统计同步...");
+        },
+      });
+      const explorerPayload = await fetchCostStatisticsExplorer(explorerMonth, undefined, costProjectScope);
+      setExplorerData(explorerPayload);
+      if (explorerMonth === "all") {
+        setExportReferenceData(explorerPayload);
+      }
+      setTagRulesSyncMessage(null);
+      setIsTagRulesDrawerOpen(false);
+    } catch (caught) {
+      setTagRulesError(getCostStatisticsActionErrorMessage(caught));
+      setTagRulesSyncMessage(null);
+    } finally {
+      setIsTagRulesSaving(false);
+    }
+  }, [
+    costProjectScope,
+    currentCostStatisticsScopeKey,
+    explorerMonth,
+    isTagRulesSaving,
+    tagRuleDraftCodes,
+    tagRules,
+  ]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -890,45 +1049,46 @@ export default function CostStatisticsPage() {
 	  }, [viewMode, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth]);
 
   const timeRows = explorerData?.timeRows ?? [];
+  const bankFlowRows = explorerData?.bankFlowTimeRows ?? timeRows;
   const availableScopeYears = useMemo(
     () =>
-      Array.from(new Set((explorerData?.timeRows ?? []).map((row) => row.tradeTime.slice(0, 4)).filter(Boolean))).sort(
+      Array.from(new Set([...timeRows, ...bankFlowRows].map((row) => row.tradeTime.slice(0, 4)).filter(Boolean))).sort(
         (left, right) => right.localeCompare(left, "zh-CN"),
       ),
-    [explorerData],
+    [bankFlowRows, timeRows],
   );
   const filteredTimeRows = useMemo(
     () =>
       filterScopeTimeRows(
-        explorerData?.timeRows ?? [],
+        bankFlowRows,
 	        timeScopeMode,
 	        timeScopeYear,
 	        timeScopeMonth,
 	      ),
-	    [explorerData, timeScopeMode, timeScopeYear, timeScopeMonth],
+	    [bankFlowRows, timeScopeMode, timeScopeYear, timeScopeMonth],
 	  );
   const timeTotalAmount = useMemo(() => formatMoney(sumCostTimeRows(filteredTimeRows)), [filteredTimeRows]);
   const filteredProjectTimeRows = useMemo(
     () =>
       filterScopeTimeRows(
-        explorerData?.timeRows ?? [],
+        timeRows,
 	        projectScopeMode,
 	        projectScopeYear,
 	        projectScopeMonth,
 	      ),
-	    [explorerData, projectScopeMode, projectScopeYear, projectScopeMonth],
+	    [projectScopeMode, projectScopeYear, projectScopeMonth, timeRows],
 	  );
   const projectTotalAmount = useMemo(() => formatMoney(sumCostTimeRows(filteredProjectTimeRows)), [filteredProjectTimeRows]);
   const projectRows = useMemo(() => buildProjectRowsFromTimeRows(filteredProjectTimeRows), [filteredProjectTimeRows]);
   const filteredBankTimeRows = useMemo(
     () =>
       filterScopeTimeRows(
-        explorerData?.timeRows ?? [],
+        timeRows,
 	        bankScopeMode,
 	        bankScopeYear,
 	        bankScopeMonth,
 	      ),
-	    [explorerData, bankScopeMode, bankScopeYear, bankScopeMonth],
+	    [bankScopeMode, bankScopeYear, bankScopeMonth, timeRows],
 	  );
   const bankRows = useMemo(
     () => buildBankRowsFromTimeRowsAndAccounts(filteredBankTimeRows, explorerData?.bankAccounts ?? []),
@@ -938,16 +1098,16 @@ export default function CostStatisticsPage() {
   const filteredExpenseTypeRows = useMemo(
     () =>
       filterScopeTimeRows(
-        explorerData?.timeRows ?? [],
+        timeRows,
 	        expenseTypeScopeMode,
 	        expenseTypeScopeYear,
 	        expenseTypeScopeMonth,
 	      ),
 	    [
-	      explorerData,
 	      expenseTypeScopeMode,
 	      expenseTypeScopeYear,
 	      expenseTypeScopeMonth,
+	      timeRows,
 	    ],
 	  );
   const expenseTypeTotalAmount = useMemo(() => formatMoney(sumCostTimeRows(filteredExpenseTypeRows)), [filteredExpenseTypeRows]);
@@ -958,12 +1118,12 @@ export default function CostStatisticsPage() {
   const filteredBankTagRows = useMemo(
     () =>
       filterScopeTimeRows(
-        explorerData?.timeRows ?? [],
+        bankFlowRows,
 	        bankTagScopeMode,
 	        bankTagScopeYear,
 	        bankTagScopeMonth,
 	      ),
-	    [explorerData, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth],
+	    [bankFlowRows, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth],
 	  );
   const bankTagTotalAmount = useMemo(() => formatMoney(sumCostTimeRows(filteredBankTagRows)), [filteredBankTagRows]);
   const bankTagPrimaryRows = useMemo(
@@ -1170,6 +1330,12 @@ export default function CostStatisticsPage() {
     if (source === "bankTag") {
       setSelectedBankTagTransactionId(row.transactionId);
     }
+    const hasOaPairedRow = timeRows.some((candidate) => candidate.transactionId === row.transactionId);
+    if ((source === "time" || source === "bankTag") && !hasOaPairedRow) {
+      setTransactionDetail(localCostTransactionDetailFromRow(row, explorerData?.month ?? explorerMonth));
+      setDetailLoadingMessage(null);
+      return;
+    }
     try {
       const payload = await fetchCostTransactionDetail(row.transactionId, undefined, costProjectScope);
       setTransactionDetail(payload);
@@ -1272,7 +1438,7 @@ export default function CostStatisticsPage() {
 	    } else {
 	      setExportCenterMode("time");
 	      const rangeMode = timeScopeMode === "month" ? "month" : "custom";
-	      const bounds = getScopeDateRange(timeRows, timeScopeMode, timeScopeYear, timeScopeMonth);
+	      const bounds = getScopeDateRange(bankFlowRows, timeScopeMode, timeScopeYear, timeScopeMonth);
 	      setTimeRangeMode(rangeMode);
 	      setTimeMonth(timeScopeMonth);
 	      setTimeStartDate(bounds.startDate);
@@ -1488,13 +1654,13 @@ export default function CostStatisticsPage() {
 
   return (
     <div className="page-stack cost-page">
-	      <header className="page-header">
-	        <div>
-	          <div className="page-title-row">
-	            <h1 className="page-title">成本统计</h1>
-	            {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
-	          </div>
-	        </div>
+      <header className="page-header">
+        <div>
+          <div className="page-title-row">
+            <h1 className="page-title">成本统计</h1>
+            {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
+          </div>
+        </div>
         <div className="page-header-actions cost-header-actions">
           <button
             aria-label="刷新成本统计"
@@ -1504,6 +1670,14 @@ export default function CostStatisticsPage() {
             onClick={handleManualRefresh}
           >
             刷新
+          </button>
+          <button
+            className="cost-export-button"
+            type="button"
+            disabled={isTagRulesSaving}
+            onClick={openTagRulesDrawer}
+          >
+            成本统计标签规则
           </button>
           <button
             className="cost-export-button"
@@ -1519,41 +1693,48 @@ export default function CostStatisticsPage() {
 	      <section className="cost-content-shell">
 	        <div className="cost-analysis-toolbar">
           <div className="cost-view-switcher" role="tablist" aria-label="成本统计视图切换">
-            <button
-              className={viewMode === "time" ? "cost-view-tab active" : "cost-view-tab"}
-              type="button"
-              onClick={() => handleViewModeChange("time")}
-            >
-              按时间
-            </button>
-            <button
-              className={viewMode === "project" ? "cost-view-tab active" : "cost-view-tab"}
-              type="button"
-              onClick={() => handleViewModeChange("project")}
-            >
-              按项目
-            </button>
-            <button
-              className={viewMode === "bank" ? "cost-view-tab active" : "cost-view-tab"}
-              type="button"
-              onClick={() => handleViewModeChange("bank")}
-            >
-              按银行
-            </button>
-            <button
-              className={viewMode === "expenseType" ? "cost-view-tab active" : "cost-view-tab"}
-              type="button"
-              onClick={() => handleViewModeChange("expenseType")}
-            >
-              按费用类型
-            </button>
-            <button
-              className={viewMode === "bankTag" ? "cost-view-tab active" : "cost-view-tab"}
-              type="button"
-              onClick={() => handleViewModeChange("bankTag")}
-	            >
-	              按流水标签类型
-	            </button>
+            <div className="cost-view-group">
+              <span className="cost-view-group-label">OA配对流水统计</span>
+              <button
+                className={viewMode === "project" ? "cost-view-tab active" : "cost-view-tab"}
+                type="button"
+                onClick={() => handleViewModeChange("project")}
+              >
+                按项目
+              </button>
+              <button
+                className={viewMode === "bank" ? "cost-view-tab active" : "cost-view-tab"}
+                type="button"
+                onClick={() => handleViewModeChange("bank")}
+              >
+                按银行
+              </button>
+              <button
+                className={viewMode === "expenseType" ? "cost-view-tab active" : "cost-view-tab"}
+                type="button"
+                onClick={() => handleViewModeChange("expenseType")}
+              >
+                按OA费用类型
+              </button>
+            </div>
+            <span className="cost-view-divider" aria-hidden="true" />
+            <div className="cost-view-group">
+              <span className="cost-view-group-label">流水统计</span>
+              <button
+                className={viewMode === "bankTag" ? "cost-view-tab active" : "cost-view-tab"}
+                type="button"
+                onClick={() => handleViewModeChange("bankTag")}
+              >
+                按标签
+              </button>
+              <button
+                className={viewMode === "time" ? "cost-view-tab active" : "cost-view-tab"}
+                type="button"
+                onClick={() => handleViewModeChange("time")}
+              >
+                按时间
+              </button>
+            </div>
 	          </div>
 	        </div>
 
@@ -1577,9 +1758,9 @@ export default function CostStatisticsPage() {
               : viewMode === "bank"
                 ? "当前时间范围没有可用于银行成本统计的支出流水。"
                 : viewMode === "expenseType"
-                  ? "当前时间范围没有可用于费用类型统计的支出流水。"
+                  ? "当前时间范围没有可用于 OA 费用类型统计的支出流水。"
                   : viewMode === "bankTag"
-                    ? "当前时间范围没有可用于流水标签统计的支出流水。"
+                    ? "当前时间范围没有可用于标签统计的支出流水。"
                   : "当前时间范围没有可用于成本统计的支出流水。"}
           </div>
         ) : null}
@@ -1821,14 +2002,14 @@ export default function CostStatisticsPage() {
               <div className="cost-analysis-layout explorer-layout expense-layout">
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
-                    <h2>按费用类型统计</h2>
+                    <h2>按OA费用类型统计</h2>
                     <span>{expenseTypeScopeLabel}</span>
                     <strong className="cost-section-total">总金额 {expenseTypeTotalAmount}</strong>
 	                  </div>
 	                  <div className="cost-section-heading-actions cost-project-scope-actions">
 	                    <div ref={scopeControlsRef} className="cost-scope-controls">
 	                      <ScopeRangePicker
-	                        ariaLabel="费用类型统计时间范围"
+	                        ariaLabel="OA费用类型统计时间范围"
 	                        label="时间范围"
 	                        mode={expenseTypeScopeMode}
 	                        years={availableScopeYears}
@@ -1893,7 +2074,7 @@ export default function CostStatisticsPage() {
               <div className="cost-analysis-layout explorer-layout">
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
-                    <h2>按流水标签类型统计</h2>
+                    <h2>按标签统计</h2>
                     <span>{bankTagScopeLabel}</span>
                     <strong className="cost-section-total">总金额 {bankTagTotalAmount}</strong>
                   </div>
@@ -1952,7 +2133,7 @@ export default function CostStatisticsPage() {
                       setTransactionDetail(null);
                     }}
                     renderPrimary={(row) => row.subLabel}
-                    renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.projectCount} 个项目`}
+                    renderSecondary={(row) => `${row.transactionCount} 条流水`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <span>{row.totalAmount}</span>
@@ -1995,6 +2176,21 @@ export default function CostStatisticsPage() {
           }}
         />
       ) : null}
+
+      <CostStatisticsTagRulesDrawer
+        canSave={canMutateData && (tagRules?.canSave ?? true)}
+        error={tagRulesError}
+        loading={isTagRulesLoading}
+        onClose={closeTagRulesDrawer}
+        onSave={() => void saveTagRules()}
+        onToggleCode={toggleTagRuleCode}
+        onToggleGroup={toggleTagRuleGroup}
+        open={isTagRulesDrawerOpen}
+        rules={tagRules}
+        saving={isTagRulesSaving}
+        selectedCodes={tagRuleDraftCodes}
+        syncMessage={tagRulesSyncMessage}
+      />
 
       {isExportCenterOpen ? (
         <ExportCenterModal

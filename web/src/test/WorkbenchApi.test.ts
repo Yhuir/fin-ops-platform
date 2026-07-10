@@ -79,18 +79,17 @@ describe("workbench api bank amount mapping", () => {
     vi.restoreAllMocks();
   });
 
-  test("maps split candidate withdraw preview lock fields", async () => {
+  test("maps withdraw relation preview lock fields", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
-          operation: "split_candidate",
-          operation_type: "split_candidate",
-          preview_id: "split_candidate:abc123",
-          submit_expected_versions: { "candidate:candidate-1": "needs_review" },
-          candidate_keys: ["candidate-1"],
+          operation: "withdraw_link",
+          operation_type: "withdraw_relation",
+          preview_id: "withdraw_relation:abc123",
+          submit_expected_versions: { "relation:relation-1": 3 },
           can_submit: true,
           requires_note: false,
-          message: "将取消该系统建议",
+          message: "将撤回该关联",
           before: { groups: [] },
           after: { groups: [] },
           amount_summary: {
@@ -109,11 +108,10 @@ describe("workbench api bank amount mapping", () => {
       rowIds: ["bank-candidate"],
     });
 
-    expect(preview.operation).toBe("split_candidate");
-    expect(preview.operationType).toBe("split_candidate");
-    expect(preview.previewId).toBe("split_candidate:abc123");
-    expect(preview.submitExpectedVersions).toEqual({ "candidate:candidate-1": "needs_review" });
-    expect(preview.candidateKeys).toEqual(["candidate-1"]);
+    expect(preview.operation).toBe("withdraw_link");
+    expect(preview.operationType).toBe("withdraw_relation");
+    expect(preview.previewId).toBe("withdraw_relation:abc123");
+    expect(preview.submitExpectedVersions).toEqual({ "relation:relation-1": 3 });
   });
 
   test("maps two-pane confirm operation projection as an open manual partial relation", async () => {

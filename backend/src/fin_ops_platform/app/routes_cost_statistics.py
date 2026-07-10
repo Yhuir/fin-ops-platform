@@ -6,8 +6,15 @@ from time import monotonic
 from typing import Any, Callable
 from urllib.parse import unquote
 
+from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session
+from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.cost_statistics_query_service import CostStatisticsReadModelNotFreshError
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsExportLimitError
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+
+ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
+WriteSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
+JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
 
 
 class CostStatisticsApiRoutes:
@@ -22,6 +29,10 @@ class CostStatisticsApiRoutes:
         duration_ms: Callable[[float], float] | None = None,
         now_provider: Callable[[], datetime] | None = None,
         optional_bool_parser: Callable[[str | None], bool] | None = None,
+        app_settings_service: Any | None = None,
+        resolve_read_session: ReadSessionResolver | None = None,
+        resolve_write_session: WriteSessionResolver | None = None,
+        load_json_body: JsonBodyLoader | None = None,
     ) -> None:
         self._query_service = query_service
         self._json_response = json_response
@@ -31,10 +42,25 @@ class CostStatisticsApiRoutes:
         self._duration_ms = duration_ms or (lambda started_at: (monotonic() - started_at) * 1000)
         self._now_provider = now_provider or datetime.now
         self._optional_bool_parser = optional_bool_parser or _parse_optional_bool_default_true
+        self._app_settings_service = app_settings_service
+        self._resolve_read_session = resolve_read_session
+        self._resolve_write_session = resolve_write_session
+        self._load_json_body = load_json_body
 
-    def route(self, method: str, route_path: str, query: dict[str, list[str]]) -> Any | None:
+    def route(
+        self,
+        method: str,
+        route_path: str,
+        query: dict[str, list[str]],
+        body: str | bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any | None:
         if method == "GET" and route_path == "/api/cost-statistics":
             return self.handle_month(query.get("month", [None])[0], query.get("project_scope", [None])[0])
+        if method == "GET" and route_path == "/api/cost-statistics/tag-rules":
+            return self.handle_tag_rules(headers)
+        if method == "PUT" and route_path == "/api/cost-statistics/tag-rules":
+            return self.handle_update_tag_rules(body, headers)
         if method == "GET" and route_path == "/api/cost-statistics/explorer":
             return self.handle_explorer(query.get("month", [None])[0], query.get("project_scope", [None])[0])
         if method == "GET" and route_path == "/api/cost-statistics/export-preview":
@@ -79,6 +105,49 @@ class CostStatisticsApiRoutes:
             transaction_id = route_path.rsplit("/", 1)[-1]
             return self.handle_transaction(transaction_id, query.get("project_scope", [None])[0])
         return None
+
+    def handle_tag_rules(self, headers: dict[str, str] | None) -> Any:
+        session, error = self._read_session(headers)
+        if error is not None:
+            return error
+        service = self._settings_service()
+        return self._json_response(
+            HTTPStatus.OK,
+            service.get_cost_statistics_tag_selection_payload(
+                can_save=bool(session is None or session.can_mutate_data),
+            ),
+        )
+
+    def handle_update_tag_rules(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+        session, error = self._write_session(headers)
+        if error is not None:
+            return error
+        payload, body_error = self._load_body(body)
+        if body_error is not None:
+            return body_error
+        service = self._settings_service()
+        try:
+            result = service.update_cost_statistics_tag_selection(
+                payload,
+                actor_id=actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or "cost_statistics"),
+            )
+        except AppSettingsValidationError as exc:
+            status = (
+                HTTPStatus.CONFLICT
+                if exc.error_code == "cost_statistics_tag_selection_version_conflict"
+                else HTTPStatus.BAD_REQUEST
+            )
+            return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
+        current_scope_key = str(payload.get("current_scope_key") or payload.get("scope_key") or "active:all").strip()
+        result.update(
+            write_target_envelope(
+                read_model_key="cost_statistics",
+                scope_keys=[current_scope_key],
+                scope_type="cost_statistics",
+                fallback_scope_key="active:all",
+            )
+        )
+        return self._json_response(HTTPStatus.OK, result)
 
     def handle_month(self, month: str | None, project_scope: str | None) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
@@ -272,6 +341,26 @@ class CostStatisticsApiRoutes:
                 {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
             )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _settings_service(self) -> Any:
+        if self._app_settings_service is None:
+            raise RuntimeError("Cost statistics app settings service is not configured.")
+        return self._app_settings_service
+
+    def _read_session(self, headers: dict[str, str] | None) -> tuple[OARequestSession | None, Any | None]:
+        if self._resolve_read_session is None:
+            return None, None
+        return self._resolve_read_session(headers)
+
+    def _write_session(self, headers: dict[str, str] | None) -> tuple[OARequestSession | None, Any | None]:
+        if self._resolve_write_session is None:
+            return None, None
+        return self._resolve_write_session(headers)
+
+    def _load_body(self, body: str | bytes | None) -> tuple[dict[str, Any], Any | None]:
+        if self._load_json_body is None:
+            raise RuntimeError("Cost statistics JSON body loader is not configured.")
+        return self._load_json_body(body)
 
     @staticmethod
     def _normalize_project_scope(project_scope: str | None) -> str:

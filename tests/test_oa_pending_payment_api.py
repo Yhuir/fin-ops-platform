@@ -449,7 +449,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["linkedOaRowIds"], ["oa-api", "oa-extra"])
         self.assertEqual(command_service.candidate_queries[0]["oa_row_ids"], ["oa-api", "oa-extra"])
 
-    def test_candidate_bank_relation_is_visible_without_marking_oa_paid(self) -> None:
+    def test_candidate_bank_relation_is_not_visible_or_marked_paid(self) -> None:
         bank = BankTransaction(
             id="bank-candidate",
             account_no="622200001234",
@@ -479,8 +479,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         row = service.list_rows(page_size=20)["rows"][0]
 
-        self.assertEqual(row["bankTransaction"]["relationCount"], 1)
-        self.assertEqual(row["bankTransaction"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["bankTransaction"]["relationCount"], 0)
+        self.assertEqual(row["bankTransaction"]["summaries"], [])
         self.assertEqual(row["bankTransaction"]["paidTotal"], "0.00")
         self.assertNotEqual(row["paymentStatus"]["code"], "paid")
 

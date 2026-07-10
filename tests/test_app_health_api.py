@@ -961,6 +961,20 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(payload["error"], "admin_only")
 
+    def test_operations_pending_invoice_refresh_is_admin_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            response = app.handle_request(
+                "POST",
+                "/api/operations/app-health/pending-invoice-refresh",
+                json.dumps({"scope_keys": ["expense:all"]}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "admin_only")
+
     def test_operations_input_invoice_usage_refresh_enqueues_valid_scopes_for_admin(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1021,6 +1035,36 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(queue.enqueued[0]["metadata"]["source"], "operations_app_health")
         self.assertEqual(queue.enqueued[0]["metadata"]["audit"], "output_invoice_collection")
 
+    def test_operations_pending_invoice_refresh_enqueues_valid_scopes_for_admin(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            queue = FakeRuntimeQueueRepository()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+
+            response = app.handle_request(
+                "POST",
+                "/api/operations/app-health/pending-invoice-refresh",
+                json.dumps(
+                    {
+                        "scope_keys": ["expense:all", "expense:all", "income:all"],
+                        "reason": "production_audit_repair",
+                        "metadata": {"audit": "pending_invoice"},
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["read_model_key"], "pending_invoice")
+        self.assertEqual(payload["enqueued_scope_keys"], ["expense:all", "income:all"])
+        self.assertEqual(payload["enqueued_count"], 2)
+        self.assertEqual([item["scope_type"] for item in queue.enqueued], ["pending_invoice", "pending_invoice"])
+        self.assertEqual([item["scope_key"] for item in queue.enqueued], ["expense:all", "income:all"])
+        self.assertTrue(all(item["priority"] == "high" for item in queue.enqueued))
+        self.assertTrue(all(item["reason"] == "production_audit_repair" for item in queue.enqueued))
+        self.assertEqual(queue.enqueued[0]["metadata"]["source"], "operations_app_health")
+        self.assertEqual(queue.enqueued[0]["metadata"]["audit"], "pending_invoice")
+
     def test_operations_input_invoice_usage_refresh_rejects_invalid_scope(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1055,6 +1099,23 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_output_invoice_collection_refresh_scope")
         self.assertEqual(queue.enqueued, [])
 
+    def test_operations_pending_invoice_refresh_rejects_invalid_scope(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            queue = FakeRuntimeQueueRepository()
+            app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+
+            response = app.handle_request(
+                "POST",
+                "/api/operations/app-health/pending-invoice-refresh",
+                json.dumps({"scope_keys": ["2026-06"]}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_pending_invoice_refresh_scope")
+        self.assertEqual(queue.enqueued, [])
+
     def test_operations_input_invoice_usage_refresh_requires_runtime_queue(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1079,6 +1140,21 @@ class AppHealthApiTests(unittest.TestCase):
                 "POST",
                 "/api/operations/app-health/output-invoice-collection-refresh",
                 json.dumps({"scope_keys": ["2026-06"]}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["error"], "runtime_queue_required")
+
+    def test_operations_pending_invoice_refresh_requires_runtime_queue(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._runtime_repositories = SimpleNamespace(queue_repository=object())
+
+            response = app.handle_request(
+                "POST",
+                "/api/operations/app-health/pending-invoice-refresh",
+                json.dumps({"scope_keys": ["expense:all"]}),
             )
             payload = json.loads(response.body)
 

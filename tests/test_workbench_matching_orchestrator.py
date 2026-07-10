@@ -1,3 +1,4 @@
+from copy import deepcopy
 import logging
 import unittest
 
@@ -11,6 +12,7 @@ from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHIN
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_special_pair_rule_service import WORKBENCH_SPECIAL_RULES_VERSION
 
 
@@ -88,6 +90,58 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             candidates[0]["special_metadata"]["workbench_reconciliation_decision"]["rule_code"],
             "bank_invoice_exact_amount",
         )
+
+    def test_legacy_mode_auto_links_only_safe_auto_closed_candidate(self) -> None:
+        relation_repository = FakeRelationRepository()
+        candidate_service = WorkbenchCandidateMatchService()
+        safe_candidate = candidate(
+            "2026-02",
+            "bank_invoice_exact_amount",
+            ["bank-safe", "invoice-safe"],
+            status="auto_closed",
+        )
+        conflicted_candidate = {
+            **candidate(
+                "2026-02",
+                "bank_invoice_exact_amount_conflict",
+                ["bank-conflict", "invoice-conflict"],
+                status="auto_closed",
+            ),
+            "conflict_candidate_keys": ["candidate:other"],
+        }
+
+        summary = self._orchestrator(
+            row_provider=FakeRowProvider(
+                bank_rows={
+                    "2026-02": [
+                        bank_row("bank-safe", month="2026-02", amount="100.00"),
+                        bank_row("bank-conflict", month="2026-02", amount="100.00"),
+                    ]
+                },
+                invoice_rows={
+                    "2026-02": [
+                        invoice_row("invoice-safe", amount="100.00"),
+                        invoice_row("invoice-conflict", amount="100.00"),
+                    ]
+                },
+            ),
+            pair_relation_service=WorkbenchPairRelationService(),
+            candidate_service=candidate_service,
+            relation_command_service=WorkbenchRelationCommandService(relation_repository=relation_repository),
+            rules=StaticRules([safe_candidate, conflicted_candidate]),
+        ).run(changed_scope_months=["2026-02"], reason="unit-test", request_id="req-auto-link")
+
+        self.assertEqual(summary["auto_closed_count"], 2)
+        self.assertEqual(summary["auto_linked_relation_count"], 1)
+        relation_service = WorkbenchPairRelationService.from_snapshot(relation_repository.snapshot)
+        self.assertIsNotNone(relation_service.get_active_relation_by_row_id("bank-safe"))
+        self.assertIsNone(relation_service.get_active_relation_by_row_id("bank-conflict"))
+        statuses_by_rule = {
+            item["rule_code"]: item["status"]
+            for item in candidate_service.list_candidates_by_month("2026-02")
+        }
+        self.assertEqual(statuses_by_rule["bank_invoice_exact_amount"], "consumed")
+        self.assertEqual(statuses_by_rule["bank_invoice_exact_amount_conflict"], "auto_closed")
 
     def test_legacy_mode_persists_oa_bank_exact_sum_candidate(self) -> None:
         candidate_service = WorkbenchCandidateMatchService()
@@ -451,6 +505,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         read_model_service: WorkbenchReadModelService | None = None,
         exception_case_service: object | None = None,
         decision_store: WorkbenchReconciliationDecisionStore | None = None,
+        relation_command_service: object | None = None,
         rules: object,
     ) -> WorkbenchMatchingOrchestrator:
         return WorkbenchMatchingOrchestrator(
@@ -459,6 +514,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             candidate_match_service=candidate_service or WorkbenchCandidateMatchService(),
             read_model_service=read_model_service or WorkbenchReadModelService(),
             decision_store=decision_store,
+            relation_command_service=relation_command_service,
             rules=rules,
             exception_case_service=exception_case_service,
             logger=logging.getLogger("fin_ops_platform.services.workbench_matching_orchestrator"),
@@ -485,6 +541,40 @@ class FakeRowProvider:
 
     def get_invoice_rows(self, scope_month: str) -> list[dict[str, object]]:
         return list(self.invoice_rows.get(scope_month, []))
+
+
+class FakeRelationRepository:
+    def __init__(self) -> None:
+        self.snapshot: dict[str, object] = {}
+        self.save_calls: list[dict[str, object]] = []
+
+    def load_workbench_pair_relations(self) -> dict[str, object]:
+        return deepcopy(self.snapshot)
+
+    def load_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        return WorkbenchPairRelationService.from_snapshot(self.snapshot).snapshot_for_row_ids(
+            list(row_ids or []),
+            case_ids=list(case_ids or []),
+        )
+
+    def save_workbench_pair_relations(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: set[str] | None = None,
+    ) -> None:
+        self.save_calls.append(
+            {
+                "snapshot": deepcopy(snapshot),
+                "changed_case_ids": set(changed_case_ids or set()),
+            }
+        )
+        self.snapshot = deepcopy(snapshot)
 
 
 class StaticRules:
@@ -630,6 +720,19 @@ def bank_row(row_id: str, *, month: str = "2026-06", amount: str = "100.00") -> 
         "credit_amount": "",
         "counterparty_name": "供应商",
         "summary": "支付供应商",
+    }
+
+
+def invoice_row(row_id: str, *, amount: str = "100.00") -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "invoice",
+        "amount": amount,
+        "total_with_tax": amount,
+        "seller_name": "供应商",
+        "buyer_name": "客户",
+        "invoice_type": "进项发票",
+        "issue_date": "2026-02-11",
     }
 
 
