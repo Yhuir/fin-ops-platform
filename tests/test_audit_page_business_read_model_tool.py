@@ -295,6 +295,19 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("group_edge_missing_row_index", relation_sql)
         self.assertIn("row_index_edge_missing_group", relation_sql)
 
+    def test_formatted_display_amounts_are_normalized_before_numeric_proof(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="cost_statistics",
+        )
+
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("replace(member.value->>'amount', ',', '')", queried_sql)
+        self.assertIn("replace(row.payload->>'amount', ',', '')", queried_sql)
+        self.assertIn("replace(model.payload->'payload'->'summary'->>'total_amount', ',', '')", queried_sql)
+
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()
 

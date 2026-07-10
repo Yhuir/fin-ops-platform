@@ -1336,7 +1336,7 @@ def _canonical_expected_set_issues(
             select substring(model.scope_key from '([0-9]{4}-[0-9]{2})$') as scope_key,
                    member.value->>'transaction_id' as transaction_id,
                    count(*)::integer as projected_count,
-                   sum(abs(coalesce(nullif(member.value->>'amount', '')::numeric, 0)))::numeric
+                   sum(abs(coalesce(nullif(replace(member.value->>'amount', ',', ''), '')::numeric, 0)))::numeric
                        as projected_amount
             from read_model.cost_statistics_read_models model
             join lateral jsonb_array_elements(
@@ -1463,7 +1463,7 @@ def _key_display_field_issues(
                 where projected.direction <> case when source.txn_direction = 'outflow' then 'expense' else 'income' end
                    or projected.scope_month is distinct from source.txn_month
                    or abs(
-                        coalesce(nullif(projected.value->>'amount', '')::numeric, 0)
+                        coalesce(nullif(replace(projected.value->>'amount', ',', ''), '')::numeric, 0)
                         - abs(coalesce(source.amount, 0))
                    ) > 0.01
                    or coalesce(projected.value->>'counterparty_name', '')
@@ -1508,7 +1508,10 @@ def _key_display_field_issues(
                 join app.oa_applications source on source.row_id = projected.oa_id
                 where source.status <> 'deleted'
                   and (
-                        abs(coalesce(nullif(projected.value->>'amount', '')::numeric, 0) - coalesce(source.amount, 0)) > 0.01
+                        abs(
+                            coalesce(nullif(replace(projected.value->>'amount', ',', ''), '')::numeric, 0)
+                            - coalesce(source.amount, 0)
+                        ) > 0.01
                      or coalesce(projected.value->>'applicantName', '') <> coalesce(source.applicant, '')
                      or coalesce(projected.value->>'projectName', '') <> coalesce(source.project_name, '')
                      or coalesce(projected.payment_status, '') <> coalesce(projected.payload_payment_status, '')
@@ -1658,7 +1661,10 @@ def _key_display_field_issues(
                        row.expense_type as structured_expense_type,
                        row.payload->>'expense_type' as payload_expense_type
                 from read_model.cost_statistics_rows row
-                where abs(coalesce(row.amount, 0) - coalesce(nullif(row.payload->>'amount', '')::numeric, 0)) > 0.01
+                where abs(
+                        coalesce(row.amount, 0)
+                        - coalesce(nullif(replace(row.payload->>'amount', ',', ''), '')::numeric, 0)
+                      ) > 0.01
                    or coalesce(row.project_name, '') <> coalesce(row.payload->>'project_name', '')
                    or coalesce(row.expense_type, '') <> coalesce(row.payload->>'expense_type', '')
                    or coalesce(row.transaction_id, '') <> coalesce(row.payload->>'transaction_id', '')
@@ -1689,7 +1695,10 @@ def _key_display_field_issues(
                 where coalesce((model.payload->'payload'->'summary'->>'transaction_count')::integer, -1)
                       <> recalculated.row_count
                    or abs(
-                        coalesce(nullif(model.payload->'payload'->'summary'->>'total_amount', '')::numeric, 0)
+                        coalesce(
+                            nullif(replace(model.payload->'payload'->'summary'->>'total_amount', ',', ''), '')::numeric,
+                            0
+                        )
                         - recalculated.total_amount
                    ) > 0.01
                 order by model.scope_key
