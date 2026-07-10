@@ -246,6 +246,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         payload = service.list_rows(page_size=20)
 
         self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["summary"]["invoiceCount"], 3)
         row = payload["rows"][0]
         self.assertEqual(row["invoice"]["totalWithTax"], "182400.00")
         self.assertEqual(row["invoiceRelations"]["relationCount"], 3)

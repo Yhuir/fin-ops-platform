@@ -1779,7 +1779,7 @@ class OutputInvoiceCollectionQueryService:
     @staticmethod
     def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         return {
-            "invoiceCount": len(rows),
+            "invoiceCount": sum(_output_invoice_count_for_row(row) for row in rows),
             "totalWithTax": _money(sum((_decimal(row["invoice"]["totalWithTax"]) for row in rows), start=ZERO)),
             "collectedAmount": _money(sum((_decimal(row["collectionStatus"]["collectedAmount"]) for row in rows), start=ZERO)),
             "pendingAmount": _money(sum((_decimal(row["collectionStatus"]["pendingAmount"]) for row in rows), start=ZERO)),
@@ -1986,6 +1986,14 @@ def _date_only(value: str | None) -> str:
     if not text:
         return ""
     return text.split("T")[0].split(" ")[0]
+
+
+def _output_invoice_count_for_row(row: dict[str, Any]) -> int:
+    relations = row.get("invoiceRelations")
+    summaries = relations.get("summaries") if isinstance(relations, dict) else None
+    if isinstance(summaries, list) and summaries:
+        return len(summaries)
+    return 1
 
 
 def _date_parts(value: str) -> dict[str, str]:
