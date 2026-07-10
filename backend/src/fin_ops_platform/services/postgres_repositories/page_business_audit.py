@@ -549,7 +549,8 @@ def _read_model_source_version_mismatch_issues(
                  and scope.scope_type = 'bank_detail'
                  and scope.scope_key = row.scope_key
                 where row.tenant_id = %s
-                  and coalesce(row.source_versions, '{}'::jsonb) <> coalesce(scope.source_versions, '{}'::jsonb)
+                  and coalesce(row.source_versions, '{}'::jsonb) - 'source_version'
+                      <> coalesce(scope.source_versions, '{}'::jsonb) - 'source_version'
                 order by row.scope_key, row.transaction_id
                 limit %s
                 """,
@@ -557,7 +558,15 @@ def _read_model_source_version_mismatch_issues(
                 "bank_details_row_source_versions_mismatch",
             )
         )
-        queries.append(_embedded_relation_versions_query(domain, "read_model.bank_detail_scopes", "scope", tenant_id, limit))
+        queries.append(
+            _embedded_relation_source_summary_query(
+                domain,
+                "read_model.bank_detail_scopes",
+                "scope",
+                tenant_id,
+                limit,
+            )
+        )
     elif domain == "pending_invoices":
         queries = []
     elif domain == "oa_pending_payments":
@@ -801,13 +810,13 @@ def _missing_read_model_row_issues(
     if domain == "bank_details":
         sql = """
         /* check: missing_read_model_row */
-        select coalesce(source.legacy_mongo_id, source.id::text) as subject_id,
+        select source.id::text as subject_id,
                to_char(source.txn_month, 'YYYY-MM') as scope_key,
                source.amount::text as amount
         from app.bank_transactions source
         left join read_model.bank_detail_rows row
           on row.tenant_id = %s
-         and row.transaction_id = coalesce(source.legacy_mongo_id, source.id::text)
+         and row.transaction_id = source.id::text
         where source.status <> 'deleted'
           and row.transaction_id is null
         order by source.txn_month, source.id
@@ -893,7 +902,7 @@ def _orphan_read_model_row_issues(
         select row.transaction_id as subject_id, row.scope_key, row.amount::text as amount
         from read_model.bank_detail_rows row
         left join app.bank_transactions source
-          on coalesce(source.legacy_mongo_id, source.id::text) = row.transaction_id
+          on source.id::text = row.transaction_id
          and source.status <> 'deleted'
         where row.tenant_id = %s
           and source.id is null
@@ -1112,8 +1121,8 @@ def _canonical_expected_set_issues(
         projected as (
             select distinct
                 coalesce(nullif(member.value->>'id', ''), row.row_id) as row_id,
-                row.direction,
-                to_char(row.scope_month, 'YYYY-MM') as scope_key
+                case when source.txn_direction = 'outflow' then 'expense' else 'income' end as direction,
+                to_char(source.txn_month, 'YYYY-MM') as scope_key
             from read_model.pending_invoice_rows row
             join lateral jsonb_array_elements(
                 case
@@ -1123,6 +1132,11 @@ def _canonical_expected_set_issues(
                     else jsonb_build_array(jsonb_build_object('id', row.row_id))
                 end
             ) member(value) on true
+            join app.bank_transactions source
+              on coalesce(source.legacy_mongo_id, source.id::text)
+                 = coalesce(nullif(member.value->>'id', ''), row.row_id)
+             and source.status <> 'deleted'
+             and source.txn_direction in ('outflow', 'inflow')
         ),
         mismatches as (
             select 'canonical_missing_projection' as mismatch_kind, canonical.*
@@ -1307,7 +1321,7 @@ def _canonical_expected_set_issues(
                    transaction_id, count(*)::integer as projected_count,
                    sum(abs(amount))::numeric as projected_amount
             from read_model.cost_statistics_rows
-            where project_scope = 'all' and cache_status = 'fresh'
+            where project_scope = 'all'
             group by substring(scope_key from '([0-9]{4}-[0-9]{2})$'), transaction_id
         ),
         cost_mismatches as (
@@ -1401,7 +1415,7 @@ def _key_display_field_issues(
             (
                 """
                 /* check: key_display_fields */
-                select coalesce(source.legacy_mongo_id, source.id::text) as subject_id,
+                select source.id::text as subject_id,
                        to_char(source.txn_month, 'YYYY-MM') as scope_key,
                        source.amount::text as source_amount, row.amount::text as projected_amount,
                        source.txn_direction as source_direction, row.direction as projected_direction,
@@ -1412,7 +1426,7 @@ def _key_display_field_issues(
                 from app.bank_transactions source
                 join read_model.bank_detail_rows row
                   on row.tenant_id = %s
-                 and row.transaction_id = coalesce(source.legacy_mongo_id, source.id::text)
+                 and row.transaction_id = source.id::text
                 where source.status <> 'deleted'
                   and (
                         abs(coalesce(row.amount, 0) - abs(coalesce(source.amount, 0))) > 0.01
@@ -1435,7 +1449,7 @@ def _key_display_field_issues(
                 """
                 /* check: key_display_fields */
                 with projected as (
-                    select row.direction, row.scope_month, row.status_code,
+                    select row.row_id as projected_row_id, row.direction, row.scope_month, row.status_code,
                            row.payload->'invoice_acquisition_status'->>'code' as payload_status_code,
                            coalesce(nullif(member.value->>'id', ''), row.row_id) as transaction_id,
                            member.value
@@ -1460,7 +1474,10 @@ def _key_display_field_issues(
                 join app.bank_transactions source
                   on coalesce(source.legacy_mongo_id, source.id::text) = projected.transaction_id
                  and source.status <> 'deleted'
-                where projected.direction <> case when source.txn_direction = 'outflow' then 'expense' else 'income' end
+                where (
+                        projected.transaction_id = projected.projected_row_id
+                    and projected.direction <> case when source.txn_direction = 'outflow' then 'expense' else 'income' end
+                      )
                    or projected.scope_month is distinct from source.txn_month
                    or abs(
                         coalesce(nullif(replace(projected.value->>'amount', ',', ''), '')::numeric, 0)
@@ -1569,6 +1586,7 @@ def _key_display_field_issues(
                        to_char(relation.month_scope, 'YYYY-MM') as scope_key,
                        relation.relation_mode as canonical_relation_mode,
                        group_row.relation_kind as projected_relation_kind,
+                       group_row.payload->>'relation_mode' as projected_relation_mode,
                        relation.special_metadata as canonical_special_metadata,
                        group_row.payload->'special_metadata' as projected_special_metadata
                 from app.workbench_pair_relations relation
@@ -1580,7 +1598,7 @@ def _key_display_field_issues(
                 where relation.status = 'active'
                   and relation.special_metadata->>'source' = 'batch_accounting'
                   and (
-                        coalesce(group_row.relation_kind, '') <> coalesce(relation.relation_mode, '')
+                        coalesce(group_row.payload->>'relation_mode', '') <> coalesce(relation.relation_mode, '')
                      or coalesce(group_row.payload->'special_metadata', '{}'::jsonb)
                         <> coalesce(relation.special_metadata, '{}'::jsonb)
                   )
@@ -1597,17 +1615,21 @@ def _key_display_field_issues(
                 """
                 /* check: key_display_fields */
                 with batch_members as (
-                    select batch.batch_id, batch.scope_month, batch.total_amount,
+                    select batch.batch_id, batch.scope_month, batch.batch_type, batch.total_amount,
                            batch.bank_transaction_ids,
                            count(bank.id)::integer as resolved_member_count,
-                           coalesce(sum(abs(bank.amount)), 0)::numeric as recalculated_total_amount
+                           case
+                               when batch.batch_type = 'internal_transfer'
+                               then coalesce(max(abs(bank.amount)), 0)::numeric
+                               else coalesce(sum(abs(bank.amount)), 0)::numeric
+                           end as recalculated_total_amount
                     from app.bank_flow_rule_batches batch
                     left join lateral unnest(batch.bank_transaction_ids) member(row_id) on true
                     left join app.bank_transactions bank
                       on coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
                      and bank.status <> 'deleted'
                     where batch.status <> 'deleted'
-                    group by batch.batch_id, batch.scope_month, batch.total_amount,
+                    group by batch.batch_id, batch.scope_month, batch.batch_type, batch.total_amount,
                              batch.bank_transaction_ids
                 ),
                 relation_members as (
@@ -1883,6 +1905,50 @@ def _embedded_relation_versions_query(
         limit %s
         """,
         params,
+        f"{domain}_relation_source_versions_mismatch",
+    )
+
+
+def _embedded_relation_source_summary_query(
+    domain: str,
+    scope_table: str,
+    alias: str,
+    tenant_id: str,
+    limit: int,
+) -> tuple[str, tuple[Any, ...], str]:
+    _assert_identifier(scope_table)
+    return (
+        f"""
+        /* check: source_versions_mismatch */
+        with canonical_relation_summary as (
+            select {alias}.scope_key,
+                   jsonb_build_object(
+                       'source', 'workbench_pair_relations',
+                       'scope_key', {alias}.scope_key,
+                       'relation_count', count(relation.id)::integer,
+                       'relation_updated_at', coalesce(max(relation.updated_at)::text, '')
+                   ) as source_versions
+            from {scope_table} {alias}
+            left join app.workbench_pair_relations relation
+              on relation.status = 'active'
+             and relation.month_scope = ({alias}.scope_key || '-01')::date
+            where {alias}.tenant_id = %s
+              and {alias}.scope_key ~ '^[0-9]{{4}}-[0-9]{{2}}$'
+            group by {alias}.scope_key
+        )
+        select {alias}.scope_key,
+               {alias}.source_versions->'workbench_relation_source_versions' as embedded_relation_versions,
+               canonical.source_versions as current_relation_versions
+        from {scope_table} {alias}
+        join canonical_relation_summary canonical on canonical.scope_key = {alias}.scope_key
+        where {alias}.tenant_id = %s
+          and {alias}.source_versions ? 'workbench_relation_source_versions'
+          and coalesce({alias}.source_versions->'workbench_relation_source_versions', '{{}}'::jsonb)
+              <> canonical.source_versions
+        order by {alias}.scope_key
+        limit %s
+        """,
+        (tenant_id, tenant_id, limit),
         f"{domain}_relation_source_versions_mismatch",
     )
 

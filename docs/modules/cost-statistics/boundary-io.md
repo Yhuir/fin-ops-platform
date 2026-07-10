@@ -72,7 +72,7 @@
 - 成本统计标签规则由 `AppSettingsService` 持久化，`CostStatisticsQueryService` 读取归一后的 selected leaf codes 并在 query/export 层过滤。该规则不是投影 source version，保存时不触发 read model rebuild；页面只等待当前 scope freshness，避免全量刷新放大耗时。
 - `bank_accounts` 的来源是 settings owner 的银行账户映射，投影层通过 `cost_statistics_bank_accounts.py` 归一为页面只读 payload，并以 `bank_account_mappings_fingerprint` 纳入 source version。页面银行统计以 `bank_accounts + time_rows` 合并生成，禁止恢复只从当前流水推断银行全集的旧逻辑。
 - Upstream read model 输入：月份 shard 只消费 Workbench active generation；父 scope 从已物化 `read_model.cost_statistics_rows` 聚合，不读 Workbench `all` 或历史 generation。
-- Explorer payload schema version：`2026-07-cost-statistics-bank-flow-tag-rules-v5`。生产 v5 投影必须输出 `bank_accounts`、`bank_flow_summary` 和 `bank_flow_time_rows`；旧 schema payload 或仍使用 Workbench 行内旧标签字段时必须通过 schema gate fail-closed 并重新投影。query/API mapper 可兼容历史本地 fixture 缺少 `bank_flow_time_rows` 的形态，但生产链路不能依赖该兼容形态提供全流水统计。
+- Explorer payload schema version：`2026-07-cost-statistics-audit-proof-v6`。生产 v6 投影必须输出 `bank_accounts`、`bank_flow_summary` 和 `bank_flow_time_rows`，并将带千分位的展示金额无损写入结构化 `cost_statistics_rows.amount`，供 Audit 独立重算 expected-set 和 summary；旧 schema payload 或仍使用 Workbench 行内旧标签字段时必须通过 schema gate fail-closed 并重新投影。query/API mapper 可兼容历史本地 fixture 缺少 `bank_flow_time_rows` 的形态，但生产链路不能依赖该兼容形态提供全流水统计。
 
 ## 文件范围
 

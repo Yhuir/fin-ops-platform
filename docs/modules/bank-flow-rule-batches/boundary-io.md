@@ -35,7 +35,7 @@
 | 银行标签事实 | `bank-details` active tag read facade / 自动标签规则 payload | 只读。每个标签至少包含 code、direction、primary label、sub label、status 和 rule version。标签增减必须反映到本模块抽屉左侧。 |
 | 标签闭环规则 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | 本模块拥有 `app_settings.bank_flow_rule_batch_tag_rules` 中的规则版本和 `requirements_by_tag_code`。未知、停用、重复 tag code fail fast。新增/未配置标签默认 `requires_oa=true, requires_invoice=true`。 |
 | 页面查询 | `BankFlowRuleBatchPage.tsx` | 查询候选/已提交/已撤回批次，必须携带 read model freshness/status。 |
-| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=bank_flow_rule_batches`；non-deleted batch 及其精确银行成员集是 canonical expected-set，批次总金额/笔数必须从 canonical 银行流水重算，submitted relation 成员必须一致，并要求共享 relation 双向 edge equality 与只读一致性快照；不得借 audit 绕过规则/提交/撤回 service 边界。 |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=bank_flow_rule_batches`；non-deleted batch 及其精确银行成员集是 canonical expected-set，批次总金额/笔数必须从 canonical 银行流水按批次规则重算：普通批次求成员金额合计，内部转账一收一支只计单边金额，不能把两边绝对值重复相加；submitted relation 成员必须一致，并要求共享 relation 双向 edge equality 与只读一致性快照；不得借 audit 绕过规则/提交/撤回 service 边界。 |
 | 批量提交 | `POST /api/bank-flow-rule-batches/submit-selection` | `transaction_ids` 必填、非空、去重。提交前重查银行流水身份、月份、账户、标签、active relation 占用和当前规则版本。 |
 | 已提交重置 | `POST /api/bank-flow-rule-batches/reset-submitted` | 批量撤回当前所有 submitted 批次，必须走 withdraw + relation command，不直接 SQL 改表；旧批次保留 withdrawn/audit history，释放的银行 rows 在 read model rebuild 后重新成为候选。 |
 | 权限/session | API session / permissions | 读取、保存规则、提交批次、撤回批次、reset 分别校验权限；缺权限 fail fast。 |

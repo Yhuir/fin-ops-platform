@@ -646,6 +646,47 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
 
 
 class CostStatisticsSqlRuntimeTests(unittest.TestCase):
+    def test_repository_parses_grouped_display_amount_into_structured_cost_row(self) -> None:
+        connection = CostStatisticsWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_cost_statistics_read_models(
+            {
+                "read_models": {
+                    "all:2026-05": {
+                        "scope_key": "all:2026-05",
+                        "month": "2026-05",
+                        "project_scope": "all",
+                        "generated_at": "2026-07-10T10:00:00+00:00",
+                        "entry_count": 1,
+                        "source_versions": {"proof": "v1"},
+                        "payload": {
+                            "month": "2026-05",
+                            "project_scope": "all",
+                            "summary": {"transaction_count": 1, "total_amount": "1,872.93"},
+                            "time_rows": [
+                                {
+                                    "transaction_id": "txn-1",
+                                    "trade_time": "2026-05-02 10:00:00",
+                                    "project_name": "项目A",
+                                    "expense_type": "材料",
+                                    "amount": "1,872.93",
+                                }
+                            ],
+                        },
+                    }
+                }
+            },
+            changed_scope_keys={"all:2026-05"},
+        )
+
+        insert = next(
+            params
+            for sql, params in connection.executed
+            if "insert into read_model.cost_statistics_rows" in sql
+        )
+        self.assertEqual(insert[16], "1872.93")
+
     def test_repository_saves_parent_scope_snapshot_without_writing_month_rows(self) -> None:
         connection = CostStatisticsWriteConnection()
         repository = PostgresReadModelRepository(connection)

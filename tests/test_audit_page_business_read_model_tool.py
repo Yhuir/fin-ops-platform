@@ -274,8 +274,53 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertNotIn("row.scope_key like scope.scope_key", scope_sql)
 
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
-        self.assertNotIn("source.txn_direction in ('outflow', 'inflow')", queried_sql)
+        self.assertIn("source.txn_direction in ('outflow', 'inflow')", queried_sql)
+        self.assertIn("projected.transaction_id = projected.projected_row_id", queried_sql)
         self.assertNotIn("pending_invoices_relation_source_versions_mismatch", queried_sql)
+
+    def test_bank_detail_audit_uses_uuid_identity_and_stable_source_versions(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="bank_details",
+        )
+
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("row.transaction_id = source.id::text", queried_sql)
+        self.assertIn("row.source_versions, '{}'::jsonb) - 'source_version'", queried_sql)
+        self.assertIn("canonical_relation_summary", queried_sql)
+
+    def test_batch_audits_recompute_their_domain_specific_display_contracts(self) -> None:
+        batch_accounting_connection = FakeConnection()
+        audit_page_business_read_model.audit_page_business_read_model(
+            batch_accounting_connection,
+            domain_key="batch_accounting",
+        )
+        batch_accounting_sql = " ".join(sql for sql, _params in batch_accounting_connection.fetch_all_calls)
+        self.assertIn("group_row.payload->>'relation_mode'", batch_accounting_sql)
+        self.assertNotIn("group_row.relation_kind, '') <> coalesce(relation.relation_mode", batch_accounting_sql)
+
+        rule_batch_connection = FakeConnection()
+        audit_page_business_read_model.audit_page_business_read_model(
+            rule_batch_connection,
+            domain_key="bank_flow_rule_batches",
+        )
+        rule_batch_sql = " ".join(sql for sql, _params in rule_batch_connection.fetch_all_calls)
+        self.assertIn("when batch.batch_type = 'internal_transfer'", rule_batch_sql)
+        self.assertIn("then coalesce(max(abs(bank.amount)), 0)", rule_batch_sql)
+
+    def test_cost_statistics_expected_set_does_not_treat_ready_rows_as_missing(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="cost_statistics",
+        )
+
+        canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
+        self.assertIn("where project_scope = 'all'", canonical_sql)
+        self.assertNotIn("project_scope = 'all' and cache_status = 'fresh'", canonical_sql)
 
     def test_pending_invoice_relation_audit_uses_scope_aware_bidirectional_edge_equality(self) -> None:
         connection = FakeConnection()

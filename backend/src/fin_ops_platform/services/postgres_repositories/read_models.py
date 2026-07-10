@@ -5205,7 +5205,7 @@ class PostgresSummaryReadModelRepository:
                     text(row.get("project_name")) or "未归集项目",
                     text(row.get("expense_type")) or "未分类",
                     text(row.get("expense_content")),
-                    decimal_text(row.get("amount")) or "0",
+                    decimal_text(str(row.get("amount") or "").replace(",", "")) or "0",
                     text(row.get("oa_applicant")),
                     jsonb(source_versions),
                     generated_at,

@@ -31,7 +31,7 @@
 - 任何会改变 rows、groups、索引键、跨 scope 成员分发、状态字段、金额口径或 freshness 语义的 projection 行为变更，都必须 bump 自己的 projection schema version；不能只依赖事实表 `updated_at`。
 - Worker 的 `source_versions_unchanged` 跳过优化只有在 own schema version 和全部依赖版本都匹配时才允许触发；缺失 schema/dependency version 时必须 fail closed 为 stale/refreshing 或执行重建。
 - 下游 read model 消费 upstream read model 时，必须把 upstream source_versions 写入自身 scope source_versions。upstream schema/version 变化后，下游 scope 必须能被 freshness gate 识别并重新投影。
-- `cost_statistics` 当前 explorer schema version 为 `2026-07-cost-statistics-bank-flow-tag-rules-v5`，payload 必须同时包含 OA 配对 `time_rows` 与全银行支出 `bank_flow_time_rows` / `bank_flow_summary`。成本统计标签规则属于 query-time filter，不进入 source_versions；保存规则不能用 dirty scope/outbox 伪造 read model projection 变化。
+- `cost_statistics` 当前 explorer schema version 为 `2026-07-cost-statistics-audit-proof-v6`，payload 必须同时包含 OA 配对 `time_rows` 与全银行支出 `bank_flow_time_rows` / `bank_flow_summary`，结构化 rows 必须正确解析展示金额中的千分位并与 payload/summary 一致。成本统计标签规则属于 query-time filter，不进入 source_versions；保存规则不能用 dirty scope/outbox 伪造 read model projection 变化。
 - `all` scope 不允许用一个伪全局版本掩盖月份 shard 差异；合法方式是 fan-out command、月份 shard convergence 或 manifest 明确登记的 parent aggregate。
 - 页面和导出只能读取 freshness gate 之后的 payload；不得用 live fallback、旧 snapshot、Redis 或前端拼接把 stale read model 伪装成 fresh。
 - `pending_invoice` 的 source summary 与 `filter=all` expected source versions 必须从 `app.bank_transactions` canonical facts 识别范围；不能只从 `read_model.pending_invoice_rows` 反推，否则新导入事实源没有投影行时会漏判 fresh 或显示旧“全部流水”数。父 scope status 必须聚合子月份 dirty scope。

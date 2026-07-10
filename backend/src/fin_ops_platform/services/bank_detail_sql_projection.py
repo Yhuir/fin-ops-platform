@@ -57,6 +57,7 @@ class BankDetailSqlProjectionBuilder:
             select to_char(txn_month, 'YYYY-MM') as scope_key
             from app.bank_transactions
             where txn_month is not null
+              and status <> 'deleted'
             group by txn_month
             order by txn_month
             """,
@@ -191,6 +192,7 @@ class BankDetailSqlProjectionBuilder:
             from app.bank_transactions
             where txn_date >= %s::date
               and txn_date < %s::date
+              and status <> 'deleted'
             order by coalesce(trade_time, txn_date::timestamptz) desc, coalesce(legacy_mongo_id, id::text) desc
             """,
             (start_date.isoformat(), end_date.isoformat()),
