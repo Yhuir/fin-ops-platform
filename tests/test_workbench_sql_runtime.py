@@ -3710,6 +3710,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
 
         self.assertEqual(page["total"], 1)
+        self.assertTrue(
+            any(
+                "not like 'case:decision:%%'" in sql
+                for sql, _params in connection.fetch_all_calls
+            )
+        )
         self.assertEqual(page["row_counts"], {"oa": 1, "bank": 0, "invoice": 0, "rows": 1})
         self.assertEqual(
             [group["group_id"] for group in page["groups"]],

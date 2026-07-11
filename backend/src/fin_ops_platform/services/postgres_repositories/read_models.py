@@ -7193,7 +7193,7 @@ class PostgresReadModelRepository:
             params.append(normalized)
         excludes_linked_etc_summary_groups = normalized_zone == "open"
         if excludes_linked_etc_summary_groups:
-            clauses.append("g.group_id not like 'case:decision:%'")
+            clauses.append("g.group_id not like 'case:decision:%%'")
             clauses.append(_workbench_open_linked_etc_summary_group_exclusion_sql(group_id_sql=group_row_join_id_sql))
         normalized_search = text(search)
         if (
