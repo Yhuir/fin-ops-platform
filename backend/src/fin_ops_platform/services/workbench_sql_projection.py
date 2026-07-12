@@ -41,7 +41,7 @@ from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHIN
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-10-visible-linked-relations-v1"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-12-collapsed-detail-proof-v2"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -1668,12 +1668,7 @@ class WorkbenchSqlProjectionBuilder:
     ) -> dict[str, Any]:
         invoice_total_amount = sum((_decimal_value(row.get("total_with_tax") or row.get("amount")) for row in invoices), Decimal("0.00"))
         batch_payload = batch_payload if isinstance(batch_payload, dict) else {}
-        total_amount = (
-            _decimal_or_none(batch_payload.get("oa_total_amount"))
-            or _decimal_or_none(batch_payload.get("total_amount"))
-            or _decimal_or_none(batch_payload.get("etc_invoice_amount"))
-            or invoice_total_amount
-        )
+        total_amount = invoice_total_amount
         issue_dates = [_date_text(row.get("invoice_date")) for row in invoices if _date_text(row.get("invoice_date"))]
         seller_names = [
             str(row.get("seller_name") or row.get("counterparty_name") or "").strip()
@@ -1681,7 +1676,7 @@ class WorkbenchSqlProjectionBuilder:
             if str(row.get("seller_name") or row.get("counterparty_name") or "").strip()
         ]
         first_seller_name = seller_names[0] if seller_names else "ETC发票"
-        count = _int_or_none(batch_payload.get("etc_invoice_count")) or len(invoices)
+        count = len(invoices)
         title = f"ETC发票 {count} 张"
         issue_range = _date_range_label(issue_dates)
         total_amount_text = _money_text(total_amount)

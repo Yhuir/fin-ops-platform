@@ -10459,10 +10459,16 @@ class PostgresReadModelRepository:
             if not isinstance(group, dict):
                 return
             for key, value in group.items():
-                if not str(key).endswith("_rows") or not isinstance(value, list):
-                    continue
-                for row in value:
-                    add_row(row, zone=zone)
+                if str(key).endswith("_rows") and isinstance(value, list):
+                    for row in value:
+                        add_row(row, zone=zone)
+            collapsed_rows = group.get("collapsed_rows")
+            if isinstance(collapsed_rows, dict):
+                for values in collapsed_rows.values():
+                    if not isinstance(values, list):
+                        continue
+                    for row in values:
+                        add_row(row, zone=zone)
 
         for direct_key in ("rows", "ignored_rows"):
             value = payload.get(direct_key)

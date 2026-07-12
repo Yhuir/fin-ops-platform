@@ -295,6 +295,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             )
             left join projected on projected.row_id = override.row_id
             where override.status = 'active'
+              and projected.payload is not null
               and not (
                     field.value = 'null'::jsonb
                 and projected.payload is not null
@@ -492,7 +493,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         invoice_mismatch as (
             select coalesce(invoice.legacy_mongo_id, invoice.id::text) as subject_id,
                    projected.scope_key, 'invoice'::text as object_type,
-                   abs(coalesce(invoice.total_with_tax, invoice.amount, 0))::text as canonical_amount,
+                   coalesce(invoice.total_with_tax, invoice.amount, 0)::text as canonical_amount,
                    projected.display_amount::text as projected_amount,
                    coalesce(invoice.counterparty_name, invoice.seller_name, invoice.buyer_name) as canonical_party,
                    projected.counterparty_name as projected_party,
@@ -502,7 +503,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
               on projected.row_id = coalesce(invoice.legacy_mongo_id, invoice.id::text)
              and projected.source_kind in ('invoice', 'oa_attachment_invoice')
             where abs(
-                    abs(coalesce(invoice.total_with_tax, invoice.amount, 0))
+                    coalesce(invoice.total_with_tax, invoice.amount, 0)
                     - coalesce(projected.display_amount, 0)
                   ) > 0.01
                or coalesce(invoice.invoice_type, '') <> coalesce(projected.payload->>'invoice_type', '')
@@ -635,19 +636,20 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             order by row.row_id, generation.scope_key desc
         ),
         projected_detail_rows as (
-            select summary_member.row_id as summary_row_id,
+            select distinct summary_member.row_id as summary_row_id,
                    coalesce(
-                       nullif(detail.column_values->>'digitalInvoiceNo', ''),
-                       nullif(detail.column_values->>'invoiceNo', ''),
+                       nullif(detail_row.payload->>'digital_invoice_no', ''),
+                       nullif(detail_row.payload->>'invoice_no', ''),
                        detail.row_id
                    ) as invoice_row_id,
                    coalesce(
-                       case when coalesce(replace(detail.column_values->>'grossAmount', ',', ''), '')
+                       case when coalesce(replace(detail_row.payload->>'total_with_tax', ',', ''), '')
                                       ~ '^-?[0-9]+([.][0-9]+)?$'
-                            then replace(detail.column_values->>'grossAmount', ',', '')::numeric end,
-                       case when coalesce(replace(detail.column_values->>'amount', ',', ''), '')
+                            then replace(detail_row.payload->>'total_with_tax', ',', '')::numeric end,
+                       case when coalesce(replace(detail_row.payload->>'amount_value', ',', ''), '')
                                       ~ '^-?[0-9]+([.][0-9]+)?$'
-                            then replace(detail.column_values->>'amount', ',', '')::numeric end,
+                            then replace(detail_row.payload->>'amount_value', ',', '')::numeric end,
+                       detail_row.amount,
                        0
                    ) as amount
             from active_months generation
@@ -663,6 +665,10 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
              and detail.pane = 'invoice'
              and detail.row_role = 'collapsed'
              and detail.source_kind = 'etc_invoice'
+            join read_model.workbench_rows detail_row
+              on detail_row.generation_id = detail.generation_id
+             and detail_row.scope_key = detail.scope_key
+             and detail_row.row_id = detail.row_id
         ),
         projected_detail as (
             select summary_row_id, invoice_row_id, count(*)::integer as projected_count,

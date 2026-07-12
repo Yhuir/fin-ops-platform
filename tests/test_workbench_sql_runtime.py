@@ -2492,10 +2492,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         summary_row = rows[0]
         self.assertEqual(summary_row["source_kind"], "etc_invoice_summary")
         self.assertEqual(summary_row["etc_batch_id"], "etc_20260520_001")
-        self.assertEqual(summary_row["total_with_tax"], "1,673.30")
-        self.assertEqual(summary_row["amount"], "1,673.30")
-        self.assertEqual(summary_row["amount_value"], "1673.30")
-        self.assertEqual(summary_row["etc_invoice_count"], 37)
+        self.assertEqual(summary_row["total_with_tax"], "27.14")
+        self.assertEqual(summary_row["amount"], "27.14")
+        self.assertEqual(summary_row["amount_value"], "27.14")
+        self.assertEqual(summary_row["etc_invoice_count"], 2)
         self.assertEqual(summary_row["invoice_bank_relation"]["code"], "pending_oa_bank_match")
         self.assertIn("ETC001", summary_row["detail_fields"]["发票清单"])
         self.assertIn("ETC002", summary_row["detail_fields"]["发票清单"])
@@ -4114,6 +4114,29 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         rows = PostgresReadModelRepository._iter_workbench_rows(payload)
 
         self.assertEqual({row["id"]: row["status"] for row in rows}, {"bank-1": "paired", "oa-1": "open"})
+
+    def test_workbench_rows_materialize_collapsed_detail_rows_for_row_detail_reads(self) -> None:
+        payload = {
+            "paired": {
+                "groups": [
+                    {
+                        "group_id": "case:collapsed",
+                        "bank_rows": [{"id": "bank-summary", "type": "bank"}],
+                        "collapsed_rows": {
+                            "bank": [{"id": "bank-detail", "type": "bank", "amount": "12.34"}],
+                            "invoice": [{"id": "etc-detail", "source_kind": "etc_invoice", "amount": "5.67"}],
+                        },
+                    }
+                ]
+            }
+        }
+
+        rows = PostgresReadModelRepository._iter_workbench_rows(payload)
+
+        self.assertEqual(
+            {row["id"]: row["status"] for row in rows},
+            {"bank-summary": "paired", "bank-detail": "paired", "etc-detail": "paired"},
+        )
 
     def test_repository_reads_single_workbench_group_detail(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()

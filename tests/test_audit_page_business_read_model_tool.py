@@ -688,6 +688,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
 
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertIn("cost_bank_flow_key_fields", queried_sql)
+        self.assertIn("detail.transaction_id = coalesce(source.legacy_mongo_id, source.id::text)", queried_sql)
         self.assertIn("bank_tag_label_path", queried_sql)
         self.assertIn("bank_flow_summary", queried_sql)
         self.assertIn("select project_scope || ':all', row_key, amount", queried_sql)

@@ -367,7 +367,10 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertNotIn("ArgumentParser", core_source)
         self.assertIn("from app.oa_applications", projection_source)
         self.assertIn("detail.row_role = 'collapsed'", projection_source)
-        self.assertIn("detail.column_values->>'digitalInvoiceNo'", projection_source)
+        self.assertIn("detail_row.payload->>'digital_invoice_no'", projection_source)
+        self.assertIn("join read_model.workbench_rows detail_row", projection_source)
+        self.assertIn("and projected.payload is not null", projection_source)
+        self.assertIn("coalesce(invoice.total_with_tax, invoice.amount, 0)::text as canonical_amount", projection_source)
         self.assertIn("select 1 from claimed_bank claim", projection_source)
         self.assertNotIn("ArgumentParser", projection_source)
 

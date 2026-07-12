@@ -3315,8 +3315,8 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(scattered_etc_rows, [])
         self.assertEqual(len(summary_rows), 1)
         summary_row = summary_rows[0]
-        self.assertEqual(summary_row["total_with_tax"], "1,673.30")
-        self.assertEqual(summary_row["amount"], "1,673.30")
+        self.assertEqual(summary_row["total_with_tax"], "27.14")
+        self.assertEqual(summary_row["amount"], "27.14")
         self.assertEqual(summary_row["etc_invoice_count"], 2)
         self.assertEqual(summary_row["invoice_bank_relation"]["code"], "pending_oa_bank_match")
         detail_response = app.handle_request("GET", f"/api/workbench/rows/{summary_row['id']}")

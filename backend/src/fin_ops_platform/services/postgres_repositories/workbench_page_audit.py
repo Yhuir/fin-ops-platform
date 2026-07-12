@@ -347,11 +347,19 @@ def _fetch_active_group_rows(connection: Any, *, tenant_id: str, group_ids: list
           gr.row_role,
           gr.source_kind,
           gr.status,
-          gr.payload
+          case
+              when jsonb_typeof(row_detail.payload) = 'object' and row_detail.payload <> '{}'::jsonb
+              then row_detail.payload
+              else gr.payload
+          end as payload
         from read_model.workbench_generations gen
         join read_model.workbench_group_rows gr
           on gr.generation_id = gen.generation_id
          and gr.scope_key = gen.scope_key
+        left join read_model.workbench_rows row_detail
+          on row_detail.generation_id = gr.generation_id
+         and row_detail.scope_key = gr.scope_key
+         and row_detail.row_id = gr.row_id
         where gen.tenant_id = %s
           and gen.status = 'active'
           and gen.scope_key ~ '^[0-9]{4}-[0-9]{2}$'

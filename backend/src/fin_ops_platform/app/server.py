@@ -589,7 +589,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-07-10-visible-linked-relations-v1"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
 PROMETHEUS_BEARER_TOKEN_ENV = "FIN_OPS_PROMETHEUS_BEARER_TOKEN"
@@ -11722,12 +11722,7 @@ class Application:
             )
             for invoice in sorted_invoices
         )
-        total_amount = (
-            self._decimal_from_value(getattr(batch, "oa_total_amount", None))
-            or self._decimal_from_value(getattr(batch, "total_amount", None))
-            or self._decimal_from_value(getattr(batch, "etc_invoice_amount", None))
-            or invoice_total_amount
-        )
+        total_amount = invoice_total_amount
         issue_dates = [
             str(getattr(invoice, "invoice_date", "") or getattr(invoice, "issue_date", "") or "").strip()
             for invoice in sorted_invoices
@@ -11739,10 +11734,7 @@ class Application:
         ]
         seller_names = [name for name in seller_names if name]
         first_seller_name = seller_names[0] if seller_names else "ETC发票"
-        try:
-            count = int(getattr(batch, "etc_invoice_count", None) or len(sorted_invoices))
-        except (TypeError, ValueError):
-            count = len(sorted_invoices)
+        count = len(sorted_invoices)
         title = f"ETC发票 {count} 张"
         issue_range = self._date_range_label(issue_dates)
         invoice_lines = [

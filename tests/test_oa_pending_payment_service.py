@@ -6,6 +6,7 @@ import unittest
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID, PAY_STATUS_PENDING
 from fin_ops_platform.services.oa_pending_payment_service import (
@@ -93,6 +94,26 @@ class FakePendingRelationService:
 
 
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
+    def test_relation_context_loads_bank_transaction_alias_members_outside_initial_scope(self) -> None:
+        bank = self._bank("bank-cross-month", "88.00")
+        context = DistributedInvoiceRelationContext(
+            import_service=ImportNormalizationService(existing_transactions=[bank]),
+        )
+        context._bank_transactions_by_id = {}
+        context._distributed_relations_by_row_id = {
+            "oa-cross-month": [
+                {
+                    "case_id": "case-cross-month",
+                    "row_ids": ["oa-cross-month", bank.id],
+                    "row_types": ["oa", "bank_transaction"],
+                }
+            ]
+        }
+
+        context._load_bank_transactions_from_loaded_relations()
+
+        self.assertEqual(context.bank_transactions_by_id()[bank.id], bank)
+
     def test_relation_group_loads_all_oa_members_from_projection_lookup_and_suppresses_standalone_rows(self) -> None:
         banks = [
             self._bank("bank-group-a", "469600.00"),

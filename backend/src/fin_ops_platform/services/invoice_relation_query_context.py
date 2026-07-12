@@ -189,7 +189,7 @@ class DistributedInvoiceRelationContext:
         for relations in self._distributed_relations_by_row_id.values():
             for relation in relations:
                 for row_id, row_type in self.typed_relation_rows(relation):
-                    if row_type != "bank" or not row_id or row_id in seen:
+                    if row_type not in {"bank", "bank_transaction"} or not row_id or row_id in seen:
                         continue
                     seen.add(row_id)
                     missing_bank_ids.append(row_id)
