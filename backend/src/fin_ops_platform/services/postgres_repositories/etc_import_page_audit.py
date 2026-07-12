@@ -20,6 +20,7 @@ from fin_ops_platform.services.postgres_repositories.etc_tickets_page_audit impo
 ACTIVE_JOB_STATUSES = frozenset({"pending", "processing"})
 TERMINAL_SESSION_STATUSES = frozenset({"succeeded", "partial_success"})
 KNOWN_SESSION_STATUSES = frozenset({"preview_ready", "queued", "processing", "failed"}) | TERMINAL_SESSION_STATUSES
+ETC_IMPORT_AUDIT_CONTRACT_REVISION = "etc-import-page-audit.v1"
 
 
 def audit_etc_import_page(
@@ -54,13 +55,32 @@ def _audit_etc_import_snapshot(
     )
     sessions = connection.fetch_all(_SESSION_SQL)
     files = connection.fetch_all(_SESSION_FILE_SQL)
-    jobs = facts["import_jobs"]
+    strict_sessions = [
+        row
+        for row in sessions
+        if _text(row.get("audit_contract_revision")) == ETC_IMPORT_AUDIT_CONTRACT_REVISION
+    ]
+    strict_session_ids = {_text(row.get("session_id")) for row in strict_sessions}
+    strict_files = [row for row in files if _text(row.get("session_id")) in strict_session_ids]
+    legacy_sessions = [row for row in sessions if row not in strict_sessions]
+    jobs = [row for row in facts["import_jobs"] if _text(row.get("import_session_id")) in strict_session_ids]
     job_ids = [str(row.get("job_id") or "") for row in jobs if row.get("job_id")]
     outbox = connection.fetch_all(_OUTBOX_SQL, (job_ids,)) if job_ids else []
 
-    issues.extend(_session_contract_issues(sessions=sessions, files=files))
-    issues.extend(_session_task_edge_issues(sessions=sessions, facts=facts))
-    issues.extend(_session_job_issues(sessions=sessions, jobs=jobs, outbox=outbox))
+    issues.extend(_session_contract_issues(sessions=strict_sessions, files=strict_files))
+    issues.extend(_session_task_edge_issues(sessions=strict_sessions, facts=facts))
+    issues.extend(_session_job_issues(sessions=strict_sessions, jobs=jobs, outbox=outbox))
+    if legacy_sessions:
+        issues.append(
+            AuditIssue(
+                "warning",
+                "etc_import_legacy_session_provenance_unproven",
+                "Pre-contract ETC import session history remains readable App data, but missing historical ZIP/session evidence is not fabricated.",
+                "legacy-etc-import-history",
+                "imports.etc-invoices",
+                {"session_count": len(legacy_sessions)},
+            )
+        )
     evaluation = evaluate_audit_issues(issues, sample_limit=limit)
 
     return {
@@ -70,10 +90,12 @@ def _audit_etc_import_snapshot(
         "audit_status": evaluation.audit_status,
         "summary": {
             "session_count": len(sessions),
-            "session_file_count": len(files),
-            "preview_ready_count": sum(1 for row in sessions if _text(row.get("status")) == "preview_ready"),
+            "strict_contract_session_count": len(strict_sessions),
+            "legacy_session_count": len(legacy_sessions),
+            "session_file_count": len(strict_files),
+            "preview_ready_count": sum(1 for row in strict_sessions if _text(row.get("status")) == "preview_ready"),
             "terminal_session_count": sum(
-                1 for row in sessions if _text(row.get("status")) in TERMINAL_SESSION_STATUSES
+                1 for row in strict_sessions if _text(row.get("status")) in TERMINAL_SESSION_STATUSES
             ),
             "import_job_count": len(jobs),
             "outbox_event_count": len(outbox),
@@ -99,7 +121,7 @@ def _audit_etc_import_snapshot(
             ],
             "read_model_tables": [],
             "canonical_expected_set": (
-                "every registered ETC import preview session and original ZIP file, all task-bound preview match edges, "
+                "every version-registered ETC import preview session and original ZIP file, all task-bound preview match edges, "
                 "all terminal session business/import-batch/ETC-invoice edges, and the complete ETC tickets canonical closure"
             ),
             "key_display_fields": [
@@ -133,8 +155,9 @@ def _audit_etc_import_snapshot(
                 "and audit_status.queue == 'drained' and audit_contract.database_snapshot == true"
             ),
             "guarantee_boundary": (
-                "Every registered App-internal ETC import fact and internal relation agrees in one database snapshot; "
-                "external archive completeness and downstream page projections require their own evidence and Audits."
+                "Every version-registered App-internal ETC import fact and internal relation agrees in one database snapshot. "
+                "Pre-contract ZIP/session provenance remains explicitly unproven rather than fabricated; external archive "
+                "completeness and downstream page projections require their own evidence and Audits."
             ),
             "write_policy": "read_only",
         },
@@ -419,9 +442,12 @@ def _session_task_edge_issues(
     for session_id in sorted(set(attempt_edges) | set(import_batch_edges) | set(invoice_edges)):
         if session_id not in session_by_id:
             issues.append(
-                _issue(
-                    "etc_import_historical_session_evidence_missing",
+                AuditIssue(
+                    "warning",
+                    "etc_import_historical_session_evidence_unproven",
+                    "Historical ETC output references a pre-contract session; the missing archive evidence is not fabricated.",
                     session_id,
+                    "imports.etc-invoices",
                     {
                         "business_attempts": len(attempt_edges.get(session_id, [])),
                         "import_batches": len(import_batch_edges.get(session_id, [])),
@@ -583,7 +609,7 @@ def _integer(value: Any) -> int:
 
 
 _SESSION_SQL = """
-select session.session_id, session.status, session.imported_by, session.imported_at,
+select session.session_id, session.audit_contract_revision, session.status, session.imported_by, session.imported_at,
        session.task_id, session.task_version, session.zip_preview_generation,
        session.confirmed_item_set_hash, session.preview_fingerprint,
        session.preview_summary, session.last_error, session.raw_payload,

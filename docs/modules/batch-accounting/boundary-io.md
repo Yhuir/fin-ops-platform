@@ -97,3 +97,8 @@
 - 如果新增独立 read model，必须先登记 manifest/scope policy/worker/tests/docs。
 - 已删除旧链路：旧 app-level repair helper、service-level legacy case-id repair、submit/withdraw direct pair fallback、route duplicate lifecycle fan-out、旧 pair persist/snapshot restore、旧 workbench read model persist、已提交 bucket 12 个月 relation scan fallback。
 - 批量账务 submit/withdraw 的生产 smoke 必须验证 durable relation 表、`workbench_relation` read model 和关联台 `workbench` active generation 同时收敛；单看 API `success=true` 不足以证明运行时外部收敛，但不影响本地模块边界 closed。
+
+## Phase 19 relation normalization（2026-07-12）
+
+- migration 0101 将 `special_metadata.source=batch_accounting` 的 active relation 从历史 `manual_confirmed` 规范为 `relation_mode=batch_accounting`，并同步结构化列与 normalized/raw payload mode。
+- 该迁移只改变可由 owner metadata 唯一确定的 App 内部 relation 分类；不得新增、删除或猜测 relation member。

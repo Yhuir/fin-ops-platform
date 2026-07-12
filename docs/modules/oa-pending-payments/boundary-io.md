@@ -95,3 +95,9 @@
 - Downstream outputs: oa_pending_payment、bank_detail、turnover_ledger、workbench_relation dirty scopes 或 owner producer 输出。
 - Forbidden paths: 其它模块不得直接 claim 银行流水关系；workbench relation migration 不得保留为 normal write path。
 - Old code deletion: legacy workbench-pair based OA pending relation fallback、direct bank claim write 和 snapshot relation inference 必须删除；migration/audit/rollback 工具保留不算 closure。
+
+## Audit v19 relation source（2026-07-12）
+
+- relation expected-set 是 completed/promoted shared `app.workbench_pair_relations` 与流程中的 `app.oa_pending_payment_bank_relations` 的逻辑并集。
+- pending relation 在 promotion 前不写 shared Workbench relation；Audit 不得把这个明确生命周期边界误报为 `consumer_edge_not_shared`。
+- consumer projection 必须与上述逻辑并集做双向 typed edge equality；promotion 后同一关系只能由 shared source 代表，不能双写两个 active owner。

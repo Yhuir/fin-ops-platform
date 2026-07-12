@@ -100,6 +100,7 @@ class FakeConnection(EtcTicketsFakeConnection):
         ]
         session = {
             "session_id": "session-1",
+            "audit_contract_revision": etc_import_page_audit.ETC_IMPORT_AUDIT_CONTRACT_REVISION,
             "status": "preview_ready",
             "task_id": "task-1",
             "task_version": 3,
@@ -149,6 +150,20 @@ class EtcImportPageAuditTests(unittest.TestCase):
             {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
         )
         self.assertEqual(report["audit_contract"]["read_model_tables"], [])
+
+    def test_legacy_session_is_non_blocking_but_explicitly_unproven(self) -> None:
+        connection = FakeConnection()
+        connection.sessions[0]["audit_contract_revision"] = None
+
+        report = etc_import_page_audit.audit_etc_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "pass")
+        self.assertIn(
+            "etc_import_legacy_session_provenance_unproven",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+        self.assertEqual(report["summary"]["strict_contract_session_count"], 0)
+        self.assertEqual(report["summary"]["legacy_session_count"], 1)
 
     def test_archive_hash_drift_fails_closed(self) -> None:
         connection = FakeConnection()

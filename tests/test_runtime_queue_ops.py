@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from io import StringIO
+import json
 import unittest
 from unittest.mock import patch
 
@@ -53,6 +54,7 @@ class FakeRuntimeQueueRepository:
         self.preview_retention_calls: list[dict[str, object]] = []
         self.prune_retention_calls: list[dict[str, object]] = []
         self.enqueue_calls: list[dict[str, object]] = []
+        self.enqueue_read_model_refresh_calls: list[dict[str, object]] = []
 
     def enqueue(self, **kwargs):
         self.enqueue_calls.append(dict(kwargs))
@@ -61,6 +63,18 @@ class FakeRuntimeQueueRepository:
             (),
             {
                 "event_id": "00000000-0000-0000-0000-000000000099",
+                "status": "pending",
+            },
+        )()
+
+    def enqueue_read_model_refresh(self, **kwargs):
+        self.enqueue_read_model_refresh_calls.append(dict(kwargs))
+        event_number = len(self.enqueue_read_model_refresh_calls)
+        return type(
+            "Event",
+            (),
+            {
+                "event_id": f"00000000-0000-0000-0000-{event_number:012d}",
                 "status": "pending",
             },
         )()
@@ -318,6 +332,83 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             ],
         )
         self.assertIn('"event_type": "oa.sync"', stdout.getvalue())
+
+    def test_read_model_refresh_dry_run_validates_and_expands_registered_scopes(self) -> None:
+        connection = FakeConnection()
+        repository = FakeRuntimeQueueRepository()
+        stdout = StringIO()
+
+        with (
+            patch.object(runtime_queue_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(runtime_queue_ops, "PostgresConnection", return_value=connection),
+            patch.object(runtime_queue_ops, "RuntimeQueueRepository", return_value=repository),
+        ):
+            exit_code = runtime_queue_ops.main(
+                [
+                    "enqueue-read-model-refresh",
+                    "--scope",
+                    "cost_statistics=all",
+                    "--scope",
+                    "tax_offset=all",
+                    "--dry-run",
+                ],
+                stdout=stdout,
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["mode"], "dry-run")
+        self.assertEqual(
+            payload["targets"],
+            [
+                {"scope_key": "active:all", "scope_type": "cost_statistics"},
+                {"scope_key": "all:all", "scope_type": "cost_statistics"},
+                {"scope_key": "all", "scope_type": "tax_offset"},
+            ],
+        )
+        self.assertEqual(repository.enqueue_read_model_refresh_calls, [])
+
+    def test_read_model_refresh_execute_uses_gateway_and_durable_queue_repository(self) -> None:
+        connection = FakeConnection()
+        repository = FakeRuntimeQueueRepository()
+        stdout = StringIO()
+
+        with (
+            patch.object(runtime_queue_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(runtime_queue_ops, "PostgresConnection", return_value=connection),
+            patch.object(runtime_queue_ops, "RuntimeQueueRepository", return_value=repository),
+        ):
+            exit_code = runtime_queue_ops.main(
+                [
+                    "enqueue-read-model-refresh",
+                    "--scope",
+                    "turnover_ledger=all",
+                    "--reason",
+                    "phase19_audit_rebuild",
+                    "--trace-id",
+                    "phase19-production",
+                    "--execute",
+                ],
+                stdout=stdout,
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["mode"], "execute")
+        self.assertEqual(payload["enqueued_count"], 1)
+        self.assertEqual(
+            repository.enqueue_read_model_refresh_calls,
+            [
+                {
+                    "scope_type": "turnover_ledger",
+                    "scope_key": "all",
+                    "reason": "phase19_audit_rebuild",
+                    "priority": "high",
+                    "trace_id": "phase19-production",
+                    "metadata": {"action_name": "production_audit_contract_rebuild"},
+                }
+            ],
+        )
 
     def test_release_stale_processing_dry_run_lists_candidates_without_update(self) -> None:
         connection = FakeConnection(

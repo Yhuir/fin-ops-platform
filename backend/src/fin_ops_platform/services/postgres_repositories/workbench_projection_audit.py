@@ -4,7 +4,6 @@ from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
-from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditIssue
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
@@ -15,7 +14,6 @@ def _sql_text(value: str) -> str:
 
 
 _MONTH_BUILDER = _sql_text(WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION)
-_ALL_BUILDER = _sql_text(WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
 _MATCHING_RULES = _sql_text(WORKBENCH_MATCHING_RULES_VERSION)
 _OA_SYNC = _sql_text(OA_PROJECTION_SYNC_VERSION)
 _ATTACHMENT_PARSER = _sql_text(attachment_invoice_cache_parser_version())
@@ -56,6 +54,7 @@ with active_generations as (
     from read_model.workbench_generations
     where tenant_id = %s
       and status = 'active'
+      and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
     order by scope_key, activated_at desc nulls last, updated_at desc
 ),
 active_relation_members as (
@@ -140,6 +139,31 @@ canonical_invoice as (
       and not exists (
           select 1 from submitted_etc_invoice_ids submitted where submitted.invoice_id = invoice.id
       )
+      and not exists (
+          select 1
+          from app.etc_invoices etc_invoice
+          left join app.etc_business_batches business_batch
+            on business_batch.business_batch_id = etc_invoice.business_batch_id
+          where (
+                  (
+                      nullif(coalesce(invoice.digital_invoice_no, invoice.invoice_no), '') is not null
+                  and etc_invoice.invoice_no = coalesce(invoice.digital_invoice_no, invoice.invoice_no)
+                  )
+               or (
+                      nullif(invoice.invoice_code, '') is not null
+                  and nullif(invoice.invoice_no, '') is not null
+                  and etc_invoice.invoice_code = invoice.invoice_code
+                  and etc_invoice.invoice_no = invoice.invoice_no
+                  )
+          )
+            and (
+                  business_batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+               or (
+                      etc_invoice.status = 'submitted'
+                  and coalesce(business_batch.status, '') <> 'deleted'
+                  )
+            )
+      )
 ),
 canonical_rows as (
     select * from canonical_oa
@@ -150,7 +174,8 @@ projected_rows as (
     select generation.scope_key as generation_scope,
            row.row_id, row.source_kind,
            row.amount, coalesce(row.counterparty_name, '') as counterparty_name,
-           coalesce(row.project_name, '') as project_name
+           coalesce(row.project_name, '') as project_name,
+           row.payload
     from active_generations generation
     join read_model.workbench_rows row
       on row.generation_id = generation.generation_id
@@ -197,21 +222,24 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
     (
         r"""
         /* check: workbench_override_exception_fields */
-        with active_all as (
-            select generation_id
+        with active_months as (
+            select distinct on (scope_key) generation_id, scope_key
             from read_model.workbench_generations
-            where tenant_id = %s and scope_key = 'all' and status = 'active'
-            order by activated_at desc nulls last, updated_at desc
-            limit 1
+            where tenant_id = %s
+              and status = 'active'
+              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            order by scope_key, activated_at desc nulls last, updated_at desc
         ),
         projected as (
-            select row.row_id, row.payload
-            from active_all generation
-            join read_model.workbench_rows row on row.generation_id = generation.generation_id
-            where row.scope_key = 'all'
+            select distinct on (row.row_id) row.row_id, generation.scope_key, row.payload
+            from active_months generation
+            join read_model.workbench_rows row
+              on row.generation_id = generation.generation_id
+             and row.scope_key = generation.scope_key
+            order by row.row_id, generation.scope_key desc
         ),
         override_mismatch as (
-            select override.row_id as subject_id, 'all'::text as scope_key,
+            select override.row_id as subject_id, coalesce(projected.scope_key, 'all') as scope_key,
                    'override'::text as mismatch_kind,
                    field.key as field_name, field.value as canonical_value,
                    projected.payload->field.key as projected_value
@@ -241,7 +269,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
               )
         ),
         exception_mismatch as (
-            select member.row_id as subject_id, 'all'::text as scope_key,
+            select member.row_id as subject_id, coalesce(projected.scope_key, 'all') as scope_key,
                    'exception'::text as mismatch_kind,
                    'case/status'::text as field_name,
                    jsonb_build_object('case_id', member.case_id, 'status', member.status) as canonical_value,
@@ -273,7 +301,9 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         with active_generations as (
             select distinct on (scope_key) generation_id, scope_key, source_versions
             from read_model.workbench_generations
-            where tenant_id = %s and status = 'active'
+            where tenant_id = %s
+              and status = 'active'
+              and scope_key ~ '^[0-9]{{4}}-[0-9]{{2}}$'
             order by scope_key, activated_at desc nulls last, updated_at desc
         ),
         current_settings as (
@@ -289,15 +319,13 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         )
         select generation.generation_id as subject_id, generation.scope_key,
                generation.source_versions,
-               case when generation.scope_key = 'all' then {_ALL_BUILDER} else {_MONTH_BUILDER} end
-                   as expected_builder,
+               {_MONTH_BUILDER} as expected_builder,
                {_MATCHING_RULES} as expected_matching_rules,
                {_OA_SYNC} as expected_oa_projection_sync,
                {_ATTACHMENT_PARSER} as expected_attachment_parser
         from active_generations generation
         left join current_settings settings on true
-        where coalesce(generation.source_versions->>'builder', '')
-              <> case when generation.scope_key = 'all' then {_ALL_BUILDER} else {_MONTH_BUILDER} end
+        where coalesce(generation.source_versions->>'builder', '') <> {_MONTH_BUILDER}
            or coalesce(generation.source_versions->>'workbench_matching_rules_version', '') <> {_MATCHING_RULES}
            or coalesce(generation.source_versions->>'oa_projection_sync_version', '') <> {_OA_SYNC}
            or coalesce(generation.source_versions->>'oa_attachment_invoice_parser_version', '')
@@ -327,7 +355,35 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         ),
         projected as (
             select generation.scope_key, row.row_id, row.source_kind, row.amount,
-                   row.counterparty_name, row.project_name, row.payload
+                   row.counterparty_name, row.project_name, row.payload,
+                   coalesce(
+                       row.amount,
+                       case
+                           when coalesce(replace(row.payload->>'amount_value', ',', ''), '')
+                                ~ '^-?[0-9]+([.][0-9]+)?$'
+                           then replace(row.payload->>'amount_value', ',', '')::numeric
+                       end,
+                       case
+                           when coalesce(replace(row.payload->>'debit_amount', ',', ''), '')
+                                ~ '^-?[0-9]+([.][0-9]+)?$'
+                           then replace(row.payload->>'debit_amount', ',', '')::numeric
+                       end,
+                       case
+                           when coalesce(replace(row.payload->>'credit_amount', ',', ''), '')
+                                ~ '^-?[0-9]+([.][0-9]+)?$'
+                           then replace(row.payload->>'credit_amount', ',', '')::numeric
+                       end,
+                       case
+                           when coalesce(replace(row.payload->>'total_with_tax', ',', ''), '')
+                                ~ '^-?[0-9]+([.][0-9]+)?$'
+                           then replace(row.payload->>'total_with_tax', ',', '')::numeric
+                       end,
+                       case
+                           when coalesce(replace(row.payload->>'amount', ',', ''), '')
+                                ~ '^-?[0-9]+([.][0-9]+)?$'
+                           then replace(row.payload->>'amount', ',', '')::numeric
+                       end
+                   ) as display_amount
             from active_generations generation
             join read_model.workbench_rows row
               on row.generation_id = generation.generation_id
@@ -336,12 +392,13 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         oa_mismatch as (
             select oa.row_id as subject_id, projected.scope_key,
                    'oa'::text as object_type,
-                   oa.amount::text as canonical_amount, projected.amount::text as projected_amount,
+                   oa.amount::text as canonical_amount,
+                   projected.display_amount::text as projected_amount,
                    oa.applicant as canonical_party, projected.payload->>'applicant' as projected_party,
                    oa.project_name as canonical_project, projected.project_name as projected_project
             from app.oa_applications oa
             join projected on projected.row_id = oa.row_id and projected.source_kind = 'oa'
-            where abs(coalesce(oa.amount, 0) - coalesce(projected.amount, 0)) > 0.01
+            where abs(coalesce(oa.amount, 0) - coalesce(projected.display_amount, 0)) > 0.01
                or coalesce(oa.applicant, '') <> coalesce(projected.payload->>'applicant', '')
                or coalesce(oa.project_name, '') <> coalesce(projected.project_name, '')
         ),
@@ -349,7 +406,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             select coalesce(bank.legacy_mongo_id, bank.id::text) as subject_id,
                    projected.scope_key, 'bank'::text as object_type,
                    abs(coalesce(bank.amount, 0))::text as canonical_amount,
-                   projected.amount::text as projected_amount,
+                   projected.display_amount::text as projected_amount,
                    bank.counterparty_name_raw as canonical_party,
                    projected.counterparty_name as projected_party,
                    ''::text as canonical_project, projected.project_name as projected_project
@@ -357,7 +414,10 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             join projected
               on projected.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
              and projected.source_kind = 'bank'
-            where abs(abs(coalesce(bank.amount, 0)) - coalesce(projected.amount, 0)) > 0.01
+            where abs(
+                    abs(coalesce(bank.amount, 0))
+                    - coalesce(projected.display_amount, 0)
+                  ) > 0.01
                or coalesce(bank.counterparty_name_raw, '') <> coalesce(projected.counterparty_name, '')
                or (
                     lower(coalesce(bank.txn_direction, '')) ~ '(out|debit|支出|付款)'
@@ -382,7 +442,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             select coalesce(invoice.legacy_mongo_id, invoice.id::text) as subject_id,
                    projected.scope_key, 'invoice'::text as object_type,
                    abs(coalesce(invoice.total_with_tax, invoice.amount, 0))::text as canonical_amount,
-                   projected.amount::text as projected_amount,
+                   projected.display_amount::text as projected_amount,
                    coalesce(invoice.counterparty_name, invoice.seller_name, invoice.buyer_name) as canonical_party,
                    projected.counterparty_name as projected_party,
                    ''::text as canonical_project, projected.project_name as projected_project
@@ -392,7 +452,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
              and projected.source_kind in ('invoice', 'oa_attachment_invoice')
             where abs(
                     abs(coalesce(invoice.total_with_tax, invoice.amount, 0))
-                    - coalesce(projected.amount, 0)
+                    - coalesce(projected.display_amount, 0)
                   ) > 0.01
                or coalesce(invoice.invoice_type, '') <> coalesce(projected.payload->>'invoice_type', '')
                or coalesce(invoice.invoice_no, '') <> coalesce(projected.payload->>'invoice_no', '')
@@ -416,12 +476,13 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
     (
         r"""
         /* check: workbench_etc_summary_details */
-        with active_all as (
-            select generation_id
+        with active_months as (
+            select distinct on (scope_key) generation_id, scope_key
             from read_model.workbench_generations
-            where tenant_id = %s and scope_key = 'all' and status = 'active'
-            order by activated_at desc nulls last, updated_at desc
-            limit 1
+            where tenant_id = %s
+              and status = 'active'
+              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            order by scope_key, activated_at desc nulls last, updated_at desc
         ),
         linked_invoice_sources as (
             select coalesce(
@@ -499,10 +560,14 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             group by external_batch_id
         ),
         projected_summary as (
-            select row.row_id as summary_row_id, row.payload
-            from active_all generation
-            join read_model.workbench_rows row on row.generation_id = generation.generation_id
-            where row.scope_key = 'all' and row.source_kind = 'etc_invoice_summary'
+            select distinct on (row.row_id)
+                   row.row_id as summary_row_id, generation.scope_key, row.payload
+            from active_months generation
+            join read_model.workbench_rows row
+              on row.generation_id = generation.generation_id
+             and row.scope_key = generation.scope_key
+            where row.source_kind = 'etc_invoice_summary'
+            order by row.row_id, generation.scope_key desc
         ),
         projected_detail_rows as (
             select summary.summary_row_id,
@@ -533,7 +598,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         ),
         summary_mismatch as (
             select coalesce(canonical.summary_row_id, projected.summary_row_id) as subject_id,
-                   'all'::text as scope_key, 'summary'::text as mismatch_kind,
+                   coalesce(projected.scope_key, 'all') as scope_key, 'summary'::text as mismatch_kind,
                    canonical.invoice_count as canonical_count,
                    case when coalesce(projected.payload->>'etc_invoice_count', '') ~ '^[0-9]+$'
                         then (projected.payload->>'etc_invoice_count')::integer else -1 end as projected_count,
@@ -558,7 +623,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         ),
         detail_mismatch as (
             select coalesce(canonical_summary.summary_row_id, projected.summary_row_id) as subject_id,
-                   'all'::text as scope_key, 'detail'::text as mismatch_kind,
+                   coalesce(projected_summary.scope_key, 'all') as scope_key, 'detail'::text as mismatch_kind,
                    case when canonical.invoice_row_id is null then 0 else 1 end as canonical_count,
                    coalesce(projected.projected_count, 0) as projected_count,
                    canonical.amount::text as canonical_amount, projected.amount::text as projected_amount
@@ -567,6 +632,10 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             full join projected_detail projected
               on projected.summary_row_id = canonical_summary.summary_row_id
              and projected.invoice_row_id = canonical.invoice_row_id
+            left join projected_summary on projected_summary.summary_row_id = coalesce(
+                canonical_summary.summary_row_id,
+                projected.summary_row_id
+            )
             where canonical.invoice_row_id is null
                or projected.invoice_row_id is null
                or projected.projected_count <> 1
@@ -589,7 +658,9 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         with active_generations as (
             select distinct on (scope_key) generation_id, scope_key
             from read_model.workbench_generations
-            where tenant_id = %s and status = 'active'
+            where tenant_id = %s
+              and status = 'active'
+              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
             order by scope_key, activated_at desc nulls last, updated_at desc
         ),
         recalculated as (
@@ -643,59 +714,14 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
     ),
     (
         r"""
-        /* check: workbench_all_scope_union */
-        with active_generations as (
-            select distinct on (scope_key) generation_id, scope_key
-            from read_model.workbench_generations
-            where tenant_id = %s and status = 'active'
-            order by scope_key, activated_at desc nulls last, updated_at desc
-        ),
-        month_rows as (
-            select row.row_id, row.source_kind
-            from active_generations generation
-            join read_model.workbench_rows row
-              on row.generation_id = generation.generation_id
-             and row.scope_key = generation.scope_key
-            where generation.scope_key ~ '^[0-9]{4}-[0-9]{2}$'
-            group by row.row_id, row.source_kind
-        ),
-        all_rows as (
-            select row.row_id, row.source_kind
-            from active_generations generation
-            join read_model.workbench_rows row
-              on row.generation_id = generation.generation_id
-             and row.scope_key = 'all'
-            where generation.scope_key = 'all'
-        ),
-        mismatches as (
-            select 'month_missing_all'::text as mismatch_kind,
-                   month.row_id as subject_id, 'all'::text as scope_key,
-                   month.source_kind as month_source_kind, all_row.source_kind as all_source_kind
-            from month_rows month
-            left join all_rows all_row using (row_id)
-            where all_row.row_id is null or all_row.source_kind <> month.source_kind
-            union all
-            select 'all_not_in_month', all_row.row_id, 'all',
-                   month.source_kind, all_row.source_kind
-            from all_rows all_row
-            left join month_rows month using (row_id)
-            where month.row_id is null or month.source_kind <> all_row.source_kind
-        )
-        select * from mismatches
-        order by mismatch_kind, subject_id
-        limit %s
-        """,
-        "workbench_all_scope_union_mismatch",
-        "Workbench all-scope rows do not equal the logical union of active month generations.",
-    ),
-    (
-        r"""
         /* check: workbench_generation_counts */
         with active_generations as (
             select distinct on (scope_key)
                    generation_id, scope_key, row_count, group_count, summary_count
             from read_model.workbench_generations
-            where tenant_id = %s and status = 'active'
+            where tenant_id = %s
+              and status = 'active'
+              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
             order by scope_key, activated_at desc nulls last, updated_at desc
         )
         select generation.generation_id as subject_id, generation.scope_key,

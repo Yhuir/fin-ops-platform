@@ -57,6 +57,7 @@ class FakeConnection:
                 "object_key": "imports/invoice-1.xlsx",
                 "sha256": "a" * 64,
                 "size_bytes": 256,
+                "audit_contract_revision": invoice_import_page_audit.IMPORT_AUDIT_CONTRACT_REVISION,
                 "raw_payload": {
                     "normalized_payload": {
                         "id": "file-1",
@@ -260,6 +261,20 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
         self.assertTrue(report["audit_contract"]["database_snapshot"])
         self.assertEqual(report["summary"]["invoice_import_job_count"], 1)
 
+    def test_legacy_file_is_non_blocking_but_explicitly_unproven(self) -> None:
+        connection = FakeConnection()
+        connection.files[0]["audit_contract_revision"] = None
+
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "pass")
+        self.assertIn(
+            "invoice_import_legacy_provenance_unproven",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+        self.assertEqual(report["summary"]["strict_contract_file_count"], 0)
+        self.assertEqual(report["summary"]["legacy_file_count"], 1)
+
     def test_dispatch_registers_zero_read_model_relation_nonconsumer_contract(self) -> None:
         report = PostgresOperationsAuditRepository(FakeConnection()).audit_page(
             page_key="imports.invoices",
@@ -267,7 +282,7 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
             sample_limit=20,
         )
 
-        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v18")
+        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v19")
         self.assertEqual(report["audit_contract"]["registered_read_model_keys"], [])
         self.assertFalse(report["audit_contract"]["relation_proof_required"])
 

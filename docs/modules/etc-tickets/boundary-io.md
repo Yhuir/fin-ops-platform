@@ -99,3 +99,9 @@
 - Forbidden paths: legacy ETC batch pickle、OA detection metadata 或 ETC invoice rows 不得替代 canonical invoice pool；ETC repair 不得绕过 relation command service。
 - Audit I/O boundary: Audit repository 只允许只读查询和 repeatable-read transaction；不得调用 ETC service mutation、refresh gateway、worker ack/retry、对象存储下载或 Workbench relation refresh。`app.workbench_pair_relations` 不是 ETC 页自己的 pairing source。
 - Old code deletion: 生产主链路的 legacy `/api/etc/batches*` source-of-truth fallback、route owner、read facade、delete/lifecycle service、前端测试 mock 假后端和后端兼容测试已删除；页面已导入任务详情改走 `/api/etc/invoices?importBatchId=...`。ETC 专用 `oa-status/refresh` 和 invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口已删除，并由 static guard 防回归。historical repair/backfill 工具保留不算页面/API closure 阻断，仍需按工具 owner/dry-run/deletion 条件单独收口。
+
+## Phase 19 deterministic graph repair（2026-07-12）
+
+- migration 0101 只从 submitted/closed business batch 的现有 `task_id/scope/title` 创建缺失的 imported reconciliation task，并把 batch title 对齐 task title。
+- active ETC invoice 若指向已删除/不可见 business batch，则清除该 orphan owner，并把已有 canonical `batch_id` 写入 normalized `import_batch_id`；不创建新 invoice 或外部来源事实。
+- task `source_files` 只从 `app.etc_reconciliation_files` 正式行重算；禁止从 payload 猜测文件、hash 或字节。

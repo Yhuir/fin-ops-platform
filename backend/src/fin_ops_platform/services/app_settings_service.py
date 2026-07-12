@@ -1239,6 +1239,18 @@ class AppSettingsService:
         )
 
     @staticmethod
+    def normalize_settings_payload(
+        payload: dict[str, Any] | None,
+        *,
+        validate_pending_invoice_tag_groups: bool = False,
+    ) -> dict[str, Any]:
+        """Return the canonical persisted App settings payload without performing I/O."""
+        return AppSettingsService._normalize_settings(
+            payload,
+            validate_pending_invoice_tag_groups=validate_pending_invoice_tag_groups,
+        )
+
+    @staticmethod
     def _normalize_settings(
         payload: dict[str, Any] | None,
         *,

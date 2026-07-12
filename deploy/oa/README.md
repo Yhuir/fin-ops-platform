@@ -435,6 +435,11 @@ sudo /usr/local/sbin/finops-deploy-control read-model-slo-smoke <release-name> \
   --json \
   --critical-only \
   --target-ms 5000
+sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
+  --scope tax_offset=all --scope turnover_ledger=all --dry-run
+sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --dry-run
+sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <release-name> \
+  --limit 100 --dry-run
 ```
 
 `workbench-rehydrate` 会调用 release 内的 `scripts/rehydrate-workbench-read-models.py`，

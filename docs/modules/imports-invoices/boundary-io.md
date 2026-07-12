@@ -93,3 +93,9 @@
 - Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、batch revert 和从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 已删除；历史 migration/只读 audit 工具不构成 runtime fallback。
 - Durable confirm：`/imports/files/confirm` 必须创建 `job.import_jobs(import_type=file_import.confirm)` 与 `job.outbox_events(event_type=import.process.requested)`；PostgreSQL polling 与 RabbitMQ wakeup 共用该 gateway，queue/repository 不可用返回 `503 import_queue_unavailable`，禁止进程内确认。
 - 2026-07-01：文件发票导入预览保存改为 `ImportNormalizationService.snapshot(include_facts=False)`，禁止旧 full snapshot 预览链路把失败确认残留的正式发票写入发票池；确认路径仍负责正式 facts 和下游 dirty scope。
+
+## Audit v19 provenance 版本边界（2026-07-12）
+
+- migration 0101 为新 `app.import_files` 设置 `audit_contract_revision=import-page-audit.v1` 默认值，但不回填历史行。
+- 当前 revision 的新导入严格证明 file object/hash/session/batch/row/canonical invoice 与 source link；税率按语义归一化比较，例如 `1% == 0.01`。
+- revision 为 NULL 的 pre-contract 历史保留明确 warning，不伪造来源证据；canonical 发票、展示字段和 relation 完整性由对应业务页面 Audit 阻断证明。

@@ -176,6 +176,17 @@ transport/wakeup，不能作为 read model 状态事实源。
 业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。refresh service
 完成 projection 后调用 queue repository 完成 dirty scope；失败或 dead-letter 后由运维 inspect/requeue。
 
+Phase 19 受控生产重建使用：
+
+```bash
+sudo -n /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
+  --scope tax_offset=all --scope turnover_ledger=all --dry-run
+```
+
+该入口只通过 scope policy、`ReadModelRefreshGateway` 和 durable queue，不直接更新 `read_model.*`、
+`app_status_readiness` 或 dirty scope 状态。已由 exact-scope fresh/done 覆盖的 dead letter 只能通过
+`runtime-queue-resolve-covered` dry-run 后执行归档；未覆盖 failure 继续阻断 Audit。
+
 如果 downstream refresh handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，runtime worker
 会调用 `RuntimeQueueRepository.defer_event(...)`，把该 outbox event 短延迟放回 `pending`，生产模板默认 0.25 秒后
 重新 claim。这只用于依赖顺序竞态，不写 fresh readiness、不缓存 payload，也不进入 failed/dead-letter。

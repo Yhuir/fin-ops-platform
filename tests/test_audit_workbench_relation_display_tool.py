@@ -71,7 +71,7 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertEqual(report["summary"]["blocking_issue_count"], 0)
         self.assertEqual(report["issues"], [])
         self.assertEqual(report["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
-        self.assertIn("active_generation_relation_display", report["audit_contract"]["proof_checks"])
+        self.assertIn("query_composed_relation_case_ownership", report["audit_contract"]["proof_checks"])
         self.assertIn("canonical_object_expected_set_equality", report["audit_contract"]["proof_checks"])
 
     def test_relation_display_can_be_clean_while_canonical_object_is_missing(self) -> None:
@@ -163,7 +163,7 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
             {issue["code"] for issue in report["issues"]},
         )
 
-    def test_reports_split_all_scope_and_stale_all_generation_without_writing(self) -> None:
+    def test_ignores_materialized_all_generation_drift(self) -> None:
         connection = FakeConnection(
             generations=[
                 _generation("2026-01", "2026-06-14 10:02:00+08"),
@@ -179,11 +179,9 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
 
         report = audit_workbench_relation_display.audit_workbench_relation_display(connection)
 
-        self.assertEqual(report["overall_status"], "issues_found")
-        self.assertGreater(report["summary"]["blocking_issue_count"], 0)
-        issue_codes = {issue["code"] for issue in report["issues"]}
-        self.assertIn("relation_rows_split_across_groups", issue_codes)
-        self.assertIn("all_generation_older_than_member_scope_generation", issue_codes)
+        self.assertEqual(report["overall_status"], "pass")
+        self.assertEqual(report["summary"]["blocking_issue_count"], 0)
+        self.assertFalse(report["summary"]["materialized_all_required"])
         self.assertEqual(connection.executed, [])
 
     def test_reports_missing_member_scope_rows_and_payload_mismatch(self) -> None:
@@ -198,11 +196,10 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         )
 
         issue_codes = {issue["code"] for issue in report["issues"]}
-        self.assertIn("relation_rows_missing_from_member_scope_generation", issue_codes)
-        self.assertIn("relation_row_payload_case_mismatch", issue_codes)
+        self.assertIn("relation_rows_missing_from_query_composed_case", issue_codes)
         self.assertGreater(report["summary"]["blocking_issue_count"], 0)
 
-    def test_reports_multi_oa_relation_bank_row_missing_source_alignment(self) -> None:
+    def test_multi_oa_hyperedge_does_not_require_fake_single_oa_alignment(self) -> None:
         report = audit_workbench_relation_display.audit_workbench_relation_display(
             FakeConnection(
                 relations=[
@@ -217,20 +214,52 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
                         "raw_payload": {},
                     }
                 ],
-                generations=[_generation("all", "2026-06-23 09:05:00+08")],
+                generations=[_generation("2026-05", "2026-06-23 09:05:00+08")],
                 group_rows=[
-                    _group_row("all", "oa-29350", group_id="case:case-multi-oa", payload_case_id="case-multi-oa"),
-                    _group_row("all", "oa-88050", group_id="case:case-multi-oa", payload_case_id="case-multi-oa"),
-                    _group_row("all", "bank-29350", group_id="case:case-multi-oa", payload_case_id="case-multi-oa"),
+                    _group_row("2026-05", "oa-29350", group_id="case:case-multi-oa", payload_case_id="case-multi-oa"),
+                    _group_row("2026-05", "oa-88050", group_id="case:case-multi-oa", payload_case_id="case-multi-oa"),
+                    _group_row("2026-05", "bank-29350", group_id="case:case-multi-oa", payload_case_id="case-multi-oa"),
                 ],
             )
         )
 
-        issue_codes = {issue["code"] for issue in report["issues"]}
-        self.assertIn("relation_bank_row_missing_source_oa_alignment", issue_codes)
-        self.assertGreater(report["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(report["overall_status"], "pass")
+        self.assertEqual(report["summary"]["blocking_issue_count"], 0)
 
-    def test_reports_visible_automatic_decision_rows_without_active_relation(self) -> None:
+    def test_query_composed_case_rejects_extra_noncanonical_member(self) -> None:
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                group_rows=[
+                    _group_row("2026-01", "bank-1"),
+                    _group_row("2026-01", "invoice-1"),
+                    _group_row("2026-01", "invoice-extra"),
+                ]
+            )
+        )
+
+        self.assertIn(
+            "query_composed_case_rows_not_canonical",
+            {issue["code"] for issue in report["issues"]},
+        )
+
+    def test_query_composed_case_rejects_member_type_drift(self) -> None:
+        drifted_invoice = _group_row("2026-01", "invoice-1")
+        drifted_invoice["source_kind"] = "bank"
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                group_rows=[
+                    _group_row("2026-01", "bank-1"),
+                    drifted_invoice,
+                ]
+            )
+        )
+
+        self.assertIn(
+            "query_composed_case_row_type_mismatch",
+            {issue["code"] for issue in report["issues"]},
+        )
+
+    def test_internal_month_decision_rows_do_not_count_as_query_composed_relations(self) -> None:
         connection = FakeConnection(
             relations=[],
             generations=[_generation("all", "2026-07-10 09:00:00+08")],
@@ -247,10 +276,8 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
 
         report = audit_workbench_relation_display.audit_workbench_relation_display(connection)
 
-        self.assertEqual(report["overall_status"], "issues_found")
-        self.assertEqual(report["summary"]["visible_automatic_decision_row_count"], 1)
-        issue_codes = {issue["code"] for issue in report["issues"]}
-        self.assertIn("visible_automatic_decision_group", issue_codes)
+        self.assertEqual(report["overall_status"], "pass")
+        self.assertNotIn("visible_automatic_decision_row_count", report["summary"])
         self.assertEqual(connection.executed, [])
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
@@ -268,7 +295,7 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
 
         payload = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 1)
-        self.assertIn("relation_rows_missing_from_all_generation", payload["summary"]["issue_counts_by_code"])
+        self.assertIn("relation_rows_missing_from_query_composed_case", payload["summary"]["issue_counts_by_code"])
 
     def test_module_has_cli_entrypoint(self) -> None:
         source = inspect.getsource(audit_workbench_relation_display)

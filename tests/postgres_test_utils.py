@@ -112,6 +112,7 @@ EXPECTED_MIGRATION_FILES = [
     "0098_etc_import_session_files.sql",
     "0099_external_control_evidence.sql",
     "0100_phase19_runtime_grants.sql",
+    "0101_phase19_audit_contract_boundaries.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

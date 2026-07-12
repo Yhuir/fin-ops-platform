@@ -25,6 +25,7 @@ KNOWN_BATCH_STATUSES = frozenset({"pending", "completed", "completed_with_errors
 KNOWN_DECISIONS = frozenset({"created", "status_updated", "duplicate_skipped", "suspected_duplicate", "error"})
 TERMINAL_BATCH_STATUSES = frozenset({"completed", "completed_with_errors"})
 LINKED_TERMINAL_DECISIONS = frozenset({"created", "status_updated", "duplicate_skipped"})
+IMPORT_AUDIT_CONTRACT_REVISION = "import-page-audit.v1"
 
 
 def audit_invoice_import_page(
@@ -71,8 +72,30 @@ def _audit_snapshot(
 ) -> dict[str, Any]:
     batch_ids = {_text(row.get("batch_id")) for row in batches if _text(row.get("batch_id"))}
     invoice_files = [row for row in files if _is_invoice_file(row, batch_ids=batch_ids)]
-    invoice_file_ids = {_text(row.get("file_id")) for row in invoice_files if _text(row.get("file_id"))}
-    invoice_session_ids = {_text(row.get("session_id")) for row in invoice_files if _text(row.get("session_id"))}
+    formal_files = [
+        row for row in invoice_files if _text(row.get("audit_contract_revision")) == IMPORT_AUDIT_CONTRACT_REVISION
+    ]
+    legacy_files = [row for row in invoice_files if row not in formal_files]
+    formal_batch_ids = {
+        batch_id
+        for row in formal_files
+        for batch_id in (_text(_payload(row).get("preview_batch_id")), _text(_payload(row).get("batch_id")))
+        if batch_id
+    }
+    formal_batches = [row for row in batches if _text(row.get("batch_id")) in formal_batch_ids]
+    formal_rows = [row for row in rows if _text(row.get("batch_id")) in formal_batch_ids]
+    formal_invoices = [
+        row
+        for row in invoices
+        if _text(row.get("source_batch_id")) in formal_batch_ids
+        or any(
+            _text(_dict(link).get("source_type")) == "manual_invoice_import"
+            and _text(_dict(link).get("batch_id")) in formal_batch_ids
+            for link in _list(row.get("source_links"))
+        )
+    ]
+    invoice_file_ids = {_text(row.get("file_id")) for row in formal_files if _text(row.get("file_id"))}
+    invoice_session_ids = {_text(row.get("session_id")) for row in formal_files if _text(row.get("session_id"))}
     invoice_jobs = [
         row
         for row in jobs
@@ -82,16 +105,27 @@ def _audit_snapshot(
     invoice_outbox = [row for row in outbox if _text(row.get("aggregate_id")) in invoice_job_ids]
 
     issues: list[AuditIssue] = []
-    issues.extend(_duplicate_issues(invoice_files, "file_id", "invoice_import_file_duplicate"))
-    issues.extend(_duplicate_issues(batches, "batch_id", "invoice_import_batch_duplicate"))
-    issues.extend(_duplicate_issues(rows, "row_id", "invoice_import_row_duplicate"))
-    issues.extend(_duplicate_issues(invoices, "invoice_id", "invoice_import_invoice_duplicate"))
-    issues.extend(_file_issues(invoice_files, files, batches))
-    issues.extend(_batch_row_issues(batches, rows))
-    issues.extend(_session_audit_issues(invoice_files, rows))
-    issues.extend(_canonical_invoice_issues(batches, rows, invoices))
-    issues.extend(_job_issues(invoice_jobs, invoice_files, files, batches))
+    issues.extend(_duplicate_issues(formal_files, "file_id", "invoice_import_file_duplicate"))
+    issues.extend(_duplicate_issues(formal_batches, "batch_id", "invoice_import_batch_duplicate"))
+    issues.extend(_duplicate_issues(formal_rows, "row_id", "invoice_import_row_duplicate"))
+    issues.extend(_duplicate_issues(formal_invoices, "invoice_id", "invoice_import_invoice_duplicate"))
+    issues.extend(_file_issues(formal_files, formal_files, formal_batches))
+    issues.extend(_batch_row_issues(formal_batches, formal_rows))
+    issues.extend(_session_audit_issues(formal_files, formal_rows))
+    issues.extend(_canonical_invoice_issues(formal_batches, formal_rows, formal_invoices))
+    issues.extend(_job_issues(invoice_jobs, formal_files, formal_files, formal_batches))
     issues.extend(_outbox_issues(invoice_outbox))
+    if legacy_files:
+        issues.append(
+            AuditIssue(
+                "warning",
+                "invoice_import_legacy_provenance_unproven",
+                "Pre-contract invoice import history remains readable canonical App data, but missing historical file provenance is not fabricated.",
+                "legacy-invoice-import-history",
+                "invoice_import",
+                {"file_count": len(legacy_files)},
+            )
+        )
     evaluation = evaluate_audit_issues(issues, sample_limit=sample_limit)
 
     return {
@@ -102,9 +136,11 @@ def _audit_snapshot(
         "summary": {
             "invoice_import_session_count": len(invoice_session_ids),
             "invoice_import_file_count": len(invoice_files),
-            "invoice_import_batch_count": len(batches),
-            "invoice_import_row_count": len(rows),
-            "invoice_import_canonical_invoice_count": len(invoices),
+            "strict_contract_file_count": len(formal_files),
+            "legacy_file_count": len(legacy_files),
+            "invoice_import_batch_count": len(formal_batches),
+            "invoice_import_row_count": len(formal_rows),
+            "invoice_import_canonical_invoice_count": len(formal_invoices),
             "invoice_import_job_count": len(invoice_jobs),
             "invoice_import_outbox_attention_count": len(invoice_outbox),
             **evaluation.summary,
@@ -122,7 +158,7 @@ def _audit_snapshot(
             ],
             "read_model_tables": [],
             "canonical_expected_set": (
-                "all registered input/output invoice file sessions, their preview/confirmed batches and rows, "
+                "all version-registered input/output invoice file sessions, their preview/confirmed batches and rows, "
                 "and the exact canonical invoice/manual_invoice_import source-link closure of terminal row decisions"
             ),
             "key_display_fields": [
@@ -168,8 +204,9 @@ def _audit_snapshot(
                 "and audit_status.queue == 'drained' and audit_contract.database_snapshot == true"
             ),
             "guarantee_boundary": (
-                "Every registered App invoice-import file/batch/row/invoice/source-link/job edge agrees in one snapshot; "
-                "downstream page projections, business pairing edges and external invoice-source completeness are not inferred."
+                "Every version-registered App invoice-import file/batch/row/invoice/source-link/job edge agrees in one snapshot. "
+                "Pre-contract provenance remains explicitly unproven instead of being fabricated; downstream page projections, "
+                "business pairing edges and external invoice-source completeness are not inferred."
             ),
             "write_policy": "read_only",
         },
@@ -497,7 +534,7 @@ def _invoice_field_issues(row: dict[str, Any], invoice: dict[str, Any], *, batch
         "amount": (_decimal_text(normalized.get("amount")), _decimal_text(invoice.get("amount"))),
         "tax_amount": (_decimal_text(normalized.get("tax_amount")), _decimal_text(invoice.get("tax_amount"))),
         "total_with_tax": (_decimal_text(normalized.get("total_with_tax")), _decimal_text(invoice.get("total_with_tax"))),
-        "tax_rate": (_text(normalized.get("tax_rate")), _text(invoice.get("tax_rate"))),
+        "tax_rate": (_tax_rate_text(normalized.get("tax_rate")), _tax_rate_text(invoice.get("tax_rate"))),
         "invoice_status_from_source": (
             _text(normalized.get("invoice_status_from_source")),
             _text(invoice_payload.get("invoice_status_from_source")),
@@ -749,6 +786,17 @@ def _decimal_text(value: Any) -> str:
         return _text(value)
 
 
+def _tax_rate_text(value: Any) -> str:
+    text = _text(value)
+    if not text:
+        return ""
+    try:
+        number = Decimal(text[:-1]) / Decimal("100") if text.endswith("%") else Decimal(text)
+    except (InvalidOperation, TypeError, ValueError):
+        return text
+    return format(number.normalize(), "f")
+
+
 def _date_text(value: Any) -> str:
     if value in (None, ""):
         return ""
@@ -767,7 +815,7 @@ def _comparable(value: Any) -> Any:
 
 _FILE_SQL = """
 select coalesce(f.legacy_mongo_id, f.id::text) as file_id,
-       f.session_id, f.file_object_id::text, f.stored_file_path, f.original_filename,
+       f.session_id, f.audit_contract_revision, f.file_object_id::text, f.stored_file_path, f.original_filename,
        f.template_kind, f.status, f.uploaded_by, f.uploaded_at, f.raw_payload,
        o.storage_backend, o.storage_uri, o.bucket_name, o.object_key, o.filename as object_filename,
        o.sha256, o.size_bytes, o.content_type

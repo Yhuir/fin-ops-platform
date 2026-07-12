@@ -45,6 +45,12 @@ commands:
                                       check or repair read model scope contracts using runtime env
   read-model-slo-smoke <release-name> [args]
                                       run read model SLO smoke dry-run using runtime env; --apply is refused
+  read-model-refresh <release-name> [args]
+                                      validate or enqueue read-model refresh scopes through the durable gateway
+  settings-normalize <release-name> [--dry-run|--execute]
+                                      normalize App settings through the canonical service/repository boundary
+  runtime-queue-resolve-covered <release-name> [args]
+                                      resolve only dead letters covered by fresh/done scope proof
   restart                              restart API, active workers, and active dispatcher
   status                               print service state and active release paths
   cleanup-dropins                      remove historical release drop-ins, preserving 99-deploy-release.conf
@@ -490,6 +496,38 @@ read_model_slo_smoke() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.read_model_slo_smoke "$@"
 }
 
+read_model_refresh() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "read-model-refresh requires release name"
+  shift
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.runtime_queue_ops \
+    enqueue-read-model-refresh "$@"
+}
+
+settings_normalize() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "settings-normalize requires release name"
+  shift
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.settings_normalization_ops "$@"
+}
+
+runtime_queue_resolve_covered() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "runtime-queue-resolve-covered requires release name"
+  shift
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.runtime_queue_ops \
+    resolve-covered-dead-letters "$@"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   check-release)
@@ -537,6 +575,18 @@ case "$cmd" in
   read-model-slo-smoke)
     shift
     read_model_slo_smoke "$@"
+    ;;
+  read-model-refresh)
+    shift
+    read_model_refresh "$@"
+    ;;
+  settings-normalize)
+    shift
+    settings_normalize "$@"
+    ;;
+  runtime-queue-resolve-covered)
+    shift
+    runtime_queue_resolve_covered "$@"
     ;;
   restart)
     assert_runtime_env_contract

@@ -106,7 +106,7 @@ def _audit_workbench_relation_display_snapshot(
             ],
             "canonical_expected_set": (
                 "eligible canonical OA, bank, invoice, and ETC summary/detail objects in active month generations, "
-                "their all-scope union, and every active relation member"
+                "plus every active relation member in the query-composed case owner"
             ),
             "key_display_fields": [
                 "object identity",
@@ -115,26 +115,23 @@ def _audit_workbench_relation_display_snapshot(
                 "bank direction/amount/counterparty",
                 "invoice identity/type/date/amount",
                 "ETC batch members/count/amount",
-                "case/mode/group owner/row alignment",
+                "case/mode/group owner",
                 "ignored and handled-exception ownership",
                 "generation and summary counts",
                 "source dependency versions",
             ],
             "relation_edge_equality": (
-                "canonical == relation_groups == relation_rows == active Workbench generation display ownership"
+                "canonical == relation_groups == relation_rows == query-composed Workbench case ownership"
             ),
             "snapshot_consistency": snapshot_consistency,
             "database_snapshot": database_snapshot,
             "proof_checks": [
                 "canonical_object_expected_set_equality",
-                "active_month_and_all_scope_union_equality",
+                "active_month_generation_expected_set_equality",
                 "generation_row_group_summary_counts",
                 "bidirectional_relation_edge_equality",
-                "active_generation_relation_display",
-                "single_visible_group_owner",
-                "case_mode_and_multi_oa_alignment",
-                "all_scope_generation_order",
-                "visible_automatic_decision_exclusion",
+                "query_composed_relation_case_ownership",
+                "relation_member_completeness",
                 "durable_queue_and_freshness_gate",
             ],
             "external_source_boundary": "bank, OA, invoice, and ETC completeness before App registration",
@@ -169,36 +166,33 @@ def collect_workbench_page_integrity_issues(
             if str(row_id or "").strip()
         }
     )
-    group_rows = _fetch_active_group_rows(connection, tenant_id=tenant_id, row_ids=relation_row_ids)
-    automatic_decision_group_rows = _fetch_visible_automatic_decision_group_rows(
+    relation_case_group_ids = sorted(
+        {
+            group_id
+            for relation in relations
+            for group_id in (
+                str(relation.get("case_id") or ""),
+                f"case:{str(relation.get('case_id') or '')}",
+            )
+            if group_id and group_id != "case:"
+        }
+    )
+    group_rows = _fetch_active_group_rows(
         connection,
         tenant_id=tenant_id,
-        limit=limit,
+        group_ids=relation_case_group_ids,
     )
-    generation_by_scope = {str(row.get("scope_key") or ""): row for row in active_generations}
     rows_by_scope_and_id = _rows_by_scope_and_row_id(group_rows)
     issues: list[RelationDisplayIssue] = []
 
-    if relations and "all" not in generation_by_scope:
-        issues.append(
-            RelationDisplayIssue(
-                severity="error",
-                code="missing_all_active_generation",
-                message="Active relations exist but Workbench all scope has no active generation.",
-                case_id="*",
-                scope_key="all",
-            )
-        )
-
     for relation in relations:
         issues.extend(
-            _relation_display_issues(
+            _query_composed_relation_display_issues(
                 relation,
                 rows_by_scope_and_id=rows_by_scope_and_id,
-                generation_by_scope=generation_by_scope,
+                group_rows=group_rows,
             )
         )
-    issues.extend(_visible_automatic_decision_issues(automatic_decision_group_rows))
     audit_issues = [_display_audit_issue(issue) for issue in issues]
     audit_issues.extend(
         workbench_relation_edge_equality_issues(
@@ -216,15 +210,13 @@ def collect_workbench_page_integrity_issues(
             limit=limit,
         )
     )
-    all_generation = generation_by_scope.get("all") or {}
     return audit_issues, {
         "active_relation_count": len(relations),
         "active_generation_scope_count": len(active_generations),
         "audited_relation_row_id_count": len(relation_row_ids),
         "active_group_row_count": len(group_rows),
-        "visible_automatic_decision_row_count": len(automatic_decision_group_rows),
-        "all_generation_id": all_generation.get("generation_id"),
-        "all_generation_activated_at": all_generation.get("activated_at"),
+        "query_composed_scope": "all",
+        "materialized_all_required": False,
     }
 
 
@@ -330,14 +322,15 @@ def _fetch_active_generations(connection: Any, *, tenant_id: str) -> list[dict[s
         from read_model.workbench_generations
         where tenant_id = %s
           and status = 'active'
+          and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
         order by scope_key
         """,
         (tenant_id,),
     )
 
 
-def _fetch_active_group_rows(connection: Any, *, tenant_id: str, row_ids: list[str]) -> list[dict[str, Any]]:
-    if not row_ids:
+def _fetch_active_group_rows(connection: Any, *, tenant_id: str, group_ids: list[str]) -> list[dict[str, Any]]:
+    if not group_ids:
         return []
     return connection.fetch_all(
         """
@@ -359,48 +352,13 @@ def _fetch_active_group_rows(connection: Any, *, tenant_id: str, row_ids: list[s
          and gr.scope_key = gen.scope_key
         where gen.tenant_id = %s
           and gen.status = 'active'
+          and gen.scope_key ~ '^[0-9]{4}-[0-9]{2}$'
           and gr.row_role <> 'summary'
-          and gr.row_id = any(%s)
+          and gr.group_id = any(%s)
         order by gen.scope_key, gr.row_id, gr.group_id
         """,
-        (tenant_id, row_ids),
+        (tenant_id, group_ids),
     )
-
-
-def _fetch_visible_automatic_decision_group_rows(connection: Any, *, tenant_id: str, limit: int) -> list[dict[str, Any]]:
-    rows = connection.fetch_all(
-        """
-        select
-          gen.scope_key,
-          gen.generation_id,
-          gen.activated_at::text as generation_activated_at,
-          gr.group_id,
-          gr.zone,
-          gr.pane,
-          gr.row_id,
-          gr.row_role,
-          gr.source_kind,
-          gr.status,
-          gr.payload
-        from read_model.workbench_generations gen
-        join read_model.workbench_group_rows gr
-          on gr.generation_id = gen.generation_id
-         and gr.scope_key = gen.scope_key
-        where gen.tenant_id = %s
-          and gen.status = 'active'
-          and gr.row_role <> 'summary'
-          and (
-            gr.group_id like 'case:decision:%%'
-            or gr.payload->>'relation_mode' = 'automatic_decision'
-            or gr.payload->>'case_id' like 'decision:%%'
-            or gr.payload ? 'workbench_reconciliation_decision'
-          )
-        order by gen.scope_key, gr.group_id, gr.row_id
-        limit %s
-        """,
-        (tenant_id, limit),
-    )
-    return [row for row in rows if _row_is_visible_automatic_decision(row)]
 
 
 def _normalize_relation(row: dict[str, Any]) -> dict[str, Any]:
@@ -429,52 +387,11 @@ def _rows_by_scope_and_row_id(rows: list[dict[str, Any]]) -> dict[tuple[str, str
     return grouped
 
 
-def _visible_automatic_decision_issues(rows: list[dict[str, Any]]) -> list[RelationDisplayIssue]:
-    issues: list[RelationDisplayIssue] = []
-    for row in rows:
-        payload = row_payload(row, "payload")
-        payload_dict = payload if isinstance(payload, dict) else {}
-        group_id = text(row.get("group_id")) or ""
-        row_id = text(row.get("row_id")) or text(payload_dict.get("id")) or ""
-        pane = text(row.get("pane") or payload_dict.get("type") or payload_dict.get("source_kind")) or ""
-        issues.append(
-            RelationDisplayIssue(
-                severity="error",
-                code="visible_automatic_decision_group",
-                message="Active Workbench generation contains visible automatic decision rows; same-row display must come from active linked relations only.",
-                case_id=group_id,
-                scope_key=text(row.get("scope_key")) or "",
-                row_id=row_id,
-                row_type=pane,
-                details={
-                    "group_id": group_id,
-                    "payload_case_id": text(payload_dict.get("case_id")) or "",
-                    "payload_relation_mode": text(payload_dict.get("relation_mode")) or "",
-                },
-            )
-        )
-    return issues
-
-
-def _row_is_visible_automatic_decision(row: dict[str, Any]) -> bool:
-    group_id = text(row.get("group_id")) or ""
-    if group_id.startswith("case:decision:"):
-        return True
-    payload = row_payload(row, "payload")
-    payload_dict = payload if isinstance(payload, dict) else {}
-    if text(payload_dict.get("relation_mode")) == "automatic_decision":
-        return True
-    case_id = text(payload_dict.get("case_id"))
-    if case_id and case_id.startswith("decision:"):
-        return True
-    return isinstance(payload_dict.get("workbench_reconciliation_decision"), dict)
-
-
-def _relation_display_issues(
+def _query_composed_relation_display_issues(
     relation: dict[str, Any],
     *,
     rows_by_scope_and_id: dict[tuple[str, str], list[dict[str, Any]]],
-    generation_by_scope: dict[str, dict[str, Any]],
+    group_rows: list[dict[str, Any]],
 ) -> list[RelationDisplayIssue]:
     case_id = str(relation.get("case_id") or "")
     row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or []) if str(row_id or "").strip()]
@@ -484,138 +401,77 @@ def _relation_display_issues(
     if not case_id or not row_ids:
         return issues
 
-    all_rows_by_id = {row_id: list(rows_by_scope_and_id.get(("all", row_id), [])) for row_id in row_ids}
-    missing_all = [row_id for row_id, rows in all_rows_by_id.items() if not rows]
-    if missing_all:
+    expected_group_ids = {case_id, f"case:{case_id}"}
+    composed_rows_by_id = {
+        row_id: [
+            row
+            for (scope_key, candidate_row_id), scoped_rows in rows_by_scope_and_id.items()
+            if scope_key != "all" and candidate_row_id == row_id
+            for row in scoped_rows
+            if text(row.get("group_id")) in expected_group_ids
+        ]
+        for row_id in row_ids
+    }
+    actual_case_rows = [
+        row
+        for row in group_rows
+        if text(row.get("scope_key")) != "all"
+        and text(row.get("group_id")) in expected_group_ids
+    ]
+    expected_row_id_set = set(row_ids)
+    actual_row_id_set = {
+        row_id
+        for row in actual_case_rows
+        if (row_id := text(row.get("row_id")))
+    }
+    missing_row_ids = [row_id for row_id, rows in composed_rows_by_id.items() if not rows]
+    if missing_row_ids:
         issues.append(
             RelationDisplayIssue(
                 severity="error",
-                code="relation_rows_missing_from_all_generation",
-                message="Active relation members are missing from the active Workbench all generation.",
+                code="relation_rows_missing_from_query_composed_case",
+                message="Active relation members are missing from the Workbench query-composed canonical case owner.",
                 case_id=case_id,
                 scope_key="all",
-                details={"missing_row_ids": missing_all, "relation_mode": relation_mode},
+                details={"missing_row_ids": missing_row_ids, "relation_mode": relation_mode},
             )
         )
-
-    issues.extend(
-        _scope_group_issues(
-            case_id=case_id,
-            relation_mode=relation_mode,
-            row_ids=row_ids,
-            row_types=row_types,
-            scope_key="all",
-            rows_by_id=all_rows_by_id,
-            require_complete=not missing_all,
-        )
-    )
-
-    relation_scopes = sorted(
-        {
-            scope_key
-            for (scope_key, row_id), rows in rows_by_scope_and_id.items()
-            if scope_key != "all" and row_id in set(row_ids) and rows
-        }
-    )
-    all_generation = generation_by_scope.get("all")
-    all_activated_at = text((all_generation or {}).get("activated_at")) or ""
-    for scope_key in relation_scopes:
-        scope_rows_by_id = {row_id: list(rows_by_scope_and_id.get((scope_key, row_id), [])) for row_id in row_ids}
-        missing_scope = [row_id for row_id, rows in scope_rows_by_id.items() if not rows]
-        if missing_scope:
-            issues.append(
-                RelationDisplayIssue(
-                    severity="error",
-                    code="relation_rows_missing_from_member_scope_generation",
-                    message="Active relation members are not complete in a member Workbench month scope.",
-                    case_id=case_id,
-                    scope_key=scope_key,
-                    details={"missing_row_ids": missing_scope, "relation_mode": relation_mode},
-                )
-            )
-        issues.extend(
-            _scope_group_issues(
-                case_id=case_id,
-                relation_mode=relation_mode,
-                row_ids=row_ids,
-                row_types=row_types,
-                scope_key=scope_key,
-                rows_by_id=scope_rows_by_id,
-                require_complete=not missing_scope,
-            )
-        )
-        scope_generation = generation_by_scope.get(scope_key) or {}
-        scope_activated_at = text(scope_generation.get("activated_at")) or ""
-        if all_activated_at and scope_activated_at and scope_activated_at > all_activated_at:
-            issues.append(
-                RelationDisplayIssue(
-                    severity="error",
-                    code="all_generation_older_than_member_scope_generation",
-                    message="Workbench all generation is older than a member month scope generation.",
-                    case_id=case_id,
-                    scope_key=scope_key,
-                    details={
-                        "all_activated_at": all_activated_at,
-                        "member_scope_activated_at": scope_activated_at,
-                        "all_generation_id": (all_generation or {}).get("generation_id"),
-                        "member_generation_id": scope_generation.get("generation_id"),
-                    },
-                )
-            )
-    return issues
-
-
-def _scope_group_issues(
-    *,
-    case_id: str,
-    relation_mode: str,
-    row_ids: list[str],
-    row_types: list[str],
-    scope_key: str,
-    rows_by_id: dict[str, list[dict[str, Any]]],
-    require_complete: bool,
-) -> list[RelationDisplayIssue]:
-    issues: list[RelationDisplayIssue] = []
-    rows = [row for row_id in row_ids for row in rows_by_id.get(row_id, [])]
-    group_ids = sorted({str(row.get("group_id") or "") for row in rows if str(row.get("group_id") or "").strip()})
-    if require_complete and len(group_ids) > 1:
+    extra_row_ids = sorted(actual_row_id_set - expected_row_id_set)
+    if extra_row_ids:
         issues.append(
             RelationDisplayIssue(
                 severity="error",
-                code="relation_rows_split_across_groups",
-                message="Active relation members are visible in more than one Workbench group.",
+                code="query_composed_case_rows_not_canonical",
+                message="The Workbench query-composed case contains rows absent from the canonical relation.",
                 case_id=case_id,
-                scope_key=scope_key,
-                details={"group_ids": group_ids, "relation_mode": relation_mode},
-            )
-        )
-    expected_group_ids = {case_id, f"case:{case_id}"}
-    if require_complete and len(group_ids) == 1 and group_ids[0] not in expected_group_ids:
-        issues.append(
-            RelationDisplayIssue(
-                severity="warning",
-                code="relation_group_id_not_case_based",
-                message="Active relation members are grouped together but not under the canonical case group id.",
-                case_id=case_id,
-                scope_key=scope_key,
-                details={"group_id": group_ids[0], "expected_group_ids": sorted(expected_group_ids)},
+                scope_key="all",
+                details={"extra_row_ids": extra_row_ids, "relation_mode": relation_mode},
             )
         )
     for row_index, row_id in enumerate(row_ids):
-        rows_for_id = list(rows_by_id.get(row_id) or [])
+        rows_for_id = list(composed_rows_by_id.get(row_id) or [])
         row_type = _row_type_at(row_types, row_index)
-        distinct_groups = sorted({str(row.get("group_id") or "") for row in rows_for_id if str(row.get("group_id") or "").strip()})
-        if len(distinct_groups) > 1:
+        if rows_for_id and not any(
+            _normalized_display_row_type(row.get("source_kind")) == _normalized_display_row_type(row_type)
+            for row in rows_for_id
+        ):
             issues.append(
                 RelationDisplayIssue(
                     severity="error",
-                    code="relation_row_duplicate_visible_owner",
-                    message="A relation member row has multiple visible owners in one active Workbench scope.",
+                    code="query_composed_case_row_type_mismatch",
+                    message="A Workbench case member type differs from the canonical relation member type.",
                     case_id=case_id,
-                    scope_key=scope_key,
+                    scope_key="all",
                     row_id=row_id,
                     row_type=row_type,
-                    details={"group_ids": distinct_groups},
+                    details={
+                        "projected_source_kinds": sorted(
+                            {
+                                text(row.get("source_kind")) or ""
+                                for row in rows_for_id
+                            }
+                        )
+                    },
                 )
             )
         for row in rows_for_id:
@@ -629,7 +485,7 @@ def _scope_group_issues(
                         code="relation_row_payload_case_mismatch",
                         message="A relation member row payload points at a different relation case.",
                         case_id=case_id,
-                        scope_key=scope_key,
+                        scope_key=text(row.get("scope_key")) or "",
                         row_id=row_id,
                         row_type=row_type,
                         details={"payload_case_id": payload_case_id},
@@ -643,31 +499,10 @@ def _scope_group_issues(
                         code="relation_row_payload_mode_mismatch",
                         message="A relation member row payload has a different relation mode.",
                         case_id=case_id,
-                        scope_key=scope_key,
+                        scope_key=text(row.get("scope_key")) or "",
                         row_id=row_id,
                         row_type=row_type,
                         details={"payload_relation_mode": payload_mode, "relation_mode": relation_mode},
-                    )
-                )
-            if (
-                require_complete
-                and _relation_has_multiple_oa_rows(row_types)
-                and row_type == "bank"
-                and not _payload_source_oa_id(row_payload_dict)
-            ):
-                issues.append(
-                    RelationDisplayIssue(
-                        severity="error",
-                        code="relation_bank_row_missing_source_oa_alignment",
-                        message="A bank row in a multi-OA active relation is missing row-level source OA alignment evidence.",
-                        case_id=case_id,
-                        scope_key=scope_key,
-                        row_id=row_id,
-                        row_type=row_type,
-                        details={
-                            "relation_mode": relation_mode,
-                            "expected_fields": ["source_oa_id", "source_oa_row_id", "derived_from_oa_id"],
-                        },
                     )
                 )
     return issues
@@ -679,22 +514,25 @@ def _row_type_at(row_types: list[str], index: int) -> str:
     return ""
 
 
-def _relation_has_multiple_oa_rows(row_types: list[str]) -> bool:
-    return sum(1 for row_type in row_types if str(row_type or "").strip() == "oa") >= 2
-
-
-def _payload_source_oa_id(payload: dict[str, Any]) -> str:
-    for key in ("source_oa_id", "source_oa_row_id", "derived_from_oa_id", "oa_row_id", "oa_id"):
-        value = text(payload.get(key))
-        if value:
-            return value
-    detail_fields = payload.get("detail_fields")
-    if isinstance(detail_fields, dict):
-        for key in ("source_oa_id", "source_oa_row_id", "derived_from_oa_id", "oa_row_id", "oa_id"):
-            value = text(detail_fields.get(key))
-            if value:
-                return value
-    return ""
+def _normalized_display_row_type(value: Any) -> str:
+    normalized = text(value).lower() if text(value) else ""
+    if normalized in {"bank", "bank_transaction"}:
+        return "bank"
+    if normalized == "oa":
+        return "oa"
+    if normalized in {
+        "input",
+        "input_invoice",
+        "output",
+        "output_invoice",
+        "invoice",
+        "formal_invoice",
+        "oa_attachment_invoice",
+    }:
+        return "invoice"
+    if normalized in {"etc_summary", "etc_invoice_summary"}:
+        return "etc_invoice_summary"
+    return normalized
 
 
 def _audit_issue_counts_by_code(issues: list[AuditIssue]) -> dict[str, int]:

@@ -8,6 +8,8 @@ from typing import Any, TextIO
 
 from fin_ops_platform.services.app_status_read_model_registry import read_model_by_refresh_event_type
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 
 
@@ -88,6 +90,24 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue_oa_sync.add_argument("--scope", default="all")
     enqueue_oa_sync.add_argument("--reason", default="scheduled_oa_sync")
     enqueue_oa_sync.add_argument("--triggered-by", default="system")
+
+    enqueue_read_model = subparsers.add_parser(
+        "enqueue-read-model-refresh",
+        help="Validate and enqueue read-model refreshes through the canonical gateway.",
+    )
+    enqueue_read_model.add_argument(
+        "--scope",
+        action="append",
+        required=True,
+        help="Repeatable scope_type=scope_key target.",
+    )
+    enqueue_read_model.add_argument("--reason", default="operator_audit_contract_rebuild")
+    enqueue_read_model.add_argument("--tenant-id", default="default")
+    enqueue_read_model.add_argument("--priority", choices=("low", "normal", "high"), default="high")
+    enqueue_read_model.add_argument("--trace-id")
+    enqueue_read_model_mode = enqueue_read_model.add_mutually_exclusive_group(required=True)
+    enqueue_read_model_mode.add_argument("--dry-run", action="store_true")
+    enqueue_read_model_mode.add_argument("--execute", action="store_true")
 
     for command in ("pause-dispatcher", "resume-dispatcher", "pause-consumer", "resume-consumer"):
         subparsers.add_parser(command, help=f"{command.replace('-', ' ')} via app.app_settings control flag.")
@@ -200,6 +220,19 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None, std
             file=stdout,
         )
         return 0
+    if args.command == "enqueue-read-model-refresh":
+        targets = _normalize_read_model_refresh_targets(args.scope)
+        result = _enqueue_read_model_refreshes(
+            repository,
+            targets=targets,
+            tenant_id=args.tenant_id,
+            reason=args.reason,
+            priority=args.priority,
+            trace_id=args.trace_id,
+            execute=args.execute,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+        return 0
     if args.command in {"pause-dispatcher", "resume-dispatcher", "pause-consumer", "resume-consumer"}:
         component = "dispatcher" if "dispatcher" in args.command else "consumer"
         paused = args.command.startswith("pause")
@@ -209,6 +242,77 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None, std
 
     print(f"unsupported command: {args.command}", file=stderr)
     return 2
+
+
+def _normalize_read_model_refresh_targets(raw_targets: list[str]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for raw_target in list(raw_targets or []):
+        target = str(raw_target or "").strip()
+        if "=" not in target:
+            raise ValueError(f"Invalid read-model target {target!r}; expected scope_type=scope_key.")
+        scope_type, scope_key = (part.strip() for part in target.split("=", 1))
+        if not scope_type or not scope_key:
+            raise ValueError(f"Invalid read-model target {target!r}; expected scope_type=scope_key.")
+        grouped.setdefault(scope_type, []).append(scope_key)
+    return {
+        scope_type: DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(scope_type, scope_keys)
+        for scope_type, scope_keys in grouped.items()
+    }
+
+
+def _enqueue_read_model_refreshes(
+    repository: RuntimeQueueRepository,
+    *,
+    targets: dict[str, list[str]],
+    tenant_id: str,
+    reason: str,
+    priority: str,
+    trace_id: str | None,
+    execute: bool,
+) -> dict[str, object]:
+    normalized_tenant_id = str(tenant_id or "default").strip() or "default"
+    normalized_reason = str(reason or "operator_audit_contract_rebuild").strip()
+    normalized_trace_id = str(trace_id or "").strip() or None
+    requested = [
+        {"scope_type": scope_type, "scope_key": scope_key}
+        for scope_type, scope_keys in targets.items()
+        for scope_key in scope_keys
+    ]
+    if not execute:
+        return {
+            "mode": "dry-run",
+            "tenant_id": normalized_tenant_id,
+            "reason": normalized_reason,
+            "priority": priority,
+            "target_count": len(requested),
+            "targets": requested,
+            "event_ids": [],
+        }
+
+    gateway = ReadModelRefreshGateway(queue_repository=repository)
+    events: list[object] = []
+    for scope_type, scope_keys in targets.items():
+        events.extend(
+            gateway.enqueue_many_events(
+                scope_type,
+                scope_keys,
+                reason=normalized_reason,
+                tenant_id=normalized_tenant_id,
+                priority=priority,
+                trace_id=normalized_trace_id,
+                metadata={"action_name": "production_audit_contract_rebuild"},
+            )
+        )
+    return {
+        "mode": "execute",
+        "tenant_id": normalized_tenant_id,
+        "reason": normalized_reason,
+        "priority": priority,
+        "target_count": len(requested),
+        "targets": requested,
+        "enqueued_count": len(events),
+        "event_ids": [str(getattr(event, "event_id", "")) for event in events],
+    }
 
 
 def _inspect_event(connection: PostgresConnection, event_id: str) -> dict[str, Any] | None:

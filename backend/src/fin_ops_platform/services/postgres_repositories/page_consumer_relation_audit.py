@@ -74,7 +74,7 @@ def _oa_pending_payment_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[A
             from app.oa_pending_payment_admissions
             where tenant_id = %s
         ),
-        relevant_groups as (
+        shared_groups as (
             select group_row.*
             from read_model.workbench_relation_groups group_row
             where group_row.tenant_id = %s
@@ -84,6 +84,27 @@ def _oa_pending_payment_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[A
                   from unnest(group_row.oa_row_ids) member(row_id)
                   join canonical_oa source on source.oa_id = member.row_id
               )
+        ),
+        pending_groups as (
+            select relation.relation_id as group_id,
+                   to_char(relation.scope_month, 'YYYY-MM') as scope_key,
+                   relation.oa_row_ids,
+                   relation.bank_transaction_ids,
+                   array[]::text[] as input_invoice_ids
+            from app.oa_pending_payment_bank_relations relation
+            where relation.status = 'active'
+              and exists (
+                  select 1
+                  from unnest(relation.oa_row_ids) member(row_id)
+                  join canonical_oa source on source.oa_id = member.row_id
+              )
+        ),
+        relevant_groups as (
+            select group_id, scope_key, oa_row_ids, bank_transaction_ids, input_invoice_ids
+            from shared_groups
+            union all
+            select group_id, scope_key, oa_row_ids, bank_transaction_ids, input_invoice_ids
+            from pending_groups
         ),
         expected_edge_rows as (
             select group_row.group_id as case_id, group_row.scope_key,

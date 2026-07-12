@@ -114,6 +114,7 @@ EXPECTED_MIGRATIONS = [
     "0098_etc_import_session_files.sql",
     "0099_external_control_evidence.sql",
     "0100_phase19_runtime_grants.sql",
+    "0101_phase19_audit_contract_boundaries.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -265,7 +266,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 101)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 102)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1098,6 +1099,12 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             flags=re.S,
         )
         sql = re.sub(
+            r"\binsert\s+into\s+app\.etc_reconciliation_tasks\s*\(.*?on\s+conflict\s*\(task_id\)\s+do\s+nothing;",
+            "insert into allowed_phase19_etc_reconciliation_task_repair",
+            sql,
+            flags=re.S,
+        )
+        sql = re.sub(
             r"\bdelete\s+from\s+read_model\.workbench_relation_rows\s+target\s+using\s*\(\s*select\s+id,\s+row_number\(\)\s+over\s*\(\s*partition\s+by\s+tenant_id,\s+scope_key,\s+row_id\s+order\s+by\s+generated_at\s+desc,\s+updated_at\s+desc,\s+created_at\s+desc,\s+id\s+desc\s*\)\s+as\s+row_rank\s+from\s+read_model\.workbench_relation_rows\s*\)\s+ranked\s+where\s+target\.id\s+=\s+ranked\.id\s+and\s+ranked\.row_rank\s+>\s+1;",
             "allowed_workbench_relation_rows_dedupe",
             sql,
@@ -1230,6 +1237,38 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             normalized_sql,
             r"grant [^;]*(?:insert|update|delete)[^;]* on audit\.external_control_evidence",
         )
+
+    def test_phase19_audit_contract_migration_versions_future_imports_without_backfill(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0101_phase19_audit_contract_boundaries.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("alter table app.import_files add column if not exists audit_contract_revision text", normalized_sql)
+        self.assertIn(
+            "alter table app.import_files alter column audit_contract_revision set default 'import-page-audit.v1'",
+            normalized_sql,
+        )
+        self.assertIn("alter table app.etc_import_sessions add column if not exists audit_contract_revision text", normalized_sql)
+        self.assertIn(
+            "alter table app.etc_import_sessions alter column audit_contract_revision set default 'etc-import-page-audit.v1'",
+            normalized_sql,
+        )
+        self.assertNotRegex(normalized_sql, r"update app\.(?:import_files|etc_import_sessions)\s+set audit_contract_revision")
+
+    def test_phase19_audit_contract_migration_repairs_only_deterministic_internal_facts(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0101_phase19_audit_contract_boundaries.sql").read_text(encoding="utf-8")
+        ).lower()
+
+        self.assertIn("special_metadata->>'source' = 'batch_accounting'", sql)
+        self.assertIn("relation_mode = 'batch_accounting'", sql)
+        self.assertIn("insert into app.etc_reconciliation_tasks", sql)
+        self.assertIn("where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')", sql)
+        self.assertIn("set business_batch_id = null", sql)
+        self.assertIn("from app.etc_reconciliation_files file", sql)
+        self.assertNotIn("insert into app.file_objects", sql)
+        self.assertNotIn("sha256 =", sql)
 
 
 if __name__ == "__main__":

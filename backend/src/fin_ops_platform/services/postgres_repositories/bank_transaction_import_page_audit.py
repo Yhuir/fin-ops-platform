@@ -23,6 +23,7 @@ ACTIVE_OUTBOX_STATUSES = frozenset({"pending", "processing", "failed", "dead_let
 KNOWN_BATCH_STATUSES = frozenset({"pending", "completed", "completed_with_errors", "failed"})
 KNOWN_DECISIONS = frozenset({"created", "status_updated", "duplicate_skipped", "suspected_duplicate", "error"})
 TERMINAL_BATCH_STATUSES = frozenset({"completed", "completed_with_errors"})
+IMPORT_AUDIT_CONTRACT_REVISION = "import-page-audit.v1"
 
 
 def audit_bank_transaction_import_page(
@@ -69,8 +70,21 @@ def _audit_snapshot(
 ) -> dict[str, Any]:
     batch_ids = {_text(row.get("batch_id")) for row in batches if _text(row.get("batch_id"))}
     bank_files = [row for row in files if _is_bank_file(row, batch_ids=batch_ids)]
-    bank_file_ids = {_text(row.get("file_id")) for row in bank_files if _text(row.get("file_id"))}
-    bank_session_ids = {_text(row.get("session_id")) for row in bank_files if _text(row.get("session_id"))}
+    formal_files = [
+        row for row in bank_files if _text(row.get("audit_contract_revision")) == IMPORT_AUDIT_CONTRACT_REVISION
+    ]
+    legacy_files = [row for row in bank_files if row not in formal_files]
+    formal_batch_ids = {
+        batch_id
+        for row in formal_files
+        for batch_id in (_text(_payload(row).get("preview_batch_id")), _text(_payload(row).get("batch_id")))
+        if batch_id
+    }
+    formal_batches = [row for row in batches if _text(row.get("batch_id")) in formal_batch_ids]
+    formal_rows = [row for row in rows if _text(row.get("batch_id")) in formal_batch_ids]
+    formal_transactions = [row for row in transactions if _text(row.get("batch_id")) in formal_batch_ids]
+    bank_file_ids = {_text(row.get("file_id")) for row in formal_files if _text(row.get("file_id"))}
+    bank_session_ids = {_text(row.get("session_id")) for row in formal_files if _text(row.get("session_id"))}
     bank_jobs = [
         row
         for row in jobs
@@ -80,16 +94,27 @@ def _audit_snapshot(
     bank_outbox = [row for row in outbox if _text(row.get("aggregate_id")) in bank_job_ids]
 
     issues: list[AuditIssue] = []
-    issues.extend(_duplicate_issues(bank_files, "file_id", "bank_import_file_duplicate"))
-    issues.extend(_duplicate_issues(batches, "batch_id", "bank_import_batch_duplicate"))
-    issues.extend(_duplicate_issues(rows, "row_id", "bank_import_row_duplicate"))
-    issues.extend(_duplicate_issues(transactions, "transaction_id", "bank_import_transaction_duplicate"))
-    issues.extend(_file_issues(bank_files, files, batches))
-    issues.extend(_batch_row_issues(batches, rows))
-    issues.extend(_session_audit_issues(bank_files, rows))
-    issues.extend(_canonical_transaction_issues(batches, rows, transactions))
-    issues.extend(_job_issues(bank_jobs, bank_files, batches))
+    issues.extend(_duplicate_issues(formal_files, "file_id", "bank_import_file_duplicate"))
+    issues.extend(_duplicate_issues(formal_batches, "batch_id", "bank_import_batch_duplicate"))
+    issues.extend(_duplicate_issues(formal_rows, "row_id", "bank_import_row_duplicate"))
+    issues.extend(_duplicate_issues(formal_transactions, "transaction_id", "bank_import_transaction_duplicate"))
+    issues.extend(_file_issues(formal_files, formal_files, formal_batches))
+    issues.extend(_batch_row_issues(formal_batches, formal_rows))
+    issues.extend(_session_audit_issues(formal_files, formal_rows))
+    issues.extend(_canonical_transaction_issues(formal_batches, formal_rows, formal_transactions))
+    issues.extend(_job_issues(bank_jobs, formal_files, formal_batches))
     issues.extend(_outbox_issues(bank_outbox))
+    if legacy_files:
+        issues.append(
+            AuditIssue(
+                "warning",
+                "bank_import_legacy_provenance_unproven",
+                "Pre-contract bank import history remains readable canonical App data, but missing historical file provenance is not fabricated.",
+                "legacy-bank-import-history",
+                "bank_transaction_import",
+                {"file_count": len(legacy_files)},
+            )
+        )
     evaluation = evaluate_audit_issues(issues, sample_limit=sample_limit)
 
     return {
@@ -100,9 +125,11 @@ def _audit_snapshot(
         "summary": {
             "bank_import_session_count": len(bank_session_ids),
             "bank_import_file_count": len(bank_files),
-            "bank_import_batch_count": len(batches),
-            "bank_import_row_count": len(rows),
-            "bank_import_owned_transaction_count": len(transactions),
+            "strict_contract_file_count": len(formal_files),
+            "legacy_file_count": len(legacy_files),
+            "bank_import_batch_count": len(formal_batches),
+            "bank_import_row_count": len(formal_rows),
+            "bank_import_owned_transaction_count": len(formal_transactions),
             "bank_import_job_count": len(bank_jobs),
             "bank_import_outbox_attention_count": len(bank_outbox),
             **evaluation.summary,
@@ -120,7 +147,7 @@ def _audit_snapshot(
             ],
             "read_model_tables": [],
             "canonical_expected_set": (
-                "all registered bank-transaction file sessions and their preview/confirmed batches and rows, "
+                "all version-registered bank-transaction file sessions and their preview/confirmed batches and rows, "
                 "plus every canonical bank transaction owned or referenced by those decisions"
             ),
             "key_display_fields": [
@@ -165,8 +192,9 @@ def _audit_snapshot(
                 "and audit_status.queue == 'drained' and audit_contract.database_snapshot == true"
             ),
             "guarantee_boundary": (
-                "Every registered App bank-import session/file/batch/row/transaction/job edge agrees in one snapshot; "
-                "downstream page projections and external bank statement completeness are not inferred."
+                "Every version-registered App bank-import session/file/batch/row/transaction/job edge agrees in one snapshot. "
+                "Pre-contract provenance remains explicitly unproven instead of being fabricated; downstream page projections "
+                "and external bank statement completeness are not inferred."
             ),
             "write_policy": "read_only",
         },
@@ -686,7 +714,7 @@ def _comparable(value: Any) -> Any:
 
 _FILE_SQL = """
 select coalesce(f.legacy_mongo_id, f.id::text) as file_id,
-       f.session_id, f.file_object_id::text, f.stored_file_path, f.original_filename, f.template_kind,
+       f.session_id, f.audit_contract_revision, f.file_object_id::text, f.stored_file_path, f.original_filename, f.template_kind,
        f.status, f.uploaded_by, f.uploaded_at, f.raw_payload,
        o.storage_backend, o.storage_uri, o.bucket_name, o.object_key, o.filename as object_filename,
        o.sha256, o.size_bytes, o.content_type

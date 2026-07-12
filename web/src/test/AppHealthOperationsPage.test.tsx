@@ -203,7 +203,7 @@ describe("AppHealthOperationsPage", () => {
           database_snapshot: true,
           snapshot_consistency: "repeatable_read_read_only",
           proof_availability: "ready",
-          contract_revision: "page-audit-contract.v18",
+          contract_revision: "page-audit-contract.v19",
         },
         summary: {
           registered_page_count: 17,

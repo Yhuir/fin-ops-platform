@@ -37,6 +37,7 @@ class FakeConnection:
                 "object_key": "imports/file-1.xlsx",
                 "sha256": "a" * 64,
                 "size_bytes": 128,
+                "audit_contract_revision": bank_transaction_import_page_audit.IMPORT_AUDIT_CONTRACT_REVISION,
                 "raw_payload": {
                     "normalized_payload": {
                         "id": "file-1",
@@ -189,6 +190,20 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         self.assertTrue(report["audit_contract"]["database_snapshot"])
         self.assertEqual(connection.executed, ["set transaction isolation level repeatable read read only"])
 
+    def test_legacy_file_is_non_blocking_but_explicitly_unproven(self) -> None:
+        connection = FakeConnection()
+        connection.files[0]["audit_contract_revision"] = None
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "pass")
+        self.assertIn(
+            "bank_import_legacy_provenance_unproven",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+        self.assertEqual(report["summary"]["strict_contract_file_count"], 0)
+        self.assertEqual(report["summary"]["legacy_file_count"], 1)
+
     def test_invoice_job_and_outbox_do_not_pollute_bank_page_queue(self) -> None:
         connection = FakeConnection()
         connection.jobs.append(
@@ -225,7 +240,7 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["page_key"], "imports.bank-transactions")
-        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v18")
+        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v19")
         self.assertEqual(report["audit_contract"]["registered_read_model_keys"], [])
         self.assertFalse(report["audit_contract"]["relation_proof_required"])
 

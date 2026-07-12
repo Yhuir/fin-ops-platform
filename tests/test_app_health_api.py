@@ -880,7 +880,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
         self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v18")
+        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v19")
         self.assertIn("app.bank_transactions", payload["audit_contract"]["source_tables"])
         self.assertIn("read_model.bank_detail_rows", payload["audit_contract"]["read_model_tables"])
         self.assertEqual(connection.executed, [])
@@ -1045,7 +1045,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["page_key"], "app-health-operations")
         self.assertEqual(payload["mode"], "app-health-system-audit")
         self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v18")
+        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v19")
         self.assertEqual(payload["external_evidence"]["end_to_end_source_truth"], "unproven")
 
     def test_operations_page_audit_returns_unified_workbench_proof(self) -> None:
@@ -1064,7 +1064,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["page_key"], "reconciliation-workbench")
         self.assertEqual(payload["mode"], "workbench-page-audit")
         self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-        self.assertIn("active_generation_relation_display", payload["audit_contract"]["proof_checks"])
+        self.assertIn("query_composed_relation_case_ownership", payload["audit_contract"]["proof_checks"])
         self.assertEqual(connection.executed, [])
 
     def test_operations_page_audit_requires_postgres_connection(self) -> None:

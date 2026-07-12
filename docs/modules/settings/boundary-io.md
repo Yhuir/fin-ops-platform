@@ -96,3 +96,9 @@
 - Downstream outputs: 按 setting family 产生 affected read model dirty scopes、domain events 或 explicit not-applicable；银行账户映射变化会通过成本统计 source version 的 `bank_account_mappings_fingerprint` 使旧 read model payload 失配并刷新；成本统计标签规则是 explicit not-applicable refresh，保存后仅影响 query/export 层过滤和 cache key，不触发成本统计 read model rebuild。
 - Forbidden paths: `state:*` JSON、`state:full_state` 或旧 snapshot 不得作为 production 业务事实 fallback；其它模块不得直接写 settings store，也不得通过 `getattr/setattr` 访问 `AppSettingsService._snapshot`。
 - Old code deletion: legacy settings snapshot、state JSON fallback、route-inline settings writes、server local snapshot refresh helper、跨模块整份 snapshot rollback 和内存 `_snapshot` 持久化补字段 fallback 已删除；migration/audit/rollback 工具保留不算 closure。
+
+## 生产 normalization I/O（2026-07-12）
+
+- `settings_normalization_ops` dry-run 只输出 changed top-level keys 与前后 hash，不输出完整设置或秘密。
+- execute 调用 `AppSettingsService.normalize_settings_payload(...)`，并在单事务内通过 `PostgresOpsTaxEtcRepository.save_app_settings_in_transaction(...)` 保存；tool 不复制 normalization 规则，也不直接拼 settings SQL。
+- 生产入口固定为 `finops-deploy-control settings-normalize <release> --dry-run|--execute`。
