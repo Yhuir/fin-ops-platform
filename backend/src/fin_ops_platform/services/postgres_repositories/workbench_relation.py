@@ -26,7 +26,6 @@ WORKBENCH_RELATION_DOWNSTREAM_SCOPE_TYPES = (
     "oa_pending_payment",
     "search",
     "cost_statistics",
-    "tax_offset",
     "no_oa_bank_batch",
     "bank_flow_rule_batch",
 )
@@ -459,7 +458,6 @@ def _workbench_relation_downstream_scope_map(
             add("input_invoice_usage", invoice_downstream_scope_keys)
         if "output" in invoice_directions or unknown_invoice_direction or unknown_row_types:
             add("output_invoice_collection", invoice_downstream_scope_keys)
-        add("tax_offset", invoice_downstream_scope_keys)
     if has_oa:
         add("oa_pending_payment", actual_oa_scope_keys or {"all"})
     cost_scope_keys: set[str] = set()

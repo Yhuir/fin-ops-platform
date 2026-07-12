@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Link as RouterLink } from "react-router-dom";
 
 import AppDialog from "../components/common/AppDialog";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import { useSessionPermissions } from "../contexts/SessionContext";
@@ -2311,6 +2312,11 @@ export default function EtcTicketManagementPage() {
         title="ETC票据"
         actions={
           <>
+            <PageBusinessAuditIcon
+              ariaLabel="Audit ETC票据管理"
+              label="ETC票据管理"
+              pageKey="etc-tickets"
+            />
             <Button
               className="etc-secondary-action"
               isDisabled={loading || taskLoading}

@@ -43,7 +43,7 @@
 - 页面必须先加载设置里的银行账户映射；每个文件都要选择对应账户后才能预览。
 - 预览使用 `/imports/files/preview`，通过 `file_overrides` 传递 `batch_type=bank_transaction`、`bank_mapping_id`、`bank_name`、`bank_short_name`、`last4`。
 - 确认使用 `/imports/files/confirm`，返回 `202 Accepted` 和 background `job`；RabbitMQ/import worker 开启时还会返回 `import_job` / `event_id`。
-- legacy JSON 入口 `/imports/preview`、`/imports/confirm` 仍存在，主要用于共享程序化导入和旧回归；银行流水页面不是该入口的调用方，前端 runtime 已用 boundary guard 锁定只走 files/session API。
+- 旧 JSON 入口 `/imports/preview`、`/imports/confirm` 及其 `general_import.confirm` worker 链已删除；HTTP 只允许走 files/session API，测试造数可继续使用 service-level normalization ports。
 - 后端确认必须防重复、检查 preview stale、持久化原始文件/session/batch/row，并触发 Workbench matching、银行明细、账户余额、Workbench relation、invoice lifecycle、成本统计和 search 等下游刷新。
 
 ## 当前边界

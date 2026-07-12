@@ -2421,7 +2421,7 @@ export default function BankDetailsPage() {
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
       ariaLabel="Audit 银行明细"
-      domainKey="bank_details"
+      pageKey="bank-details"
       label="银行明细"
       readModelStatus={readModelStatus}
     />

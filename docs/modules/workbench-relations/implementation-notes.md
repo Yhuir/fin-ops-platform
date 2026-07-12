@@ -1,5 +1,13 @@
 # 关联台关系事实源 实施记录
 
+## 2026-07-11 - 删除 relation → tax_offset 污染 I/O
+
+目标：纠正历史 Browser mock 和 refresh 合同把 Workbench relation 误当成税金抵扣 projection source 的问题。
+
+变更：relation repository、write facade、UoW target planner 和 write-operation SLO 不再生成 `tax_offset` dirty/outbox；删除 `taxOffsetRelationFanout` 动态造数选项与旧 fan-out spec，改为 tax-offset isolation Browser 测试。发票/ETC/税务认证等真实 canonical source 写入的 tax refresh 保持不变。
+
+边界结论：税金抵扣不读取 `app.workbench_pair_relations` 或 `read_model.workbench_relation_*`。下方 2026-06-19 的 tax relation fan-out 记录是历史决策，已由本条取代，不再是当前合同。
+
 ## 2026-07-05 - legacy `/workbench` HTTP compat 删除
 
 目标：删除旧 `/workbench` 页面读入口、静态 prototype 和旧 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP 包装层，防止旧 `ManualReconciliationService` / `LedgerReminderService` 链路继续作为 Workbench relation action 入口存在。

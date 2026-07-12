@@ -216,7 +216,7 @@ def test_relation_change_enqueues_relation_read_model_before_relevant_downstream
     assert dirty_by_scope_type["input_invoice_usage"]["priority"] == "high"
     assert dirty_by_scope_type["output_invoice_collection"]["priority"] == "high"
     assert dirty_by_scope_type["search"]["priority"] == "high"
-    assert dirty_by_scope_type["tax_offset"]["priority"] == "high"
+    assert "tax_offset" not in dirty_by_scope_type
     assert "cost_statistics" not in dirty_by_scope_type
     assert "oa_pending_payment" not in dirty_by_scope_type
     assert "no_oa_bank_batch" not in dirty_by_scope_type
@@ -408,7 +408,7 @@ def test_relation_downstream_refresh_routes_scope_keys_by_row_domain() -> None:
     assert scope_keys_by_type["bank_detail"] == {"2026-02"}
     assert scope_keys_by_type["invoice_lifecycle"] == {"2026-01"}
     assert scope_keys_by_type["input_invoice_usage"] == {"2026-01"}
-    assert scope_keys_by_type["tax_offset"] == {"2026-01"}
+    assert "tax_offset" not in scope_keys_by_type
     assert scope_keys_by_type["search"] == {"2026-01", "2026-02"}
     assert "cost_statistics" not in scope_keys_by_type
     assert scope_keys_by_type["pending_invoice"] == {
@@ -499,7 +499,7 @@ def test_relation_downstream_refresh_enqueues_all_scope_when_invoice_month_is_un
 
     assert scope_keys_by_type["workbench_relation"] == {"2026-04"}
     assert scope_keys_by_type["input_invoice_usage"] == {"all"}
-    assert scope_keys_by_type["tax_offset"] == {"all"}
+    assert "tax_offset" not in scope_keys_by_type
 
 
 def test_relation_downstream_refresh_routes_cost_statistics_by_bank_month_for_cost_bearing_relation() -> None:

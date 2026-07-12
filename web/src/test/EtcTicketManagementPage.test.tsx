@@ -107,6 +107,7 @@ describe("ETC ticket management page", () => {
       pageSource.includes("@heroui/react") ? null : "ETC page should use HeroUI primitives where appropriate",
       pageSource.includes("DisclosureGroup") && pageSource.includes("EtcDisclosureSection") ? null : "ETC workflow should use collapsible HeroUI sections",
       pageSource.includes("ToggleButtonGroup") ? null : "ETC status switcher should use HeroUI ToggleButtonGroup",
+      pageSource.includes('pageKey="etc-tickets"') ? null : "ETC page should expose the unified page Audit control",
     ].filter(Boolean);
 
     expect({

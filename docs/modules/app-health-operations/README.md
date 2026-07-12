@@ -25,11 +25,15 @@
 - `web/src/features/appStatus/*`
 - `web/src/contexts/AppHealthStatusContext.tsx`
 - `web/src/components/shell/AppStatusIndicator.tsx`
-- `backend/src/fin_ops_platform/app/server.py` 中 `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/input-invoice-usage-audit`、`/api/operations/app-health/output-invoice-collection-audit`、`/api/operations/app-health/page-audit`、`/api/operations/app-health/input-invoice-usage-refresh`、`/api/operations/app-health/output-invoice-collection-refresh`
+- `backend/src/fin_ops_platform/app/server.py` 中 `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/page-audit`、`/api/operations/app-health/input-invoice-usage-refresh`、`/api/operations/app-health/output-invoice-collection-refresh`
 - `backend/src/fin_ops_platform/services/app_health_service.py`
 - `backend/src/fin_ops_platform/services/app_health_alert_service.py`
 - `backend/src/fin_ops_platform/services/app_status_overview_service.py`
 - `backend/src/fin_ops_platform/services/runtime_monitoring.py`
+- `backend/src/fin_ops_platform/services/external_control_evidence.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/external_control_evidence.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/external_control_evidence_audit.py`
+- `backend/src/fin_ops_platform/tools/external_control_evidence.py`
 - `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
 - `backend/src/fin_ops_platform/services/app_status_read_model_registry.py`
 - `backend/src/fin_ops_platform/services/app_status_job_registry.py`
@@ -43,9 +47,8 @@
 - `/api/app-health`：面向页面和 App Status provider 的运行健康 snapshot，包含 workbench/read model、background jobs、dependencies、alerts、`app_status`。
 - `/api/app-health/stream`：SSE snapshot/heartbeat，只负责通知 UI 更新状态，不替代 durable facts。
 - `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、导入历史、请求性能、runtime outbox/read model/worker 指标。RabbitMQ 管理接口是可选 transport 观测，不是 read model freshness 事实源；dashboard 默认不阻塞等待 RabbitMQ management API，需显式设置 `FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS=1` 才读取实时队列管理指标。
-- `/api/operations/app-health/input-invoice-usage-audit`：admin-only 只读三边对账入口，App Health 页面提供 `Audit 进项使用` 按钮触发；后端复用 App 自身 PostgreSQL 连接审计 `app.invoices`、`app.workbench_pair_relations`、`read_model.input_invoice_usage_*`、`read_model.workbench_relation_*` 和 `job.read_model_dirty_scopes`。该入口只输出 `pass/issues_found` 报告，不刷新、不修复、不写业务数据。
-- `/api/operations/app-health/output-invoice-collection-audit`：admin-only 只读三边对账入口，销项收款页面 Audit icon 触发；后端复用 App 自身 PostgreSQL 连接审计 `app.invoices`、`app.workbench_pair_relations`、`read_model.output_invoice_collection_*`、`read_model.workbench_relation_*` 和 `job.read_model_dirty_scopes`。该入口只输出 `pass/issues_found` 报告，不刷新、不修复、不写业务数据。
-- `/api/operations/app-health/page-audit`：admin-only 只读页面业务审计入口，待找发票、外部往来款管理、批量账务、流水规则批量处理、OA 待付款核对、银行明细和成本统计页面标题右侧 Audit icon 触发；后端复用 App 自身 PostgreSQL 连接审计该页面 canonical facts、页面 read model rows/scopes/source_versions、durable refresh state 和相关 Workbench relation 分发。该入口只输出 `pass/issues_found` 报告，不刷新、不修复、不写业务数据；通过时证明 App 内部事实和投影一致，不证明外部银行/OA 系统本身没有漏同步。
+- `/api/operations/app-health/page-audit?page=<page_key>`：17 页统一 admin-only 只读 Audit。普通页面只执行 registry 选定的有限 proof owner；`page=app-health-operations` 是 system owner，在一个 outer `REPEATABLE READ READ ONLY` snapshot 内执行其余 16 页 proof、App Health dashboard database inventory 和 durable runtime/registry证明。该入口只输出 `pass/issues_found`，不刷新、不修复、不写业务数据。
+- System Audit 返回 `database_system_snapshot`、`runtime_observation`、`external_evidence`。数据库面绑定 snapshot id、system audit id、17 页 revision、read model manifest 和 worker registry fingerprint；进程内 request metrics/RabbitMQ 仅为 point-in-time observation。外部面只读取已审计登记的银行/OA/发票/ETC `complete_snapshot/all` manifest，在同一 outer snapshot 内对 canonical item set、关键字段 fingerprint 和 controls 做精确双向 equality。四域全部通过才返回 `proven_as_of_external_evidence`；缺失为 unknown，撤销/过期/不一致为 fail，内部通过不能覆盖外部结论。
 - `/api/operations/app-health/input-invoice-usage-refresh`：admin-only 受控刷新入队入口，只通过 `ReadModelRefreshGateway` / durable runtime queue 入队 `input_invoice_usage` scope refresh；返回 `202` 后必须继续用 Audit 或 operation barrier 复核。
 - `/api/operations/app-health/output-invoice-collection-refresh`：admin-only 受控刷新入队入口，只通过 `ReadModelRefreshGateway` / durable runtime queue 入队 `output_invoice_collection` scope refresh；返回 `202` 后必须继续用 Audit 或 operation barrier 复核。
 - `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
@@ -63,11 +66,12 @@
 - Worker registry：`runtime_worker_registry.py`。
 - Domain/read model/job/dependency registries：`app_status_*_registry.py`。
 - 发票 inventory：读取 `app.invoices.source_links`，只统计已进入统一发票池且未删除的 canonical invoice facts；OA 附件 OCR cache 只作为解析缓存，不作为 App Health 发票 inventory 事实源。
-- 进项发票使用情况审计：只读 canonical facts、`input_invoice_usage`、`workbench_relation` 和 dirty scopes；仅当 `overall_status=pass`、`audit_status.integrity=pass`、`audit_status.freshness=fresh` 时可作为已登记 invariant 一致的证据。
-- 销项发票收款情况审计：只读 canonical facts、`output_invoice_collection`、`workbench_relation` 和 dirty scopes；同样以结构化 `audit_status` 为准。
+- 进项/销项页面审计：各页面只读 canonical facts、自身 consumer projection、`workbench_relation` 和 durable queue；App Health 不再保留进项专项 Audit panel。
 - 页面业务审计：只读 `PAGE_AUDIT_CONTRACTS` 登记的 source/read model/relation/job 表，dirty/outbox 均按 tenant 隔离；`*_sample_count` 只是有上限的问题样本，不能把 50/100/150 当成精确问题总数。OA 待付款等依赖外部 OA/银行系统的页面仍需要外部 sync/runbook 证明来源系统本身完整。
 - 导入历史：只读取 `app.import_batches` 的 `bank_transaction`、`input_invoice`、`output_invoice` 批次成功数。
 - 前端只展示后端事实；不能用当前 route、表格 loading、组件本地状态推导全局状态。
+- App Health System Audit 成功后用响应内同一 snapshot 的 `page_projection` 更新 dashboard；后续普通 dashboard refresh 会清除旧 Audit 状态，避免把历史快照继续显示为当前绿色。
+- 外部 manifest 的 validate/register/revoke 仅通过运维 CLI 和独立 service/repository 边界执行；System Audit、页面 route 和 UI 都没有登记或修复能力。具体合同和授权门禁见 `docs/operations/external-control-evidence.md`。
 
 ## 关键 fan-out
 

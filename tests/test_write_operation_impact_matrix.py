@@ -81,7 +81,9 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
 
         for operation, row in self.rows_by_operation.items():
             target_read_model_keys = set(row["target_read_model_keys"])
+            direct_canonical_targets = set(row.get("direct_canonical_target_page_keys", []))
             self.assertEqual(target_read_model_keys - valid_read_model_keys, set(), operation)
+            self.assertEqual(direct_canonical_targets - set(row["target_page_keys"]), set(), operation)
 
             for page_key in row["source_page_keys"]:
                 self.assertIn(page_key, valid_page_keys, operation)
@@ -89,10 +91,17 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
                 self.assertIn(page_key, valid_page_keys, operation)
                 page_read_model_keys = set(self.page_rows_by_key[page_key]["read_model_keys"])
                 accepted_read_model_keys = target_read_model_keys | set(row.get("legacy_page_proxy_read_model_keys", []))
-                self.assertTrue(
-                    page_read_model_keys & accepted_read_model_keys,
-                    f"{operation}: {page_key} has no declared impacted read model",
-                )
+                if not page_read_model_keys:
+                    self.assertIn(
+                        page_key,
+                        direct_canonical_targets,
+                        f"{operation}: {page_key} must be declared as a direct canonical target",
+                    )
+                else:
+                    self.assertTrue(
+                        page_read_model_keys & accepted_read_model_keys,
+                        f"{operation}: {page_key} has no declared impacted read model",
+                    )
 
     def test_pairing_operations_use_the_canonical_relation_fact_sources(self) -> None:
         for operation, row in self.rows_by_operation.items():

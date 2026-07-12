@@ -4,11 +4,11 @@
 
 ## 模块化状态
 
-- 状态：partial
-- 当前边界可信度：medium
+- 状态：implemented-and-auditable
+- 当前边界可信度：high（App 内部合同；外部税务来源证据仍独立）
 - 目标边界：发票导入通过 import service/job queue 进入预览、确认和 lifecycle，触发 invoice lifecycle/search/input/output read model 刷新。
-- 当前缺口：导入路径同时影响进项、销项、待找发票和搜索，变更必须明确下游 scopes。
-- 旧代码删除条件：旧同步导入或直接状态写入不再被 API/测试引用。
+- 当前缺口：外部税务平台导出完整性、原始文件 control total 和对象字节可读性仍需独立证据。
+- 旧代码删除状态：旧 JSON preview/confirm、file confirm inline 写入、batch revert 和 `app.import_files.import_batch_id` 反推链均已删除并由 guard 保护。
 
 ## 职责边界
 
@@ -46,6 +46,7 @@
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
+- Page Audit：`imports.invoices` 是 `read_model_keys=()`、`relation_proof_required=false` 的 direct-canonical 页面；在同一 repeatable-read read-only snapshot 内证明 file/session/batch/row、canonical invoice、`manual_invoice_import` source-link 与本页 job/outbox。
 - 影响 read model：`tax_offset`、`invoice_lifecycle`、`pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`search`、`workbench`、`workbench_relation`、`oa_pending_payment`、`cost_statistics`。
 - Worker：import job/runtime handlers。
 
@@ -89,5 +90,6 @@
 - Allowed reads: invoice import facts repository、发票查询/context ports、owner API。
 - Downstream outputs: invoice lifecycle、pending invoice、input/output invoice usage、search、workbench、workbench_relation、tax、cost read model dirty scopes 或 owner producer 输出。
 - Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或 OA/ETC cache 直接构造第二发票池。
-- Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 必须删除；migration/audit/rollback 工具保留不算 closure。
+- Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、batch revert 和从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 已删除；历史 migration/只读 audit 工具不构成 runtime fallback。
+- Durable confirm：`/imports/files/confirm` 必须创建 `job.import_jobs(import_type=file_import.confirm)` 与 `job.outbox_events(event_type=import.process.requested)`；PostgreSQL polling 与 RabbitMQ wakeup 共用该 gateway，queue/repository 不可用返回 `503 import_queue_unavailable`，禁止进程内确认。
 - 2026-07-01：文件发票导入预览保存改为 `ImportNormalizationService.snapshot(include_facts=False)`，禁止旧 full snapshot 预览链路把失败确认残留的正式发票写入发票池；确认路径仍负责正式 facts 和下游 dirty scope。

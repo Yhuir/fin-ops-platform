@@ -321,7 +321,6 @@ def _refresh_targets_for(command: Any, handler_result: dict[str, Any]) -> list[W
         "output_invoice_collection",
         "oa_pending_payment",
         "search",
-        "tax_offset",
         "no_oa_bank_batch",
         "bank_flow_rule_batch",
     ):

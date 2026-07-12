@@ -110,10 +110,15 @@ EXPECTED_MIGRATIONS = [
     "0094_input_invoice_usage_oa_reverse_preview_hot_path.sql",
     "0095_oa_pending_payment_admissions.sql",
     "0096_oa_pending_payment_admission_runtime_grants.sql",
+    "0097_drop_import_files_batch_fallback.sql",
+    "0098_etc_import_session_files.sql",
+    "0099_external_control_evidence.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
     "audit.app_health_alerts",
+    "audit.external_control_evidence",
+    "audit.external_control_evidence_items",
     "job.outbox_events",
     "job.background_jobs",
     "job.import_jobs",
@@ -156,6 +161,7 @@ EXPECTED_TABLES = [
     "app.tax_certified_import_records",
     "app.tax_offset_plans",
     "app.etc_invoices",
+    "app.etc_import_session_files",
     "app.etc_import_sessions",
     "app.etc_import_batches",
     "app.etc_submission_batches",
@@ -258,7 +264,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 97)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 100)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1143,6 +1149,8 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             match = re.search(pattern, sql, flags=re.S)
             self.assertIsNotNone(match, table)
             body = match.group(1)
+            if table in {"audit.external_control_evidence", "audit.external_control_evidence_items"}:
+                continue
             self.assertIn("id uuid primary key default gen_random_uuid()", body, table)
             if table == "app.workbench_idempotency_records":
                 continue
@@ -1169,6 +1177,32 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("oa_pending_payment_rows_workflow_scope_idx", sql)
         self.assertIn("oa_pending_payment_rows_bank_transaction_id_idx", sql)
         self.assertIn("oa_pending_payment_rows_invoice_id_idx", sql)
+
+    def test_external_control_evidence_is_immutable_itemized_and_explicitly_granted(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        header = re.search(
+            r"create table if not exists audit\.external_control_evidence\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        items = re.search(
+            r"create table if not exists audit\.external_control_evidence_items\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        self.assertIsNotNone(header)
+        self.assertIsNotNone(items)
+        self.assertIn("coverage_mode text not null check (coverage_mode = 'complete_snapshot')", header.group(1))
+        self.assertIn("scope_key text not null check (scope_key = 'all')", header.group(1))
+        self.assertIn("unique (tenant_id, domain, manifest_fingerprint)", header.group(1))
+        self.assertIn("primary key (evidence_id, item_kind, item_key)", items.group(1))
+        self.assertNotIn("delete on audit.external_control_evidence", sql)
+        self.assertIn(
+            "grant select on audit.external_control_evidence, audit.external_control_evidence_items to fin_ops_api",
+            sql,
+        )
+        self.assertNotIn("insert, update on audit.external_control_evidence to fin_ops_api", sql)
+        self.assertIn("grant select, insert, update on audit.external_control_evidence to fin_ops_migrator", sql)
 
 
 if __name__ == "__main__":

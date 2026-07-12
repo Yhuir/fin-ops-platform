@@ -7,7 +7,7 @@
 - 状态：close
 - 当前边界可信度：high
 - 目标边界：ETC 票据页面和导入/修复服务通过 ETC application/reconciliation services 处理业务，关联影响通过 workbench relation 和 derived lifecycle 扇出。
-- 当前缺口：无页面/API 主链路闭环缺口；历史 repair/migration/backfill 工具作为显式运维入口保留，必须继续 dry-run/owner/allowlist 管控，不得进入常规页面链路。
+- 当前缺口：页面/API 与 App 内部 Audit 证明主链路已闭环；对象存储文件字节、ETC 外部归档与真实 OA 草稿状态仍属于外部 gate。历史 repair/migration/backfill 工具作为显式运维入口保留，必须继续 dry-run/owner/allowlist 管控，不得进入常规页面链路。
 - 旧代码删除条件：已删除 legacy `/api/etc/batches*`、ETC OA 自动检测 refresh、invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口及测试 mock 假后端；历史 ETC migration/repair 工具在完成生产迁移职责且无生产/测试引用后再单独删除。
 
 ## 职责边界
@@ -33,6 +33,7 @@
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
 | ETC invoice list | `GET /api/etc/invoices` | 只读查询入口；route owner 只接收 `etc_service`、`json_response`、`serialize_invoice` 三个读侧端口，不接收 JSON body、link refresh 或状态回退端口 |
 | 历史修复/迁移 | tools | 只作为显式运维入口 |
+| 页面 Audit | `GET /api/operations/app-health/page-audit?page=etc-tickets` | 管理员只读；同一 `REPEATABLE READ READ ONLY` snapshot 直接读取 canonical tables，不创建或刷新 read model |
 
 ## 输出 I/O
 
@@ -43,10 +44,12 @@
 | 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复 |
 | Completed import job consumption | background job progress / operation barrier | ETC 发票导入 job 完成后，页面必须读取 job `operation_barrier_targets`，等待 targets fresh 后再刷新批次和任务列表 |
+| Audit proof report | 统一页面 Audit UI | 输出 canonical expected-set、结构化展示字段、批次/任务/文件/发票/导入/提交内部 typed edge、统一发票桥和 durable import queue 证明；不宣称 shared Workbench relation 或外部 ETC/OA 完整性 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
+- 页面 Audit：`etc-tickets` 是直接 canonical 页面，registry 的 `read_model_keys=()`；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。下游影响 read model 不得冒充页面消费模型。
 - 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search` 等。
 - ETC 导入完成消费会额外等待 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等 job result targets。
 - Worker：通过 import/runtime handler、derived lifecycle 和 registered workers 扇出。
@@ -59,6 +62,7 @@
 | Frontend feature/components | `web/src/features/etc/*`、`web/src/components/workbench/CandidateGroupGrid.tsx` |
 | Backend route | `routes_etc.py`、`routes_etc_import.py`、`routes_etc_invoices.py`、`routes_etc_reconciliation.py` |
 | Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_reconciliation_*`、`invoice_attachment_recognition_service.py` |
+| Audit proof owner | `services/postgres_repositories/etc_tickets_page_audit.py`、`services/page_audit_registry.py`、`services/postgres_repositories/operations_audit.py` |
 | Workbench integration | `workbench_sql_projection.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
 | Tools | `cleanup_orphan_etc_reconciliation_tasks.py`、`migrate_historical_etc_business_batches.py`、`link_existing_etc_batches.py` |
 | Tests | `tests/test_etc_*.py`、`web/src/test/Etc*.test.*`、`web/e2e/etc-tickets-flow.spec.ts` |
@@ -74,6 +78,9 @@
 - `tests/test_etc_backend.py`
 - `tests/test_etc_reconciliation_service.py`
 - `tests/test_import_processing_service.py`
+- `tests/test_audit_etc_tickets_read_model_tool.py`
+- `tests/test_page_audit_registry.py`
+- `tests/test_app_health_api.py`
 - `web/src/test/EtcTicketManagementPage.test.tsx`
 - `web/e2e/etc-tickets-flow.spec.ts`
 
@@ -90,4 +97,5 @@
 - Allowed reads: ETC business batch API、ETC services、canonical invoice existing-link ports。
 - Downstream outputs: workbench、workbench_relation、tax/cost/search dirty scopes 或 owner producer 输出。
 - Forbidden paths: legacy ETC batch pickle、OA detection metadata 或 ETC invoice rows 不得替代 canonical invoice pool；ETC repair 不得绕过 relation command service。
+- Audit I/O boundary: Audit repository 只允许只读查询和 repeatable-read transaction；不得调用 ETC service mutation、refresh gateway、worker ack/retry、对象存储下载或 Workbench relation refresh。`app.workbench_pair_relations` 不是 ETC 页自己的 pairing source。
 - Old code deletion: 生产主链路的 legacy `/api/etc/batches*` source-of-truth fallback、route owner、read facade、delete/lifecycle service、前端测试 mock 假后端和后端兼容测试已删除；页面已导入任务详情改走 `/api/etc/invoices?importBatchId=...`。ETC 专用 `oa-status/refresh` 和 invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口已删除，并由 static guard 防回归。historical repair/backfill 工具保留不算页面/API closure 阻断，仍需按工具 owner/dry-run/deletion 条件单独收口。

@@ -175,9 +175,8 @@ from fin_ops_platform.services.etc_reconciliation_task_payload_facade import Etc
 from fin_ops_platform.services.etc_reconciliation_source_upload_service import (
     EtcReconciliationSourceUploadService,
 )
-from fin_ops_platform.services.etc_reconciliation_zip_filter import (
-    EtcZipFilterPreview,
-)
+from fin_ops_platform.services.etc_import_preview_service import EtcImportPreviewService
+from fin_ops_platform.services.etc_import_session_store import build_etc_import_session_store
 from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
 from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobRepository
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
@@ -217,7 +216,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
 from fin_ops_platform.services.input_invoice_usage_read_model_fresh_gate_service import (
     InputInvoiceUsageReadModelFreshGateService,
 )
-from fin_ops_platform.services.operations_audit_service import OperationsAuditService
+from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_best_source_link,
@@ -409,7 +408,6 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerLocalRelationRepository,
     TurnoverLedgerLocalRelationExtraAdapterSet,
     TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder,
-    TurnoverLedgerLocalTagSelectionAdapterSet,
     TurnoverLedgerLocalRuntimeSupport,
     TurnoverLedgerLocalWithdrawRelationAdapterSet,
     TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder,
@@ -1218,10 +1216,18 @@ class Application:
             settings_provider=lambda: {"postgres_required": self._requires_sql_read_model_runtime()},
         )
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
-        self._etc_service = EtcService(state_store=self._state_store)
+        self._etc_import_session_store = build_etc_import_session_store(self._state_store)
+        self._etc_service = EtcService(
+            state_store=self._state_store,
+            import_session_store=self._etc_import_session_store,
+        )
         self._etc_service.set_canonical_invoice_key_exists(self._canonical_invoice_key_exists_for_etc_import)
         self._etc_reconciliation_task_service = EtcReconciliationTaskService(state_store=self._state_store)
-        self._etc_reconciliation_import_previews: dict[str, EtcZipFilterPreview] = {}
+        self._etc_import_preview_service = EtcImportPreviewService(
+            etc_service=self._etc_service,
+            task_service=self._etc_reconciliation_task_service,
+            session_store=self._etc_import_session_store,
+        )
         self._historical_etc_repair_service = (
             HistoricalEtcRepairService(
                 state_store=self._state_store,
@@ -1243,7 +1249,10 @@ class Application:
             if self._state_store is not None
             else None
         )
-        self._background_job_service = BackgroundJobService(self._state_store)
+        background_job_service = getattr(self, "_background_job_service", None)
+        if background_job_service is None:
+            background_job_service = BackgroundJobService(self._state_store)
+        self._background_job_service = background_job_service
         self._etc_reconciliation_task_service.recover_interrupted_imports(
             active_import_session_ids=self._background_job_service.active_source_values(
                 job_type="etc_invoice_import",
@@ -1251,7 +1260,6 @@ class Application:
             )
         )
         self._import_processing_service = ImportProcessingService(
-            import_service=self._import_service,
             file_import_service=self._file_import_service,
             tax_certified_import_service=self._tax_certified_import_service,
             etc_service=self._etc_service,
@@ -1263,20 +1271,15 @@ class Application:
             enqueue_workbench_auto_matching_for_scopes=self._enqueue_workbench_auto_matching_for_scopes,
             persist_state_with_workbench_invalidation=self._persist_import_state_with_read_model_invalidation,
             invalidate_tax_offset_read_model_scopes=self._invalidate_tax_offset_read_model_scopes,
-            workbench_matching_scope_months_for_import_preview=self._workbench_matching_scope_months_for_import_preview,
             workbench_matching_scope_months_for_import_file_session=self._workbench_matching_scope_months_for_import_file_session,
-            tax_offset_scope_keys_for_import_preview=self._tax_offset_scope_keys_for_import_preview,
             tax_offset_scope_keys_for_import_file_session=self._tax_offset_scope_keys_for_import_file_session,
-            cost_statistics_scope_keys_for_import_preview=self._cost_statistics_scope_keys_for_import_preview,
             cost_statistics_scope_keys_for_import_file_session=self._cost_statistics_scope_keys_for_import_file_session,
-            bank_detail_scope_keys_for_import_preview=self._bank_detail_scope_keys_for_import_preview,
             bank_detail_scope_keys_for_import_file_session=self._bank_detail_scope_keys_for_import_file_session,
-            input_invoice_usage_scope_keys_for_import_preview=self._input_invoice_usage_scope_keys_for_import_preview,
             input_invoice_usage_scope_keys_for_import_file_session=self._input_invoice_usage_scope_keys_for_import_file_session,
-            output_invoice_collection_scope_keys_for_import_preview=self._output_invoice_collection_scope_keys_for_import_preview,
             output_invoice_collection_scope_keys_for_import_file_session=self._output_invoice_collection_scope_keys_for_import_file_session,
             link_etc_import_result_to_existing_invoices=self._link_etc_import_result_to_existing_invoices,
             refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
+            etc_import_preview_service=self._etc_import_preview_service,
             oa_manual_import_create_processor=self._process_oa_manual_import_create_job,
         )
         self._app_health_service = AppHealthService()
@@ -2006,10 +2009,6 @@ class Application:
             return self._handle_api_operation_barrier_status(body, headers)
         if method == "GET" and route_path == "/api/operations/app-health-dashboard":
             return self._handle_api_operations_app_health_dashboard(headers)
-        if method == "GET" and route_path == "/api/operations/app-health/input-invoice-usage-audit":
-            return self._handle_api_operations_input_invoice_usage_audit(headers)
-        if method == "GET" and route_path == "/api/operations/app-health/output-invoice-collection-audit":
-            return self._handle_api_operations_output_invoice_collection_audit(headers)
         if method == "GET" and route_path == "/api/operations/app-health/page-audit":
             return self._handle_api_operations_page_audit(query, headers)
         if method == "POST" and route_path == "/api/operations/app-health/input-invoice-usage-refresh":
@@ -2044,7 +2043,7 @@ class Application:
         if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/retry"):
             job_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_background_job_retry(job_id, headers)
-        if route_path == "/api/etc/import" or route_path.startswith("/api/etc/import/"):
+        if route_path in {"/api/etc/import/preview", "/api/etc/import/confirm"}:
             return self._etc_import_routes().route(method, route_path, body, headers)
         if route_path == "/api/etc/reconciliation-tasks" or route_path.startswith("/api/etc/reconciliation-tasks/"):
             return self._etc_reconciliation_routes().route(method, route_path, body, headers)
@@ -2172,19 +2171,12 @@ class Application:
         if method == "GET" and route_path.startswith("/reconciliation/cases/"):
             case_id = route_path.rsplit("/", 1)[-1]
             return self._handle_reconciliation_case_detail(case_id)
-        if method == "POST" and route_path == "/imports/preview":
-            return self._handle_import_preview(body)
-        if method == "POST" and route_path == "/imports/confirm":
-            return self._handle_import_confirm(body)
         if method == "GET" and route_path.startswith("/imports/batches/"):
             if route_path.endswith("/download"):
                 batch_id = route_path.rsplit("/", 2)[-2]
                 return self._handle_import_batch_download(batch_id)
             batch_id = route_path.rsplit("/", 1)[-1]
             return self._handle_import_batch(batch_id)
-        if method == "POST" and route_path.startswith("/imports/batches/") and route_path.endswith("/revert"):
-            batch_id = route_path.rsplit("/", 2)[-2]
-            return self._handle_import_batch_revert(batch_id)
         if method == "GET" and route_path == "/imports/templates":
             return self._handle_import_templates()
         if method == "POST" and route_path == "/imports/files/preview":
@@ -2258,11 +2250,8 @@ class Application:
                 "/health",
                 "/metrics",
                 "/foundation/seed",
-                "/imports/preview",
-                "/imports/confirm",
                 "/imports/templates",
                 "/imports/batches/{batch_id}/download",
-                "/imports/batches/{batch_id}/revert",
                 "/imports/files/preview",
                 "/imports/files/confirm",
                 "/imports/files/retry",
@@ -3352,7 +3341,6 @@ class Application:
             state_store=state_store,
             queue_repository=queue_repository,
             app_settings_service=self._app_settings_service,
-            refresh_snapshot=self._refresh_local_app_settings_snapshot,
             tenant_id=self._workbench_reconciliation_tenant_id(),
             postgres_settings_repository_factory=lambda transaction: PostgresOpsTaxEtcRepository(transaction),
             postgres_idempotency_store_factory=self._turnover_ledger_tag_selection_postgres_idempotency_store,
@@ -3361,9 +3349,6 @@ class Application:
         if facade is None:
             return None
         return facade
-
-    def _refresh_local_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
-        self._turnover_ledger_local_runtime_support().refresh_app_settings_snapshot(snapshot)
 
     def _turnover_ledger_relation_extra_row_provider(
         self,
@@ -3881,63 +3866,15 @@ class Application:
 
     def _operations_audit_service(self) -> OperationsAuditService | None:
         repository = getattr(getattr(self, "_runtime_repositories", None), "operations_audit_repository", None)
-        return OperationsAuditService(repository) if repository is not None else None
-
-    def _handle_api_operations_input_invoice_usage_audit(self, headers: dict[str, str] | None) -> Response:
-        session, admin_error = self._resolve_admin_session(headers)
-        if admin_error is not None:
-            return admin_error
-        service = self._operations_audit_service()
-        if service is None:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": "postgres_required",
-                    "message": "Input invoice usage audit requires PostgreSQL runtime facts.",
-                },
-            )
-        try:
-            payload = service.audit_input_invoice_usage(
-                tenant_id=tenant_id_for_session(session),
-                sample_limit=50,
-            )
-        except Exception as exc:
-            return self._json_response(
-                HTTPStatus.INTERNAL_SERVER_ERROR,
-                {
-                    "error": "input_invoice_usage_audit_failed",
-                    "message": str(exc) or "Input invoice usage audit failed.",
-                },
-            )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def _handle_api_operations_output_invoice_collection_audit(self, headers: dict[str, str] | None) -> Response:
-        session, admin_error = self._resolve_admin_session(headers)
-        if admin_error is not None:
-            return admin_error
-        service = self._operations_audit_service()
-        if service is None:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": "postgres_required",
-                    "message": "Output invoice collection audit requires PostgreSQL runtime facts.",
-                },
-            )
-        try:
-            payload = service.audit_output_invoice_collection(
-                tenant_id=tenant_id_for_session(session),
-                sample_limit=50,
-            )
-        except Exception as exc:
-            return self._json_response(
-                HTTPStatus.INTERNAL_SERVER_ERROR,
-                {
-                    "error": "output_invoice_collection_audit_failed",
-                    "message": str(exc) or "Output invoice collection audit failed.",
-                },
-            )
-        return self._json_response(HTTPStatus.OK, payload)
+        if repository is None:
+            return None
+        return OperationsAuditService(
+            repository,
+            dashboard_payload_builder=lambda connection: OperationsDashboardService(
+                connection,
+                api_performance_recorder=self._api_performance_recorder,
+            ).build_payload(),
+        )
 
     def _handle_api_operations_page_audit(
         self,
@@ -3947,13 +3884,13 @@ class Application:
         session, admin_error = self._resolve_admin_session(headers)
         if admin_error is not None:
             return admin_error
-        domain_key = _operation_text((query.get("domain") or [""])[0])
-        if not domain_key:
+        page_key = _operation_text((query.get("page") or [""])[0])
+        if not page_key:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
-                    "error": "page_audit_domain_required",
-                    "message": "domain is required.",
+                    "error": "page_audit_page_required",
+                    "message": "page is required.",
                 },
             )
         service = self._operations_audit_service()
@@ -3966,16 +3903,31 @@ class Application:
                 },
             )
         try:
-            payload = service.audit_page_business(
-                domain_key=domain_key,
+            payload = service.audit_page(
+                page_key=page_key,
                 tenant_id=tenant_id_for_session(session),
                 sample_limit=50,
+            )
+        except PageAuditUnavailableError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "page_audit_proof_unavailable",
+                    "message": str(exc),
+                    "page_key": page_key,
+                    "overall_status": "unavailable",
+                    "audit_status": {
+                        "integrity": "unavailable",
+                        "freshness": "unavailable",
+                        "queue": "unavailable",
+                    },
+                },
             )
         except ValueError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
-                    "error": "unsupported_page_audit_domain",
+                    "error": "unsupported_page_audit_page",
                     "message": str(exc),
                 },
             )
@@ -4740,19 +4692,15 @@ class Application:
         if isinstance(routes, EtcImportApiRoutes):
             return routes
         routes = EtcImportApiRoutes(
-            etc_service=self._etc_service,
-            task_service=self._etc_reconciliation_task_service,
+            preview_service=self._etc_import_preview_service,
             background_job_service=self._background_job_service,
-            reconciliation_import_previews=self._etc_reconciliation_import_previews,
             json_response=self._json_response,
             load_json_body=self._load_json_body,
             load_multipart_body=self._load_multipart_body,
             reconciliation_error_response=self._reconciliation_error_response,
             resolve_background_job_owner=self._resolve_background_job_owner,
-            import_job_processing_enabled=self._import_job_processing_enabled,
             enqueue_import_job=self._enqueue_import_process_job,
             serialize_import_job=self._serialize_import_job,
-            execute_etc_invoice_import_confirm_job=self._execute_etc_invoice_import_confirm_job,
         )
         self._etc_import_api_routes = routes
         return routes
@@ -5304,27 +5252,6 @@ class Application:
             task_id=task_id,
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,
-        )
-
-    def _execute_etc_invoice_import_confirm_job(
-        self,
-        *,
-        session_id: str,
-        task_id: str,
-        owner_user_id: str,
-        background_job_id: str,
-        task_version: int,
-        confirmed_item_set_hash: str,
-        total: int,
-    ) -> dict[str, object]:
-        return self._import_processing_service.execute_etc_invoice_import_confirm_job(
-            session_id=session_id,
-            task_id=task_id,
-            owner_user_id=owner_user_id,
-            background_job_id=background_job_id,
-            task_version=task_version,
-            confirmed_item_set_hash=confirmed_item_set_hash,
-            total=total,
         )
 
     @staticmethod
@@ -8371,7 +8298,11 @@ class Application:
         )
 
     def _tax_offset_certified_import_source_version(self) -> str:
-        sql_version = self._tax_offset_sql_table_source_version("app.tax_certified_import_records", "status <> 'deleted'")
+        sql_version = self._tax_offset_sql_table_source_version(
+            "app.tax_certified_import_records",
+            "status <> 'deleted'",
+            timestamp_column="created_at",
+        )
         if sql_version is not None:
             return sql_version
         source_version = getattr(getattr(self, "_tax_certified_import_service", None), "source_version", None)
@@ -8379,14 +8310,21 @@ class Application:
             return str(source_version())
         return "unavailable"
 
-    def _tax_offset_sql_table_source_version(self, table_name: str, where_sql: str) -> str | None:
+    def _tax_offset_sql_table_source_version(
+        self,
+        table_name: str,
+        where_sql: str,
+        *,
+        timestamp_column: str = "updated_at",
+    ) -> str | None:
         connection = getattr(getattr(self, "_state_store", None), "_connection", None)
         fetch_one = getattr(connection, "fetch_one", None)
         if not callable(fetch_one):
             return None
         try:
             row = fetch_one(
-                f"select count(*) as row_count, max(updated_at)::text as max_updated_at from {table_name} where {where_sql}"
+                f"select count(*) as row_count, max({timestamp_column})::text as max_updated_at "
+                f"from {table_name} where {where_sql}"
             )
         except Exception:
             return "unavailable"
@@ -9510,83 +9448,6 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"case": case})
 
-    def _handle_import_preview(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-
-        try:
-            batch_type = BatchType(payload["batch_type"])
-            source_name = payload["source_name"]
-            imported_by = payload["imported_by"]
-            rows = payload["rows"]
-        except (KeyError, ValueError, TypeError):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_import_preview_request",
-                    "message": "batch_type, source_name, imported_by and rows are required.",
-                },
-            )
-
-        preview = self._import_service.preview_import(
-            batch_type=batch_type,
-            source_name=source_name,
-            imported_by=imported_by,
-            rows=rows,
-        )
-        self._persist_import_preview_state()
-        return self._json_response(HTTPStatus.OK, self._serialize_preview(preview))
-
-    def _handle_import_confirm(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-
-        batch_id = payload.get("batch_id")
-        if not batch_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_import_confirm_request",
-                    "message": "batch_id is required.",
-                },
-            )
-        if self._import_job_processing_enabled():
-            try:
-                import_job, event = self._enqueue_import_process_job(
-                    import_type="general_import.confirm",
-                    import_session_id=str(batch_id),
-                    idempotency_key=f"general_import.confirm:{batch_id}",
-                    payload={"batch_id": str(batch_id)},
-                    created_by=str(payload.get("actor_id") or payload.get("imported_by") or "imports_api"),
-                    reason="general_import_confirm",
-                )
-            except RuntimeError as exc:
-                return self._json_response(
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                    {"error": "import_queue_unavailable", "message": str(exc)},
-                )
-            return self._json_response(
-                HTTPStatus.ACCEPTED,
-                {
-                    "status": "queued",
-                    "import_job": self._serialize_import_job(import_job),
-                    "event_id": getattr(event, "event_id", None),
-                },
-            )
-        try:
-            result = self._import_processing_service.execute_general_import_confirm(str(batch_id))
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "batch_not_found", "batch_id": batch_id},
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            result,
-        )
-
     def build_import_job_processors(self) -> dict[str, Callable[[ImportJob], dict[str, object]]]:
         return self._import_processing_service.build_import_job_processors()
 
@@ -9610,14 +9471,15 @@ class Application:
     def _import_processing_backend(self) -> str:
         explicit = str(os.getenv("FIN_OPS_IMPORT_PROCESSING_BACKEND") or "").strip().lower()
         if explicit:
-            if explicit not in {"inline", "rabbitmq"}:
-                raise RuntimeError("FIN_OPS_IMPORT_PROCESSING_BACKEND must be inline or rabbitmq.")
+            if explicit not in {"postgres", "rabbitmq"}:
+                raise RuntimeError("FIN_OPS_IMPORT_PROCESSING_BACKEND must be postgres or rabbitmq.")
             return explicit
         queue_settings = getattr(getattr(self, "_runtime_repositories", None), "queue_settings", None)
-        return "rabbitmq" if str(getattr(queue_settings, "backend", "") or "").strip().lower() == "rabbitmq" else "inline"
+        backend = str(getattr(queue_settings, "backend", "") or "").strip().lower()
+        return "rabbitmq" if backend == "rabbitmq" else "postgres"
 
     def _import_job_processing_enabled(self) -> bool:
-        if self._import_processing_backend() != "rabbitmq":
+        if self._import_processing_backend() not in {"postgres", "rabbitmq"}:
             return False
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         return callable(getattr(queue_repository, "enqueue", None))
@@ -9692,26 +9554,6 @@ class Application:
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
-
-    def _handle_import_batch_revert(self, batch_id: str) -> Response:
-        try:
-            preview = self._import_service.get_batch(batch_id)
-            batch = self._import_service.revert_import(batch_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "batch_not_found", "batch_id": batch_id},
-            )
-        self._file_import_service.mark_batch_reverted(batch_id)
-        self._invalidate_tax_offset_read_model_scopes(
-            self._tax_offset_scope_keys_for_import_preview(preview),
-            reason="invoice_import_revert",
-        )
-        self._persist_state_with_workbench_invalidation(
-            cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_preview(preview),
-            bank_detail_scope_keys=self._bank_detail_scope_keys_for_import_preview(preview),
-        )
-        return self._json_response(HTTPStatus.OK, {"batch": self._serialize_value(batch)})
 
     def _handle_import_templates(self) -> Response:
         return self._json_response(
@@ -9831,58 +9673,33 @@ class Application:
             },
             affected_scopes=["imports", "workbench"],
         )
-        if created and self._import_job_processing_enabled():
-            try:
-                import_job, event = self._enqueue_import_process_job(
-                    import_type="file_import.confirm",
-                    import_session_id=normalized_session_id,
-                    idempotency_key=f"file_import.confirm:{normalized_session_id}:{selected_key}",
-                    payload={
-                        "session_id": normalized_session_id,
-                        "selected_file_ids": normalized_selected_file_ids,
-                        "owner_user_id": owner_user_id,
-                        "background_job_id": job.job_id,
-                    },
-                    created_by=owner_user_id,
-                    reason="file_import_confirm",
-                )
-                job_payload = job.to_payload()
-                job_payload["import_job"] = self._serialize_import_job(import_job)
-                job_payload["event_id"] = getattr(event, "event_id", None)
-                response_payload = self._serialize_file_session(session)
-                response_payload["job"] = job_payload
-                return self._json_response(HTTPStatus.ACCEPTED, response_payload)
-            except RuntimeError as exc:
+        try:
+            import_job, event = self._enqueue_import_process_job(
+                import_type="file_import.confirm",
+                import_session_id=normalized_session_id,
+                idempotency_key=f"file_import.confirm:{normalized_session_id}:{selected_key}",
+                payload={
+                    "session_id": normalized_session_id,
+                    "selected_file_ids": normalized_selected_file_ids,
+                    "owner_user_id": owner_user_id,
+                    "background_job_id": job.job_id,
+                },
+                created_by=owner_user_id,
+                reason="file_import_confirm",
+            )
+            job_payload = job.to_payload()
+            job_payload["import_job"] = self._serialize_import_job(import_job)
+            job_payload["event_id"] = getattr(event, "event_id", None)
+            response_payload = self._serialize_file_session(session)
+            response_payload["job"] = job_payload
+            return self._json_response(HTTPStatus.ACCEPTED, response_payload)
+        except RuntimeError as exc:
+            if created:
                 self._background_job_service.fail_job(job.job_id, "导入文件任务未启动。", str(exc))
-                return self._json_response(
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                    {"error": "import_queue_unavailable", "message": str(exc), "job": job.to_payload()},
-                )
-        if created:
-            def run_file_import(running_job):
-                return self._import_processing_service.execute_file_import_confirm_job(
-                    session_id=normalized_session_id,
-                    selected_file_ids=normalized_selected_file_ids,
-                    owner_user_id=running_job.owner_user_id,
-                    background_job_id=running_job.job_id,
-                )
-
-            self._background_job_service.run_job(job, run_file_import)
-
-        response_payload = self._serialize_file_session(session)
-        job_payload = job.to_payload()
-        result_summary = job_payload.get("result_summary") if isinstance(job_payload, dict) else None
-        if isinstance(result_summary, dict):
-            for key in (
-                "affected_scope_keys",
-                "read_model_scope_keys",
-                "freshness_targets",
-                "operation_barrier_targets",
-            ):
-                if key in result_summary:
-                    response_payload[key] = result_summary[key]
-        response_payload["job"] = job_payload
-        return self._json_response(HTTPStatus.ACCEPTED, response_payload)
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "import_queue_unavailable", "message": str(exc), "job": job.to_payload()},
+            )
 
     @staticmethod
     def _file_import_job_status_scope(session, selected_file_ids: list[str]) -> tuple[list[str], str]:

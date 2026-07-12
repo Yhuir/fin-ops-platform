@@ -127,7 +127,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         auxiliary_refresh_worker_instances=(),
         query_status_contract="self_managed_freshness",
         projection_strategy="partitioned_scoped_incremental",
-        all_scope_semantics="fan_out_command",
+        all_scope_semantics="queryable_all_scope",
         partition_key_contract="global all scope only",
         scoped_incremental_target="bank account balance snapshot for all accounts",
         full_rebuild_fallback="gateway force refresh rebuilds the all-only account balance projection",
@@ -441,3 +441,14 @@ def read_model_manifest_by_scope_type() -> dict[str, ReadModelManifestEntry]:
 
 def read_model_manifest_by_refresh_event_type() -> dict[str, ReadModelManifestEntry]:
     return {entry.refresh_event_type: entry for entry in READ_MODEL_MANIFEST.values()}
+
+
+def is_command_only_read_model_scope(read_model_key: str, scope_key: str) -> bool:
+    """Return whether a scope is a fan-out command rather than queryable state."""
+
+    entry = READ_MODEL_MANIFEST.get(str(read_model_key or "").strip())
+    normalized_scope_key = str(scope_key or "").strip()
+    if entry is None or not normalized_scope_key:
+        return False
+    is_all_scope = normalized_scope_key == "all" or normalized_scope_key.endswith(":all")
+    return is_all_scope and entry.all_scope_semantics == "fan_out_command"

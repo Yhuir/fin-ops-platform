@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { usePageSessionState } from "../../contexts/PageSessionStateContext";
 import { useSession } from "../../contexts/SessionContext";
+import PageBusinessAuditIcon from "../common/PageBusinessAuditIcon";
 import type {
   BankAccountMapping,
   OaApplicantCredentialSummary,
@@ -764,6 +765,13 @@ export default function SettingsPageContent({
               ) : null}
             </div>
             <div className="settings-save-actions">
+              {canManageAccessControl ? (
+                <PageBusinessAuditIcon
+                  ariaLabel="Audit 设置"
+                  label="设置"
+                  pageKey="settings"
+                />
+              ) : null}
               <span>
                 {isSaving ? "正在保存变更" : "变更需手动保存"}
               </span>

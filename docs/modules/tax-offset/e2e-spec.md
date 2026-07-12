@@ -4,7 +4,7 @@
 
 ## 模块目标
 
-税金抵扣页必须让用户基于 fresh `tax_offset` read model 查看销项税额、进项认证计划、已认证结果，完成试算、保存计划和已认证发票导入。关系事实、发票导入、ETC、OA 附件等上游变化必须通过 read model/worker 边界进入页面，不能由页面本地推断或读 stale payload 伪装 fresh。
+税金抵扣页必须让用户基于 fresh `tax_offset` read model 查看销项税额、进项认证计划、已认证结果，完成试算、保存计划和已认证发票导入。发票导入、ETC/OA 附件 canonical promotion 与税务认证等实际 source 变化必须通过 read model/worker 边界进入页面；Workbench relation 不属于税金 projection source，不能触发税金造数或 queue fan-out。
 
 ## Spec 场景
 
@@ -15,7 +15,7 @@
 | `TAX-E2E-003` | 保存税金抵扣计划 | P0 | 保存时提交 selected ids、expected read model scope/source versions 和 idempotency key；成功后等待当前月份 `tax_offset` operation barrier fresh，再提示已保存并刷新页面；stale/conflict 不能伪成功。 |
 | `TAX-E2E-004` | 已认证发票导入 preview/confirm | P0 | 选择 XLSX 后可预览识别结果；确认导入后等待当前月份 `tax_offset` operation barrier fresh，再刷新税金页和已认证结果 drawer，显示新增已认证记录。 |
 | `TAX-E2E-005` | read model non-fresh/failed | P0 | refreshing/stale/failed/missing 时显示诊断或禁用不安全写入，不把空 payload 当最终空结果。 |
-| `TAX-E2E-006` | Workbench relation fan-out 到税金抵扣 | P1 | Workbench confirm 后，税金抵扣页重新请求 `/api/tax-offset`，读取 fresh tax offset read model，展示 relation 影响后的进项计划行，且不误报读模型错误。 |
+| `TAX-E2E-006` | Workbench relation 与税金事实隔离 | P1 | Workbench confirm/withdraw 不得新增、删除或改变税金抵扣发票 item，也不得为 `tax_offset` 写 dirty/outbox；税金页面只随 canonical 发票或税务认证事实变化。 |
 | `TAX-E2E-007` | 权限矩阵 | P1 | read-only 用户可读不可保存/导入；无权限或 session expired 不应调用受保护业务 API；写 API 仍由后端拒绝。 |
 | `TAX-E2E-008` | 大数据、筛选、排序、横向滚动和视觉遮挡 | P2 | 大表格搜索/筛选/排序/滚动保持可用，按钮和弹窗不遮挡关键内容。 |
 

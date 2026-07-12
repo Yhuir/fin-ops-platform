@@ -391,7 +391,7 @@ export default function OaPendingPaymentsPage() {
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
       ariaLabel="Audit OA 待付款核对"
-      domainKey="oa_pending_payments"
+      pageKey="oa-pending-payments"
       label="OA 待付款核对"
       readModelStatus={readModelStatus}
     />

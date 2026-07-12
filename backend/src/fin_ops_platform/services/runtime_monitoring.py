@@ -8,6 +8,11 @@ from fin_ops_platform.services.app_status_read_model_registry import (
     read_model_by_scope_type,
 )
 from fin_ops_platform.services.rabbitmq_runtime import rabbitmq_event_routes
+from fin_ops_platform.services.read_model_manifest import (
+    READ_MODEL_MANIFEST,
+    is_command_only_read_model_scope,
+    read_model_manifest_by_refresh_event_type,
+)
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES, RuntimeQueueSettings
 from fin_ops_platform.services.runtime_worker_registry import (
     read_model_event_types,
@@ -17,6 +22,7 @@ from fin_ops_platform.services.runtime_worker_registry import (
 
 
 READ_MODEL_EVENT_TYPES: dict[str, tuple[str, str]] = read_model_event_types()
+READ_MODEL_MANIFEST_BY_EVENT_TYPE = read_model_manifest_by_refresh_event_type()
 
 EMPTY_PERCENTILES = {"p50": None, "p95": None, "p99": None}
 READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT = 512
@@ -91,6 +97,24 @@ exists (
 """
 
 
+def _command_only_parent_scope_sql(*, scope_type_sql: str, scope_key_sql: str) -> str:
+    scope_types = ", ".join(
+        "'" + entry.scope_type.replace("'", "''") + "'"
+        for entry in READ_MODEL_MANIFEST.values()
+        if entry.all_scope_semantics == "fan_out_command"
+    )
+    return f"({scope_type_sql} in ({scope_types}) and ({scope_key_sql} = 'all' or {scope_key_sql} like '%%:all'))"
+
+
+def _command_only_parent_event_sql(*, event_type_sql: str, scope_key_sql: str) -> str:
+    event_types = ", ".join(
+        "'" + entry.refresh_event_type.replace("'", "''") + "'"
+        for entry in READ_MODEL_MANIFEST.values()
+        if entry.all_scope_semantics == "fan_out_command"
+    )
+    return f"({event_type_sql} in ({event_types}) and ({scope_key_sql} = 'all' or {scope_key_sql} like '%%:all'))"
+
+
 def _current_effective_outbox_attention_predicate_sql(alias: str) -> str:
     prefix = f"{alias}."
     scope_type_expr = (
@@ -100,6 +124,10 @@ def _current_effective_outbox_attention_predicate_sql(alias: str) -> str:
     scope_key_expr = (
         f"coalesce({prefix}scope_key, {prefix}raw_payload->>'scope_key', "
         f"{prefix}payload->>'scope_key', {prefix}aggregate_id, '')"
+    )
+    command_only_parent = _command_only_parent_event_sql(
+        event_type_sql=f"{prefix}event_type",
+        scope_key_sql=scope_key_expr,
     )
     return f"""
 {_current_effective_outbox_event_predicate_sql(alias)}
@@ -133,14 +161,17 @@ and not (
       and done.status = 'done'
       and done.updated_at > {prefix}updated_at
   )
-  or exists (
-    select 1
-    from read_model.app_status_readiness readiness
-    where readiness.tenant_id = {prefix}tenant_id
-      and coalesce(readiness.scope_type, '') = {scope_type_expr}
-      and coalesce(readiness.scope_key, '') = {scope_key_expr}
-      and readiness.status = 'fresh'
-      and readiness.updated_at > {prefix}updated_at
+  or (
+    not {command_only_parent}
+    and exists (
+      select 1
+      from read_model.app_status_readiness readiness
+      where readiness.tenant_id = {prefix}tenant_id
+        and coalesce(readiness.scope_type, '') = {scope_type_expr}
+        and coalesce(readiness.scope_key, '') = {scope_key_expr}
+        and readiness.status = 'fresh'
+        and readiness.updated_at > {prefix}updated_at
+    )
   )
   or {_active_dirty_scope_coverage_sql(alias)}
 )
@@ -149,19 +180,28 @@ and not (
 
 def _current_effective_dirty_scope_predicate_sql(alias: str | None = None) -> str:
     prefix = f"{alias}." if alias else ""
+    scope_type_expr = f"coalesce({prefix}scope_type, '')"
+    scope_key_expr = f"coalesce({prefix}scope_key, '')"
+    command_only_parent = _command_only_parent_scope_sql(
+        scope_type_sql=scope_type_expr,
+        scope_key_sql=scope_key_expr,
+    )
     return f"""
 not (
   {prefix}scope_type = 'cost_statistics'
   and ({prefix}scope_key = 'all' or {prefix}scope_key ~ '^[0-9]{{4}}-[0-9]{{2}}$')
 )
-and not exists (
-  select 1
-  from read_model.app_status_readiness readiness
-  where readiness.tenant_id = {prefix}tenant_id
-    and coalesce(readiness.scope_type, '') = coalesce({prefix}scope_type, '')
-    and coalesce(readiness.scope_key, '') = coalesce({prefix}scope_key, '')
-    and readiness.status = 'fresh'
-    and readiness.updated_at > {prefix}updated_at
+and not (
+  not {command_only_parent}
+  and exists (
+    select 1
+    from read_model.app_status_readiness readiness
+    where readiness.tenant_id = {prefix}tenant_id
+      and coalesce(readiness.scope_type, '') = {scope_type_expr}
+      and coalesce(readiness.scope_key, '') = {scope_key_expr}
+      and readiness.status = 'fresh'
+      and readiness.updated_at > {prefix}updated_at
+  )
 )
 """
 
@@ -307,9 +347,13 @@ class RuntimeMonitoringRepository:
             scope_type = str(row.get("scope_type") or "").strip()
             if not scope_type:
                 continue
-            if _truthy(row.get("covered_by_later_readiness")):
-                continue
             read_model_key = definitions_by_scope.get(scope_type).key if scope_type in definitions_by_scope else scope_type
+            scope_key = str(row.get("scope_key") or "").strip()
+            if _truthy(row.get("covered_by_later_readiness")) and not is_command_only_read_model_scope(
+                read_model_key,
+                scope_key,
+            ):
+                continue
             last_error = str(row.get("last_error") or "").strip()
             updated_at = str(row.get("updated_at") or "").strip()
             scope_status = _app_status_dirty_scope_status(row.get("status"))
@@ -399,6 +443,19 @@ class RuntimeMonitoringRepository:
             if not key:
                 continue
             status = str(row.get("status") or "missing").strip().lower() or "missing"
+            if is_command_only_read_model_scope(key, str(row.get("scope_key") or "")):
+                historical_scopes_by_key.setdefault(key, []).append(
+                    _app_status_historical_read_model_scope_payload(
+                        read_model_key=key,
+                        scope_type=row.get("scope_type"),
+                        scope_key=row.get("scope_key"),
+                        status=status,
+                        last_error=row.get("last_error"),
+                        updated_at=row.get("updated_at"),
+                        history_reason="fan_out_command_scope",
+                    )
+                )
+                continue
             if _is_legacy_cost_statistics_scope(row.get("scope_type"), row.get("scope_key")):
                 historical_scopes_by_key.setdefault(key, []).append(
                     _app_status_historical_read_model_scope_payload(
@@ -2017,10 +2074,15 @@ def _is_legacy_cost_statistics_scope(scope_type: object, scope_key: object) -> b
 def _is_historical_outbox_status(row: dict[str, Any]) -> bool:
     if _is_legacy_cost_statistics_scope(row.get("scope_type"), row.get("scope_key")):
         return True
+    entry = READ_MODEL_MANIFEST_BY_EVENT_TYPE.get(str(row.get("event_type") or "").strip())
+    command_only_parent = bool(
+        entry is not None
+        and is_command_only_read_model_scope(entry.key, str(row.get("scope_key") or ""))
+    )
     return (
         _truthy(row.get("covered_by_later_event"))
         or _truthy(row.get("covered_by_later_done"))
-        or _truthy(row.get("covered_by_later_readiness"))
+        or (_truthy(row.get("covered_by_later_readiness")) and not command_only_parent)
         or _truthy(row.get("covered_by_active_dirty_scope"))
     )
 

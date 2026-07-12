@@ -73,7 +73,7 @@
       "deterministic_evidence": [
         {
           "path": "web/e2e/workbench-relations-oa-pending-fanout.spec.ts",
-          "required_markers": ["支付少了", "关联台已确认", "12561048"]
+          "required_markers": ["未支付", "已支付", "关联台已确认", "12561048"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:oa_pending_payments_rows", "http_slo_probe:oa_pending_payments_filter_options"]
@@ -130,10 +130,11 @@
       "module": "etc-tickets",
       "page_key": "etc-tickets",
       "route": "/etc-tickets",
-      "read_model_keys": ["workbench", "workbench_relation", "invoice_lifecycle", "tax_offset", "cost_statistics"],
+      "read_model_keys": [],
       "freshness_probe_names": ["etc_invoices", "etc_business_batches", "etc_reconciliation_tasks"],
-      "fact_sources": ["app.etc_invoices", "app.etc_business_batches", "app.invoices", "read_model.invoice_lifecycle"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.etc_business_batches", "app.etc_reconciliation_tasks", "app.etc_reconciliation_files", "app.etc_invoices", "app.etc_import_batches", "app.etc_submission_batches", "app.etc_batch_invoice_links", "app.invoices", "job.import_jobs"],
+      "pairing_relation_fact_sources": [],
+      "internal_relation_fact_sources": ["app.etc_business_batches", "app.etc_reconciliation_tasks", "app.etc_reconciliation_files", "app.etc_invoices", "app.etc_import_batches", "app.etc_submission_batches", "app.etc_batch_invoice_links"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/etc-tickets-flow.spec.ts",
@@ -150,14 +151,14 @@
       "module": "tax-offset",
       "page_key": "tax-offset",
       "route": "/tax-offset",
-      "read_model_keys": ["tax_offset", "workbench_relation"],
+      "read_model_keys": ["tax_offset"],
       "freshness_probe_names": ["tax_offset_summary", "tax_offset_rows"],
-      "fact_sources": ["app.invoices", "app.tax_offset_plans", "read_model.tax_offset"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "fact_sources": ["app.invoices", "app.tax_certified_import_records", "read_model.tax_offset_read_models", "read_model.tax_offset_items"],
+      "pairing_relation_fact_sources": [],
       "deterministic_evidence": [
         {
-          "path": "web/e2e/workbench-relations-tax-offset-fanout.spec.ts",
-          "required_markers": ["智能工厂设备商", "91330108MA27B4011D", "7,540.00"]
+          "path": "web/e2e/workbench-relations-tax-offset-isolation.spec.ts",
+          "required_markers": ["does not invent or remove tax-offset invoice facts", "rowsBeforeConfirm"]
         },
         {
           "path": "web/e2e/tax-offset-flow.spec.ts",
@@ -230,9 +231,9 @@
       "module": "settings",
       "page_key": "settings",
       "route": "/settings",
-      "read_model_keys": ["bank_detail", "pending_invoice", "cost_statistics"],
-      "freshness_probe_names": ["bank_details_transactions", "pending_invoices_rows", "cost_statistics_explorer_all"],
-      "fact_sources": ["app.resettable_business_state", "read_model.bank_detail", "read_model.pending_invoice", "read_model.cost_statistics"],
+      "read_model_keys": [],
+      "freshness_probe_names": ["workbench_settings", "background_jobs_active"],
+      "fact_sources": ["app.app_settings", "app.oa_applicant_credentials", "job.background_jobs"],
       "pairing_relation_fact_sources": [],
       "deterministic_evidence": [
         {
@@ -240,20 +241,20 @@
           "required_markers": ["数据重置", "bankRowsAfterReset", "pendingRowsAfterReset"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:bank_details_transactions", "http_slo_probe:pending_invoices_rows", "http_slo_probe:cost_statistics_explorer_all"]
+      "production_readonly_gates": ["http_slo_probe:workbench_settings", "http_slo_probe:background_jobs_active"]
     },
     {
       "module": "app-health-operations",
       "page_key": "app-health-operations",
       "route": "/operations/app-health",
-      "read_model_keys": ["workbench", "workbench_relation", "bank_detail", "pending_invoice", "cost_statistics"],
+      "read_model_keys": [],
       "freshness_probe_names": ["operations_app_health_dashboard", "app_health", "background_jobs_active"],
-      "fact_sources": ["job.read_model_dirty_scopes", "job.outbox_events", "runtime.read_model_readiness", "app_status.read_model_registry"],
+      "fact_sources": ["app.bank_transactions", "app.invoices", "app.import_batches", "app.oa_applications", "app.oa_application_items", "app.oa_sync_runs", "job.read_model_dirty_scopes", "job.outbox_events", "read_model.app_status_readiness", "job.runtime_worker_heartbeats", "PAGE_AUDIT_REGISTRY", "READ_MODEL_MANIFEST", "RUNTIME_WORKER_REGISTRY"],
       "pairing_relation_fact_sources": [],
       "deterministic_evidence": [
         {
           "path": "web/e2e/app-shell.spec.ts",
-          "required_markers": ["AppHealth 运维状态", "app-health-data", "app-health-requests", "app-health-runtime"]
+          "required_markers": ["AppHealth 运维状态", "app-health-data", "app-health-requests", "app-health-runtime", "app-health-system-audit", "外部证据 unknown"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:operations_app_health_dashboard", "http_slo_probe:app_health", "http_slo_probe:background_jobs_active"]
@@ -262,9 +263,9 @@
       "module": "imports-bank-transactions",
       "page_key": "imports.bank-transactions",
       "route": "/imports/bank-transactions",
-      "read_model_keys": ["bank_detail", "bank_account_balance", "workbench", "cost_statistics", "search"],
-      "freshness_probe_names": ["import_facts_batches", "import_facts_files", "bank_details_transactions", "bank_details_accounts", "cost_statistics_explorer_all"],
-      "fact_sources": ["import.bank_transaction_files", "app.bank_transactions", "read_model.bank_detail", "read_model.bank_account_balance"],
+      "read_model_keys": [],
+      "freshness_probe_names": ["import_facts_batches", "import_facts_files"],
+      "fact_sources": ["app.file_objects", "app.import_files", "app.import_batches", "app.import_batch_rows", "app.bank_transactions", "job.import_jobs", "job.outbox_events"],
       "pairing_relation_fact_sources": [],
       "deterministic_evidence": [
         {
@@ -272,39 +273,40 @@
           "required_markers": ["expectFreshReadModelResponse", "expectFreshBankAccountBalanceResponse", "银行流水导入", "导入预览结果"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:import_facts_batches", "http_slo_probe:import_facts_files", "http_slo_probe:bank_details_transactions", "http_slo_probe:bank_details_accounts", "http_slo_probe:cost_statistics_explorer_all"]
+      "production_readonly_gates": ["http_slo_probe:import_facts_batches", "http_slo_probe:import_facts_files"]
     },
     {
       "module": "imports-invoices",
       "page_key": "imports.invoices",
       "route": "/imports/invoices",
-      "read_model_keys": ["workbench", "workbench_relation", "invoice_lifecycle", "pending_invoice", "input_invoice_usage", "output_invoice_collection", "oa_pending_payment", "tax_offset", "cost_statistics", "search"],
-      "freshness_probe_names": ["import_facts_invoices", "import_facts_files", "workbench_summary_all", "pending_invoices_rows", "input_invoice_usage_rows", "output_invoice_collections_rows", "oa_pending_payments_rows", "tax_offset_rows", "cost_statistics_explorer_all"],
-      "fact_sources": ["import.invoice_files", "app.invoices", "app.invoice_lifecycle", "read_model.invoice_lifecycle"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "read_model_keys": [],
+      "freshness_probe_names": ["import_facts_invoices", "import_facts_files"],
+      "fact_sources": ["app.file_objects", "app.import_files", "app.import_batches", "app.import_batch_rows", "app.invoices", "job.import_jobs", "job.outbox_events"],
+      "pairing_relation_fact_sources": [],
       "deterministic_evidence": [
         {
           "path": "web/e2e/imports-invoices-flow.spec.ts",
           "required_markers": ["expectFreshReadModelResponse", "发票导入进项供应商", "发票导入成本项目", "已支付已开票"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:import_facts_invoices", "http_slo_probe:import_facts_files", "http_slo_probe:workbench_summary_all", "http_slo_probe:pending_invoices_rows", "http_slo_probe:input_invoice_usage_rows", "http_slo_probe:output_invoice_collections_rows", "http_slo_probe:oa_pending_payments_rows", "http_slo_probe:tax_offset_rows", "http_slo_probe:cost_statistics_explorer_all"]
+      "production_readonly_gates": ["http_slo_probe:import_facts_invoices", "http_slo_probe:import_facts_files"]
     },
     {
       "module": "imports-etc-invoices",
       "page_key": "imports.etc-invoices",
       "route": "/imports/etc-invoices",
-      "read_model_keys": ["workbench", "workbench_relation", "invoice_lifecycle", "tax_offset", "cost_statistics", "search"],
-      "freshness_probe_names": ["import_facts_batches", "import_facts_files", "etc_reconciliation_tasks", "etc_business_batches", "tax_offset_rows", "cost_statistics_explorer_all"],
-      "fact_sources": ["import.etc_invoice_files", "app.etc_invoices", "app.etc_business_batches", "read_model.invoice_lifecycle"],
-      "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
+      "read_model_keys": [],
+      "freshness_probe_names": ["etc_reconciliation_tasks", "etc_business_batches"],
+      "fact_sources": ["app.etc_import_sessions", "app.etc_import_session_files", "app.file_objects", "app.etc_reconciliation_tasks", "app.etc_business_batches", "app.etc_import_batches", "app.etc_invoices", "app.etc_batch_invoice_links", "app.invoices", "job.import_jobs", "job.outbox_events"],
+      "pairing_relation_fact_sources": [],
+      "internal_relation_fact_sources": ["app.etc_import_sessions", "app.etc_import_session_files", "app.etc_reconciliation_tasks", "app.etc_business_batches", "app.etc_import_batches", "app.etc_invoices", "app.etc_batch_invoice_links"],
       "deterministic_evidence": [
         {
           "path": "web/e2e/imports-etc-invoices-flow.spec.ts",
           "required_markers": ["ETC-E2E-2026-03", "ETC导入通行服务商", "ETC导入通行成本项目", "expectFreshReadModelResponse"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:import_facts_batches", "http_slo_probe:import_facts_files", "http_slo_probe:etc_reconciliation_tasks", "http_slo_probe:etc_business_batches", "http_slo_probe:tax_offset_rows", "http_slo_probe:cost_statistics_explorer_all"]
+      "production_readonly_gates": ["http_slo_probe:etc_reconciliation_tasks", "http_slo_probe:etc_business_batches"]
     }
   ]
 }

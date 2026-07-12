@@ -60,6 +60,19 @@ class ApplicationStateStoreProtocol(Protocol):
 
     def delete_import_files(self, stored_file_paths: list[str]) -> int: ...
 
+    def store_etc_import_archive(
+        self,
+        *,
+        session_id: str,
+        file_id: str,
+        file_name: str,
+        content: bytes,
+    ) -> dict[str, object]: ...
+
+    def read_etc_import_archive(self, stored_file_path: str) -> bytes: ...
+
+    def delete_etc_import_archives(self, stored_file_paths: list[str]) -> int: ...
+
     def import_session_exists(self, session_id: str) -> bool: ...
 
     def import_file_exists(self, file_id: str) -> bool: ...

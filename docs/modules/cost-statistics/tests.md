@@ -2,6 +2,14 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-11 - 正式 relation lineage 与全银行支出口径测试收敛
+
+- 变更类型：test fixture contract correction + read model lineage regression。
+- 架构结论：成本统计 OA 归因只能消费 active `workbench_relation`，Workbench open/proposed candidate 即使相似度很高也不得进入成本；API fixture 必须通过正式 confirm-link 写边界建立 active relation，禁止直接改 pair query service 或恢复 candidate fallback。`按标签` / `按时间` 的 `bank_flow_time_rows` 是独立的全银行支出 projection，测试数据必须从 canonical bank transactions 构造，不能借用 OA 配对成本行冒充该事实集。
+- 更新测试：`tests/test_cost_statistics_api.py`。
+- 覆盖点：fixture 通过真实 `/api/workbench/actions/confirm-link` 建立关系；候选关系仍被排除；全银行支出可包含没有 OA relation 的流水，并保持 `未配对OA` / `未分类` 展示口径；project/expense-type export 继续消费 OA 配对成本行。
+- 七类测试决策：business core、service-layer、API contract、read model/cache/background job、end-to-end business-flow integration、existing regression 适用并由成本统计 API/服务组合测试覆盖；frontend interaction 行为未变，继续由既有 `CostStatisticsPage.test.tsx` 与 Browser flow 覆盖。
+
 ## 2026-07-10 - 成本统计标签规则和双统计口径
 
 - 变更类型：settings-backed rule contract + read model payload contract + frontend drawer interaction。

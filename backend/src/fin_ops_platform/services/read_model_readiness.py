@@ -7,6 +7,7 @@ from fin_ops_platform.services.app_status_read_model_registry import (
     APP_STATUS_READ_MODEL_REGISTRY,
     read_model_by_refresh_event_type,
 )
+from fin_ops_platform.services.read_model_manifest import is_command_only_read_model_scope
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -164,6 +165,8 @@ class ReadModelReadinessReporter:
         raw_payload: dict[str, Any] | None = None,
     ) -> None:
         definition = self._definition_for_key(read_model_key)
+        if is_command_only_read_model_scope(definition.key, scope_key):
+            return
         if status not in READINESS_WRITE_STATUSES:
             raise ValueError(f"Unsupported readiness status: {status!r}.")
         record = getattr(self._readiness_repository, "record_read_model_readiness", None)

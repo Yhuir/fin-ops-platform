@@ -258,11 +258,19 @@ function installOutputInvoiceCollectionsFetch(options: { operationBarrierDelay?:
       const override = options.rowsPayloadOverride;
       return jsonResponse(typeof override === "function" ? override(url) : override ?? rowsPayload);
     }
-    if (url.pathname === "/api/operations/app-health/output-invoice-collection-audit") {
+    if (
+      url.pathname === "/api/operations/app-health/page-audit"
+      && url.searchParams.get("page") === "output-invoice-collections"
+    ) {
       return jsonResponse({
         overall_status: "pass",
         audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
-        audit_contract: { database_snapshot: true, snapshot_consistency: "repeatable_read_read_only" },
+        audit_contract: {
+          database_snapshot: true,
+          snapshot_consistency: "repeatable_read_read_only",
+          proof_availability: "ready",
+          contract_revision: "page-audit-contract.v9",
+        },
         summary: {
           blocking_issue_sample_count: 0,
           issue_sample_count: 0,
@@ -766,11 +774,11 @@ describe("Output invoice collections page", () => {
     await user.click(auditButton);
 
     await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/operations/app-health/output-invoice-collection-audit"))).toBe(true);
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/operations/app-health/page-audit?page=output-invoice-collections"))).toBe(true);
     });
     const status = await within(page).findByText(/Audit 通过/);
-    expect(status).toHaveTextContent("已登记 App 内部数据完整正确");
-    expect(status).toHaveTextContent("配对关系完整正确");
+    expect(status).toHaveTextContent("已登记 App 内部合同一致");
+    expect(status).toHaveTextContent("已登记配对证明一致");
     expect(status).toHaveTextContent("Fresh");
   });
 

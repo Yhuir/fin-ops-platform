@@ -54,6 +54,7 @@ class AuditOutputInvoiceCollectionReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["issues"], [])
         self.assertEqual(report["audit_contract"]["snapshot_consistency"], "caller_managed")
         self.assertFalse(report["audit_contract"]["database_snapshot"])
+        self.assertIn("invoice page consumer summaries", report["audit_contract"]["relation_edge_equality"])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
         self.assertIn("app.invoices", queried_sql)
@@ -62,6 +63,53 @@ class AuditOutputInvoiceCollectionReadModelToolTests(unittest.TestCase):
         self.assertIn("read_model.workbench_relation_groups", queried_sql)
         self.assertIn("output_invoice_ids", queried_sql)
         self.assertIn("/* check: relation_edge_equality */", queried_sql)
+        self.assertIn("job.outbox_events", queried_sql)
+        self.assertIn("/* check: consumer_relation_edge_equality */", queried_sql)
+
+    def test_workbench_relation_outbox_backlog_blocks_queue_proof(self) -> None:
+        report = run_output_invoice_collection_audit(
+            FakeConnection(
+                rows_by_check={
+                    "outbox_backlog": [
+                        {
+                            "event_type": "workbench_relation.read_model.refresh",
+                            "scope_key": "2026-05",
+                            "status": "pending",
+                        }
+                    ]
+                }
+            )
+        )
+
+        self.assertEqual(report["audit_status"]["freshness"], "not_fresh")
+        self.assertEqual(report["audit_status"]["queue"], "backlog")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"read_model_outbox_not_drained": 1},
+        )
+
+    def test_output_consumer_extra_relation_member_is_blocking(self) -> None:
+        report = run_output_invoice_collection_audit(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "case-extra",
+                            "scope_key": "2026-05",
+                            "row_id": "bank-extra",
+                            "row_type": "bank_transaction",
+                            "mismatch_kind": "consumer_edge_not_shared",
+                        }
+                    ]
+                }
+            )
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"output_invoice_collection_consumer_relation_edge_mismatch": 1},
+        )
 
     def test_sql_literal_percent_is_escaped_for_psycopg_placeholders(self) -> None:
         self.assertIn("销项%%", OUTPUT_INVOICE_PREDICATE)

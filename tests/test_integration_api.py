@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import seed_confirmed_import
 
 
 class OAIntegrationApiTests(unittest.TestCase):
@@ -58,23 +59,12 @@ class OAIntegrationApiTests(unittest.TestCase):
         self.assertEqual(dashboard_payload["runs"], [])
 
     def _preview_and_confirm(self, app, batch_type: str, rows: list[dict[str, str]]) -> None:
-        preview_response = app.handle_request(
-            "POST",
-            "/imports/preview",
-            json.dumps(
-                {
-                    "batch_type": batch_type,
-                    "source_name": f"{batch_type}.json",
-                    "imported_by": "user_finance_01",
-                    "rows": rows,
-                }
-            ),
-        )
-        preview_payload = json.loads(preview_response.body)
-        app.handle_request(
-            "POST",
-            "/imports/confirm",
-            json.dumps({"batch_id": preview_payload["batch"]["id"]}),
+        seed_confirmed_import(
+            app,
+            batch_type=batch_type,
+            source_name=f"{batch_type}.json",
+            imported_by="user_finance_01",
+            rows=rows,
         )
 
 

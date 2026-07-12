@@ -433,63 +433,6 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(lifecycle_event.call_args.kwargs["months"], ["2026-01"])
         self.assertEqual(lifecycle_event.call_args.kwargs["include_all"], False)
 
-    def test_invoice_import_confirm_invalidates_tax_offset_month_cache(self) -> None:
-        app = build_application()
-        preview = app._import_service.preview_import(
-            batch_type=BatchType.INPUT_INVOICE,
-            source_name="input-invoices.xlsx",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "invoice_code": "255020000001",
-                    "invoice_no": "45098656",
-                    "counterparty_name": "重庆高新技术产业开发区国家税务局",
-                    "seller_name": "重庆高新技术产业开发区国家税务局",
-                    "invoice_date": "2026-05-02",
-                    "amount": "6000.00",
-                    "tax_amount": "180.00",
-                }
-            ],
-        )
-
-        with patch.object(app._import_processing_service, "_invalidate_tax_offset_read_model_scopes") as invalidate:
-            response = app.handle_request(
-                "POST",
-                "/imports/confirm",
-                json.dumps({"batch_id": preview.id}),
-            )
-
-        self.assertEqual(response.status_code, 200)
-        invalidate.assert_called_once_with(["2026-05"], reason="invoice_import_confirm")
-
-    def test_bank_import_confirm_does_not_invalidate_tax_offset_cache(self) -> None:
-        app = build_application()
-        preview = app._import_service.preview_import(
-            batch_type=BatchType.BANK_TRANSACTION,
-            source_name="bank.xlsx",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "account_no": "6222000000008106",
-                    "txn_date": "2026-05-02",
-                    "counterparty_name": "云南溯源科技有限公司",
-                    "credit_amount": "88.00",
-                    "debit_amount": "",
-                    "balance": "88.00",
-                }
-            ],
-        )
-
-        with patch.object(app._import_processing_service, "_invalidate_tax_offset_read_model_scopes") as invalidate:
-            response = app.handle_request(
-                "POST",
-                "/imports/confirm",
-                json.dumps({"batch_id": preview.id}),
-            )
-
-        self.assertEqual(response.status_code, 200)
-        invalidate.assert_called_once_with([], reason="invoice_import_confirm")
-
     def test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month(self) -> None:
         app = build_application()
         attachment_invoice = {

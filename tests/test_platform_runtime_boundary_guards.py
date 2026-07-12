@@ -240,6 +240,32 @@ def _bare_application(*, backend: str = "postgres", bootstrap_mode: str = "produ
 
 
 class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
+    def test_file_import_has_one_durable_confirm_path_and_removed_revert_fallbacks(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        confirm_source = _function_source(server_tree, server_source, "_handle_import_file_confirm")
+        imports_source = (SERVICES_ROOT / "imports.py").read_text(encoding="utf-8")
+        file_service_source = (SERVICES_ROOT / "import_file_service.py").read_text(encoding="utf-8")
+        web_api_source = (WEB_SRC_ROOT / "features" / "imports" / "api.ts").read_text(encoding="utf-8")
+        bank_audit_source = (
+            SERVICES_ROOT / "postgres_repositories" / "bank_transaction_import_page_audit.py"
+        ).read_text(encoding="utf-8")
+        invoice_audit_source = (
+            SERVICES_ROOT / "postgres_repositories" / "invoice_import_page_audit.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("_enqueue_import_process_job", confirm_source)
+        self.assertNotIn("execute_file_import_confirm_job", confirm_source)
+        self.assertNotIn("run_file_import", confirm_source)
+        for source in (server_source, imports_source, file_service_source, web_api_source):
+            self.assertNotIn("revertImportBatch", source)
+            self.assertNotIn("_handle_import_batch_revert", source)
+            self.assertNotIn("def revert_import", source)
+            self.assertNotIn("def mark_batch_reverted", source)
+        self.assertNotIn("f.import_batch_id", bank_audit_source)
+        self.assertNotIn("f.import_batch_id", invoice_audit_source)
+
     def test_workbench_scope_invalidation_does_not_refresh_invoice_usage_domains(self) -> None:
         source_path = APP_ROOT / "server.py"
         source = source_path.read_text(encoding="utf-8")
@@ -656,6 +682,24 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                     violations.append(f"{method_name} contains {forbidden}")
 
         self.assertEqual(violations, [])
+
+    def test_turnover_local_tag_selection_does_not_bypass_settings_owner(self) -> None:
+        adapter_path = SERVICES_ROOT / "turnover_ledger_write_adapters.py"
+        adapter_source = adapter_path.read_text(encoding="utf-8")
+        adapter_class_source = _class_source(
+            _parse(adapter_path),
+            adapter_source,
+            "TurnoverLedgerLocalTagSelectionAdapterSet",
+        )
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+
+        self.assertIn("get_turnover_ledger_tag_selection_state", adapter_class_source)
+        self.assertIn("commit_turnover_ledger_tag_selection_update", adapter_class_source)
+        self.assertIn("restore_turnover_ledger_tag_selection_state", adapter_class_source)
+        self.assertNotIn("_snapshot", adapter_class_source)
+        self.assertNotIn("save_app_settings", adapter_class_source)
+        self.assertNotIn("_refresh_local_app_settings_snapshot", server_source)
+        self.assertNotIn("refresh_app_settings_snapshot", adapter_source)
 
     def test_application_state_store_etc_states_do_not_use_app_mongo(self) -> None:
         path = SERVICES_ROOT / "state_store.py"
@@ -1153,6 +1197,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_server_no_longer_owns_import_confirm_processors(self) -> None:
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         service_source = (SERVICES_ROOT / "import_processing_service.py").read_text(encoding="utf-8")
+        worker_source = (SERVICES_ROOT / "runtime_worker_handlers.py").read_text(encoding="utf-8")
         forbidden_server_snippets = {
             "def _execute_file_import_confirm_job",
             "def _execute_general_import_confirm",
@@ -1172,6 +1217,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertIn("class ImportProcessingService", service_source)
         self.assertIn("def execute_file_import_confirm_job", service_source)
         self.assertIn("def execute_etc_invoice_import_confirm_job", service_source)
+        self.assertNotIn("general_import.confirm", service_source)
+        self.assertNotIn("general_import.confirm", worker_source)
+        self.assertNotIn("execute_general_import_confirm", service_source)
+        self.assertNotIn("process_general_import_confirm_job", service_source)
+
+    def test_server_no_longer_exposes_legacy_json_import_write_routes(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+
+        for endpoint in ('"/imports/preview"', '"/imports/confirm"', "'/imports/preview'", "'/imports/confirm'"):
+            self.assertNotIn(endpoint, server_source)
 
     def test_bank_transaction_import_frontend_uses_file_session_api_only(self) -> None:
         page_source = (WEB_SRC_ROOT / "pages" / "imports" / "ImportBankTransactionsPage.tsx").read_text(encoding="utf-8")
@@ -3487,6 +3542,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_path = APP_ROOT / "routes_etc_import.py"
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
+        etc_service_source = (SERVICES_ROOT / "etc_service.py").read_text(encoding="utf-8")
+        preview_service_source = (SERVICES_ROOT / "etc_import_preview_service.py").read_text(encoding="utf-8")
+        processing_service_source = (SERVICES_ROOT / "import_processing_service.py").read_text(encoding="utf-8")
 
         handle_request = _function_source(server_tree, server_source, "_handle_request_untracked")
         route_factory = _function_source(server_tree, server_source, "_etc_import_routes")
@@ -3508,12 +3566,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if "EtcImportApiRoutes(" not in route_factory:
             violations.append("_etc_import_routes does not construct the route owner")
         for required_dependency in (
-            "etc_service=self._etc_service",
-            "task_service=self._etc_reconciliation_task_service",
+            "preview_service=self._etc_import_preview_service",
             "background_job_service=self._background_job_service",
-            "reconciliation_import_previews=self._etc_reconciliation_import_previews",
             "enqueue_import_job=self._enqueue_import_process_job",
-            "execute_etc_invoice_import_confirm_job=self._execute_etc_invoice_import_confirm_job",
         ):
             if required_dependency not in route_factory:
                 violations.append(f"ETC import route owner lacks explicit dependency {required_dependency}")
@@ -3531,20 +3586,35 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for required_route in (
             'route_path == "/api/etc/import/preview"',
             'route_path == "/api/etc/import/confirm"',
-            'route_path == "/api/etc/import"',
         ):
             if required_route not in route_owner_route:
                 violations.append(f"ETC import route owner missing dispatch branch {required_route}")
-        if "preview_etc_zip_for_task" not in route_owner_preview:
-            violations.append("ETC import route owner preview does not apply reconciliation task filter")
-        if "filter_uploads_by_allowlist" not in route_owner_preview:
-            violations.append("ETC import route owner preview does not filter uploads by task allowlist")
+        if "self._preview_service.preview(" not in route_owner_preview:
+            violations.append("ETC import route owner preview does not delegate to the durable preview service")
         if "create_or_get_idempotent_job_with_created" not in route_owner_confirm:
             violations.append("ETC import route owner confirm does not create idempotent background job")
-        if "begin_import" not in route_owner_confirm:
-            violations.append("ETC import route owner confirm does not mark task import start")
+        if "self._preview_service.validate(" not in route_owner_confirm:
+            violations.append("ETC import route owner confirm does not validate the durable preview")
+        if "begin_import" in route_owner_confirm or "run_job" in route_owner_confirm:
+            violations.append("ETC import route owner reintroduced task mutation or inline processing")
+        if 'route_path == "/api/etc/import"' in route_owner_route:
+            violations.append("ETC import route owner reintroduced the removed direct-import route")
+        for removed_runtime in (
+            "_etc_reconciliation_import_previews",
+            "_execute_etc_invoice_import_confirm_job",
+            "execute_etc_invoice_import_confirm_job=self.",
+        ):
+            if removed_runtime in server_source:
+                violations.append(f"server.py reintroduced ETC legacy runtime {removed_runtime}")
         if "_enqueue_import_process_job" in route_source:
             violations.append("ETC import route owner uses app-private enqueue helper instead of injected port")
+        if "_import_sessions" in etc_service_source:
+            violations.append("EtcService reintroduced process-local import session ownership")
+        if "class EtcImportPreviewService" not in preview_service_source:
+            violations.append("ETC import durable preview owner is missing")
+        for marker in ("self._etc_import_preview_service.validate(", "begin_import(", "uploads=list(validated_preview.uploads)"):
+            if marker not in processing_service_source:
+                violations.append(f"ETC import worker processing lacks durable boundary marker {marker}")
 
         self.assertEqual(violations, [])
 

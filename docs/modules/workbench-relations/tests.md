@@ -81,8 +81,8 @@ Spec-first Browser e2e 审计入口：
 - `web/e2e/workbench-relations-candidate-semantics.spec.ts`：历史 browser 回归用于保护未正式确认的自动匹配不驱动 linked-only 状态；新 relation distribution 只向下游分发 active linked/unlinked 业务口径。
 - `web/e2e/workbench-relations-nonfresh-diagnostics.spec.ts`：真实 Chromium 中验证 relation-backed 待找发票 read model 非 fresh 时显示诊断；`refreshing` 保留已有行和选择发票入口，`stale` 空 rows 仍显示读模型警告并禁用导出。
 - `web/e2e/output-invoice-red-relation-fanout.spec.ts`：真实 Chromium 中验证销项收款红蓝票 relation 写入后重新读取 rows，并在 drawer 的已有依据中展示人工 relation source/evidence。
-- `web/e2e/input-invoice-relation-fanout.spec.ts`：真实 Chromium 中验证进项发票使用页面消费 relation distribution；未正式化前不驱动 `已支付`，Workbench confirm 后重新进入页面显示 linked 证据和 `已支付`，OA reverse drawer 中旧 candidate 兼容数据归入未关联；进项、OA pending、税金和成本下游成功节点都会检查无操作失败/同步失败/read model 失败残留。
-- `web/e2e/workbench-relations-tax-offset-fanout.spec.ts`：真实 Chromium 中先进入税金抵扣页确认 relation 影响前无目标进项计划行，再从 Workbench confirm，回到税金抵扣页验证重新请求 `/api/tax-offset`、显示 relation 影响后的 fresh 进项计划行且无读模型错误，并检查无成功后的错误残留。
+- `web/e2e/input-invoice-relation-fanout.spec.ts`：真实 Chromium 验证进项发票使用、OA pending 与成本统计这些 relation 消费页面的 confirmed 结果；不再伪造税金下游结果。
+- `web/e2e/workbench-relations-tax-offset-isolation.spec.ts`：真实 Chromium 验证 Workbench relation confirm 前后税金抵扣 invoice item 集合完全不变。
 - `web/e2e/workbench-relations-oa-pending-fanout.spec.ts`：真实 Chromium 中先进入 OA 待付款确认未正式化匹配仍为 `未支付`，再从 Workbench confirm，回到 OA 待付款验证 rows 重新读取、状态变为 `已支付` 并显示 `关联台已确认`，并检查无成功后的错误残留。
 - `web/e2e/workbench-withdraw-flow.spec.ts`：真实 Chromium 中先建立 paired group，再从关联台自身执行 withdraw preview/submit；断言 submit 带回 `operation_type`、`preview_id`、`expected_versions`，弹窗内 busy 锁定，等待 `workbench_relation` barrier 和 Workbench fresh refetch 后恢复 open group，并检查成功后无操作失败/同步失败/read model 失败残留。
 - `tests/test_workbench_sql_runtime.py`、`tests/test_audit_workbench_relation_display_tool.py`：覆盖 automatic decision/candidate 不再投影为可见 linked group；旧 active generation 中残留 visible automatic decision rows 会被 groups page/all-scope 过滤并被 display audit 标为 blocking issue。
@@ -171,7 +171,7 @@ Spec-first Browser e2e 审计入口：
 
 适用。至少覆盖：
 
-- 在关联台 confirm/withdraw 后，bank detail、pending invoice、invoice usage/OA pending、tax offset 或 batch accounting 通过后端 read model 看到同一 relation；当前 Browser e2e 已覆盖 bank detail relation tag fan-out、银行明细 linked relation 字段真实下载、进项发票使用 candidate/linked relation fan-out、税金抵扣页 relation 后重新读取 fresh tax offset read model、关联台自身 withdraw preview lock/submit/barrier/open recovery、automatic candidate 无 active relation 时防误 withdraw 且不 suppress、pending invoice row status fan-out、batch accounting submit/withdraw 后等待 relation barrier 并进入对应 bucket，以及 turnover manual closure confirm/withdraw 后等待 turnover/workbench barriers 并恢复 grouped payload。成功写流必须额外断言页面没有残留“操作失败”、同步失败、read model 失败或 barrier timeout 文案，避免“关系已建立但用户看到错误弹窗”的假成功。
+- 在关联台 confirm/withdraw 后，只有登记为 relation consumer 的 bank detail、pending invoice、invoice usage/OA pending、cost statistics 或 batch accounting 才读取 relation 结果；tax offset 明确隔离，不读取 relation，也不接收 relation dirty/outbox。Browser 与 repository 测试分别保护用户可见集合不变和 queue 不污染。
 - 在关联台 confirm -> withdraw 后，用真实登录态 HTTP 响应、relation audit、durable outbox/readiness 和 `write_operation_slo_audit --since <scenario-start>` 证明不是假同步；旧失败样本不得混入新发布 gate。
 - no-OA submit/withdraw 与关联台 internal transfer confirm-link 对同一组 row 收敛到同一 case，并在 Workbench paired/open 之间恢复。
 - turnover closure submit/withdraw 影响 workbench_relation、cost/search；必须覆盖 canonical write safety 下不产生半写入。当前 Browser e2e 已覆盖小样本 confirm/withdraw 的 barrier 与页面恢复，复杂 OA-bank merge、cost/search 最终显示仍由后端 integration 和后续目标 smoke 保护。
@@ -220,11 +220,11 @@ cd web && npm run e2e:smoke
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 会运行全量后端 unittest、前端 Vitest、前端 build、deterministic Playwright smoke 和 docs check。当前 Playwright smoke 覆盖 app shell / AppHealth / session permission gate，并覆盖关联台 confirm 后银行明细 relation tags、银行明细 linked relation 字段真实下载、未正式化自动匹配不驱动 linked-only 状态、relation-backed 待找发票 read model 非 fresh 诊断、销项收款红蓝票 relation 写入后 rows refresh 和人工依据展示、进项发票使用 linked relation fan-out、税金抵扣 relation 后重新读取 fresh tax offset read model、OA pending linked fan-out、关联台自身 withdraw preview lock/submit/barrier/open recovery、自动建议取消防误 withdraw、exception apply/cancel/ignore/unignore recovery、transient network retry、409 stale preview、confirm/withdraw duplicate-submit guard、待找发票行状态跨页面同步、批量账务 submit/withdraw -> `workbench_relation` barrier -> bucket recovery，以及外部往来 manual closure confirm/withdraw -> turnover/workbench barriers -> grouped recovery；共享成功写流 guard 会在 confirm 主链路后检查页面无操作失败/同步失败/read model 失败残留，银行明细、待找发票、进项使用、成本统计、OA pending、税金抵扣下游 fan-out 以及 Workbench withdraw/exception/network-recovery 成功节点也会在目标业务结果出现后复查无错误残留。真实 download event 覆盖银行明细、待找发票、销项收款和进项使用的 relation 字段导出；后端 unittest 覆盖 relation 写入 high priority 入队 `search`、search projection group jump target 和 `/api/search` SQL read model hit。更复杂真实基础设施同步仍主要由后端 integration、Vitest、运行时 SLO 工具和 staging smoke 保护。
+`bash scripts/verify.sh all` 会运行后端、前端、Browser 和 docs 门禁。Relation 消费页面继续验证 fan-out；税金抵扣使用 `workbench-relations-tax-offset-isolation` 验证非消费者隔离，后端测试验证无 `tax_offset` queue 写入。
 
 ## 未测风险
 
-- 本地 deterministic Browser/API relation Spec IDs 已覆盖：confirm -> bank details relation tags、银行明细 relation 字段真实下载、银行明细账户/日期/关键字/分类筛选导出和 `read_export_only` 下载权限、未正式化自动匹配不驱动 linked-only 状态、relation-backed pending invoice non-fresh 诊断、销项收款红蓝票 relation 写入后 rows refresh 和人工依据展示、进项发票使用 linked relation fan-out、税金抵扣 relation 后重新读取 fresh tax offset read model、OA pending linked fan-out、关联台自身 withdraw preview/submit -> open recovery、自动建议无 active relation 时撤回拒绝且不 suppress、网络失败重试、409 stale preview、confirm/withdraw 重复提交防护、confirm -> pending invoice row status、batch accounting submit/withdraw -> bucket recovery、turnover manual closure confirm/withdraw -> grouped recovery、银行明细/待找发票/销项收款/进项使用 relation 字段下载均已覆盖；search API/runtime fan-out 已覆盖但没有独立 Browser route。剩余风险为未来 Browser search UI、新 relation 撤销入口、真实网络抖动、真实 XLSX 完整解析、生产 display audit 和真实 worker drain。
+- 本地 deterministic Browser/API relation Spec IDs 已覆盖 relation consumer fan-out 与 tax-offset 非消费者隔离；search API/runtime fan-out 已覆盖但没有独立 Browser route。剩余风险为未来 Browser search UI、新 relation 撤销入口、真实网络抖动、真实 XLSX 完整解析、生产 display audit 和真实 worker drain。
 - 真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、生产历史 relation 半迁移、大数据 active generation 回放和真实导出/滚动性能仍需 staging 或生产只读 smoke。
 - 关联台关系 fan-out 影响银行明细、待找发票、进项/销项、no-OA、turnover、batch accounting、成本、搜索等多个页面；新增 relation mode 或 write contract 时必须同步补目标 API/服务/前端/e2e 回归。
 

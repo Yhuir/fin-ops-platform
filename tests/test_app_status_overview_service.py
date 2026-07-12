@@ -1034,7 +1034,7 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         self.assertIn("done.status = 'done'", connection.outbox_sql)
         self.assertIn("readiness.status = 'fresh'", connection.outbox_sql)
 
-    def test_runtime_repository_ignores_dirty_scope_covered_by_later_fresh_readiness(self) -> None:
+    def test_runtime_repository_does_not_cover_command_parent_dirty_scope_with_historical_readiness(self) -> None:
         class CoveredDirtyScopeConnection(FakeRuntimeConnection):
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
@@ -1074,8 +1074,75 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         snapshot = RuntimeMonitoringRepository(CoveredDirtyScopeConnection()).app_status_runtime_snapshot()
 
         input_usage_status = snapshot["read_model_statuses"]["input_invoice_usage"]
-        self.assertEqual(input_usage_status["status"], "fresh")
-        self.assertEqual(input_usage_status["scopes"][0]["status"], "fresh")
+        self.assertEqual(input_usage_status["status"], "refreshing")
+        self.assertEqual(input_usage_status["scopes"][0]["status"], "refreshing")
+        self.assertEqual(input_usage_status["historical_scopes"][0]["scope_key"], "all")
+        self.assertEqual(input_usage_status["historical_scopes"][0]["history_reason"], "fan_out_command_scope")
+
+    def test_runtime_repository_keeps_failed_fan_out_parent_readiness_as_history(self) -> None:
+        class FanOutHistoryConnection(FakeRuntimeConnection):
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized or "from job.read_model_dirty_scopes" in normalized:
+                    return []
+                if "from read_model.app_status_readiness" in normalized:
+                    return [
+                        {
+                            "read_model_key": "oa_pending_payment",
+                            "scope_type": "oa_pending_payment",
+                            "scope_key": "all",
+                            "status": "failed",
+                            "updated_at": "2026-07-10T20:31:00+08:00",
+                            "last_error": "permission denied for table oa_pending_payment_admissions",
+                        },
+                        {
+                            "read_model_key": "oa_pending_payment",
+                            "scope_type": "oa_pending_payment",
+                            "scope_key": "2026-06",
+                            "status": "fresh",
+                            "updated_at": "2026-07-10T20:32:00+08:00",
+                            "last_error": None,
+                        },
+                    ]
+                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
+                    return []
+                raise AssertionError(sql)
+
+        snapshot = RuntimeMonitoringRepository(FanOutHistoryConnection()).app_status_runtime_snapshot()
+
+        status = snapshot["read_model_statuses"]["oa_pending_payment"]
+        self.assertEqual(status["status"], "fresh")
+        self.assertEqual([scope["scope_key"] for scope in status["scopes"]], ["2026-06"])
+        self.assertEqual(status["historical_scopes"][0]["scope_key"], "all")
+        self.assertEqual(status["historical_scopes"][0]["current_effective"], False)
+        self.assertEqual(status["historical_scopes"][0]["history_reason"], "fan_out_command_scope")
+
+    def test_runtime_repository_keeps_queryable_all_scope_readiness_current(self) -> None:
+        class QueryableAllConnection(FakeRuntimeConnection):
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized or "from job.read_model_dirty_scopes" in normalized:
+                    return []
+                if "from read_model.app_status_readiness" in normalized:
+                    return [
+                        {
+                            "read_model_key": "bank_account_balance",
+                            "scope_type": "bank_account_balance",
+                            "scope_key": "all",
+                            "status": "failed",
+                            "updated_at": "2026-07-10T20:31:00+08:00",
+                            "last_error": "projection failed",
+                        }
+                    ]
+                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
+                    return []
+                raise AssertionError(sql)
+
+        snapshot = RuntimeMonitoringRepository(QueryableAllConnection()).app_status_runtime_snapshot()
+
+        status = snapshot["read_model_statuses"]["bank_account_balance"]
+        self.assertEqual(status["status"], "failed")
+        self.assertEqual(status["scopes"][0]["scope_key"], "all")
 
     def test_runtime_repository_ignores_failed_outbox_row_covered_by_later_pending_retry(self) -> None:
         class CoveredByRetryConnection(FakeRuntimeConnection):

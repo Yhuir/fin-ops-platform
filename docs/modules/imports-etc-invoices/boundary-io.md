@@ -1,14 +1,15 @@
 # ETC发票导入模块边界与 I/O
 
-日期：2026-07-05
+日期：2026-07-11
 
 ## 模块化状态
 
 - 状态：close
 - 当前边界可信度：high
 - 目标边界：ETC 发票导入通过 ETC parsers/import job/reconciliation services 进入 ETC 批次和发票附件识别链路。
-- 当前缺口：无阻断 close 的模块边界缺口；真实大 zip、对象存储、真实 worker drain 和 OA 草稿仍是发布前 smoke 风险。
-- 旧代码删除状态：生产主链路已删除旧 ETC ZIP 直接创建/清理 canonical invoice 的 runtime cleanup surface；历史污染清理由 `docs/operations/invoice-pool-cleanup.md` 和独立工具负责。旧 `POST /api/etc/import` 仅保留 410 boundary guard，不解析、不持久化、不进入导入链路。
+- 当前闭环：Web preview 把 task/version/hash、原始 ZIP file object、preview fingerprint/counts/match edges 持久化到 `app.etc_import_sessions` / `app.etc_import_session_files`；独立 worker 只按 durable session id 重载并处理。页面统一 Audit 已登记为 direct-canonical、zero own read model、ETC internal-relation consumer。
+- 当前缺口：真实大 ZIP、对象存储 bytes 可读性、真实 worker drain、外部 ETC control total 和 OA 草稿仍是发布前 external smoke/evidence 风险，不由数据库 Audit 伪装为已证明。
+- 旧代码删除状态：进程内 `_import_sessions` / `_etc_reconciliation_import_previews`、inline confirm 和旧 `POST /api/etc/import` 410 runtime surface 已删除；历史污染清理由 `docs/operations/invoice-pool-cleanup.md` 和独立工具负责。
 
 ## 职责边界
 
@@ -29,8 +30,8 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| ETC 文件/ZIP | `ImportEtcInvoicesPage.tsx` | 进入 ETC import/parsing service |
-| 预览确认 | import workflow | 创建 job 并持久化导入结果 |
+| ETC 文件/ZIP | `ImportEtcInvoicesPage.tsx` | 原件先经 verified file-object I/O 登记；route 不保存 bytes |
+| 预览确认 | import workflow | preview application service 持久化 session；confirm 只创建 durable job/outbox |
 | Reconciliation trigger | ETC services | 产生后续候选和 lifecycle |
 | Ready task selector | `EtcReconciliationTaskService.list_ready_for_import_tasks()` | 下拉标题使用 reconciliation task `title`；ETC business batch title 修改后由 ETC 票据管理同步该 task title，导入页不得自行派生或缓存旧标题 |
 
@@ -39,6 +40,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | ETC import preview/result | 前端页面 | 可审计、可失败恢复 |
+| ETC import session/files | PostgreSQL + object storage | metadata/edge 在 PostgreSQL；ZIP bytes 只经窄 file-object port；worker 可跨进程重载 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走导入 session/preview 边界 |
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
 | Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |
@@ -48,9 +50,9 @@
 
 ## 持久化与投影
 
-- Own read model：无独立 manifest entry。
+- Own read model：无独立 manifest entry；页面 Audit `registered_read_model_keys=[]`。
 - 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search`、`tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics`。
-- Worker：import/runtime handlers。
+- Worker：`etc_invoice_import.confirm` 只走 `job.import_jobs` + `import.process.requested`；worker 幂等执行 `begin_import`，Web 不 inline。
 
 ## 文件范围
 

@@ -19,14 +19,14 @@
 
 ### Zip Preview
 
-事实源：`preview_etc_zip_for_task(...)`、`EtcService.preview_import_zips(...)` 和 `_etc_reconciliation_import_previews[session_id]`。
+事实源：`EtcImportPreviewService`、`app.etc_import_sessions`、`app.etc_import_session_files`、`app.file_objects`。进程内 preview dict 不是事实源并已删除。
 
 | 状态 | 含义 | 允许流转 |
 | --- | --- | --- |
 | `task_selected` | 前端已选择 ready task | `zip_selected`、切换 task |
 | `zip_selected` | 本地选择一个或多个 zip 文件 | `previewing`、清空 |
 | `previewing` | 调用 `/api/etc/import/preview` | `preview_ready`、`preview_blocked`、`error`、unmount cleanup |
-| `preview_ready` | 生成 ETC import session 和 reconciliation filter | `confirming`、重新预览、清空 |
+| `preview_ready` | durable session 已冻结 task/version/hash、ZIP identity、filter/match/count/fingerprint | `confirming`、重新预览、清空 |
 | `preview_blocked` | 缺少必要 ETC 发票、匹配歧义或无 allowlist | 不能 confirm；需要修正 task/source/zip |
 | `preview_stale` | canonical invoice 或 import session 已变化 | 只能重新预览 |
 | `task_preview_stale` | task version/hash/source facts 已变化 | 清空 preview，重新读取 task 后再 preview |
@@ -35,9 +35,9 @@
 
 | 状态 | 含义 | 允许流转 |
 | --- | --- | --- |
-| `confirming` | 前端提交 `/api/etc/import/confirm` | `queued`、`error` |
-| `queued` | `etc_invoice_import` background job 创建；App Status domain 为 `imports_etc_invoices` + `etc_tickets`、route 为 `/imports/etc-invoices`，source 保留 `task_id` | `processing`、`failed`、可轮询 |
-| `processing` | `etc_invoice_import.confirm` processor 正在写入 | `succeeded`、`partial_success`、`failed` |
+| `confirming` | 前端从 durable session 校验后提交 `/api/etc/import/confirm` | `queued`、`error`；不修改 task、不 inline |
+| `queued` | `job.import_jobs` 与 `import.process.requested` 已登记；App Status domain 为 `imports_etc_invoices` + `etc_tickets` | `processing`、`failed`、可轮询 |
+| `processing` | worker 幂等执行 task `begin_import`，重载原始 ZIP 并确定性过滤后写入 | `succeeded`、`partial_success`、`failed` |
 | `succeeded` | 所有匹配发票导入成功，task 标记 imported | downstream refreshing |
 | `partial_success` | 部分 item 失败，task 标记 import failed 可重试 | 保留错误，允许重试 |
 | `failed` | job 或 service 失败 | task 标记 import failed，不能把旧 preview 当 fresh |

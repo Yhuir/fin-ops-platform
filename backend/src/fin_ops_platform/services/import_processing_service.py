@@ -18,7 +18,6 @@ class ImportProcessingService:
     def __init__(
         self,
         *,
-        import_service: Any,
         file_import_service: Any,
         tax_certified_import_service: Any,
         etc_service: Any,
@@ -30,23 +29,17 @@ class ImportProcessingService:
         enqueue_workbench_auto_matching_for_scopes: Callable[..., Any],
         persist_state_with_workbench_invalidation: Callable[..., Any],
         invalidate_tax_offset_read_model_scopes: Callable[..., Any],
-        workbench_matching_scope_months_for_import_preview: Callable[[Any], list[str]],
         workbench_matching_scope_months_for_import_file_session: Callable[[Any, list[str]], list[str]],
-        tax_offset_scope_keys_for_import_preview: Callable[[Any], list[str]],
         tax_offset_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
-        cost_statistics_scope_keys_for_import_preview: Callable[[Any], list[str]],
         cost_statistics_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
-        bank_detail_scope_keys_for_import_preview: Callable[[Any], list[str]],
         bank_detail_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
-        input_invoice_usage_scope_keys_for_import_preview: Callable[[Any], list[str]],
         input_invoice_usage_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
-        output_invoice_collection_scope_keys_for_import_preview: Callable[[Any], list[str]],
         output_invoice_collection_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         link_etc_import_result_to_existing_invoices: Callable[[Any], list[str]],
         refresh_after_etc_invoice_link: Callable[..., Any],
+        etc_import_preview_service: Any,
         oa_manual_import_create_processor: Callable[[ImportJob], dict[str, object]] | None = None,
     ) -> None:
-        self._import_service = import_service
         self._file_import_service = file_import_service
         self._tax_certified_import_service = tax_certified_import_service
         self._etc_service = etc_service
@@ -58,25 +51,19 @@ class ImportProcessingService:
         self._enqueue_workbench_auto_matching_for_scopes = enqueue_workbench_auto_matching_for_scopes
         self._persist_state_with_workbench_invalidation = persist_state_with_workbench_invalidation
         self._invalidate_tax_offset_read_model_scopes = invalidate_tax_offset_read_model_scopes
-        self._workbench_matching_scope_months_for_import_preview = workbench_matching_scope_months_for_import_preview
         self._workbench_matching_scope_months_for_import_file_session = workbench_matching_scope_months_for_import_file_session
-        self._tax_offset_scope_keys_for_import_preview = tax_offset_scope_keys_for_import_preview
         self._tax_offset_scope_keys_for_import_file_session = tax_offset_scope_keys_for_import_file_session
-        self._cost_statistics_scope_keys_for_import_preview = cost_statistics_scope_keys_for_import_preview
         self._cost_statistics_scope_keys_for_import_file_session = cost_statistics_scope_keys_for_import_file_session
-        self._bank_detail_scope_keys_for_import_preview = bank_detail_scope_keys_for_import_preview
         self._bank_detail_scope_keys_for_import_file_session = bank_detail_scope_keys_for_import_file_session
-        self._input_invoice_usage_scope_keys_for_import_preview = input_invoice_usage_scope_keys_for_import_preview
         self._input_invoice_usage_scope_keys_for_import_file_session = input_invoice_usage_scope_keys_for_import_file_session
-        self._output_invoice_collection_scope_keys_for_import_preview = output_invoice_collection_scope_keys_for_import_preview
         self._output_invoice_collection_scope_keys_for_import_file_session = output_invoice_collection_scope_keys_for_import_file_session
         self._link_etc_import_result_to_existing_invoices = link_etc_import_result_to_existing_invoices
         self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link
+        self._etc_import_preview_service = etc_import_preview_service
         self._oa_manual_import_create_processor = oa_manual_import_create_processor
 
     def build_import_job_processors(self) -> dict[str, Callable[[ImportJob], dict[str, object]]]:
         processors: dict[str, Callable[[ImportJob], dict[str, object]]] = {
-            "general_import.confirm": self.process_general_import_confirm_job,
             "file_import.confirm": self.process_file_import_confirm_job,
             "etc_invoice_import.confirm": self.process_etc_invoice_import_confirm_job,
             "tax_certified_import.confirm": self.process_tax_certified_import_confirm_job,
@@ -84,12 +71,6 @@ class ImportProcessingService:
         if self._oa_manual_import_create_processor is not None:
             processors["oa_manual_import.create"] = self._oa_manual_import_create_processor
         return processors
-
-    def process_general_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        batch_id = str(import_job.payload.get("batch_id") or "").strip()
-        if not batch_id:
-            raise ValueError("import job payload.batch_id is required.")
-        return self.execute_general_import_confirm(batch_id)
 
     def process_tax_certified_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
         session_id = str(import_job.payload.get("session_id") or "").strip()
@@ -120,41 +101,6 @@ class ImportProcessingService:
             confirmed_item_set_hash=str(payload.get("confirmed_item_set_hash") or "").strip(),
             total=int(payload.get("total") or 0),
         )
-
-    def execute_general_import_confirm(self, batch_id: str) -> dict[str, object]:
-        batch = self._import_service.confirm_import(batch_id)
-        preview = self._import_service.get_batch(batch_id)
-        tax_offset_scope_keys = self._tax_offset_scope_keys_for_import_preview(preview)
-        workbench_scope_keys = self._workbench_matching_scope_months_for_import_preview(preview)
-        cost_statistics_scope_keys = self._cost_statistics_scope_keys_for_import_preview(preview)
-        bank_detail_scope_keys = self._bank_detail_scope_keys_for_import_preview(preview)
-        input_invoice_usage_scope_keys = self._input_invoice_usage_scope_keys_for_import_preview(preview)
-        output_invoice_collection_scope_keys = self._output_invoice_collection_scope_keys_for_import_preview(preview)
-        self._invalidate_tax_offset_read_model_scopes(
-            tax_offset_scope_keys,
-            reason="invoice_import_confirm",
-        )
-        self._schedule_or_run_workbench_auto_matching_for_scopes(
-            workbench_scope_keys,
-            reason="import_confirm",
-        )
-        self._persist_state_with_workbench_invalidation(
-            cost_statistics_scope_keys=cost_statistics_scope_keys,
-            bank_detail_scope_keys=bank_detail_scope_keys,
-            input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
-            output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
-        )
-        return {
-            "batch": self._serialize_value(batch),
-            "row_results": self._serialize_value(preview.row_results),
-            **self._import_write_target_envelope(
-                cost_statistics_scope_keys=cost_statistics_scope_keys,
-                tax_offset_scope_keys=tax_offset_scope_keys,
-                bank_detail_scope_keys=bank_detail_scope_keys,
-                input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
-                output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
-            ),
-        }
 
     def execute_tax_certified_import_confirm(self, session_id: str) -> dict[str, object]:
         batch = self._tax_certified_import_service.confirm_session(session_id)
@@ -313,6 +259,19 @@ class ImportProcessingService:
             )
 
         try:
+            validated_preview = self._etc_import_preview_service.validate(session_id=session_id, task_id=task_id)
+            self._etc_reconciliation_task_service.begin_import(
+                task_id=task_id,
+                task_version=task_version,
+                confirmed_item_set_hash=confirmed_item_set_hash,
+                import_session_id=session_id,
+                actor=owner_user_id,
+            )
+            self._etc_import_preview_service.mark_status(
+                session_id,
+                status="processing",
+                imported_by=owner_user_id,
+            )
             business_batch = self.resolve_task_etc_business_batch(
                 task_id=task_id,
                 owner_user_id=owner_user_id,
@@ -324,6 +283,7 @@ class ImportProcessingService:
                 expected_version=business_batch.version,
                 idempotency_key=f"etc_import_session:{session_id}",
                 progress_callback=progress_callback,
+                uploads=list(validated_preview.uploads),
             )
         except Exception as exc:
             self._etc_reconciliation_task_service.mark_import_failed(
@@ -335,6 +295,12 @@ class ImportProcessingService:
             )
             if running_job is not None:
                 self._background_job_service.fail_job(running_job.job_id, "后台任务失败。", str(exc))
+            self._etc_import_preview_service.mark_status(
+                session_id,
+                status="failed",
+                imported_by=owner_user_id,
+                last_error=str(exc),
+            )
             raise
         import_batch = next(
             (
@@ -384,6 +350,11 @@ class ImportProcessingService:
                 import_batch_id=getattr(import_batch, "id", None),
                 actor=owner_user_id,
             )
+        self._etc_import_preview_service.mark_status(
+            session_id,
+            status=status,
+            imported_by=owner_user_id,
+        )
         message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
         if running_job is not None:
             self._background_job_service.succeed_job(

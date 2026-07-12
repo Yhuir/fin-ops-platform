@@ -30,7 +30,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面过滤、月份、账号、标签操作 | `BankDetailsPage.tsx`、`features/bankDetails/api.ts` | API 入参必须映射到明确查询/filter contract；后端只通过 read model/query port 返回页面数据 |
-| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=bank_details`；all active bank transactions 是 canonical expected-set，按正式 UUID `transaction_id` 校验交易日期/方向/金额/对方户名/月 scope；row/scope provenance 比较排除仅表示队列游标的易变 `source_version`，但必须保持 schema、source signature、row_count 和 relation source summary 一致；账户余额必须从 canonical 流水重算 identity、笔数、最新余额和最新流水，并要求共享 relation 双向 edge equality 与只读一致性快照；审计 SQL 归 AppHealth PostgreSQL repository，银行明细页面不直接读表或修复 |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?page=bank-details`；all active bank transactions 是 canonical expected-set，按正式 UUID `transaction_id` 校验交易日期/方向/金额/对方户名/月 scope；row/scope provenance 比较排除仅表示队列游标的易变 `source_version`，但必须保持 schema、source signature、row_count 和 relation source summary 一致；账户余额必须从 canonical 流水重算 identity、笔数、最新余额和最新流水；canonical/shared relation typed edges 先双向相等，再以每条 bank row 的 linked OA/发票存在性、唯一 linked case id 和 linked status 重算页面标签，多个 active case overlap 或任一 linked 标签/case/status 偏差都阻断；candidate 只作为候选展示，不混入已配对证明；全部检查位于同一只读一致性快照，审计 SQL 归 AppHealth PostgreSQL repository，银行明细页面不直接读表或修复 |
 | 标签/分类写操作 | route/service | 通过 write UoW 触发受影响 month scope |
 | 自动标签规则保存/重跑 | `BankDetailsApplicationService` | 返回 `bank_detail` operation barrier targets；无明确范围时按现有月份 fan-out，不把 `all` 当作页面 fresh 结果 |
 | 关系标签投影 | `BankDetailsRelationTagProjectionService` -> `WorkbenchRelationReadFacade.get_by_row_ids(...)` | 只允许按银行流水 row id 读取 relation distribution；可作为展示标签降级读，但不得作为写前事实源、freshness proof 或 raw Workbench payload fallback |

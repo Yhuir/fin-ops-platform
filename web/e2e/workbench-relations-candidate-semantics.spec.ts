@@ -30,7 +30,7 @@ test.describe("workbench relation candidate semantics", () => {
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(0);
   });
 
-  test("keeps candidate payment relations in partially paid state until explicit confirmation", async ({ page }) => {
+  test("keeps candidate payment relations unpaid until explicit confirmation", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentCandidateRelations: true,
       sessionMode: "full_access",
@@ -41,7 +41,7 @@ test.describe("workbench relation candidate semantics", () => {
     const row = page.getByRole("row", { name: /浏览器付款申请人/ });
     await expect(row).toBeVisible();
     await expect(row.getByText("候选")).toHaveCount(3);
-    await expect(row.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("支付少了");
+    await expect(row.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("未支付");
     await expect(row.getByRole("button", { name: /确认已支付/ })).toHaveCount(0);
     await expect(row).toContainText("浏览器待付款供应商");
     await expect(row).toContainText("INV-PAY-E2E-001");

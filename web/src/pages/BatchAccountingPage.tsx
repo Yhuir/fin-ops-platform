@@ -638,7 +638,7 @@ export default function BatchAccountingPage() {
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
       ariaLabel="Audit 日常报销批量账务管理"
-      domainKey="batch_accounting"
+      pageKey="batch-accounting"
       label="日常报销批量账务管理"
       readModelStatus={readModelStatus}
     />

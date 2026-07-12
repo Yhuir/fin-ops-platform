@@ -24,6 +24,7 @@ from fin_ops_platform.services.output_invoice_collection_read_model_repository i
 from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories import (
     PostgresCoreRepository,
+    PostgresEtcImportSessionRepository,
     PostgresOaPendingPaymentRelationRepository,
     PostgresOAProjectionRepository,
     PostgresOpsTaxEtcRepository,
@@ -166,6 +167,7 @@ class PostgresStateStore:
         self._core_repository = PostgresCoreRepository(connection)
         self._oa_projection_repository = PostgresOAProjectionRepository(connection)
         self._ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
+        self._etc_import_session_repository = PostgresEtcImportSessionRepository(connection)
         self._read_model_repository = PostgresReadModelRepository(connection)
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
         self._cost_statistics_sql_read_repository = CostStatisticsReadModelRepositoryPort(self._sql_read_model_repository)
@@ -396,6 +398,60 @@ class PostgresStateStore:
         stored_file_path = self._store_local_file("etc_reconciliation", file_id, file_name, content)
         self._save_file_object(file_id=file_id, file_name=file_name, stored_file_path=stored_file_path, content=content)
         return stored_file_path
+
+    @property
+    def etc_import_session_repository(self) -> PostgresEtcImportSessionRepository:
+        return self._etc_import_session_repository
+
+    def store_etc_import_archive(
+        self,
+        *,
+        session_id: str,
+        file_id: str,
+        file_name: str,
+        content: bytes,
+    ) -> dict[str, object]:
+        storage_file_id = f"{session_id}:{file_id}"
+        if self._object_storage_repository is not None:
+            stored_file_path = self._store_object_file(
+                namespace="etc_import",
+                file_id=storage_file_id,
+                file_name=file_name,
+                content=content,
+            )
+        else:
+            stored_file_path = self._store_local_file("etc_import", storage_file_id, file_name, content)
+            self._save_file_object(
+                file_id=f"etc_import:{storage_file_id}",
+                file_name=file_name,
+                stored_file_path=stored_file_path,
+                content=content,
+            )
+        row = self._file_object_for_storage_uri(stored_file_path)
+        if row is None or not row.get("id"):
+            raise RuntimeError("ETC import archive file object registration failed.")
+        return {
+            "stored_file_path": stored_file_path,
+            "file_object_id": str(row["id"]),
+            "sha256": str(row.get("sha256") or ""),
+            "size_bytes": int(row.get("size_bytes") or 0),
+        }
+
+    def read_etc_import_archive(self, stored_file_path: str) -> bytes:
+        return self._read_file(stored_file_path)
+
+    def delete_etc_import_archives(self, stored_file_paths: list[str]) -> int:
+        deleted = 0
+        for stored_file_path in stored_file_paths:
+            try:
+                if self._is_object_storage_ref(stored_file_path):
+                    self._delete_object_file(stored_file_path)
+                else:
+                    Path(stored_file_path).unlink(missing_ok=True)
+                deleted += 1
+            except FileNotFoundError:
+                continue
+        return deleted
 
     def read_etc_reconciliation_file(self, stored_file_path: str) -> bytes:
         return self._read_file(stored_file_path)

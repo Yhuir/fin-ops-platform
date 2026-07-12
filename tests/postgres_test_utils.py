@@ -108,11 +108,16 @@ EXPECTED_MIGRATION_FILES = [
     "0094_input_invoice_usage_oa_reverse_preview_hot_path.sql",
     "0095_oa_pending_payment_admissions.sql",
     "0096_oa_pending_payment_admission_runtime_grants.sql",
+    "0097_drop_import_files_batch_fallback.sql",
+    "0098_etc_import_session_files.sql",
+    "0099_external_control_evidence.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
     "audit.events",
     "audit.app_health_alerts",
+    "audit.external_control_evidence_items",
+    "audit.external_control_evidence",
     "job.outbox_events",
     "job.background_jobs",
     "job.import_jobs",
@@ -171,6 +176,7 @@ TEST_TABLES = (
     "app.tax_certified_import_batches",
     "app.tax_certified_import_records",
     "app.etc_invoices",
+    "app.etc_import_session_files",
     "app.etc_import_sessions",
     "app.etc_import_batches",
     "app.etc_submission_batches",

@@ -1839,7 +1839,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             "_save_local_bank_transaction_categories_snapshot",
             "_save_local_turnover_relations_snapshot",
             "_save_local_turnover_ledger_extras_snapshot",
-            "_refresh_local_app_settings_snapshot",
         ]
 
         for helper_name in helper_names:
@@ -1888,22 +1887,17 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIs(app._turnover_ledger_api_routes._extra_service, app._turnover_ledger_extra_service)
         self.assertIs(app._turnover_ledger_service._extra_service, app._turnover_ledger_extra_service)
 
-    def test_refresh_local_app_settings_snapshot_updates_snapshot_in_place(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            snapshot = dict(getattr(app._app_settings_service, "_snapshot", {}) or {})
-            snapshot["turnover_ledger_tag_selection"] = {
-                "version": 99,
-                "selected_tag_codes": ["external_rule_borrow_out"],
-            }
+    def test_local_tag_selection_adapter_uses_only_domain_settings_boundary(self) -> None:
+        adapter_type = Application._turnover_ledger_tag_selection_write_facade.__globals__[
+            "TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder"
+        ].build.__globals__["TurnoverLedgerLocalTagSelectionAdapterSet"]
+        source = inspect.getsource(adapter_type)
 
-            app._refresh_local_app_settings_snapshot(snapshot)
-
-        self.assertEqual(app._app_settings_service._snapshot["turnover_ledger_tag_selection"]["version"], 99)
-        self.assertEqual(
-            app._app_settings_service._snapshot["turnover_ledger_tag_selection"]["selected_tag_codes"],
-            ["external_rule_borrow_out"],
-        )
+        self.assertIn("get_turnover_ledger_tag_selection_state", source)
+        self.assertIn("commit_turnover_ledger_tag_selection_update", source)
+        self.assertIn("restore_turnover_ledger_tag_selection_state", source)
+        self.assertNotIn("_snapshot", source)
+        self.assertNotIn("save_app_settings", source)
 
     def test_turnover_ledger_local_save_helpers_require_state_store_methods(self) -> None:
         with TemporaryDirectory() as temp_dir:

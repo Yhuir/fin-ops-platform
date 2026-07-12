@@ -36,22 +36,39 @@ function auditMessage(
   const integrityPassed = payload.audit_status?.integrity === "pass";
   const auditFresh = payload.audit_status?.freshness === "fresh";
   const queueDrained = payload.audit_status?.queue === "drained";
+  const proofReady = payload.audit_contract?.proof_availability === "ready";
+  const contractVersioned = Boolean(payload.audit_contract?.contract_revision);
   const snapshotConsistent =
     payload.audit_contract?.database_snapshot === true &&
     payload.audit_contract?.snapshot_consistency === "repeatable_read_read_only";
-  const pageFresh = isFreshStatus(readModelStatus);
+  const registeredReadModelKeys = payload.audit_contract?.registered_read_model_keys;
+  const directCanonicalPage = Array.isArray(registeredReadModelKeys) && registeredReadModelKeys.length === 0;
+  const pageFresh = directCanonicalPage || isFreshStatus(readModelStatus);
   if (
     payload.overall_status === "pass" &&
     integrityPassed &&
     auditFresh &&
     queueDrained &&
+    proofReady &&
+    contractVersioned &&
     snapshotConsistent &&
     pageFresh &&
     blockingSamples === 0
   ) {
-    return { tone: "success", text: successText };
+    const relationProofNotApplicable =
+      payload.audit_contract?.relation_proof_required === false ||
+      normalizeStatus(payload.audit_contract?.relation_edge_equality).startsWith("not_applicable");
+    return {
+      tone: "success",
+      text: relationProofNotApplicable
+        ? "Audit 通过 · 此数据库快照内已登记 App 内部合同一致 · 本页面不消费配对关系 · 外部来源未证明 · Fresh"
+        : successText,
+    };
   }
   if (integrityPassed && blockingSamples === 0) {
+    if (!proofReady || !contractVersioned) {
+      return { tone: "danger", text: "Audit 证明不足 · proof contract unavailable or unversioned" };
+    }
     if (!snapshotConsistent) {
       return { tone: "danger", text: "Audit 证明不足 · consistency snapshot unavailable" };
     }
@@ -73,7 +90,7 @@ export default function PageAuditIcon({
   label,
   readModelStatus,
   runAudit,
-  successText = "Audit 通过 · 已登记 App 内部数据完整正确 · 配对关系完整正确 · Fresh",
+  successText = "Audit 通过 · 此数据库快照内已登记 App 内部合同一致 · 已登记配对证明一致 · 外部来源未证明 · Fresh",
   notFreshText = "Audit 完整性通过 · 已登记 App 内部合同 · Not fresh",
 }: PageAuditIconProps) {
   const [payload, setPayload] = useState<PageAuditPayload | null>(null);

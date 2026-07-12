@@ -327,6 +327,19 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(row["workbench_relation_mode"], "turnover_manual_closure")
         self.assertEqual(row["workbench_relation_source"], "manual")
         self.assertEqual(row["workbench_relation_row_ids"], ["txn-out-collected", "txn-repayment-001"])
+        self.assertEqual(
+            row["workbench_relations"],
+            [
+                {
+                    "case_id": "case-turnover-001",
+                    "relation_status": "linked",
+                    "relation_mode": "turnover_manual_closure",
+                    "relation_source": "manual",
+                    "row_ids": ["txn-out-collected", "txn-repayment-001"],
+                    "row_types": ["bank", "bank"],
+                }
+            ],
+        )
         self.assertFalse(row["linked_oa"])
         self.assertFalse(row["linked_invoice"])
         self.assertTrue(row["cash_closure_linked"])
@@ -337,6 +350,7 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(flow["workbench_relation_status"], "linked")
         self.assertEqual(flow["workbench_relation_case_ids"], ["case-turnover-001"])
         self.assertEqual(flow["workbench_relation_mode"], "turnover_manual_closure")
+        self.assertEqual(flow["workbench_relations"], row["workbench_relations"])
         self.assertTrue(flow["cash_closure_linked"])
         self.assertEqual(flow["cash_closure_case_id"], "case-turnover-001")
         self.assertNotIn("__workbench_relation_details", flow)

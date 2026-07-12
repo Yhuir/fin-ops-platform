@@ -1518,6 +1518,38 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
         self.assertEqual(read_model_persist.call_count, 2)
 
+    def test_update_bank_exception_with_different_legacy_code_keeps_active_case_conflict(self) -> None:
+        app = self._build_app()
+        bank_row = self._default_open_rows(app)["bank"]
+
+        with patch.object(app, "_schedule_workbench_read_model_persist") as read_model_persist:
+            first_response = self._post(
+                app,
+                "/api/workbench/actions/update-bank-exception",
+                {
+                    "month": "2026-03",
+                    "row_id": bank_row["id"],
+                    "relation_code": "bank_fee",
+                    "relation_label": "银行手续费",
+                },
+            )
+            conflicting_response = self._post(
+                app,
+                "/api/workbench/actions/update-bank-exception",
+                {
+                    "month": "2026-03",
+                    "row_id": bank_row["id"],
+                    "relation_code": "other_exception",
+                    "relation_label": "其他异常",
+                },
+            )
+
+        self.assertEqual(first_response.status_code, 200, first_response.body)
+        self.assertEqual(conflicting_response.status_code, 409, conflicting_response.body)
+        self.assertEqual(_json_response(conflicting_response)["error"], "active_exception_case_conflict")
+        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
+        self.assertEqual(read_model_persist.call_count, 1)
+
     def test_update_bank_exception_after_pair_relation_returns_conflict_current_behavior(self) -> None:
         app = self._build_app()
         rows = self._default_open_rows(app)

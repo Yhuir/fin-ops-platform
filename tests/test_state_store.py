@@ -13,6 +13,7 @@ from fin_ops_platform.services.cost_statistics_read_model_service import COST_ST
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
 from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.tax_offset_read_model_service import TAX_OFFSET_READ_MODEL_SCHEMA_VERSION
 
 
 class StateStoreTests(unittest.TestCase):
@@ -768,7 +769,7 @@ class StateStoreTests(unittest.TestCase):
                     "2026-05": {
                         "scope_key": "2026-05",
                         "scope_type": "month",
-                        "schema_version": "2026-05-tax-offset-month-v1",
+                        "schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
                         "month": "2026-05",
                         "generated_at": "2026-05-04T12:00:00+00:00",
                         "cache_status": "ready",
@@ -801,7 +802,7 @@ class StateStoreTests(unittest.TestCase):
                     "2026-05": {
                         "scope_key": "2026-05",
                         "scope_type": "month",
-                        "schema_version": "2026-05-tax-offset-month-v1",
+                        "schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
                         "month": "2026-05",
                         "generated_at": "2026-05-04T12:00:00+00:00",
                         "cache_status": "ready",

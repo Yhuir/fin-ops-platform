@@ -5125,7 +5125,8 @@ class PostgresSummaryReadModelRepository:
                     continue
                 source_counts = payload.get("source_counts") if isinstance(payload.get("source_counts"), dict) else {}
                 source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
-                row_count = self._read_model_row_count(payload)
+                model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+                row_count = self._read_model_row_count(model_payload)
                 scope_month = month_start(payload.get("scope_month") or payload.get("month") or scope_key)
                 connection.execute(
                     """
@@ -5159,7 +5160,6 @@ class PostgresSummaryReadModelRepository:
                         jsonb({"normalized_payload": payload}),
                     ),
                 )
-                model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
                 if isinstance(model_payload, dict) and any(key in model_payload for key in _TAX_OFFSET_ITEM_TYPES):
                     self._replace_tax_offset_items(connection, scope_key=scope_key, payload=payload)
 

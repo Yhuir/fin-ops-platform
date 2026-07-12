@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import PageAuditIcon from "../components/common/PageAuditIcon";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
@@ -17,7 +17,6 @@ import ReceiptSettingsDrawer from "../components/outputInvoiceCollections/Receip
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { fetchOutputInvoiceCollectionAudit } from "../features/appHealth/api";
 import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   cancelOutputInvoiceCollectionReminder,
@@ -606,11 +605,11 @@ export default function OutputInvoiceCollectionsPage() {
         <span className="invoice-count-segment__item invoice-count-segment__item--active">销项票 {titleInvoiceCount}</span>
       </span>
       {canAdminAccess ? (
-        <PageAuditIcon
+        <PageBusinessAuditIcon
           ariaLabel="Audit 销项发票收款情况"
           label="销项发票收款情况"
+          pageKey="output-invoice-collections"
           readModelStatus={readModelStatus}
-          runAudit={fetchOutputInvoiceCollectionAudit}
         />
       ) : null}
     </div>

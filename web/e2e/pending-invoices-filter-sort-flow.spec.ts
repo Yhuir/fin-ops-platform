@@ -174,10 +174,10 @@ test.describe("pending invoices filter and sort browser flow", () => {
     let filteredUrl: URL | undefined;
     await recordLatency({
       operationId: "pending-invoices.apply-counterparty-filter",
-      visibleLabel: "筛选 对方户名 / 时间",
+      visibleLabel: "筛选 对方户名",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "筛选 对方户名 / 时间" }).click();
+      await page.getByRole("button", { name: "筛选 对方户名" }).click();
       const filteredRowsRequest = page.waitForRequest((request) => {
         if (!pendingInvoiceRowsRequest(request)) {
           return false;

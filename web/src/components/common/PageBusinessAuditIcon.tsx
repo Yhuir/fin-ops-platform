@@ -1,26 +1,26 @@
 import { useCallback } from "react";
 
-import { fetchPageBusinessAudit } from "../../features/appHealth/api";
-import type { PageAuditDomainKey } from "../../features/appHealth/types";
+import { fetchPageAudit } from "../../features/appHealth/api";
+import type { PageAuditPageKey } from "../../features/appHealth/types";
 import PageAuditIcon from "./PageAuditIcon";
 
 type PageBusinessAuditIconProps = {
   ariaLabel: string;
   label: string;
-  domainKey: PageAuditDomainKey;
+  pageKey: PageAuditPageKey;
   readModelStatus?: string;
 };
 
-const BUSINESS_AUDIT_SUCCESS_TEXT = "Audit 通过 · 已登记 App 内部全量合同正确 · Fresh";
+const BUSINESS_AUDIT_SUCCESS_TEXT = "Audit 通过 · 此数据库快照内已登记 App 内部合同一致 · 已登记配对证明一致 · 外部来源未证明 · Fresh";
 const BUSINESS_AUDIT_NOT_FRESH_TEXT = "Audit 完整性通过 · 已登记 App 内部合同 · Not fresh";
 
 export default function PageBusinessAuditIcon({
   ariaLabel,
   label,
-  domainKey,
+  pageKey,
   readModelStatus,
 }: PageBusinessAuditIconProps) {
-  const runAudit = useCallback((signal?: AbortSignal) => fetchPageBusinessAudit(domainKey, signal), [domainKey]);
+  const runAudit = useCallback((signal?: AbortSignal) => fetchPageAudit(pageKey, signal), [pageKey]);
 
   return (
     <PageAuditIcon

@@ -1,7 +1,7 @@
 import { Download, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import PageAuditIcon from "../components/common/PageAuditIcon";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
@@ -13,7 +13,6 @@ import PaymentStatusRulesDrawer from "../components/inputInvoiceUsage/PaymentSta
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { fetchInputInvoiceUsageAudit } from "../features/appHealth/api";
 import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   downloadInputInvoiceUsageExport,
@@ -506,11 +505,11 @@ export default function InputInvoiceUsagePage() {
         <span className="invoice-count-segment__item invoice-count-segment__item--active">进项票 {titleInvoiceCount}</span>
       </span>
       {canAdminAccess ? (
-        <PageAuditIcon
+        <PageBusinessAuditIcon
           ariaLabel="Audit 进项发票使用情况"
           label="进项发票使用情况"
+          pageKey="input-invoice-usage"
           readModelStatus={readModelStatus}
-          runAudit={fetchInputInvoiceUsageAudit}
         />
       ) : null}
     </div>

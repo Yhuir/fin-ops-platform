@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
@@ -394,7 +395,7 @@ export default function ReconciliationWorkbenchPage() {
   const healthStatus = useAppHealthStatus();
   const canMutateWithHealth = useCanMutateWithHealth();
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const { active } = useOptionalPageActivation("reconciliation-workbench");
   const isOaSyncWriteBlocked = healthStatus.sources.oaSync === "dirty" || healthStatus.sources.oaSync === "refreshing";
   const canWriteWorkbench = canMutateData && canMutateWithHealth && !isOaSyncWriteBlocked;
@@ -2240,6 +2241,21 @@ export default function ReconciliationWorkbenchPage() {
   return (
     <div className="workbench-shell">
       <div className={`page-stack${expandedZoneId ? " zone-expanded-layout" : ""}`}>
+        <header className="page-header">
+          <div className="page-title-row">
+            <h1 className="page-title">关联台</h1>
+            {canAdminAccess ? (
+              <div className="page-title-accessory">
+                <PageBusinessAuditIcon
+                  ariaLabel="Audit 关联台"
+                  pageKey="reconciliation-workbench"
+                  label="关联台"
+                  readModelStatus={workbenchPageReadModelStatus}
+                />
+              </div>
+            ) : null}
+          </div>
+        </header>
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
         {!loadError && oaStatusPanelMessage ? (
           <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>

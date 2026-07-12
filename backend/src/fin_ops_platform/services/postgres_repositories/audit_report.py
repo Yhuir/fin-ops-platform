@@ -7,8 +7,10 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
-FRESHNESS_ISSUE_CODES = frozenset({"read_model_scope_not_fresh", "read_model_outbox_not_drained"})
-QUEUE_ISSUE_CODES = frozenset({"read_model_outbox_not_drained"})
+FRESHNESS_ISSUE_CODES = frozenset(
+    {"read_model_scope_not_fresh", "read_model_outbox_not_drained", "page_runtime_queue_not_drained"}
+)
+QUEUE_ISSUE_CODES = frozenset({"read_model_outbox_not_drained", "page_runtime_queue_not_drained"})
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,20 @@ def read_only_audit_snapshot(connection: Any) -> Iterator[AuditSnapshot]:
             consistency="repeatable_read_read_only",
             database_snapshot=True,
         )
+
+
+@contextmanager
+def use_audit_snapshot(
+    connection: Any,
+    audit_snapshot: AuditSnapshot | None = None,
+) -> Iterator[AuditSnapshot]:
+    """Use an explicit caller-owned snapshot or open one for a page-only audit."""
+
+    if audit_snapshot is not None:
+        yield audit_snapshot
+        return
+    with read_only_audit_snapshot(connection) as snapshot:
+        yield snapshot
 
 
 def evaluate_audit_issues(issues: list[AuditIssue], *, sample_limit: int) -> AuditEvaluation:

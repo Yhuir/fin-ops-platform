@@ -3558,12 +3558,20 @@ class WorkbenchWriteFacade:
     ) -> WorkbenchWriteResult:
         try:
             normalized_row_ids = self._normalize_row_ids(row_ids)
-            preview = self._exception_service.preview({"month": month, "row_ids": normalized_row_ids})
+            scenario_code = self._legacy_replay_scenario_code(
+                month=month,
+                row_ids=normalized_row_ids,
+                legacy_payload=legacy_payload,
+            )
+            preview = None
+            if not scenario_code:
+                preview = self._exception_service.preview({"month": month, "row_ids": normalized_row_ids})
+                scenario_code = str(preview["scenario"]["scenario_code"])
             result = self._apply_exception_payload(
                 {
                     "month": month,
                     "row_ids": normalized_row_ids,
-                    "scenario_code": str(preview["scenario"]["scenario_code"]),
+                    "scenario_code": scenario_code,
                     "action_code": "manual_review",
                     "payload": legacy_payload,
                 },
@@ -3612,6 +3620,40 @@ class WorkbenchWriteFacade:
                 "message": response_message,
             },
         )
+
+    def _legacy_replay_scenario_code(
+        self,
+        *,
+        month: str,
+        row_ids: list[str],
+        legacy_payload: dict[str, object],
+    ) -> str:
+        identity_key = next(
+            (
+                key
+                for key in ("legacy_relation_code", "legacy_exception_code")
+                if str(legacy_payload.get(key) or "").strip()
+            ),
+            "",
+        )
+        if not identity_key:
+            return ""
+        existing_cases = self._exception_case_service.preview_existing_case_conflicts(row_ids)
+        if len(existing_cases) != 1:
+            return ""
+        existing_case = existing_cases[0]
+        existing_row_ids = [str(row_id) for row_id in list(existing_case.get("row_ids") or [])]
+        if set(existing_row_ids) != set(row_ids) or len(existing_row_ids) != len(row_ids):
+            return ""
+        scope_months = {str(scope) for scope in list(existing_case.get("scope_months") or [])}
+        if month not in scope_months:
+            return ""
+        resolution = existing_case.get("resolution") if isinstance(existing_case.get("resolution"), dict) else {}
+        if str(resolution.get("action_code") or "") != "manual_review":
+            return ""
+        if str(resolution.get(identity_key) or "") != str(legacy_payload.get(identity_key) or ""):
+            return ""
+        return str(existing_case.get("scenario_code") or "")
 
     def _apply_exception_payload(
         self,
@@ -3800,7 +3842,6 @@ class WorkbenchWriteFacade:
                 scope_types.add("input_invoice_usage")
             if "output" in invoice_directions or unknown_invoice_direction:
                 scope_types.add("output_invoice_collection")
-            scope_types.add("tax_offset")
         if has_oa:
             scope_types.add("oa_pending_payment")
         if has_bank or has_invoice or has_oa or unknown_row_types:

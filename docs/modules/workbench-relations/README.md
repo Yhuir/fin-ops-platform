@@ -226,9 +226,9 @@ PYTHONPATH=/opt/fin-ops/releases/<release>/src/backend/src \
 
 `--fail-on-issues` 只用于 CI/release gate；生产手工巡检建议先不加该参数，确保 JSON 报告完整输出。该工具只执行 `select`，不会修复或写库。`display_only_relation_in_confirm_history` / `summary.display_only_history_before_relation_count` 表示历史 before_relations 曾保存 `existing_case` 显示归属；当前运行时会过滤这类 snapshot，通常不需要 backfill。`display_only_relation_mode_in_write_model` 且 severity 为 error 表示 active relation 本身使用 display-only mode，必须先单独设计 repair plan，再考虑发布。
 
-## Workbench relation display audit
+## Workbench 统一页面 Audit 与 CLI
 
-history replay 只证明 canonical relation 写模型自身可回放；它不能证明 active Workbench generation 已经把每条 active relation 的 OA/流水/发票成员发布到同一个展示 group。发布前、生产修复后或排查“已确认但不同行/重复行/联动高亮”时，必须补跑只读 display audit：
+history replay 只证明 canonical relation 写模型自身可回放；它不能证明 active Workbench generation 已经把每条 active relation 的 OA/流水/发票成员发布到同一个展示 group。管理员页面的 `reconciliation-workbench` Audit 与下列 CLI 现在调用同一个 `workbench_page_audit` repository proof owner；CLI 仅保留参数、连接、JSON 和退出码，不再拥有 SQL 或第二套判定。发布前、生产修复后或排查“已确认但不同行/重复行/联动高亮”时执行：
 
 ```bash
 cd /opt/fin-ops/releases/<release>/src
@@ -240,15 +240,16 @@ PYTHONPATH=/opt/fin-ops/releases/<release>/src/backend/src \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.audit_workbench_relation_display --json --limit 50
 ```
 
-审计不修改数据库。它把 `app.workbench_pair_relations` active rows 与当前 active `read_model.workbench_generations` / `read_model.workbench_group_rows` 对齐检查，覆盖：
+审计不修改数据库，并在同一 `REPEATABLE READ READ ONLY` snapshot 中组合 canonical/shared relation equality、`workbench` active generation display proof、dirty scope 与 outbox。display proof 覆盖：
 
 - active relation 成员是否缺失于 `all` 或成员月份 Workbench generation。
 - 同一 active relation 是否在 active scope 中被拆到多个 group。
 - 同一 relation row 是否在同一 active scope 中有多个 visible owner。
 - group row payload 的 `case_id` / `relation_mode` 是否与 canonical relation 不一致。
 - `all` generation 是否旧于成员月份 generation。
+- visible automatic decision/candidate 是否污染 active generation。
 
-blocking issue 的修复原则是重新触发现有 relation mutation fan-out contract，而不是编辑 read model 行：按成员 row 推导 affected Workbench month scopes，通过 `ReadModelRefreshGateway` 或事务内 repository scope contract 入队刷新，再用 aggregate-only `all` refresh 从 active month shards 收敛。只有 active relation 本身非法时，才进入专用 relation repair；repair 后仍必须重跑 display audit。
+任一 canonical/shared edge、display、dirty 或 outbox blocking issue 都会让统一页面 Audit 失败。修复原则是重新触发现有 relation mutation fan-out contract，而不是编辑 read model 行：按成员 row 推导 affected Workbench month scopes，通过 `ReadModelRefreshGateway` 或事务内 repository scope contract 入队刷新，再用 aggregate-only `all` refresh 从 active month shards 收敛。只有 active relation 本身非法时，才进入专用 relation repair；repair 后必须重跑统一页面 Audit。CLI module path 因正式 runbook 保持兼容，但不得重新引入独立 proof/fallback。
 
 ## Affected scope 和 downstream refresh
 

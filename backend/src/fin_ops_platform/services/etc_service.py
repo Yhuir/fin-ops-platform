@@ -22,6 +22,13 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 from zipfile import BadZipFile, ZipFile
 
+from fin_ops_platform.services.etc_import_session_store import (
+    EtcImportSessionStorePort,
+    InMemoryEtcImportSessionStore,
+    StoredEtcImportSession,
+    StoredEtcImportUpload,
+)
+
 
 class EtcInvoiceStatus(str, Enum):
     UNSUBMITTED = "unsubmitted"
@@ -567,18 +574,6 @@ ETC_IMPORT_STALE_AUDIT_KEYS = (
 
 
 @dataclass(slots=True)
-class EtcImportSession:
-    session_id: str
-    uploads: list[UploadedEtcZipFile]
-    created_at: datetime
-    preview_result: EtcImportResult
-    preview_audit: EtcImportPreviewAudit
-    preview_files: list[dict[str, object]] = field(default_factory=list)
-    confirmed_result: EtcImportResult | None = None
-    confirmed_at: datetime | None = None
-
-
-@dataclass(slots=True)
 class EtcDraftResult:
     batch_id: str
     etc_batch_id: str
@@ -673,6 +668,7 @@ class EtcService:
         *,
         data_dir: Path | None = None,
         state_store: Any | None = None,
+        import_session_store: EtcImportSessionStorePort | None = None,
         oa_client: EtcOAClient | None = None,
         form_mapping: EtcOAFormFieldMapping | None = None,
     ) -> None:
@@ -695,7 +691,7 @@ class EtcService:
         self._batches: dict[str, EtcBatch] = {}
         self._import_batches: dict[str, EtcImportBatch] = {}
         self._business_batches: dict[str, EtcBusinessBatch] = {}
-        self._import_sessions: dict[str, EtcImportSession] = {}
+        self._import_session_store = import_session_store or InMemoryEtcImportSessionStore()
         self._canonical_invoice_key_exists: Callable[[str], bool] | None = None
         self._business_batch_lock = RLock()
         self._hydrate(self._load_snapshot())
@@ -845,6 +841,7 @@ class EtcService:
         expected_version: int | None = None,
         idempotency_key: str | None = None,
         progress_callback: Callable[[EtcImportResult], None] | None = None,
+        uploads: list[UploadedEtcZipFile] | None = None,
     ) -> tuple[EtcBusinessBatch, EtcImportResult]:
         normalized_session_id = str(session_id or "").strip()
         normalized_idempotency_key = str(idempotency_key or "").strip() or None
@@ -856,9 +853,6 @@ class EtcService:
                 for attempt in list(batch.import_attempts or []):
                     if str(attempt.get("idempotency_key") or "") != normalized_idempotency_key:
                         continue
-                    session = self._import_sessions.get(normalized_session_id)
-                    if session is not None and session.confirmed_result is not None:
-                        return self._copy_business_batch(batch), session.confirmed_result
                     summary = attempt.get("summary") if isinstance(attempt.get("summary"), dict) else {}
                     replayed = EtcImportResult(
                         imported=int(summary.get("imported", 0) or 0),
@@ -870,10 +864,18 @@ class EtcService:
             self._assert_business_batch_version(batch, expected_version)
             self._assert_business_batch_allows_import(batch)
             before_status = batch.status
-            result = self.confirm_import_session_with_progress(
-                normalized_session_id,
-                progress_callback=progress_callback,
-            ) if progress_callback is not None else self.confirm_import_session(normalized_session_id)
+            if uploads is not None:
+                result = self._process_import_zips(
+                    uploads,
+                    persist=True,
+                    import_session_id=normalized_session_id,
+                    progress_callback=progress_callback,
+                )
+            else:
+                result = self.confirm_import_session_with_progress(
+                    normalized_session_id,
+                    progress_callback=progress_callback,
+                ) if progress_callback is not None else self.confirm_import_session(normalized_session_id)
             linked_import_batches = [
                 import_batch
                 for import_batch in self._import_batches.values()
@@ -1281,13 +1283,31 @@ class EtcService:
     def preview_import_zips(self, uploads: list[UploadedEtcZipFile]) -> dict[str, object]:
         result, audit, file_audits = self.inspect_import_zips(uploads)
         session_id = uuid4().hex
-        self._import_sessions[session_id] = EtcImportSession(
-            session_id=session_id,
-            uploads=[UploadedEtcZipFile(upload.file_name, bytes(upload.content)) for upload in uploads],
-            created_at=datetime.now(UTC),
-            preview_result=result,
-            preview_audit=audit,
-            preview_files=file_audits,
+        self._import_session_store.save_preview(
+            StoredEtcImportSession(
+                session_id=session_id,
+                status="preview_ready",
+                task_id="",
+                task_version=0,
+                zip_preview_generation=0,
+                confirmed_item_set_hash="",
+                preview_fingerprint=self._direct_preview_fingerprint(uploads, audit),
+                preview_result=result.to_payload(),
+                preview_audit=audit.to_payload(),
+                preview_files=file_audits,
+                reconciliation_filter={},
+                uploads=tuple(
+                    StoredEtcImportUpload(
+                        file_id=f"etc-import-{index + 1:04d}",
+                        file_name=upload.file_name,
+                        content=bytes(upload.content),
+                        sha256=hashlib.sha256(upload.content).hexdigest(),
+                        size_bytes=len(upload.content),
+                        ordinal=index,
+                    )
+                    for index, upload in enumerate(uploads)
+                ),
+            )
         )
         return self._import_session_payload(session_id, result, audit=audit, files=file_audits)
 
@@ -1300,28 +1320,31 @@ class EtcService:
         return result, audit, file_audits
 
     def confirm_import_session(self, session_id: str) -> EtcImportResult:
-        session = self._import_sessions.get(session_id)
+        session = self._import_session_store.get(session_id)
         if session is None:
             raise EtcServiceError("ETC import session not found.")
-        if session.confirmed_result is not None:
-            return session.confirmed_result
+        if session.status in {"succeeded", "partial_success"}:
+            return self._result_from_payload(session.preview_result)
         self._assert_import_preview_fresh(session)
-        result = self._process_import_zips(session.uploads, persist=True, import_session_id=session.session_id)
-        session.confirmed_result = result
-        session.confirmed_at = datetime.now(UTC)
+        uploads = [UploadedEtcZipFile(upload.file_name, upload.content) for upload in session.uploads]
+        result = self._process_import_zips(uploads, persist=True, import_session_id=session.session_id)
+        self._import_session_store.update_status(
+            session.session_id,
+            status="partial_success" if result.failed else "succeeded",
+        )
         return result
 
     def get_import_session_item_total(self, session_id: str) -> int:
-        session = self._import_sessions.get(session_id)
+        session = self._import_session_store.get(session_id)
         if session is None:
             raise EtcServiceError("ETC import session not found.")
-        return len(session.preview_result.items)
+        return len(list(session.preview_result.get("items") or []))
 
     def validate_import_session_preview_fresh(self, session_id: str) -> None:
-        session = self._import_sessions.get(session_id)
+        session = self._import_session_store.get(session_id)
         if session is None:
             raise EtcServiceError("ETC import session not found.")
-        if session.confirmed_result is not None:
+        if session.status in {"succeeded", "partial_success"}:
             return
         self._assert_import_preview_fresh(session)
 
@@ -1330,22 +1353,26 @@ class EtcService:
         session_id: str,
         progress_callback: Callable[[EtcImportResult], None] | None = None,
     ) -> EtcImportResult:
-        session = self._import_sessions.get(session_id)
+        session = self._import_session_store.get(session_id)
         if session is None:
             raise EtcServiceError("ETC import session not found.")
-        if session.confirmed_result is not None:
+        if session.status in {"succeeded", "partial_success"}:
+            result = self._result_from_payload(session.preview_result)
             if progress_callback is not None:
-                progress_callback(session.confirmed_result)
-            return session.confirmed_result
+                progress_callback(result)
+            return result
         self._assert_import_preview_fresh(session)
+        uploads = [UploadedEtcZipFile(upload.file_name, upload.content) for upload in session.uploads]
         result = self._process_import_zips(
-            session.uploads,
+            uploads,
             persist=True,
             import_session_id=session.session_id,
             progress_callback=progress_callback,
         )
-        session.confirmed_result = result
-        session.confirmed_at = datetime.now(UTC)
+        self._import_session_store.update_status(
+            session.session_id,
+            status="partial_success" if result.failed else "succeeded",
+        )
         return result
 
     def import_result_payload(self, result: EtcImportResult) -> dict[str, object]:
@@ -1374,10 +1401,48 @@ class EtcService:
             response["files"] = files
         return response
 
-    def _assert_import_preview_fresh(self, session: EtcImportSession) -> None:
-        current_audit, _files = self._calculate_import_preview_audit(session.uploads)
-        if current_audit.stale_key_payload() != session.preview_audit.stale_key_payload():
+    def _assert_import_preview_fresh(self, session: StoredEtcImportSession) -> None:
+        uploads = [UploadedEtcZipFile(upload.file_name, upload.content) for upload in session.uploads]
+        current_audit, _files = self._calculate_import_preview_audit(uploads)
+        preview_audit = EtcImportPreviewAudit(
+            **{
+                key: int(value or 0)
+                for key, value in session.preview_audit.items()
+                if key in EtcImportPreviewAudit.__dataclass_fields__
+            }
+        )
+        if current_audit.stale_key_payload() != preview_audit.stale_key_payload():
             raise EtcImportPreviewStaleError("ETC import preview is stale; refresh preview before confirming.")
+
+    @staticmethod
+    def _direct_preview_fingerprint(uploads: list[UploadedEtcZipFile], audit: EtcImportPreviewAudit) -> str:
+        payload = {
+            "uploads": [
+                [upload.file_name, hashlib.sha256(upload.content).hexdigest(), len(upload.content)]
+                for upload in uploads
+            ],
+            "audit": audit.to_payload(),
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _result_from_payload(payload: dict[str, object]) -> EtcImportResult:
+        return EtcImportResult(
+            imported=int(payload.get("imported") or 0),
+            duplicates_skipped=int(payload.get("duplicatesSkipped") or 0),
+            attachments_completed=int(payload.get("attachmentsCompleted") or 0),
+            failed=int(payload.get("failed") or 0),
+            items=[
+                EtcImportItem(
+                    file_name=str(item.get("fileName") or ""),
+                    invoice_number=str(item.get("invoiceNumber") or "") or None,
+                    status=str(item.get("status") or ""),
+                    message=str(item.get("message") or ""),
+                )
+                for item in list(payload.get("items") or [])
+                if isinstance(item, dict)
+            ],
+        )
 
     def _calculate_import_preview_audit(
         self,

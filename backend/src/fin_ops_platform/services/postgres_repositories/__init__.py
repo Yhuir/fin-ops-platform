@@ -1,6 +1,13 @@
 """PostgreSQL repository helpers for the application state store."""
 
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.etc_import_sessions import PostgresEtcImportSessionRepository
+from fin_ops_platform.services.postgres_repositories.external_control_evidence import (
+    PostgresExternalControlEvidenceRepository,
+)
+from fin_ops_platform.services.postgres_repositories.external_control_evidence_audit import (
+    audit_external_control_evidence,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter, PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
@@ -16,6 +23,9 @@ __all__ = [
     "PostgresOAProjectionAdapter",
     "PostgresOAProjectionRepository",
     "PostgresCoreRepository",
+    "PostgresEtcImportSessionRepository",
+    "PostgresExternalControlEvidenceRepository",
+    "audit_external_control_evidence",
     "PostgresOpsTaxEtcRepository",
     "PostgresOaPendingPaymentRelationRepository",
     "SnapshotOaPendingPaymentRelationRepository",

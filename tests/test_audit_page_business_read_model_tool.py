@@ -254,6 +254,81 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("source_business_fields_mismatch", queried_sql)
         self.assertNotIn("read_model.source_versions as row_source_versions", queried_sql)
 
+    def test_bank_flow_rule_batch_audit_proves_page_and_active_relation_member_sets(self) -> None:
+        connection = FakeConnection()
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="bank_flow_rule_batches",
+        )
+
+        consumer_sql, params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "consumer_relation_edge_equality" in sql
+        )
+        self.assertIn("row.payload->'bank_transaction_ids'", consumer_sql)
+        self.assertIn("row.payload->'row_ids'", consumer_sql)
+        self.assertIn("relation.relation_mode = 'bank_flow_rule_batch'", consumer_sql)
+        self.assertIn("submitted_batch_missing_active_relation", consumer_sql)
+        self.assertIn("non_submitted_batch_has_active_relation", consumer_sql)
+        self.assertIn("active_relation_member_set_mismatch", consumer_sql)
+        self.assertIn("active_relation_without_canonical_batch", consumer_sql)
+        self.assertEqual(params, (51,))
+        self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
+
+    def test_submitted_bank_flow_batch_without_relation_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "batch-1",
+                            "scope_key": "2026-06",
+                            "row_id": "batch-1",
+                            "row_type": "bank_flow_rule_batch",
+                            "mismatch_kind": "submitted_batch_missing_active_relation",
+                            "canonical_status": "submitted",
+                            "canonical_member_ids": ["bank-1", "bank-2"],
+                            "projected_member_ids": ["bank-1", "bank-2"],
+                            "relation_member_ids": None,
+                        }
+                    ]
+                }
+            ),
+            domain_key="bank_flow_rule_batches",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"bank_flow_rule_batches_consumer_relation_edge_mismatch": 1},
+        )
+        self.assertEqual(report["issues"][0]["details"]["canonical_status"], "submitted")
+
+    def test_bank_flow_page_member_set_mismatch_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "batch-2",
+                            "scope_key": "2026-06",
+                            "row_id": "batch-2",
+                            "row_type": "bank_flow_rule_batch",
+                            "mismatch_kind": "page_consumer_member_set_mismatch",
+                            "canonical_member_ids": ["bank-1", "bank-2"],
+                            "projected_member_ids": ["bank-1"],
+                        }
+                    ]
+                }
+            ),
+            domain_key="bank_flow_rule_batches",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(report["issues"][0]["details"]["mismatch_kind"], "page_consumer_member_set_mismatch")
+
     def test_pending_invoice_audit_uses_page_read_model_scope_contract(self) -> None:
         connection = FakeConnection()
 
@@ -291,6 +366,81 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("row.source_versions, '{}'::jsonb) - 'source_version'", queried_sql)
         self.assertIn("canonical_relation_summary", queried_sql)
 
+    def test_bank_detail_audit_proves_linked_relation_tag_case_and_status_contract(self) -> None:
+        connection = FakeConnection()
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="bank_details",
+        )
+
+        consumer_sql, params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "consumer_relation_edge_equality" in sql
+        )
+        self.assertIn("cardinality(group_row.oa_row_ids) > 0", consumer_sql)
+        self.assertIn("cardinality(group_row.input_invoice_ids) > 0", consumer_sql)
+        self.assertIn("shared_bank_member_multiple_cases", consumer_sql)
+        self.assertIn("linked_case_mismatch", consumer_sql)
+        self.assertIn("linked_oa_tag_mismatch", consumer_sql)
+        self.assertIn("linked_invoice_tag_mismatch", consumer_sql)
+        self.assertIn("consumer_linked_tag_not_shared", consumer_sql)
+        self.assertIn("projected.relation_status = 'linked'", consumer_sql)
+        self.assertNotIn("'candidate'", consumer_sql)
+        self.assertEqual(params, ("default", "default", 51))
+        self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
+
+    def test_bank_detail_missing_linked_tag_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "bank-1",
+                            "scope_key": "2026-06",
+                            "row_id": "bank-1",
+                            "row_type": "bank_transaction",
+                            "mismatch_kind": "linked_oa_tag_mismatch",
+                            "expected_case_id": "case-1",
+                            "expected_has_oa": True,
+                            "projected_oa_relation_tag": "无oa",
+                        }
+                    ]
+                }
+            ),
+            domain_key="bank_details",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"bank_details_consumer_relation_edge_mismatch": 1},
+        )
+        self.assertEqual(report["issues"][0]["details"]["expected_case_id"], "case-1")
+
+    def test_bank_detail_multiple_active_relation_cases_are_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "bank-overlap",
+                            "scope_key": "2026-06",
+                            "row_id": "bank-overlap",
+                            "row_type": "bank_transaction",
+                            "mismatch_kind": "shared_bank_member_multiple_cases",
+                            "linked_case_count": 2,
+                        }
+                    ]
+                }
+            ),
+            domain_key="bank_details",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(report["issues"][0]["details"]["linked_case_count"], 2)
+
     def test_batch_audits_recompute_their_domain_specific_display_contracts(self) -> None:
         batch_accounting_connection = FakeConnection()
         audit_page_business_read_model.audit_page_business_read_model(
@@ -310,6 +460,53 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("batch.raw_payload->'normalized_payload'->>'batch_type'", rule_batch_sql)
         self.assertIn("when batch.canonical_batch_type = 'internal_transfer'", rule_batch_sql)
         self.assertIn("then coalesce(max(abs(bank.amount)), 0)", rule_batch_sql)
+
+    def test_batch_accounting_audit_proves_direct_shared_consumer_case_set(self) -> None:
+        connection = FakeConnection()
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="batch_accounting",
+        )
+
+        consumer_sql, params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "consumer_relation_edge_equality" in sql
+        )
+        self.assertIn("relation.special_metadata->>'source' = 'batch_accounting'", consumer_sql)
+        self.assertIn("canonical.relation_mode <> 'batch_accounting'", consumer_sql)
+        self.assertIn("canonical_case_missing_direct_consumer", consumer_sql)
+        self.assertIn("direct_consumer_mode_or_metadata_mismatch", consumer_sql)
+        self.assertIn("direct_consumer_case_not_canonical", consumer_sql)
+        self.assertEqual(params, ("default", 51))
+        self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
+
+    def test_batch_accounting_wrong_canonical_relation_mode_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "case-batch-1",
+                            "scope_key": "2026-06",
+                            "row_id": "case-batch-1",
+                            "row_type": "batch_accounting_relation",
+                            "mismatch_kind": "canonical_batch_accounting_relation_mode_mismatch",
+                            "canonical_relation_mode": "manual",
+                        }
+                    ]
+                }
+            ),
+            domain_key="batch_accounting",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"batch_accounting_consumer_relation_edge_mismatch": 1},
+        )
+        self.assertEqual(report["issues"][0]["details"]["canonical_relation_mode"], "manual")
 
     def test_turnover_audit_uses_effective_bank_detail_leaves_as_independent_expected_set(self) -> None:
         connection = FakeConnection()
@@ -334,6 +531,53 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("expected_balance", business_sql)
         self.assertIn("ledger.payload->>'pending_repayment_amount'", business_sql)
         self.assertIn("ledger.payload->>'collected_amount'", business_sql)
+
+    def test_turnover_audit_proves_ledger_and_flow_relation_consumer_edges(self) -> None:
+        connection = FakeConnection()
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="turnover_ledger",
+        )
+
+        consumer_sql, params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "consumer_relation_edge_equality" in sql
+        )
+        self.assertIn("ledger.relation_id || ':flow:'", consumer_sql)
+        self.assertIn("anchor.anchor_payload->'workbench_relations'", consumer_sql)
+        self.assertIn("group_row.bank_transaction_ids && anchor.anchor_bank_row_ids", consumer_sql)
+        self.assertIn("shared_edge_missing_consumer", consumer_sql)
+        self.assertIn("consumer_edge_not_shared", consumer_sql)
+        self.assertEqual(params, ("default", 51))
+        self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
+
+    def test_turnover_flow_missing_relation_member_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "ledger-1:flow:1",
+                            "scope_key": "2026-06",
+                            "row_id": "bank-2",
+                            "row_type": "bank_transaction",
+                            "case_id": "case-turnover-1",
+                            "mismatch_kind": "shared_edge_missing_consumer",
+                        }
+                    ]
+                }
+            ),
+            domain_key="turnover_ledger",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"turnover_ledger_consumer_relation_edge_mismatch": 1},
+        )
+        self.assertEqual(report["issues"][0]["details"]["case_id"], "case-turnover-1")
 
     def test_cost_statistics_expected_set_does_not_treat_ready_rows_as_missing(self) -> None:
         connection = FakeConnection()
@@ -362,7 +606,118 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("member.member_payload->>'project_id'", canonical_sql)
         self.assertIn("member.member_payload->>'applicant'", canonical_sql)
         self.assertIn("member.member_payload->>'debit_amount'", canonical_sql)
-        self.assertNotIn("join app.bank_transactions bank_source", canonical_sql)
+        self.assertIn("join app.bank_transactions bank_source", canonical_sql)
+        self.assertIn("expected_fields", canonical_sql)
+        self.assertIn("projected_fields", canonical_sql)
+        expected_bank_flow_sql = canonical_sql.split("expected_bank_flow as", 1)[1].split("projected_bank_flow as", 1)[0]
+        self.assertIn("from app.bank_transactions source", expected_bank_flow_sql)
+        self.assertNotIn("read_model.bank_detail_rows", expected_bank_flow_sql)
+
+    def test_cost_statistics_reuses_workbench_integrity_proof_in_same_snapshot(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "workbench_canonical_object_set": [
+                        {
+                            "subject_id": "bank-missing",
+                            "scope_key": "2026-06",
+                            "mismatch_kind": "canonical_missing_projection",
+                        }
+                    ]
+                }
+            ),
+            domain_key="cost_statistics",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"cost_statistics_dependency_workbench_workbench_canonical_object_set_mismatch": 1},
+        )
+        self.assertEqual(report["issues"][0]["details"]["dependency"], "workbench")
+
+    def test_cost_statistics_binds_month_upstream_versions_and_parent_shards(self) -> None:
+        connection = FakeConnection(
+            rows_by_check={
+                "cost_upstream_source_versions": [
+                    {
+                        "subject_id": "all:2026-06",
+                        "scope_key": "all:2026-06",
+                        "embedded_workbench_source_versions": {"generation": "old"},
+                        "current_workbench_source_versions": {"generation": "new"},
+                    }
+                ],
+                "cost_parent_source_shards": [
+                    {
+                        "subject_id": "all:all",
+                        "scope_key": "all:all",
+                        "expected_shard_count": 2,
+                        "present_shard_count": 1,
+                    }
+                ],
+            }
+        )
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="cost_statistics",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {
+                "cost_statistics_parent_source_shards_mismatch": 1,
+                "cost_statistics_upstream_source_versions_mismatch": 1,
+            },
+        )
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("source_versions->'workbench_source_versions'", queried_sql)
+        self.assertIn("source_versions->'bank_detail_source_versions'", queried_sql)
+        self.assertIn("expected_source_shards", queried_sql)
+
+    def test_cost_statistics_recalculates_bank_flow_and_group_summaries(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="cost_statistics",
+        )
+
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("cost_bank_flow_key_fields", queried_sql)
+        self.assertIn("bank_tag_label_path", queried_sql)
+        self.assertIn("bank_flow_summary", queried_sql)
+        self.assertIn("cost_group_summaries", queried_sql)
+        self.assertIn("expected_projects", queried_sql)
+        self.assertIn("expected_expenses", queried_sql)
+        self.assertIn("cost_bank_accounts", queried_sql)
+        self.assertIn("bank_account_mappings", queried_sql)
+
+    def test_cost_statistics_bank_account_mapping_gap_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "cost_bank_accounts": [
+                        {
+                            "subject_id": "all:2026-06:建设银行:8106",
+                            "scope_key": "all:2026-06",
+                            "bank_name": "建设银行",
+                            "account_last4": "8106",
+                            "expected_source": "settings",
+                            "projected_source": None,
+                        }
+                    ]
+                }
+            ),
+            domain_key="cost_statistics",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"cost_statistics_bank_accounts_mismatch": 1},
+        )
 
     def test_pending_invoice_relation_audit_uses_scope_aware_bidirectional_edge_equality(self) -> None:
         connection = FakeConnection()
@@ -382,6 +737,110 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("group_edge_missing_row_index", relation_sql)
         self.assertIn("row_index_edge_missing_group", relation_sql)
 
+    def test_oa_pending_payment_audit_proves_registered_consumer_edges(self) -> None:
+        connection = FakeConnection()
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="oa_pending_payments",
+        )
+
+        consumer_sql, params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "consumer_relation_edge_equality" in sql
+        )
+        self.assertIn("app.oa_pending_payment_admissions", consumer_sql)
+        self.assertIn("row.payload->'oa'->'summaries'", consumer_sql)
+        self.assertIn("row.payload->'bankTransaction'->'summaries'", consumer_sql)
+        self.assertIn("row.payload->'invoice'->'summaries'", consumer_sql)
+        self.assertIn("shared_edge_missing_consumer", consumer_sql)
+        self.assertIn("consumer_edge_not_shared", consumer_sql)
+        self.assertEqual(params, ("default", "default", 51))
+        self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
+        self.assertIn("registered page consumer summaries", report["audit_contract"]["relation_edge_equality"])
+
+    def test_oa_pending_payment_shared_edge_missing_from_consumer_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "case-oa-1",
+                            "scope_key": "2026-06",
+                            "row_id": "bank-1",
+                            "row_type": "bank_transaction",
+                            "mismatch_kind": "shared_edge_missing_consumer",
+                        }
+                    ]
+                }
+            ),
+            domain_key="oa_pending_payments",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"oa_pending_payments_consumer_relation_edge_mismatch": 1},
+        )
+        self.assertEqual(report["issues"][0]["details"]["mismatch_kind"], "shared_edge_missing_consumer")
+
+    def test_pending_invoice_audit_proves_registered_consumer_edges(self) -> None:
+        connection = FakeConnection()
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="pending_invoices",
+        )
+
+        consumer_sql, params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "consumer_relation_edge_equality" in sql
+        )
+        self.assertIn("row.payload->'oa'->'summaries'", consumer_sql)
+        self.assertIn("row.payload->'bank_transactions'->'summaries'", consumer_sql)
+        self.assertIn("row.payload->'input_invoices'->'summaries'", consumer_sql)
+        self.assertIn("when row.direction = 'income'", consumer_sql)
+        self.assertEqual(params, ("default", 51))
+        self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
+
+    def test_pending_invoice_consumer_edge_not_in_shared_relation_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "case-pending-1",
+                            "scope_key": "2026-06",
+                            "row_id": "invoice-extra",
+                            "row_type": "input_invoice",
+                            "mismatch_kind": "consumer_edge_not_shared",
+                        }
+                    ]
+                }
+            ),
+            domain_key="pending_invoices",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"pending_invoices_consumer_relation_edge_mismatch": 1},
+        )
+
+    def test_unregistered_consumer_contract_does_not_claim_consumer_equality(self) -> None:
+        connection = FakeConnection()
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="cost_statistics",
+        )
+
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertNotIn("consumer_relation_edge_equality", queried_sql)
+        self.assertNotIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
+
     def test_formatted_display_amounts_are_normalized_before_numeric_proof(self) -> None:
         connection = FakeConnection()
 
@@ -393,7 +852,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertIn("replace(member.value->>'amount', ',', '')", queried_sql)
         self.assertIn("replace(row.payload->>'amount', ',', '')", queried_sql)
-        self.assertIn("replace(model.payload->'payload'->'summary'->>'total_amount', ',', '')", queried_sql)
+        self.assertIn("model.payload->'payload'->'summary'->>'total_amount'", queried_sql)
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()

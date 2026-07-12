@@ -91,21 +91,32 @@ describe("AppHealthOperationsPage", () => {
     expect(within(data).getByRole("grid", { name: "发票来源" })).toBeInTheDocument();
     expect(within(data).getByRole("grid", { name: "OA来源" })).toBeInTheDocument();
 
-    const audit = screen.getByTestId("app-health-input-usage-audit");
+    const audit = screen.getByTestId("app-health-system-audit");
     expectProjectSection(audit);
-    expect(audit).toHaveTextContent("Audit");
-    expect(audit).toHaveTextContent("进项发票使用情况");
+    expect(audit).toHaveTextContent("System Audit");
+    expect(audit).toHaveTextContent("17 页 App 内部合同");
     expect(audit).toHaveTextContent("未验证");
-    const auditButton = within(audit).getByRole("button", { name: "Audit 进项发票使用情况" });
+    const auditButton = within(audit).getByRole("button", { name: "Audit 全系统 App 内部合同" });
     expect(auditButton).toHaveClass("app-health-audit-button");
     await userEvent.click(auditButton);
     await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health/input-invoice-usage-audit"))).toBe(true);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health/page-audit?page=app-health-operations"))).toBe(true);
     });
     expect(audit).toHaveTextContent("pass");
-    expect(audit).toHaveTextContent("Read model 发票");
+    expect(audit).toHaveTextContent("业务页面通过");
+    expect(audit).toHaveTextContent("App 内部 pass");
+    expect(audit).toHaveTextContent("外部域 unknown");
+    expect(audit).toHaveTextContent("bank unknown");
+    expect(audit).toHaveTextContent("oa unknown");
+    expect(audit).toHaveTextContent("仅证明该只读数据库快照内的已登记 App 内部合同");
     expect(audit).toHaveTextContent("Blocking samples");
-    expect(within(audit).getAllByText("236").length).toBeGreaterThanOrEqual(1);
+    expect(within(audit).getAllByText("16").length).toBeGreaterThanOrEqual(1);
+
+    await userEvent.click(refreshButton);
+    await waitFor(() => {
+      expect(audit).toHaveTextContent("未验证");
+    });
+    expect(within(audit).queryByText("App 内部 pass")).not.toBeInTheDocument();
 
     const requests = screen.getByTestId("app-health-requests");
     expectProjectSection(requests);
@@ -156,10 +167,81 @@ describe("AppHealthOperationsPage", () => {
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          String(url).includes("/api/operations/app-health/input-invoice-usage-audit")
+          String(url).includes("/api/operations/app-health/page-audit?page=app-health-operations")
           && String(init?.method ?? "GET").toUpperCase() !== "GET",
       ),
     ).toBe(false);
+  });
+
+  test("does not label an unversioned or non-snapshot audit as pass", async () => {
+    renderOperationsPage({
+      appHealthSystemAudit: {
+        overall_status: "pass",
+        audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
+        audit_contract: { database_snapshot: false, snapshot_consistency: "caller_managed" },
+        summary: { blocking_issue_sample_count: 0, error_sample_count: 0 },
+        issues: [],
+      },
+    });
+
+    const audit = await screen.findByTestId("app-health-system-audit", {}, { timeout: PAGE_TIMEOUT });
+    await userEvent.click(within(audit).getByRole("button", { name: "Audit 全系统 App 内部合同" }));
+
+    expect((await within(audit).findByText("proof_unavailable")).closest(".finance-status-tag")).toHaveAttribute(
+      "data-tone",
+      "danger",
+    );
+    expect(within(audit).queryByText("pass")).not.toBeInTheDocument();
+  });
+
+  test("shows versioned external domain pass as an as-of claim instead of extending it to live truth", async () => {
+    renderOperationsPage({
+      appHealthSystemAudit: {
+        overall_status: "pass",
+        audit_status: { integrity: "pass", freshness: "fresh", queue: "drained", external: "pass" },
+        audit_contract: {
+          database_snapshot: true,
+          snapshot_consistency: "repeatable_read_read_only",
+          proof_availability: "ready",
+          contract_revision: "page-audit-contract.v18",
+        },
+        summary: {
+          registered_page_count: 17,
+          audited_business_page_count: 16,
+          passed_business_page_count: 16,
+          database_internal_contracts: "pass",
+          end_to_end_source_truth: "proven_as_of_external_evidence",
+          blocking_issue_sample_count: 0,
+          issue_sample_count: 0,
+        },
+        issues: [],
+        database_system_snapshot: {
+          system_audit_id: "system-audit:external-pass",
+          snapshot_identity: "100:100:",
+          snapshot_generated_at: "2026-07-11T12:00:00Z",
+          database_snapshot: true,
+        },
+        external_evidence: {
+          status: "pass",
+          end_to_end_source_truth: "proven_as_of_external_evidence",
+          claim_boundary: "仅证明外部 evidence observed_at 与当前不可变 App 快照之间的精确相等；不证明后续变化。",
+          summary: { required_domain_count: 4, passed_domain_count: 4, failed_domain_count: 0, unknown_domain_count: 0 },
+          domains: ["bank", "oa", "invoice", "etc"].map((domain) => ({
+            domain,
+            status: "pass",
+            observed_at: "2026-07-11T11:59:00Z",
+          })),
+        },
+      },
+    });
+
+    const audit = await screen.findByTestId("app-health-system-audit", {}, { timeout: PAGE_TIMEOUT });
+    await userEvent.click(within(audit).getByRole("button", { name: "Audit 全系统 App 内部合同" }));
+
+    expect((await within(audit).findByText("外部证据 pass")).closest(".finance-status-tag")).toHaveAttribute("data-tone", "success");
+    expect(audit).toHaveTextContent("bank pass");
+    expect(audit).toHaveTextContent("不证明后续变化");
+    expect(audit).not.toHaveTextContent("外部域 unknown4");
   });
 
   test("blocks non admin users without fetching dashboard data", async () => {
@@ -173,7 +255,7 @@ describe("AppHealthOperationsPage", () => {
     expectProjectNotice(permissionMessage);
     expect(screen.queryByTestId("app-health-data")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health-dashboard"))).toBe(false);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health/input-invoice-usage-audit"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health/page-audit?page=app-health-operations"))).toBe(false);
   });
 
   test("renders unknown metrics as dashes instead of zero", async () => {

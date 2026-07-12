@@ -159,6 +159,39 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
 
         self.assertEqual(repository.records, [])
 
+    def test_all_scope_shard_fanout_failure_does_not_record_parent_failed_readiness(self) -> None:
+        repository = RecordingReadinessRepository()
+        reporter = ReadModelReadinessReporter(readiness_repository=repository)
+
+        reporter.record_event_failure(
+            _event(
+                event_type="oa_pending_payment.read_model.refresh",
+                scope_type="oa_pending_payment",
+                scope_key="all",
+            ),
+            RuntimeError("permission denied for table oa_pending_payment_admissions"),
+        )
+
+        self.assertEqual(repository.records, [])
+
+    def test_queryable_all_scope_failure_still_records_failed_readiness(self) -> None:
+        repository = RecordingReadinessRepository()
+        reporter = ReadModelReadinessReporter(readiness_repository=repository)
+
+        reporter.record_event_failure(
+            _event(
+                event_type="bank_account_balance.read_model.refresh",
+                scope_type="bank_account_balance",
+                scope_key="all",
+            ),
+            RuntimeError("projection failed"),
+        )
+
+        self.assertEqual(len(repository.records), 1)
+        self.assertEqual(repository.records[0]["read_model_key"], "bank_account_balance")
+        self.assertEqual(repository.records[0]["scope_key"], "all")
+        self.assertEqual(repository.records[0]["status"], "failed")
+
     def test_all_scope_parent_rebuild_with_shard_fanout_records_parent_fresh(self) -> None:
         repository = RecordingReadinessRepository()
         reporter = ReadModelReadinessReporter(readiness_repository=repository)

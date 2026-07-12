@@ -9,7 +9,7 @@
 | `IMPORT-INVOICE-E2E-003` | 重复/未导入明细 | 文件内重复、跨文件重复、已存在、异常或需复核行必须进入明细表；损坏发票文件必须作为 file-level error 展示，不能让整个 preview 崩溃；页面不能把 skipped/duplicate/error 行展示成可确认导入，confirm 只能提交有效文件 id。 |
 | `IMPORT-INVOICE-E2E-004` | preview stale | 预览后底层发票事实变化时，confirm 返回 `preview_stale`；页面必须提示重新预览，不创建 import job，不刷新 Workbench 或下游页面。 |
 | `IMPORT-INVOICE-E2E-005` | confirm 失败 | confirm API/worker 入队失败时，页面必须显示错误，不展示“已确认导入”，不刷新 Workbench，也不把下游 read model 伪装成 fresh。 |
-| `IMPORT-INVOICE-E2E-006` | confirm 成功和下游刷新 | 可确认文件提交后显示确认反馈；若 inline 完成，页面可刷新 Workbench 状态。返回 `job` 时只能展示“已开始后台导入”，不能宣称下游页面 fresh。 |
+| `IMPORT-INVOICE-E2E-006` | confirm 排队和下游刷新 | 可确认文件提交后必须返回 durable job；queue 不可用时显示失败且保持 preview。返回 `job` 时只能展示“已开始后台导入”，不能宣称下游页面 fresh；不存在 inline confirm。 |
 | `IMPORT-INVOICE-E2E-007` | 权限和系统保护 | `read_export_only` 不能上传、预览或确认；系统 write-safety blocked 时不能执行确认。 |
 | `IMPORT-INVOICE-E2E-008` | derived lifecycle fan-out | `invoice_import_confirmed` 必须触发 Workbench、invoice lifecycle、tax offset、cost statistics、pending invoices、input/output invoice pages、OA pending 和 search 的 dirty scope/read model refresh；页面必须通过 freshness/status 判断下游是否可读。 |
 | `IMPORT-INVOICE-E2E-009` | 真实基础设施 worker drain | PostgreSQL/RabbitMQ/Redis/systemd import worker、derived lifecycle worker、下游 read model freshness 和 App Status/import progress 必须在 staging 或生产只读 smoke 验证。 |

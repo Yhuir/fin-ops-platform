@@ -6,7 +6,7 @@
 ## 当前决策
 
 - 银行流水导入页面复用 `ImportWorkflowPage`，业务差异通过 `mode="bank_transaction"` 和 per-file bank mapping overrides 表达。
-- 新页面路径使用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/{session_id}`；legacy `/imports/preview`、`/imports/confirm` 仍作为旧 API/程序化导入回归入口。
+- 页面路径唯一使用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/{session_id}`；旧 JSON `/imports/preview`、`/imports/confirm` 及 `general_import.confirm` worker 链已于 2026-07-11 删除。
 - preview 是可失效的临时判断；confirm 前必须通过后端 `assert_session_preview_current` 防 stale。
 - confirm 是异步导入动作；返回 `job` / `import_job` 只能说明已开始处理，不能说明银行明细、关联台、成本统计等下游已 fresh。
 - 银行导入的跨页一致性以后端 lifecycle、dirty scope、read model worker 和 App Status 为准，前端只展示 job feedback 和刷新提示。
@@ -28,16 +28,24 @@
 
 ## 历史记录
 
+## 2026-07-11 - direct-canonical Audit 与旧 JSON 写入链删除
+
+- 目标：证明全部已登记 bank file/session/batch/row/canonical transaction 与当前 import job/outbox 闭包，并删除并行 HTTP 写入合同。
+- 关键决策：页面无 own read model、不消费配对关系；下游 bank detail、account balance、Workbench、cost、search 仅是 impact targets。App 文件 hash 不替代银行外部 control evidence。
+- 删除项：`/imports/preview`、`/imports/confirm` route/handler/entrypoint，`general_import.confirm` producer/processor/check registry，以及只服务旧 confirm 的 preview scope dependencies和旧 HTTP 回归。
+- 保留项：`ImportNormalizationService.preview_import/confirm_import` 领域端口和 `FileImportService.snapshot/from_snapshot` worker 恢复端口。
+- 验证：全迁移 disposable PostgreSQL clean pass；金额漂移、hash 缺失、canonical transaction 删除、active/terminal job/outbox 均 fail closed；旧 URL 只允许存在于 404/边界 guard。
+
 ## 2026-07-05 - 银行流水导入边界 close 与旧 wrapper 删除
 
 - 目标：完成银行流水导入模块边界与 I/O 收口，确认页面主链路只走 files/session API，移除会让 `server.py` 继续拥有 import confirm 处理职责的旧 wrapper。
 - 影响范围：`server.py` import endpoints、`ImportProcessingService` 委托边界、银行流水导入前端 API guard、本模块 boundary/tests/state-machine 文档。
-- 关键决策：`/imports/preview`、`/imports/confirm` 仍作为共享程序化导入和旧回归入口保留，不能在本轮顺手删除并拖动跨模块 fixture；银行流水页面不是该入口的调用方。`FileImportService.snapshot/from_snapshot` 是当前 file/session 与 import worker 跨进程恢复 I/O，不是旧 full snapshot 事实源 fallback。
+- 当时决策：`/imports/preview`、`/imports/confirm` 暂时作为共享程序化导入和旧回归入口保留；该临时决定已由 2026-07-11 记录取代。`FileImportService.snapshot/from_snapshot` 仍是当前 file/session 与 import worker 跨进程恢复 I/O，不是旧 full snapshot 事实源 fallback。
 - 删除项：移除 `server.py` 中无调用的 `_process_general_import_confirm_job`、`_process_tax_certified_import_confirm_job`、`_process_file_import_confirm_job`、`_process_etc_invoice_import_confirm_job`，以及单调用委托 `_execute_general_import_confirm`、`_execute_file_import_confirm_job`、`_file_import_job_label`。
 - 文档影响：更新 `boundary-io.md` 为 `close`，并同步 README、state-machine、tests 和全局测试依赖地图。
 - 测试覆盖：新增/扩展 `tests/test_platform_runtime_boundary_guards.py`，防止银行流水前端回退旧 JSON import API，防止 `server.py` 重新持有 import confirm processor wrapper。
 - 验证命令：`python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/import_processing_service.py tests/test_platform_runtime_boundary_guards.py`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_no_longer_owns_import_confirm_processors tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_transaction_import_frontend_uses_file_session_api_only -v`；后续本轮还需跑模块窄范围后端/前端和 docs/lint。
-- 未测风险：未删除共享 legacy JSON import API；其删除需要先迁移跨模块造数 fixture 和旧回归。真实银行大文件、真实 import worker drain、RabbitMQ/Redis/systemd、生产账户余额 fresh gate 仍按测试矩阵走 staging/infra-smoke。
+- 当时未测风险中的共享 legacy JSON import API 已在 2026-07-11 删除；真实银行大文件、真实 import worker drain、RabbitMQ/Redis/systemd、生产账户余额 fresh gate 仍按测试矩阵走 staging/infra-smoke。
 
 ## 2026-07-03 - 导入文件事实列表摘要化
 
@@ -155,7 +163,7 @@
 - 文档影响：更新 `README.md`、`tests.md`、`state-machine.md`，并在全局测试闭环依赖地图中补充 imports-bank-transactions 细化。
 - 测试覆盖：后端 import service/API/job queue/lifecycle/read model/App Status tests 覆盖核心链路；前端 `ImportCenterPage.test.tsx` 与 `ImportsApi.test.ts` 覆盖页面和 API mapper。
 - 验证命令：
-  - `PYTHONPATH=backend/src python3 -m unittest tests.test_import_api tests.test_import_service tests.test_import_file_service tests.test_import_file_api tests.test_import_preview_audit tests.test_import_job_queue tests.test_import_formalization_api tests.test_derived_data_lifecycle_service tests.test_runtime_worker_registry tests.test_app_status_overview_service tests.test_bank_account_balance_read_model tests.test_bank_details_sql_runtime tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_import_file_confirm_returns_preview_stale_when_existing_records_change tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_bank_import_confirm_invalidates_workbench_read_model -v`
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_import_api tests.test_import_service tests.test_import_file_service tests.test_import_file_api tests.test_import_preview_audit tests.test_import_job_queue tests.test_import_formalization_api tests.test_derived_data_lifecycle_service tests.test_runtime_worker_registry tests.test_app_status_overview_service tests.test_bank_account_balance_read_model tests.test_bank_details_sql_runtime tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_import_file_confirm_returns_preview_stale_when_existing_records_change -v`
   - `cd web && npm test -- --run src/test/ImportsApi.test.ts src/test/ImportCenterPage.test.tsx src/test/AppStatusIndicator.test.tsx`
   - `bash scripts/verify.sh docs`
 - 未测风险：真实银行大文件/历史模板、真实 Postgres/RabbitMQ/Redis/systemd import worker drain、worker crash/retry、下游最终页面展示仍需 staging/发布前 smoke；`import.process.requested` App Status job affected domain 与银行导入 domain 声明存在 P1 文档化风险。

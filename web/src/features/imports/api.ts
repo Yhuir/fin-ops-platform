@@ -481,13 +481,3 @@ export async function fetchImportTemplates(): Promise<ImportTemplate[]> {
   });
   return mapImportTemplates(payload);
 }
-
-export async function revertImportBatch(batchId: string): Promise<void> {
-  await requestJson<{ batch: { id: string; status: string } }>(`/imports/batches/${batchId}/revert`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({}),
-  });
-}

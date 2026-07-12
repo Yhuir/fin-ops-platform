@@ -49,22 +49,23 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
 
 ## Workbench relation 展示归属审计
 
-对象 identity 审计负责发现同一业务对象是否有多个 visible owner；active relation 写入后是否已经在当前 Workbench active generation 中同组展示，由独立的 relation display 审计覆盖。发布前或生产修复后执行：
+对象 identity 审计负责发现同一业务对象是否有多个 visible owner；active relation 写入后是否已经在当前 Workbench active generation 中同组展示，由统一 `reconciliation-workbench` 页面 Audit 覆盖。管理员页面按钮和下列 CLI 调用同一个只读 proof core；CLI 只是运维适配器，不是第二套审计实现。发布前或生产修复后执行：
 
 ```bash
 cd /path/to/fin-ops-platform
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_workbench_relation_display --json --limit 50
 ```
 
-该工具只执行 `select`，不写 `app.*`、`read_model.*` 或 `job.*`。它检查：
+该工具只执行 `select`，不写 `app.*`、`read_model.*` 或 `job.*`。同一报告还检查 canonical/shared typed-edge equality、`workbench`/`workbench_relation` dirty scope 和 outbox；Workbench display 检查包括：
 
 - `app.workbench_pair_relations` 中 active relation 的成员 row 是否存在于 active Workbench `all` generation。
 - 同一 relation 的成员 row 在 `all` 或成员月份 scope 中是否被拆到多个 group。
 - 同一 relation row 在同一个 active scope 中是否有多个 visible owner。
 - row payload 中的 `case_id` / `relation_mode` 是否与 canonical relation 不一致。
 - `all` generation 是否旧于 relation 成员所在月份 generation。
+- visible automatic decision/candidate 是否仍污染 active generation。
 
-出现 blocking issue 时，不要直接修改 `read_model.workbench_group_rows` 或 `read_model.workbench_generations`。修复必须走现有刷新边界：按 relation 成员月份通过 `ReadModelRefreshGateway` / 事务内 repository scope contract 入队 Workbench month refresh，再用 aggregate-only `all` refresh 收敛全局 active generation。修复后重跑本审计和对象 identity 审计，确认两个报告的 `blocking_issue_count=0`。
+出现 blocking issue 时，不要直接修改 `read_model.workbench_group_rows` 或 `read_model.workbench_generations`。修复必须走现有刷新边界：按 relation 成员月份通过 `ReadModelRefreshGateway` / 事务内 repository scope contract 入队 Workbench month refresh，再用 aggregate-only `all` refresh 收敛全局 active generation。修复后重跑统一页面 Audit 和对象 identity 审计，确认页面报告 `integrity=pass`、`freshness=fresh`、`queue=drained` 且 `blocking_issue_count=0`。
 
 `--limit` 只限制明细 examples 数量，不影响 summary count。生产判断以 summary 中的全量 count 和 `blocking_issue_count` 为准。
 

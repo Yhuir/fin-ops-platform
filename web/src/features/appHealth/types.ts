@@ -259,19 +259,30 @@ export type OperationsDashboardPayload = {
 
 export type InputInvoiceUsageAuditStatus = "pass" | "issues_found" | string;
 
-export type PageAuditDomainKey =
-  | "pending_invoices"
-  | "turnover_ledger"
-  | "batch_accounting"
-  | "bank_flow_rule_batches"
-  | "oa_pending_payments"
-  | "bank_details"
-  | "cost_statistics";
+export type PageAuditPageKey =
+  | "reconciliation-workbench"
+  | "cost-statistics"
+  | "bank-details"
+  | "oa-pending-payments"
+  | "bank-flow-rule-batches"
+  | "batch-accounting"
+  | "turnover-ledger"
+  | "etc-tickets"
+  | "tax-offset"
+  | "pending-invoices"
+  | "input-invoice-usage"
+  | "output-invoice-collections"
+  | "settings"
+  | "app-health-operations"
+  | "imports.bank-transactions"
+  | "imports.invoices"
+  | "imports.etc-invoices";
 
 export type PageAuditStatus = {
   integrity?: "pass" | "issues_found";
   freshness?: "fresh" | "not_fresh";
   queue?: "drained" | "backlog";
+  external?: "pass" | "fail" | "unknown" | "not_applicable" | string;
 };
 
 export type PageAuditSummary = {
@@ -328,13 +339,18 @@ export type PageAuditContract = {
   database_snapshot?: boolean;
   external_source_boundary?: string;
   proof_checks?: string[];
+  contract_revision?: string;
+  proof_availability?: "ready" | "unavailable" | string;
+  registered_read_model_keys?: string[];
+  relation_proof_required?: boolean;
   write_policy?: "read_only" | string;
 };
 
 export type PageAuditPayload = {
   mode?: string;
   tenant_id?: string;
-  domain_key?: PageAuditDomainKey;
+  page_key?: PageAuditPageKey;
+  domain_key?: string;
   label?: string;
   generated_at?: string;
   overall_status?: InputInvoiceUsageAuditStatus;
@@ -350,4 +366,67 @@ export type InputInvoiceUsageAuditPayload = PageAuditPayload & {
 
 export type OutputInvoiceCollectionAuditPayload = PageAuditPayload & {
   summary?: OutputInvoiceCollectionAuditSummary;
+};
+
+export type AppHealthSystemAuditPayload = PageAuditPayload & {
+  summary?: PageAuditSummary & {
+    registered_page_count?: number | null;
+    audited_business_page_count?: number | null;
+    passed_business_page_count?: number | null;
+    database_internal_contracts?: "pass" | "issues_found" | string;
+    end_to_end_source_truth?: "unproven" | "proven_as_of_external_evidence" | "not_applicable" | string;
+  };
+  database_system_snapshot?: {
+    system_audit_id?: string;
+    snapshot_identity?: string;
+    snapshot_generated_at?: string;
+    snapshot_consistency?: string;
+    database_snapshot?: boolean;
+    evidence_fingerprint?: string;
+    page_results?: PageAuditPayload[];
+  };
+  runtime_observation?: {
+    observed_at?: string;
+    database_snapshot?: boolean;
+    warnings?: string[];
+  };
+  external_evidence?: {
+    status?: "pass" | "fail" | "unknown" | "not_applicable" | string;
+    end_to_end_source_truth?: "unproven" | "proven_as_of_external_evidence" | "not_applicable" | string;
+    as_of?: string;
+    claim_boundary?: string;
+    summary?: {
+      required_domain_count?: number;
+      passed_domain_count?: number;
+      failed_domain_count?: number;
+      unknown_domain_count?: number;
+    };
+    domains?: Array<{
+      domain?: "bank" | "oa" | "invoice" | "etc" | string;
+      status?: "pass" | "fail" | "unknown" | string;
+      reason?: string;
+      evidence_id?: string;
+      source_snapshot_id?: string;
+      observed_at?: string;
+      valid_until?: string;
+      manifest_fingerprint?: string;
+      issue_count?: number;
+      boundary?: string;
+    }>;
+    items?: Array<{
+      domain?: "bank" | "oa" | "invoice" | "etc" | string;
+      status?: "pass" | "fail" | "unknown" | string;
+      reason?: string;
+      evidence_id?: string;
+      observed_at?: string;
+      boundary?: string;
+    }>;
+    page_coverage?: Array<{
+      page_key?: PageAuditPageKey;
+      status?: "pass" | "fail" | "unknown" | "not_applicable" | string;
+      dependency_keys?: Array<"bank" | "oa" | "invoice" | "etc" | string>;
+      boundary?: string;
+    }>;
+  };
+  page_projection?: OperationsDashboardPayload;
 };

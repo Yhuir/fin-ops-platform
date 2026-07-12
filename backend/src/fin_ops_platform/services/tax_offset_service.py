@@ -37,7 +37,9 @@ class TaxOffsetService:
         month_snapshot = self._build_month_snapshot(month)
         default_selected_output_ids = [item["id"] for item in month_snapshot["output_items"]]
         default_selected_input_ids = [
-            item["id"] for item in month_snapshot["input_plan_items"] if item["id"] not in month_snapshot["locked_certified_input_ids"]
+            item["id"]
+            for item in month_snapshot["input_plan_items"]
+            if item["id"] not in month_snapshot["locked_certified_input_ids"]
         ]
         summary = self._calculate_from_month_snapshot(
             month=month,
@@ -109,9 +111,7 @@ class TaxOffsetService:
         locked_ids = set(month_snapshot["locked_certified_input_ids"])
         selected_output_id_set = set(selected_output_ids)
         selected_output_items = [
-            item
-            for item in month_snapshot["output_items"]
-            if item["id"] in selected_output_id_set
+            item for item in month_snapshot["output_items"] if item["id"] in selected_output_id_set
         ]
         selected_uncertified_input = [
             item
@@ -119,8 +119,12 @@ class TaxOffsetService:
             if item["id"] in selected_input_ids and item["id"] not in locked_ids
         ]
         output_tax = sum((self._to_decimal(item["tax_amount"]) for item in selected_output_items), start=ZERO)
-        certified_input_tax = sum((self._certified_tax_amount(item) for item in month_snapshot["certified_items"]), start=ZERO)
-        planned_input_tax = sum((self._to_decimal(item["tax_amount"]) for item in selected_uncertified_input), start=ZERO)
+        certified_input_tax = sum(
+            (self._certified_tax_amount(item) for item in month_snapshot["certified_items"]), start=ZERO
+        )
+        planned_input_tax = sum(
+            (self._to_decimal(item["tax_amount"]) for item in selected_uncertified_input), start=ZERO
+        )
         input_tax = certified_input_tax + planned_input_tax
         deductible_tax = min(output_tax, input_tax)
         payable_tax = output_tax - deductible_tax
@@ -360,18 +364,22 @@ class TaxOffsetService:
 
         for input_plan_item in input_plan_items:
             certified_seller_tax_no = certified_item.get("seller_tax_no")
+            certified_seller_name = certified_item.get("seller_name")
             seller_matches = False
             if certified_seller_tax_no and input_plan_item.get("seller_tax_no") == certified_seller_tax_no:
                 seller_matches = True
-            elif input_plan_item.get("seller_name") == certified_item.get("seller_name"):
+            elif certified_seller_name and input_plan_item.get("seller_name") == certified_seller_name:
                 seller_matches = True
             plan_tax_amount = input_plan_item.get("tax_amount")
             certified_tax_amount = certified_item.get("tax_amount")
             tax_amount_matches = False
             if plan_tax_amount not in (None, "") and certified_tax_amount not in (None, ""):
-                tax_amount_matches = self._to_decimal(str(plan_tax_amount)) == self._to_decimal(str(certified_tax_amount))
+                tax_amount_matches = self._to_decimal(str(plan_tax_amount)) == self._to_decimal(
+                    str(certified_tax_amount)
+                )
             if (
                 seller_matches
+                and certified_item.get("issue_date")
                 and input_plan_item.get("issue_date") == certified_item.get("issue_date")
                 and tax_amount_matches
             ):
@@ -386,7 +394,11 @@ class TaxOffsetService:
         if total_with_tax in (None, "") and amount not in (None, "") and tax_amount not in (None, ""):
             total_with_tax = self._format_money(self._to_decimal(str(amount)) + self._to_decimal(str(tax_amount)))
         return {
-            "id": item.get("id") or item.get("unique_key") or item.get("invoice_no") or item.get("digital_invoice_no") or "certified",
+            "id": item.get("id")
+            or item.get("unique_key")
+            or item.get("invoice_no")
+            or item.get("digital_invoice_no")
+            or "certified",
             "unique_key": item.get("unique_key"),
             "digital_invoice_no": item.get("digital_invoice_no"),
             "invoice_code": item.get("invoice_code"),

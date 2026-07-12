@@ -369,6 +369,7 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(resetBody.reason).toBe("流水规则批量处理：全部已提交批次重新过规则");
     expect((await resetResponse).status()).toBe(200);
 
+    await page.getByRole("button", { name: "查看建设银行8106流水" }).click();
     await expect(page.getByRole("table", { name: "建设银行8106流水" })).toBeVisible();
     expect(api.count("POST /api/bank-flow-rule-batches/reset-submitted")).toBe(1);
     await expectNoUnexpectedSuccessUiErrors(page);

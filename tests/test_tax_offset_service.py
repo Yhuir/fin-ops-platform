@@ -408,7 +408,7 @@ class TaxOffsetServiceTests(unittest.TestCase):
                     invoice_status="正常",
                     selection_time="2026-04-01 09:01:00",
                 ),
-            ]
+            ],
         )
 
         payload = service.get_month_payload("2026-03")
@@ -484,7 +484,7 @@ class TaxOffsetServiceTests(unittest.TestCase):
                     invoice_status="正常",
                     selection_time="2026-04-01 09:01:00",
                 ),
-            ]
+            ],
         )
 
         result = service.calculate(
@@ -614,6 +614,35 @@ class TaxOffsetServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["locked_certified_input_ids"], ["ti-1", "ti-2", "ti-3"])
         self.assertEqual(len(payload["certified_outside_plan_rows"]), 0)
+
+    def test_match_certified_to_plan_does_not_treat_missing_seller_identity_as_equal(self) -> None:
+        service = TaxOffsetService()
+
+        match = service._match_certified_to_plan(
+            {
+                "digital_invoice_no": None,
+                "invoice_code": None,
+                "invoice_no": None,
+                "seller_tax_no": None,
+                "seller_name": None,
+                "issue_date": "2026-05-03",
+                "tax_amount": "6.00",
+            },
+            [
+                {
+                    "id": "input-1",
+                    "digital_invoice_no": None,
+                    "invoice_code": None,
+                    "invoice_no": None,
+                    "seller_tax_no": None,
+                    "seller_name": None,
+                    "issue_date": "2026-05-03",
+                    "tax_amount": "6.00",
+                }
+            ],
+        )
+
+        self.assertIsNone(match)
 
 
 if __name__ == "__main__":

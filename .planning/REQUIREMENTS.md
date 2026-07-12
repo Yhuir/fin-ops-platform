@@ -34,6 +34,21 @@
 - [ ] **PAR-02**: Each page thread only writes its assigned phase directory unless explicitly asked to update long-term docs.
 - [ ] **PAR-03**: Long-term facts discovered during analysis are promoted to `docs/modules/<module>/` only after review.
 
+### Page Audit Proof Closure
+
+- [ ] **AUDIT-01**: Every page registered in `web/src/app/pageRegistry.tsx` has an explicit fail-closed Audit contract or an explicit non-read-model operational proof contract.
+- [ ] **AUDIT-02**: Every page Audit compares an independently owned canonical expected set with the complete page projection in both directions.
+- [ ] **AUDIT-03**: Every page Audit independently recalculates all registered business-critical display fields and summary totals.
+- [ ] **AUDIT-04**: Canonical relation edges, shared `workbench_relation` edges, Workbench active-generation edges, and every page consumer projection are equal in both directions.
+- [ ] **AUDIT-05**: Audit results are produced from one system-level repeatable-read read-only snapshot and bind the current audit/source/read-model/relation/config/generation versions.
+- [ ] **AUDIT-06**: Freshness, queue and readiness use one manifest-driven current-effective policy across Audit, App Status, operation barriers and SLO smoke.
+- [ ] **AUDIT-07**: `fan_out_command/all` historical readiness is diagnostic-only while current dirty/outbox failures remain blocking; queryable parent readiness remains blocking.
+- [ ] **AUDIT-08**: External source completeness is reported separately and cannot pass when required control evidence is absent.
+- [ ] **AUDIT-09**: Specialized and parallel legacy Audit runtime paths are removed after callers migrate, with static guards preventing reintroduction.
+- [ ] **AUDIT-10**: The exact cross-page omitted-relation counterexample fails deterministically and all applicable seven-category tests pass.
+- [ ] **AUDIT-11**: Any required read-model rebuild uses the formal refresh gateway and durable queue with staged drain, idempotency, rollback and no direct SQL mark-fresh.
+- [ ] **AUDIT-12**: Production closure proves release consistency, worker/queue convergence, all-page system Audit, version currency and legacy-route absence using read-only evidence after authorized deployment.
+
 ## v2 Requirements
 
 ### Automation
@@ -45,7 +60,7 @@
 
 | Feature | Reason |
 |---------|--------|
-| Business implementation changes | This step only creates planning structure. |
+| Business changes unrelated to Audit/readiness closure | The milestone remains page-scoped; Phase 19 authorizes only the cross-page proof and runtime consistency work defined by AUDIT-01..12. |
 | Full project roadmap redesign | The immediate goal is page-scoped phase scaffolding. |
 | Per-page copies of the seven codebase map files | They duplicate global map semantics and create merge conflicts. |
 
@@ -76,12 +91,24 @@
 | PAR-01 | Phase 0-17 | Pending |
 | PAR-02 | Phase 0-17 | Pending |
 | PAR-03 | Phase 0-17 | Pending |
+| AUDIT-01 | Phase 19 | Pending |
+| AUDIT-02 | Phase 19 | Pending |
+| AUDIT-03 | Phase 19 | Pending |
+| AUDIT-04 | Phase 19 | Pending |
+| AUDIT-05 | Phase 19 | Pending |
+| AUDIT-06 | Phase 19 | Pending |
+| AUDIT-07 | Phase 19 | Pending |
+| AUDIT-08 | Phase 19 | Pending |
+| AUDIT-09 | Phase 19 | Pending |
+| AUDIT-10 | Phase 19 | Pending |
+| AUDIT-11 | Phase 19 | Pending |
+| AUDIT-12 | Phase 19 | Pending |
 
 **Coverage:**
-- v1 requirements: 23 total
-- Mapped to phases: 23
+- v1 requirements: 35 total
+- Mapped to phases: 35
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-16*
-*Last updated: 2026-06-16 after adding Phase 0 cross-page dependency baseline*
+*Last updated: 2026-07-11 after adding Phase 19 Audit proof closure requirements*

@@ -12,6 +12,7 @@ from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
 
 from postgres_test_utils import apply_test_migrations, fetch_scalar, require_postgres_test_database_url, truncate_test_database
+from tests.app_test_support import seed_confirmed_import
 
 
 @contextmanager
@@ -115,37 +116,25 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
 
     def test_import_preview_confirm_persists_to_postgres_and_survives_rebuild(self) -> None:
         app = self._build_app()
-        preview_response = app.handle_request(
-            "POST",
-            "/imports/preview",
-            body=json.dumps(
-                {
-                    "batch_type": "input_invoice",
-                    "source_name": "stage07-input.json",
-                    "imported_by": "test_finops_user",
-                    "rows": [
-                        {
-                            "counterparty_name": "供应商A",
-                            "invoice_no": "INV-STAGE07-001",
-                            "invoice_date": "2026-03-01",
-                            "amount": "100.00",
-                            "tax_amount": "6.00",
-                            "total_with_tax": "106.00",
-                        }
-                    ],
-                }
-            ),
-        )
-
-        self.assertEqual(preview_response.status_code, 200, preview_response.body)
-        preview_payload = json.loads(preview_response.body)
-        batch_id = preview_payload["batch"]["id"]
         with patch.object(app, "_run_workbench_auto_matching_for_scopes", return_value=None):
-            confirm_response = app.handle_request("POST", "/imports/confirm", body=json.dumps({"batch_id": batch_id}))
-
-        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
-        confirm_payload = json.loads(confirm_response.body)
-        self.assertEqual(confirm_payload["batch"]["status"], "completed")
+            preview, confirmed_batch = seed_confirmed_import(
+                app,
+                batch_type=BatchType.INPUT_INVOICE,
+                source_name="stage07-input.json",
+                imported_by="test_finops_user",
+                rows=[
+                    {
+                        "counterparty_name": "供应商A",
+                        "invoice_no": "INV-STAGE07-001",
+                        "invoice_date": "2026-03-01",
+                        "amount": "100.00",
+                        "tax_amount": "6.00",
+                        "total_with_tax": "106.00",
+                    }
+                ],
+            )
+        batch_id = preview.id
+        self.assertEqual(confirmed_batch.status.value, "completed")
 
         rebuilt_app = self._build_app()
         batch_response = rebuilt_app.handle_request("GET", f"/imports/batches/{batch_id}")

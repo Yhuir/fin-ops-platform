@@ -23,8 +23,8 @@
 - `/api/background-jobs*`：后台任务。
 - `/api/app-health*`：健康状态。
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
-- `/api/operations/app-health/input-invoice-usage-audit`：管理员只读进项使用三边对账审计。
-- `/api/operations/app-health/output-invoice-collection-audit`：管理员只读销项收款三边对账审计。
+- `/api/operations/app-health/page-audit?page=input-invoice-usage`：管理员只读进项 canonical/shared/consumer 对账审计。
+- `/api/operations/app-health/page-audit?page=output-invoice-collections`：管理员只读销项 canonical/shared/consumer 对账审计。
 - `/api/operations/app-health/page-audit`：管理员只读页面业务 read model / relation 全量对账审计。
 - `/api/operations/app-health/input-invoice-usage-refresh`：管理员受控入队刷新进项使用 read model scope。
 - `/api/operations/app-health/output-invoice-collection-refresh`：管理员受控入队刷新销项收款 read model scope。
@@ -1105,7 +1105,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 ## AppHealth 进项使用审计 API
 
-`GET /api/operations/app-health/input-invoice-usage-audit`
+`GET /api/operations/app-health/page-audit?page=input-invoice-usage`
 
 权限：
 
@@ -1153,7 +1153,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
       "read_model.workbench_relation_scopes",
       "job.read_model_dirty_scopes"
     ],
-    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh'",
+    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh' and audit_status.queue == 'drained' and audit_contract.database_snapshot == true",
     "write_policy": "read_only"
   },
   "generated_at": "2026-07-10T00:00:00+00:00"
@@ -1168,7 +1168,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 ## AppHealth 销项收款审计 API
 
-`GET /api/operations/app-health/output-invoice-collection-audit`
+`GET /api/operations/app-health/page-audit?page=output-invoice-collections`
 
 权限：
 
@@ -1216,7 +1216,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
       "read_model.workbench_relation_scopes",
       "job.read_model_dirty_scopes"
     ],
-    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh'",
+    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh' and audit_status.queue == 'drained' and audit_contract.database_snapshot == true",
     "write_policy": "read_only"
   },
   "generated_at": "2026-07-10T00:00:00+00:00"
@@ -1231,7 +1231,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 ## AppHealth 页面业务审计 API
 
-`GET /api/operations/app-health/page-audit?domain=<domain_key>`
+`GET /api/operations/app-health/page-audit?page=<page_key>`
 
 权限：
 
@@ -1240,17 +1240,9 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - 未登录或登录态失效返回现有 `401 invalid_oa_session`。
 - 非管理员返回 `403 admin_only`。
 
-支持的 `domain_key`：
+`page_key` 与 frontend page registry 完全一致。当前 17 个页面全部为 `ready`；`app-health-operations` 是 system proof owner，其余 16 个页面分别由有限、显式的 proof owner 执行。任何新页面在进入 frontend registry 时都必须同时登记 Audit 合同；未完成 proof 时只能 fail closed，不能把登记本身解释为可证明。
 
-- `pending_invoices`：代找发票页面。
-- `turnover_ledger`：外部往来款管理页面。
-- `batch_accounting`：批量账务页面。
-- `bank_flow_rule_batches`：流水规则批量处理页面。
-- `oa_pending_payments`：OA 代付款核对页面。
-- `bank_details`：银行明细页面。
-- `cost_statistics`：成本统计页面。
-
-该接口是只读页面业务审计入口，复用 App 后端已有 PostgreSQL 连接，不要求调用方提供 DB URL。无 PostgreSQL runtime connection 时返回 `503 postgres_required`；未知 `domain` 返回 `400 unsupported_page_audit_domain`；审计 SQL 失败时返回 `500 page_audit_failed`。该接口不得刷新 read model、不得自动修复 relation、不得写入业务表。
+该接口是只读页面业务审计入口，复用 App 后端已有 PostgreSQL 连接，不要求调用方提供 DB URL。无 PostgreSQL runtime connection 时返回 `503 postgres_required`；未知 `page` 返回 `400 unsupported_page_audit_page`；已登记但 proof 未实现返回 `409 page_audit_proof_unavailable` 和 `overall_status=unavailable`；审计 SQL 失败返回 `500 page_audit_failed`。该接口不得刷新 read model、不得自动修复 relation、不得写入业务表。
 
 成功响应始终为 `200`，审计是否通过由 payload 判断：
 
@@ -1258,6 +1250,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 {
   "mode": "page-business-read-model-audit",
   "tenant_id": "default",
+  "page_key": "bank-details",
   "domain_key": "bank_details",
   "label": "银行明细",
   "overall_status": "pass",
@@ -1286,7 +1279,11 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
     "relation_tables": ["read_model.workbench_relation_rows", "read_model.workbench_relation_groups"],
     "scope_types": ["bank_detail", "bank_account_balance", "workbench_relation"],
     "event_types": ["bank_detail.read_model.refresh", "bank_account_balance.read_model.refresh", "workbench_relation.read_model.refresh"],
-    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh'",
+    "contract_revision": "page-audit-contract.v18",
+    "proof_availability": "ready",
+    "registered_read_model_keys": ["bank_detail", "bank_account_balance", "workbench_relation"],
+    "relation_proof_required": true,
+    "pass_condition": "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh' and audit_status.queue == 'drained' and audit_contract.database_snapshot == true",
     "guarantee_boundary": "App-internal canonical facts, read_model rows/scopes/source_versions, durable refresh state, and projected relation distribution agree for this page.",
     "write_policy": "read_only"
   },
@@ -1294,12 +1291,31 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 }
 ```
 
+页面 success gate 还要求 `audit_contract.database_snapshot=true` 和 `snapshot_consistency=repeatable_read_read_only`。当前文案只能声明“已登记证明一致”，不能把 shared relation 三边一致扩张为所有 consumer projection 已完整证明。
+
 契约要求：
 
-- `overall_status="pass"`、`audit_status.integrity="pass"`、`audit_status.freshness="fresh"` 且 `audit_status.queue="drained"` 才能声明该页面在 App 内部 canonical facts、页面 read model、refresh queue 和 Workbench relation 投影上全量一致。
+- `overall_status="pass"`、`audit_status.integrity="pass"`、`audit_status.freshness="fresh"` 且 `audit_status.queue="drained"` 才能声明该页面在已登记的 App 内部 canonical facts、页面 read model、refresh queue，以及该页面实际消费的 Workbench relation 投影上全量一致。
 - `audit_status` 分开表达完整性、freshness 和 durable outbox queue；`overall_status="issues_found"` 时返回有上限的 `issues` 样本，样本字段不可解释为精确总数。
 - 审计覆盖页面 source facts、read model rows/scopes/source_versions、dirty scopes/outbox backlog、缺失/孤儿/重复 row、scope row_count、active relation 分发和非 active relation 误投影为 linked。
 - 该接口只能证明 App 内部事实、read model 和 relation 投影一致；不能证明外部银行/OA 系统本身没有漏同步。外部源完整性仍必须由对应导入/OA sync runbook 和来源系统对账证明。
+- `imports.bank-transactions` 是 direct-canonical 页面：`registered_read_model_keys=[]`、`relation_proof_required=false`。Audit 双向证明已登记 file/session/batch/row/canonical bank transaction 与当前 job/outbox；bank detail、account balance、Workbench、cost、search 是写后 impact targets，不是该页 consumer。文件对象 hash/size 不等于银行外部 statement control evidence。
+- `imports.invoices` 是 direct-canonical 页面：`registered_read_model_keys=[]`、`relation_proof_required=false`。Audit 双向证明 input/output file/session/batch/row、canonical invoice、manual source-link 和精确归属 job/outbox；下游 read models 与业务配对关系不由本页通过状态推断。`POST /imports/files/confirm` 只允许 durable enqueue；queue 不可用返回 `503 import_queue_unavailable`，没有 inline 或 batch revert fallback。
+- `imports.etc-invoices` 是 zero-own-read-model 的 direct-canonical workflow，并登记 ETC internal relation proof。`POST /api/etc/import/preview` 持久化 task-bound session、原始 ZIP file objects、counts/matches/fingerprint；`POST /api/etc/import/confirm` 只从 durable session校验并 enqueue。Audit 双向证明 session/file/task/requirement/business-import-batch/ETC-invoice/canonical bridge 与 job/outbox；不推断下游 Workbench 配对或外部 ETC ZIP 完整性。
+- `tax-offset` 是明确的 relation 非消费者：canonical expected-set 只来自 active `app.invoices` 与 `app.tax_certified_import_records`，Audit 独立重算 output/input/certified/matched/outside 五组 item、认证匹配优先级、锁定与默认选择、税额 summary、结构化展示字段、source versions、dirty scope 与 outbox。其 `relation_proof_required=false`，成功文案必须显示“本页面不消费配对关系”，不得宣称已证明配对关系；`app.tax_offset_plans` 是写入事实但不属于当前页面 read projection expected-set。
+- `etc-tickets` 是 `registered_read_model_keys=[]` 的直接 canonical 页面；统一 executor 在一个只读 repeatable-read snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 的集合、字段与内部 typed edge，并以 `job.import_jobs(import_type=etc_invoice_import.confirm)` 判定 queue。成功不能依赖伪造的 page read-model status；也不能把 Workbench、tax、cost 或 invoice-lifecycle 下游影响目标声称为本页 consumer。外部文件字节、ETC 归档和真实 OA 草稿状态不在此合同内。
+- `settings` 是 `registered_read_model_keys=[]`、`relation_proof_required=false` 的 direct-canonical control-plane 页面。Audit 证明唯一 settings singleton、生产归一化合同、非敏感 credential summary 和 settings reset jobs；credential SQL 不解密也不选择密文，报告不得出现密码/token/secret。OA project provider、真实 credential 登录、manual OA search/import 和 reset 后多页面 smoke 属于 external gate。
+
+### App Health System Audit 响应
+
+`page=app-health-operations` 不打开第 17 个独立事务。后端只打开一个 outer `REPEATABLE READ READ ONLY` transaction，把同一 caller-owned Audit snapshot 传给其余 16 个页面 proof，并在该 snapshot 内独立重算 App Health inventory、read model manifest/status、required worker heartbeat 和 current durable queue。响应在普通 page Audit 字段之外至少包含：
+
+- `database_system_snapshot`：`system_audit_id`、PostgreSQL `snapshot_identity`/时间、17 页合同 revision/version set、页面结果、registry/manifest/worker fingerprint 和 durable runtime 证明。
+- `runtime_observation`：request metrics、RabbitMQ transport 等 point-in-time 观测；必须明确 `database_snapshot=false`，不能冒充数据库快照事实。
+- `external_evidence`：银行、OA、发票和 ETC 四个独立 `complete_snapshot/all` manifest 与 App canonical facts 的精确双向证明。每个 domain 返回 evidence id/fingerprint、source snapshot、observed/valid time、missing/extra/field mismatch/control mismatch 和有上限的问题样本；页面覆盖来自 registry 的显式 domain keys，不从说明文字猜测。
+- `page_projection`：与 database system proof 同一 snapshot 构建的 App Health dashboard payload。
+
+System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 17 页已登记的 App 内部合同完整一致。只有四个外部 domain 同时 `pass` 时，`external_evidence.status=pass` 与 `end_to_end_source_truth=proven_as_of_external_evidence` 才成立；该声明严格绑定 manifest 的 `observed_at/source_snapshot_id` 与当前 App immutable snapshot。缺 manifest 为 `unknown/unproven`，最新 manifest 被撤销、过期、覆盖不全或精确集合/字段/control 不一致为 `fail/unproven`，不得回退旧版本。它仍不证明 Audit 后发生的写入或外部实时状态。页面下一次普通 dashboard refresh 必须清除历史 Audit 绿色状态，避免把旧 snapshot 继续展示为当前结论。
 
 ## AppHealth 进项使用刷新 API
 
@@ -1329,7 +1345,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - 只允许 `scope_keys` 为 `all` 或 `YYYY-MM`，同一请求最多 36 个 scope；非法 scope 返回 `400 invalid_input_invoice_usage_refresh_scope`。
 - 接口只通过 `ReadModelRefreshGateway` 写入 durable runtime queue，入队 `input_invoice_usage.read_model.refresh`；不得直接写 `read_model.input_invoice_usage_*`、不得直接修复 relation、不得绕过 scope policy。
 - runtime queue 不可用时返回 `503 runtime_queue_required`。
-- 成功返回 `202 Accepted`，表示 refresh job 已入队，实际完成状态必须继续用 App Health、operation barrier 或 `/api/operations/app-health/input-invoice-usage-audit` 复核。
+- 成功返回 `202 Accepted`，表示 refresh job 已入队，实际完成状态必须继续用 App Health、operation barrier 或统一 `page-audit?page=input-invoice-usage` 复核。
 
 成功响应：
 
@@ -1373,7 +1389,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - 只允许 `scope_keys` 为 `all` 或 `YYYY-MM`，同一请求最多 36 个 scope；非法 scope 返回 `400 invalid_output_invoice_collection_refresh_scope`。
 - 接口只通过 `ReadModelRefreshGateway` 写入 durable runtime queue，入队 `output_invoice_collection.read_model.refresh`；不得直接写 `read_model.output_invoice_collection_*`、不得直接修复 relation、不得绕过 scope policy。
 - runtime queue 不可用时返回 `503 runtime_queue_required`。
-- 成功返回 `202 Accepted`，表示 refresh job 已入队，实际完成状态必须继续用 App Health、operation barrier 或 `/api/operations/app-health/output-invoice-collection-audit` 复核。
+- 成功返回 `202 Accepted`，表示 refresh job 已入队，实际完成状态必须继续用 App Health、operation barrier 或统一 `page-audit?page=output-invoice-collections` 复核。
 
 成功响应：
 

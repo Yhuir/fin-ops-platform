@@ -2,6 +2,8 @@
 
 本文件把 `input-invoice-usage` 的 Spec ID 映射到自动化测试。状态定义见 `docs/dev/spec-first-e2e-audit.md`。
 
+> 2026-07-11 合同纠正：进项 relation confirm 继续影响本页、OA pending 与 cost consumer；不再声称或 mock relation→tax-offset fan-out。税金页面只消费 canonical invoices/certified facts。
+
 ## 覆盖矩阵
 
 | Spec ID | 状态 | 当前覆盖 | 缺口/说明 |

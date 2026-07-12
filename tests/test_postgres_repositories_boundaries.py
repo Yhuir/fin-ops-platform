@@ -318,8 +318,7 @@ def test_no_oa_bank_batch_save_deletes_removed_events_before_removed_batches() -
     removed_batches_delete_index = next(
         index
         for index, sql in enumerate(executed_sql)
-        if "delete from app.no_oa_bank_batches" in sql
-        and "not (batch_id = any(%s))" in sql
+        if "delete from app.no_oa_bank_batches" in sql and "not (batch_id = any(%s))" in sql
     )
 
     assert read_model_delete_index < removed_events_delete_index < removed_batches_delete_index
@@ -372,7 +371,9 @@ def test_no_oa_bank_batch_save_bulk_upserts_app_and_read_model_rows() -> None:
     assert [len(params_seq) for params_seq in app_upserts] == [2]
     assert [len(params_seq) for params_seq in read_model_upserts] == [2]
     assert not any(sql.startswith("insert into app.no_oa_bank_batches(") for sql, _params in connection.executed)
-    assert not any(sql.startswith("insert into read_model.no_oa_bank_batch_rows(") for sql, _params in connection.executed)
+    assert not any(
+        sql.startswith("insert into read_model.no_oa_bank_batch_rows(") for sql, _params in connection.executed
+    )
 
 
 def test_read_model_bulk_insert_prefers_multi_values_path_for_allowlisted_tables() -> None:
@@ -497,7 +498,10 @@ def test_workbench_relation_distribution_partial_save_deletes_overlap_and_counts
     assert any("delete from read_model.workbench_relation_rows" in sql for sql in executed_sql)
     assert not any("update read_model.workbench_relation_rows" in sql for sql in executed_sql)
     assert not any("update read_model.workbench_relation_groups" in sql for sql in executed_sql)
-    assert any("select ( select count(*)::integer from read_model.workbench_relation_rows" in sql for sql, _params in connection.fetched_one)
+    assert any(
+        "select ( select count(*)::integer from read_model.workbench_relation_rows" in sql
+        for sql, _params in connection.fetched_one
+    )
     bulk_sql = [sql for sql, _params in connection.executed_many_values]
     assert any("insert into read_model.workbench_relation_groups" in sql for sql in bulk_sql)
     assert any("insert into read_model.workbench_relation_rows" in sql for sql in bulk_sql)
@@ -511,14 +515,10 @@ def test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches() -> None
 
     executed_sql = [sql for sql, _ in connection.executed]
     events_delete_index = next(
-        index
-        for index, sql in enumerate(executed_sql)
-        if "delete from app.no_oa_bank_batch_events" in sql
+        index for index, sql in enumerate(executed_sql) if "delete from app.no_oa_bank_batch_events" in sql
     )
     batches_delete_index = next(
-        index
-        for index, sql in enumerate(executed_sql)
-        if "delete from app.no_oa_bank_batches" in sql
+        index for index, sql in enumerate(executed_sql) if "delete from app.no_oa_bank_batches" in sql
     )
 
     assert events_delete_index < batches_delete_index
@@ -583,8 +583,7 @@ def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() 
     assert connection.executed[1][1] == ("2026-03-01", "no_oa_bank_batch", ["march-batch"])
     assert connection.executed[2][1] == ("2026-03-01", "no_oa_bank_batch", ["march-batch"])
     assert not any(
-        sql == "delete from read_model.no_oa_bank_batch_rows where not (batch_id = any(%s))"
-        for sql in executed_sql
+        sql == "delete from read_model.no_oa_bank_batch_rows where not (batch_id = any(%s))" for sql in executed_sql
     )
     upsert_batch_params = [
         params
@@ -595,7 +594,9 @@ def test_no_oa_bank_batch_scoped_save_deletes_only_target_scope_before_upsert() 
     assert len(upsert_batch_params) == 1
     assert upsert_batch_params[0][0] == "march-batch"
     assert not any(sql.startswith("insert into app.no_oa_bank_batches(") for sql, _params in connection.executed)
-    assert not any(sql.startswith("insert into read_model.no_oa_bank_batch_rows(") for sql, _params in connection.executed)
+    assert not any(
+        sql.startswith("insert into read_model.no_oa_bank_batch_rows(") for sql, _params in connection.executed
+    )
     replaced_event_params = [
         params
         for sql, params in connection.executed
@@ -635,7 +636,9 @@ def test_bank_flow_rule_batch_save_uses_dedicated_physical_tables() -> None:
     assert any("insert into read_model.bank_flow_rule_batch_rows(" in sql for sql in executed_sql)
     assert any("insert into app.bank_flow_rule_batch_events(" in sql for sql in executed_sql)
     assert not any(sql.startswith("insert into app.bank_flow_rule_batches(") for sql, _params in connection.executed)
-    assert not any(sql.startswith("insert into read_model.bank_flow_rule_batch_rows(") for sql, _params in connection.executed)
+    assert not any(
+        sql.startswith("insert into read_model.bank_flow_rule_batch_rows(") for sql, _params in connection.executed
+    )
     forbidden_tables = (
         "app.no_oa_bank_batches",
         "app.no_oa_bank_batch_events",
@@ -832,6 +835,33 @@ def test_read_model_tax_save_uses_entry_count_column_and_transaction() -> None:
     assert "insert into read_model.tax_offset_read_models" in sql
     assert "entry_count" in sql
     assert "row_count" not in sql
+
+
+def test_read_model_tax_save_counts_inner_tax_items_for_entry_count() -> None:
+    connection = RecordingConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.save_tax_offset_read_models(
+        {
+            "read_models": {
+                "2026-03": {
+                    "payload": {
+                        "output_items": [{"id": "output-1"}],
+                        "input_plan_items": [{"id": "input-1"}],
+                        "certified_items": [{"id": "certified-1"}],
+                        "certified_matched_rows": [{"id": "certified-1", "matched_input_id": "input-1"}],
+                        "certified_outside_plan_rows": [],
+                    },
+                    "generated_at": "2026-03-02T00:00:00+00:00",
+                }
+            }
+        }
+    )
+
+    model_insert = next(
+        params for sql, params in connection.executed if "insert into read_model.tax_offset_read_models" in sql
+    )
+    assert model_insert[3] == 3
 
 
 def test_invoice_lifecycle_rows_are_saved_in_batch_and_scope_is_updated() -> None:
@@ -1041,9 +1071,7 @@ def test_ops_tax_etc_attachment_cache_save_updates_source_lookup_rows() -> None:
     assert "attachment_identity_invoice" in executed_sql
     assert "from app.oa_attachments attachment" in executed_sql
     assert any(
-        params == ("cache-key-1",)
-        for sql, params in connection.executed
-        if "attachment_identity_invoice" in sql
+        params == ("cache-key-1",) for sql, params in connection.executed if "attachment_identity_invoice" in sql
     )
 
 
@@ -1140,8 +1168,7 @@ def test_workbench_repository_delegates_pair_relation_load_to_relation_repositor
 
 def test_workbench_repository_no_longer_owns_pair_relation_sql() -> None:
     repository_source = (
-        Path(__file__).resolve().parents[1]
-        / "backend/src/fin_ops_platform/services/postgres_repositories/workbench.py"
+        Path(__file__).resolve().parents[1] / "backend/src/fin_ops_platform/services/postgres_repositories/workbench.py"
     ).read_text(encoding="utf-8")
     forbidden_snippets = {
         "from app.workbench_pair_relations",

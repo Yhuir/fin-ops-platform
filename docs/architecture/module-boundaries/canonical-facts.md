@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | 外部事实 | OA Mongo、Excel/PDF/ZIP、银行导出文件 | 外部系统或导入文件 | app 只读接入或导入，不写外部原始库。 |
 | Canonical facts | `app.invoices`、`app.bank_transactions`、`app.workbench_pair_relations` | 现有业务模块 | 业务唯一真相，写入必须经过 owner 边界。 |
-| Runtime/audit facts | `job.outbox_events`、`job.read_model_dirty_scopes`、`job.background_jobs`、`audit.events` | runtime-workers / read-models / permissions-and-audit | 描述任务、刷新、审计，不替代业务事实。 |
+| Runtime/audit facts | `job.outbox_events`、`job.read_model_dirty_scopes`、`job.background_jobs`、`audit.events`、`audit.external_control_evidence*` | runtime-workers / read-models / permissions-and-audit | 描述任务、刷新、审计和外部 complete-snapshot 对照证据，不替代业务事实；外部 manifest 不允许由 App canonical rows 反向生成后自证。 |
 | Read models | `read_model.*` 页面投影 | read-models + 各 query/projection owner | 派生投影，只能从 canonical facts 或上游 fresh read model 生成。 |
 | Cache / transport / UI hints | Redis、RabbitMQ、frontend event | runtime/UI | 只做缓存、唤醒、传输或刷新提示。 |
 

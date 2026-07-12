@@ -1646,7 +1646,7 @@ export default function CostStatisticsPage() {
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
       ariaLabel="Audit 成本统计"
-      domainKey="cost_statistics"
+      pageKey="cost-statistics"
       label="成本统计"
       readModelStatus={readModelStatus}
     />

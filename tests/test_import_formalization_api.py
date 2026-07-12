@@ -8,7 +8,7 @@ import unittest
 
 from openpyxl import Workbook
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import build_local_state_application as build_application, install_durable_import_queue
 from tests.mock_import_files import INVOICE_JAN, PINGAN_JAN, MockImportFile
 
 
@@ -69,6 +69,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
     def test_confirmed_import_persists_across_restart_and_refreshes_api_workbench(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            import_queue = install_durable_import_queue(app)
             preview_body, preview_headers = build_multipart_payload(
                 imported_by="user_finance_01",
                 files=[INVOICE_JAN, PINGAN_JAN],
@@ -96,6 +97,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
             )
             self.assertEqual(confirm_response.status_code, 202)
             confirm_payload = json.loads(confirm_response.body)
+            import_queue.process_all()
             job_payload = self._wait_for_background_job(app, confirm_payload["job"]["job_id"])
             self.assertEqual(job_payload["status"], "succeeded")
             matching_job_id = job_payload["result_summary"]["enqueued_matching_job_id"]
@@ -242,6 +244,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
     def test_revert_batch_and_download_batch_export(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            import_queue = install_durable_import_queue(app)
             preview_body, preview_headers = build_multipart_payload(
                 imported_by="user_finance_01",
                 files=[INVOICE_JAN],
@@ -266,6 +269,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 ),
             )
             confirm_payload = json.loads(confirm_response.body)
+            import_queue.process_all()
             job_payload = self._wait_for_background_job(app, confirm_payload["job"]["job_id"])
             self.assertEqual(job_payload["status"], "succeeded")
             session_response = app.handle_request("GET", f"/imports/files/sessions/{preview_payload['session']['id']}")
@@ -279,20 +283,18 @@ class ImportFormalizationApiTests(unittest.TestCase):
             self.assertEqual(download_payload["batch"]["id"], batch_id)
 
             revert_response = app.handle_request("POST", f"/imports/batches/{batch_id}/revert", json.dumps({}))
-            self.assertEqual(revert_response.status_code, 200)
-            revert_payload = json.loads(revert_response.body)
-            self.assertEqual(revert_payload["batch"]["status"], "reverted")
+            self.assertEqual(revert_response.status_code, 404)
 
             batch_response = app.handle_request("GET", f"/imports/batches/{batch_id}")
             batch_payload = json.loads(batch_response.body)
-            self.assertEqual(batch_payload["batch"]["status"], "reverted")
+            self.assertEqual(batch_payload["batch"]["status"], "completed")
 
             session_response = app.handle_request(
                 "GET",
                 f"/imports/files/sessions/{preview_payload['session']['id']}",
             )
             session_payload = json.loads(session_response.body)
-            self.assertEqual(session_payload["files"][0]["status"], "reverted")
+            self.assertEqual(session_payload["files"][0]["status"], "confirmed")
             app.shutdown_background_jobs()
 
 

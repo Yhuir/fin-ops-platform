@@ -17,10 +17,20 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
 - 关键 query 需要保留 EXPLAIN/性能观测入口；性能结论进入 `monitoring.md` 或本文，而不是保留一次性 audit。
 - Redis payload 必须在 fresh gate 后写入，并设置可解释 TTL。
 
+## System Audit 运维边界
+
+- `GET /api/operations/app-health/page-audit?page=app-health-operations` 是 admin-only 只读证明入口，不是 refresh、repair 或 deploy 操作。
+- 一次 System Audit 只打开一个 outer `REPEATABLE READ READ ONLY` PostgreSQL snapshot，在该 snapshot 内执行其余 16 页 proof、App Health inventory 重算，以及 read model/worker/current durable queue 合同检查。不得串行调用 16 个独立页面 HTTP Audit 后聚合为系统绿色。
+- 数据库证明、运行时观测和外部证据是三个独立 evidence plane。RabbitMQ transport、HTTP request metrics 等 point-in-time observation 不能写入数据库 snapshot 结论；银行/OA/发票/ETC 外部 control evidence 必须来自经审计登记的独立 complete manifest。缺失保持 `unknown/unproven`；latest revoked/expired/mismatch 为 `fail/unproven`；四域 exact pass 也只能声明截至 evidence observed/source snapshot 与当前 system snapshot 已证明。登记与撤销 runbook 见 `external-control-evidence.md`。
+- Audit 发现 drift 后，运维人员先保存 `system_audit_id`、snapshot identity、issue codes 和当前 release/version set，再依赖 upstream → downstream 顺序通过正式 gateway/durable queue 制定受控 refresh 或数据修复。Audit handler 本身永远不 enqueue、不写业务表、不写 read model、不伪造 fresh。
+- 绿色结论只属于报告中的 immutable snapshot；任何后续 dashboard refresh、导入、配对、撤销、设置变更或 worker 发布都使旧绿色不能代表当前状态，必须重新运行 System Audit。
+
 ## 管理边界
 
 - App 负责：通过 `RuntimeQueueRepository` 写入 `job.outbox_events`、`job.read_model_dirty_scopes`，
   接收 worker heartbeat，并在 `/health` 与 App Health 中暴露 missing/stale/mismatch/backlog。
+- file import confirm 必须先写 `job.import_jobs` 再通过同一 repository/gateway 写 `import.process.requested` outbox；`FIN_OPS_IMPORT_PROCESSING_BACKEND` 只允许 `postgres` 或 `rabbitmq`。PostgreSQL polling 是 durable 基线，RabbitMQ 只是 wakeup；API 进程不得 inline confirm，queue/repository 缺失必须 `503` fail closed。
+- ETC invoice confirm 遵循同一 durable 基线，但 preview 还必须先登记 `app.etc_import_sessions`、session files 和 verified file objects。独立 worker 从 session 重载 ZIP；Web 进程内存、inline `run_job` 和先改 task 再 enqueue 都不是允许的生产路径。
 - systemd 负责：启动、停止、重启 worker 进程，保持进程常驻。
 - deploy helper 负责：从 registry 生成 required worker 矩阵，安装 env，执行 `--check`，重启
   systemd unit，并在发布阶段等待 worker readiness 收敛。release deploy 解包并校验 release layout 后，

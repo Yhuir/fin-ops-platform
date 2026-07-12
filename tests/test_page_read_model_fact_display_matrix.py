@@ -28,15 +28,19 @@ RELATION_DISPLAY_PAGE_KEYS = {
     "bank-flow-rule-batches",
     "batch-accounting",
     "turnover-ledger",
-    "etc-tickets",
-    "tax-offset",
     "pending-invoices",
     "input-invoice-usage",
     "output-invoice-collections",
-    "imports.invoices",
-    "imports.etc-invoices",
 }
 
+DIRECT_CANONICAL_PAGE_KEYS = {
+    "etc-tickets",
+    "imports.bank-transactions",
+    "imports.invoices",
+    "imports.etc-invoices",
+    "settings",
+}
+ZERO_OWN_READ_MODEL_PAGE_KEYS = DIRECT_CANONICAL_PAGE_KEYS | {"app-health-operations"}
 
 def _load_matrix_rows() -> list[dict[str, Any]]:
     payload = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))
@@ -79,7 +83,10 @@ class PageReadModelFactDisplayMatrixTests(unittest.TestCase):
             read_model_keys = list(row.get("read_model_keys", []))
             probe_names = list(row.get("freshness_probe_names", []))
 
-            self.assertTrue(read_model_keys, page_key)
+            if page_key in ZERO_OWN_READ_MODEL_PAGE_KEYS:
+                self.assertEqual(read_model_keys, [], page_key)
+            else:
+                self.assertTrue(read_model_keys, page_key)
             self.assertTrue(probe_names, page_key)
             self.assertEqual(sorted(set(read_model_keys)), sorted(read_model_keys), page_key)
             self.assertEqual(sorted(set(probe_names)), sorted(probe_names), page_key)
@@ -107,6 +114,10 @@ class PageReadModelFactDisplayMatrixTests(unittest.TestCase):
                 self.assertIn("read_model.workbench_relation_rows", relation_sources, page_key)
             else:
                 self.assertEqual(relation_sources, set(), page_key)
+
+        etc_row = self.rows_by_page_key["etc-tickets"]
+        self.assertTrue(etc_row.get("internal_relation_fact_sources"))
+        self.assertNotIn("app.workbench_pair_relations", etc_row["internal_relation_fact_sources"])
 
     def test_production_gates_point_to_declared_freshness_probes(self) -> None:
         for row in self.rows:

@@ -88,7 +88,56 @@ class ImportJobRepository:
                 values (%s, %s, %s, %s, %s, 'pending', 'queued', %s, %s, %s, %s, %s, %s, coalesce(%s, now()))
                 on conflict (tenant_id, idempotency_key)
                 where idempotency_key is not null
-                do update set updated_at = job.import_jobs.updated_at
+                do update set
+                    status = case
+                        when job.import_jobs.status in ('failed', 'dead_lettered') then 'pending'
+                        else job.import_jobs.status
+                    end,
+                    stage = case
+                        when job.import_jobs.status in ('failed', 'dead_lettered') then 'queued'
+                        else job.import_jobs.stage
+                    end,
+                    payload = case
+                        when job.import_jobs.status in ('pending', 'failed', 'dead_lettered') then excluded.payload
+                        else job.import_jobs.payload
+                    end,
+                    raw_payload = case
+                        when job.import_jobs.status in ('pending', 'failed', 'dead_lettered') then excluded.raw_payload
+                        else job.import_jobs.raw_payload
+                    end,
+                    created_by = case
+                        when job.import_jobs.status in ('pending', 'failed', 'dead_lettered') then excluded.created_by
+                        else job.import_jobs.created_by
+                    end,
+                    attempt_count = case
+                        when job.import_jobs.status in ('failed', 'dead_lettered') then 0
+                        else job.import_jobs.attempt_count
+                    end,
+                    last_error = case
+                        when job.import_jobs.status in ('failed', 'dead_lettered') then null
+                        else job.import_jobs.last_error
+                    end,
+                    result_payload = case
+                        when job.import_jobs.status in ('failed', 'dead_lettered') then '{}'::jsonb
+                        else job.import_jobs.result_payload
+                    end,
+                    available_at = case
+                        when job.import_jobs.status in ('failed', 'dead_lettered') then excluded.available_at
+                        else job.import_jobs.available_at
+                    end,
+                    locked_by = case
+                        when job.import_jobs.status in ('failed', 'dead_lettered') then null
+                        else job.import_jobs.locked_by
+                    end,
+                    locked_at = case
+                        when job.import_jobs.status in ('failed', 'dead_lettered') then null
+                        else job.import_jobs.locked_at
+                    end,
+                    finished_at = case
+                        when job.import_jobs.status in ('failed', 'dead_lettered') then null
+                        else job.import_jobs.finished_at
+                    end,
+                    updated_at = now()
                 returning
                     id::text as import_job_id,
                     tenant_id,

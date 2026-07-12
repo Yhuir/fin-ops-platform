@@ -1,6 +1,6 @@
 # 外部往来款管理模块边界与 I/O
 
-日期：2026-07-05
+日期：2026-07-11
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：外部往来款页面读取 `turnover_ledger` read model；写操作通过 write facade/UoW/adapters 进入 scoped dirty projection。
 - 当前闭环：read path 由 `TurnoverLedgerApiRoutes` route owner 进入 `TurnoverLedgerQueryService` / read model；write path 由 request-boundary facade 进入 `TurnoverLedgerWriteFacade` / UoW / explicit adapters；refresh producer 只负责通过 `ReadModelRefreshGateway` enqueue，不再暴露 direct clear I/O。
-- 旧代码删除状态：`TurnoverLedgerReadFacade` app 转发壳、`TurnoverLedgerRelationMutationInvalidationLegacyAdapter`、`Application._after_turnover_relation_mutation(...)` 与 refresh producer `clear_best_effort()` 已删除；provider-backed 生产投影不再在 `BankTransactionTagReadFacade` 之后逐笔回读 legacy `category_service.get(...)`；边界 guard 防止恢复。
+- 旧代码删除状态：`TurnoverLedgerReadFacade` app 转发壳、`TurnoverLedgerRelationMutationInvalidationLegacyAdapter`、`Application._after_turnover_relation_mutation(...)`、`Application._refresh_local_app_settings_snapshot(...)` 与 refresh producer `clear_best_effort()` 已删除；本地 tag-selection UoW 不再直接读取/保存/替换 Settings 私有 snapshot；provider-backed 生产投影不再在 `BankTransactionTagReadFacade` 之后逐笔回读 legacy `category_service.get(...)`；边界 guard 防止恢复。
 
 ## 职责边界
 
@@ -29,8 +29,9 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面查询/筛选 | `TurnoverLedgerPage.tsx`、`features/turnoverLedger/api.ts` | 进入 `TurnoverLedgerApiRoutes` route owner，再由 `TurnoverLedgerQueryService` 读取 read model |
-| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?domain=turnover_ledger`；canonical expected-set 从 active bank facts + fresh bank-detail effective turnover fields + 当前 tag selection 独立形成，并按 `family + counterparty` 聚合完整 bank member set，与页面 group 双向相等；余额按去重 leaf 分方向重算（有本金时结算最多冲减到零，纯结算组保留负余额），待还/已还/待收/已收分别按 leaf action/amount 重算，ledger extras 另行核对，并要求共享 relation 双向 edge equality 与只读一致性快照；只消费结构化 audit status 与 issue samples，不进入本模块写 facade |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?page=turnover-ledger`；canonical expected-set 从 active bank facts + fresh bank-detail effective turnover fields + 当前 tag selection 独立形成，并按 `family + counterparty` 聚合完整 bank member set，与页面 group 双向相等；余额按去重 leaf 分方向重算（有本金时结算最多冲减到零，纯结算组保留负余额），待还/已还/待收/已收分别按 leaf action/amount 重算，ledger extras 另行核对；ledger/flow payload 必须保留 `workbench_relations` 的 case/status/mode/source/typed members，并按每个 row 的 bank anchor 与 linked shared groups 做双向 edge equality；全部检查位于同一只读一致性快照，只消费结构化 audit status 与 issue samples，不进入本模块写 facade |
 | 确认/撤回写操作 | write facade/UoW | 已知 affected months 的写路径触发 turnover/workbench/workbench_relation/cost/search affected month scopes；未知月份例外才允许 `all` fan-out |
+| 标签选择写操作 | write facade/UoW + Settings domain port | PostgreSQL 路径通过 supplied transaction 保存 canonical settings/audit/outbox；本地路径只调用 `AppSettingsService` 的 tag-selection state/commit/restore 端口，queue 失败仅回滚该 family，不得直接访问 `_snapshot` 或 `state_store.save_app_settings(...)` |
 | Workbench relation requirement | `TurnoverLedgerWorkbenchPairPort` | 创建 `turnover_manual_closure` 时必须写入 `requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`；这些字段是关联台分区的唯一输入，不能由关联台查询当前设置兜底 |
 | Refresh scope | `turnover_ledger` manifest | month or `all`；`all` 是 fan-out command，不是普通写操作默认 scope。`all`/month scope 在 own source_versions 未变化、仅 Workbench relation source_versions 追平时，可以从现有 rows 重套 relation context 后保存，避免 relation-version 追平重建整本台账。`all` 查询由月度/行级 rows 拼接时允许 mixed row source_versions，freshness 以 repository 返回的 durable `refresh_status` 为准；dirty scope 非 fresh 时仍必须返回 refreshing/stale |
 
@@ -95,5 +96,5 @@
 - Allowed writes: turnover write facade、write UoW、turnover relation service。
 - Allowed reads: turnover query service/read ports、turnover ledger read model boundary。
 - Downstream outputs: turnover_ledger、workbench_relation、workbench、cost、search dirty scopes 或 owner producer 输出。
-- Forbidden paths: legacy fallback facade 不得进入 production normal write path；不能直接写 workbench relation 或 bank category facts；不能从银行明细或 Application helper 直接清 `turnover_ledger` read model。
-- Old code deletion: app read forwarding facade、relation mutation legacy invalidation adapter、producer direct clear I/O、direct relation fallback 和 snapshot bank-row source fallback 已删除；migration/audit/rollback 工具保留不算 closure。
+- Forbidden paths: legacy fallback facade 不得进入 production normal write path；不能直接写 workbench relation 或 bank category facts；不能从银行明细或 Application helper 直接清 `turnover_ledger` read model；local adapter 不得读写 Settings 私有 snapshot 或整份 settings store。
+- Old code deletion: app read forwarding facade、relation mutation legacy invalidation adapter、producer direct clear I/O、direct relation fallback、snapshot bank-row source fallback 和 Settings snapshot save/refresh fallback 已删除；migration/audit/rollback 工具保留不算 closure。

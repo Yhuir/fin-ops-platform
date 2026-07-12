@@ -742,6 +742,52 @@ class AppSettingsService:
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
         )
 
+    def get_turnover_ledger_tag_selection_state(self) -> dict[str, Any]:
+        """Return the persisted state needed by the local write boundary rollback."""
+        self._refresh_snapshot_from_state_store()
+        current = self._snapshot["turnover_ledger_tag_selection"]
+        return {
+            "version": int(current.get("version") or 1),
+            "selected_tag_codes": list(current.get("selected_tag_codes") or []),
+        }
+
+    def commit_turnover_ledger_tag_selection_update(
+        self,
+        *,
+        next_snapshot: dict[str, Any],
+        audit_event: dict[str, Any],
+    ) -> None:
+        """Persist one normalized turnover-tag update through the Settings owner."""
+        self._refresh_snapshot_from_state_store()
+        current = self._snapshot["turnover_ledger_tag_selection"]
+        expected_version = int(audit_event.get("old_version") or 0)
+        if expected_version != int(current.get("version") or 1):
+            raise AppSettingsValidationError(
+                "turnover_ledger_tag_selection_version_conflict",
+                "Turnover ledger tag selection version conflict.",
+            )
+        next_selection = self._normalize_turnover_ledger_tag_selection(
+            dict(next_snapshot.get("turnover_ledger_tag_selection") or {}),
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            validate=True,
+        )
+        normalized_snapshot = dict(self._snapshot)
+        normalized_snapshot["turnover_ledger_tag_selection"] = next_selection
+        self._save_snapshot(normalized_snapshot)
+        self._record_turnover_ledger_tag_selection_audit(dict(audit_event))
+
+    def restore_turnover_ledger_tag_selection_state(self, previous_state: dict[str, Any]) -> None:
+        """Restore only the turnover-tag field after a local transaction failure."""
+        self._refresh_snapshot_from_state_store()
+        restored_selection = self._normalize_turnover_ledger_tag_selection(
+            dict(previous_state),
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+            validate=True,
+        )
+        restored_snapshot = dict(self._snapshot)
+        restored_snapshot["turnover_ledger_tag_selection"] = restored_selection
+        self._save_snapshot(restored_snapshot)
+
     def get_input_invoice_usage_payment_status_rules_payload(self, *, can_save: bool = True) -> dict[str, Any]:
         provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(
             state_store=self._state_store,

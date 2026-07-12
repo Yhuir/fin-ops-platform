@@ -6,10 +6,8 @@ import type {
   AppHealthBackgroundJobsSource,
   AppHealthOaSyncSource,
   AppHealthWorkbenchSource,
-  InputInvoiceUsageAuditPayload,
   OperationsDashboardPayload,
-  OutputInvoiceCollectionAuditPayload,
-  PageAuditDomainKey,
+  PageAuditPageKey,
   PageAuditPayload,
 } from "./types";
 
@@ -94,17 +92,12 @@ export async function fetchAppHealthDashboard(signal?: AbortSignal): Promise<Ope
   return requestJson<OperationsDashboardPayload>("/api/operations/app-health-dashboard", signal);
 }
 
-export async function fetchInputInvoiceUsageAudit(signal?: AbortSignal): Promise<InputInvoiceUsageAuditPayload> {
-  return requestJson<InputInvoiceUsageAuditPayload>("/api/operations/app-health/input-invoice-usage-audit", signal);
-}
-
-export async function fetchOutputInvoiceCollectionAudit(signal?: AbortSignal): Promise<OutputInvoiceCollectionAuditPayload> {
-  return requestJson<OutputInvoiceCollectionAuditPayload>("/api/operations/app-health/output-invoice-collection-audit", signal);
-}
-
-export async function fetchPageBusinessAudit(domainKey: PageAuditDomainKey, signal?: AbortSignal): Promise<PageAuditPayload> {
-  return requestJson<PageAuditPayload>(
-    `/api/operations/app-health/page-audit?domain=${encodeURIComponent(domainKey)}`,
+export async function fetchPageAudit<T extends PageAuditPayload = PageAuditPayload>(
+  pageKey: PageAuditPageKey,
+  signal?: AbortSignal,
+): Promise<T> {
+  return requestJson<T>(
+    `/api/operations/app-health/page-audit?page=${encodeURIComponent(pageKey)}`,
     signal,
   );
 }

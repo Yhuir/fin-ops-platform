@@ -832,6 +832,13 @@ class EtcReconciliationTaskService:
         actor: str = "system",
     ) -> EtcReconciliationTask:
         task = self._get_active_task_mutable(task_id)
+        if (
+            task.status == EtcReconciliationTaskStatus.IMPORTING
+            and str(task.import_batch_id or "").strip() == str(import_session_id or "").strip()
+            and task.version == task_version
+            and task.confirmed_item_set_hash == confirmed_item_set_hash
+        ):
+            return _copy_task(task)
         if task.status != EtcReconciliationTaskStatus.READY_FOR_IMPORT:
             raise ValueError("invalid_reconciliation_task_status")
         if task.version != task_version or task.confirmed_item_set_hash != confirmed_item_set_hash:
@@ -867,7 +874,6 @@ class EtcReconciliationTaskService:
             raise ValueError("stale_reconciliation_task_preview")
         before_status = task.status.value
         task.status = EtcReconciliationTaskStatus.READY_FOR_IMPORT
-        self._touch(task)
         task.audit_events.append(
             self._new_audit_event(
                 task_id=task_id,

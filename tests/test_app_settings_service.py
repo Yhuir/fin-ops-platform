@@ -247,6 +247,41 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(version_context.exception.error_code, "turnover_ledger_tag_selection_version_conflict")
         self.assertEqual(invalid_context.exception.error_code, "invalid_turnover_ledger_tag")
 
+    def test_turnover_ledger_local_transaction_port_commits_and_restores_only_its_setting_family(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[self._external_rule("external_rule_borrow_out")],
+            )
+            store = ApplicationStateStore(Path(temp_dir))
+            seeded = store.load_app_settings()
+            seeded["allowed_usernames"] = ["boundary-owner"]
+            store.save_app_settings(seeded)
+            app = build_application(data_dir=Path(temp_dir))
+            service = app._app_settings_service
+            previous_state = service.get_turnover_ledger_tag_selection_state()
+            normalized = service.normalize_turnover_ledger_tag_selection_update(
+                {
+                    "expected_version": previous_state["version"],
+                    "selected_tag_codes": [],
+                },
+                actor_id="turnover-owner",
+            )
+
+            service.commit_turnover_ledger_tag_selection_update(
+                next_snapshot=normalized["next_snapshot"],
+                audit_event=normalized["audit_event"],
+            )
+            committed = store.load_app_settings()
+            service.restore_turnover_ledger_tag_selection_state(previous_state)
+            restored = store.load_app_settings()
+
+        self.assertIn("boundary-owner", committed["allowed_usernames"])
+        self.assertEqual(committed["turnover_ledger_tag_selection"]["selected_tag_codes"], [])
+        self.assertEqual(restored["allowed_usernames"], committed["allowed_usernames"])
+        self.assertEqual(restored["turnover_ledger_tag_selection"], previous_state)
+        self.assertEqual(app._audit_service.as_dicts()[-1]["action"], "turnover_ledger_tag_selection_updated")
+
     def test_cost_statistics_tag_selection_defaults_to_active_expense_tags_and_uncategorized(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(

@@ -11,7 +11,8 @@
 - 税金抵扣计划保存成功、已认证发票导入 confirm/job 成功后，页面必须先等待当前月份 `tax_offset` operation barrier fresh，再重新读取 `/api/tax-offset`；barrier blocked/timeout 只提示后台同步尚未完成，不能提前读旧投影。
 - 进项计划行只从 canonical invoice facts 读取；OA 附件正式发票必须先 promotion 到 Invoice repository / `app.invoices`，`app.oa_attachment_invoice_cache` 只作为解析缓存，不是税金抵扣事实源。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖税额试算、已认证导入、权限、计划保存、SQL read model、Redis cache、worker fan-out、lifecycle fan-out、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
-- 2026-06-19 Spec-first 基线补齐：新增 `e2e-spec.md` / `e2e-coverage.md`，并用 Browser smoke 覆盖 Workbench relation -> tax offset fresh read model fan-out。
+- 2026-07-11 Audit proof 闭环复核纠正旧 Spec：`tax_offset` projection 不消费 Workbench relation；已删除 relation→tax dirty/outbox、SLO 期望和动态造数 mock，Browser 改为保护 relation 前后税金 item 集合不变。2026-06-19 的 relation fan-out 记录仅是被本决策取代的历史。
+- 2026-07-11 页面 Audit proof-ready：同一只读一致性快照独立重算五组 item、认证匹配、锁定/默认选择、summary、关键字段、entry count、source versions 和 queue；外部发票/税务来源完整性仍需独立对账。
 - 2026-06-19 Browser conflict 回归补齐：计划保存遇到 source/version conflict 时，页面必须显示冲突错误、不能显示保存成功、不能刷新成伪成功，保存按钮必须恢复可用。
 - 2026-06-19 Browser 权限细分补齐：read-export 用户可读税金页但无保存/导入入口，forbidden/expired session 不加载 `/api/tax-offset` protected API，admin 可见保存和已认证导入入口。
 - 2026-06-19 Browser 大数据窄屏补齐：390px 视口下税金页必须保持大表搜索、排序、筛选、共享横向滚动和保存/导入按钮可用；tax 布局容器必须允许子项收缩，筛选弹层必须夹在 viewport 内。

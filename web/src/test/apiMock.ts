@@ -76,12 +76,9 @@ type MockApiOptions = {
   appHealthDashboardSequence?: Array<{ status?: number; body: Record<string, unknown> }>;
   appHealthDashboardErrorStatus?: number;
   appHealthDashboardErrorBody?: Record<string, unknown>;
-  appHealthInputInvoiceUsageAudit?: Record<string, unknown>;
-  appHealthInputInvoiceUsageAuditStatus?: number;
-  appHealthInputInvoiceUsageAuditBody?: Record<string, unknown>;
-  appHealthOutputInvoiceCollectionAudit?: Record<string, unknown>;
-  appHealthOutputInvoiceCollectionAuditStatus?: number;
-  appHealthOutputInvoiceCollectionAuditBody?: Record<string, unknown>;
+  appHealthSystemAudit?: Record<string, unknown>;
+  appHealthSystemAuditStatus?: number;
+  appHealthSystemAuditBody?: Record<string, unknown>;
   workbenchExceptionPreview?: Record<string, unknown>;
   workbenchExceptionApply?: Record<string, unknown>;
   workbenchConfirmPreview?: Record<string, unknown>;
@@ -5053,82 +5050,88 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
-    "/api/operations/app-health/input-invoice-usage-audit": () => {
-      if (options.appHealthInputInvoiceUsageAuditStatus) {
+    "/api/operations/app-health/page-audit": ({ url }) => {
+      const pageKey = url.searchParams.get("page") ?? "";
+      if (pageKey === "app-health-operations" && options.appHealthSystemAuditStatus) {
         return {
-          status: options.appHealthInputInvoiceUsageAuditStatus,
-          body: options.appHealthInputInvoiceUsageAuditBody ?? { message: "input invoice usage audit failed" },
+          status: options.appHealthSystemAuditStatus,
+          body: options.appHealthSystemAuditBody ?? { message: "system audit failed" },
         };
       }
-      return {
-        body: options.appHealthInputInvoiceUsageAudit ?? {
-          mode: "app_health_api",
-          tenant_id: "default",
-          generated_at: "2026-05-23T10:01:00+08:00",
-          overall_status: "pass",
-          audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
-          audit_contract: { database_snapshot: true, snapshot_consistency: "repeatable_read_read_only" },
-          summary: {
-            active_input_invoice_count: 236,
-            read_model_invoice_member_count: 236,
-            read_model_row_count: 212,
-            active_workbench_pair_relation_count: 31,
-            linked_workbench_relation_group_count: 31,
-            blocking_issue_sample_count: 0,
-            issue_sample_count: 0,
-            error_sample_count: 0,
-            warning_sample_count: 0,
-            issue_sample_counts_by_code: {},
-          },
-          issues: [],
-        },
-      };
-    },
-    "/api/operations/app-health/output-invoice-collection-audit": () => {
-      if (options.appHealthOutputInvoiceCollectionAuditStatus) {
+      if (pageKey === "app-health-operations") {
         return {
-          status: options.appHealthOutputInvoiceCollectionAuditStatus,
-          body: options.appHealthOutputInvoiceCollectionAuditBody ?? { message: "output invoice collection audit failed" },
+          body: options.appHealthSystemAudit ?? {
+            mode: "app-health-system-audit",
+            tenant_id: "default",
+            page_key: pageKey,
+            generated_at: "2026-05-23T10:01:00+08:00",
+            overall_status: "pass",
+            audit_status: { integrity: "pass", freshness: "fresh", queue: "drained", external: "unknown" },
+            audit_contract: {
+              database_snapshot: true,
+              snapshot_consistency: "repeatable_read_read_only",
+              proof_availability: "ready",
+              contract_revision: "page-audit-contract.v18",
+            },
+            summary: {
+              registered_page_count: 17,
+              audited_business_page_count: 16,
+              passed_business_page_count: 16,
+              database_internal_contracts: "pass",
+              end_to_end_source_truth: "unproven",
+              blocking_issue_sample_count: 0,
+              issue_sample_count: 0,
+              error_sample_count: 0,
+              warning_sample_count: 0,
+              issue_sample_counts_by_code: {},
+            },
+            issues: [],
+            database_system_snapshot: {
+              system_audit_id: "system-audit:test-fixture",
+              snapshot_identity: "100:100:",
+              snapshot_generated_at: "2026-05-23T10:01:00+08:00",
+              snapshot_consistency: "repeatable_read_read_only",
+              database_snapshot: true,
+              evidence_fingerprint: "test-fixture",
+              page_results: [],
+            },
+            runtime_observation: {
+              observed_at: "2026-05-23T10:01:00+08:00",
+              database_snapshot: false,
+              warnings: [],
+            },
+            external_evidence: {
+              status: "unknown",
+              end_to_end_source_truth: "unproven",
+              summary: { required_domain_count: 4, passed_domain_count: 0, failed_domain_count: 0, unknown_domain_count: 4 },
+              claim_boundary: "external manifests are not registered",
+              domains: ["bank", "oa", "invoice", "etc"].map((domain) => ({
+                domain,
+                status: "unknown",
+                boundary: "external control evidence not registered",
+              })),
+            },
+          },
         };
       }
-      return {
-        body: options.appHealthOutputInvoiceCollectionAudit ?? {
-          mode: "app_health_api",
-          tenant_id: "default",
-          generated_at: "2026-05-23T10:02:00+08:00",
-          overall_status: "pass",
-          audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
-          audit_contract: { database_snapshot: true, snapshot_consistency: "repeatable_read_read_only" },
-          summary: {
-            active_output_invoice_count: 20,
-            read_model_invoice_member_count: 20,
-            read_model_row_count: 18,
-            active_workbench_pair_relation_count: 4,
-            linked_workbench_relation_group_count: 4,
-            blocking_issue_sample_count: 0,
-            issue_sample_count: 0,
-            error_sample_count: 0,
-            warning_sample_count: 0,
-            issue_sample_counts_by_code: {},
-          },
-          issues: [],
-        },
-      };
-    },
-    "/api/operations/app-health/page-audit": ({ url }) => ({
-      body: {
+      return { body: {
         mode: "page-business-read-model-audit",
-        domain_key: url.searchParams.get("domain") ?? "",
+        page_key: pageKey,
         overall_status: "pass",
         audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
-        audit_contract: { database_snapshot: true, snapshot_consistency: "repeatable_read_read_only" },
+        audit_contract: {
+          database_snapshot: true,
+          snapshot_consistency: "repeatable_read_read_only",
+          proof_availability: "ready",
+          contract_revision: "page-audit-contract.v9",
+        },
         summary: {
           blocking_issue_sample_count: 0,
           issue_sample_count: 0,
         },
         issues: [],
-      },
-    }),
+      } };
+    },
     "/api/background-jobs/active": () => ({
       body: {
         jobs: cloneJson(backgroundJobs),
@@ -7577,32 +7580,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ? jsonResponse({ body: task })
           : jsonResponse({ status: 404, body: { message: "ETC对账任务不存在。" } });
       }
-    }
-    if (url.pathname.startsWith("/imports/batches/") && url.pathname.endsWith("/revert")) {
-      const batchId = url.pathname.split("/")[3] ?? "";
-      latestImportSession = {
-        ...latestImportSession,
-        session: {
-          ...latestImportSession.session,
-          status: "reverted",
-        },
-        files: latestImportSession.files.map((file) =>
-          file.batch_id === batchId
-            ? {
-                ...file,
-                status: "reverted",
-              }
-            : file,
-        ),
-      };
-      return jsonResponse({
-        body: {
-          batch: {
-            id: batchId,
-            status: "reverted",
-          },
-        },
-      });
     }
     if ((init?.method ?? "GET").toUpperCase() === "POST" && url.pathname === "/api/workbench/settings/data-reset/jobs") {
       if (options.dataResetPasswordShouldFail || !jsonBody?.oa_password) {

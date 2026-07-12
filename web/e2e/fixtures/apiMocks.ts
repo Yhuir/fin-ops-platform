@@ -162,7 +162,6 @@ type ApiMockOptions = {
   pendingInvoiceReadModelStatus?: PendingInvoiceReadModelMockStatus;
   pendingInvoiceRowsEmpty?: boolean;
   sessionMode?: SessionMode;
-  taxOffsetRelationFanout?: boolean;
   taxOffsetLargeDataset?: boolean;
   taxOffsetReadModelStatus?: TaxOffsetReadModelMockStatus;
   taxOffsetReadModelStatuses?: TaxOffsetReadModelMockStatus[];
@@ -560,22 +559,24 @@ function operationsDashboardPayload() {
   };
 }
 
-function inputInvoiceUsageAuditPayload() {
+function appHealthSystemAuditPayload() {
   return {
-    mode: "dry-run",
+    mode: "app-health-system-audit",
     tenant_id: "default",
+    page_key: "app-health-operations",
     overall_status: "pass",
     audit_status: {
       integrity: "pass",
       freshness: "fresh",
       queue: "drained",
+      external: "unknown",
     },
     summary: {
-      active_input_invoice_count: 236,
-      read_model_invoice_member_count: 236,
-      read_model_row_count: 212,
-      active_workbench_pair_relation_count: 31,
-      linked_workbench_relation_group_count: 31,
+      registered_page_count: 17,
+      audited_business_page_count: 16,
+      passed_business_page_count: 16,
+      database_internal_contracts: "pass",
+      end_to_end_source_truth: "unproven",
       issue_sample_count: 0,
       error_sample_count: 0,
       warning_sample_count: 0,
@@ -590,8 +591,36 @@ function inputInvoiceUsageAuditPayload() {
       pass_condition: "integrity=pass and freshness=fresh and queue=drained and database_snapshot=true",
       snapshot_consistency: "repeatable_read_read_only",
       database_snapshot: true,
+      proof_availability: "ready",
+      contract_revision: "page-audit-contract.v18",
       write_policy: "read_only",
     },
+    database_system_snapshot: {
+      system_audit_id: "system-audit:e2e-fixture",
+      snapshot_identity: "100:100:",
+      snapshot_generated_at: "2026-07-10T08:00:00Z",
+      snapshot_consistency: "repeatable_read_read_only",
+      database_snapshot: true,
+      evidence_fingerprint: "e2e-fixture",
+      page_results: [],
+    },
+    runtime_observation: {
+      observed_at: "2026-07-10T08:00:00Z",
+      database_snapshot: false,
+      warnings: [],
+    },
+    external_evidence: {
+      status: "unknown",
+      end_to_end_source_truth: "unproven",
+      summary: { required_domain_count: 4, passed_domain_count: 0, failed_domain_count: 0, unknown_domain_count: 4 },
+      claim_boundary: "external manifests are not registered",
+      domains: ["bank", "oa", "invoice", "etc"].map((domain) => ({
+        domain,
+        status: "unknown",
+        boundary: "external control evidence not registered",
+      })),
+    },
+    page_projection: operationsDashboardPayload(),
     generated_at: "2026-07-10T08:00:00Z",
   };
 }
@@ -2149,7 +2178,7 @@ function etcBusinessBatchListPayload(status: string | null, batchStatus: EtcBusi
 
 function taxSourceVersions(month: string) {
   return {
-    tax_offset_read_model_schema_version: "mock-tax-offset-v1",
+    tax_offset_read_model_schema_version: "2026-07-tax-offset-audit-proof-v2",
     invoice_fact_source_version: `mock-invoice-facts:${month}`,
     tax_certified_import_source_version: `mock-certified:${month}`,
   };
@@ -2165,7 +2194,6 @@ function formatTaxAmount(value: number) {
 function taxSummary(
   selectedInputIds: string[],
   certifiedImported: boolean,
-  relationFanout = false,
   invoiceImportFanout = false,
   etcImportFanout = false,
 ) {
@@ -2177,9 +2205,6 @@ function taxSummary(
     }
     if (id === "ti-202603-002") {
       return total + 5760;
-    }
-    if (relationFanout && id === "ti-202603-relation-001") {
-      return total + 7540;
     }
     if (invoiceImportFanout && id === "ti-202603-import-001") {
       return total + 1038.87;
@@ -2246,7 +2271,6 @@ function taxOffsetLargeInputItems() {
 function taxOffsetPayload(
   selectedInputIds: string[],
   certifiedImported: boolean,
-  relationFanout = false,
   invoiceImportFanout = false,
   etcImportFanout = false,
   readModelStatus: TaxOffsetReadModelMockStatus = "fresh",
@@ -2278,22 +2302,6 @@ function taxOffsetPayload(
       certified_status: "待认证",
       is_locked_certified: false,
     },
-    ...(relationFanout
-      ? [
-        {
-          id: "ti-202603-relation-001",
-          seller_name: "智能工厂设备商",
-          issue_date: "2026-03-28",
-          invoice_no: "91330108MA27B4011D",
-          tax_rate: "13%",
-          tax_amount: "7,540.00",
-          total_with_tax: "65,540.00",
-          risk_level: "低",
-          certified_status: "待认证",
-          is_locked_certified: false,
-        },
-      ]
-      : []),
     ...(invoiceImportFanout
       ? [
         {
@@ -2329,10 +2337,9 @@ function taxOffsetPayload(
     ...(largeDataset ? taxOffsetLargeInputItems() : []),
   ];
   const defaultSelectedInputIds = certifiedImported
-    ? ["ti-202603-002", ...(relationFanout ? ["ti-202603-relation-001"] : [])]
+    ? ["ti-202603-002"]
     : [
       ...selectedInputIds,
-      ...(relationFanout && !selectedInputIds.includes("ti-202603-relation-001") ? ["ti-202603-relation-001"] : []),
       ...(invoiceImportFanout && !selectedInputIds.includes("ti-202603-import-001") ? ["ti-202603-import-001"] : []),
       ...(etcImportFanout && !selectedInputIds.includes("ti-202603-etc-import-001") ? ["ti-202603-etc-import-001"] : []),
     ];
@@ -2444,7 +2451,7 @@ function taxOffsetPayload(
     locked_certified_input_ids: certifiedImported ? ["ti-202603-001"] : [],
     default_selected_output_ids: ["to-202603-001"],
     default_selected_input_ids: defaultSelectedInputIds,
-    summary: taxSummary(defaultSelectedInputIds, certifiedImported, relationFanout, invoiceImportFanout, etcImportFanout),
+    summary: taxSummary(defaultSelectedInputIds, certifiedImported, invoiceImportFanout, etcImportFanout),
   };
 }
 
@@ -3490,12 +3497,19 @@ function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceI
           relationCount: candidateRelations ? 1 : 0,
           ...candidateRelationFields,
         },
-        paymentStatus: {
-          code: "paid",
-          label: "已支付",
-          reason: "已存在已配对支出流水关系，金额差额不影响付款状态",
-          severity: "success",
-        },
+        paymentStatus: candidateRelations
+          ? {
+            code: "unpaid",
+            label: "未支付",
+            reason: "只有候选关系，尚无已确认支出流水关系",
+            severity: "warning",
+          }
+          : {
+            code: "paid",
+            label: "已支付",
+            reason: "已存在已配对支出流水关系，金额差额不影响付款状态",
+            severity: "success",
+          },
         bankTransaction: {
           primaryBankTransactionId: "bank-payment-e2e-001",
           accountDetailNo: "bank-detail-payment-e2e-001",
@@ -8196,7 +8210,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, taxOffsetPayload(
         taxSelectedInputIds,
         taxCertifiedImported,
-        (relationConfirmed && Boolean(options.taxOffsetRelationFanout)) || outputInvoiceDownstreamConfirmed,
         invoiceImportDownstreamConfirmed,
         etcImportDownstreamConfirmed,
         taxOffsetReadModelStatus,
@@ -8212,7 +8225,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         summary: taxSummary(
           selectedInputIds,
           taxCertifiedImported,
-          (relationConfirmed && Boolean(options.taxOffsetRelationFanout)) || outputInvoiceDownstreamConfirmed,
           invoiceImportDownstreamConfirmed,
           etcImportDownstreamConfirmed,
         ),
@@ -8241,7 +8253,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           summary: taxSummary(
             taxSelectedInputIds,
             taxCertifiedImported,
-            (relationConfirmed && Boolean(options.taxOffsetRelationFanout)) || outputInvoiceDownstreamConfirmed,
             invoiceImportDownstreamConfirmed,
             etcImportDownstreamConfirmed,
           ),
@@ -8585,6 +8596,41 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         readModelStatus: pendingInvoiceRulesSaved ? "refreshing" : "fresh",
         version: pendingInvoiceRulesVersion,
       }));
+    }
+
+    if (path === "/api/cost-statistics/tag-rules") {
+      return json(route, {
+        version: 1,
+        bank_auto_tag_rules_version: 8,
+        default_selection_applied: true,
+        selected_tag_codes: ["fee", "__uncategorized__"],
+        effective_selected_tag_codes: ["fee", "__uncategorized__"],
+        inactive_selected_tag_codes: [],
+        active_tags: [
+          {
+            code: "fee",
+            label: "材料费",
+            path: ["费用", "材料费"],
+            source: "custom",
+            status: "active",
+            direction: "expense",
+            output_primary_label: "费用",
+            output_sub_label: "材料费",
+          },
+          {
+            code: "__uncategorized__",
+            label: "未分类",
+            path: ["未分类", "未分类"],
+            source: "system",
+            status: "active",
+            direction: "expense",
+            output_primary_label: "未分类",
+            output_sub_label: "未分类",
+          },
+        ],
+        can_save: true,
+        operation_barrier_targets: [],
+      });
     }
 
     if (path === "/api/cost-statistics/explorer") {
@@ -9775,8 +9821,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, operationsDashboardPayload());
     }
 
-    if (path === "/api/operations/app-health/input-invoice-usage-audit") {
-      return json(route, inputInvoiceUsageAuditPayload());
+    if (
+      path === "/api/operations/app-health/page-audit"
+      && url.searchParams.get("page") === "app-health-operations"
+    ) {
+      return json(route, appHealthSystemAuditPayload());
     }
 
     return json(route, {});

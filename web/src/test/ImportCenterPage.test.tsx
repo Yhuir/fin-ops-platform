@@ -136,11 +136,17 @@ describe("Import pages", () => {
 
   test("bank transaction import uses the standalone route and sends bank mapping overrides", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
+    const fetchMock = installMockApiFetch({ sessionAccessTier: "admin" });
 
-    renderAppAt("/imports/bank-transactions");
+    renderAppAt("/imports/bank-transactions", {
+      session: {
+        accessTier: "admin",
+        canAdminAccess: true,
+      },
+    });
 
     expect(await screen.findByRole("heading", { name: "银行流水导入" }, { timeout: ROUTE_RENDER_TIMEOUT })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Audit 银行流水导入" })).toBeInTheDocument();
     expectProjectImportShell();
     const bankUploadInput = expectProjectUploadZone("上传银行流水文件");
     expect(screen.queryByRole("dialog", { name: "银行流水导入" })).not.toBeInTheDocument();
@@ -273,6 +279,25 @@ describe("Import pages", () => {
         batch_type: "input_invoice",
       },
     ]);
+  });
+
+  test("invoice import exposes the unified Audit only to administrators", async () => {
+    installMockApiFetch({ sessionAccessTier: "admin" });
+
+    const { unmount } = renderAppAt("/imports/invoices", {
+      session: {
+        accessTier: "admin",
+        canAdminAccess: true,
+      },
+    });
+
+    expect(await screen.findByRole("button", { name: "Audit 发票导入" })).toBeInTheDocument();
+    unmount();
+
+    installMockApiFetch({ sessionAccessTier: "full_access" });
+    renderAppAt("/imports/invoices");
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Audit 发票导入" })).not.toBeInTheDocument();
   });
 
   test("invoice import displays preview audit counts and review copy", async () => {
@@ -443,6 +468,21 @@ describe("Import pages", () => {
 
     expect(screen.getAllByText("ETC发票导入仅支持 zip 文件，已拒绝 2 个非 zip 文件。").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "开始预览" })).toBeDisabled();
+  });
+
+  test("ETC invoice import exposes the unified Audit only to administrators", async () => {
+    installMockApiFetch({ sessionAccessTier: "admin" });
+    const { unmount } = renderAppAt("/imports/etc-invoices", {
+      session: { accessTier: "admin", canAdminAccess: true },
+    });
+
+    expect(await screen.findByRole("button", { name: "Audit ETC发票导入" })).toBeInTheDocument();
+    unmount();
+
+    installMockApiFetch({ sessionAccessTier: "full_access" });
+    renderAppAt("/imports/etc-invoices");
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Audit ETC发票导入" })).not.toBeInTheDocument();
   });
 
   test("ETC invoice import requires a ready reconciliation task before preview", async () => {

@@ -32,7 +32,7 @@
 - 禁止重复导入相同认证记录导致重复抵扣。
 - 禁止保存基于 stale/source mismatch read model 的计划。
 - 禁止 API 请求线程在生产 PostgreSQL read model miss 时同步 rebuild 并伪装 fresh。
-- 禁止银行流水导入直接刷新税金抵扣；税金抵扣只受发票、认证、ETC、关系和规则类事件影响。
+- 禁止银行流水导入或 Workbench relation 写入直接刷新税金抵扣；税金抵扣只受发票、认证、ETC canonical promotion 和确实改变 projection source 的规则/生命周期事件影响。
 
 ## UI 状态
 

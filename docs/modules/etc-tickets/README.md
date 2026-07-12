@@ -61,6 +61,7 @@
 - ETC 历史 repair、historical business batch migration 和 existing batch link 的生产写入路径必须通过 `WorkbenchRelationCommandService` 写入或更新 relation；缺少 command service 时必须 fail fast，不得落回 direct pair relation mutation。domain event 只作为页面刷新提示，不是 relation 事实源。
 - source file 上传必须先落对象存储，再追加 source file 元数据；对象存储失败不得留下半写入 source file、版本号或审计事件。
 - ETC 导入确认、业务批次提交/删除和历史迁移会影响关联台 summary、税金抵扣、成本统计、search、App Health 和 import/Workbench worker 状态；这些流程只允许关联或折叠已存在 canonical invoice，不允许旧 ETC 模块创建新的 canonical invoice。
+- ETC 页面自身没有 manifest read model；统一 Audit 直接在一个只读 repeatable-read PostgreSQL snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 与 import queue。Workbench、税金抵扣、成本统计和 invoice lifecycle 只是下游影响目标，不得登记成 ETC 页面已消费 read model；shared Workbench relation 由关联台 Audit 负责。
 
 ## 维护触发器
 

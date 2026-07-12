@@ -3,6 +3,7 @@
 - `deployment.md`：发布路径、环境和部署检查。
 - `data-safety.md`：数据重置、备份恢复、对象存储和高风险数据操作。
 - `etc-business-batches.md`：ETC 业务批次、OA 自动检测、迁移 dry-run、回滚和 Nginx/API smoke。
+- `external-control-evidence.md`：银行/OA/发票/ETC 外部完整快照 manifest 的独立采集边界、校验、登记、撤销、System Audit 判定和生产授权门禁。
 - `invoice-pool-cleanup.md`：统一发票池清理、备份、dry-run、soft reference gate 和重导验收。
 - `object-identity-dedup.md`：业务对象 identity/dedup 统一规则审计、blocking issue、人工 repair 原则。
 - `postgresql-runtime.md`：当前 PostgreSQL primary runtime、queue/read model、备份、回滚和验证边界。

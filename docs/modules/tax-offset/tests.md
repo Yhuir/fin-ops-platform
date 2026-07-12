@@ -18,7 +18,7 @@
 | 导入 job | import job repository / polling API | confirm 可转后台任务；前端 modal 必须保持 processing，直到 job 结果完成。 |
 | App Status readiness | `tax_offset` read model、`tax-offset` worker、runtime snapshot | missing/refreshing/stale/failed/unavailable 必须从后端 runtime facts 解释，不能由页面本地状态推断。 |
 | 前端交互 | `TaxOffsetPage`、`web/src/features/tax/api.ts`、`web/src/components/tax/*` | loading/abort/remount、权限、导入 modal、drag/drop、搜索、排序、筛选、drawer、高亮、空状态、计划保存。 |
-| 跨模块 fan-out | invoice import、ETC import、tax certified import、pending invoice rules、workbench relation、invoice lifecycle | 下游 dirty scope/outbox 必须覆盖税金抵扣，同时不能误刷新无关 read model。 |
+| 跨模块 fan-out | invoice import、ETC import、tax certified import、pending invoice rules、invoice lifecycle | 实际 canonical/projection source 变化必须覆盖税金抵扣；Workbench relation 明确排除，不能污染 `tax_offset` dirty/outbox。 |
 
 ## 场景覆盖清单
 
@@ -40,7 +40,7 @@ Spec-first Browser e2e 审计入口：
 | SQL read model / Redis cache | P0 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_postgres_state_store.py` | covered | SQL rows 优先、Redis hit/miss/timeout、summary 小 payload、Postgres 不回退 runtime snapshot。 |
 | refresh worker / all fan-out | P0 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | covered | `all` 展开月份 shard，refresh 完成 dirty scope，gateway 去重，worker lifecycle 归属。 |
 | lifecycle fan-out | P0 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_tax_offset_api.py` | covered | 发票导入、认证导入、规则变更、OA rebuild 等事件刷新 tax offset，不误刷银行导入。 |
-| Workbench relation fan-out | P1 | `web/e2e/workbench-relations-tax-offset-fanout.spec.ts`、`docs/modules/workbench-relations/e2e-coverage.md` | covered | Browser 覆盖 Workbench confirm 后重新请求 `/api/tax-offset`，读取 fresh tax offset read model 并展示 relation 影响后的进项计划行。 |
+| Workbench relation 隔离 | P1 | `web/e2e/workbench-relations-tax-offset-isolation.spec.ts`、`tests/test_workbench_relation_repository.py` | covered | Browser 证明 relation confirm 前后税金 item 不变；repository 证明 relation 写不污染 `tax_offset` queue。 |
 | App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_worker_registry.py` | covered | route/domain registry、read model readiness、`tax-offset` worker 注册与回填。 |
 | migration/schema | P1 | `tests/test_postgres_migrations.py`、`tests/test_postgres_state_store.py` | covered | certified import、tax offset plans、read model 表结构和状态存取。 |
 | 前端页面交互 | P1 | `web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts` | covered | loading abort、remount reload、只读权限、导入 modal、drag/drop、非 Excel 拒绝、recalculate、save、搜索/排序/筛选、drawer、高亮、empty；Browser e2e 覆盖真实 Chromium 下的 read-export/forbidden/expired/admin 权限细分、试算、保存、409 conflict 不伪成功、modal preview/confirm、页面刷新、保存/导入成功后无保存失败/导入失败/read model 失败残留、390px 窄屏大表搜索/排序/筛选/横向滚动/按钮无遮挡，以及 read model `refreshing` / `stale` / `missing` / `failed` 时不 false-empty、不泄露 stale reason、不允许保存计划伪成功和 `stale -> fresh` 自动恢复。 |
@@ -56,9 +56,9 @@ Spec-first Browser e2e 审计入口：
 | 2. Service-layer tests | 适用 | `tests/test_tax_offset_read_model_service.py`、`tests/test_tax_offset_cache_warmup_executor.py`、`tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`tests/test_postgres_state_store.py` | 覆盖 read model service、cache warmup executor、计划保存 service、导入 job repository、Postgres 状态边界。 |
 | 3. API contract tests | 适用 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`web/src/test/TaxApi.test.ts`、`web/e2e/tax-offset-flow.spec.ts` | 覆盖 `/api/tax-offset`、calculate、summary、plans、certified-import preview/confirm/job/list 的 response shape、权限和错误；Browser 额外保护 session gate 零 protected API 和 plan save 409 conflict 的用户可见错误合同。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_tax_offset_worker_rebuild_executor.py`、`tests/test_tax_offset_derived_lifecycle_executor.py`、`tests/test_tax_offset_cache_warmup_executor.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py`、`tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_architecture_guards.py` | 覆盖 SQL projection、compat worker rebuild executor、derived lifecycle read model/cache executor、cache warmup background job executor、Redis fresh month/summary cache envelope、refresh gateway、worker all fan-out、dirty scope、lifecycle fan-out 和 App Status；static guard 防止 cache warmup job creation/run/upsert/persist/env helper 或 broad full-state `tax_offset_read_models` 写入回到 `Application`。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/TaxApi.test.ts`、`web/e2e/tax-offset-flow.spec.ts`、`web/e2e/workbench-relations-tax-offset-fanout.spec.ts` | 覆盖用户可见 loading/error/empty/权限/导入/保存/搜索/排序/筛选/drawer/job polling，并用真实浏览器覆盖 read-export/forbidden/expired/admin 权限细分、StrictMode 下 modal confirm 后关闭与刷新、plan save 409 conflict 不伪成功、保存/导入成功后无错误残留、read model 非 fresh gate、390px 窄屏大表滚动和筛选弹层视口定位，以及 Workbench relation 后税金页 fresh 重读。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`tests/test_tax_offset_sql_runtime.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts`、`web/e2e/workbench-relations-tax-offset-fanout.spec.ts` | 覆盖认证导入 preview -> confirm/job -> read model invalidation -> 页面刷新；Browser e2e 覆盖用户从试算/保存到认证导入刷新后的可见结果、保存/认证导入成功后无错误残留、plan save conflict 防假成功、tax offset read model `stale -> fresh` 自动恢复，也覆盖 Workbench confirm -> tax offset fresh read model -> relation 影响行展示；真实 worker drain 仍为 documented-risk。 |
-| 7. Existing feature regression tests | 适用 | 上述全部 tax offset tests，加 invoice lifecycle、pending invoice、ETC、workbench、cost statistics tests 的按改动选择扩展集 | 发票、ETC、关系、规则和 read model 改动都可能影响税金抵扣旧功能；`web/e2e/tax-offset-flow.spec.ts` 保护 read model 非 fresh 不 false-empty/不保存伪成功、plan save conflict 不伪成功、已认证导入 modal 的 StrictMode mounted guard 回归，`web/e2e/workbench-relations-tax-offset-fanout.spec.ts` 保护 relation fan-out 不丢。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/TaxApi.test.ts`、`web/src/test/PageAuditIcon.test.tsx`、`web/e2e/tax-offset-flow.spec.ts`、`web/e2e/workbench-relations-tax-offset-isolation.spec.ts` | 覆盖用户可见 loading/error/empty/权限/导入/保存/搜索/排序/筛选/drawer/job polling、管理员 Audit 入口、relation 非消费者诚实文案，以及 Workbench relation 前后税金 item 隔离。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`tests/test_tax_offset_sql_runtime.py`、`tests/test_audit_tax_offset_read_model_tool.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts`、`web/e2e/workbench-relations-tax-offset-isolation.spec.ts` | 覆盖认证导入 preview -> confirm/job -> read model invalidation -> 页面刷新、真实迁移 PostgreSQL projection/Audit 收敛，以及 Workbench relation 与税金事实/queue 隔离；真实生产 worker drain 仍归生产证据门禁。 |
+| 7. Existing feature regression tests | 适用 | 上述全部 tax offset tests，加 invoice lifecycle、pending invoice、ETC、workbench、cost statistics tests 的按改动选择扩展集 | 发票/认证导入仍必须合法刷新税金；relation 写入必须保持隔离，禁止恢复旧动态造数和污染 queue。 |
 
 ## 历史 bug 回归库
 
@@ -74,7 +74,7 @@ Spec-first Browser e2e 审计入口：
 | 长期 | 银行流水导入误刷新税金抵扣。 | `tests/test_tax_offset_api.py::test_bank_import_confirm_does_not_invalidate_tax_offset_cache` | covered |
 | 2026-06-13 / 2026-06-24 | 税金抵扣从 OA 附件 parser cache/Workbench 临时行读取发票，绕过统一 Invoice repository；或 OA 附件 payload 缺少 `evidence_type` 但带 `invoice_type=进项发票` 时未 promotion 成 canonical invoice facts。 | `tests/test_object_identity_policy.py::FinancialObjectIdentityPolicyTests::test_oa_attachment_invoice_evidence_classification_is_centralized`、`tests/test_tax_offset_service.py::test_month_payload_includes_oa_attachment_invoices_by_issue_month`、`tests/test_tax_offset_api.py::test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month` | covered |
 | 2026-06-17 | React StrictMode effect replay 后，已认证导入 modal mounted guard 停留为 false，confirm 200 后直接 return，页面不关闭 modal、不刷新 tax offset。 | `web/e2e/tax-offset-flow.spec.ts` | covered |
-| 2026-06-19 | Workbench relation 写入后，税金抵扣页没有重新读取 fresh tax offset read model，导致 relation 影响后的进项计划行不可见或误报读模型错误。 | `web/e2e/workbench-relations-tax-offset-fanout.spec.ts` | covered |
+| 2026-07-11 | 旧 Browser mock 把 relation confirm 伪造成新增税金进项行，并让 relation writer 污染 `tax_offset` queue。 | `web/e2e/workbench-relations-tax-offset-isolation.spec.ts`、`tests/test_workbench_relation_repository.py` | covered |
 | 2026-06-19 | 税金抵扣页只识别 `refreshing/stale`，`missing/failed/unavailable` read model 可能落入普通空态或允许基于非 fresh 数据保存计划。 | `web/e2e/tax-offset-flow.spec.ts`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
 | 2026-06-19 | 税金抵扣计划保存遇到 source/version conflict 时，页面可能误显示保存成功、刷新成伪成功或吞掉冲突错误。 | `web/e2e/tax-offset-flow.spec.ts`、`tests/test_tax_offset_api.py::test_tax_offset_plan_save_rejects_stale_source_versions` | covered |
 | 2026-06-19 | 税金抵扣权限只靠全局 role matrix，可能漏掉本页导入/保存入口、session gate 零 protected API 或 admin 写入口可见性。 | `web/e2e/tax-offset-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`tests/test_tax_offset_api.py` | covered |
@@ -89,7 +89,7 @@ Spec-first Browser e2e 审计入口：
 4. `ETC 发票导入/业务批次变化 -> invoiceFactUpdated / lifecycle -> tax_offset refresh -> 页面重新读取`
 5. `pending invoice rules changed -> invoice_lifecycle -> tax_offset + cost_statistics + search refresh -> 不刷新 no_oa_bank_batch/bank_account_balance`
 6. `Browser e2e: /tax-offset -> 取消一张进项计划 -> calculate -> 保存计划 -> 页内已认证发票导入 preview/confirm -> 刷新已认证结果 drawer -> 无保存/导入/read model 失败残留`
-7. `Browser e2e: /tax-offset -> Workbench confirm relation -> /tax-offset 重新读取 fresh read model -> 显示 relation 影响后的进项计划行`
+7. `Browser e2e: /tax-offset -> Workbench confirm relation -> /tax-offset item 集合保持完全不变；repository 不产生 tax_offset queue 写入`
 8. `Browser e2e: /tax-offset -> read model refreshing/stale/missing/failed -> 不显示真实空态/不允许保存计划 -> stale 自动重试到 fresh -> 恢复业务表格`
 9. `Browser e2e: /tax-offset -> 修改计划 -> save plan 返回 409 conflict -> 错误可见、不显示保存成功、不刷新成伪成功 -> 保存按钮恢复可用`
 10. `Browser e2e: /tax-offset -> read-export 可读无保存/导入入口 -> forbidden/expired 不调用 tax protected API -> admin 可见保存/导入入口`
@@ -105,7 +105,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_tax_offset_api tests.test_
 PYTHONPATH=backend/src python3 -m unittest tests.test_tax_offset_sql_runtime tests.test_tax_offset_worker_rebuild_executor tests.test_tax_offset_derived_lifecycle_executor tests.test_tax_offset_cache_warmup_executor tests.test_read_model_refresh_gateway tests.test_runtime_worker_read_model_refresh_scopes -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_app_status_overview_service tests.test_postgres_state_store tests.test_postgres_migrations -v
 cd web && npm test -- --run src/test/TaxOffsetPage.test.tsx src/test/TaxApi.test.ts src/test/AppStatusIndicator.test.tsx
-cd web && npx playwright test e2e/tax-offset-flow.spec.ts e2e/workbench-relations-tax-offset-fanout.spec.ts
+cd web && npx playwright test e2e/tax-offset-flow.spec.ts e2e/workbench-relations-tax-offset-isolation.spec.ts
 bash scripts/verify.sh docs
 ```
 
@@ -120,7 +120,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、frontend build 和 deterministic Playwright smoke，覆盖完整税金抵扣、认证导入、read model、App Status、前端测试集、`web/e2e/tax-offset-flow.spec.ts` 的浏览器权限细分、导入刷新闭环、保存/导入成功后无错误残留、plan save conflict 防假成功、non-fresh read model gate 和窄屏大表交互，以及 `web/e2e/workbench-relations-tax-offset-fanout.spec.ts` 的 Workbench relation -> tax offset fresh read model fan-out。单轮模块验证只跑最小闭环。
+`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、frontend build 和 deterministic Playwright smoke，覆盖完整税金抵扣、认证导入、read model、App Status、前端测试集、`web/e2e/tax-offset-flow.spec.ts` 的页面流程，以及 `web/e2e/workbench-relations-tax-offset-isolation.spec.ts` 的 relation 与税金事实隔离。单轮模块验证只跑最小闭环。
 
 ## 未测风险
 

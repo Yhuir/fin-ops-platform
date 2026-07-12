@@ -26,6 +26,14 @@
 
 ## 历史记录
 
+## 2026-07-11 - 发票导入 direct-canonical Audit 与 durable confirm 单链闭环
+
+- 目标：使 `imports.invoices` 能证明全部已登记 App 内部导入事实，同时删除绕过 durable queue 或制造不可逆半状态的旧路径。
+- 关键决策：页面没有 own read model，也不消费业务配对关系；Audit 在一个只读一致性快照内比较 file/session/batch/row、canonical invoice 和 `(invoice_id,batch_id,source_id)` manual source-link 集合，并重算 counts/关键发票字段。下游 Workbench/lifecycle/tax/cost 等只登记为 impacts。
+- 旧链删除：file confirm 不再 inline 执行；PostgreSQL/RabbitMQ 均通过 `job.import_jobs + job.outbox_events`，queue 缺失 fail closed。删除无正式 caller 且无法完整撤销 merge/source-link 的 batch revert；migration 0097 删除无 writer 的 `app.import_files.import_batch_id`。
+- 验证：fake/protocol、API/worker、runtime guard、Vitest，以及 disposable PostgreSQL 全迁移 clean + field/source-link/hash/job/outbox 破坏性验证通过；未连接生产。
+- 保证边界：通过只证明 App 已登记导入合同；不能证明税务平台导出未漏票，也不能替代下游每页 Audit。
+
 ## 2026-07-03 - 导入文件事实列表摘要化
 
 - 目标：修复生产 HTTP SLO 中 `/api/import-facts/files?page=1&page_size=50` 返回约 15MB 导致导入页探针超时的问题。
@@ -63,7 +71,7 @@
 ## 2026-06-21 - 导入 preview/confirm 轻量化与批量查重
 
 - 目标：修复发票导入 preview/confirm/read model 链路中的两个性能瓶颈：preview/confirm 每行远程查重，以及 preview 保存整份 workbench 关系快照并触发 read model 刷新。
-- 影响范围：legacy `/imports/preview`、文件 `/imports/files/preview`、导入 confirm job 持久化、PostgreSQL invoice identity repository、下游 read model enqueue；不改变发票 identity 规则、重复判定语义或 confirm 后写入的 canonical invoice facts。
+- 当时影响范围包含 legacy `/imports/preview`；该入口已于 2026-07-11 删除。当前范围只保留文件 `/imports/files/preview`、导入 confirm job 持久化、PostgreSQL invoice identity repository、下游 read model enqueue；不改变发票 identity 规则、重复判定语义或 confirm 后写入的 canonical invoice facts。
 - 关键决策：preview 只保存 `imports` 与 `file_imports` 的预览/session 状态，不刷新 Workbench、pending invoice、invoice usage、search、cost 等 read model。confirm 前仍会重新校验当前 DB 状态，但同一批次使用一次 bulk identity preload，避免逐行 DB 往返。confirm 后使用轻量 import-state persistence，只保存 import/file/ETC/tax import 状态并通过 read model gateway 投递必要 scopes，不再持久化整份 `workbench_pair_relations` snapshot。
 - 文档影响：本实施记录和 `tests.md` 已同步；长期 API shape 不变。
 - 测试覆盖：新增/更新 `tests/test_import_service.py`、`tests/test_postgres_repositories_core.py`、`tests/test_import_file_api.py`，覆盖批量发票 identity preload、PostgreSQL bulk lookup、文件 preview 不调用重型 workbench persistence。
@@ -78,7 +86,7 @@
 - 关键决策：用户看到关联台新增发票不等于 read model 链路完成；导入成功必须以后端 dirty/outbox/readiness 全部收敛为准。`save_imports` 只保存完整 facts snapshot，不再从全量 snapshot 推导 `import.fact.changed`；发票导入不应产生 `import_facts_changed` 旁路。pending invoice 在有影响月份时直接投递月级 scope，避免全量 aggregate 先展开再刷新。银行流水导入的银行明细刷新由本次导入行计算月份并投递真实 `bank_detail.read_model.refresh`，兼容 `import.fact.changed` handler 也只作为 legacy bridge 投递真实 refresh 后完成兼容 dirty scope。runtime queue 的 superseded 判定新增创建顺序约束，避免历史高 `source_version` done event 覆盖当前导入产生的新 event。
 - 后续优化：发票导入已进一步支持方向级 fan-out；进项文件只投递 `input_invoice_usage`，销项文件只投递 `output_invoice_collection`，混合导入按各自文件月份分别投递。`write_operation_slo_audit` 中这两个方向页为可选命中项，缺少未命中方向显示 `skipped`，不再误判 input-only/output-only 导入失败。
 - 文档影响：同步 runtime-workers 与 read-models 模块记录；本模块真实基础设施 gate 仍需发布后执行。
-- 测试覆盖：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_processing_service.py::test_general_import_confirm_passes_bank_detail_scope_keys_to_persist_state`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_import_fact_changed_handler_completes_matching_dirty_scope`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_invoice_relation_scope_helpers_split_input_and_output_file_months`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models`、`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_invoice_import_confirmed_profile_allows_direction_specific_relation_refresh`。
+- 测试覆盖：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_processing_service.py::test_file_import_confirm_job_returns_import_write_targets`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_import_fact_changed_handler_completes_matching_dirty_scope`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_invoice_relation_scope_helpers_split_input_and_output_file_months`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models`、`tests/test_write_operation_slo_audit.py::WriteOperationSloAuditTests::test_invoice_import_confirmed_profile_allows_direction_specific_relation_refresh`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_runtime_worker.py tests/test_runtime_monitoring.py tests/test_import_job_queue.py tests/test_runtime_worker_registry.py tests/test_read_model_refresh_gateway.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate tests/test_write_operation_slo_audit.py -q`。
 - 未测风险：本地测试不连接真实生产 RabbitMQ/Redis/systemd worker；发布后必须只读观察本次导入相关 outbox/dirty/readiness 是否归零，并用小批量发票重新导入跑 `invoice_import_confirmed` write-operation SLO audit。
 

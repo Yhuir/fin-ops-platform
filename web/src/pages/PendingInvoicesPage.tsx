@@ -744,7 +744,7 @@ export default function PendingInvoicesPage() {
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
       ariaLabel="Audit 待找发票"
-      domainKey="pending_invoices"
+      pageKey="pending-invoices"
       label="待找发票"
       readModelStatus={readModelStatus}
     />

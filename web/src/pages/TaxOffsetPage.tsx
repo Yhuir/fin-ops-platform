@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Alert, Button } from "@heroui/react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
 import CertifiedInvoiceImportModal from "../components/tax/CertifiedInvoiceImportModal";
 import CertifiedResultsDrawer from "../components/tax/CertifiedResultsDrawer";
@@ -63,7 +64,7 @@ function PageNote({ message, tone }: { message: string; tone: "info" | "success"
 export default function TaxOffsetPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const { active } = useOptionalPageActivation("tax-offset");
   const pageActiveRef = useRef(active);
   const currentMonthSession = usePageSessionState({
@@ -364,6 +365,14 @@ export default function TaxOffsetPage() {
   const headerStatusMessage = importFeedback
     ?? planFeedback
     ?? null;
+  const titleAccessory = canAdminAccess ? (
+    <PageBusinessAuditIcon
+      ariaLabel="Audit 税金抵扣"
+      pageKey="tax-offset"
+      label="税金抵扣"
+      readModelStatus={readModelStatus}
+    />
+  ) : null;
 
   const waitForTaxOffsetBarrier = useCallback(async () => {
     try {
@@ -436,6 +445,7 @@ export default function TaxOffsetPage() {
   return (
     <PageScaffold
       title="税金抵扣计划与试算"
+      titleAccessory={titleAccessory}
       description="围绕进项票认证计划与已认证结果，做本月税金抵扣试算、导入核对与读模型状态展示。"
       actions={(
         <div className="tax-page-actions">

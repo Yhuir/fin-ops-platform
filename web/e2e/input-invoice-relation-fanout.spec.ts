@@ -39,7 +39,6 @@ test.describe("input invoice usage relation browser fan-out", () => {
       inputInvoiceUsageRelationFanout: true,
       oaPendingPaymentRelationFanout: true,
       sessionMode: "full_access",
-      taxOffsetRelationFanout: true,
     });
     const recordLatency = createInputInvoiceUsageFanoutLatencyRecorder(page, testInfo);
 
@@ -173,29 +172,6 @@ test.describe("input invoice usage relation browser fan-out", () => {
     await expect(oaPendingRow).toContainText("关联台已确认");
     await expect(oaPendingRow).toContainText("智能工厂设备商");
     await expect(oaPendingRow).toContainText("12561048");
-    await expectNoUnexpectedSuccessUiErrors(page);
-
-    const taxOffsetRowsBefore = api.count("GET /api/tax-offset");
-    await recordLatency({
-      route: "/tax-offset",
-      pageKey: "tax-offset",
-      module: "tax-offset",
-      operationId: "tax-offset.open-after-input-invoice-confirm",
-      visibleLabel: "税金抵扣",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("link", { name: "税金抵扣" }).click();
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/tax-offset")).toBeGreaterThan(taxOffsetRowsBefore));
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
-    });
-    await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    expect(api.count("GET /api/tax-offset")).toBeGreaterThan(taxOffsetRowsBefore);
-    const taxInputPlanGrid = page.getByRole("grid", { name: "进项票认证计划" });
-    await expect(taxInputPlanGrid).toBeVisible();
-    await expect(taxInputPlanGrid.getByText("智能工厂设备商")).toBeVisible();
-    await expect(taxInputPlanGrid.getByRole("row", { name: /91330108MA27B4011D/ })).toContainText("7,540.00");
-    await expect(page.getByText("税金抵扣数据加载失败，请稍后重试。")).toHaveCount(0);
-    await expect(page.getByText(/读模型.*刷新|读模型.*失败|read model/i)).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     const costExplorerRowsBefore = api.count("GET /api/cost-statistics/explorer");

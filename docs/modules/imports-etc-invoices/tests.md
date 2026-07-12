@@ -1,5 +1,20 @@
 # ETC发票导入测试矩阵
 
+## 2026-07-11 durable session / Audit 增量
+
+| 类别 | 覆盖 |
+| --- | --- |
+| 业务核心 | task/version/hash、ZIP allowlist、preview counts/fingerprint、partial/failure/retry |
+| Service | durable session store、跨 store 实例重载、worker `begin_import` 幂等、terminal status |
+| API contract | preview storage 503、confirm queue 503、旧 `/api/etc/import` 404、admin-only Audit |
+| Read model / queue | zero own read model；page-owned import job/outbox gate；下游仅 impact targets |
+| Frontend | ETC Audit 控件、ZIP/task/preview/confirm 回归 |
+| E2E integration | disposable PostgreSQL 0001–0098 store + Audit clean/destructive proof |
+| Existing regression | ETC tickets、business batch/OA draft/delete、canonical linking、file/object migrations |
+
+关键入口：`tests/test_etc_import_session_store.py`、`tests/test_audit_etc_import_page.py`、`tests/test_etc_backend.py`、`tests/test_import_processing_service.py`、`tests/test_platform_runtime_boundary_guards.py`、`web/src/test/ImportCenterPage.test.tsx`。
+
+
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
 ## 影响面清单

@@ -72,6 +72,14 @@ function isWorkbenchSummaryRequest(input: RequestInfo | URL) {
 }
 
 describe("Workbench row selection and detail drawer", () => {
+  test("shows the unified page Audit control to admins", async () => {
+    installMockApiFetch();
+    renderAuthenticatedAppAt("/", { session: { canAdminAccess: true } });
+
+    expect(await screen.findByRole("heading", { name: "关联台" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Audit 关联台" })).toBeInTheDocument();
+  });
+
   test("clicking an open row toggles multi-selection without opening the detail drawer", async () => {
     const user = userEvent.setup();
     installMockApiFetch();

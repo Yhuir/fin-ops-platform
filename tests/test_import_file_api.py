@@ -9,7 +9,7 @@ import unittest
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import build_local_state_application as build_application, install_durable_import_queue
 
 from tests.mock_import_files import (
     BOCOM_JAN,
@@ -301,6 +301,7 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_confirm_files_imports_only_selected_files_from_session(self) -> None:
         app = build_application()
+        import_queue = install_durable_import_queue(app)
         preview_body, preview_headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[INVOICE_JAN, PINGAN_JAN],
@@ -334,6 +335,7 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(confirm_payload["job"]["affected_domains"], ["imports_invoices"])
         self.assertEqual(confirm_payload["job"]["route"], "/imports/invoices")
         job_id = confirm_payload["job"]["job_id"]
+        import_queue.process_all()
         job_payload = confirm_payload["job"]
         for _ in range(20):
             job_response = app.handle_request("GET", f"/api/background-jobs/{job_id}")
@@ -365,8 +367,78 @@ class ImportFileApiTests(unittest.TestCase):
         session_file = next(item for item in confirm_payload["files"] if item["id"] == invoice_file["id"])
         self.assertEqual(session_file["status"], "confirmed")
 
+    def test_confirm_fails_closed_when_durable_import_queue_is_unavailable(self) -> None:
+        app = build_application()
+        preview_body, preview_headers = build_multipart_payload(
+            imported_by="user_finance_01",
+            files=[INVOICE_JAN],
+        )
+        preview_response = app.handle_request(
+            "POST",
+            "/imports/files/preview",
+            body=preview_body,
+            headers=preview_headers,
+        )
+        preview_payload = json.loads(preview_response.body)
+
+        response = app.handle_request(
+            "POST",
+            "/imports/files/confirm",
+            json.dumps(
+                {
+                    "session_id": preview_payload["session"]["id"],
+                    "selected_file_ids": [preview_payload["files"][0]["id"]],
+                }
+            ),
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(json.loads(response.body)["error"], "import_queue_unavailable")
+        session = app._file_import_service.get_session(preview_payload["session"]["id"])
+        self.assertEqual(session.files[0].status, "preview_ready")
+        self.assertIsNone(session.files[0].batch_id)
+
+    def test_confirm_retry_reuses_pending_import_job_and_updates_background_job_reference(self) -> None:
+        app = build_application()
+        import_queue = install_durable_import_queue(app)
+        import_queue.fail_next_enqueue = True
+        preview_body, preview_headers = build_multipart_payload(
+            imported_by="user_finance_01",
+            files=[INVOICE_JAN],
+        )
+        preview_payload = json.loads(
+            app.handle_request(
+                "POST",
+                "/imports/files/preview",
+                body=preview_body,
+                headers=preview_headers,
+            ).body
+        )
+        request_body = json.dumps(
+            {
+                "session_id": preview_payload["session"]["id"],
+                "selected_file_ids": [preview_payload["files"][0]["id"]],
+            }
+        )
+
+        first = app.handle_request("POST", "/imports/files/confirm", request_body)
+        second = app.handle_request("POST", "/imports/files/confirm", request_body)
+
+        self.assertEqual(first.status_code, 503)
+        self.assertEqual(second.status_code, 202)
+        first_background_job_id = json.loads(first.body)["job"]["job_id"]
+        second_background_job_id = json.loads(second.body)["job"]["job_id"]
+        self.assertNotEqual(first_background_job_id, second_background_job_id)
+        self.assertEqual(len(import_queue.jobs), 1)
+        self.assertEqual(import_queue.jobs[0].payload["background_job_id"], second_background_job_id)
+
+        import_queue.process_all()
+        session = app._file_import_service.get_session(preview_payload["session"]["id"])
+        self.assertEqual(session.files[0].status, "confirmed")
+
     def test_confirm_bank_transaction_file_job_reports_bank_import_domain(self) -> None:
         app = build_application()
+        import_queue = install_durable_import_queue(app)
         preview_body, preview_headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[PINGAN_JAN],
@@ -402,6 +474,7 @@ class ImportFileApiTests(unittest.TestCase):
             ),
         )
         confirm_payload = json.loads(confirm_response.body)
+        import_queue.process_all()
         job_id = confirm_payload["job"]["job_id"]
         job_response = app.handle_request("GET", f"/api/background-jobs/{job_id}")
         job_payload = json.loads(job_response.body)["job"]

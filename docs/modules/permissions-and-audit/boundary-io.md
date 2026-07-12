@@ -30,6 +30,9 @@
 | Session/auth request | `auth.py`、session API | 解析身份、角色、权限 |
 | Permission check | route/service | 写入口必须显式校验 |
 | Audit event | business service/route | 记录对象、动作、身份、结果 |
+| Page Audit request | admin session + registered frontend page key | `PAGE_AUDIT_REGISTRY` 全覆盖校验；17 页只允许有限 executor；未实现 proof fail closed，不动态选择函数 |
+| App Health system Audit request | admin session + `page=app-health-operations` | 只读；由 system owner 在一个 caller-owned PostgreSQL snapshot 内编排其余 16 页 proof。权限边界只授权读取，不授予 refresh、repair、写 read model 或生产修复能力 |
+| External evidence registration/revocation | 运维 CLI + manifest/artifact + `--apply --actor --reason` | 无 HTTP/UI 入口；API/worker/readonly DB role 只有 select，apply 使用受控 migrator/operator role。service 校验完整 manifest 和 artifact，repository 原子 append/revoke 并写 `audit.events`。dry-run 不连接数据库；生产 apply 需要独立发布/运维授权。 |
 
 ## 输出 I/O
 
@@ -38,6 +41,8 @@
 | Session payload | frontend context | 权限字段稳定 |
 | Access decision | route/service | fail closed |
 | Audit record | audit store/log | 不泄露 secret |
+| Page/System Audit report | admin API consumer | 必须保留 proof availability、contract revision、snapshot、integrity/freshness/queue 和 external evidence 边界；权限通过不等于数据证明通过 |
+| External evidence audit record | audit store/operator | 记录 evidence id/domain/fingerprint、actor、reason 与 register/revoke 动作；不得记录 manifest item 原文、credential 或 secret。 |
 
 ## 持久化与投影
 
@@ -51,6 +56,7 @@
 | --- | --- |
 | Backend auth | `backend/src/fin_ops_platform/app/auth.py` |
 | Backend services | `access_control_service.py`、`audit.py` |
+| Page Audit registry | `backend/src/fin_ops_platform/services/page_audit_registry.py` |
 | Routes | `backend/src/fin_ops_platform/app/server.py`、route owners with protected endpoints |
 | Frontend session | `web/src/features/session/api.ts`、`web/src/contexts/SessionContext.tsx` |
 | Frontend gates | `web/src/components/auth/SessionGate.tsx`、`useSessionPermissions()`、`useOptionalSessionPermissions()` |
@@ -61,7 +67,7 @@
 
 - 允许依赖：auth/session source, access control service, audit service。
 - 必须通过：explicit route/service permission check。
-- 禁止绕过：write endpoint without permission owner；frontend-only authorization；logging secrets。
+- 禁止绕过：write endpoint without permission owner；frontend-only authorization；logging secrets；Audit route 触发 refresh/repair；把 system Audit 的 admin access decision 当作 integrity 结论。
 
 ## 测试与验证
 

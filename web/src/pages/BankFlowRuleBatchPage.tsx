@@ -816,7 +816,7 @@ export default function BankFlowRuleBatchPage() {
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
       ariaLabel="Audit 流水规则批量处理"
-      domainKey="bank_flow_rule_batches"
+      pageKey="bank-flow-rule-batches"
       label="流水规则批量处理"
       readModelStatus={readModelStatus}
     />

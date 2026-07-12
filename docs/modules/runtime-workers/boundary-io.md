@@ -42,6 +42,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | Job result/status | runtime queue/app health | 成功、失败、重试和 readiness 可观察；影响 read model 的 job completion result summary 必须携带 target envelope 或明确不适用 |
+| Fan-out parent result | readiness / app health | manifest 为 `fan_out_command` 的 command-only `all` parent 只负责入队 child scopes，不写 current readiness；parent event/dirty scope 的当前失败仍可观察，历史 readiness 只作为 diagnostics。真实 queryable all scope（当前 `bank_account_balance:all`）和 queryable parent 不适用该忽略规则。 |
 | Worker heartbeat | `job.runtime_worker_heartbeats` | 空轮询 `idle` heartbeat 必须节流，禁止每个 0.05s poll 同步写库；`processing`、`deferred`、`failed`、`stopping`、`stopped` 等事件状态必须即时写入 |
 | Read model projection | 对应 repository | 只写 worker 对应投影 |
 | Wakeup/transport | RabbitMQ 可选 | 不能作为状态事实源 |

@@ -20,6 +20,7 @@
 | `保存计划` | tax offset 计划保存 |
 | `保存规则` | pending/OA/input/output 规则保存 |
 | `保存并刷新` | input invoice usage 支付状态规则保存并刷新 read model |
+| `保存并同步` | cost statistics 标签准入规则保存并等待 read model barrier |
 | `保存外部往来款` | turnover extra save |
 | `保存补充信息` | bank details 人工补分类 |
 | `保存收据编号设置` | output invoice receipt settings |
@@ -112,6 +113,7 @@
 | `新增标签` | `web/src/features/bankDetails/AutoTagRulesDrawer.tsx` | 银行明细自动标签规则新增。 |
 | `开始预览` | `web/src/components/imports/ImportWorkflowPage.tsx` | 导入 preview。 |
 | `确认导入` | `web/src/components/imports/ImportWorkflowPage.tsx` | 导入确认。 |
+| `保存并同步` | `web/src/components/cost-statistics/CostStatisticsTagRulesDrawer.tsx` | 成本统计标签准入规则保存。 |
 
 ## Mutating feature API coverage map
 
@@ -122,6 +124,7 @@
 | `backgroundJobs/api.ts` | `app-health-operations`, `settings` | 后台任务用于运维、数据重置和长任务轮询/控制。 |
 | `bankDetails/api.ts` | `bank-details` | 银行明细分类、自动标签、关系入口等写入口。 |
 | `batchAccounting/api.ts` | `batch-accounting` | 批量账务提交和撤回。 |
+| `cost-statistics/api.ts` | `cost-statistics` | 成本统计标签准入规则 PUT；导出仍为只读能力。 |
 | `etc/api.ts` | `etc-tickets`, `imports-etc-invoices` | ETC 票据管理、ETC 导入、对账和业务批次写入口。 |
 | `imports/api.ts` | `imports-bank-transactions`, `imports-invoices`, `imports-etc-invoices` | 通用导入 preview/confirm/template 写链路。 |
 | `inputInvoiceUsage/api.ts` | `input-invoice-usage` | 支付规则、OA reverse 草稿/批次/状态写入口。 |
@@ -144,6 +147,7 @@
 | `reconciliation-workbench:paired-withdraw-actions` | `reconciliation-workbench` | 已配对候选选择后的撤回关联写入口 | read-export 下选择已配对三栏候选后撤回关联禁用，更多/取消关联/异常处理入口隐藏，withdraw durable mutation 零调用，且复扫候选。 |
 | `reconciliation-workbench:cash-special-actions` | `reconciliation-workbench` | 已配对银行行的现金过账、现金买票和取消现金处理行级菜单 | deterministic mock 暴露 `confirm_cash_pass_through`、`confirm_cash_ticket_purchase`、`cancel_cash_special` 后，read-export 下更多菜单不可见，确认为过账/确认为买票/取消现金处理 menuitem 和确认买票成本弹窗均不可见，三个现金处理 durable mutation 零调用，且复扫候选。 |
 | `bank-details:auto-tag-rules` | `bank-details` | 自动标签规则抽屉 | read-export 下新增标签、重新应用规则、保存禁用，且复扫 visible enabled 写控件候选。 |
+| `cost-statistics:tag-rules` | `cost-statistics` | 成本统计标签规则抽屉 | read-export 下可查看规则，但 `保存并同步` disabled，`PUT /api/cost-statistics/tag-rules` 零调用，并复扫 visible enabled 写控件候选。 |
 | `bank-details:category-confirmation` | `bank-details` | 银行明细行内分类确认入口 | read-export 下待确认分类按钮禁用，分类菜单不打开，category-confirmation durable mutation 零调用，且复扫候选。 |
 | `bank-details:manual-category-assignment` | `bank-details` | 银行明细未匹配人工分类入口 | read-export 下待分类按钮禁用，人工分类菜单不打开，category-assignment durable mutation 零调用，且复扫候选。 |
 | `bank-flow-rule-batches:tag-drawer` | `bank-flow-rule-batches` | 流水规则批量处理标签规则抽屉 | read-export 下提交/撤回入口不可见，标签规则 OA/发票复选框和保存禁用，且复扫候选。 |
@@ -173,7 +177,6 @@
 | `imports-invoices` | 导入页写入口集中在首屏上传、开始预览和确认导入控件，不需要额外抽屉 opener。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下打开该 route，断言文件 input、开始预览和确认导入禁用且零 mutation；`imports-invoices-flow.spec.ts` 覆盖 full-access 主链路。 |
 | `imports-etc-invoices` | 导入页写入口集中在首屏上传、开始预览和确认导入控件，不需要额外抽屉 opener。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下打开该 route，断言文件 input、开始预览和确认导入禁用且零 mutation；`imports-etc-invoices-flow.spec.ts` 覆盖 full-access 主链路。 |
 | `tax-offset` | read-export 下保存计划和已认证发票导入入口在页面首屏直接可判定，深层导入流程由 full-access Browser flow 覆盖。 | `permissions-role-matrix.spec.ts` 直接断言 read-export 下无保存计划/已认证发票导入入口；`tax-offset-flow.spec.ts` 覆盖 full-access 保存、导入、冲突和 read model 非 fresh。 |
-| `cost-statistics` | 页面没有普通 mutation，read-export 导出是允许能力；风险在下载和 read model freshness，不在动态写入口。 | `permissions-role-matrix.spec.ts` 打开页面并扫描 enabled 写控件候选；`cost-statistics-flow.spec.ts` 覆盖 read-export download、row-limit 和非 fresh 禁用。 |
 | `settings` | read-export、full-access、admin 的关键写入口在 role matrix 顶层测试中逐项断言，不通过动态 opener registry 执行。 | `permissions-role-matrix.spec.ts` 断言 read-export 保存禁用且 admin-only 区隐藏，full-access 普通保存 POST/200，admin 访问账户、OA 凭据保存/清空密码，并打开数据重置影响确认和 OA 密码复核弹窗但取消在创建 reset job 之前。 |
 | `app-health-operations` | AppHealth 是 admin-only 只读运维页面，本地 Browser 权限风险是 route gate 和 dashboard API 零误调用，不是页面写入口。 | `app-shell.spec.ts` 与 `permissions-role-matrix.spec.ts` 覆盖 admin dashboard、read-export/forbidden/expired gate 和 dashboard protected API 零调用。 |
 
@@ -194,7 +197,7 @@
 | `input-invoice-usage` | 支付规则保存、OA reverse 草稿创建 | `covered-browser` | `web/e2e/input-invoice-usage-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开支付状态规则抽屉和以发票反提 OA 工作流，断言规则只读、OA reverse preview 不可创建草稿、durable write endpoints 零调用并复跑 DOM 写控件候选扫描 | 新增 payment/OA 写入口时补。 |
 | `output-invoice-collections` | 状态/提醒保存、红蓝票关系、正式收据、收据编号、history void/reopen | `covered-browser` | `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`、组件/API tests；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开收款状态规则和已出收据历史，断言收据编号/状态/红蓝票/待出收据/作废/重开入口不可用并复跑 DOM 写控件候选扫描；admin role matrix 会打开收据编号设置并保存一次 `PUT /api/output-invoice-collections/receipt-settings` | 新增收款 write command 时补。 |
 | `oa-pending-payments` | 进行中 OA confirm-paid、link-bank、支出流水无需开票规则保存 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下 confirm-paid 隐藏、link-bank disabled、OA 选择隐藏、支出流水无需开票规则 drawer 只读且保存禁用，并保持零 mutation；`web/e2e/oa-pending-payments-*` 覆盖 full_access 主链路 | 新增 OA command 时补。 |
-| `cost-statistics` | 导出 | `covered-browser` | `web/e2e/cost-statistics-flow.spec.ts` 覆盖 read-export download；页面无普通 mutation | 真实 XLSX 和代理 header 归 staging。 |
+| `cost-statistics` | 标签准入规则保存、导出 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 在 read-export 下打开标签规则抽屉，断言 `保存并同步` disabled 且 tag-rules PUT 零调用；`web/src/test/CostStatisticsPage.test.tsx` 覆盖 writable save→barrier→fresh；`web/e2e/cost-statistics-flow.spec.ts` 覆盖 read-export download | 真实 XLSX、代理 header 和生产 rule write audit 归 staging。 |
 | `etc-tickets` | OA 草稿、人工提交、delete/reset、source file/upload/import/manual reconciliation | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下提交 OA、新建批次、删除按钮、source file 上传、确认对账和人工核对动作禁用且零 mutation；`web/e2e/etc-tickets-flow.spec.ts` 覆盖 full_access OA 草稿和人工提交主链路；组件/API tests 覆盖 source file/upload/manual reconciliation guard | 新增 ETC 写入口时补同类 Browser 断言。 |
 | `settings` | 保存设置、访问账户、OA 凭据、数据重置 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 保存禁用、full-access 普通 settings 保存 POST/200/成功反馈且不能进入 admin-only 区、admin 访问账户新增只读导出用户并在 settings 保存 payload 中写入 allowed/readonly/admin 权限数组、保存 200 后页面继续显示持久化账户、admin OA 申请人凭据保存 PUT/200、清空密码 DELETE/200、密码不回显且不进入普通 settings 保存 body，并打开数据重置影响确认和 OA 密码复核弹窗、断言密码前 `确认清理` 禁用、填入密码后启用、取消后 `POST /api/workbench/settings/data-reset/jobs` 零新增；`web/e2e/settings-data-reset-flow.spec.ts` 覆盖 admin data reset 真正提交 job 和项目 scope fan-out 主链路 | 真实 admin/OA 凭据登录有效性仍归 staging。 |
 | `app-health-operations` | dashboard/admin runtime read、write-safety blockers | `covered-browser` | `web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 systemd/RabbitMQ/Redis 归 staging。 |

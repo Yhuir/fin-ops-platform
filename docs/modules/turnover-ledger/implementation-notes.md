@@ -627,3 +627,10 @@ git diff --check
 - 决策：relation snapshot/audit log 继续保留 `withdrawn` 历史，但 grouped 当前台账不再消费 withdrawn relation。Audit 从 bank-detail canonical leaves 分方向重算余额：有本金时结算最多冲减到零，纯结算组保留负余额；同时继续分别校验待还、已还、待收、已收字段，不以放宽断言掩盖重复聚合。
 - 版本：`TURNOVER_LEDGER_SCHEMA_VERSION` 升至 `2026-07-turnover-ledger-v4`，发布后必须通过正式 read-model gateway 重建受影响 scope；禁止直接改 `read_model.turnover_ledger_rows`。
 - 测试：新增撤回后 grouped totals/flow leaf 不重复的业务核心回归，并扩展 Audit SQL 合同测试覆盖 `expected_balance`。
+
+## 2026-07-11 - Audit consumer 证明：保留 case-member 映射
+
+- 触发事实：旧 turnover payload 只有 `workbench_relation_case_ids` 与 `workbench_relation_row_ids` 两个 union，无法证明每个 case 对应哪些 typed members；shared relation 正确不能推出 ledger/flow consumer 没有漏配对。
+- 决策：复用 builder 已存在的内部 relation detail，公开为 `workbench_relations` 结构化 summaries；不新增表、worker 或事实源。Audit 以 ledger aggregate row 和每条 flow row 为 anchor，与 linked shared groups 做 `(anchor, case, row_id, row_type)` 双向 equality。
+- 版本：`TURNOVER_LEDGER_SCHEMA_VERSION` 升至 `2026-07-turnover-ledger-v5`；发布后必须通过正式 gateway 重建旧 scope，禁止直接写 read model。
+- 测试：扩展 turnover projection/source-version tests 和 page Audit omission fixture；真实 PostgreSQL/生产数据仍由后续只读发布 gate 验证。

@@ -15,7 +15,7 @@ function createOutputInvoiceRedRelationLatencyRecorder(page: Page, testInfo: Tes
 }
 
 test.describe("output invoice red relation browser fan-out", () => {
-  test("confirms a red invoice relation, exports relation fields, refreshes tax/cost downstream, and revokes it", async ({ page }, testInfo) => {
+  test("confirms a red invoice relation, exports relation fields, refreshes cost downstream, and revokes it", async ({ page }, testInfo) => {
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       outputInvoiceDownstreamFanout: true,
@@ -154,27 +154,6 @@ test.describe("output invoice red relation browser fan-out", () => {
       await mark("finalSettledLatencyMs", expect(exportDrawer).toBeHidden());
     });
     await expect(exportDrawer).toBeHidden();
-
-    const taxOffsetRequestCountBeforeDownstream = api.count("GET /api/tax-offset");
-    await recordLatency({
-      route: "/tax-offset",
-      pageKey: "tax-offset",
-      module: "tax-offset",
-      operationId: "tax-offset.open-after-output-red-relation",
-      visibleLabel: "税金抵扣",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("link", { name: "税金抵扣" }).click();
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/tax-offset")).toBeGreaterThan(taxOffsetRequestCountBeforeDownstream));
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
-    });
-    await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    expect(api.count("GET /api/tax-offset")).toBeGreaterThan(taxOffsetRequestCountBeforeDownstream);
-    const taxInputPlanGrid = page.getByRole("grid", { name: "进项票认证计划" });
-    await expect(taxInputPlanGrid).toBeVisible();
-    await expect(taxInputPlanGrid.getByText("智能工厂设备商")).toBeVisible();
-    await expect(taxInputPlanGrid.getByRole("row", { name: /91330108MA27B4011D/ })).toContainText("7,540.00");
-    await expect(page.getByText("税金抵扣数据加载失败，请稍后重试。")).toHaveCount(0);
 
     const costExplorerRequestCountBeforeDownstream = api.count("GET /api/cost-statistics/explorer");
     await recordLatency({

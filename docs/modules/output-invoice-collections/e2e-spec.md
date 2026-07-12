@@ -24,7 +24,7 @@
 | `OUT-COLL-E2E-005` | read model refreshing/stale | P0 | missing/stale/source mismatch 不显示 stale rows 为 fresh；页面展示 loading/refreshing/empty/error 的用户可理解状态并自动重试。 |
 | `OUT-COLL-E2E-006` | 权限和 admin-only 设置 | P1 | `read_export_only` 不触发写 API，`admin` 才显示收据编号设置；API 403 不被 UI 当作成功。 |
 | `OUT-COLL-E2E-007` | 导出/download | P1 | 浏览器 download event 成功，字段、筛选、权限和 row-limit 反馈与后端 contract 一致。 |
-| `OUT-COLL-E2E-008` | 下游 tax/cost/search fan-out | P1 | 红蓝票、收款状态或 receipt 变化后，下游税金、成本和搜索等页面通过自己的 read model 展示一致结果。 |
+| `OUT-COLL-E2E-008` | 下游 relation consumer fan-out | P1 | 红蓝票关系变化后，销项页自身、成本和搜索等实际 relation consumer 通过自己的 read model 展示一致结果；税金抵扣不消费 relation，不得发生造数或刷新。 |
 
 ## 不属于本地 deterministic E2E 的风险
 

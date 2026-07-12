@@ -646,6 +646,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 ],
             )
             app._workbench_query_service._oa_adapter = adapter
+            background_job_service = app._background_job_service
 
             response = app.handle_request(
                 "POST",
@@ -669,13 +670,17 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                     f"/api/workbench/settings/data-reset/jobs/{job_id}",
                     headers={"Authorization": "Bearer admin-token"},
                 )
-                job_payload = json.loads(query_response.body)["job"]
+                self.assertEqual(query_response.status_code, 200, query_response.body)
+                query_payload = json.loads(query_response.body)
+                self.assertIn("job", query_payload, query_response.body)
+                job_payload = query_payload["job"]
                 if job_payload["status"] == "completed":
                     break
                 time.sleep(0.02)
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(query_response.status_code, 200)
+        self.assertIs(app._background_job_service, background_job_service)
         self.assertEqual(job_payload["status"], "completed")
         self.assertEqual(job_payload["percent"], 100)
         self.assertEqual(job_payload["result"]["rebuild_status"], "completed")
@@ -1166,10 +1171,18 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(payload["rebuild_status"], "completed")
         parse_files.assert_not_called()
         rebuilt_invoice_ids = _flatten_group_rows(rebuilt_payload, "invoice")
-        self.assertEqual(rebuilt_invoice_ids, ["oa-att-inv-oa-exp-exp-attach-001-e932b5c147bf4f20"])
+        self.assertEqual(
+            rebuilt_invoice_ids,
+            ["oa-att-inv-oa-exp-exp-attach-001-e932b5c147bf4f20", "iv-o-202604-001"],
+        )
         invoice_rows = _flatten_group_payload_rows(rebuilt_payload, "invoice")
-        self.assertEqual(invoice_rows[0]["source_kind"], "oa_attachment_invoice")
-        self.assertEqual(invoice_rows[0]["detail_fields"]["发票号码"], "40512344")
+        attachment_row = next(
+            row
+            for row in invoice_rows
+            if row["id"] == "oa-att-inv-oa-exp-exp-attach-001-e932b5c147bf4f20"
+        )
+        self.assertEqual(attachment_row["source_kind"], "oa_attachment_invoice")
+        self.assertEqual(attachment_row["detail_fields"]["发票号码"], "40512344")
 
     def test_reset_oa_attachment_parse_is_limited_to_retained_months(self) -> None:
         class CaptureParseAdapter:

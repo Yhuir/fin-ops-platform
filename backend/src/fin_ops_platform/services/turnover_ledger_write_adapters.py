@@ -92,22 +92,19 @@ class TurnoverLedgerLocalTagSelectionConnection:
     def __init__(
         self,
         *,
-        settings_snapshot_provider: Callable[[], dict[str, object]],
-        save_snapshot: Callable[[dict[str, object]], None],
-        refresh_snapshot: Callable[[dict[str, object]], None],
+        selection_state_provider: Callable[[], dict[str, object]],
+        restore_selection_state: Callable[[dict[str, object]], None],
     ) -> None:
-        self._settings_snapshot_provider = settings_snapshot_provider
-        self._save_snapshot = save_snapshot
-        self._refresh_snapshot = refresh_snapshot
+        self._selection_state_provider = selection_state_provider
+        self._restore_selection_state = restore_selection_state
 
     @contextmanager
     def transaction(self) -> Any:
-        previous_snapshot = dict(self._settings_snapshot_provider() or {})
+        previous_state = dict(self._selection_state_provider() or {})
         try:
             yield SimpleNamespace()
         except Exception:
-            self._save_snapshot(dict(previous_snapshot))
-            self._refresh_snapshot(dict(previous_snapshot))
+            self._restore_selection_state(dict(previous_state))
             raise
 
 
@@ -115,11 +112,9 @@ class TurnoverLedgerLocalTagSelectionSettingsWriter:
     def __init__(
         self,
         *,
-        save_snapshot: Callable[[dict[str, object]], None],
-        refresh_snapshot: Callable[[dict[str, object]], None],
+        commit_update: Callable[..., None],
     ) -> None:
-        self._save_snapshot = save_snapshot
-        self._refresh_snapshot = refresh_snapshot
+        self._commit_update = commit_update
 
     def save_tag_selection_settings(
         self,
@@ -128,42 +123,31 @@ class TurnoverLedgerLocalTagSelectionSettingsWriter:
         audit_event: dict[str, object],
         transaction: Any,
     ) -> None:
-        _ = audit_event, transaction
-        snapshot = dict(next_snapshot)
-        self._save_snapshot(snapshot)
-        self._refresh_snapshot(snapshot)
+        _ = transaction
+        self._commit_update(
+            next_snapshot=dict(next_snapshot),
+            audit_event=dict(audit_event),
+        )
 
 
 class TurnoverLedgerLocalTagSelectionAdapterSet:
     def __init__(
         self,
         *,
-        state_store: Any,
         app_settings_service: Any,
-        refresh_snapshot: Callable[[dict[str, object]], None],
     ) -> None:
-        self._state_store = state_store
         self._app_settings_service = app_settings_service
-        self._refresh_snapshot = refresh_snapshot
 
     def connection(self) -> TurnoverLedgerLocalTagSelectionConnection:
         return TurnoverLedgerLocalTagSelectionConnection(
-            settings_snapshot_provider=self.settings_snapshot,
-            save_snapshot=self.save_snapshot,
-            refresh_snapshot=self._refresh_snapshot,
+            selection_state_provider=self._app_settings_service.get_turnover_ledger_tag_selection_state,
+            restore_selection_state=self._app_settings_service.restore_turnover_ledger_tag_selection_state,
         )
 
     def settings_writer(self) -> TurnoverLedgerLocalTagSelectionSettingsWriter:
         return TurnoverLedgerLocalTagSelectionSettingsWriter(
-            save_snapshot=self.save_snapshot,
-            refresh_snapshot=self._refresh_snapshot,
+            commit_update=self._app_settings_service.commit_turnover_ledger_tag_selection_update,
         )
-
-    def settings_snapshot(self) -> dict[str, object]:
-        return dict(getattr(self._app_settings_service, "_snapshot", {}) or {})
-
-    def save_snapshot(self, snapshot: dict[str, object]) -> None:
-        self._state_store.save_app_settings(dict(snapshot))
 
 
 class TurnoverLedgerLocalRuntimeSupport:
@@ -280,14 +264,6 @@ class TurnoverLedgerLocalRuntimeSupport:
         if self._turnover_ledger_service is not None:
             setattr(self._turnover_ledger_service, "_extra_service", extra_service)
 
-    def refresh_app_settings_snapshot(self, snapshot: dict[str, object]) -> None:
-        if self._app_settings_service is None:
-            return
-        setattr(self._app_settings_service, "_snapshot", dict(snapshot))
-        configure_category_service = getattr(self._app_settings_service, "_configure_category_service", None)
-        if callable(configure_category_service):
-            configure_category_service(dict(snapshot))
-
     def save_bank_transaction_categories_snapshot(self, state_store: object, snapshot: dict[str, object]) -> None:
         save_categories = getattr(state_store, "save_bank_transaction_categories", None)
         if not callable(save_categories):
@@ -332,7 +308,6 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
         state_store: Any,
         queue_repository: Any,
         app_settings_service: Any,
-        refresh_snapshot: Callable[[dict[str, object]], None],
         tenant_id: str,
         postgres_settings_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
@@ -341,7 +316,6 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
         self._state_store = state_store
         self._queue_repository = queue_repository
         self._app_settings_service = app_settings_service
-        self._refresh_snapshot = refresh_snapshot
         self._tenant_id = tenant_id
         self._postgres_settings_repository_factory = postgres_settings_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
@@ -364,9 +338,7 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
             local_adapters = TurnoverLedgerLocalTagSelectionAdapterSet(
-                state_store=self._state_store,
                 app_settings_service=self._app_settings_service,
-                refresh_snapshot=self._refresh_snapshot,
             )
             connection = local_adapters.connection()
             settings_port = local_adapters.settings_writer()

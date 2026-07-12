@@ -96,9 +96,18 @@ class ImportRuntimeProcessorFactory:
             file_store=state_store,
         )
         tax_certified_import_service = TaxCertifiedImportService(state_store=state_store)
-        etc_service = EtcService(state_store=state_store)
+        from fin_ops_platform.services.etc_import_preview_service import EtcImportPreviewService
+        from fin_ops_platform.services.etc_import_session_store import build_etc_import_session_store
+
+        etc_import_session_store = build_etc_import_session_store(state_store)
+        etc_service = EtcService(state_store=state_store, import_session_store=etc_import_session_store)
         etc_service.set_canonical_invoice_key_exists(_canonical_invoice_key_exists(import_service))
         etc_reconciliation_task_service = EtcReconciliationTaskService(state_store=state_store)
+        etc_import_preview_service = EtcImportPreviewService(
+            etc_service=etc_service,
+            task_service=etc_reconciliation_task_service,
+            session_store=etc_import_session_store,
+        )
         background_job_service = BackgroundJobService(state_store)
         category_service = BankTransactionCategoryService.from_snapshot(
             state_store.load_bank_transaction_categories(),
@@ -130,7 +139,6 @@ class ImportRuntimeProcessorFactory:
             tax_certified_import_service=tax_certified_import_service,
         )
         processing_service = ImportProcessingService(
-            import_service=import_service,
             file_import_service=file_import_service,
             tax_certified_import_service=tax_certified_import_service,
             etc_service=etc_service,
@@ -142,23 +150,18 @@ class ImportRuntimeProcessorFactory:
             enqueue_workbench_auto_matching_for_scopes=lifecycle.enqueue_workbench_matching_job,
             persist_state_with_workbench_invalidation=persist_import_state,
             invalidate_tax_offset_read_model_scopes=lifecycle.invalidate_tax_offset_scopes,
-            workbench_matching_scope_months_for_import_preview=_workbench_matching_scope_months_for_import_preview,
             workbench_matching_scope_months_for_import_file_session=_workbench_matching_scope_months_for_import_file_session,
-            tax_offset_scope_keys_for_import_preview=_tax_offset_scope_keys_for_import_preview,
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
-            cost_statistics_scope_keys_for_import_preview=_cost_statistics_scope_keys_for_import_preview,
             cost_statistics_scope_keys_for_import_file_session=_cost_statistics_scope_keys_for_import_file_session,
-            bank_detail_scope_keys_for_import_preview=_bank_detail_scope_keys_for_import_preview,
             bank_detail_scope_keys_for_import_file_session=_bank_detail_scope_keys_for_import_file_session,
-            input_invoice_usage_scope_keys_for_import_preview=_input_invoice_usage_scope_keys_for_import_preview,
             input_invoice_usage_scope_keys_for_import_file_session=_input_invoice_usage_scope_keys_for_import_file_session,
-            output_invoice_collection_scope_keys_for_import_preview=_output_invoice_collection_scope_keys_for_import_preview,
             output_invoice_collection_scope_keys_for_import_file_session=_output_invoice_collection_scope_keys_for_import_file_session,
             link_etc_import_result_to_existing_invoices=_link_etc_import_result_to_existing_invoices(
                 import_service,
                 etc_service,
             ),
             refresh_after_etc_invoice_link=lifecycle.refresh_after_etc_invoice_link,
+            etc_import_preview_service=etc_import_preview_service,
             oa_manual_import_create_processor=_oa_manual_import_create_processor(state_store=state_store),
         )
         return processing_service.build_import_job_processors()
@@ -783,10 +786,6 @@ def _oa_manual_import_create_processor(*, state_store: Any) -> Callable[[Any], d
     return process
 
 
-def _workbench_matching_scope_months_for_import_preview(preview: Any) -> list[str]:
-    return _workbench_matching_scope_months_for_import_rows(getattr(preview, "normalized_rows", []))
-
-
 def _workbench_matching_scope_months_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
     selected = {str(file_id) for file_id in list(selected_file_ids or [])}
     rows: list[Any] = []
@@ -805,16 +804,6 @@ def _workbench_matching_scope_months_for_import_rows(rows: Any) -> list[str]:
             if SEARCH_MONTH_RE.match(value[:7]):
                 months.add(value[:7])
     return sorted(months)
-
-
-def _tax_offset_scope_keys_for_import_preview(preview: Any) -> list[str]:
-    batch = getattr(preview, "batch", None)
-    if _normalized_batch_type(getattr(batch, "batch_type", None)) not in {
-        BatchType.INPUT_INVOICE,
-        BatchType.OUTPUT_INVOICE,
-    }:
-        return []
-    return _tax_offset_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
 
 
 def _tax_offset_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
@@ -838,10 +827,6 @@ def _tax_offset_scope_keys_for_import_rows(rows: Any) -> list[str]:
     return _workbench_matching_scope_months_for_import_rows(rows)
 
 
-def _cost_statistics_scope_keys_for_import_preview(preview: Any) -> list[str]:
-    return _cost_statistics_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
-
-
 def _cost_statistics_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
     return _workbench_matching_scope_months_for_import_file_session(session, selected_file_ids)
 
@@ -849,10 +834,6 @@ def _cost_statistics_scope_keys_for_import_file_session(session: Any, selected_f
 def _cost_statistics_scope_keys_for_import_rows(rows: Any) -> list[str]:
     months = _workbench_matching_scope_months_for_import_rows(rows)
     return months or ["all"]
-
-
-def _bank_detail_scope_keys_for_import_preview(preview: Any) -> list[str]:
-    return _bank_detail_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
 
 
 def _bank_detail_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
@@ -877,27 +858,12 @@ def _bank_detail_scope_keys_for_import_rows(rows: Any) -> list[str]:
     return sorted(months)
 
 
-def _input_invoice_usage_scope_keys_for_import_preview(preview: Any) -> list[str]:
-    return _invoice_relation_scope_keys_for_import_preview(preview, BatchType.INPUT_INVOICE)
-
-
 def _input_invoice_usage_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
     return _invoice_relation_scope_keys_for_import_file_session(session, selected_file_ids, BatchType.INPUT_INVOICE)
 
 
-def _output_invoice_collection_scope_keys_for_import_preview(preview: Any) -> list[str]:
-    return _invoice_relation_scope_keys_for_import_preview(preview, BatchType.OUTPUT_INVOICE)
-
-
 def _output_invoice_collection_scope_keys_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:
     return _invoice_relation_scope_keys_for_import_file_session(session, selected_file_ids, BatchType.OUTPUT_INVOICE)
-
-
-def _invoice_relation_scope_keys_for_import_preview(preview: Any, batch_type: BatchType) -> list[str]:
-    batch = getattr(preview, "batch", None)
-    if _normalized_batch_type(getattr(batch, "batch_type", None)) != batch_type:
-        return []
-    return _cost_statistics_scope_keys_for_import_rows(getattr(preview, "normalized_rows", []))
 
 
 def _invoice_relation_scope_keys_for_import_file_session(
@@ -976,7 +942,6 @@ def handle_import_fact_changed_event(event: Any, *, queue_repository: Any | None
 
 def check_import_job_processors() -> dict[str, Callable[[Any], dict[str, object]]]:
     return {
-        "general_import.confirm": _check_processor,
         "file_import.confirm": _check_processor,
         "etc_invoice_import.confirm": _check_processor,
         "tax_certified_import.confirm": _check_processor,

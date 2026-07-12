@@ -5,9 +5,9 @@
 - `/health` 和 app health API。
 - `GET /metrics` Prometheus text exposition。
 - `GET /api/operations/app-health-dashboard` 管理员只读 Dashboard。
-- `GET /api/operations/app-health/input-invoice-usage-audit` 管理员只读进项使用三边对账审计。
-- `GET /api/operations/app-health/output-invoice-collection-audit` 管理员只读销项收款三边对账审计。
-- `GET /api/operations/app-health/page-audit?domain=<domain_key>` 管理员只读页面业务 read model / relation 全量对账审计。
+- `GET /api/operations/app-health/page-audit?page=input-invoice-usage` 管理员只读进项使用 canonical/shared/consumer 对账审计。
+- `GET /api/operations/app-health/page-audit?page=output-invoice-collections` 管理员只读销项收款 canonical/shared/consumer 对账审计。
+- `GET /api/operations/app-health/page-audit?page=<page_key>` 管理员只读页面业务 read model / relation 对账审计；registry 全覆盖 17 页，未实现 proof 的页面 fail closed。
 - `POST /api/operations/app-health/input-invoice-usage-refresh` 管理员受控入队刷新进项使用 read model scope。
 - `POST /api/operations/app-health/output-invoice-collection-refresh` 管理员受控入队刷新销项收款 read model scope。
 - OA 同步状态。
@@ -227,7 +227,7 @@ Dashboard 三个区域：
 curl -sS \
   -b "Admin-Token=${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
   -H "Accept: application/json" \
-  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/input-invoice-usage-audit"
+  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/page-audit?page=input-invoice-usage"
 ```
 
 报告 `overall_status=pass`、`audit_status.integrity=pass` 且 `audit_status.freshness=fresh`，才可作为已登记 invariant 一致的证据。`issues` 与 `*_sample_count` 是有上限样本；`issue_samples_truncated=true` 时不能把样本数当成精确问题总数。
@@ -254,7 +254,7 @@ curl -sS \
 curl -sS \
   -b "Admin-Token=${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
   -H "Accept: application/json" \
-  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/output-invoice-collection-audit"
+  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/page-audit?page=output-invoice-collections"
 ```
 
 报告 `overall_status=pass`、`audit_status.integrity=pass` 且 `audit_status.freshness=fresh`，才可作为已登记 invariant 一致的证据；问题计数是有上限样本。
@@ -275,18 +275,18 @@ curl -sS \
 
 ## 页面业务全量审计
 
-部署包含该 API 的版本后，管理员可用 Admin Token 只读触发 7 个页面的 App 内部全量对账：
+部署包含该 API 的版本后，管理员可用 Admin Token 只读触发已就绪页面的 App 内部对账：
 
 ```bash
 curl -sS \
   -b "Admin-Token=${FIN_OPS_HTTP_SLO_ADMIN_TOKEN}" \
   -H "Accept: application/json" \
-  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/page-audit?domain=bank_details"
+  "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/page-audit?page=bank-details"
 ```
 
-支持的 `domain`：`pending_invoices`、`turnover_ledger`、`batch_accounting`、`bank_flow_rule_batches`、`oa_pending_payments`、`bank_details`、`cost_statistics`。
+当前 `ready` 页面：`pending-invoices`、`turnover-ledger`、`batch-accounting`、`bank-flow-rule-batches`、`oa-pending-payments`、`bank-details`、`cost-statistics`、`input-invoice-usage`、`output-invoice-collections`。其余注册页面返回 `409 page_audit_proof_unavailable`，不能作为通过证据。
 
-报告 `audit_status.integrity=pass`、`freshness=fresh` 且 `queue=drained`，才可作为该页面 App 内部事实、read model 和 relation 投影一致的证据。outbox/dirty scope 按 tenant 隔离，问题只返回样本；该审计不能证明外部银行/OA 系统本身没有漏同步。
+报告还必须带 `proof_availability=ready`、非空 `contract_revision`、repeatable-read database snapshot，且 `audit_status.integrity=pass`、`freshness=fresh`、`queue=drained`，才可作为该页面已登记 proof 一致的证据。outbox/dirty scope 按 tenant 隔离，问题只返回样本；该审计不能证明尚未登记的 consumer projection，也不能证明外部银行/OA 系统本身没有漏同步。
 
 Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS` 调整。缓存过期后刷新失败时，接口返回上一份 payload，并在 `freshness.warnings` 中加入 `dashboard_cache_stale_after_error`；权限校验和 PostgreSQL runtime 缺失不走缓存兜底。
 

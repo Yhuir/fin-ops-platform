@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
-from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
+from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
@@ -1050,7 +1050,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(sql_versions["bank_auto_tag_rules_version"], 42)
         self.assertEqual(sql_versions["builder"], WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION)
         self.assertEqual(aggregate_sql_versions["bank_auto_tag_rules_version"], 42)
-        self.assertEqual(aggregate_sql_versions["builder"], WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
+        self.assertEqual(aggregate_sql_versions["builder"], WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
 
     def test_workbench_refresh_status_marks_old_bank_auto_tag_generation_stale(self) -> None:
         app = build_application()

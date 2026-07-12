@@ -1,5 +1,14 @@
 # ETC发票导入 实施记录
 
+## 2026-07-11：durable preview、单一 worker confirm 与页面 Audit
+
+- 识别真实生产缺口：旧 preview/session 只在 Web 进程 dict 中，独立 PostgreSQL worker 无法重载；route 仍保留 inline confirm 和旧直导 410 surface。
+- 新增 `app.etc_import_session_files`，复用 `app.etc_import_sessions` / `app.file_objects`；metadata 与 bytes 分离，worker只依赖窄 session port。
+- `begin_import` 移到 worker并对同 session 幂等；queue unavailable 不再先污染 task status。failed import job 可用同一 idempotency key受控重试并更新 background reference。
+- 统一 Audit 升到 `page-audit-contract.v16`，本页从 unavailable 升为 ready；zero own read model，证明 ETC internal relations，不冒充 Workbench consumer。
+- disposable PostgreSQL 0001–0098 验证 store 跨实例重载和 Audit destructive cases；未连接生产。
+
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

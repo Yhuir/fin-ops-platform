@@ -22,7 +22,6 @@ from fin_ops_platform.services.runtime_worker_handlers import (
     _input_invoice_usage_scope_keys_for_import_file_session,
     _output_invoice_collection_scope_keys_for_import_file_session,
     _tax_offset_scope_keys_for_import_file_session,
-    _tax_offset_scope_keys_for_import_preview,
     build_import_job_handler_bundle,
 )
 from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
@@ -197,6 +196,21 @@ def import_job(**overrides: object) -> ImportJob:
 
 
 class ImportJobRepositoryTests(unittest.TestCase):
+    def test_postgres_import_processing_backend_uses_durable_queue_and_inline_is_rejected(self) -> None:
+        app = build_application()
+        app._runtime_repositories = SimpleNamespace(  # noqa: SLF001
+            queue_repository=FakeRuntimeQueue(),
+            queue_settings=SimpleNamespace(backend="postgres"),
+        )
+
+        with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "postgres"}):
+            self.assertEqual(app._import_processing_backend(), "postgres")  # noqa: SLF001
+            self.assertTrue(app._import_job_processing_enabled())  # noqa: SLF001
+
+        with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "inline"}):
+            with self.assertRaisesRegex(RuntimeError, "must be postgres or rabbitmq"):
+                app._import_processing_backend()  # noqa: SLF001
+
     def test_invoice_relation_scope_helpers_split_input_and_output_file_months(self) -> None:
         session = SimpleNamespace(
             files=[
@@ -231,10 +245,6 @@ class ImportJobRepositoryTests(unittest.TestCase):
         )
 
     def test_tax_offset_scope_helpers_ignore_bank_transaction_files(self) -> None:
-        bank_preview = SimpleNamespace(
-            batch=SimpleNamespace(batch_type="bank_transaction"),
-            normalized_rows=[{"trade_time": "2026-05-02 10:00:00"}],
-        )
         session = SimpleNamespace(
             files=[
                 SimpleNamespace(
@@ -252,7 +262,6 @@ class ImportJobRepositoryTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(_tax_offset_scope_keys_for_import_preview(bank_preview), [])
         self.assertEqual(
             _tax_offset_scope_keys_for_import_file_session(
                 session,
@@ -435,51 +444,6 @@ class ImportJobRepositoryTests(unittest.TestCase):
             ],
         )
 
-    def test_general_import_confirm_queues_import_job_in_rabbitmq_mode(self) -> None:
-        app = build_application()
-        queue = FakeRuntimeQueue()
-        import_jobs = FakeApplicationImportJobRepository()
-        app._runtime_repositories = SimpleNamespace(  # noqa: SLF001
-            queue_repository=queue,
-            queue_settings=SimpleNamespace(backend="rabbitmq"),
-        )
-        app._import_job_repository = import_jobs  # noqa: SLF001
-        preview_response = app.handle_request(
-            "POST",
-            "/imports/preview",
-            json.dumps(
-                {
-                    "batch_type": "output_invoice",
-                    "source_name": "rabbitmq-confirm.json",
-                    "imported_by": "user_finance_01",
-                    "rows": [
-                        {
-                            "invoice_code": "033001",
-                            "invoice_no": "9901",
-                            "counterparty_name": "Queued Corp",
-                            "amount": "150.00",
-                            "invoice_date": "2026-03-26",
-                            "invoice_status_from_source": "valid",
-                        }
-                    ],
-                }
-            ),
-        )
-        batch_id = json.loads(preview_response.body)["batch"]["id"]
-
-        with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "rabbitmq"}):
-            confirm_response = app.handle_request("POST", "/imports/confirm", json.dumps({"batch_id": batch_id}))
-
-        self.assertEqual(confirm_response.status_code, 202)
-        payload = json.loads(confirm_response.body)
-        self.assertEqual(payload["status"], "queued")
-        self.assertEqual(payload["import_job"]["import_job_id"], "app-import-job-1")
-        self.assertEqual(import_jobs.created[0]["import_type"], "general_import.confirm")
-        self.assertEqual(import_jobs.created[0]["idempotency_key"], f"general_import.confirm:{batch_id}")
-        self.assertEqual(queue.enqueued[0]["event_type"], IMPORT_PROCESS_REQUESTED_EVENT)
-        batch_response = app.handle_request("GET", f"/imports/batches/{batch_id}")
-        self.assertNotEqual(json.loads(batch_response.body)["batch"]["status"], "completed")
-
     def test_tax_certified_import_confirm_queue_result_can_be_polled(self) -> None:
         app = build_application()
         queue = FakeRuntimeQueue()
@@ -543,41 +507,6 @@ class ImportJobRepositoryTests(unittest.TestCase):
         status_payload = json.loads(status_response.body)
         self.assertEqual(status_payload["import_job"]["status"], "succeeded")
         self.assertEqual(status_payload["import_job"]["result_payload"]["batch"]["persisted_record_count"], 2)
-
-    def test_application_import_processor_registry_runs_general_import_confirm(self) -> None:
-        app = build_application()
-        preview_response = app.handle_request(
-            "POST",
-            "/imports/preview",
-            json.dumps(
-                {
-                    "batch_type": "output_invoice",
-                    "source_name": "processor-confirm.json",
-                    "imported_by": "user_finance_01",
-                    "rows": [
-                        {
-                            "invoice_code": "033001",
-                            "invoice_no": "9902",
-                            "counterparty_name": "Processor Corp",
-                            "amount": "150.00",
-                            "invoice_date": "2026-03-26",
-                            "invoice_status_from_source": "valid",
-                        }
-                    ],
-                }
-            ),
-        )
-        batch_id = json.loads(preview_response.body)["batch"]["id"]
-        processors = app.build_import_job_processors()
-
-        result = processors["general_import.confirm"](
-            import_job(import_type="general_import.confirm", payload={"batch_id": batch_id})
-        )
-
-        self.assertEqual(result["batch"]["status"], "completed")
-        batch_response = app.handle_request("GET", f"/imports/batches/{batch_id}")
-        self.assertEqual(json.loads(batch_response.body)["batch"]["status"], "completed")
-
 
 def _runtime_event():
     from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent

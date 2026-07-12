@@ -1,14 +1,14 @@
 # 银行流水导入模块边界与 I/O
 
-日期：2026-07-05
+日期：2026-07-11
 
 ## 模块化状态
 
 - 状态：close
 - 当前边界可信度：high
 - 目标边界：银行流水导入通过 import file/service/job queue 进入预览、确认、后台处理和 derived lifecycle，不直接写页面 read model。
-- 当前缺口：无阻塞缺口。导入服务影响 bank detail、workbench、search 等多个下游 scope，变更仍必须同步 fan-out 测试。
-- 旧代码删除状态：银行流水页面和前端 runtime 只走 `/imports/files/*` file/session I/O，已用 boundary guard 禁止回到旧 `/imports/preview`、`/imports/confirm` JSON 入口；`server.py` 中旧 import confirm processor wrapper 已删除，confirm 执行边界统一归 `ImportProcessingService`；`FileImportService.snapshot/from_snapshot` 保留为当前 file/session 与 import worker 跨进程恢复 I/O，不属于旧 snapshot 事实源 fallback。
+- 当前缺口：App 内部 direct-canonical Audit 已闭环；外部银行回单页数、行数、control total 与上传前字节真实性仍须独立来源证据，不能由 App 文件登记 hash 推导。
+- 旧代码删除状态：生产与前端只保留 `/imports/files/*` file/session I/O。旧 `/imports/preview`、`/imports/confirm` JSON route/handler/entrypoint、无生产者的 `general_import.confirm` worker 类型、processor 和 preview-only orchestration dependencies 已删除；`FileImportService.snapshot/from_snapshot` 保留为当前 file/session 与 import worker 跨进程恢复 I/O，不属于旧 snapshot 事实源 fallback。
 
 ## 职责边界
 
@@ -17,6 +17,7 @@
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
 - 通过后台任务和 lifecycle 触发银行明细及下游 read model 刷新。
 - 记录导入预览审计。
+- 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
 - 导入确认结果或完成后的 job result 必须透出 read model write target envelope；银行流水导入必须包含 `bank_detail:<month>` 与 `bank_account_balance:all` operation barrier targets。
 
 ### 不负责
@@ -42,6 +43,7 @@
 | 导入 job status | background job/app status | 可查询、可失败恢复 |
 | Dirty scope | derived lifecycle/runtime queue | bank_detail/workbench/search 等受影响 scope |
 | Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets，消费 completed job 的页面必须先等待 targets |
+| Page Audit | `/api/operations/app-health/page-audit?page=imports.bank-transactions` | admin-only、只读、`read_model_keys=[]`、`relation_proof_required=false`；下游 read model 只登记为 impact targets，不冒充页面 consumer |
 
 ## 持久化与投影
 
@@ -58,6 +60,7 @@
 | Frontend feature | `web/src/features/imports/api.ts`、`types.ts`、`importRoutes.ts` |
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
 | Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py` |
+| Audit owner | `services/postgres_repositories/bank_transaction_import_page_audit.py`、`services/page_audit_registry.py` |
 | Worker/lifecycle | `runtime_worker_handlers.py`、`derived_data_lifecycle_service.py`、`app_status_job_registry.py` |
 | Tests | `tests/test_import*.py`、`web/src/test/ImportsApi.test.ts`、`web/e2e/imports-bank-transactions-flow.spec.ts` |
 
@@ -72,7 +75,9 @@
 - `tests/test_import_api.py`
 - `tests/test_import_job_queue.py`
 - `tests/test_import_processing_service.py`
+- `tests/test_audit_bank_transaction_import_page.py`
 - `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_server_no_longer_owns_import_confirm_processors`
+- `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_server_no_longer_exposes_legacy_json_import_write_routes`
 - `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_transaction_import_frontend_uses_file_session_api_only`
 - `web/src/test/BackgroundJobProgress.test.tsx`
 - `web/src/test/ImportsApi.test.ts`
@@ -81,8 +86,9 @@
 ## 当前缺口和删除条件
 
 - 模板识别变更必须覆盖预览、确认、失败恢复和 downstream freshness。
-- 当前无 closure blocker。旧 JSON import API 作为共享程序化/回归入口仍存在，不是银行流水页面 I/O；若未来删除该兼容入口，必须先迁移跨模块 fixture 和 legacy `/imports/preview`、`/imports/confirm` 回归。
+- 旧 JSON import API 及其 `general_import.confirm` worker 链已删除；测试造数只能调用保留的 service-level normalization ports，HTTP 行为必须走 file/session API。
 - 删除任何 file/session snapshot 持久化前，必须先提供 import worker 跨进程恢复替代方案；不能把 `FileImportService.snapshot/from_snapshot` 误判为旧 full snapshot fallback。
+- Audit pass 只证明已登记 App 内部事实闭包；外部银行 control evidence 与下游受影响页面各自的 Audit 仍是独立 gate。
 
 ## Canonical facts ownership
 
@@ -91,4 +97,4 @@
 - Allowed reads: bank transaction repository/query ports、bank detail/import API。
 - Downstream outputs: bank_detail、bank_account_balance、workbench、turnover_ledger、no_oa_bank_batch、search read model dirty scopes 或 owner producer 输出。
 - Forbidden paths: 银行流水页面不得调用旧 JSON `/imports/preview`、`/imports/confirm`；production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或前端 payload 直接补写银行流水。
-- Old code deletion: 已删除 `server.py` 中旧 import confirm processor wrapper；snapshot 银行流水 fallback、直接跨模块写银行事实路径、前端旧 JSON 页面入口必须保持删除。migration/audit/rollback 工具保留不算 closure。
+- Old code deletion: 已删除旧 JSON HTTP route/handler/entrypoint、`general_import.confirm` job producer/processor 及只为该链服务的 preview scope dependencies；snapshot 银行流水 fallback、直接跨模块写银行事实路径必须保持删除。migration/audit/rollback 工具和 file/session worker restore 端口保留不算 closure。

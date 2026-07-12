@@ -6,6 +6,8 @@ import json
 import unittest
 
 from fin_ops_platform.tools import audit_workbench_relation_display
+from fin_ops_platform.services.postgres_repositories import workbench_page_audit
+from fin_ops_platform.services.postgres_repositories import workbench_projection_audit
 
 
 class FakeConnection:
@@ -15,6 +17,7 @@ class FakeConnection:
         relations: list[dict[str, object]] | None = None,
         generations: list[dict[str, object]] | None = None,
         group_rows: list[dict[str, object]] | None = None,
+        projection_issues: dict[str, list[dict[str, object]]] | None = None,
     ) -> None:
         self.executed: list[tuple[str, tuple[object, ...]]] = []
         self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
@@ -32,10 +35,20 @@ class FakeConnection:
             _group_row("2026-02", "bank-1"),
             _group_row("2026-02", "invoice-1"),
         ]
+        self._projection_issues = projection_issues or {}
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         self.fetch_all_calls.append((sql, params))
         normalized = " ".join(sql.lower().split())
+        for marker, rows in self._projection_issues.items():
+            if f"/* check: {marker} */" in sql:
+                return list(rows)
+        if "/* check: workbench_" in sql:
+            return []
+        if "/* check: relation_edge_equality */" in sql:
+            return []
+        if "from job.read_model_dirty_scopes" in normalized or "from job.outbox_events" in normalized:
+            return []
         if "from app.workbench_pair_relations" in normalized:
             return list(self._relations)
         if "from read_model.workbench_generations" in normalized and "join read_model.workbench_group_rows" not in normalized:
@@ -57,6 +70,98 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertEqual(report["summary"]["active_relation_count"], 1)
         self.assertEqual(report["summary"]["blocking_issue_count"], 0)
         self.assertEqual(report["issues"], [])
+        self.assertEqual(report["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
+        self.assertIn("active_generation_relation_display", report["audit_contract"]["proof_checks"])
+        self.assertIn("canonical_object_expected_set_equality", report["audit_contract"]["proof_checks"])
+
+    def test_relation_display_can_be_clean_while_canonical_object_is_missing(self) -> None:
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                projection_issues={
+                    "workbench_canonical_object_set": [
+                        {
+                            "subject_id": "bank-unrelated",
+                            "scope_key": "2026-01",
+                            "mismatch_kind": "canonical_missing_projection",
+                            "canonical_source_kind": "bank",
+                            "projected_source_kind": None,
+                        }
+                    ]
+                }
+            )
+        )
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertIn(
+            "workbench_canonical_object_set_mismatch",
+            {issue["code"] for issue in report["issues"]},
+        )
+
+    def test_etc_summary_can_exist_while_a_canonical_detail_is_missing(self) -> None:
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                projection_issues={
+                    "workbench_etc_summary_details": [
+                        {
+                            "subject_id": "etc-summary-batch-1",
+                            "scope_key": "all",
+                            "mismatch_kind": "detail",
+                            "canonical_amount": "100.00",
+                            "projected_amount": None,
+                        }
+                    ]
+                }
+            )
+        )
+
+        self.assertIn(
+            "workbench_etc_summary_details_mismatch",
+            {issue["code"] for issue in report["issues"]},
+        )
+
+    def test_stale_generation_dependency_version_blocks_page_audit(self) -> None:
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                projection_issues={
+                    "workbench_generation_source_versions": [
+                        {
+                            "subject_id": "workbench:2026-01:001",
+                            "scope_key": "2026-01",
+                            "source_versions": {"builder": "old"},
+                            "expected_builder": "current",
+                        }
+                    ]
+                }
+            )
+        )
+
+        self.assertIn(
+            "workbench_generation_source_versions_mismatch",
+            {issue["code"] for issue in report["issues"]},
+        )
+
+    def test_ignored_override_missing_from_projection_blocks_page_audit(self) -> None:
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                projection_issues={
+                    "workbench_override_exception_fields": [
+                        {
+                            "subject_id": "bank-ignored",
+                            "scope_key": "all",
+                            "mismatch_kind": "override",
+                            "field_name": "ignored",
+                            "canonical_value": True,
+                            "projected_value": None,
+                        }
+                    ]
+                }
+            )
+        )
+
+        self.assertIn(
+            "workbench_override_exception_fields_mismatch",
+            {issue["code"] for issue in report["issues"]},
+        )
 
     def test_reports_split_all_scope_and_stale_all_generation_without_writing(self) -> None:
         connection = FakeConnection(
@@ -167,9 +272,16 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
 
     def test_module_has_cli_entrypoint(self) -> None:
         source = inspect.getsource(audit_workbench_relation_display)
+        core_source = inspect.getsource(workbench_page_audit)
+        projection_source = inspect.getsource(workbench_projection_audit)
 
         self.assertIn('if __name__ == "__main__"', source)
         self.assertIn("raise SystemExit(main())", source)
+        self.assertNotIn("from app.workbench_pair_relations", source)
+        self.assertIn("from app.workbench_pair_relations", core_source)
+        self.assertNotIn("ArgumentParser", core_source)
+        self.assertIn("from app.oa_applications", projection_source)
+        self.assertNotIn("ArgumentParser", projection_source)
 
 
 def _relation() -> dict[str, object]:

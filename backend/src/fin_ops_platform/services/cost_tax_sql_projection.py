@@ -786,15 +786,20 @@ class TaxOffsetSqlProjectionBuilder:
         return {
             "tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
             "invoice_fact_source_version": self._table_source_version("app.invoices", "status <> 'deleted'"),
-            "tax_certified_import_source_version": self._table_source_version("app.tax_certified_import_records", "status <> 'deleted'"),
+            "tax_certified_import_source_version": self._table_source_version(
+                "app.tax_certified_import_records",
+                "status <> 'deleted'",
+                timestamp_column="created_at",
+            ),
             "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
         }
 
-    def _table_source_version(self, table_name: str, where_sql: str) -> str:
+    def _table_source_version(self, table_name: str, where_sql: str, *, timestamp_column: str = "updated_at") -> str:
         try:
             row = self._connection.fetch_one(
-                f"select count(*) as row_count, max(updated_at)::text as max_updated_at from {table_name} where {where_sql}"
+                f"select count(*) as row_count, max({timestamp_column})::text as max_updated_at "
+                f"from {table_name} where {where_sql}"
             )
         except Exception:
             return "unavailable"

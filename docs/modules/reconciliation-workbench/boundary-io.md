@@ -39,6 +39,7 @@
 | no-OA relation metadata | `workbench_relation` / no-OA submit | legacy `special_metadata.paired_requires_oa`、`paired_requires_invoice` 决定 no-OA relation 是否具备进入 paired 区的 row type |
 | 写后 target envelope | `WorkbenchWriteFacade` | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；`read_model_key=workbench_relation` |
 | API 失败 envelope | backend error response -> `features/workbench/api.ts` | 结构化 `message` 映射为用户错误时必须保留 `requestId` / `request_id`，便于从页面错误定位后端日志；不得把 `ApiClientError` 降级成丢失关联 ID 的普通错误 |
+| 页面 Audit 请求 | 管理员页面控件或运维 CLI | 页面统一调用 `page-audit?page=reconciliation-workbench`；CLI 仅作为同一 proof core 的参数/连接/JSON/退出码适配器。两者必须进入 `workbench_page_audit` 的同一只读 `REPEATABLE READ` snapshot，禁止 route、页面或 tool 复制 SQL/判断逻辑 |
 | 外部 OA 手工导入影响 | settings/OA manual import API | 不属于 `WorkbenchWriteFacade`，但必须返回并等待 `workbench`/`workbench_relation` 等受影响 read model targets |
 | Refresh scope | `workbench` manifest | month or `all`；普通写路径只刷新受影响 month shard，`month=all` 查询组合 active 月度 generation；显式 rebuild/repair/backfill 才使用 materialized all aggregate |
 
@@ -56,6 +57,7 @@
 | 配对/撤回结果 | 调用方和页面刷新 | 返回业务结果并触发 dirty scope；confirm/cancel/withdraw 输入输出的 `row_ids`、`affected_row_ids`、operation barrier targets 均使用 canonical Workbench row id，撤回读取 active relation facts，不从 source metadata 反推任意行集合。撤回预览的 `before.groups` 和 `after.groups` 必须来自 relation command/pair service 的 alias-aware before/after relation 合同；没有被合法恢复的行按独立 selection row 展示，不能因为 row payload 残留 `case_id` 或历史 source alias 合成同一行。OA 自带附件发票必须作为父 OA 的绑定成员保留在 active relation 和 after relation 中，不能作为 standalone 发票行输出，也不能只作为 `oa_attachment_source_relation` display candidate 输出。确认关联可在 operation projection 有效时用于页面快速更新；撤回预览提交期间，页面输出只能来自 fresh Workbench read model，必须延迟应用 fresh payload 到关闭预览同一批状态更新，禁止把 submit response 的 operation projection 直接渲染到底层 Workbench。automatic decision/candidate 不再作为可见同组关系或撤回写入口。 |
 | Operation barrier targets | 前端页面 | 写成功后等待 `workbench_relation` targets 以及可见性依赖的 `workbench` targets，再刷新 workbench/相关页面；跨模块写入若会影响关联台 `month=all`，必须把 `all` scope 纳入 targets，不能只等待业务页面自身 read model。 |
 | Dirty scope/outbox | runtime queue | 通过 gateway 或等价事务合同进入 durable queue |
+| 页面 Audit 报告 | 管理员页面与运维 CLI | 同一报告组合 canonical OA/银行/普通及附件发票/ETC summary-detail expected-set、month/all union、关键字段与 summary/source-version 重算、canonical/shared relation typed-edge equality、active generation 展示归属/同组/唯一 owner/case/mode/alignment、automatic decision 排除、all/member generation 时序，以及 `workbench`/`workbench_relation` dirty/outbox；任一 blocking issue 均不能显示通过 |
 | 下游影响 | workbench relation、tax offset、pending invoice、bank-flow-rule-batches、no-OA、turnover 等 | 由关系事实源和 lifecycle/worker 扇出 |
 
 生产 orphan relation 修复只能使用专用 `repair_workbench_pair_relation_integrity`，先 dry-run 并用重复
@@ -81,7 +83,8 @@
 | Frontend API/tests | `web/src/features/workbench/*`、`web/src/test/Workbench*.test.*`（含 500 `requestId` 保留回归）、`web/e2e/workbench-*.spec.ts` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_workbench.py`、`backend/src/fin_ops_platform/app/routes_workbench_actions.py` |
 | Backend service | `backend/src/fin_ops_platform/services/workbench_*`、`backend/src/fin_ops_platform/services/live_workbench_service.py`、`backend/src/fin_ops_platform/services/matching.py` |
-| Repository / SQL | `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`、`backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py`、`backend/src/fin_ops_platform/services/workbench_sql_projection.py` |
+| Repository / SQL | `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py`、`backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py`、`backend/src/fin_ops_platform/services/workbench_sql_projection.py`、`backend/src/fin_ops_platform/services/postgres_repositories/workbench_page_audit.py`（唯一页面证明编排）、`backend/src/fin_ops_platform/services/postgres_repositories/workbench_projection_audit.py`（纯只读 expected-set/field proof） |
+| Audit CLI adapter | `backend/src/fin_ops_platform/tools/audit_workbench_relation_display.py`（只允许 parser/connection/调用/JSON/exit code） |
 | Worker/read model | `backend/src/fin_ops_platform/services/workbench_read_model_service.py`、`backend/src/fin_ops_platform/services/runtime_worker_registry.py` |
 | Tests | `tests/test_workbench_*.py`、`tests/test_live_workbench_service.py`、`tests/test_workbench_sql_runtime.py` |
 
@@ -110,6 +113,7 @@
 - `workbench-matching` 只能通过 `job.workbench_matching_dirty_scopes` claim/complete/fail 和 `WorkbenchMatchingRelationReadPort` 读取 canonical active relations；不得直接依赖页面 full payload、legacy dirty scope snapshot 或 read model distribution 作为 matching 事实源。
 - 删除后端 `GET /api/workbench` full-payload contract 前必须证明 route、backend tests、生产脚本和外部调用方都不再依赖。
 - Workbench exception action 已归入现代 `/api/workbench/actions/*`/`/api/workbench/exception/*` 写边界；不得回退到旧 `/workbench/actions/*` 或丢弃 `_apply_exception_payload` 计算出的 affected scopes。
+- legacy bank exception 入口只承担旧请求 DTO 到现代 exception application 的映射：相同 legacy identity、完全相同 row set、相同月份、相同 legacy code 且现有 active case 为 `manual_review` 时，必须复用既有 `scenario_code` 并由统一 idempotency boundary 返回同一结果；不同 code、不同 row set、不同月份或非 legacy case 仍按 active-case conflict fail closed。不得新增第二套 case owner、隐藏 fallback 或直接写 exception 表。
 
 ## Canonical facts ownership
 

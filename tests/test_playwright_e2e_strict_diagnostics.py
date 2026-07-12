@@ -100,7 +100,7 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
             "workbench relation to input invoice usage": (E2E_DIR / "input-invoice-relation-fanout.spec.ts").read_text(encoding="utf-8"),
             "workbench relation to cost statistics": (E2E_DIR / "cost-statistics-relation-fanout.spec.ts").read_text(encoding="utf-8"),
             "workbench relation to OA pending": (E2E_DIR / "workbench-relations-oa-pending-fanout.spec.ts").read_text(encoding="utf-8"),
-            "workbench relation to tax offset": (E2E_DIR / "workbench-relations-tax-offset-fanout.spec.ts").read_text(encoding="utf-8"),
+            "workbench relation tax-offset isolation": (E2E_DIR / "workbench-relations-tax-offset-isolation.spec.ts").read_text(encoding="utf-8"),
             "workbench withdraw": (E2E_DIR / "workbench-withdraw-flow.spec.ts").read_text(encoding="utf-8"),
             "workbench exception recovery": (E2E_DIR / "workbench-exception-flow.spec.ts").read_text(encoding="utf-8"),
             "workbench network recovery and duplicate submit": (E2E_DIR / "workbench-network-recovery-flow.spec.ts").read_text(encoding="utf-8"),

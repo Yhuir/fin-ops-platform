@@ -766,26 +766,6 @@ class ImportNormalizationService:
         self._register_invoice(invoice)
         return invoice
 
-    def revert_import(self, batch_id: str) -> ImportedBatch:
-        preview = self._batches[batch_id]
-        if preview.batch.status == BatchStatus.REVERTED:
-            return preview.batch
-
-        for row_result, normalized in reversed(list(zip(preview.row_results, preview.normalized_rows, strict=True))):
-            if row_result.decision == ImportDecision.CREATED and row_result.linked_object_id:
-                if row_result.linked_object_type == "invoice":
-                    self._remove_invoice(row_result.linked_object_id)
-                elif row_result.linked_object_type == "bank_transaction":
-                    self._remove_transaction(row_result.linked_object_id)
-            elif row_result.decision == ImportDecision.STATUS_UPDATED and row_result.linked_object_id:
-                invoice = self._invoices_by_id[row_result.linked_object_id]
-                invoice.invoice_status_from_source = normalized.get("previous_invoice_status_from_source")
-                invoice.source_batch_id = normalized.get("previous_source_batch_id")
-
-        preview.batch.status = BatchStatus.REVERTED
-        self._batches[batch_id] = preview
-        return preview.batch
-
     def _preview_invoice_row(
         self,
         *,

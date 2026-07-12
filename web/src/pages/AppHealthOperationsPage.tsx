@@ -16,9 +16,9 @@ import {
 } from "../components/common/FinanceTable";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
-import { fetchAppHealthDashboard, fetchInputInvoiceUsageAudit } from "../features/appHealth/api";
+import { fetchAppHealthDashboard, fetchPageAudit } from "../features/appHealth/api";
 import type {
-  InputInvoiceUsageAuditPayload,
+  AppHealthSystemAuditPayload,
   OperationsDashboardEndpointPerformance,
   OperationsDashboardImportEvent,
   OperationsDashboardInventoryBlock,
@@ -199,26 +199,42 @@ function importEventState(row: OperationsDashboardImportEvent) {
   return { label: rawStatus || "unknown", tone: "neutral" as const };
 }
 
-function auditStatus(payload: InputInvoiceUsageAuditPayload | null) {
+function auditStatus(payload: AppHealthSystemAuditPayload | null) {
   if (!payload) {
     return { label: "未验证", tone: "neutral" as const };
   }
   const status = String(payload.overall_status || "unknown");
   const blockingIssueSampleCount = payload.summary?.blocking_issue_sample_count ?? 0;
   const errorSampleCount = payload.summary?.error_sample_count ?? 0;
+  const proofReady = payload.audit_contract?.proof_availability === "ready";
+  const proofVersioned = Boolean(payload.audit_contract?.contract_revision);
+  const snapshotConsistent =
+    payload.audit_contract?.database_snapshot === true
+    && payload.audit_contract?.snapshot_consistency === "repeatable_read_read_only";
   if (
     status === "pass"
     && payload.audit_status?.integrity === "pass"
     && payload.audit_status?.freshness === "fresh"
+    && payload.audit_status?.queue === "drained"
+    && proofReady
+    && proofVersioned
+    && snapshotConsistent
     && blockingIssueSampleCount === 0
     && errorSampleCount === 0
   ) {
     return { label: "pass", tone: "success" as const };
   }
+  if (!proofReady || !proofVersioned || !snapshotConsistent) {
+    return { label: "proof_unavailable", tone: "danger" as const };
+  }
   if (payload.audit_status?.integrity === "issues_found" || blockingIssueSampleCount > 0 || errorSampleCount > 0) {
     return { label: status, tone: "danger" as const };
   }
-  if (payload.audit_status?.freshness === "not_fresh" || status === "issues_found") {
+  if (
+    payload.audit_status?.freshness === "not_fresh"
+    || payload.audit_status?.queue !== "drained"
+    || status === "issues_found"
+  ) {
     return { label: status, tone: "warning" as const };
   }
   return { label: status, tone: "neutral" as const };
@@ -233,37 +249,39 @@ function AuditMetric({ label, value }: { label: string; value: number | null | u
   );
 }
 
-function InputInvoiceUsageAuditPanel({
+function AppHealthSystemAuditPanel({
   payload,
   error,
   isLoading,
   onRun,
 }: {
-  payload: InputInvoiceUsageAuditPayload | null;
+  payload: AppHealthSystemAuditPayload | null;
   error: string | null;
   isLoading: boolean;
   onRun: () => void;
 }) {
   const state = auditStatus(payload);
   const summary = payload?.summary;
+  const externalStatus = payload?.external_evidence?.status ?? "unknown";
+  const externalTone = externalStatus === "pass" ? "success" : externalStatus === "fail" ? "danger" : externalStatus === "unknown" ? "warning" : "neutral";
   const issueCodeEntries = Object.entries(summary?.issue_sample_counts_by_code ?? {})
     .sort((left, right) => right[1] - left[1])
     .slice(0, 4);
   const visibleIssues = (payload?.issues ?? []).slice(0, 3);
   return (
-    <Section title="Audit" testId="app-health-input-usage-audit">
+    <Section title="System Audit" testId="app-health-system-audit">
       <div className="app-health-audit-card">
         <div className="app-health-audit-header">
           <div className="app-health-audit-heading">
-            <h3>进项发票使用情况</h3>
-            <p>{payload?.generated_at ? formatTimestamp(payload.generated_at) : "未验证"}</p>
+            <h3>17 页 App 内部合同</h3>
+            <p>{payload?.database_system_snapshot?.snapshot_generated_at ? formatTimestamp(payload.database_system_snapshot.snapshot_generated_at) : "未验证"}</p>
           </div>
           <div className="app-health-audit-actions">
             <FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag>
             <Tooltip delay={0}>
               <Tooltip.Trigger>
                 <Button
-                  aria-label="Audit 进项发票使用情况"
+                  aria-label="Audit 全系统 App 内部合同"
                   className="app-health-audit-button"
                   isDisabled={isLoading}
                   isIconOnly
@@ -274,21 +292,40 @@ function InputInvoiceUsageAuditPanel({
                   {isLoading ? <Spinner color="current" size="sm" /> : <ClipboardCheck aria-hidden="true" size={15} strokeWidth={2.2} />}
                 </Button>
               </Tooltip.Trigger>
-              <Tooltip.Content>Audit 进项发票使用情况</Tooltip.Content>
+              <Tooltip.Content>Audit 全系统 App 内部合同</Tooltip.Content>
             </Tooltip>
           </div>
         </div>
         {error ? <AppHealthNotice status="danger">{error}</AppHealthNotice> : null}
         <div className="app-health-audit-grid">
-          <AuditMetric label="进项发票" value={summary?.active_input_invoice_count} />
-          <AuditMetric label="Read model 发票" value={summary?.read_model_invoice_member_count} />
-          <AuditMetric label="Read model rows" value={summary?.read_model_row_count} />
-          <AuditMetric label="Active relation" value={summary?.active_workbench_pair_relation_count} />
-          <AuditMetric label="Relation groups" value={summary?.linked_workbench_relation_group_count} />
+          <AuditMetric label="注册页面" value={summary?.registered_page_count} />
+          <AuditMetric label="业务页面 Audit" value={summary?.audited_business_page_count} />
+          <AuditMetric label="业务页面通过" value={summary?.passed_business_page_count} />
+          <AuditMetric label="外部域 unknown" value={payload?.external_evidence?.summary?.unknown_domain_count ?? payload?.external_evidence?.domains?.filter((item) => item.status === "unknown").length} />
+          <AuditMetric label="问题样本" value={summary?.issue_sample_count} />
           <AuditMetric label="Blocking samples" value={summary?.blocking_issue_sample_count} />
         </div>
+        {payload ? (
+          <div className="app-health-audit-issues" aria-label="System Audit 证明边界">
+            <FinanceStatusTag tone={state.tone}>{`App 内部 ${summary?.database_internal_contracts ?? "unknown"}`}</FinanceStatusTag>
+            <FinanceStatusTag tone={externalTone}>
+              {`外部证据 ${externalStatus}`}
+            </FinanceStatusTag>
+            <span>{payload.database_system_snapshot?.system_audit_id ?? "system audit id unavailable"}</span>
+            <span>仅证明该只读数据库快照内的已登记 App 内部合同；后续写入会使本结果失效。</span>
+            {(payload.external_evidence?.domains ?? []).map((domain) => (
+              <FinanceStatusTag
+                key={domain.domain ?? "external-domain"}
+                tone={domain.status === "pass" ? "success" : domain.status === "fail" ? "danger" : "warning"}
+              >
+                {`${domain.domain ?? "external"} ${domain.status ?? "unknown"}${domain.observed_at ? ` · ${formatTimestamp(domain.observed_at)}` : ""}`}
+              </FinanceStatusTag>
+            ))}
+            <span>{payload.external_evidence?.claim_boundary ?? "外部来源证明未登记；App 内部绿色不能替代外部来源对账。"}</span>
+          </div>
+        ) : null}
         {issueCodeEntries.length > 0 || visibleIssues.length > 0 ? (
-          <div className="app-health-audit-issues" aria-label="进项使用 Audit 问题">
+          <div className="app-health-audit-issues" aria-label="System Audit 问题">
             {issueCodeEntries.map(([code, count]) => (
               <FinanceStatusTag key={code} tone={state.tone === "danger" ? "danger" : "warning"}>{`${code}: ${formatNumber(count)}`}</FinanceStatusTag>
             ))}
@@ -644,7 +681,7 @@ export default function AppHealthOperationsPage() {
   const [payload, setPayload] = useState<OperationsDashboardPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [auditPayload, setAuditPayload] = useState<InputInvoiceUsageAuditPayload | null>(null);
+  const [auditPayload, setAuditPayload] = useState<AppHealthSystemAuditPayload | null>(null);
   const [auditError, setAuditError] = useState<string | null>(null);
   const [isAuditLoading, setAuditLoading] = useState(false);
   const [isImportHistoryOpen, setImportHistoryOpen] = useState(false);
@@ -661,6 +698,8 @@ export default function AppHealthOperationsPage() {
     try {
       const nextPayload = await fetchAppHealthDashboard(controller.signal);
       setPayload(nextPayload);
+      setAuditPayload(null);
+      setAuditError(null);
       setLoadError(null);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -675,7 +714,7 @@ export default function AppHealthOperationsPage() {
     }
   }, [permissions.canAdminAccess]);
 
-  const runInputUsageAudit = useCallback(async () => {
+  const runSystemAudit = useCallback(async () => {
     if (!permissions.canAdminAccess || auditInFlightRef.current) {
       return;
     }
@@ -683,14 +722,17 @@ export default function AppHealthOperationsPage() {
     auditInFlightRef.current = controller;
     setAuditLoading(true);
     try {
-      const nextPayload = await fetchInputInvoiceUsageAudit(controller.signal);
+      const nextPayload = await fetchPageAudit<AppHealthSystemAuditPayload>("app-health-operations", controller.signal);
       setAuditPayload(nextPayload);
+      if (nextPayload.page_projection) {
+        setPayload(nextPayload.page_projection);
+      }
       setAuditError(null);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
-      setAuditError(error instanceof Error && error.message.trim() ? error.message : "进项使用 Audit 失败。");
+      setAuditError(error instanceof Error && error.message.trim() ? error.message : "System Audit 失败。");
     } finally {
       if (auditInFlightRef.current === controller) {
         auditInFlightRef.current = null;
@@ -762,10 +804,10 @@ export default function AppHealthOperationsPage() {
       {payload ? (
         <>
           <DataInventory payload={payload} onOpenImportHistory={() => setImportHistoryOpen(true)} />
-          <InputInvoiceUsageAuditPanel
+          <AppHealthSystemAuditPanel
             error={auditError}
             isLoading={isAuditLoading}
-            onRun={runInputUsageAudit}
+            onRun={runSystemAudit}
             payload={auditPayload}
           />
           <RequestPerformance rows={payload.request_performance.endpoints} />

@@ -38,15 +38,15 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "read_model_status=fresh",
     ): (1, "filter options are derived only after PendingInvoiceReadModelService.filter_options returned fresh."),
     (
-        "backend/src/fin_ops_platform/app/routes_input_invoice_usage.py",
-        "InputInvoiceUsageApiRoutes.filter_options",
-        "read_model_status=fresh",
-    ): (1, "filter options are derived only after sql_all_rows_provider returned a fresh rows payload."),
+        "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py",
+        "InputInvoiceUsageReadModelFreshGateService.filter_options",
+        "dict read_model_status=fresh",
+    ): (1, "filter options are marked fresh only after repository refresh status and exact source versions pass."),
     (
         "backend/src/fin_ops_platform/services/input_invoice_usage_read_model_fresh_gate_service.py",
-        "InputInvoiceUsageReadModelFreshGateService.all_rows",
-        "dict read_model_status=fresh",
-    ): (1, "all-rows helper returns fresh only after every paged SQL read-model payload is fresh."),
+        "InputInvoiceUsageReadModelFreshGateService.rows_by_invoice_ids",
+        "read_model_status=fresh",
+    ): (1, "invoice-id lookup is marked fresh only after every returned scope has fresh status and exact source versions."),
     (
         "backend/src/fin_ops_platform/services/output_invoice_collection_read_model_fresh_gate_service.py",
         "OutputInvoiceCollectionReadModelFreshGateService.all_rows",

@@ -2,6 +2,12 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口、影响面和应保护的旧功能。实现后按实际影响更新矩阵。
 
+## 2026-07-11 - OA 数据重置 canonical 发票全集保护
+
+- OA reset 只重建 OA 及其附件派生事实，不得删除同一 canonical invoice store 中的普通进/销项发票。
+- `tests/test_settings_data_reset_service.py` 以稳定 invoice id 断言 OA attachment 被缓存重建，同时普通 output invoice `iv-o-202604-001` 仍存在；测试不依赖列表顺序，也不通过 OCR 重跑掩盖事实源边界。
+- 此合同覆盖 service-layer、read model/background job、跨模块 reset integration 与 existing regression；页面交互和 HTTP shape 未变化，沿用既有 settings component/Browser 覆盖。
+
 ## 影响面清单
 
 | 层级 | 当前入口 | 回归风险 |

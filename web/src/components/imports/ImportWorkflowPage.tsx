@@ -17,6 +17,7 @@ import {
   TruncatedCellText,
 } from "../common/FinanceTable";
 import PageScaffold from "../common/PageScaffold";
+import PageBusinessAuditIcon from "../common/PageBusinessAuditIcon";
 import {
   confirmImportFiles,
   fetchImportSession,
@@ -788,7 +789,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setIsConfirming,
   } = useImportWorkflowDraft(mode);
   const healthStatus = useAppHealthStatus();
-  const { canMutateData } = useSessionPermissions();
+  const { canAdminAccess, canMutateData } = useSessionPermissions();
   const {
     selectedFiles,
     fileSelections,
@@ -1333,6 +1334,27 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     <div className="import-workflow-page" data-testid="import-workflow-page">
       <PageScaffold
         title={title}
+        titleAccessory={canAdminAccess ? (
+          mode === "bank_transaction" ? (
+            <PageBusinessAuditIcon
+              ariaLabel="Audit 银行流水导入"
+              label="银行流水导入"
+              pageKey="imports.bank-transactions"
+            />
+          ) : mode === "invoice" ? (
+            <PageBusinessAuditIcon
+              ariaLabel="Audit 发票导入"
+              label="发票导入"
+              pageKey="imports.invoices"
+            />
+          ) : (
+            <PageBusinessAuditIcon
+              ariaLabel="Audit ETC发票导入"
+              label="ETC发票导入"
+              pageKey="imports.etc-invoices"
+            />
+          )
+        ) : null}
         actions={
           <div className="import-workflow-actions" data-testid="import-workflow-actions">
             <RouterLink className="button button--secondary button--sm import-workflow-back-link" to="/">

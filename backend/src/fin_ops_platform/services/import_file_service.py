@@ -369,14 +369,6 @@ class FileImportService:
         self._sessions[session.id] = session
         return session
 
-    def mark_batch_reverted(self, batch_id: str) -> None:
-        for session in self._sessions.values():
-            for item in session.files:
-                if item.batch_id == batch_id:
-                    item.status = "reverted"
-            if any(file.status == "reverted" for file in session.files):
-                session.status = "reverted"
-
     def _preview_single_file(
         self,
         *,

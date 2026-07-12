@@ -6,8 +6,9 @@ from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.audit_report import (
     AuditIssue,
+    AuditSnapshot,
     evaluate_audit_issues,
-    read_only_audit_snapshot,
+    use_audit_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_relation_audit import (
     workbench_relation_edge_equality_issues,
@@ -227,10 +228,11 @@ def audit_invoice_read_model(
     contract: InvoiceReadModelAuditContract,
     tenant_id: str = "default",
     example_limit: int = 50,
+    audit_snapshot: AuditSnapshot | None = None,
 ) -> dict[str, Any]:
     normalized_tenant_id = str(tenant_id or "default").strip() or "default"
     limit = max(int(example_limit or 50), 1)
-    with read_only_audit_snapshot(connection) as snapshot:
+    with use_audit_snapshot(connection, audit_snapshot) as snapshot:
         return _audit_invoice_read_model_snapshot(
             snapshot.connection,
             contract=contract,
@@ -255,6 +257,7 @@ def _audit_invoice_read_model_snapshot(
     checks = (
         _noncanonical_invoice_type_issues,
         _dirty_scope_issues,
+        _outbox_backlog_issues,
         _missing_scope_issues,
         _scope_row_count_mismatch_issues,
         _missing_workbench_relation_scope_issues,
@@ -264,6 +267,7 @@ def _audit_invoice_read_model_snapshot(
         _duplicate_invoice_member_issues,
         _amount_mismatch_issues,
         _relation_edge_equality_issues,
+        _consumer_relation_edge_equality_issues,
         _relation_member_split_row_issues,
         _candidate_relation_in_projection_issues,
         _candidate_workbench_relation_issues,
@@ -290,6 +294,7 @@ def _audit_invoice_read_model_snapshot(
                 "read_model.workbench_relation_groups",
                 "read_model.workbench_relation_scopes",
                 "job.read_model_dirty_scopes",
+                "job.outbox_events",
             ],
             "pass_condition": (
                 "audit_status.integrity == 'pass' and audit_status.freshness == 'fresh' "
@@ -306,7 +311,9 @@ def _audit_invoice_read_model_snapshot(
                 "total_with_tax",
                 "relation members",
             ],
-            "relation_edge_equality": "canonical == relation_groups == relation_rows, including affected month scopes",
+            "relation_edge_equality": (
+                "canonical == relation_groups == relation_rows == invoice page consumer summaries"
+            ),
             "snapshot_consistency": snapshot_consistency,
             "database_snapshot": database_snapshot,
             "external_source_boundary": "invoice/OA source completeness before App import",
@@ -316,7 +323,14 @@ def _audit_invoice_read_model_snapshot(
                 "key_display_field_recalculation",
                 "scope_count_and_source_version_equality",
                 "bidirectional_relation_edge_equality",
+                "consumer_relation_edge_equality",
                 "durable_queue_and_freshness_gate",
+            ],
+            "scope_types": [contract.read_model_key, "workbench_relation", "invoice_lifecycle"],
+            "event_types": [
+                f"{contract.read_model_key}.read_model.refresh",
+                "workbench_relation.read_model.refresh",
+                "invoice_lifecycle.read_model.refresh",
             ],
             "write_policy": "read_only",
         },
@@ -338,6 +352,133 @@ def _relation_edge_equality_issues(
         code_prefix=contract.read_model_key,
         label=contract.title,
     )
+
+
+def _consumer_relation_edge_equality_issues(
+    connection: Any,
+    contract: InvoiceReadModelAuditContract,
+    *,
+    tenant_id: str,
+    limit: int,
+) -> list[AuditIssue]:
+    rows = connection.fetch_all(
+        f"""
+        /* check: consumer_relation_edge_equality */
+        with
+        {_invoice_lookup_cte(contract)},
+        relevant_groups as (
+            select group_row.*
+            from read_model.workbench_relation_groups group_row
+            where group_row.tenant_id = %s
+              and group_row.relation_status = 'linked'
+              and exists (
+                  select 1
+                  from unnest(group_row.{contract.relation_group_ids_column}) member(row_id)
+                  join invoice_relation_lookup lookup
+                    on lookup.relation_row_id = member.row_id
+              )
+        ),
+        expected_edge_rows as (
+            select group_row.group_id as case_id, group_row.scope_key,
+                   member.row_id, 'oa'::text as row_type
+            from relevant_groups group_row
+            join lateral unnest(group_row.oa_row_ids) member(row_id) on true
+            union all
+            select group_row.group_id, group_row.scope_key,
+                   member.row_id, 'bank_transaction'::text
+            from relevant_groups group_row
+            join lateral unnest(group_row.bank_transaction_ids) member(row_id) on true
+            union all
+            select group_row.group_id, group_row.scope_key,
+                   lookup.invoice_id, '{contract.direction}_invoice'::text
+            from relevant_groups group_row
+            join lateral unnest(group_row.{contract.relation_group_ids_column}) member(row_id) on true
+            join invoice_relation_lookup lookup
+              on lookup.relation_row_id = member.row_id
+        ),
+        expected_edges as (
+            select case_id, row_id, row_type, min(scope_key) as scope_key
+            from expected_edge_rows
+            where nullif(case_id, '') is not null
+              and nullif(row_id, '') is not null
+            group by case_id, row_id, row_type
+        ),
+        consumer_edge_rows as (
+            select oa_summary.value->>'relationCaseId' as case_id, row.scope_key,
+                   coalesce(nullif(oa_summary.value->>'oaId', ''), oa_summary.value->>'id') as row_id,
+                   'oa'::text as row_type
+            from {contract.rows_table} row
+            join lateral jsonb_array_elements(
+                case when jsonb_typeof(row.payload->'oa'->'summaries') = 'array'
+                     then row.payload->'oa'->'summaries' else '[]'::jsonb end
+            ) oa_summary(value) on true
+            where row.cache_status = 'fresh'
+              and lower(coalesce(oa_summary.value->>'relationStatus', '')) = 'linked'
+            union all
+            select bank_summary.value->>'relationCaseId', row.scope_key,
+                   bank_summary.value->>'bankTransactionId', 'bank_transaction'::text
+            from {contract.rows_table} row
+            join lateral jsonb_array_elements(
+                case when jsonb_typeof(row.payload->'bankTransactions'->'summaries') = 'array'
+                     then row.payload->'bankTransactions'->'summaries' else '[]'::jsonb end
+            ) bank_summary(value) on true
+            where row.cache_status = 'fresh'
+              and lower(coalesce(bank_summary.value->>'relationStatus', '')) = 'linked'
+            union all
+            select invoice_summary.value->>'relationCaseId', row.scope_key,
+                   invoice_summary.value->>'invoiceId', '{contract.direction}_invoice'::text
+            from {contract.rows_table} row
+            join lateral jsonb_array_elements(
+                case when jsonb_typeof(row.payload->'invoiceRelations'->'summaries') = 'array'
+                     then row.payload->'invoiceRelations'->'summaries' else '[]'::jsonb end
+            ) invoice_summary(value) on true
+            where row.cache_status = 'fresh'
+              and lower(coalesce(invoice_summary.value->>'relationStatus', '')) = 'linked'
+        ),
+        consumer_edges as (
+            select case_id, row_id, row_type, min(scope_key) as scope_key
+            from consumer_edge_rows
+            where nullif(case_id, '') is not null
+              and nullif(row_id, '') is not null
+            group by case_id, row_id, row_type
+        ),
+        mismatches as (
+            select 'shared_edge_missing_consumer' as mismatch_kind, expected.*
+            from expected_edges expected
+            where not exists (
+                select 1 from consumer_edges consumer
+                where consumer.case_id = expected.case_id
+                  and consumer.row_id = expected.row_id
+                  and consumer.row_type = expected.row_type
+            )
+            union all
+            select 'consumer_edge_not_shared', consumer.*
+            from consumer_edges consumer
+            where not exists (
+                select 1 from expected_edges expected
+                where expected.case_id = consumer.case_id
+                  and expected.row_id = consumer.row_id
+                  and expected.row_type = consumer.row_type
+            )
+        )
+        select mismatch_kind, case_id as subject_id, scope_key, row_id, row_type
+        from mismatches
+        order by mismatch_kind, subject_id, row_type, row_id
+        limit %s
+        """,
+        (tenant_id, limit),
+    )
+    return [
+        AuditIssue(
+            severity="error",
+            code=f"{contract.read_model_key}_consumer_relation_edge_mismatch",
+            message=f"{contract.title} consumer relation summaries do not equal the shared linked relation edges.",
+            subject_id=_text(row.get("subject_id")),
+            scope_key=_text(row.get("scope_key")),
+            details=_details(row, "mismatch_kind", "row_id", "row_type"),
+        )
+        for row in rows
+    ]
 
 
 def _fetch_summary(
@@ -418,6 +559,44 @@ def _dirty_scope_issues(
             code="read_model_scope_not_fresh",
             message=f"{contract.title} cannot be guaranteed while a required read model scope is pending, processing, or failed.",
             subject_id=_text(row.get("scope_type")),
+            scope_key=_text(row.get("scope_key")),
+            details=_details(row, "status", "updated_at", "last_error"),
+        )
+        for row in rows
+    ]
+
+
+def _outbox_backlog_issues(
+    connection: Any,
+    contract: InvoiceReadModelAuditContract,
+    *,
+    tenant_id: str,
+    limit: int,
+) -> list[AuditIssue]:
+    rows = connection.fetch_all(
+        f"""
+        /* check: outbox_backlog */
+        select event_type, coalesce(scope_key, aggregate_id, '') as scope_key,
+               status, updated_at::text as updated_at, last_error
+        from job.outbox_events
+        where tenant_id = %s
+          and event_type in (
+              '{contract.read_model_key}.read_model.refresh',
+              'workbench_relation.read_model.refresh',
+              'invoice_lifecycle.read_model.refresh'
+          )
+          and status in ('pending', 'processing', 'failed', 'dead_lettered')
+        order by event_type, updated_at desc
+        limit %s
+        """,
+        (tenant_id, limit),
+    )
+    return [
+        AuditIssue(
+            severity="error",
+            code="read_model_outbox_not_drained",
+            message=f"{contract.title} cannot be guaranteed while a required refresh event is not drained.",
+            subject_id=_text(row.get("event_type")),
             scope_key=_text(row.get("scope_key")),
             details=_details(row, "status", "updated_at", "last_error"),
         )

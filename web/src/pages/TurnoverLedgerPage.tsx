@@ -965,7 +965,7 @@ export default function TurnoverLedgerPage() {
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
       ariaLabel="Audit 外部往来款管理"
-      domainKey="turnover_ledger"
+      pageKey="turnover-ledger"
       label="外部往来款管理"
       readModelStatus={readModelStatus}
     />

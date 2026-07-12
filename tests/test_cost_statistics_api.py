@@ -71,21 +71,66 @@ class _FallbackCostStatsOAAdapter:
         ]
 
 
-def _pair_query_service_rows_for_cost_statistics(query_service, *, month: str, row_ids: list[str]) -> None:
-    query_service.get_workbench(month)
-    relation = query_service.linked_relation()
-    for row_id in row_ids:
-        row = query_service.get_row_record(row_id, month_hint=month)
-        row["_section"] = "paired"
-        row["case_id"] = "CASE-COST-FALLBACK"
-        query_service.set_relation(row, **relation)
-        row["available_actions"] = query_service.available_actions(row["type"], "paired")
-        summary_fields = row.get("_summary_fields")
-        if isinstance(summary_fields, dict):
-            if row["type"] == "oa":
-                summary_fields["OA和流水关联情况"] = relation["label"]
-            elif row["type"] == "bank":
-                summary_fields["和发票关联情况"] = relation["label"]
+def _confirm_active_cost_relation(
+    app,
+    *,
+    month: str,
+    oa_row_id: str,
+    bank_row_id: str,
+    case_id: str,
+) -> None:
+    app._build_api_workbench_payload(month)
+    response = app.handle_request(
+        "POST",
+        "/api/workbench/actions/confirm-link",
+        json.dumps(
+            {
+                "month": month,
+                "row_ids": [oa_row_id, bank_row_id],
+                "case_id": case_id,
+                "note": "cost statistics active relation fixture",
+            }
+        ),
+    )
+    if response.status_code != 200:
+        raise AssertionError(response.body)
+
+
+def _canonical_bank_flow_projection(app, month: str) -> tuple[list[dict[str, object]], dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    total_amount = 0
+    for transaction in app._import_service.list_transactions():
+        transaction_month = str(transaction.txn_date or "")[:7]
+        if month != "all" and transaction_month != month:
+            continue
+        if str(transaction.txn_direction.value) != "outflow":
+            continue
+        amount = transaction.amount
+        total_amount += amount
+        rows.append(
+            {
+                "transaction_id": transaction.id,
+                "trade_time": transaction.trade_time or transaction.pay_receive_time or transaction.txn_date,
+                "direction": "支出",
+                "project_name": "未配对OA",
+                "expense_type": "未分类",
+                "expense_content": transaction.summary or transaction.remark or "未分类",
+                "amount": f"{amount:.2f}",
+                "counterparty_name": transaction.counterparty_name_raw,
+                "payment_account_label": transaction.account_no,
+                "remark": transaction.remark or "",
+                "bank_tag_code": "",
+                "bank_tag_label": "未标记",
+                "bank_tag_primary_label": "未标记",
+                "bank_tag_sub_label": "未标记",
+                "bank_tag_label_path": ["未标记"],
+            }
+        )
+    return rows, {
+        "row_count": len(rows),
+        "transaction_count": len(rows),
+        "total_amount": f"{total_amount:.2f}",
+    }
 
 
 class _MemoryCostStatisticsReadModelService:
@@ -249,6 +294,19 @@ class CostStatisticsApiTests(unittest.TestCase):
         return queue
 
     def _prime_cost_statistics_read_model(self, month: str = "2026-03", project_scope: str | None = None) -> None:
+        if month != "all":
+            bank_row = next(
+                transaction
+                for transaction in reversed(self.app._import_service.list_transactions())
+                if str(transaction.txn_date or "").startswith(month)
+            )
+            _confirm_active_cost_relation(
+                self.app,
+                month=month,
+                oa_row_id="oa-cost-api-001",
+                bank_row_id=bank_row.id,
+                case_id=f"CASE-COST-ACTIVE-{bank_row.id}",
+            )
         project_scopes = [project_scope] if project_scope else ["active", "all"]
         months = [month]
         if month != "all":
@@ -256,6 +314,9 @@ class CostStatisticsApiTests(unittest.TestCase):
         for scope in project_scopes:
             for target_month in months:
                 payload = self.app._cost_statistics_service.get_explorer(target_month, project_scope=scope)
+                bank_flow_rows, bank_flow_summary = _canonical_bank_flow_projection(self.app, target_month)
+                payload["bank_flow_time_rows"] = bank_flow_rows
+                payload["bank_flow_summary"] = bank_flow_summary
                 scope_key = self.app._cost_statistics_read_model_service.scope_key(target_month, scope)
                 self.app._cost_statistics_read_model_service.upsert_read_model(
                     target_month,
@@ -596,83 +657,6 @@ class CostStatisticsApiTests(unittest.TestCase):
             ],
         )
 
-    def test_import_preview_does_not_invalidate_cost_statistics_cache(self) -> None:
-        with (
-            patch.object(self.app, "_invalidate_cost_statistics_read_models") as invalidate_all,
-            patch.object(self.app, "_invalidate_cost_statistics_read_model_scopes") as invalidate_scopes,
-        ):
-            response = self.app.handle_request(
-                "POST",
-                "/imports/preview",
-                json.dumps(
-                    {
-                        "batch_type": "bank_transaction",
-                        "source_name": "cost-preview.json",
-                        "imported_by": "user_finance_01",
-                        "rows": [
-                            {
-                                "account_no": "62228888",
-                                "txn_date": "2026-03-10",
-                                "trade_time": "2026-03-10 21:27:55",
-                                "counterparty_name": "昆明设备供应商",
-                                "debit_amount": "1250.00",
-                                "credit_amount": "",
-                                "bank_serial_no": "COST-PREVIEW-001",
-                            }
-                        ],
-                    }
-                ),
-            )
-
-        self.assertEqual(response.status_code, 200)
-        invalidate_all.assert_not_called()
-        invalidate_scopes.assert_not_called()
-
-    def test_import_confirm_invalidates_cost_statistics_cache_for_imported_month(self) -> None:
-        preview_response = self.app.handle_request(
-            "POST",
-            "/imports/preview",
-            json.dumps(
-                {
-                    "batch_type": "bank_transaction",
-                    "source_name": "cost-confirm.json",
-                    "imported_by": "user_finance_01",
-                    "rows": [
-                        {
-                            "account_no": "62228888",
-                            "txn_date": "2026-03-10",
-                            "trade_time": "2026-03-10 21:27:55",
-                            "counterparty_name": "昆明设备供应商",
-                            "debit_amount": "1250.00",
-                            "credit_amount": "",
-                            "bank_serial_no": "COST-CONFIRM-001",
-                        }
-                    ],
-                }
-            ),
-        )
-        batch_id = json.loads(preview_response.body)["batch"]["id"]
-
-        with (
-            patch.object(self.app, "_invalidate_cost_statistics_read_models") as invalidate_all,
-            patch.object(self.app, "_execute_derived_data_lifecycle_event", return_value={}) as lifecycle_event,
-        ):
-            response = self.app.handle_request("POST", "/imports/confirm", json.dumps({"batch_id": batch_id}))
-
-        self.assertEqual(response.status_code, 200)
-        invalidate_all.assert_not_called()
-        lifecycle_event.assert_called_once()
-        self.assertEqual(lifecycle_event.call_args.args, ("import_state_changed",))
-        self.assertEqual(lifecycle_event.call_args.kwargs["scope_keys"], ["2026-03"])
-        self.assertFalse(lifecycle_event.call_args.kwargs["include_all"])
-        self.assertEqual(
-            lifecycle_event.call_args.kwargs["domain_scope_keys"]["cost_statistics_read_model"],
-            ["2026-03"],
-        )
-        payload = json.loads(response.body)
-        self.assertIn({"read_model_key": "cost_statistics", "scope_key": "active:2026-03"}, payload["operation_barrier_targets"])
-        self.assertIn({"read_model_key": "cost_statistics", "scope_key": "all:2026-03"}, payload["operation_barrier_targets"])
-
     def test_get_cost_statistics_routes_return_expected_shapes(self) -> None:
         from fin_ops_platform.domain.enums import BatchType
 
@@ -885,7 +869,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         time_sheet = time_workbook.active
         self.assertEqual(time_sheet.title, "按时间统计")
         self.assertEqual(time_sheet["A2"].value, "2026-03-10 21:27:55")
-        self.assertEqual(time_sheet["B2"].value, "云南溯源科技")
+        self.assertEqual(time_sheet["B2"].value, "未配对OA")
 
         expense_type = quote("设备货款及材料费", safe="")
         expense_response = self.app.handle_request(
@@ -1285,11 +1269,12 @@ class CostStatisticsApiTests(unittest.TestCase):
         app = build_application()
         app._workbench_query_service = app._workbench_query_service.__class__(oa_adapter=_FallbackCostStatsOAAdapter())
         workbench_routes = WorkbenchApiRoutes(app._workbench_query_service)
+        app._workbench_api_routes = workbench_routes
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 
         app._cost_statistics_service = CostStatisticsService(
             app._import_service,
-            grouped_workbench_loader=lambda month: app._group_row_payload(workbench_routes.get_workbench(month)),
+            grouped_workbench_loader=app._build_api_workbench_payload,
             project_active_checker=app._app_settings_service.is_project_active,
         )
         app._cost_statistics_sql_read_repository = _MemoryCostStatisticsSqlRepository(
@@ -1297,10 +1282,12 @@ class CostStatisticsApiTests(unittest.TestCase):
             app._cost_statistics_source_versions,
         )
 
-        _pair_query_service_rows_for_cost_statistics(
-            app._workbench_query_service,
+        _confirm_active_cost_relation(
+            app,
             month="2026-03",
-            row_ids=["oa-cost-fallback-001", "bk-o-202603-001"],
+            oa_row_id="oa-cost-fallback-001",
+            bank_row_id="bk-o-202603-001",
+            case_id="CASE-COST-FALLBACK",
         )
 
         app._cost_statistics_read_model_service.upsert_read_model(

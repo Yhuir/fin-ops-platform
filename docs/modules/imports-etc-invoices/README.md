@@ -46,11 +46,13 @@
 
 `/imports/etc-invoices` 只渲染 `ImportWorkflowPage mode="etc_invoice"`。页面不走通用 `/imports/files/*` 发票文件导入，而是通过 `web/src/features/etc/api.ts` 调用 `/api/etc/import/preview` 和 `/api/etc/import/confirm`。
 
-ETC 发票导入必须绑定一个已经确认且可导入的 ETC 对账任务。预览阶段会用对账任务的 confirmed item set 过滤 zip 内发票，只允许与任务要求匹配的发票进入 import session；确认阶段会校验 task version、`confirmed_item_set_hash` 和 import session freshness，创建 `etc_invoice_import` 后台 job，并通过 `etc_invoice_import.confirm` processor 完成导入。
+ETC 发票导入必须绑定一个已经确认且可导入的 ETC 对账任务。预览阶段会用对账任务的 confirmed item set 过滤 ZIP 内发票，并把 task version/hash/generation、原始 ZIP file object、preview counts/fingerprint 和 requirement match edges 持久化；确认阶段从 durable session 重读、校验 freshness，只 enqueue `etc_invoice_import.confirm`。独立 worker 重载原始 ZIP、确定性重建 allowlist 后完成导入。
+
+页面不存在 own read model。统一 Audit 在一个 `REPEATABLE READ READ ONLY` snapshot 内复用 ETC tickets canonical collector，并独立证明 session/file/object、preview match、task、business/import batch、ETC invoice、existing canonical bridge 与 job/outbox。Workbench/tax/cost/lifecycle/search 仍只是写后影响目标。
 
 ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入 ETC import batch 和 ETC invoice metadata / PDF / XML 附件关系，再触发 `etc_import_confirmed` 派生生命周期。ETC ZIP 不再直接创建统一发票池事实；统一发票池 `app.invoices` 只由正式进/销项发票导入，或 OA 附件识别 service 判定为正式发票且池内不存在时受控创建。业务批次后续的 OA 草稿创建、人工确认“已提交/未提交”、删除和 summary row 释放属于 ETC 票据管理模块，但本导入模块必须把这些 fan-out 风险写入测试矩阵。
 
-ETC 导入 runtime 删除链路只清理 ETC task、import batch、business batch 和 ETC metadata 自有事实，不再调用通用 import service 删除或改写 canonical invoice。历史版本造成的 `app.invoices` ETC-created canonical 污染只能通过 `docs/operations/invoice-pool-cleanup.md` 的备份/dry-run/确认流程处理。旧 `POST /api/etc/import` 只保留 410 boundary guard，用于证明直导入口不会持久化记录。
+ETC 导入 runtime 删除链路只清理 ETC task、import batch、business batch 和 ETC metadata 自有事实，不再调用通用 import service 删除或改写 canonical invoice。历史版本造成的 `app.invoices` ETC-created canonical 污染只能通过 `docs/operations/invoice-pool-cleanup.md` 的备份/dry-run/确认流程处理。旧 `POST /api/etc/import` 已彻底移除并返回 404；正式写入口只有 preview/confirm。
 
 核心 fan-out：
 

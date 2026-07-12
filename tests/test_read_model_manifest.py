@@ -16,6 +16,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
 )
 from fin_ops_platform.services.read_model_manifest import (
     READ_MODEL_MANIFEST,
+    is_command_only_read_model_scope,
     read_model_manifest_by_refresh_event_type,
     read_model_manifest_by_scope_type,
 )
@@ -86,6 +87,7 @@ class ReadModelManifestTests(unittest.TestCase):
             "active_month_shard_aggregate",
             "fan_out_command",
             "forbidden_bare_all",
+            "queryable_all_scope",
             "queryable_parent_aggregate",
         }
         allowed_force_refresh_contracts = {
@@ -395,7 +397,7 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertEqual(bank_detail.projection_strategy, "partitioned_scoped_incremental")
         self.assertEqual(balance.projection_strategy, "partitioned_scoped_incremental")
         self.assertEqual(bank_detail.all_scope_semantics, "fan_out_command")
-        self.assertEqual(balance.all_scope_semantics, "fan_out_command")
+        self.assertEqual(balance.all_scope_semantics, "queryable_all_scope")
         self.assertEqual(bank_detail.force_refresh_contract, "gateway_force_refresh")
         self.assertEqual(balance.force_refresh_contract, "gateway_force_refresh")
         self.assertEqual(bank_detail.query_owner, "BankDetailsApplicationService")
@@ -407,6 +409,15 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertLessEqual(required_bank_detail_ports, set(bank_detail.repository_port_contract))
         self.assertEqual(required_balance_ports, set(balance.repository_port_contract))
         self.assertFalse(set(bank_detail.repository_port_contract).intersection(balance.repository_port_contract))
+
+    def test_manifest_distinguishes_fan_out_commands_from_queryable_all_scopes(self) -> None:
+        self.assertTrue(is_command_only_read_model_scope("oa_pending_payment", "all"))
+        self.assertTrue(is_command_only_read_model_scope("bank_detail", "all"))
+        self.assertTrue(is_command_only_read_model_scope("turnover_ledger", "all"))
+        self.assertFalse(is_command_only_read_model_scope("bank_detail", "2026-06"))
+        self.assertFalse(is_command_only_read_model_scope("bank_account_balance", "all"))
+        self.assertFalse(is_command_only_read_model_scope("cost_statistics", "active:all"))
+        self.assertFalse(is_command_only_read_model_scope("workbench", "all"))
 
     def test_pending_invoice_and_oa_payment_manifest_preserve_page_scope_contracts(self) -> None:
         pending_invoice = READ_MODEL_MANIFEST["pending_invoice"]

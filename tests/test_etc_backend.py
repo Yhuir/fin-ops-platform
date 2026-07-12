@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import build_local_state_application as _build_application, install_durable_import_queue
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services import etc_service as etc_service_module
 from fin_ops_platform.services.etc_service import (
@@ -94,6 +94,12 @@ TICKET_ROOT_CLIPBOARD_TEXT = """
 """
 
 REAL_TICKET_ROOT_TXT_A516HJ_PATH = Path("/Users/yu/Desktop/sy/财务运营平台/票根网/4月/云A516HJ/云A516HJ")
+
+
+def build_application(*args, **kwargs):
+    application = _build_application(*args, **kwargs)
+    application._test_import_queue = install_durable_import_queue(application)
+    return application
 
 
 def etc_xml(
@@ -1443,6 +1449,7 @@ class EtcServiceTests(unittest.TestCase):
 
 class EtcApiTests(unittest.TestCase):
     def _wait_for_job(self, app, job_id: str, *, timeout: float = 2.0) -> dict[str, object]:
+        app._test_import_queue.process_all(raise_errors=False)
         deadline = time.monotonic() + timeout
         payload: dict[str, object] = {}
         while time.monotonic() < deadline:
@@ -4224,11 +4231,11 @@ class EtcApiTests(unittest.TestCase):
                 app._build_etc_oa_client = lambda _headers: fake_oa
                 task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
                 session_id = str(preview_payload["sessionId"])
-                reconciliation_preview = app._etc_reconciliation_import_previews[session_id]
+                validated_preview = app._etc_import_preview_service.validate(session_id=session_id, task_id=task_id)
                 app._etc_reconciliation_task_service.begin_import(
                     task_id=task_id,
-                    task_version=reconciliation_preview.task_version,
-                    confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
+                    task_version=validated_preview.session.task_version,
+                    confirmed_item_set_hash=validated_preview.session.confirmed_item_set_hash,
                     import_session_id=session_id,
                     actor="alice",
                 )
@@ -4243,6 +4250,7 @@ class EtcApiTests(unittest.TestCase):
                     session_id,
                     expected_version=business_batch.version,
                     idempotency_key=f"etc_import_session:{session_id}",
+                    uploads=list(validated_preview.uploads),
                 )
 
                 draft_payload = app._etc_business_application_service().create_oa_draft_payload(
@@ -4676,7 +4684,7 @@ class EtcApiTests(unittest.TestCase):
             response = app.handle_request("POST", "/api/etc/import", body=body, headers=headers)
             query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
 
-        self.assertIn(response.status_code, {400, 410})
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(json.loads(query_response.body)["total"], 0)
 
     def test_historical_etc_repair_reconcile_is_idempotent_from_seed_bundle(self) -> None:

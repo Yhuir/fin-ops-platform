@@ -8,6 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：税金抵扣页面读取 `tax_offset` read model，通过 query service/gateway 保证 scoped freshness。
 - 当前缺口：税金导入、认证、计划、worker cache warmup 与页面查询耦合较多，变更时必须明确影响面。
+- 页面 Audit 状态：proof-ready；`relation_proof_required=false`，因为页面和 SQL projection 均不消费 Workbench relation。
 - 旧代码删除条件：旧 service/cache 路径不再被 API 或 worker 引用，并有 SQL runtime/e2e 回归。
 
 ## 职责边界
@@ -23,6 +24,7 @@
 
 - 不拥有成本统计 parent rollup。
 - 不直接处理关联台关系事实写入。
+- 不读取 `app.workbench_pair_relations` 或 `read_model.workbench_relation_*`，Workbench relation 写入也不得触发 `tax_offset` dirty/outbox。
 - 不在页面里绕过 freshness gate 读取旧缓存。
 
 ## 输入 I/O
@@ -33,6 +35,7 @@
 | 税金导入/认证 | tax certified import services | 写后触发受影响 tax_offset scope；直接确认响应必须返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | 抵扣计划保存 | `TaxOffsetPlanService.save_plan(...)` | 验证 source versions 后保存计划，并返回当前月份 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | Refresh scope | `tax_offset` manifest | month or `all`；`all` 是 fan-out command |
+| 页面 Audit | 管理员统一 page-audit API | 同一 `REPEATABLE READ READ ONLY` snapshot 读取 canonical、projection、dirty/outbox；只读 |
 
 ## 输出 I/O
 
@@ -42,6 +45,7 @@
 | 导入/认证结果 | API/worker | 返回 job/result 并触发 dirty scope；同步完成时前端优先等待响应 targets |
 | 计划保存结果 | 前端页面 | 保存成功后等待 `read_model_key=tax_offset`、`scope_key=<month>` fresh，再刷新页面数据 |
 | Dirty scope | runtime queue | `tax_offset.read_model.refresh` |
+| Audit proof | App Health 页面 | 五组 item 双向相等、关键字段/匹配/选择/summary/version/queue 证明；relation 明确为不适用 |
 
 ## 持久化与投影
 
@@ -60,7 +64,7 @@
 | Backend route | `backend/src/fin_ops_platform/app/routes_tax.py` |
 | Backend service | `tax_offset_service.py`、`tax_offset_query_service.py`、`tax_offset_runtime_service.py`、`tax_offset_plan_service.py`、`tax_offset_read_model_service.py` |
 | Import services | `tax_certified_import_service.py`、`tax_certified_import_application_service.py`、`tax_certified_import_job_service.py` |
-| Repository / SQL | `tax_offset_read_model_repository.py`、`cost_tax_sql_projection.py` |
+| Repository / SQL | `tax_offset_read_model_repository.py`、`cost_tax_sql_projection.py`、`postgres_repositories/tax_offset_page_audit.py` |
 | Worker/read model | `tax_offset_read_model_refresh.py`、`tax_offset_derived_lifecycle_executor.py`、`tax_offset_cache_warmup_executor.py`、`tax_offset_worker_rebuild_executor.py` |
 | Tests | `tests/test_tax_offset*.py`、`web/src/test/Tax*.test.*`、`web/e2e/tax-offset-flow.spec.ts` |
 
@@ -69,10 +73,12 @@
 - 允许依赖：cost/tax projection, read model query gateway, certified import job service。
 - 必须通过：TaxOffsetQueryService for reads, application/import service for writes。
 - 禁止绕过：直接 SQL 写 read model；把成本统计 parent aggregate 当成税金事实源。
+- 禁止污染：relation command/UoW/repository 不得把 `tax_offset` 当作 relation downstream；页面不得从 relation 状态推断发票是否应进入税金计划。
 
 ## 测试与验证
 
 - `tests/test_tax_offset_sql_runtime.py`
+- `tests/test_audit_tax_offset_read_model_tool.py`
 - `tests/test_tax_offset_api.py`
 - `tests/test_tax_offset_read_model_service.py`
 - `web/src/test/TaxOffsetPage.test.tsx` 覆盖保存/认证导入后 barrier 等待和刷新。
@@ -82,6 +88,7 @@
 
 - cache warmup/rebuild worker 变更必须同步 runtime registry 和 deploy env。
 - 删除旧 cache/read path 前必须证明页面不会读 stale 数据。
+- 已删除旧 relation→tax_offset fan-out、SLO 期望和动态造数 Browser mock；不得恢复“配对后税金进项才出现”的旧合同。
 - 队列化认证导入的 job result 若未来暴露给页面刷新，也必须携带与直接确认路径等价的 `tax_offset` operation barrier targets。
 
 ## Canonical facts ownership
@@ -91,4 +98,5 @@
 - Allowed reads: tax query/application service、tax certified import repository/read ports。
 - Downstream outputs: tax_offset、cost_statistics、invoice_lifecycle dirty scopes 或 owner producer 输出。
 - Forbidden paths: 其它模块不得直接写认证抵扣或计划表；tax read model 不得反向成为抵扣事实源。
+- `app.tax_offset_plans` 是计划写入事实，但当前页面 read model 不读取计划表；因此页面 Audit expected-set 不混入计划表。若未来页面 projection 消费计划，必须先更新 projection、source version、Audit 和 API 合同。
 - Old code deletion: 旧认证抵扣 snapshot、旧计划 fallback 和直接 SQL 写税金事实路径必须删除；migration/audit/rollback 工具保留不算 closure。

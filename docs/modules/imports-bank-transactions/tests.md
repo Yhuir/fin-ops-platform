@@ -31,9 +31,9 @@
 | 选择银行映射持久化，检测账号冲突，银行别名/简称/法定名称不误报 | covered | `test_preview_persists_selected_bank_mapping_and_marks_conflict_against_detected_account`、`test_preview_does_not_mark_bank_*_as_conflict_when_last4_matches` |
 | preview stale 时拒绝 confirm | covered | `test_confirm_session_rejects_stale_preview_when_existing_records_change`、`test_import_file_confirm_returns_preview_stale_when_existing_records_change` |
 | confirm 只导入 selected files | covered | `test_confirm_files_imports_only_selected_files_from_session` |
-| RabbitMQ/import worker 模式下 confirm 入队并可被 import processor 执行 | covered | `test_general_import_confirm_queues_import_job_in_rabbitmq_mode`、`test_application_import_processor_registry_runs_general_import_confirm` |
-| 银行流水页面禁止回到旧 JSON import API，server confirm processor wrapper 保持删除 | covered | `test_bank_transaction_import_frontend_uses_file_session_api_only`、`test_server_no_longer_owns_import_confirm_processors` |
-| 银行导入确认后 Workbench read model invalidated | covered | `test_bank_import_confirm_invalidates_workbench_read_model` |
+| file/session confirm 只处理 selected files 并返回银行导入 domain targets | covered | `test_confirm_files_imports_only_selected_files_from_session`、`test_confirm_bank_transaction_file_job_reports_bank_import_domain`、`test_file_import_confirm_job_returns_import_write_targets` |
+| 旧 JSON HTTP route、`general_import.confirm` processor 和 server confirm wrapper 保持删除 | covered | `test_bank_transaction_import_frontend_uses_file_session_api_only`、`test_server_no_longer_exposes_legacy_json_import_write_routes`、`test_server_no_longer_owns_import_confirm_processors` |
+| 银行导入确认后的 Workbench/bank detail/cost operation targets | covered | `test_file_import_confirm_job_returns_import_write_targets` |
 | bank import lifecycle fan-out 到银行明细/账户余额、Workbench、relation、matching、invoice lifecycle、cost/search | covered | `test_bank_import_confirmed_maps_workbench_candidate_cost_and_search_domains` |
 | Browser e2e 上传/预览/慢预览防重复提交/重复/损坏文件混合/冲突取消零提交/冲突确认/preview stale/confirm 失败/下游银行明细 | covered | `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | read_export_only 不能上传/预览/确认导入 | covered | `web/e2e/permissions-role-matrix.spec.ts` |
@@ -99,9 +99,9 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_bank_details_sql_runtime \
   tests.test_write_operation_slo_audit \
   tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_no_longer_owns_import_confirm_processors \
+  tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_no_longer_exposes_legacy_json_import_write_routes \
   tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_bank_transaction_import_frontend_uses_file_session_api_only \
   tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_import_file_confirm_returns_preview_stale_when_existing_records_change \
-  tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_bank_import_confirm_invalidates_workbench_read_model \
   -v
 
 cd web && npm test -- --run \

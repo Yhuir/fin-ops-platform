@@ -770,23 +770,16 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(second_payload["data_inventory"]["bank"]["total_count"], 1)
         self.assertIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])
 
-    def test_operations_input_invoice_usage_audit_is_admin_only(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "admin_only")
-
     def test_operations_input_invoice_usage_audit_returns_read_only_report_for_admin(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             connection = FakeInputInvoiceUsageAuditConnection()
             inject_operations_audit_connection(app, connection)
 
-            response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
+            response = app.handle_request(
+                "GET",
+                "/api/operations/app-health/page-audit?page=input-invoice-usage",
+            )
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
@@ -809,7 +802,10 @@ class AppHealthApiTests(unittest.TestCase):
             connection = FakeOutputInvoiceCollectionAuditConnection()
             inject_operations_audit_connection(app, connection)
 
-            response = app.handle_request("GET", "/api/operations/app-health/output-invoice-collection-audit")
+            response = app.handle_request(
+                "GET",
+                "/api/operations/app-health/page-audit?page=output-invoice-collections",
+            )
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
@@ -842,7 +838,10 @@ class AppHealthApiTests(unittest.TestCase):
             )
             inject_operations_audit_connection(app, connection)
 
-            response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
+            response = app.handle_request(
+                "GET",
+                "/api/operations/app-health/page-audit?page=input-invoice-usage",
+            )
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
@@ -854,21 +853,11 @@ class AppHealthApiTests(unittest.TestCase):
         )
         self.assertEqual(connection.executed, [])
 
-    def test_operations_input_invoice_usage_audit_requires_postgres_connection(self) -> None:
-        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            response = app.handle_request("GET", "/api/operations/app-health/input-invoice-usage-audit")
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(payload["error"], "postgres_required")
-
     def test_operations_page_audit_is_admin_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
-            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_details")
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?page=bank-details")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 403)
@@ -880,15 +869,18 @@ class AppHealthApiTests(unittest.TestCase):
             connection = FakePageBusinessAuditConnection()
             inject_operations_audit_connection(app, connection)
 
-            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_details")
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?page=bank-details")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["mode"], "page-business-read-model-audit")
+        self.assertEqual(payload["page_key"], "bank-details")
         self.assertEqual(payload["domain_key"], "bank_details")
         self.assertEqual(payload["overall_status"], "pass")
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
+        self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
+        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v18")
         self.assertIn("app.bank_transactions", payload["audit_contract"]["source_tables"])
         self.assertIn("read_model.bank_detail_rows", payload["audit_contract"]["read_model_tables"])
         self.assertEqual(connection.executed, [])
@@ -921,7 +913,7 @@ class AppHealthApiTests(unittest.TestCase):
             )
             inject_operations_audit_connection(app, connection)
 
-            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_flow_rule_batches")
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?page=bank-flow-rule-batches")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
@@ -936,22 +928,150 @@ class AppHealthApiTests(unittest.TestCase):
         )
         self.assertEqual(connection.executed, [])
 
-    def test_operations_page_audit_rejects_unsupported_domain(self) -> None:
+    def test_operations_page_audit_dispatches_both_invoice_pages_through_the_unified_route(self) -> None:
+        cases = (
+            ("input-invoice-usage", FakeInputInvoiceUsageAuditConnection, "input_invoice_usage"),
+            ("output-invoice-collections", FakeOutputInvoiceCollectionAuditConnection, "output_invoice_collection"),
+        )
+        for page_key, connection_factory, read_model_key in cases:
+            with self.subTest(page_key=page_key), self._temporary_env(
+                FIN_OPS_ADMIN_USERNAMES="test_finops_user"
+            ), tempfile.TemporaryDirectory() as temp_dir:
+                app = build_application(data_dir=Path(temp_dir))
+                connection = connection_factory()
+                inject_operations_audit_connection(app, connection)
+
+                response = app.handle_request(
+                    "GET",
+                    f"/api/operations/app-health/page-audit?page={page_key}",
+                )
+                payload = json.loads(response.body)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(payload["page_key"], page_key)
+            self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
+            self.assertIn(read_model_key, payload["audit_contract"]["registered_read_model_keys"])
+            queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+            self.assertIn("job.outbox_events", queried_sql)
+
+    def test_operations_page_audit_dispatches_etc_direct_canonical_proof(self) -> None:
+        with self._temporary_env(
+            FIN_OPS_ADMIN_USERNAMES="test_finops_user"
+        ), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakeInputInvoiceUsageAuditConnection()
+            inject_operations_audit_connection(app, connection)
+
+            response = app.handle_request(
+                "GET",
+                "/api/operations/app-health/page-audit?page=etc-tickets",
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["page_key"], "etc-tickets")
+        self.assertEqual(payload["mode"], "etc-tickets-page-audit")
+        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
+        self.assertTrue(payload["audit_contract"]["relation_proof_required"])
+        self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("app.etc_business_batches", queried_sql)
+        self.assertIn("app.etc_reconciliation_tasks", queried_sql)
+        self.assertIn("app.etc_batch_invoice_links", queried_sql)
+        self.assertIn("job.import_jobs", queried_sql)
+        self.assertEqual(connection.executed, [])
+
+    def test_operations_page_audit_dispatches_secret_safe_settings_proof(self) -> None:
+        with self._temporary_env(
+            FIN_OPS_ADMIN_USERNAMES="test_finops_user"
+        ), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakeInputInvoiceUsageAuditConnection()
+            inject_operations_audit_connection(app, connection)
+
+            response = app.handle_request(
+                "GET",
+                "/api/operations/app-health/page-audit?page=settings",
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["page_key"], "settings")
+        self.assertEqual(payload["mode"], "settings-page-audit")
+        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
+        self.assertFalse(payload["audit_contract"]["relation_proof_required"])
+        self.assertIn("not selected", payload["audit_contract"]["secret_policy"])
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("app.app_settings", queried_sql)
+        self.assertIn("app.oa_applicant_credentials", queried_sql)
+        self.assertIn("job.background_jobs", queried_sql)
+        self.assertNotIn("pgp_sym_decrypt", queried_sql)
+        self.assertEqual(connection.executed, [])
+
+    def test_operations_page_audit_requires_page_key(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             inject_operations_audit_connection(app, FakePageBusinessAuditConnection())
 
-            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=unknown")
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "unsupported_page_audit_domain")
+        self.assertEqual(payload["error"], "page_audit_page_required")
+
+    def test_operations_page_audit_rejects_unsupported_page(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            inject_operations_audit_connection(app, FakePageBusinessAuditConnection())
+
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?page=unknown")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "unsupported_page_audit_page")
+
+    def test_operations_page_audit_returns_system_proof_for_app_health(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            inject_operations_audit_connection(app, FakePageBusinessAuditConnection())
+
+            response = app.handle_request(
+                "GET",
+                "/api/operations/app-health/page-audit?page=app-health-operations",
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["page_key"], "app-health-operations")
+        self.assertEqual(payload["mode"], "app-health-system-audit")
+        self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
+        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v18")
+        self.assertEqual(payload["external_evidence"]["end_to_end_source_truth"], "unproven")
+
+    def test_operations_page_audit_returns_unified_workbench_proof(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakePageBusinessAuditConnection()
+            inject_operations_audit_connection(app, connection)
+
+            response = app.handle_request(
+                "GET",
+                "/api/operations/app-health/page-audit?page=reconciliation-workbench",
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["page_key"], "reconciliation-workbench")
+        self.assertEqual(payload["mode"], "workbench-page-audit")
+        self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
+        self.assertIn("active_generation_relation_display", payload["audit_contract"]["proof_checks"])
+        self.assertEqual(connection.executed, [])
 
     def test_operations_page_audit_requires_postgres_connection(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
-            response = app.handle_request("GET", "/api/operations/app-health/page-audit?domain=bank_details")
+            response = app.handle_request("GET", "/api/operations/app-health/page-audit?page=bank-details")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 503)

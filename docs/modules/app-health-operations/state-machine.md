@@ -38,6 +38,17 @@
 - payload 状态：`fresh`、`stale_after_refresh_error`、`unavailable`。
 - 缓存刷新失败允许返回上一份 payload 并带 warning；权限失败和 PostgreSQL runtime 缺失不走缓存兜底。
 
+### System Audit
+
+- `not_run`：尚未执行，不能显示绿色。
+- `running`：一个 outer `REPEATABLE READ READ ONLY` transaction 正在执行 16 个子页面 proof 和 App Health database plane；不触发 refresh/repair。
+- `internal_pass_external_unknown`：17 页已登记 App 内部合同在同一 snapshot 内通过，但外部 control evidence 缺失；`overall_status=pass`、`audit_status.external=unknown`、`end_to_end_source_truth=unproven` 同时成立。
+- `internal_pass_external_pass`：内部 17 页通过，且银行/OA/发票/ETC 最新、未过期的 complete manifest 与当前 canonical exact set、关键字段和 controls 全部一致；只允许声明 `proven_as_of_external_evidence`，有效时间边界是各 evidence 的 observed/source snapshot 与当前 system snapshot。
+- `external_fail`：任一最新 evidence revoked/expired、contract/coverage 非法，或存在 missing/extra/duplicate/field/control mismatch；即使内部 `overall_status=pass` 也必须保持 `end_to_end_source_truth=unproven`，不得回退旧 evidence。
+- `issues_found`：任一子页 integrity/freshness/queue、dashboard inventory、manifest/status registry、required worker 或 current outbox 不一致；不得显示系统通过。
+- `request_failed`：snapshot/SQL/runtime projection 不可执行，HTTP 返回 fail-closed error；不能用上一次绿色替代。
+- Audit result 是不可变历史快照证据。系统页面下一次普通 dashboard refresh 会清除本地 Audit 绿色；后续写入不能沿用旧 `system_audit_id`。
+
 ## UI 状态
 
 - loading：首次加载 dashboard 或 App Status provider 请求中；不能显示旧成功态为 fresh。
@@ -64,6 +75,8 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-11 | App Health 成为 17 页 system Audit owner | 一个 outer snapshot 执行其余 16 页 proof；database/runtime/external 三个 evidence plane 分离，旧进项专项面板删除 | `tests/test_audit_app_health_system.py`、`tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/e2e/app-shell.spec.ts` |
+| 2026-07-11 | 外部 evidence exact proof owner | 四域 immutable manifest 与 canonical facts 做 exact set/field/control equality；显式 page coverage，删除 free-text classifier | `tests/test_external_control_evidence_*.py`、`tests/test_audit_external_control_evidence.py`、`tests/test_audit_app_health_system.py` |
 | - | 初始骨架 | 待补充 | - |
 | 2026-06-21 | current-effective outbox 增加同 scope active dirty scope 覆盖，Workbench generation consistency failure 在 active repair 期间展示 refreshing 而不是 blocked | `RuntimeMonitoringRepository.app_status_runtime_snapshot()`、health summary/outbox attention SQL、Workbench refresh status 到 App Status 的状态口径 | `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_ignores_failed_outbox_row_covered_by_active_dirty_scope`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_reports_inconsistent_workbench_generation_as_refreshing_during_active_repair` |
 | 2026-06-20 | App Status 增加 runtime summary，并在 hover 与系统状态页展示 read model / worker / queue 整体状态 | 用户不用进入具体表格即可判断 read model 是否 fresh、worker 是否 active/working、queue 是否有 backlog | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v`；`cd web && npm test -- --run src/test/AppStatusApi.test.ts src/test/AppStatusIndicator.test.tsx src/test/AppHealthOperationsPage.test.tsx` |
