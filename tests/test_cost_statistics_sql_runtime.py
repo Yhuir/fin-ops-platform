@@ -659,6 +659,28 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
 
 
 class CostStatisticsSqlRuntimeTests(unittest.TestCase):
+    def test_shared_postgres_repository_exposes_active_workbench_versions_to_cost_port(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
+                self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
+                return {"source_versions": {"builder": "workbench-v5", "source_version": 2512}}
+
+        connection = Connection()
+        repository = PostgresReadModelRepository(connection)
+        port = CostStatisticsReadModelRepositoryPort(repository)
+
+        self.assertEqual(
+            port.active_workbench_source_versions(scope_key="2026-05"),
+            {"builder": "workbench-v5", "source_version": 2512},
+        )
+        sql, params = connection.fetch_one_calls[0]
+        self.assertIn("from read_model.workbench_generations", sql)
+        self.assertIn("status = 'active'", sql)
+        self.assertEqual(params, ("2026-05",))
+
     def test_repository_parses_grouped_display_amount_into_structured_cost_row(self) -> None:
         connection = CostStatisticsWriteConnection()
         repository = PostgresReadModelRepository(connection)

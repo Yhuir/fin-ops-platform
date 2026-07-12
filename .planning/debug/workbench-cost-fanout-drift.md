@@ -29,6 +29,7 @@ updated: 2026-07-12
 - 2026-07-12 19:56: System Audit `system-audit:1deeb8b8658d948dd279c6b3` passed 15/16; only cost statistics failed.
 - 2026-07-12: cost scopes embedded Workbench versions such as 2504/334 while current versions were 2511/341.
 - 2026-07-12: App Health runtime metrics showed Workbench last completed at 19:54:52 and cost statistics last completed at 19:20:29, with no current outbox backlog.
+- 2026-07-12 production convergence proof: an operator enqueued only `workbench=all`; Workbench publication automatically created 38 cost-statistics events. Production then exposed a missing facade delegate: the narrow method existed on `PostgresSummaryReadModelRepository`, while the worker receives the composed `PostgresReadModelRepository`.
 
 ## Eliminated
 
@@ -44,5 +45,5 @@ updated: 2026-07-12
 - root_cause: Business lifecycle events enqueue Workbench and cost statistics independently, so cost can finish from the old active generation before Workbench publishes the new one. Workbench publication did not enqueue a dependent cost refresh. Separately, the cost API expected source versions omitted `workbench_source_versions`, so the query gateway could label that stale snapshot fresh even though Audit compared and rejected it.
 - fix: Add a narrow repository port for current Workbench active-generation source versions; use it in both the cost projection builder and API expected-set. After a Workbench month shard publishes, enqueue normalized active/all cost month scopes through `ReadModelRefreshGateway` before completing the Workbench dirty scope. Do not fan out from the compatibility all aggregate.
 - hardening: Preserve fail-closed behavior, durable queue ordering, tenant/priority/trace propagation, parent fan-out from cost shard completion, and remove the builder's duplicate raw SQL version reader.
-- verification: targeted suites pass; full verification and production sustained-convergence proof pending.
+- verification: initial targeted/full verification passed, but the production composed repository caught the missing delegate. A production-shaped facade/port regression and hotfix are in progress before rerunning the same upstream-only convergence proof.
 - files_changed: `workbench_read_model_refresh.py`, `cost_statistics_read_model_repository.py`, `postgres_repositories/read_models.py`, `cost_tax_sql_projection.py`, `app/server.py`, tests, and boundary docs.
