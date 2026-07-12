@@ -56,7 +56,7 @@
 | 折叠批次展示 | `CandidateGroupGrid` | `collapsed_summary` 默认只展示摘要 row 和“展开 N 条/张明细”按钮；不得再渲染“当前显示 1 条摘要 / 实际 N 条流水”等绝对定位计数文案，避免与流水标签和日期重叠。 |
 | 配对/撤回结果 | 调用方和页面刷新 | 返回业务结果并触发 dirty scope；confirm/cancel/withdraw 输入输出的 `row_ids`、`affected_row_ids`、operation barrier targets 均使用 canonical Workbench row id，撤回读取 active relation facts，不从 source metadata 反推任意行集合。撤回预览的 `before.groups` 和 `after.groups` 必须来自 relation command/pair service 的 alias-aware before/after relation 合同；没有被合法恢复的行按独立 selection row 展示，不能因为 row payload 残留 `case_id` 或历史 source alias 合成同一行。OA 自带附件发票必须作为父 OA 的绑定成员保留在 active relation 和 after relation 中，不能作为 standalone 发票行输出，也不能只作为 `oa_attachment_source_relation` display candidate 输出。确认关联可在 operation projection 有效时用于页面快速更新；撤回预览提交期间，页面输出只能来自 fresh Workbench read model，必须延迟应用 fresh payload 到关闭预览同一批状态更新，禁止把 submit response 的 operation projection 直接渲染到底层 Workbench。automatic decision/candidate 不再作为可见同组关系或撤回写入口。 |
 | Operation barrier targets | 前端页面 | 写成功后等待 `workbench_relation` targets 以及可见性依赖的 `workbench` targets，再刷新 workbench/相关页面；跨模块写入若会影响关联台 `month=all`，必须把 `all` scope 纳入 targets，不能只等待业务页面自身 read model。 |
-| Dirty scope/outbox | runtime queue | 通过 gateway 或等价事务合同进入 durable queue |
+| Dirty scope/outbox | runtime queue | 通过 gateway 或等价事务合同进入 durable queue；月度 active generation 发布是成本统计的上游提交边界，发布成功后必须经正式 gateway 追加对应 active/all 成本月份 refresh，并在该 durable fan-out 成功后才完成 Workbench dirty scope。`all` aggregate 不重复触发成本统计 |
 | 页面 Audit 报告 | 管理员页面与运维 CLI | 同一报告组合 canonical OA/银行/普通及附件发票/ETC summary-detail expected-set、month/all union、关键字段与 summary/source-version 重算、canonical/shared relation typed-edge equality、active generation 展示归属/同组/唯一 owner/case/mode/alignment、automatic decision 排除、all/member generation 时序，以及 `workbench`/`workbench_relation` dirty/outbox；折叠行必须同时存在于 group membership 与 `workbench_rows` row-detail owner，红票金额保留 canonical 正负号，ETC“发票数量/合计”从实际 ETC 发票明细独立重算而非 OA/批次金额；任一 blocking issue 均不能显示通过 |
 | 下游影响 | workbench relation、tax offset、pending invoice、bank-flow-rule-batches、no-OA、turnover 等 | 由关系事实源和 lifecycle/worker 扇出 |
 
@@ -122,7 +122,7 @@
 - Shared facts: relation facts 由 `workbench-relations` owner 管理；Workbench 只能通过 relation command/read boundary 写读关系。
 - Allowed writes: workbench route owner、workbench command/facade services、matching worker、idempotency service。
 - Allowed reads: workbench query/facade ports、active generation/read model boundary。
-- Downstream outputs: workbench active generation、workbench_relation、search/cost/tax dirty scopes 或 owner producer 输出。
+- Downstream outputs: workbench active generation、workbench_relation、search/cost/tax dirty scopes 或 owner producer 输出；其中 `cost_statistics` 直接消费 Workbench active generation，除业务写入时的预先 fan-out 外，还必须由 Workbench 月分片发布后的 durable fan-out 保证依赖顺序和最终收敛。
 - Forbidden paths: legacy workbench handler 不得直接写 relation facts、read model 或 dirty/outbox；building/failed projection 不得被当作页面事实。
 - Old code deletion: frontend legacy full-payload client 已删除；legacy `WorkbenchActionService` 已删除，legacy `WorkbenchApiRoutes` 只保留 read-only `get_workbench` / `get_row_detail` 兼容壳，不得承载 `confirm_link`、`mark_exception`、`cancel_link` 或 `update_bank_exception` 写状态机；旧 `/workbench`、`/workbench/prototype` 和 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP compat route owner 已删除，ledger/reminder 行为保留在 reconciliation/ledger service 和 `/ledgers`/`/reminders` API；后端 `GET /api/workbench` full payload 是受限 read-only compat API，不进入前端页面 runtime，不拥有写 I/O，不作为旧代码污染面。
 

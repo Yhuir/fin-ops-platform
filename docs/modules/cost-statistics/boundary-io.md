@@ -53,10 +53,10 @@
 | 成本统计 rows/summary | 前端页面 | query gateway 后返回 freshness；`time_rows` 输出 OA 配对成本流水字段和流水标签 `bank_tag_*` 字段，供 `按项目`、`按银行`、`按OA费用类型` 使用；`bank_flow_time_rows` 输出全部银行支出流水标签字段，供 `按标签`、`按时间` 使用 |
 | 页面 Audit 状态 | 标题附件 | 只有 audit status 与 explorer read model 均明确 fresh/pass 才显示成功；问题数量是有上限 sample |
 | Explorer bank accounts | 前端页面 | `bank_accounts` 输出设置中的银行账户全集，字段为 `bank_name`、`account_last4`、`payment_account_label`、`source`；按银行统计必须展示这些账户，即使当前范围金额为 0 |
-| Source versions | read model/query gateway | `source_versions` 必须包含 workbench/input 版本、`bank_auto_tag_rules_version` 和 `bank_account_mappings_fingerprint`；任一变化都使旧 payload 失配并刷新 |
+| Source versions | read model/query gateway | 月份 scope 的 `source_versions` 必须包含当前 Workbench active generation 的完整 `workbench_source_versions`、`bank_detail_source_versions`、`bank_auto_tag_rules_version` 和 `bank_account_mappings_fingerprint`；projection builder、页面 fresh gate 与 Audit 必须经同一 repository port 读取 Workbench 版本。任一上游变化都使旧 payload fail-closed 为 refreshing 并入队刷新，禁止只在 Audit 中识别漂移而让页面继续显示 fresh |
 | Project/detail/export payload | 前端页面 / 下载 | 由 fresh `cost_statistics` explorer read model 组装；导出保留 filename/workbook/row-limit contract；live `CostStatisticsService` 不再拥有 export-preview/export 输出 |
 | Parent rollup | read model repository | scoped parent aggregate |
-| Dirty scope | runtime queue | fan-out 到必要 parent/month scopes |
+| Dirty scope | runtime queue | Workbench 月分片 active generation 发布成功后，`WorkbenchReadModelRefreshService` 必须先经 `ReadModelRefreshGateway` 持久入队对应 active/all 成本月份 scope，再完成 Workbench dirty scope；成本月份完成后继续 fan-out 到对应 parent。这样即使原业务事件同时投递 Workbench 与成本统计、成本先读到旧 generation，也会由发布后事件保证最终重算 |
 | Write target visibility | 导入/关系写 API | 上游写操作必须显式透出 `cost_statistics` targets，成本统计页面自身保持纯读面 |
 
 ## 持久化与投影

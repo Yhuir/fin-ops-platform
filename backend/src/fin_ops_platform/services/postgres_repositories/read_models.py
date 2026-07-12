@@ -4689,6 +4689,15 @@ class PostgresSummaryReadModelRepository:
             "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
         }
 
+    def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, Any]:
+        normalized_scope_key = str(scope_key or "").strip()
+        if not normalized_scope_key:
+            return {}
+        return self._active_workbench_generation_source_versions(
+            self._connection,
+            scope_key=normalized_scope_key,
+        )
+
     def save_cost_statistics_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
         def write(connection: Any) -> None:
             self._save_generic_read_model_snapshots(

@@ -286,23 +286,7 @@ class CostStatisticsSqlProjectionBuilder:
         return dict(source_versions) if isinstance(source_versions, dict) else {}
 
     def _workbench_source_versions(self, scope_key: str) -> dict[str, Any]:
-        try:
-            row = self._connection.fetch_one(
-                """
-                select source_versions
-                from read_model.workbench_generations
-                where tenant_id = 'default'
-                  and scope_key = %s
-                  and status = 'active'
-                order by activated_at desc nulls last, completed_at desc nulls last, updated_at desc
-                limit 1
-                """,
-                (scope_key,),
-            )
-        except Exception:
-            return {}
-        source_versions = row.get("source_versions") if isinstance(row, dict) else {}
-        return dict(source_versions) if isinstance(source_versions, dict) else {}
+        return self._read_model_repository.active_workbench_source_versions(scope_key=scope_key)
 
     def _unchanged_cost_statistics_scope_result(
         self,

@@ -7849,7 +7849,20 @@ class Application:
         bank_detail_source_versions = self._cost_statistics_bank_detail_source_versions(month)
         if bank_detail_source_versions is not None:
             source_versions["bank_detail_source_versions"] = bank_detail_source_versions
+        workbench_source_versions = self._cost_statistics_workbench_source_versions(month)
+        if workbench_source_versions:
+            source_versions["workbench_source_versions"] = workbench_source_versions
         return source_versions
+
+    def _cost_statistics_workbench_source_versions(self, month: str) -> dict[str, object]:
+        if month == "all":
+            return {}
+        repository = getattr(self, "_cost_statistics_sql_read_repository", None)
+        load_source_versions = getattr(repository, "active_workbench_source_versions", None)
+        if not callable(load_source_versions):
+            return {}
+        payload = load_source_versions(scope_key=month)
+        return dict(payload) if isinstance(payload, dict) else {}
 
     def _cost_statistics_bank_detail_source_versions(self, month: str) -> dict[str, object] | None:
         facade = getattr(self, "_bank_transaction_tag_read_facade", None)

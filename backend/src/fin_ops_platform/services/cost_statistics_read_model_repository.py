@@ -17,6 +17,10 @@ class CostStatisticsReadModelRepositoryPort:
         payload = self._repository.get_cost_statistics_view(scope_key=scope_key)
         return dict(payload) if isinstance(payload, dict) else None
 
+    def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, Any]:
+        payload = self._repository.active_workbench_source_versions(scope_key=scope_key)
+        return dict(payload) if isinstance(payload, dict) else {}
+
     def save_cost_statistics_read_models(
         self,
         snapshot: dict[str, Any],

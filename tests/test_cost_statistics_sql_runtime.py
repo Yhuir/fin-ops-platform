@@ -583,6 +583,11 @@ class CostStatisticsParentAggregationConnection:
 class CostStatisticsSaveRecorder:
     def __init__(self) -> None:
         self.saved: list[tuple[dict, set[str] | None]] = []
+        self.workbench_source_versions: dict[str, object] = {}
+
+    def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, object]:
+        del scope_key
+        return dict(self.workbench_source_versions)
 
     def save_cost_statistics_read_models(self, snapshot: dict, *, changed_scope_keys: set[str] | None = None) -> None:
         self.saved.append((snapshot, changed_scope_keys))
@@ -594,6 +599,7 @@ class UnchangedCostStatisticsSaveRecorder(CostStatisticsSaveRecorder):
         self.refresh_status = refresh_status
         self.source_versions: dict[str, object] = {}
         self.views: list[str] = []
+        self.workbench_source_versions = {"workbench_generation": "stable-v1", "source_version": 42}
 
     def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object]:
         self.views.append(scope_key)
@@ -618,6 +624,9 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
             def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object]:
                 return {"scope_key": scope_key, "payload": {}}
 
+            def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, object]:
+                return {"scope_key": scope_key, "source_version": 42}
+
             def save_cost_statistics_read_models(
                 self,
                 snapshot: dict[str, object],
@@ -639,6 +648,10 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
 
         self.assertEqual(port.load_cost_statistics_read_models(), {"read_models": {}})
         self.assertEqual(port.get_cost_statistics_view(scope_key="active:2026-05")["scope_key"], "active:2026-05")
+        self.assertEqual(
+            port.active_workbench_source_versions(scope_key="2026-05"),
+            {"scope_key": "2026-05", "source_version": 42},
+        )
         port.save_cost_statistics_read_models({"read_models": {}}, changed_scope_keys={"active:2026-05"})
         self.assertFalse(hasattr(port, "get_tax_offset_view"))
         self.assertFalse(hasattr(port, "list_turnover_ledger_view"))
@@ -1347,6 +1360,16 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         tag_facade = CostStatisticsBankTagFacade()
         app._app_settings_service = CostStatisticsAppSettingsStub()
         app._bank_transaction_tag_read_facade = tag_facade
+        app._cost_statistics_sql_read_repository = type(
+            "SqlCostStats",
+            (),
+            {
+                "active_workbench_source_versions": lambda *_args, **_kwargs: {
+                    "builder": "workbench-v5",
+                    "source_version": 2511,
+                }
+            },
+        )()
         app._current_oa_attachment_invoice_parser_version = lambda: "parser-v1"
         app._current_oa_projection_sync_version = lambda: "oa-sync-v1"
 
@@ -1358,6 +1381,65 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(tag_facade.source_version_calls[0][0], ["2026-05"])
         self.assertEqual(tag_facade.source_version_calls[0][1]["require_fresh"], False)
+        self.assertEqual(
+            source_versions["workbench_source_versions"],
+            {"builder": "workbench-v5", "source_version": 2511},
+        )
+
+    def test_cost_statistics_api_rejects_snapshot_built_from_old_workbench_generation(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._app_settings_service = CostStatisticsAppSettingsStub()
+        app._bank_transaction_tag_read_facade = CostStatisticsBankTagFacade()
+        app._current_oa_attachment_invoice_parser_version = lambda: "parser-v1"
+        app._current_oa_projection_sync_version = lambda: "oa-sync-v1"
+        current_workbench_versions = {"builder": "workbench-v5", "source_version": 2511}
+        old_workbench_versions = {"builder": "workbench-v5", "source_version": 2504}
+
+        class SqlCostStats:
+            def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, object]:
+                self.scope_key = scope_key
+                return dict(current_workbench_versions)
+
+            def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object]:
+                source_versions = app._cost_statistics_expected_source_versions(scope_key)
+                source_versions["workbench_source_versions"] = old_workbench_versions
+                return {
+                    "payload": {
+                        "month": "2026-05",
+                        "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
+                        "time_rows": [],
+                        "bank_accounts": [],
+                        "project_rows": [],
+                        "expense_type_rows": [],
+                    },
+                    "refresh_status": "fresh",
+                    "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                    "generated_at": "2026-07-12T19:20:29+08:00",
+                    "source_versions": source_versions,
+                }
+
+        repository = SqlCostStats()
+        app._cost_statistics_sql_read_repository = repository
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": queue, "redis_helper": RedisRecorder()},
+        )()
+
+        response = app._cost_statistics_routes().route(
+            "GET",
+            "/api/cost-statistics/explorer",
+            {"month": ["2026-05"], "project_scope": ["active"]},
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_key"], "active:2026-05")
+        self.assertEqual(payload["read_model_stale_reasons"], ["workbench_source_versions_mismatch"])
+        self.assertEqual(payload["time_rows"], [])
+        self.assertEqual(queue.refreshes, [("cost_statistics", "active:2026-05", "api_source_versions_stale")])
 
     def test_cost_statistics_scope_shards_are_listed_from_active_workbench_generations(self) -> None:
         class Connection(CostStatisticsProjectionConnection):

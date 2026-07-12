@@ -85,6 +85,8 @@ class WorkbenchReadModelRefreshService:
                 f"active_generation_id={payload.get('active_generation_id')!r}"
             )
 
+        cost_statistics_scope_keys = self._enqueue_cost_statistics_after_publish(event, scope_key)
+
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(
@@ -93,6 +95,8 @@ class WorkbenchReadModelRefreshService:
                 scope_key=scope_key,
                 source_version=source_version,
             )
+        if cost_statistics_scope_keys:
+            payload["cost_statistics_enqueued_scope_keys"] = cost_statistics_scope_keys
         aggregate_enqueued = self._enqueue_all_scope_aggregate_after_shard_publish(event, scope_key)
         if aggregate_enqueued is not None:
             payload["aggregate_enqueued"] = aggregate_enqueued
@@ -100,6 +104,25 @@ class WorkbenchReadModelRefreshService:
         if warmup_payload is not None:
             payload["cache_warmup"] = warmup_payload
         return payload
+
+    def _enqueue_cost_statistics_after_publish(
+        self,
+        event: RuntimeQueueEvent,
+        scope_key: str,
+    ) -> list[str]:
+        if scope_key == "all":
+            return []
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
+            return []
+        return refresh_gateway.enqueue_many(
+            "cost_statistics",
+            [scope_key],
+            reason="workbench_shard_published",
+            tenant_id=event.tenant_id,
+            priority=str(event.priority or "normal").strip() or "normal",
+            trace_id=event.trace_id,
+        )
 
     def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_workbench_scope_shards", None)

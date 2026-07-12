@@ -8143,6 +8143,126 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("aggregate_enqueued", result)
         self.assertEqual(queue.enqueued, [])
 
+    def test_workbench_month_publish_enqueues_cost_statistics_after_projection_commit(self) -> None:
+        calls: list[str] = []
+
+        class FakeBuilder:
+            def rebuild_workbench_read_model_scope(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                calls.append(f"published:{scope_key}:{source_version}")
+                return {"scope_key": scope_key, "active_generation_id": "gen-2026-05"}
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.refreshes: list[dict[str, object]] = []
+                self.completed: list[tuple[str, str, str, object]] = []
+
+            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+                calls.append(f"enqueued:{kwargs['scope_type']}:{kwargs['scope_key']}")
+                self.refreshes.append(dict(kwargs))
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                calls.append(f"completed:{scope_type}:{scope_key}")
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-month-cost-fanout",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="workbench",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={"scope_key": "2026-05", "source_version": 19},
+            attempts=1,
+            status="processing",
+            priority="high",
+            trace_id="trace-workbench-cost-fanout",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(
+            result["cost_statistics_enqueued_scope_keys"],
+            ["active:2026-05", "all:2026-05"],
+        )
+        self.assertEqual(
+            [(item["scope_type"], item["scope_key"], item["reason"]) for item in queue.refreshes],
+            [
+                ("cost_statistics", "active:2026-05", "workbench_shard_published"),
+                ("cost_statistics", "all:2026-05", "workbench_shard_published"),
+            ],
+        )
+        self.assertEqual(
+            calls,
+            [
+                "published:2026-05:19",
+                "enqueued:cost_statistics:active:2026-05",
+                "enqueued:cost_statistics:all:2026-05",
+                "completed:workbench:2026-05",
+            ],
+        )
+
+    def test_workbench_all_aggregate_does_not_enqueue_cost_statistics(self) -> None:
+        class FakeBuilder:
+            def refresh_workbench_all_scope_from_active_shards(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "active_generation_id": "gen-all",
+                    "read_model_status": "fresh",
+                    "source_version": source_version,
+                }
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.refreshes: list[dict[str, object]] = []
+
+            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+                self.refreshes.append(dict(kwargs))
+
+            def complete_read_model_refresh(self, **_kwargs: object) -> None:
+                return None
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-all-no-cost-fanout",
+            tenant_id="default",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="workbench",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all", "aggregate_only": True},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertNotIn("cost_statistics_enqueued_scope_keys", result)
+        self.assertEqual(queue.refreshes, [])
+
     def test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(
