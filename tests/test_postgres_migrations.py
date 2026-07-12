@@ -113,6 +113,7 @@ EXPECTED_MIGRATIONS = [
     "0097_drop_import_files_batch_fallback.sql",
     "0098_etc_import_session_files.sql",
     "0099_external_control_evidence.sql",
+    "0100_phase19_runtime_grants.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -264,7 +265,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 100)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 101)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1203,6 +1204,32 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         )
         self.assertNotIn("insert, update on audit.external_control_evidence to fin_ops_api", sql)
         self.assertIn("grant select, insert, update on audit.external_control_evidence to fin_ops_migrator", sql)
+
+    def test_phase19_new_tables_have_complete_runtime_role_grants(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0100_phase19_runtime_grants.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        for role in ("fin_ops_app_runtime", "fin_ops_api", "fin_ops_migrator"):
+            self.assertIn(
+                f"grant select, insert, update, delete on app.etc_import_session_files to {role}",
+                normalized_sql,
+            )
+        for role in ("fin_ops_worker", "fin_ops_readonly"):
+            self.assertIn(
+                f"grant select on app.etc_import_session_files to {role}",
+                normalized_sql,
+            )
+        self.assertIn(
+            "grant select on audit.external_control_evidence, audit.external_control_evidence_items "
+            "to fin_ops_app_runtime",
+            normalized_sql,
+        )
+        self.assertNotRegex(
+            normalized_sql,
+            r"grant [^;]*(?:insert|update|delete)[^;]* on audit\.external_control_evidence",
+        )
 
 
 if __name__ == "__main__":

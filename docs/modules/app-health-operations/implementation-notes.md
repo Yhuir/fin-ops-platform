@@ -1,5 +1,11 @@
 # 系统状态 实施记录
 
+## 2026-07-12 - System Audit 运行角色权限闭环
+
+- 生产 v18 System Audit fail closed 于 `app.etc_import_session_files` 的 runtime select 权限；这是 migration grant 合同错误，不是 integrity drift。
+- migration 0100 补齐 ETC session file 角色矩阵，并只给 `fin_ops_app_runtime` 增加 external evidence header/items 的 select；evidence 继续禁止 runtime/API/worker 写入或删除。
+- 发布后必须重新运行 17 页单一 `REPEATABLE READ READ ONLY` System Audit；只有实际响应通过才可声明 App 内部一致性闭环。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

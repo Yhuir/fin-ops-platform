@@ -1,5 +1,11 @@
 # ETC发票导入 实施记录
 
+## 2026-07-12：补齐 durable session file 运行角色权限
+
+- 生产发布 0098 后，System Audit 首次读取 `app.etc_import_session_files` 暴露 `permission denied`；同一缺口也会阻断 API preview 的 replace/delete 和 worker confirm 的只读加载。
+- 新增幂等 migration 0100：`fin_ops_app_runtime` / `fin_ops_api` / `fin_ops_migrator` 获得 session file 全 DML，worker/readonly 仅获得 select；不修改表结构和业务数据。
+- 迁移 SQL 合同测试锁定完整角色矩阵，避免早期 `GRANT ... ALL TABLES` 被误认为会自动覆盖后续新表。
+
 ## 2026-07-11：durable preview、单一 worker confirm 与页面 Audit
 
 - 识别真实生产缺口：旧 preview/session 只在 Web 进程 dict 中，独立 PostgreSQL worker 无法重载；route 仍保留 inline confirm 和旧直导 410 surface。
