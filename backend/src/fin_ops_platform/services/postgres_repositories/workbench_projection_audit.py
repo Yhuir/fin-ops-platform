@@ -76,7 +76,7 @@ submitted_etc_invoice_ids as (
 ),
 canonical_oa as (
     select oa.row_id,
-           to_char(oa.scope_month, 'YYYY-MM') as scope_key,
+           to_char(coalesce(oa.scope_month, date_trunc('month', oa.application_date)::date), 'YYYY-MM') as scope_key,
            'oa'::text as source_kind,
            oa.amount::numeric as amount,
            coalesce(oa.applicant, '') as counterparty_name,
@@ -91,7 +91,7 @@ canonical_oa as (
               where member.row_id = oa.row_id
          )
       )
-      and oa.scope_month is not null
+      and coalesce(oa.scope_month, date_trunc('month', oa.application_date)::date) is not null
 ),
 canonical_bank as (
     select coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,

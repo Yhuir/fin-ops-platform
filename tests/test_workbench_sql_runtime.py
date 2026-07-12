@@ -156,6 +156,17 @@ class WorkbenchSqlProjectionRelationPayloadTests(unittest.TestCase):
         self.assertIn("from app.etc_batch_invoice_links", queried_sql)
         self.assertIn("with submitted_batches as", queried_sql)
 
+    def test_etc_invoice_summary_does_not_use_submission_fallback_when_business_owner_exists(self) -> None:
+        connection = EtcSummaryBusinessOwnerConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        rows = builder._etc_invoice_summary_rows(month="2026-05")
+
+        self.assertEqual(rows, {})
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("from app.etc_business_batches batch", queried_sql)
+        self.assertIn("with submitted_batches as", queried_sql)
+
 
 class WorkbenchSqlReadConnection:
     def __init__(
@@ -364,6 +375,27 @@ class EtcSummaryCanonicalOwnerConnection:
                     "row_id": "legacy-fallback-invoice",
                     "invoice_no": "legacy-fallback-invoice",
                     "total_with_tax": Decimal("88.00"),
+                }
+            ]
+        return []
+
+
+class EtcSummaryBusinessOwnerConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "select distinct" in normalized and "from app.etc_business_batches batch" in normalized:
+            return [{"external_etc_batch_id": "etc-business-owner"}]
+        if "with submitted_batches as" in normalized and "from app.invoices invoices" in normalized:
+            return [
+                {
+                    "external_etc_batch_id": "etc-business-owner",
+                    "row_id": "submission-fallback-invoice",
+                    "invoice_no": "submission-fallback-invoice",
+                    "total_with_tax": Decimal("31.00"),
                 }
             ]
         return []
@@ -2595,7 +2627,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertIn("from app.workbench_pair_relations", connection.active_relation_query)
 
-    def test_sql_projection_reads_cross_month_active_relations_by_row_overlap(self) -> None:
+    def test_sql_projection_reads_cross_month_active_relations_by_canonical_member_month(self) -> None:
         connection = CrossMonthActiveRelationProjectionConnection()
         builder = WorkbenchSqlProjectionBuilder(connection=connection)
 
@@ -2603,8 +2635,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(len(relations), 1)
         self.assertEqual(relations[0]["case_id"], "decision:2026-05:bank_invoice_exact_amount:txn_imported_0118:inv_imported_0481")
-        self.assertNotIn("month_scope is null or month_scope =", connection.active_relation_query)
-        self.assertEqual(connection.active_relation_params, (["inv_imported_0481"],))
+        self.assertIn("relation.month_scope = %s::date", connection.active_relation_query)
+        self.assertIn("join app.bank_transactions bank", connection.active_relation_query)
+        self.assertIn("join app.invoices invoice", connection.active_relation_query)
+        self.assertIn("join app.oa_applications oa", connection.active_relation_query)
+        self.assertEqual(
+            connection.active_relation_params,
+            (["inv_imported_0481"], "2026-06-01", "2026-06-01", "2026-06-01", "2026-06-01"),
+        )
 
     def test_sql_projection_scope_shards_include_etc_business_sources_and_active_month_generations(self) -> None:
         connection = WorkbenchScopeShardEtcConnection()

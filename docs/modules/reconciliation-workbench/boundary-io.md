@@ -73,7 +73,7 @@
 - Worker：`workbench`
 - 特殊例外：保留 active generation 原子发布模型，不机械改成普通 read model gateway。
 - Summary 物化合同：`read_model.workbench_summary` 是 summary 读路径唯一事实源；repository 不再用 groups/group_rows/app.invoices 在 API 请求内补算 summary。
-- ETC canonical source 合同：同一 external batch 存在 active `app.etc_batch_invoice_links` 后，link table 是摘要与折叠明细的唯一 owner；旧 submission/business source 仅能作为没有 link owner 时的 fallback，且不得在其它月份再投影同一 summary row id。Workbench schema `2026-07-12-canonical-source-proof-v4` 通过 rebuild 清除 v3 重复 owner。
+- ETC canonical source 合同：同一 external batch 存在 active `app.etc_batch_invoice_links` 后，link table 是摘要与折叠明细的唯一 owner；没有 link owner但存在可解析 `app.etc_business_batches.invoice_ids` 时，business batch 是唯一 owner；submission source 只在前两者都不存在时使用。低优先级 source 不得在其它月份再投影同一 summary row id。Workbench schema `2026-07-12-canonical-source-proof-v5` 通过 rebuild 清除 v3/v4 重复 owner。
 
 ## 文件范围
 

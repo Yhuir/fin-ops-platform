@@ -41,7 +41,7 @@ from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHIN
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-12-canonical-source-proof-v4"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-12-canonical-source-proof-v5"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -619,18 +619,49 @@ class WorkbenchSqlProjectionBuilder:
         }
 
     def _active_pair_relations_for_month(self, month: str, row_ids: set[str]) -> list[dict[str, Any]]:
-        if not row_ids:
-            return []
         rows = self._connection.fetch_all(
             """
             select case_id, relation_mode, month_scope, row_ids, row_types,
                    amount_check, special_metadata, source_versions, raw_payload
-            from app.workbench_pair_relations
-            where status = 'active'
-              and row_ids && %s::text[]
+            from app.workbench_pair_relations relation
+            where relation.status = 'active'
+              and (
+                    relation.row_ids && %s::text[]
+                 or relation.month_scope = %s::date
+                 or exists (
+                        select 1
+                        from unnest(relation.row_ids) member(row_id)
+                        join app.bank_transactions bank
+                          on coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
+                         and bank.status <> 'deleted'
+                         and bank.txn_month = %s::date
+                    )
+                 or exists (
+                        select 1
+                        from unnest(relation.row_ids) member(row_id)
+                        join app.invoices invoice
+                          on coalesce(invoice.legacy_mongo_id, invoice.id::text) = member.row_id
+                         and invoice.status <> 'deleted'
+                         and invoice.invoice_month = %s::date
+                    )
+                 or exists (
+                        select 1
+                        from unnest(relation.row_ids) member(row_id)
+                        join app.oa_applications oa
+                          on oa.row_id = member.row_id
+                         and oa.status <> 'deleted'
+                         and coalesce(oa.scope_month, date_trunc('month', oa.application_date)::date) = %s::date
+                    )
+              )
             order by case_id
             """,
-            (sorted(row_ids),),
+            (
+                sorted(row_ids),
+                month_start(month),
+                month_start(month),
+                month_start(month),
+                month_start(month),
+            ),
         )
         result: list[dict[str, Any]] = []
         for row in rows:
@@ -1405,6 +1436,10 @@ class WorkbenchSqlProjectionBuilder:
             normalized_external_batch_ids,
             normalized_excluded_external_batch_ids,
         )
+        business_external_batch_ids = self._etc_invoice_summary_business_source_ids(
+            normalized_external_batch_ids,
+            normalized_excluded_external_batch_ids,
+        )
         for row in link_rows:
             append_summary_source_row(
                 row,
@@ -1452,7 +1487,9 @@ class WorkbenchSqlProjectionBuilder:
             tuple(params),
         )
         for row in rows:
-            if str(row.get("external_etc_batch_id") or "").strip() in linked_external_batch_ids:
+            if str(row.get("external_etc_batch_id") or "").strip() in (
+                linked_external_batch_ids | business_external_batch_ids
+            ):
                 continue
             batch_payload = row_payload(row, "batch_payload")
             append_summary_source_row(row, batch_payload=batch_payload if isinstance(batch_payload, dict) else None)
@@ -1551,6 +1588,52 @@ class WorkbenchSqlProjectionBuilder:
             )
             for external_batch_id, invoices in invoices_by_external_batch_id.items()
             if invoices
+        }
+
+    def _etc_invoice_summary_business_source_ids(
+        self,
+        external_batch_ids: set[str],
+        excluded_external_batch_ids: set[str] | None = None,
+    ) -> set[str]:
+        batch_id_expr = """
+            coalesce(
+                nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                batch.business_batch_id
+            )
+        """
+        filters = [
+            "batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')",
+            "invoice.status <> 'deleted'",
+        ]
+        params: list[Any] = []
+        if external_batch_ids:
+            filters.append(f"{batch_id_expr} = any(%s)")
+            params.append(sorted(external_batch_ids))
+        if excluded_external_batch_ids:
+            filters.append(f"{batch_id_expr} <> all(%s)")
+            params.append(sorted(excluded_external_batch_ids))
+        rows = self._connection.fetch_all(
+            f"""
+            select distinct {batch_id_expr} as external_etc_batch_id
+            from app.etc_business_batches batch
+            join lateral jsonb_array_elements_text(
+                case when jsonb_typeof(batch.raw_payload->'normalized_payload'->'invoice_ids') = 'array'
+                     then batch.raw_payload->'normalized_payload'->'invoice_ids' else '[]'::jsonb end
+            ) member(invoice_id) on true
+            join app.etc_invoices invoice
+              on invoice.etc_invoice_id = member.invoice_id
+              or coalesce(invoice.legacy_mongo_id, '') = member.invoice_id
+            where {" and ".join(filters)}
+            """,
+            tuple(params),
+        )
+        return {
+            str(row.get("external_etc_batch_id") or "").strip()
+            for row in rows
+            if str(row.get("external_etc_batch_id") or "").strip()
         }
 
     def _etc_invoice_summary_link_rows(
