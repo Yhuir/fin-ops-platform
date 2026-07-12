@@ -32,6 +32,15 @@
 
 ## 历史记录
 
+## 2026-07-12 - 成本流水展示字段 Audit 与 canonical 文本优先级对齐
+
+- 目标：消除成本统计 Audit 对未配对 OA 银行流水「费用内容」的假阳性，保持关键展示字段独立重算证明。
+- 影响范围：仅调整 `cost_statistics` 页面 Audit 的 expected value 重算及全局 Audit 合同版本；不改成本 read model builder、页面 API、业务数据或队列。
+- 关键决策：与正式 `CostStatisticsSqlProjectionBuilder` 对齐，「费用内容」按银行明细 canonical 文本 `summary -> purpose -> payload.remark -> 标签`重算；不通过忽略字段或放宽比较绕过证明。
+- 文档影响：Audit 合同升级为 `page-audit-contract.v25`；模块边界和 I/O 不变。
+- 测试覆盖：`test_cost_statistics_bank_flow_recalculation_uses_bank_detail_scope_owner` 锁定 scope owner 与完整文本 fallback 链，Audit/API 合同测试锁定 v25。
+- 未测风险：只有当生产单一 System Audit 快照中所有登记业务页均为 `pass / fresh / drained` 时才算闭环。
+
 ## 2026-07-05 - 父 scope rollup 热路径索引
 
 - 目标：降低写操作 fan-out 后 `cost_statistics:active:all` / `all:all` 父 scope 从月 shard 聚合的 I/O 成本，收敛生产 1 秒目标附近的长尾。

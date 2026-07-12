@@ -2435,6 +2435,7 @@ def _key_display_field_issues(
                            detail.account_last4,
                            detail.purpose,
                            detail.summary,
+                           detail.payload as bank_detail_payload,
                            detail.effective_category_code,
                            detail.effective_category_label,
                            detail.effective_category_primary_label,
@@ -2516,6 +2517,8 @@ def _key_display_field_issues(
                    )
                    or coalesce(value->>'expense_content', '') <> coalesce(
                         nullif(summary, ''),
+                        nullif(purpose, ''),
+                        nullif(bank_detail_payload->>'remark', ''),
                         expected_sub_label,
                         '未标记'
                       )

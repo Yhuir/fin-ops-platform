@@ -824,6 +824,9 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
         self.assertIn("detail.scope_key as bank_detail_scope_key", bank_flow_sql)
         self.assertIn("month_key <> coalesce(bank_detail_scope_key", bank_flow_sql)
+        self.assertIn("detail.payload as bank_detail_payload", bank_flow_sql)
+        self.assertIn("nullif(purpose, '')", bank_flow_sql)
+        self.assertIn("nullif(bank_detail_payload->>'remark', '')", bank_flow_sql)
 
     def test_pending_invoice_audit_proves_registered_consumer_edges(self) -> None:
         connection = FakeConnection()
