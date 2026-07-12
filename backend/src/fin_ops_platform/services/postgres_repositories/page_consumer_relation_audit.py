@@ -74,6 +74,23 @@ def _oa_pending_payment_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[A
             from app.oa_pending_payment_admissions
             where tenant_id = %s
         ),
+        identity_aliases as (
+            select distinct
+                   coalesce(nullif(alias.value->>'id', ''), nullif(alias.value->>'row_id', '')) as alias_row_id,
+                   row.row_id as canonical_row_id
+            from read_model.workbench_generations generation
+            join read_model.workbench_rows row
+              on row.generation_id = generation.generation_id
+             and row.scope_key = generation.scope_key
+            join lateral jsonb_array_elements(
+                case when jsonb_typeof(row.payload->'identity_alias_rows'->'bank') = 'array'
+                     then row.payload->'identity_alias_rows'->'bank' else '[]'::jsonb end
+            ) alias(value) on true
+            where generation.tenant_id = %s
+              and generation.status = 'active'
+              and generation.scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+              and nullif(coalesce(alias.value->>'id', alias.value->>'row_id'), '') is not null
+        ),
         shared_groups as (
             select group_row.*
             from read_model.workbench_relation_groups group_row
@@ -113,9 +130,10 @@ def _oa_pending_payment_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[A
             join lateral unnest(group_row.oa_row_ids) member(row_id) on true
             union all
             select group_row.group_id, group_row.scope_key,
-                   member.row_id, 'bank_transaction'::text
+                   coalesce(identity.canonical_row_id, member.row_id), 'bank_transaction'::text
             from relevant_groups group_row
             join lateral unnest(group_row.bank_transaction_ids) member(row_id) on true
+            left join identity_aliases identity on identity.alias_row_id = member.row_id
             union all
             select group_row.group_id, group_row.scope_key,
                    member.row_id, 'input_invoice'::text
@@ -142,12 +160,15 @@ def _oa_pending_payment_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[A
               and lower(coalesce(summary.value->>'relationStatus', '')) = 'linked'
             union all
             select summary.value->>'relationCaseId', row.scope_key,
-                   summary.value->>'bankTransactionId', 'bank_transaction'::text
+                   coalesce(identity.canonical_row_id, summary.value->>'bankTransactionId'),
+                   'bank_transaction'::text
             from read_model.oa_pending_payment_rows row
             join lateral jsonb_array_elements(
                 case when jsonb_typeof(row.payload->'bankTransaction'->'summaries') = 'array'
                      then row.payload->'bankTransaction'->'summaries' else '[]'::jsonb end
             ) summary(value) on true
+            left join identity_aliases identity
+              on identity.alias_row_id = summary.value->>'bankTransactionId'
             where row.cache_status = 'fresh'
               and lower(coalesce(summary.value->>'relationStatus', '')) = 'linked'
             union all
@@ -192,7 +213,7 @@ def _oa_pending_payment_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[A
         order by mismatch_kind, subject_id, row_type, row_id
         limit %s
         """,
-        (tenant_id, tenant_id, limit),
+        (tenant_id, tenant_id, tenant_id, limit),
     )
 
 

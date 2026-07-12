@@ -1271,5 +1271,6 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertNotIn("sha256 =", sql)
 
 
+
 if __name__ == "__main__":
     unittest.main()

@@ -250,20 +250,6 @@ def _canonical_fact_issues(
     input_items_by_month: dict[str, list[dict[str, Any]]] = {}
     for row in invoice_rows:
         scope_key = str(row.get("scope_key") or "")
-        amount = _decimal(row.get("amount"))
-        tax_amount = _decimal(row.get("tax_amount"))
-        total_with_tax = _decimal(row.get("total_with_tax"))
-        if amount is not None and tax_amount is not None and total_with_tax is not None:
-            expected_total = amount + tax_amount
-            if total_with_tax != expected_total:
-                issues.append(
-                    _issue(
-                        "tax_offset_canonical_invoice_total_mismatch",
-                        str(row.get("row_id") or ""),
-                        scope_key,
-                        {"stored": _money(total_with_tax), "expected": _money(expected_total)},
-                    )
-                )
         if not _is_output(row.get("invoice_type")):
             input_items_by_month.setdefault(scope_key, []).append(_invoice_item(row, output=False))
 
@@ -271,21 +257,6 @@ def _canonical_fact_issues(
     for row in certified_rows:
         scope_key = str(row.get("scope_key") or "")
         subject_id = str(row.get("certified_unique_key") or row.get("invoice_no") or "")
-        raw = _payload(row, "raw_payload")
-        amount = _decimal(row.get("amount"))
-        tax_amount = _decimal(row.get("tax_amount"))
-        total_with_tax = _decimal(raw.get("total_with_tax"))
-        if amount is not None and tax_amount is not None and total_with_tax is not None:
-            expected_total = amount + tax_amount
-            if total_with_tax != expected_total:
-                issues.append(
-                    _issue(
-                        "tax_offset_canonical_certified_total_mismatch",
-                        subject_id,
-                        scope_key,
-                        {"stored": _money(total_with_tax), "expected": _money(expected_total)},
-                    )
-                )
         candidates = _certified_match_candidates(
             _certified_item(row),
             input_items_by_month.get(scope_key, []),
@@ -640,6 +611,8 @@ def _normal(value: Any) -> Any:
 def _field_equal(field: str, left: Any, right: Any) -> bool:
     if field in {"amount", "tax_amount", "total_with_tax", "deductible_tax_amount"}:
         return _decimal(left) == _decimal(right)
+    if left in (None, "") and right in (None, ""):
+        return True
     return _normal(left) == _normal(right)
 
 

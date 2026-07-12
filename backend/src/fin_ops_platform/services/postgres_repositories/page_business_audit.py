@@ -2414,7 +2414,7 @@ def _key_display_field_issues(
                     select projected.scope_key, projected.month_key, projected.ordinality,
                            projected.value,
                            source.id::text as canonical_id,
-                           source.id::text as canonical_transaction_id,
+                           coalesce(source.legacy_mongo_id, source.id::text) as canonical_transaction_id,
                            source.amount as canonical_amount,
                            detail.transaction_id as bank_detail_transaction_id,
                            detail.trade_date,
@@ -2640,12 +2640,20 @@ def _key_display_field_issues(
             (
                 """
                 /* check: cost_group_summaries */
-                with expected_projects as (
+                with expected_scope_rows as (
+                    select scope_key, project_name, expense_type, amount
+                    from read_model.cost_statistics_rows
+                    union all
+                    select project_scope || ':all', project_name, expense_type, amount
+                    from read_model.cost_statistics_rows
+                    where scope_key ~ '^(active|all):[0-9]{4}-[0-9]{2}$'
+                ),
+                expected_projects as (
                     select scope_key, project_name as group_key,
                            count(*)::integer as transaction_count,
                            count(distinct expense_type)::integer as related_count,
                            sum(amount)::numeric as total_amount
-                    from read_model.cost_statistics_rows
+                    from expected_scope_rows
                     group by scope_key, project_name
                 ),
                 projected_projects as (
@@ -2701,7 +2709,7 @@ def _key_display_field_issues(
                            count(*)::integer as transaction_count,
                            count(distinct project_name)::integer as related_count,
                            sum(amount)::numeric as total_amount
-                    from read_model.cost_statistics_rows
+                    from expected_scope_rows
                     group by scope_key, expense_type
                 ),
                 projected_expenses as (

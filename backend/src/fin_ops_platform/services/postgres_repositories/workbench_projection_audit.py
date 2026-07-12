@@ -170,7 +170,7 @@ canonical_rows as (
     union all select * from canonical_bank
     union all select * from canonical_invoice
 ),
-projected_rows as (
+projected_primary_rows as (
     select generation.scope_key as generation_scope,
            row.row_id, row.source_kind,
            row.amount, coalesce(row.counterparty_name, '') as counterparty_name,
@@ -178,8 +178,35 @@ projected_rows as (
            row.payload
     from active_generations generation
     join read_model.workbench_rows row
-      on row.generation_id = generation.generation_id
+     on row.generation_id = generation.generation_id
      and row.scope_key = generation.scope_key
+),
+projected_alias_rows as (
+    select primary_row.generation_scope,
+           coalesce(nullif(alias.value->>'id', ''), nullif(alias.value->>'row_id', '')) as row_id,
+           coalesce(nullif(alias.value->>'source_kind', ''), alias_bucket.key) as source_kind,
+           case
+               when coalesce(replace(alias.value->>'amount_value', ',', ''), '') ~ '^-?[0-9]+([.][0-9]+)?$'
+               then replace(alias.value->>'amount_value', ',', '')::numeric
+               when coalesce(replace(alias.value->>'amount', ',', ''), '') ~ '^-?[0-9]+([.][0-9]+)?$'
+               then replace(alias.value->>'amount', ',', '')::numeric
+           end as amount,
+           coalesce(alias.value->>'counterparty_name', alias.value->>'counterparty_name_raw', '') as counterparty_name,
+           coalesce(alias.value->>'project_name', '') as project_name,
+           alias.value as payload
+    from projected_primary_rows primary_row
+    join lateral jsonb_each(
+        case when jsonb_typeof(primary_row.payload->'identity_alias_rows') = 'object'
+             then primary_row.payload->'identity_alias_rows' else '{}'::jsonb end
+    ) alias_bucket(key, value) on true
+    join lateral jsonb_array_elements(
+        case when jsonb_typeof(alias_bucket.value) = 'array' then alias_bucket.value else '[]'::jsonb end
+    ) alias(value) on true
+),
+projected_rows as (
+    select * from projected_primary_rows
+    union all
+    select * from projected_alias_rows
 )
 """
 
@@ -230,13 +257,33 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
               and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
             order by scope_key, activated_at desc nulls last, updated_at desc
         ),
-        projected as (
-            select distinct on (row.row_id) row.row_id, generation.scope_key, row.payload
+        projected_candidates as (
+            select row.row_id, generation.scope_key, row.payload, 0 as representation_rank
             from active_months generation
             join read_model.workbench_rows row
               on row.generation_id = generation.generation_id
              and row.scope_key = generation.scope_key
-            order by row.row_id, generation.scope_key desc
+            union all
+            select coalesce(nullif(alias.value->>'id', ''), nullif(alias.value->>'row_id', '')),
+                   generation.scope_key, alias.value, 1
+            from active_months generation
+            join read_model.workbench_rows row
+              on row.generation_id = generation.generation_id
+             and row.scope_key = generation.scope_key
+            join lateral jsonb_each(
+                case when jsonb_typeof(row.payload->'identity_alias_rows') = 'object'
+                     then row.payload->'identity_alias_rows' else '{}'::jsonb end
+            ) alias_bucket(key, value) on true
+            join lateral jsonb_array_elements(
+                case when jsonb_typeof(alias_bucket.value) = 'array'
+                     then alias_bucket.value else '[]'::jsonb end
+            ) alias(value) on true
+        ),
+        projected as (
+            select distinct on (row_id) row_id, scope_key, payload
+            from projected_candidates
+            where nullif(row_id, '') is not null
+            order by row_id, representation_rank, scope_key desc
         ),
         override_mismatch as (
             select override.row_id as subject_id, coalesce(projected.scope_key, 'all') as scope_key,
@@ -255,6 +302,11 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             )
             left join projected on projected.row_id = override.row_id
             where override.status = 'active'
+              and not (
+                    field.value = 'null'::jsonb
+                and projected.payload is not null
+                and projected.payload->field.key is null
+              )
               and projected.payload->field.key is distinct from field.value
         ),
         exception_members as (
@@ -357,6 +409,12 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             select generation.scope_key, row.row_id, row.source_kind, row.amount,
                    row.counterparty_name, row.project_name, row.payload,
                    coalesce(
+                       case
+                           when row.source_kind in ('invoice', 'oa_attachment_invoice')
+                            and coalesce(replace(row.payload->>'total_with_tax', ',', ''), '')
+                                ~ '^-?[0-9]+([.][0-9]+)?$'
+                           then replace(row.payload->>'total_with_tax', ',', '')::numeric
+                       end,
                        row.amount,
                        case
                            when coalesce(replace(row.payload->>'amount_value', ',', ''), '')
@@ -492,7 +550,11 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
                        nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
                        link.business_batch_id
                    ) as external_batch_id,
-                   coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_row_id,
+                   coalesce(
+                       nullif(invoice.digital_invoice_no, ''),
+                       nullif(invoice.invoice_no, ''),
+                       coalesce(invoice.legacy_mongo_id, invoice.id::text)
+                   ) as invoice_row_id,
                    abs(coalesce(invoice.total_with_tax, invoice.amount, 0))::numeric as amount
             from app.etc_batch_invoice_links link
             join app.invoices invoice on invoice.id = link.invoice_id and invoice.status <> 'deleted'
@@ -504,7 +566,11 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
                        nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
                        submission.submission_batch_id
                    ) as external_batch_id,
-                   coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_row_id,
+                   coalesce(
+                       nullif(invoice.digital_invoice_no, ''),
+                       nullif(invoice.invoice_no, ''),
+                       coalesce(invoice.legacy_mongo_id, invoice.id::text)
+                   ) as invoice_row_id,
                    abs(coalesce(invoice.total_with_tax, invoice.amount, 0))::numeric as amount
             from app.etc_submission_batches submission
             join app.invoices invoice
@@ -525,7 +591,10 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
                        nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
                        batch.business_batch_id
                    ) as external_batch_id,
-                   coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text) as invoice_row_id,
+                   coalesce(
+                       nullif(invoice.invoice_no, ''),
+                       coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text)
+                   ) as invoice_row_id,
                    abs(coalesce(invoice.total_with_tax, invoice.amount, 0))::numeric as amount
             from app.etc_business_batches batch
             join lateral jsonb_array_elements_text(
@@ -571,7 +640,12 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         ),
         projected_detail_rows as (
             select summary.summary_row_id,
-                   coalesce(nullif(detail.value->>'id', ''), nullif(detail.value->>'row_id', '')) as invoice_row_id,
+                   coalesce(
+                       nullif(detail.value->>'digital_invoice_no', ''),
+                       nullif(detail.value->>'invoice_no', ''),
+                       nullif(detail.value->>'id', ''),
+                       nullif(detail.value->>'row_id', '')
+                   ) as invoice_row_id,
                    coalesce(
                        case when coalesce(replace(detail.value->>'amount_value', ',', ''), '')
                                       ~ '^-?[0-9]+([.][0-9]+)?$'

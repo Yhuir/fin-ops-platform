@@ -176,16 +176,14 @@ class TaxOffsetPageAuditTests(unittest.TestCase):
         self.assertIn("tax_offset_duplicate_scope", report["summary"]["issue_sample_counts_by_code"])
         self.assertIn("tax_offset_invalid_scope", report["summary"]["issue_sample_counts_by_code"])
 
-    def test_canonical_invoice_total_is_recalculated(self) -> None:
+    def test_canonical_total_is_compared_to_projection_without_guessing_amount_semantics(self) -> None:
         connection = FakeConnection()
         connection.invoices[0]["total_with_tax"] = "999.00"
 
         report = tax_offset_page_audit.audit_tax_offset_page(connection)
 
-        self.assertIn(
-            "tax_offset_canonical_invoice_total_mismatch",
-            report["summary"]["issue_sample_counts_by_code"],
-        )
+        self.assertNotIn("tax_offset_canonical_invoice_total_mismatch", report["summary"]["issue_sample_counts_by_code"])
+        self.assertIn("tax_offset_key_display_fields_mismatch", report["summary"]["issue_sample_counts_by_code"])
 
     def test_ambiguous_certified_match_is_blocking(self) -> None:
         connection = FakeConnection()

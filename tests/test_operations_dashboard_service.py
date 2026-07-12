@@ -461,7 +461,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertIn("union all", normalized_sql)
         self.assertIn("e.status in ('pending', 'failed', 'dead_lettered')", normalized_sql)
         self.assertIn("e.publish_status = 'publishing'", normalized_sql)
-        self.assertIn("e.publish_status = 'failed'", normalized_sql)
+        self.assertNotIn("where e.publish_status = 'failed'", normalized_sql)
         self.assertIn("e.status not in ('pending', 'failed', 'dead_lettered')", normalized_sql)
 
     def test_runtime_repository_bounds_read_model_duration_history_query(self) -> None:

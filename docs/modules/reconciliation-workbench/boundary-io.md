@@ -125,9 +125,11 @@
 - Forbidden paths: legacy workbench handler 不得直接写 relation facts、read model 或 dirty/outbox；building/failed projection 不得被当作页面事实。
 - Old code deletion: frontend legacy full-payload client 已删除；legacy `WorkbenchActionService` 已删除，legacy `WorkbenchApiRoutes` 只保留 read-only `get_workbench` / `get_row_detail` 兼容壳，不得承载 `confirm_link`、`mark_exception`、`cancel_link` 或 `update_bank_exception` 写状态机；旧 `/workbench`、`/workbench/prototype` 和 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP compat route owner 已删除，ledger/reminder 行为保留在 reconciliation/ledger service 和 `/ledgers`/`/reminders` API；后端 `GET /api/workbench` full payload 是受限 read-only compat API，不进入前端页面 runtime，不拥有写 I/O，不作为旧代码污染面。
 
-## Audit v19 query-composed 合同（2026-07-12）
+## Audit v20 query-composed 与 object identity 合同（2026-07-12）
 
 - `month=all` 的页面事实是 active 月度 generation 的 query-composed 结果；Audit 只证明这些月度 generation，不再要求或读取历史 materialized `all` generation。
 - 多 OA / 多流水 / 多发票关系按完整 typed hyperedge row-set 与 canonical case owner 证明；禁止把一个多成员 case 拆成不存在的 `source_oa_id` 单边配对要求。
 - 每个 active relation member 必须在 query-composed 月度 shard 中归属同一 canonical case；relation group/row distribution 继续做双向 edge equality。
+- 稳定身份仲裁压缩的源行必须完整保存在 canonical primary row 的 `identity_alias_rows`，Audit 把 primary + alias 合并后与源事实做双向 equality；禁止把去重别名误报成遗漏，也禁止直接丢弃 alias。
+- ETC summary/detail 是由已登记 external ETC batch 派生的显示扩展，不是 relation edge；只有 `source_kind=etc_invoice_summary|etc_invoice` 且 `etc_batch_id` 与 relation 的正式 batch id 相等时才允许出现在 case，另由独立 summary/detail expected-set 证明。
 - 已删除的旧证明路径包括 materialized-all freshness/union、raw automatic decision row 和 singular OA-bank alignment；不得恢复为 fallback。

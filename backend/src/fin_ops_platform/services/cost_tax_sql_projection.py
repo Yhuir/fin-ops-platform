@@ -116,6 +116,7 @@ class CostStatisticsSqlProjectionBuilder:
             project_scope, month = _parse_cost_scope_key(scope_key)
             if month != "all":
                 raise ValueError("parent scope rebuild requires an all scope.")
+            self._remove_obsolete_cost_statistics_month_scopes(project_scope=project_scope)
             entries, bank_flow_entries, shard_versions = self._cost_entries_from_materialized_shards(project_scope=project_scope)
             payload = self._build_explorer_payload_from_entries(
                 entries,
@@ -147,6 +148,34 @@ class CostStatisticsSqlProjectionBuilder:
             )
         finally:
             self._settings_payload_cache = None
+
+    def _remove_obsolete_cost_statistics_month_scopes(self, *, project_scope: str) -> None:
+        current_scope_keys = set(self.list_cost_statistics_scope_shards(f"{project_scope}:all"))
+        rows = self._connection.fetch_all(
+            """
+            select scope_key
+            from read_model.cost_statistics_read_models
+            where project_scope = %s
+              and scope_key ~ '^(active|all):[0-9]{4}-[0-9]{2}$'
+            order by scope_key
+            """,
+            (project_scope,),
+        )
+        obsolete_scope_keys = {
+            str(row.get("scope_key") or "").strip()
+            for row in rows
+            if str(row.get("scope_key") or "").strip()
+            and str(row.get("scope_key") or "").strip() not in current_scope_keys
+        }
+        if obsolete_scope_keys:
+            self._read_model_repository.save_cost_statistics_read_models(
+                {"read_models": {}},
+                changed_scope_keys=obsolete_scope_keys,
+            )
+            delete_cache = getattr(self._redis_helper, "delete", None)
+            if callable(delete_cache):
+                for scope_key in sorted(obsolete_scope_keys):
+                    delete_cache(f"cost_statistics:explorer:{scope_key}")
 
     def missing_or_stale_cost_statistics_shards(self, parent_scope_key: str) -> list[str]:
         project_scope, month = _parse_cost_scope_key(parent_scope_key)
@@ -943,10 +972,12 @@ def _outflow_amount(bank_row: dict[str, Any]) -> Decimal | None:
 def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
     bank_tag_context = bank_tag_context_from_row(entry)
     return {
+        "group_id": entry.get("group_id") or "",
         "transaction_id": entry["transaction_id"],
         "trade_time": entry["trade_time"],
         "direction": entry["direction"],
         "project_name": entry["project_name"],
+        "project_id": entry.get("project_id") or "",
         "expense_type": entry["expense_type"],
         "expense_content": entry["expense_content"],
         "amount": format_decimal(entry["amount_decimal"]),

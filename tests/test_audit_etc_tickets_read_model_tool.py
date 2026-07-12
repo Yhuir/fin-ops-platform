@@ -121,6 +121,51 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
         self.assertIn("etc_business_batch_invoice_missing", report["summary"]["issue_sample_counts_by_code"])
         self.assertIn("etc_business_batch_invoice_edge_mismatch", report["summary"]["issue_sample_counts_by_code"])
 
+    def test_reimport_event_can_reference_an_invoice_owned_by_an_earlier_import(self) -> None:
+        connection = FakeConnection()
+        connection.invoices = [
+            {
+                "etc_invoice_id": "etc-invoice-1",
+                "status": "unsubmitted",
+                "amount": "100.00",
+                "tax_amount": "0.00",
+                "total_with_tax": "100.00",
+                "raw_payload": {"normalized_payload": {"id": "etc-invoice-1", "import_batch_id": "import-1"}},
+            }
+        ]
+        connection.import_batches = [
+            {"batch_id": "import-1", "invoice_count": 1, "raw_payload": {"normalized_payload": {"invoice_ids": ["etc-invoice-1"]}}},
+            {"batch_id": "import-2", "invoice_count": 1, "raw_payload": {"normalized_payload": {"invoice_ids": ["etc-invoice-1"]}}},
+        ]
+
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+
+        self.assertNotIn("etc_import_batch_invoice_edge_mismatch", report["summary"]["issue_sample_counts_by_code"])
+        self.assertNotIn("etc_import_batch_invoice_missing", report["summary"]["issue_sample_counts_by_code"])
+
+    def test_current_import_owner_must_declare_the_invoice_member(self) -> None:
+        connection = FakeConnection()
+        connection.invoices = [
+            {
+                "etc_invoice_id": "etc-invoice-1",
+                "status": "unsubmitted",
+                "amount": "100.00",
+                "tax_amount": "0.00",
+                "total_with_tax": "100.00",
+                "raw_payload": {"normalized_payload": {"id": "etc-invoice-1", "import_batch_id": "import-1"}},
+            }
+        ]
+        connection.import_batches = [
+            {"batch_id": "import-1", "invoice_count": 0, "raw_payload": {"normalized_payload": {"invoice_ids": []}}}
+        ]
+
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+
+        self.assertIn(
+            "etc_invoice_import_owner_membership_mismatch",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
     def test_card_ticket_edge_rejects_an_orphan_card_reference(self) -> None:
         connection = FakeConnection()
         payload = connection.tasks[0]["raw_payload"]["normalized_payload"]

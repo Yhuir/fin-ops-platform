@@ -573,22 +573,36 @@ def _batch_relation_issues(
                 )
             )
 
-    for import_id, import_row in import_by_id.items():
-        declared_ids = _text_set(_payload(import_row).get("invoice_ids"))
-        derived_ids = {
-            invoice_id
-            for invoice_id, invoice in invoice_by_id.items()
-            if _text(_payload(invoice).get("import_batch_id")) == import_id
-        }
-        if declared_ids != derived_ids:
+    declared_import_members = {
+        import_id: _text_set(_payload(import_row).get("invoice_ids"))
+        for import_id, import_row in import_by_id.items()
+    }
+    for import_id, declared_ids in declared_import_members.items():
+        missing_invoice_ids = sorted(declared_ids - set(invoice_by_id))
+        if missing_invoice_ids:
             issues.append(
                 _issue(
-                    "etc_import_batch_invoice_edge_mismatch",
+                    "etc_import_batch_invoice_missing",
                     import_id,
-                    {
-                        "missing_invoice_owner": sorted(declared_ids - derived_ids),
-                        "unexpected_invoice_owner": sorted(derived_ids - declared_ids),
-                    },
+                    {"missing_invoice_ids": missing_invoice_ids},
+                )
+            )
+
+    # An import batch is an immutable import-attempt membership event. Re-importing an
+    # existing invoice can therefore register the same invoice in several batch events,
+    # while the invoice's import_batch_id remains its first/current provenance owner.
+    # Prove both representations without incorrectly requiring every historical event to
+    # be the invoice's single current owner.
+    for invoice_id, invoice in invoice_by_id.items():
+        import_id = _text(_payload(invoice).get("import_batch_id"))
+        if not import_id or import_id not in import_by_id:
+            continue
+        if invoice_id not in declared_import_members.get(import_id, set()):
+            issues.append(
+                _issue(
+                    "etc_invoice_import_owner_membership_mismatch",
+                    invoice_id,
+                    {"import_batch_id": import_id},
                 )
             )
 

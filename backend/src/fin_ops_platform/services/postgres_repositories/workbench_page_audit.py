@@ -366,6 +366,12 @@ def _normalize_relation(row: dict[str, Any]) -> dict[str, Any]:
     relation_payload = payload if isinstance(payload, dict) else {}
     row_ids = text_list(row.get("row_ids")) or text_list(relation_payload.get("row_ids"))
     row_types = text_list(row.get("row_types")) or text_list(relation_payload.get("row_types"))
+    normalized_payload = relation_payload.get("normalized_payload")
+    normalized_payload = normalized_payload if isinstance(normalized_payload, dict) else relation_payload
+    amount_check = normalized_payload.get("amount_check")
+    amount_check = amount_check if isinstance(amount_check, dict) else relation_payload.get("amount_check")
+    special_metadata = normalized_payload.get("special_metadata")
+    special_metadata = special_metadata if isinstance(special_metadata, dict) else relation_payload.get("special_metadata")
     return {
         "case_id": text(row.get("case_id") or relation_payload.get("case_id")) or "",
         "relation_mode": text(row.get("relation_mode") or relation_payload.get("relation_mode")) or "",
@@ -374,7 +380,29 @@ def _normalize_relation(row: dict[str, Any]) -> dict[str, Any]:
         "row_types": row_types,
         "month_scope": text(row.get("month_scope") or relation_payload.get("month_scope")) or "",
         "updated_at": text(row.get("updated_at")) or "",
+        "external_etc_batch_id": _external_etc_batch_id(
+            amount_check if isinstance(amount_check, dict) else {},
+            special_metadata if isinstance(special_metadata, dict) else {},
+        ),
     }
+
+
+def _external_etc_batch_id(amount_check: dict[str, Any], special_metadata: dict[str, Any]) -> str:
+    for value in (
+        amount_check.get("external_etc_batch_id"),
+        amount_check.get("etc_batch_id"),
+        special_metadata.get("external_etc_batch_id"),
+        special_metadata.get("etc_batch_id"),
+    ):
+        if resolved := text(value):
+            return resolved
+    for key in ("etc_batch_link", "historical_etc_business_batch_migration"):
+        nested = special_metadata.get(key)
+        if not isinstance(nested, dict):
+            continue
+        if resolved := text(nested.get("external_etc_batch_id") or nested.get("etc_batch_id")):
+            return resolved
+    return ""
 
 
 def _rows_by_scope_and_row_id(rows: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
@@ -436,7 +464,13 @@ def _query_composed_relation_display_issues(
                 details={"missing_row_ids": missing_row_ids, "relation_mode": relation_mode},
             )
         )
-    extra_row_ids = sorted(actual_row_id_set - expected_row_id_set)
+    derived_display_row_ids = {
+        row_id
+        for row in actual_case_rows
+        if (row_id := text(row.get("row_id")))
+        and _is_registered_etc_display_expansion(row, relation=relation)
+    }
+    extra_row_ids = sorted(actual_row_id_set - expected_row_id_set - derived_display_row_ids)
     if extra_row_ids:
         issues.append(
             RelationDisplayIssue(
@@ -506,6 +540,19 @@ def _query_composed_relation_display_issues(
                     )
                 )
     return issues
+
+
+def _is_registered_etc_display_expansion(row: dict[str, Any], *, relation: dict[str, Any]) -> bool:
+    external_batch_id = text(relation.get("external_etc_batch_id")) or ""
+    if not external_batch_id:
+        return False
+    source_kind = text(row.get("source_kind")) or ""
+    if source_kind not in {"etc_invoice_summary", "etc_invoice"}:
+        return False
+    payload = row_payload(row, "payload")
+    if not isinstance(payload, dict):
+        return False
+    return text(payload.get("etc_batch_id")) == external_batch_id
 
 
 def _row_type_at(row_types: list[str], index: int) -> str:

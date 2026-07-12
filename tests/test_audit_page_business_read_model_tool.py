@@ -756,7 +756,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("row.payload->'invoice'->'summaries'", consumer_sql)
         self.assertIn("shared_edge_missing_consumer", consumer_sql)
         self.assertIn("consumer_edge_not_shared", consumer_sql)
-        self.assertEqual(params, ("default", "default", 51))
+        self.assertEqual(params, ("default", "default", "default", 51))
         self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
         self.assertIn("registered page consumer summaries", report["audit_contract"]["relation_edge_equality"])
 

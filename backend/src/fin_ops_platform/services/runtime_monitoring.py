@@ -1553,15 +1553,6 @@ class RuntimeMonitoringRepository:
               where e.publish_status = 'publishing'
                 and e.status not in ('pending', 'failed', 'dead_lettered')
                 and {_current_effective_outbox_attention_predicate_sql("e")}
-              union all
-              select
-                e.status,
-                e.publish_status,
-                e.created_at
-              from job.outbox_events e
-              where e.publish_status = 'failed'
-                and e.status not in ('pending', 'failed', 'dead_lettered')
-                and {_current_effective_outbox_attention_predicate_sql("e")}
             )
             select
               count(*) filter (where status = 'pending')::bigint as pending_count,

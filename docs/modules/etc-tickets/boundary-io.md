@@ -105,3 +105,4 @@
 - migration 0101 只从 submitted/closed business batch 的现有 `task_id/scope/title` 创建缺失的 imported reconciliation task，并把 batch title 对齐 task title。
 - active ETC invoice 若指向已删除/不可见 business batch，则清除该 orphan owner，并把已有 canonical `batch_id` 写入 normalized `import_batch_id`；不创建新 invoice 或外部来源事实。
 - task `source_files` 只从 `app.etc_reconciliation_files` 正式行重算；禁止从 payload 猜测文件、hash 或字节。
+- ETC import batch 的 `invoice_ids` 是不可变导入尝试成员；同一 invoice 可因补附件/重复导入出现在多个历史 batch，而 invoice `import_batch_id` 仍指向首个/当前 provenance owner。Audit 分别证明“batch 成员全部存在”和“当前 owner 反向声明该 invoice”，禁止恢复错误的一对一 owner equality。

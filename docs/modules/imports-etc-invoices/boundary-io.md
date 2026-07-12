@@ -101,3 +101,4 @@
 - migration 0101 为新 `app.etc_import_sessions` 设置 `audit_contract_revision=etc-import-page-audit.v1` 默认值，不回填历史/合成 session。
 - 当前 revision session 必须严格证明 ZIP file object/hash、preview requirement edge、fingerprint、task version、job/outbox；缺失一律阻断。
 - revision 为 NULL 的历史 session 只报告 `legacy_session_provenance_unproven`；禁止从当前 ETC invoice 反向生成不存在的 ZIP/session 证据。
+- v20 中 import batch/invoice edge 按历史事件成员与当前 provenance owner 两个不同方向证明；重复导入不会覆盖首个 owner，也不能因此被误报为关系缺失。

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from threading import RLock
 from typing import Any
 
-COST_STATISTICS_READ_MODEL_SCHEMA_VERSION = "2026-07-cost-statistics-audit-proof-v6"
+COST_STATISTICS_READ_MODEL_SCHEMA_VERSION = "2026-07-cost-statistics-audit-proof-v7"
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 PROJECT_SCOPES = {"active", "all"}
 

@@ -242,6 +242,64 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
             {issue["code"] for issue in report["issues"]},
         )
 
+    def test_query_composed_case_allows_only_registered_etc_display_expansion(self) -> None:
+        relation = _relation()
+        relation["relation_mode"] = "batch_accounting"
+        relation["raw_payload"]["normalized_payload"]["relation_mode"] = "batch_accounting"
+        relation["raw_payload"]["normalized_payload"]["amount_check"] = {
+            "external_etc_batch_id": "ETC-BATCH-1"
+        }
+        summary = _group_row("2026-01", "etc-summary-ETC-BATCH-1", relation_mode="batch_accounting")
+        summary["source_kind"] = "etc_invoice_summary"
+        summary["payload"]["etc_batch_id"] = "ETC-BATCH-1"
+        detail = _group_row("2026-01", "etc-invoice-1", relation_mode="batch_accounting")
+        detail["source_kind"] = "etc_invoice"
+        detail["payload"]["etc_batch_id"] = "ETC-BATCH-1"
+
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                relations=[relation],
+                group_rows=[
+                    _group_row("2026-01", "bank-1"),
+                    _group_row("2026-01", "invoice-1"),
+                    summary,
+                    detail,
+                ],
+            )
+        )
+
+        self.assertNotIn(
+            "query_composed_case_rows_not_canonical",
+            {issue["code"] for issue in report["issues"]},
+        )
+
+    def test_query_composed_case_rejects_etc_display_expansion_for_another_batch(self) -> None:
+        relation = _relation()
+        relation["relation_mode"] = "batch_accounting"
+        relation["raw_payload"]["normalized_payload"]["relation_mode"] = "batch_accounting"
+        relation["raw_payload"]["normalized_payload"]["amount_check"] = {
+            "external_etc_batch_id": "ETC-BATCH-1"
+        }
+        summary = _group_row("2026-01", "etc-summary-ETC-BATCH-2", relation_mode="batch_accounting")
+        summary["source_kind"] = "etc_invoice_summary"
+        summary["payload"]["etc_batch_id"] = "ETC-BATCH-2"
+
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                relations=[relation],
+                group_rows=[
+                    _group_row("2026-01", "bank-1"),
+                    _group_row("2026-01", "invoice-1"),
+                    summary,
+                ],
+            )
+        )
+
+        self.assertIn(
+            "query_composed_case_rows_not_canonical",
+            {issue["code"] for issue in report["issues"]},
+        )
+
     def test_query_composed_case_rejects_member_type_drift(self) -> None:
         drifted_invoice = _group_row("2026-01", "invoice-1")
         drifted_invoice["source_kind"] = "bank"

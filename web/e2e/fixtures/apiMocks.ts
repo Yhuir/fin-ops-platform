@@ -592,7 +592,7 @@ function appHealthSystemAuditPayload() {
       snapshot_consistency: "repeatable_read_read_only",
       database_snapshot: true,
       proof_availability: "ready",
-      contract_revision: "page-audit-contract.v19",
+      contract_revision: "page-audit-contract.v20",
       write_policy: "read_only",
     },
     database_system_snapshot: {

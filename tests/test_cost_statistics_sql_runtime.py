@@ -1280,6 +1280,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["transaction_count"], 1)
         self.assertEqual(payload["summary"]["total_amount"], "10.00")
         self.assertEqual([row["transaction_id"] for row in payload["time_rows"]], ["bank-1"])
+        self.assertEqual(payload["time_rows"][0]["group_id"], "group-1")
+        self.assertEqual(payload["time_rows"][0]["project_id"], "P-A")
         self.assertEqual(payload["time_rows"][0]["bank_tag_primary_label"], "项目开销")
         self.assertEqual(payload["time_rows"][0]["bank_tag_sub_label"], "设备材料")
         self.assertEqual(payload["time_rows"][0]["bank_tag_label_path"], ["项目开销", "设备材料"])
@@ -1487,6 +1489,31 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["month"], "all")
         self.assertEqual(result["project_scope"], "all")
         self.assertEqual(repository.saved[0][1], {"all:all"})
+
+    def test_cost_statistics_parent_rebuild_removes_obsolete_month_scopes(self) -> None:
+        class Connection(CostStatisticsParentAggregationConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.workbench_generations" in normalized:
+                    return [{"scope_key": "2026-05"}, {"scope_key": "2026-04"}]
+                if "from read_model.cost_statistics_read_models" in normalized:
+                    return [
+                        {"scope_key": "active:2026-05"},
+                        {"scope_key": "active:2026-04"},
+                        {"scope_key": "active:2023-05"},
+                    ]
+                return super().fetch_all(sql, params)
+
+        repository = CostStatisticsSaveRecorder()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=Connection(),
+            read_model_repository=repository,
+        )
+
+        builder.rebuild_cost_statistics_read_model_scope("active:all")
+
+        self.assertEqual(repository.saved[0], ({"read_models": {}}, {"active:2023-05"}))
+        self.assertEqual(repository.saved[1][1], {"active:all"})
 
     def test_cost_statistics_refresh_handler_enqueues_missing_shards_before_parent_rebuild(self) -> None:
         class FakeBuilder:

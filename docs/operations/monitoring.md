@@ -101,7 +101,7 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 
 - `rabbitmq_publish_status`：outbox 按 publish status 聚合。
 - `rabbitmq_unpublished_backlog`：等待 dispatcher 投递的 pending outbox 数量。
-- `rabbitmq_publish_failed_backlog`：RabbitMQ 发布失败、等待重试的 pending outbox 数量。
+- `rabbitmq_publish_failed_backlog`：RabbitMQ 发布失败、等待重试的 pending outbox 数量；PostgreSQL worker 已完成的事件即使保留历史 publish failure，也不属于当前 durable queue backlog。
 - `rabbitmq_dispatcher_lag_seconds`：最老未发布 pending outbox age。
 - `rabbitmq_publish_confirm_latency_ms`：每类 RabbitMQ dispatch event 最近 bounded 样本的 publisher confirm p50/p95/p99。
 - `rabbitmq_queue_depth`：RabbitMQ workbench queue messages。
