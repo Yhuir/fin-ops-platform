@@ -51,13 +51,13 @@
 
 ### Reversible Relation Closure
 
-- [ ] **RELCL-01**: Controlled relation scenarios use one existing runner and one canonical Workbench relation write boundary; no second fact, queue, freshness or Audit owner is introduced.
-- [ ] **RELCL-02**: Every confirm and withdraw checkpoint independently proves all required fan-out scopes, worker completion and freshness from post-mutation durable evidence.
-- [ ] **RELCL-03**: Every checkpoint obtains a new fail-closed App Health System Audit report with integrity pass, freshness fresh, queue drained and all registered internal page proofs passing.
-- [ ] **RELCL-04**: Bank+invoice, bank+turnover and bank+OA+invoice are covered as data-driven reversible shapes without 17×operation duplication.
-- [ ] **RELCL-05**: Affected consumer API/Browser contracts prove user-visible relation results while non-consumers remain isolated.
-- [ ] **RELCL-06**: Legacy/parallel runners, direct derived-data writes and mock-only closure claims are removed after whole-repo caller evidence; retained operational adapters are explicit.
-- [ ] **RELCL-07**: Real-infrastructure execution is restricted to disposable/test-owned fixtures with auth, admin Audit access, approval, rollback and cleanup gates.
+- [x] **RELCL-01**: Controlled relation scenarios use one existing runner and one canonical Workbench relation write boundary; no second fact, queue, freshness or Audit owner is introduced.
+- [x] **RELCL-02**: Every confirm and withdraw checkpoint independently proves all required fan-out scopes, worker completion and freshness from post-mutation durable evidence.
+- [x] **RELCL-03**: Every checkpoint obtains a new fail-closed App Health System Audit report with integrity pass, freshness fresh, queue drained and all registered internal page proofs passing.
+- [x] **RELCL-04**: Bank+invoice, bank+turnover and bank+OA+invoice are covered as data-driven reversible shapes without 17×operation duplication.
+- [x] **RELCL-05**: Affected consumer API/Browser contracts prove user-visible relation results while non-consumers remain isolated.
+- [x] **RELCL-06**: Legacy/parallel runners, direct derived-data writes and mock-only closure claims are removed after whole-repo caller evidence; retained operational adapters are explicit.
+- [x] **RELCL-07**: Real-infrastructure execution is restricted to disposable/test-owned fixtures with auth, admin Audit access, approval, rollback and cleanup gates.
 
 ## v2 Requirements
 
@@ -113,13 +113,13 @@
 | AUDIT-10 | Phase 19 | Pending |
 | AUDIT-11 | Phase 19 | Pending |
 | AUDIT-12 | Phase 19 | Pending |
-| RELCL-01 | Phase 20 | Pending |
-| RELCL-02 | Phase 20 | Pending |
-| RELCL-03 | Phase 20 | Pending |
-| RELCL-04 | Phase 20 | Pending |
-| RELCL-05 | Phase 20 | Pending |
-| RELCL-06 | Phase 20 | Pending |
-| RELCL-07 | Phase 20 | Pending |
+| RELCL-01 | Phase 20 | Complete |
+| RELCL-02 | Phase 20 | Complete |
+| RELCL-03 | Phase 20 | Complete |
+| RELCL-04 | Phase 20 | Complete |
+| RELCL-05 | Phase 20 | Complete |
+| RELCL-06 | Phase 20 | Complete |
+| RELCL-07 | Phase 20 | Complete |
 
 **Coverage:**
 - v1 requirements: 42 total

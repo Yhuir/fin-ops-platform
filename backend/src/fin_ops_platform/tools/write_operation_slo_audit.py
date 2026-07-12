@@ -9,7 +9,11 @@ from pathlib import Path
 import sys
 from typing import Any, Sequence, TextIO
 
-from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import (
+    PostgresConfigurationError,
+    PostgresConnection,
+    PostgresSettings,
+)
 from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report, write_json_report
 
 
@@ -127,66 +131,172 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_withdraw", "workbench", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw", "workbench_relation", "workbench_pair_relation_changed"),
     OperationExpectation("workbench_relation_confirm_bank_invoice", "workbench", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_invoice", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation(
+        "workbench_relation_confirm_bank_invoice", "workbench_relation", "workbench_pair_relation_changed"
+    ),
     OperationExpectation("workbench_relation_withdraw_bank_invoice", "workbench", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_invoice", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation(
+        "workbench_relation_withdraw_bank_invoice", "workbench_relation", "workbench_pair_relation_changed"
+    ),
     OperationExpectation("workbench_relation_confirm_cross_page", "workbench", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation(
+        "workbench_relation_confirm_cross_page", "workbench_relation", "workbench_pair_relation_changed"
+    ),
     OperationExpectation("workbench_relation_confirm_cross_page", "bank_detail", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "invoice_lifecycle", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_cross_page", "oa_pending_payment", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "cost_statistics", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "workbench", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation(
+        "workbench_relation_withdraw_cross_page", "workbench_relation", "workbench_pair_relation_changed"
+    ),
     OperationExpectation("workbench_relation_withdraw_cross_page", "bank_detail", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "invoice_lifecycle", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_cross_page", "oa_pending_payment", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "cost_statistics", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "search", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "workbench", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "bank_detail", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "invoice_lifecycle", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "pending_invoice", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation(
+        "workbench_relation_confirm_bank_invoice_cross_page", "workbench", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_confirm_bank_invoice_cross_page", "workbench_relation", "workbench_pair_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_confirm_bank_invoice_cross_page", "bank_detail", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_confirm_bank_invoice_cross_page", "invoice_lifecycle", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_confirm_bank_invoice_cross_page", "pending_invoice", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_confirm_bank_invoice_cross_page", "input_invoice_usage", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_confirm_bank_invoice_cross_page", "cost_statistics", "workbench_relation_changed"
+    ),
     OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "search", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "workbench", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "bank_detail", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "invoice_lifecycle", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "pending_invoice", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation(
+        "workbench_relation_withdraw_bank_invoice_cross_page", "workbench", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_withdraw_bank_invoice_cross_page", "workbench_relation", "workbench_pair_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_withdraw_bank_invoice_cross_page", "bank_detail", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_withdraw_bank_invoice_cross_page", "invoice_lifecycle", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_withdraw_bank_invoice_cross_page", "pending_invoice", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_withdraw_bank_invoice_cross_page", "input_invoice_usage", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_withdraw_bank_invoice_cross_page", "cost_statistics", "workbench_relation_changed"
+    ),
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "search", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "workbench", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "bank_detail", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "pending_invoice", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "cost_statistics", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_bank_turnover_cross_page", "search", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "workbench", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "workbench_relation", "workbench_pair_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "bank_detail", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "pending_invoice", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "cost_statistics", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_bank_turnover_cross_page", "search", "workbench_relation_changed"),
+    OperationExpectation(
+        "turnover_relation_confirm_cross_page",
+        "turnover_ledger",
+        "turnover_relation_changed",
+        ("turnover_relation_zero_difference_closure",),
+    ),
+    OperationExpectation(
+        "turnover_relation_confirm_cross_page",
+        "workbench",
+        "turnover_relation_changed",
+        ("turnover_relation_zero_difference_closure",),
+    ),
+    OperationExpectation(
+        "turnover_relation_confirm_cross_page",
+        "workbench_relation",
+        "turnover_relation_changed",
+        ("turnover_relation_zero_difference_closure",),
+    ),
+    OperationExpectation(
+        "turnover_relation_confirm_cross_page",
+        "cost_statistics",
+        "turnover_relation_changed",
+        ("turnover_relation_zero_difference_closure",),
+    ),
+    OperationExpectation(
+        "turnover_relation_confirm_cross_page",
+        "search",
+        "turnover_relation_changed",
+        ("turnover_relation_zero_difference_closure",),
+    ),
+    OperationExpectation(
+        "turnover_relation_withdraw_cross_page",
+        "turnover_ledger",
+        "turnover_relation_changed",
+        ("turnover_relation_withdraw",),
+    ),
+    OperationExpectation(
+        "turnover_relation_withdraw_cross_page",
+        "workbench",
+        "turnover_relation_changed",
+        ("turnover_relation_withdraw",),
+    ),
+    OperationExpectation(
+        "turnover_relation_withdraw_cross_page",
+        "workbench_relation",
+        "turnover_relation_changed",
+        ("turnover_relation_withdraw",),
+    ),
+    OperationExpectation(
+        "turnover_relation_withdraw_cross_page",
+        "cost_statistics",
+        "turnover_relation_changed",
+        ("turnover_relation_withdraw",),
+    ),
+    OperationExpectation(
+        "turnover_relation_withdraw_cross_page",
+        "search",
+        "turnover_relation_changed",
+        ("turnover_relation_withdraw",),
+    ),
     OperationExpectation("pending_invoice_attach_existing_invoice", "workbench", "workbench_relation_changed"),
-    OperationExpectation("pending_invoice_attach_existing_invoice", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation(
+        "pending_invoice_attach_existing_invoice", "workbench_relation", "workbench_pair_relation_changed"
+    ),
     OperationExpectation("pending_invoice_attach_existing_invoice", "bank_detail", "workbench_relation_changed"),
     OperationExpectation("pending_invoice_attach_existing_invoice", "invoice_lifecycle", "workbench_relation_changed"),
     OperationExpectation("pending_invoice_attach_existing_invoice", "pending_invoice", "workbench_relation_changed"),
-    OperationExpectation("pending_invoice_attach_existing_invoice", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation(
+        "pending_invoice_attach_existing_invoice", "input_invoice_usage", "workbench_relation_changed"
+    ),
     OperationExpectation("pending_invoice_attach_existing_invoice", "search", "workbench_relation_changed"),
     OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "workbench", "workbench_relation_changed"),
-    OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "workbench_relation", "workbench_pair_relation_changed"),
-    OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "bank_detail", "workbench_relation_changed"),
-    OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "invoice_lifecycle", "workbench_relation_changed"),
-    OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "pending_invoice", "workbench_relation_changed"),
-    OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "input_invoice_usage", "workbench_relation_changed"),
-    OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "oa_pending_payment", "workbench_relation_changed"),
-    OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "cost_statistics", "workbench_relation_changed"),
+    OperationExpectation(
+        "pending_invoice_attach_existing_invoice_with_oa", "workbench_relation", "workbench_pair_relation_changed"
+    ),
+    OperationExpectation(
+        "pending_invoice_attach_existing_invoice_with_oa", "bank_detail", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "pending_invoice_attach_existing_invoice_with_oa", "invoice_lifecycle", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "pending_invoice_attach_existing_invoice_with_oa", "pending_invoice", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "pending_invoice_attach_existing_invoice_with_oa", "input_invoice_usage", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "pending_invoice_attach_existing_invoice_with_oa", "oa_pending_payment", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "pending_invoice_attach_existing_invoice_with_oa", "cost_statistics", "workbench_relation_changed"
+    ),
     OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "search", "workbench_relation_changed"),
     OperationExpectation("bank_flow_rule_batch_submit", "bank_flow_rule_batch", "workbench_relation_changed"),
     OperationExpectation("bank_flow_rule_batch_submit", "workbench", "workbench_relation_changed"),
@@ -201,7 +311,9 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("invoice_import_confirmed", "search", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "pending_invoice", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "input_invoice_usage", "import_state_changed", required=False),
-    OperationExpectation("invoice_import_confirmed", "output_invoice_collection", "import_state_changed", required=False),
+    OperationExpectation(
+        "invoice_import_confirmed", "output_invoice_collection", "import_state_changed", required=False
+    ),
     OperationExpectation("invoice_import_confirmed", "oa_pending_payment", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "cost_statistics", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "tax_offset", "invoice_file_import_confirm"),
@@ -221,11 +333,21 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("etc_import_confirmed", "invoice_lifecycle", "etc_invoice_import_confirm"),
     OperationExpectation("etc_import_confirmed", "tax_offset", "etc_invoice_import_confirm"),
     OperationExpectation("etc_import_confirmed", "cost_statistics", "etc_invoice_import_confirm"),
-    OperationExpectation("no_oa_bank_batch_withdraw", "no_oa_bank_batch", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
-    OperationExpectation("no_oa_bank_batch_withdraw", "workbench", "workbench_scope_invalidated", ("no_oa_bank_batch_withdraw",)),
-    OperationExpectation("no_oa_bank_batch_withdraw", "workbench_relation", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
-    OperationExpectation("no_oa_bank_batch_withdraw", "cost_statistics", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
-    OperationExpectation("no_oa_bank_batch_withdraw", "search", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
+    OperationExpectation(
+        "no_oa_bank_batch_withdraw", "no_oa_bank_batch", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)
+    ),
+    OperationExpectation(
+        "no_oa_bank_batch_withdraw", "workbench", "workbench_scope_invalidated", ("no_oa_bank_batch_withdraw",)
+    ),
+    OperationExpectation(
+        "no_oa_bank_batch_withdraw", "workbench_relation", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)
+    ),
+    OperationExpectation(
+        "no_oa_bank_batch_withdraw", "cost_statistics", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)
+    ),
+    OperationExpectation(
+        "no_oa_bank_batch_withdraw", "search", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)
+    ),
 )
 
 
@@ -364,6 +486,63 @@ def selected_expectations_for_operations(operations: Sequence[str] | None) -> li
     return _selected_expectations(operations)
 
 
+def committed_workbench_outbox_event_ids(
+    connection: Any,
+    *,
+    tenant_id: str,
+    idempotency_key: str,
+) -> list[str]:
+    evidence = workbench_idempotency_evidence(
+        connection,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+    )
+    if evidence["status"] != "committed":
+        raise ValueError("Workbench idempotency record is not committed")
+    return list(evidence["outbox_event_ids"])
+
+
+def workbench_idempotency_evidence(
+    connection: Any,
+    *,
+    tenant_id: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    normalized_tenant_id = str(tenant_id or "").strip()
+    normalized_idempotency_key = str(idempotency_key or "").strip()
+    if not normalized_tenant_id or not normalized_idempotency_key:
+        raise ValueError("tenant_id and idempotency_key are required")
+    rows = connection.fetch_all(
+        """
+        select status, outbox_event_ids, response_payload
+        from app.workbench_idempotency_records
+        where tenant_id = %s
+          and idempotency_key = %s
+        """,
+        (normalized_tenant_id, normalized_idempotency_key),
+    )
+    if len(rows) != 1:
+        raise ValueError("expected exactly one Workbench idempotency record")
+    row = rows[0]
+    status = str(row.get("status") or "").strip()
+    if status not in {"reserved", "committed", "failed"}:
+        raise ValueError("Workbench idempotency record has invalid status")
+    raw_event_ids = row.get("outbox_event_ids")
+    if status == "committed" and not isinstance(raw_event_ids, list):
+        raise ValueError("committed Workbench idempotency record has invalid outbox_event_ids")
+    event_ids = _exact_event_ids(raw_event_ids) if status == "committed" else []
+    response_payload = row.get("response_payload")
+    if response_payload is None:
+        response_payload = {}
+    if not isinstance(response_payload, dict):
+        raise ValueError("Workbench idempotency record has invalid response_payload")
+    return {
+        "status": status,
+        "outbox_event_ids": event_ids,
+        "response_payload": dict(response_payload),
+    }
+
+
 def recent_read_model_refresh_events_since(
     connection: Any,
     *,
@@ -371,8 +550,15 @@ def recent_read_model_refresh_events_since(
     started_at: Any,
     limit: int,
     expectations: Sequence[OperationExpectation] | None = None,
+    event_ids: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     expectation_filter_sql, expectation_params = _expectation_filter_sql(expectations)
+    event_filter_sql = ""
+    event_params: tuple[Any, ...] = ()
+    if event_ids is not None:
+        exact_event_ids = _exact_event_ids(event_ids)
+        event_filter_sql = "and e.id::text = any(%s)"
+        event_params = (exact_event_ids,)
     rows = connection.fetch_all(
         f"""
         select
@@ -403,12 +589,24 @@ def recent_read_model_refresh_events_since(
           and (e.event_type like '%%.read_model.refresh' or e.event_type = 'import.fact.changed')
           and e.created_at >= %s
           {expectation_filter_sql}
+          {event_filter_sql}
         order by e.created_at desc, e.id desc
         limit %s
         """,
-        (tenant_id, started_at, *expectation_params, limit),
+        (tenant_id, started_at, *expectation_params, *event_params, limit),
     )
     return [dict(row) for row in rows]
+
+
+def _exact_event_ids(values: Sequence[Any]) -> list[str]:
+    if isinstance(values, (str, bytes)):
+        raise ValueError("outbox_event_ids must be a sequence of strings")
+    event_ids = [str(value).strip() if isinstance(value, str) else "" for value in values]
+    if not event_ids or any(not event_id for event_id in event_ids):
+        raise ValueError("outbox_event_ids must contain non-empty strings")
+    if len(event_ids) != len(set(event_ids)):
+        raise ValueError("outbox_event_ids must not contain duplicates")
+    return event_ids
 
 
 def _selected_expectations(operations: Sequence[str] | None) -> list[OperationExpectation]:
@@ -505,10 +703,7 @@ def _evaluate_expectation(
         if str(row.get("event_type") or "") == expected_event_type
         and str(row.get("scope_type") or "") == expectation.scope_type
         and str(row.get("reason") or "") == expectation.reason
-        and (
-            not expectation.action_names
-            or str(row.get("action_name") or "") in set(expectation.action_names)
-        )
+        and (not expectation.action_names or str(row.get("action_name") or "") in set(expectation.action_names))
     ]
     latest = samples[0] if samples else {}
     if not samples:
@@ -535,16 +730,14 @@ def _evaluate_expectation(
     durations = [
         duration
         for duration in (
-            _duration_ms(row.get("available_at") or row.get("created_at"), row.get("processed_at"))
-            for row in samples
+            _duration_ms(row.get("available_at") or row.get("created_at"), row.get("processed_at")) for row in samples
         )
         if duration is not None
     ]
     failed_samples = [
         row
         for row in samples
-        if str(row.get("event_status") or "") != "done"
-        or str(row.get("dirty_status") or "") not in {"", "done"}
+        if str(row.get("event_status") or "") != "done" or str(row.get("dirty_status") or "") not in {"", "done"}
     ]
     p95 = _percentile(durations, 0.95)
     p99 = _percentile(durations, 0.99)

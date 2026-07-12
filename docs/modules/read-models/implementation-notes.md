@@ -5,6 +5,11 @@
 
 ## 当前决策
 
+- 2026-07-12：可逆关系 closure 以 committed idempotency record 的精确 `outbox_event_ids` 关联 mutation 与 worker，不再允许 `started_at + profile` 证明事件归属；事件集合必须与正式 required/optional profile 完全相容。
+- 2026-07-12：bank+OA+invoice 的 confirm/withdraw profile 补齐 required `oa_pending_payment`。这是既有 repository/UoW fan-out 的合同修正，不新增 read model、worker 或业务 HTTP 字段。
+- 2026-07-12：页面业务结果由 runner 对部署包内 runtime contract 登记的 affected/non-consumer 页面执行 typed JSON Pointer assertions；impact matrix 是测试约束的文档镜像。断言必须落在正式响应的业务根，不能指向 `read_model_status` 等元数据；freshness 只证明投影收敛，不能替代内容断言。
+- 2026-07-12：终审移除按 profile 反向制造 fan-out 的伪闭环：bank+invoice 按真实 planner 补 `cost_statistics`，bank+turnover 改用正式 turnover closure UoW/profile。affected assertion 必须绑定 fixture identity，non-consumer 必须比较 mutation 前后的 fresh baseline；首次 mutation 前固定执行 admin System Audit preflight。
+
 - read model refresh 入队前由统一 scope policy/gateway 负责 normalize、validate 和 dedupe；`RuntimeQueueRepository` 继续只负责 PostgreSQL durable queue 持久化。
 - 生产旧 runtime 状态的 scope contract 检查/清理由 `ReadModelScopeContractService` 编排，SQL 限定在 `PostgresReadModelScopeContractRepository`，清理后通过 `ReadModelRefreshGateway` 补投规范 replacement scope。
 - RabbitMQ real consumers 只负责 transport/wakeup；`job.outbox_events`、`job.read_model_dirty_scopes` 与 `read_model.app_status_readiness` 仍是 read model 状态事实源。Redis payload 只能在 fresh gate 后缓存。
@@ -1459,7 +1464,7 @@
 - 写入口：`POST /api/workbench/actions/withdraw-link`，payload `month=all`、`row_ids=["txn_imported_1344","txn_imported_1292","txn_imported_1277","oa-pay-2025"]`，approval reference `FINOPS-PROD-WRITE-SMOKE-20260620-JIAXIAOHUA-WORKBENCH-001`。
 - 结果：写步骤 HTTP 200，约 `762.793ms`；post API probes 通过，Workbench grouped fresh，turnover ledger grouped 200。当前 active Workbench relation 已恢复为 bank-only `turnover_manual_closure`，仅包含三笔 bank row；原含 `oa-pay-2025` 的完整 relation 已撤回。外部往来 relation 本身保持 `confirmed`，余额仍 `0.00`。
 - SLO：窄口径 `workbench_relation_withdraw` 通过；严格 `workbench_relation_withdraw_cross_page` 失败，原因是 `workbench:all`、`pending_invoice`、`cost_statistics` 超过 5 秒，且 `invoice_lifecycle`、`input_invoice_usage`、`tax_offset` 未产生该 profile 期待的近期 refresh event。该结果说明真实写入和基础 read model drain 成功，但这个样本不应直接等同于全下游跨页闭环；需要后续拆分“样本不适用 scope”和“真实性能长尾”。
-- 2026-06-20 后续归因：`workbench_relation_withdraw_cross_page` 是 broad profile，不适合该 bank/turnover 恢复样本。新增 `workbench_relation_confirm_bank_turnover_cross_page` / `workbench_relation_withdraw_bank_turnover_cross_page` profile：要求 `workbench`、`workbench_relation`、`bank_detail`、`pending_invoice`、`cost_statistics`、`search`，但不要求 invoice-only 的 `invoice_lifecycle`、`input_invoice_usage`、`tax_offset`。本轮慢尾仍保留为 read model/worker 性能风险，不能因为 profile 拆分而视为 5s 写后跨页收敛已闭合。
+- 2026-06-20 当时为一次 Workbench withdraw 恢复 bank-only turnover relation 的不对称样本增加了 `workbench_relation_*_bank_turnover_cross_page`。2026-07-12 终审确认该口径不能作为可逆 pair，且与正式 turnover closure endpoint/reason/scope 不同；旧 pair 已移除，改由 `turnover_relation_confirm_cross_page` / `turnover_relation_withdraw_cross_page` 精确对应 Turnover UoW。历史慢尾仍保留为当次 worker 性能证据。
 - 生产只读下钻：bank/turnover profile 下 `pending_invoice` 慢尾不是 handler 本身慢，最终 `runtime_result.duration_ms` 多数只有几十到一百多毫秒；慢尾来自 `bank_detail_read_model_not_fresh` dependency defer，并由多个 pending scope 反复补投同一 `bank_detail:2026-03`，把银行明细 source version 从 `44635` bump 到 `44638`。`RuntimeWorker` 追加 dependency fresh guard：依赖 scope 已 fresh 时记录 `already_fresh`，不再 enqueue 依赖 refresh，避免下游 fan-out 自己制造新的 stale。
 - 生产健康：写后 outbox/dirty/readiness 无非 done / 非 fresh；`/health/ready` ready；API、dispatcher 和 20 个 worker active。
 

@@ -50,7 +50,7 @@
 | --- | --- | --- |
 | 关系事实 | repository | 原子持久化关系状态和审计 |
 | 关系 read model | `workbench_relation` projection | scoped incremental distribution；`rows` 是 scope 内 row 索引，唯一键为 `(tenant_id, scope_key, row_id)`；只向下游分发 active relation 的 linked/unlinked 业务口径，不分发 automatic decision candidate。 |
-| 下游 dirty scope | runtime queue | command repository 按受影响页面 fan-out |
+| 下游 dirty scope | runtime queue | command repository/UoW target planner 按受影响页面 fan-out。bank+OA+invoice 的 confirm/withdraw 必须包含 `oa_pending_payment`；bank+invoice 必须包含真实 `cost_statistics` fan-out；tax-offset 对所有 Workbench relation shape 都是非消费者。turnover closure 使用独立正式 Turnover UoW/profile。写后 closure 以 committed idempotency record 的精确 outbox event IDs 对照正式 required/optional profile，不能用同 profile 时间窗样本替代归属。 |
 | no-OA / 流水规则批量 read model dirty scope | `no_oa_bank_batch` runtime queue | `relation_mode=no_oa_bank_batch` 与 `relation_mode=bank_flow_rule_batch` 共用迁移期底座，但 dirty/outbox payload 必须携带 `relation_mode`，outbox dedupe key 必须按 relation mode 分桶；不能让同一月份 no-OA 与 bank-flow 刷新互相覆盖 metadata。 |
 
 ## 持久化与投影

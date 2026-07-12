@@ -1,5 +1,12 @@
 # 监控与告警
 
+## 可逆关系写后闭环
+
+- 生产可逆关系 smoke 统一使用 `write_operation_e2e_smoke` 的 checkpoint 模式；每个 confirm/withdraw 都以唯一 `idempotency_key` 从 committed `app.workbench_idempotency_records` 解析精确 `outbox_event_ids`，不得只按时间窗/profile 抽取样本。
+- 首次 mutation 前必须先通过固定 admin-only `GET /api/operations/app-health/page-audit?page=app-health-operations`；scenario 不能覆盖 Audit path。每个 checkpoint 再依次通过 required/optional scope 合同、worker done/dirty done、consumer API `fresh`、绑定 fixture identity 的 affected assertions、non-consumer 写前/写后 baseline equality，以及新的 17/16 页只读 System Audit。任一事件 ID 未被正式 profile 接受、页面/path/role 不匹配或复用旧 `system_audit_id` 均失败。
+- 只允许 `fixture_ownership=test_owned`、最多 20 个显式 row IDs、三种登记 shape、审批票和正式 mutation contract。bank+invoice/full 只走 Workbench preview/confirm/withdraw；bank+turnover 只走 turnover closure confirm 与 relation-id withdraw。confirm 已提交而后置 gate 失败时执行声明的 recovery checkpoint；withdraw 已提交后不重复撤回；网络结果不明确时不盲重试，输出 `recovery_required`。
+- 该闭环证明 App 内部已登记 canonical/read model/relation 合同，不证明外部银行/OA/发票/ETC 未漏导；外部 evidence `unknown` 可以保留，但不得扩大结论。
+
 ## 当前可观察对象
 
 - `/health` 和 app health API。
@@ -734,18 +741,15 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 边界：
 
 - 工具只读，不发 mutating HTTP，也不写数据库。
-- 默认把已被 write-operation audit profile 覆盖的 `turnover_manual_closure_or_withdraw`、`workbench_relation_withdraw`
-  和 `no_oa_bank_batch_withdraw` 候选写入 scenario。
-- 生产标准使用 `--limit 1` 生成最小闭环输入，避免 full gate 串行执行过多生产写步骤。
-- `turnover_manual_closure_or_withdraw` 只选择 active Workbench relation 支撑的手工往来闭环，要求成员行数在 `2..6`
-  且有明确月份；scenario 必须调用 `/api/workbench/actions/withdraw-link`，禁止把旧
-  `/api/turnover-ledger/relations/{id}/withdraw` 直连路径作为 standing smoke。
-- `workbench_relation_withdraw` 只选择 `manual_confirmed` active relation，要求成员行数在 `2..6` 且有明确月份。
-- `no_oa_bank_batch_withdraw` 只选择 submitted 批次，要求 `scope_month` 非空且 `bank_transaction_ids` 数量在
-  `1..6`，优先选择月份内批次数少的候选。
+- discovery 会列出 `turnover_manual_closure_or_withdraw`、Workbench relation 与 no-OA 候选，但这些普通生产关系仅作为只读审核上下文，不再自动写入 executable scenario；当前只有 bank-flow submit 的独立正式 owner 可以生成可执行 scenario。
+- 三组可逆 relation closure 必须由调用者显式提供 test-owned、bounded、confirm+withdraw checkpoint 场景，不能把 discovery 中的真实业务候选转换为测试写入。
+- `turnover_manual_closure_or_withdraw` 只读上下文仍选择 active Workbench relation 支撑的手工往来闭环；其历史 standing operation 的正式入口仍是 `/api/workbench/actions/withdraw-link`。它与本阶段 bank+turnover test-owned closure 的 `/api/turnover-ledger/closures/confirm` → `/api/turnover-ledger/relations/{id}/withdraw` 是两条不同合同，不得互换 profile 或 endpoint。
+- 生产标准对可生成的 bank-flow 场景使用 `--limit 1`，避免 full gate 串行执行过多生产写步骤。
 - 如果没有发现候选，报告返回 `status=no_candidates`，即使传了 `--scenario-output` 也不会写空 scenario 文件；主控
   workflow 应先准备已审批、可回滚的测试对象，再重新 discovery。
-- 生成的 scenario 仍需要人工确认测试对象、业务影响和回滚路径；不能直接对真实待处理业务盲目 `--apply`。
+- 生成的 bank-flow scenario 仍需要人工确认测试对象、业务影响和回滚路径；不能直接对真实待处理业务盲目 `--apply`。
+
+可逆关系 runtime contract 随 backend release 发布，定义三个 shape、正式 consumer API 与允许的业务数据根；`docs/dev/write-operation-impact-matrix.json` 是测试约束的文档镜像，runner 不在生产读取 `docs/`。mutation 返回非预期 HTTP/HTML 时先视为 ambiguous，并只读查询 durable idempotency record：明确 committed 才允许按正式 recovery checkpoint 清理，明确 failed 才可判定未提交；missing/reserved/冲突保持 `recovery_required`，禁止盲重试或盲撤回。
 
 ## Phase 1.5 读 API 验证
 

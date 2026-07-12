@@ -3664,7 +3664,7 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.p
 
 - 该样本撤回完整 bank+OA relation 后，当前 active relation 恢复为 bank-only `turnover_manual_closure`，后续 fan-out 应覆盖 Workbench、Workbench relation、银行明细、待找发票、成本统计和 search。
 - `invoice_lifecycle`、`input_invoice_usage`、`tax_offset` 适用于 bank+invoice 或 invoice import 等场景；本样本不应要求这些 refresh event。
-- 新增 `workbench_relation_confirm_bank_turnover_cross_page` / `workbench_relation_withdraw_bank_turnover_cross_page` profile，分别覆盖确认/撤回口径下的 bank/turnover read model fan-out。
+- 当时新增 `workbench_relation_confirm_bank_turnover_cross_page` / `workbench_relation_withdraw_bank_turnover_cross_page` 用于一次不对称 Workbench 恢复样本。2026-07-12 终审确认它不能定义可逆业务合同，现已退休；正式 bank+turnover 闭环改由 turnover ledger closure confirm/withdraw profile 负责。
 - 该拆分不等于生产写后 5s 收敛闭合；本轮生产证据中的 `workbench:all`、`pending_invoice`、`cost_statistics` 慢尾仍需后续优化或受控复验。
 
 验证：

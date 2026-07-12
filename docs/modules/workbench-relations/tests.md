@@ -5,6 +5,14 @@ Spec-first Browser e2e 审计入口：
 - `e2e-spec.md`：关系事实源跨页面 Browser e2e 验收合同。
 - `e2e-coverage.md`：Spec ID 到现有 Playwright/Vitest/API/integration 的映射和缺口。
 
+## 2026-07-12 - 三组可逆关系写后证明闭环
+
+- 三种登记 shape：bank+invoice、bank+turnover、bank+OA+invoice；每种只使用一对 confirm/withdraw profile，不做 17×operation 重复套件。
+- runner 合同：test-owned/bounded row IDs、全文件唯一 idempotency key、首次写前管理员 System Audit preflight、逐 checkpoint exact event IDs、required fan-out、worker/freshness、绑定 fixture identity 且限定正式业务响应根的 affected consumer assertions、写前/写后 non-consumer baseline equality、全新 System Audit，以及 confirm 后失败的正式 recovery withdraw。可执行合同随 backend 部署；impact matrix 由测试验证为一致镜像。Workbench withdraw 使用 preview ID/version lock；turnover closure 使用正式 expected versions 和 relation ID handoff。
+- 旧逻辑删除：relation discovery 不再从普通生产 active relation 自动生成 withdraw；原 turnover/workbench/no-OA mutation builders 和无 caller probe 已删除，避免 standing scenario 误改真实业务关系。
+- 合同修正：full bank+OA+invoice 两方向 required scope 增加 `oa_pending_payment`；此前该 consumer 可能漏更新而 SLO profile 仍通过。
+- 七类测试：business core 规则未改变；service/API/read-model-worker/frontend/E2E/regression 均适用并由 SLO evidence、runner contract、impact matrix、PostgreSQL opt-in、定向 Browser 和 legacy load 映射覆盖。真实 PostgreSQL 测试缺 `FIN_OPS_TEST_DATABASE_URL` 时必须显式 skip，不能记为真实环境通过。
+
 ## 2026-07-03 - confirm link OA 附件上下文对称补齐
 
 - 变更类型：Workbench confirm 写入边界修复；不改变 HTTP response shape、权限、审计字段、relation payload schema 或 read model freshness 合同。
@@ -63,7 +71,7 @@ Spec-first Browser e2e 审计入口：
 - `tests/test_workbench_reconciliation_decision_store.py::WorkbenchReconciliationDecisionStoreTests::test_upsert_does_not_revive_suppressed_decision`：decision upsert 不复活已 suppressed 的用户取消建议。
 - `tests/test_workbench_write_characterization.py`：confirm/withdraw UoW、idempotency、rollback、stale precondition、目标月 Workbench refresh，以及已知 affected month 时 `all` 只能走 aggregate-only 收敛，不能触发 full all shard fan-out。
 - `tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview`：confirm preview 基于 canonical active relation 判定已配对 row-set，返回 withdraw preview，而不是继续允许 confirm。
-- `tests/test_write_operation_slo_audit.py`：Workbench confirm/withdraw canonical UoW 后的 write operation SLO profile，覆盖 `workbench_relation`、下游 read model reason、bank+invoice 非成本 profile、以及 `--since` 过滤生产修复前旧样本。
+- `tests/test_write_operation_slo_audit.py`：Workbench/turnover canonical UoW 后的 write operation SLO profile，覆盖 `workbench_relation`、下游 read model reason、bank+invoice 真实成本 fan-out、turnover closure 正反向 profile，以及 `--since` 过滤旧样本。
 - `tests/test_workbench_relation_sql_projection.py`：`workbench_relation` distribution、linked/unlinked rows、open automatic decision 不再作为 downstream candidate group、正式发票和 OA 附件发票 identity 去重。
 - `tests/test_workbench_relation_read_facade.py`：freshness-gated facade、missing 入队刷新、unlinked 过滤、relation status 不被硬编码为 active。
 - `tests/test_platform_runtime_boundary_guards.py`：下游读模型不得直接 join `app.workbench_pair_relations`，银行明细关系标签必须走 facade，ETC summary 删除、server OA offset auto pair、OA 附件上下文 repair、batch accounting legacy repair 和 no-OA legacy repair/consolidation 不得退回 direct pair relation mutation。
@@ -143,7 +151,7 @@ Spec-first Browser e2e 审计入口：
 
 - relation 写入后 `workbench_relation` 与 `workbench` dirty/outbox 入队；`workbench` 必须覆盖 affected month scopes，且已知 affected month 时 `all` 必须作为 aggregate-only refresh 入队；完全无法推导 affected month 时才允许普通 `all` fallback。ETC summary delete command result 必须返回 changed case ids 和 affected months 并驱动 Workbench relation invalidation。
 - relation 写入后 `pending_invoice` dirty/outbox 必须按银行流水月份投递 shard scope（例如 `expense:all:2026-02`），不能投递会扩展到多个月份的基础 scope（例如 `expense:all`）。
-- relation 写入后 downstream dirty/outbox 必须按 row domain 路由：银行明细只刷银行流水月份，发票生命周期/进项使用/销项收款/税抵扣只刷发票或 OA 相关月份，`search` / `workbench_relation` 保留跨域 broad scope；`cost_statistics` 只由未知 row type、bank+OA、no-OA batch 或 turnover 成本关系触发，bank+invoice 不应刷新成本统计。旧数据缺少事实表月份时必须保留 `read_model.workbench_rows` fallback。
+- relation 写入后 downstream dirty/outbox 必须按 row domain 路由：银行明细只刷银行流水月份，发票生命周期/进项使用/销项收款只刷相应发票或 OA 相关月份，`search` / `workbench_relation` 保留跨域 broad scope；`cost_statistics` 对含 bank、invoice、OA 或未知 row type 的正式 Workbench relation 都是 affected consumer，bank+invoice 也必须刷新。`tax_offset` 不消费 Workbench relation，不得产生 relation dirty/outbox。旧数据缺少事实表月份时必须保留 `read_model.workbench_rows` fallback。
 - relation 写入后 downstream dirty/outbox 必须使用 `high` priority，避免用户写操作后的真实同步被普通后台刷新排队拖慢；只有无法从 relation/bank/invoice/OA 事实拿到月份时才允许查 `read_model.workbench_rows` legacy fallback。
 - search read model 保存必须走批量写入路径，避免 relation 写后 `search.read_model.refresh` 因逐行写 `read_model.search_index_rows` 成为当前 P2/P3 一秒级写后同步门禁的长尾。
 - search read model projection 必须保留 `workbench_group_rows.group_id`，`/api/search` 的 SQL read model hit 必须返回 linked group `jump_target`，避免 relation 写后 search fresh 但用户无法跳回已关联组。

@@ -136,7 +136,7 @@ class MultiCandidateConnection(FakeConnection):
 
 
 class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
-    def test_discovers_turnover_scenario_and_context_candidates(self) -> None:
+    def test_discovers_relation_context_without_turning_business_facts_into_mutations(self) -> None:
         report = discovery.discover_write_operation_scenarios(FakeConnection(), limit=5)
 
         self.assertEqual(report["status"], "ready")
@@ -145,38 +145,20 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         self.assertEqual(report["candidate_counts"]["bank_flow_rule_batch_submit_context"], 1)
         self.assertEqual(report["candidate_counts"]["no_oa_bank_batch_withdraw_context"], 1)
         scenarios = report["scenario_json"]["scenarios"]
-        self.assertEqual(len(scenarios), 3)
-        operations = [scenario["operation"] for scenario in scenarios]
+        self.assertEqual([scenario["operation"] for scenario in scenarios], ["bank_flow_rule_batch_submit"])
+        self.assertEqual(scenarios[0]["steps"][0]["path"], "/api/bank-flow-rule-batches/submit-selection")
         self.assertEqual(
-            operations,
-            [
-                "turnover_manual_closure_or_withdraw",
-                "workbench_relation_withdraw",
-                "bank_flow_rule_batch_submit",
-            ],
+            scenarios[0]["steps"][0]["json"]["transaction_ids"],
+            [f"bank-fee-{index}" for index in range(1, 11)],
         )
-        self.assertEqual(scenarios[0]["steps"][0]["path"], "/api/workbench/actions/withdraw-link")
-        self.assertEqual(scenarios[0]["steps"][0]["json"]["row_ids"], ["txn-1", "oa-1"])
-        self.assertEqual(scenarios[0]["metadata"]["candidate_case_id"], "turnover:turnover_rel_1")
-        self.assertEqual(scenarios[1]["steps"][0]["path"], "/api/workbench/actions/withdraw-link")
-        self.assertEqual(scenarios[1]["steps"][0]["json"]["row_ids"], ["oa-1", "bank-1"])
-        scenario_1_probe_paths = {probe["name"]: probe["path"] for probe in scenarios[1]["post_api_probes"]}
-        self.assertEqual(
-            scenario_1_probe_paths["workbench_groups_month_paired"],
-            "/api/workbench/groups?month=2026-06&zone=paired&page=1&page_size=50&detail_level=summary",
-        )
-        self.assertEqual(
-            scenario_1_probe_paths["workbench_groups_all_paired"],
-            "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50&detail_level=summary",
-        )
-        self.assertEqual(scenarios[2]["steps"][0]["path"], "/api/bank-flow-rule-batches/submit-selection")
-        self.assertEqual(scenarios[2]["steps"][0]["json"]["transaction_ids"], [f"bank-fee-{index}" for index in range(1, 11)])
-        self.assertEqual(scenarios[2]["metadata"]["candidate_batch_type"], "fee")
-        probe_names = {probe["name"] for probe in scenarios[2]["post_api_probes"]}
+        self.assertEqual(scenarios[0]["metadata"]["candidate_batch_type"], "fee")
+        probe_names = {probe["name"] for probe in scenarios[0]["post_api_probes"]}
         self.assertIn("bank_flow_rule_batches_submitted", probe_names)
         self.assertIn("workbench_groups_all_paired", probe_names)
         self.assertIn("workbench_groups_month_paired", probe_names)
-        self.assertTrue(all("requires_manual_approval_before_apply" not in scenario["metadata"] for scenario in scenarios))
+        self.assertTrue(
+            all("requires_manual_approval_before_apply" not in scenario["metadata"] for scenario in scenarios)
+        )
         self.assertEqual(
             scenarios[0]["metadata"]["approval_ticket"],
             "FINOPS-WRITE-SMOKE-STANDING-20260702",
@@ -184,6 +166,25 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         self.assertEqual(
             report["standard_inputs"]["scenario_path"],
             "/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json",
+        )
+
+        closure = report["reversible_relation_closure"]
+        self.assertEqual(closure["generated_scenario_count"], 0)
+        self.assertEqual(closure["candidate_policy"], "read_only_context_only")
+        self.assertEqual(
+            closure["profile_pair_registry"],
+            "fin_ops_platform.tools.write_operation_e2e_smoke.REVERSIBLE_RELATION_SHAPE_CONTRACTS",
+        )
+        self.assertEqual(
+            closure["required_scenario_contract"],
+            {
+                "fixture_ownership": "test_owned",
+                "bounded_row_ids": True,
+                "approval_required": True,
+                "checkpoints": ["confirm", "withdraw"],
+                "cleanup": "withdraw",
+                "unique_idempotency_key_per_mutation": True,
+            },
         )
 
     def test_turnover_discovery_matches_withdraw_boundary_source_contract(self) -> None:
@@ -219,6 +220,10 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         self.assertTrue(report["safety"]["requires_approval_ticket_before_apply"])
         self.assertNotIn("requires_manual_approval_before_apply", report["safety"])
         self.assertEqual(report["safety"]["approval_ticket"], "FINOPS-WRITE-SMOKE-STANDING-20260702")
+        self.assertIn(
+            "Existing turnover and Workbench relations are context only; discovery never turns ordinary business facts into executable relation mutations.",
+            report["safety"]["notes"],
+        )
 
     def test_standard_apply_scenarios_are_capped_per_operation(self) -> None:
         report = discovery.discover_write_operation_scenarios(MultiCandidateConnection(), limit=5)
@@ -229,10 +234,9 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         scenarios = report["scenario_json"]["scenarios"]
         self.assertEqual(
             [scenario["operation"] for scenario in scenarios],
-            ["workbench_relation_withdraw", "bank_flow_rule_batch_submit"],
+            ["bank_flow_rule_batch_submit"],
         )
-        self.assertEqual(scenarios[0]["name"], "workbench-withdraw-CASE-1")
-        self.assertEqual(scenarios[1]["name"], "bank-flow-rule-submit-BANK-FLOW-BATCH-1")
+        self.assertEqual(scenarios[0]["name"], "bank-flow-rule-submit-BANK-FLOW-BATCH-1")
 
     def test_bank_flow_discovery_uses_current_page_source_and_excludes_active_relations(self) -> None:
         connection = FakeConnection()
@@ -318,10 +322,13 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
             report_path = Path(temp_dir) / "report.json"
             scenario_path = Path(temp_dir) / "scenario.json"
             stdout = StringIO()
-            with patch.object(discovery.PostgresSettings, "from_env", return_value=object()), patch.object(
-                discovery,
-                "PostgresConnection",
-                return_value=FakeConnection(),
+            with (
+                patch.object(discovery.PostgresSettings, "from_env", return_value=object()),
+                patch.object(
+                    discovery,
+                    "PostgresConnection",
+                    return_value=FakeConnection(),
+                ),
             ):
                 exit_code = discovery.main(
                     [
@@ -339,24 +346,27 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(report["mode"], "read_only")
         self.assertTrue(report["scenario_output"]["written"])
-        self.assertEqual(report["scenario_output"]["scenario_count"], 3)
+        self.assertEqual(report["scenario_output"]["scenario_count"], 1)
         self.assertEqual(
             scenario["standard_inputs"]["approval_ticket"],
             "FINOPS-WRITE-SMOKE-STANDING-20260702",
         )
         self.assertIn("page_write_scenario_policy", scenario)
-        self.assertEqual(len(scenario["scenarios"]), 3)
-        self.assertEqual(scenario["scenarios"][2]["operation"], "bank_flow_rule_batch_submit")
+        self.assertEqual(len(scenario["scenarios"]), 1)
+        self.assertEqual(scenario["scenarios"][0]["operation"], "bank_flow_rule_batch_submit")
 
     def test_cli_does_not_write_empty_scenario_file_when_no_candidates_are_found(self) -> None:
         with TemporaryDirectory() as temp_dir:
             report_path = Path(temp_dir) / "report.json"
             scenario_path = Path(temp_dir) / "scenario.json"
             stdout = StringIO()
-            with patch.object(discovery.PostgresSettings, "from_env", return_value=object()), patch.object(
-                discovery,
-                "PostgresConnection",
-                return_value=EmptyCandidateConnection(),
+            with (
+                patch.object(discovery.PostgresSettings, "from_env", return_value=object()),
+                patch.object(
+                    discovery,
+                    "PostgresConnection",
+                    return_value=EmptyCandidateConnection(),
+                ),
             ):
                 exit_code = discovery.main(
                     [

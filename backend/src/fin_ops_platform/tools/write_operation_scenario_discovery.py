@@ -8,7 +8,11 @@ import sys
 from typing import Any, Sequence, TextIO
 from urllib.parse import quote
 
-from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import (
+    PostgresConfigurationError,
+    PostgresConnection,
+    PostgresSettings,
+)
 from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report, write_json_report
 
 
@@ -182,14 +186,6 @@ def discover_write_operation_scenarios(
     no_oa_candidates = _no_oa_withdraw_candidates(connection, limit=normalized_limit)
     scenarios = [
         *[
-            _turnover_withdraw_scenario(candidate)
-            for candidate in turnover_candidates[:STANDARD_SCENARIOS_PER_OPERATION]
-        ],
-        *[
-            _workbench_withdraw_scenario(candidate)
-            for candidate in workbench_candidates[:STANDARD_SCENARIOS_PER_OPERATION]
-        ],
-        *[
             _bank_flow_rule_batch_submit_scenario(candidate)
             for candidate in bank_flow_candidates[:STANDARD_SCENARIOS_PER_OPERATION]
         ],
@@ -211,9 +207,24 @@ def discover_write_operation_scenarios(
         "scenario_json": {
             "scenarios": scenarios,
             "warning": (
-                "Use these controlled reversible scenarios with the standard approval ticket from "
-                "standard_inputs; do not request a one-off approval for standing production smoke."
+                "Only the current bank-flow owner may emit an executable discovery scenario. "
+                "Relation candidates are read-only context and require an explicit test-owned reversible scenario."
             ),
+        },
+        "reversible_relation_closure": {
+            "profile_pair_registry": (
+                "fin_ops_platform.tools.write_operation_e2e_smoke.REVERSIBLE_RELATION_SHAPE_CONTRACTS"
+            ),
+            "generated_scenario_count": 0,
+            "candidate_policy": "read_only_context_only",
+            "required_scenario_contract": {
+                "fixture_ownership": "test_owned",
+                "bounded_row_ids": True,
+                "approval_required": True,
+                "checkpoints": ["confirm", "withdraw"],
+                "cleanup": "withdraw",
+                "unique_idempotency_key_per_mutation": True,
+            },
         },
         "candidates": {
             "turnover_manual_closure_or_withdraw": turnover_candidates,
@@ -230,7 +241,9 @@ def discover_write_operation_scenarios(
             "approval_ticket_policy": "standing_ticket_allowed_for_controlled_reversible_smoke",
             "notes": [
                 "Discovery is read-only and does not call mutating HTTP endpoints.",
-                "Generated scenarios are limited to controlled turnover, Workbench withdraw, or current bank-flow submit candidates.",
+                "Existing turnover and Workbench relations are context only; discovery never turns ordinary business facts into executable relation mutations.",
+                "Only the current bank-flow submit owner may emit an executable discovery scenario.",
+                "Reversible relation apply requires an explicit test-owned, bounded confirm-and-withdraw scenario with unique idempotency keys.",
                 "Legacy no-OA candidates remain discovery-only context and are not part of current standard page coverage.",
                 "Apply remains blocked until real OA/Admin auth and the standard approval ticket are supplied.",
             ],
@@ -507,96 +520,6 @@ def _bank_flow_rule_batch_submit_candidates(connection: Any, *, limit: int) -> l
     ]
 
 
-def _turnover_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
-    relation_id = _text(candidate.get("relation_id"))
-    row_ids = [_text(item) for item in list(candidate.get("row_ids") or []) if _text(item)]
-    month = _month_text(candidate.get("scope_month")) or "all"
-    return {
-        "name": f"turnover-withdraw-{relation_id}",
-        "operation": "turnover_manual_closure_or_withdraw",
-        "steps": [
-            {
-                "name": "withdraw",
-                "method": "POST",
-                "path": "/api/workbench/actions/withdraw-link",
-                "json": {
-                    "month": month,
-                    "row_ids": row_ids,
-                    "note": "controlled runtime sync SLO smoke withdraw under standing ticket",
-                    "idempotency_key": f"runtime-sync-slo-withdraw-{relation_id}",
-                },
-                "expected_statuses": [200],
-            }
-        ],
-        "post_api_probes": [
-            *_workbench_paired_probes(month),
-            {
-                "name": "turnover_ledger_grouped",
-                "path": "/api/turnover-ledger?view=grouped&page=1&page_size=50",
-                "expected_statuses": [200, 202],
-                "target_ms": 1000,
-            },
-            *_bank_relation_fanout_probes(month),
-            {
-                "name": "operations_app_health_dashboard",
-                "path": "/api/operations/app-health-dashboard",
-                "expected_statuses": [200, 202],
-                "target_ms": 1000,
-            },
-        ],
-        "metadata": {
-            **_standard_scenario_metadata("turnover-ledger"),
-            "candidate_status": candidate.get("status"),
-            "candidate_scope_month": candidate.get("scope_month"),
-            "candidate_case_id": candidate.get("case_id"),
-            "candidate_relation_mode": candidate.get("relation_mode"),
-            "candidate_row_count": candidate.get("row_count"),
-            "risk": candidate.get("risk"),
-        },
-    }
-
-
-def _workbench_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
-    case_id = _text(candidate.get("case_id"))
-    row_ids = [_text(item) for item in list(candidate.get("row_ids") or []) if _text(item)]
-    month = _month_text(candidate.get("month")) or "all"
-    return {
-        "name": f"workbench-withdraw-{case_id}",
-        "operation": "workbench_relation_withdraw",
-        "steps": [
-            {
-                "name": "withdraw",
-                "method": "POST",
-                "path": "/api/workbench/actions/withdraw-link",
-                "json": {
-                    "month": month,
-                    "row_ids": row_ids,
-                    "note": "controlled runtime sync SLO smoke withdraw under standing ticket",
-                },
-                "expected_statuses": [200],
-            }
-        ],
-        "post_api_probes": [
-            *_workbench_paired_probes(month),
-            *_bank_invoice_relation_fanout_probes(month),
-            {
-                "name": "operations_app_health_dashboard",
-                "path": "/api/operations/app-health-dashboard",
-                "expected_statuses": [200, 202],
-                "target_ms": 1000,
-            },
-        ],
-        "metadata": {
-            **_standard_scenario_metadata("reconciliation-workbench"),
-            "candidate_case_id": case_id,
-            "candidate_relation_mode": candidate.get("relation_mode"),
-            "candidate_month": month,
-            "candidate_row_count": candidate.get("row_count"),
-            "risk": candidate.get("risk"),
-        },
-    }
-
-
 def _bank_flow_rule_batch_submit_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
     batch_id = _text(candidate.get("batch_id"))
     month = _month_text(candidate.get("month")) or "all"
@@ -639,51 +562,6 @@ def _bank_flow_rule_batch_submit_scenario(candidate: dict[str, Any]) -> dict[str
             "candidate_batch_label": candidate.get("batch_label"),
             "candidate_month": month,
             "candidate_row_count": candidate.get("row_count"),
-            "risk": candidate.get("risk"),
-        },
-    }
-
-
-def _no_oa_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
-    batch_id = _text(candidate.get("batch_id"))
-    month = _month_text(candidate.get("month")) or "all"
-    version = candidate.get("version")
-    return {
-        "name": f"no-oa-withdraw-{batch_id}",
-        "operation": "no_oa_bank_batch_withdraw",
-        "steps": [
-            {
-                "name": "withdraw",
-                "method": "POST",
-                "path": f"/api/no-oa-bank-batches/{quote(batch_id, safe='')}/withdraw",
-                "json": {
-                    "expected_version": version,
-                    "reason": "controlled runtime sync SLO smoke withdraw under standing ticket",
-                },
-                "expected_statuses": [200],
-            }
-        ],
-        "post_api_probes": [
-            {
-                "name": "no_oa_bank_batches",
-                "path": f"/api/no-oa-bank-batches?month={quote(month, safe='')}&bucket=submitted",
-                "expected_statuses": [200, 202],
-                "target_ms": 1000,
-            },
-            {
-                "name": "operations_app_health_dashboard",
-                "path": "/api/operations/app-health-dashboard",
-                "expected_statuses": [200, 202],
-                "target_ms": 1000,
-            },
-        ],
-        "metadata": {
-            **_standard_scenario_metadata("no-oa-bank-batches"),
-            "candidate_batch_id": batch_id,
-            "candidate_month": month,
-            "candidate_version": version,
-            "candidate_row_count": candidate.get("row_count"),
-            "candidate_month_batch_count": candidate.get("month_batch_count"),
             "risk": candidate.get("risk"),
         },
     }
@@ -734,25 +612,6 @@ def _bank_relation_fanout_probes(month: str) -> list[dict[str, Any]]:
         {
             "name": "search_all",
             "path": "/api/search?q=%E5%85%AC%E5%8F%B8&scope=all&month=all&limit=5",
-            "expected_statuses": [200, 202],
-            "target_ms": 1000,
-        },
-    ]
-
-
-def _bank_invoice_relation_fanout_probes(month: str) -> list[dict[str, Any]]:
-    month_scope = _month_text(month) or "all"
-    return [
-        *_bank_relation_fanout_probes(month_scope),
-        {
-            "name": "input_invoice_usage_rows",
-            "path": "/api/input-invoice-usage/rows?page=1&page_size=20",
-            "expected_statuses": [200, 202],
-            "target_ms": 1000,
-        },
-        {
-            "name": "tax_offset_rows",
-            "path": f"/api/tax-offset?month={quote(month_scope, safe='')}",
             "expected_statuses": [200, 202],
             "target_ms": 1000,
         },

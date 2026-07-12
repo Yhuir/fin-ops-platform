@@ -1,10 +1,83 @@
 {
-  "version": 1,
+  "version": 3,
   "slo": {
     "p95_enqueue_to_done_ms": 1000,
     "p99_enqueue_to_done_ms": 3000
   },
   "description": "Write-operation impact matrix. Every operation in write_operation_slo_audit.DEFAULT_OPERATION_EXPECTATIONS must have one row. expected_outbox_scope_types must exactly match the audit profile scope types.",
+  "reversible_relation_consumer_probe_paths": {
+    "reconciliation-workbench": "/api/workbench/groups",
+    "bank-details": "/api/bank-details/transactions",
+    "pending-invoices": "/api/pending-invoices/rows",
+    "input-invoice-usage": "/api/input-invoice-usage/rows",
+    "oa-pending-payments": "/api/oa-pending-payments/rows",
+    "cost-statistics": "/api/cost-statistics/explorer",
+    "tax-offset": "/api/tax-offset",
+    "turnover-ledger": "/api/turnover-ledger"
+  },
+  "reversible_relation_consumer_business_roots": {
+    "reconciliation-workbench": ["groups"],
+    "bank-details": ["rows"],
+    "pending-invoices": ["rows"],
+    "input-invoice-usage": ["rows"],
+    "oa-pending-payments": ["rows"],
+    "cost-statistics": ["time_rows", "bank_flow_time_rows", "project_rows", "expense_type_rows"],
+    "tax-offset": ["output_items", "input_plan_items", "certified_items"],
+    "turnover-ledger": ["groups", "rows"]
+  },
+  "reversible_relation_profile_pairs": [
+    {
+      "shape": "bank_invoice",
+      "mutation_contract": "workbench_relation",
+      "confirm_profile": "workbench_relation_confirm_bank_invoice_cross_page",
+      "withdraw_profile": "workbench_relation_withdraw_bank_invoice_cross_page",
+      "affected_consumer_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "cost-statistics"],
+      "non_consumer_isolation_page_keys": ["tax-offset"],
+      "safety_contract": {
+        "fixture_ownership": "test_owned",
+        "bounded_row_ids": true,
+        "approval_required": true,
+        "checkpoints": ["confirm", "withdraw"],
+        "cleanup": "withdraw",
+        "unique_idempotency_key_per_mutation": true,
+        "discovery_candidate_policy": "read_only_context_only"
+      }
+    },
+    {
+      "shape": "bank_turnover",
+      "mutation_contract": "turnover_closure",
+      "confirm_profile": "turnover_relation_confirm_cross_page",
+      "withdraw_profile": "turnover_relation_withdraw_cross_page",
+      "affected_consumer_page_keys": ["reconciliation-workbench", "cost-statistics", "turnover-ledger"],
+      "non_consumer_isolation_page_keys": ["input-invoice-usage"],
+      "safety_contract": {
+        "fixture_ownership": "test_owned",
+        "bounded_row_ids": true,
+        "approval_required": true,
+        "checkpoints": ["confirm", "withdraw"],
+        "cleanup": "withdraw",
+        "unique_idempotency_key_per_mutation": true,
+        "discovery_candidate_policy": "read_only_context_only"
+      }
+    },
+    {
+      "shape": "bank_oa_invoice",
+      "mutation_contract": "workbench_relation",
+      "confirm_profile": "workbench_relation_confirm_cross_page",
+      "withdraw_profile": "workbench_relation_withdraw_cross_page",
+      "affected_consumer_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "oa-pending-payments", "cost-statistics"],
+      "non_consumer_isolation_page_keys": ["tax-offset"],
+      "safety_contract": {
+        "fixture_ownership": "test_owned",
+        "bounded_row_ids": true,
+        "approval_required": true,
+        "checkpoints": ["confirm", "withdraw"],
+        "cleanup": "withdraw",
+        "unique_idempotency_key_per_mutation": true,
+        "discovery_candidate_policy": "read_only_context_only"
+      }
+    }
+  ],
   "operations": [
     {
       "operation": "bank_auto_tag_rules",
@@ -232,9 +305,9 @@
       "write_entrypoints": ["/api/workbench/actions/confirm-link"],
       "write_fact_sources": ["app.workbench_pair_relations", "app.bank_transactions", "app.oa_applications", "app.invoices"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
-      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "cost-statistics"],
+      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "oa_pending_payment", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "oa_pending_payment", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "oa-pending-payments", "cost-statistics"],
       "production_gate": {"slo_audit_profile": "workbench_relation_confirm_cross_page", "apply_policy": "audit_profile_only"},
       "deterministic_evidence": [{"path": "web/e2e/input-invoice-relation-fanout.spec.ts", "required_markers": ["关联台已确认", "智能工厂项目"]}]
     },
@@ -244,9 +317,9 @@
       "write_entrypoints": ["/api/workbench/actions/withdraw-link"],
       "write_fact_sources": ["app.workbench_pair_relations", "app.bank_transactions", "app.oa_applications", "app.invoices"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
-      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "cost-statistics"],
+      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "oa_pending_payment", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "oa_pending_payment", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "oa-pending-payments", "cost-statistics"],
       "production_gate": {"slo_audit_profile": "workbench_relation_withdraw_cross_page", "apply_policy": "audit_profile_only"},
       "deterministic_evidence": [{"path": "web/e2e/workbench-withdraw-flow.spec.ts", "required_markers": ["withdraw_relation:CASE-202603-101", "candidate-group-open-case:CASE-202603-101"]}]
     },
@@ -256,9 +329,9 @@
       "write_entrypoints": ["/api/workbench/actions/confirm-link"],
       "write_fact_sources": ["app.workbench_pair_relations", "app.bank_transactions", "app.invoices"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
-      "expected_outbox_scope_types": ["bank_detail", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_read_model_keys": ["bank_detail", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage"],
+      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "cost-statistics"],
       "production_gate": {"slo_audit_profile": "workbench_relation_confirm_bank_invoice_cross_page", "apply_policy": "audit_profile_only"},
       "deterministic_evidence": [{"path": "web/e2e/input-invoice-relation-fanout.spec.ts", "required_markers": ["SD-INV-E2E-REL-001", "已关联oa"]}]
     },
@@ -268,34 +341,34 @@
       "write_entrypoints": ["/api/workbench/actions/withdraw-link"],
       "write_fact_sources": ["app.workbench_pair_relations", "app.bank_transactions", "app.invoices"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
-      "expected_outbox_scope_types": ["bank_detail", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_read_model_keys": ["bank_detail", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage"],
+      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "cost-statistics"],
       "production_gate": {"slo_audit_profile": "workbench_relation_withdraw_bank_invoice_cross_page", "apply_policy": "audit_profile_only"},
       "deterministic_evidence": [{"path": "web/e2e/workbench-withdraw-flow.spec.ts", "required_markers": ["withdraw_relation:CASE-202603-101", "91330108MA27B4011D"]}]
     },
     {
-      "operation": "workbench_relation_confirm_bank_turnover_cross_page",
-      "source_page_keys": ["reconciliation-workbench", "turnover-ledger"],
-      "write_entrypoints": ["/api/workbench/actions/confirm-link"],
-      "write_fact_sources": ["app.workbench_pair_relations", "app.bank_transactions", "app.turnover_relations"],
+      "operation": "turnover_relation_confirm_cross_page",
+      "source_page_keys": ["turnover-ledger"],
+      "write_entrypoints": ["/api/turnover-ledger/closures/confirm"],
+      "write_fact_sources": ["app.turnover_relations", "app.bank_transactions", "app.workbench_pair_relations"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
-      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_read_model_keys": ["bank_detail", "cost_statistics", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "cost-statistics", "turnover-ledger"],
-      "production_gate": {"slo_audit_profile": "workbench_relation_confirm_bank_turnover_cross_page", "apply_policy": "audit_profile_only"},
+      "expected_outbox_scope_types": ["cost_statistics", "search", "turnover_ledger", "workbench", "workbench_relation"],
+      "target_read_model_keys": ["cost_statistics", "search", "turnover_ledger", "workbench", "workbench_relation"],
+      "target_page_keys": ["reconciliation-workbench", "cost-statistics", "turnover-ledger"],
+      "production_gate": {"slo_audit_profile": "turnover_relation_confirm_cross_page", "apply_policy": "audit_profile_only"},
       "deterministic_evidence": [{"path": "web/e2e/turnover-ledger-flow.spec.ts", "required_markers": ["收支闭环", "外部往来闭环成本项目"]}]
     },
     {
-      "operation": "workbench_relation_withdraw_bank_turnover_cross_page",
-      "source_page_keys": ["reconciliation-workbench", "turnover-ledger"],
-      "write_entrypoints": ["/api/workbench/actions/withdraw-link"],
-      "write_fact_sources": ["app.workbench_pair_relations", "app.bank_transactions", "app.turnover_relations"],
+      "operation": "turnover_relation_withdraw_cross_page",
+      "source_page_keys": ["turnover-ledger"],
+      "write_entrypoints": ["/api/turnover-ledger/relations/{relation_id}/withdraw"],
+      "write_fact_sources": ["app.turnover_relations", "app.bank_transactions", "app.workbench_pair_relations"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
-      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_read_model_keys": ["bank_detail", "cost_statistics", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "cost-statistics", "turnover-ledger"],
-      "production_gate": {"slo_audit_profile": "workbench_relation_withdraw_bank_turnover_cross_page", "apply_policy": "audit_profile_only"},
+      "expected_outbox_scope_types": ["cost_statistics", "search", "turnover_ledger", "workbench", "workbench_relation"],
+      "target_read_model_keys": ["cost_statistics", "search", "turnover_ledger", "workbench", "workbench_relation"],
+      "target_page_keys": ["reconciliation-workbench", "cost-statistics", "turnover-ledger"],
+      "production_gate": {"slo_audit_profile": "turnover_relation_withdraw_cross_page", "apply_policy": "audit_profile_only"},
       "deterministic_evidence": [{"path": "web/e2e/turnover-ledger-flow.spec.ts", "required_markers": ["withdraw", "浏览器 e2e 归还借款"]}]
     }
   ]

@@ -451,6 +451,6 @@ Plans:
 
 Plans:
 
-- [ ] 20-01-PLAN — Build the single checkpoint closure runner, register three reversible relation shapes, remove retired paths, and verify deterministic plus disposable-PostgreSQL evidence.
+- [x] 20-01-PLAN — Build the single checkpoint closure runner, register three reversible relation shapes, remove retired paths, and verify deterministic plus disposable-PostgreSQL evidence.
 
 ---

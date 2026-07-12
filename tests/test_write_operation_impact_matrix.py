@@ -14,7 +14,12 @@ if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY  # noqa: E402
-from fin_ops_platform.tools import write_operation_scenario_discovery, write_operation_slo_audit  # noqa: E402
+from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade  # noqa: E402
+from fin_ops_platform.tools import (  # noqa: E402
+    write_operation_e2e_smoke,
+    write_operation_scenario_discovery,
+    write_operation_slo_audit,
+)
 
 
 MATRIX_PATH = REPO_ROOT / "docs" / "dev" / "write-operation-impact-matrix.json"
@@ -25,6 +30,21 @@ APPLY_POLICIES = {
     "audit_profile_only",
     "single_use_approval_required",
     "legacy_audit_only",
+}
+
+REVERSIBLE_RELATION_PROFILE_PAIRS = {
+    "bank_invoice": (
+        "workbench_relation_confirm_bank_invoice_cross_page",
+        "workbench_relation_withdraw_bank_invoice_cross_page",
+    ),
+    "bank_turnover": (
+        "turnover_relation_confirm_cross_page",
+        "turnover_relation_withdraw_cross_page",
+    ),
+    "bank_oa_invoice": (
+        "workbench_relation_confirm_cross_page",
+        "workbench_relation_withdraw_cross_page",
+    ),
 }
 
 
@@ -90,7 +110,9 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
             for page_key in row["target_page_keys"]:
                 self.assertIn(page_key, valid_page_keys, operation)
                 page_read_model_keys = set(self.page_rows_by_key[page_key]["read_model_keys"])
-                accepted_read_model_keys = target_read_model_keys | set(row.get("legacy_page_proxy_read_model_keys", []))
+                accepted_read_model_keys = target_read_model_keys | set(
+                    row.get("legacy_page_proxy_read_model_keys", [])
+                )
                 if not page_read_model_keys:
                     self.assertIn(
                         page_key,
@@ -111,6 +133,125 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
                 self.assertIn("read_model.workbench_relation_rows", relation_sources, operation)
             else:
                 self.assertEqual(relation_sources, set(), operation)
+
+    def test_reversible_relation_registry_has_exactly_three_safe_profile_pairs(self) -> None:
+        pairs = list(self.matrix["reversible_relation_profile_pairs"])
+        pairs_by_shape = {str(pair["shape"]): pair for pair in pairs}
+        consumer_probe_paths = dict(self.matrix["reversible_relation_consumer_probe_paths"])
+        consumer_business_roots = dict(self.matrix["reversible_relation_consumer_business_roots"])
+
+        self.assertEqual(len(pairs), 3)
+        self.assertEqual(set(pairs_by_shape), set(REVERSIBLE_RELATION_PROFILE_PAIRS))
+        for shape, expected_profiles in REVERSIBLE_RELATION_PROFILE_PAIRS.items():
+            pair = pairs_by_shape[shape]
+            self.assertEqual(
+                pair["mutation_contract"],
+                "turnover_closure" if shape == "bank_turnover" else "workbench_relation",
+            )
+            profiles = (str(pair["confirm_profile"]), str(pair["withdraw_profile"]))
+            self.assertEqual(profiles, expected_profiles, shape)
+
+            confirm_row = self.rows_by_operation[profiles[0]]
+            withdraw_row = self.rows_by_operation[profiles[1]]
+            affected_consumers = set(pair["affected_consumer_page_keys"])
+            non_consumers = set(pair["non_consumer_isolation_page_keys"])
+            self.assertEqual(affected_consumers, set(confirm_row["target_page_keys"]), shape)
+            self.assertEqual(affected_consumers, set(withdraw_row["target_page_keys"]), shape)
+            self.assertTrue(non_consumers, shape)
+            self.assertEqual(affected_consumers & non_consumers, set(), shape)
+            self.assertEqual(non_consumers - set(self.page_rows_by_key), set(), shape)
+
+            for row in (confirm_row, withdraw_row):
+                self.assertEqual(
+                    set(row["pairing_relation_fact_sources"]),
+                    {"app.workbench_pair_relations", "read_model.workbench_relation_rows"},
+                    row["operation"],
+                )
+
+            self.assertEqual(
+                pair["safety_contract"],
+                {
+                    "fixture_ownership": "test_owned",
+                    "bounded_row_ids": True,
+                    "approval_required": True,
+                    "checkpoints": ["confirm", "withdraw"],
+                    "cleanup": "withdraw",
+                    "unique_idempotency_key_per_mutation": True,
+                    "discovery_candidate_policy": "read_only_context_only",
+                },
+                shape,
+            )
+        registered_pages = {
+            str(page_key)
+            for pair in pairs
+            for key in ("affected_consumer_page_keys", "non_consumer_isolation_page_keys")
+            for page_key in pair[key]
+        }
+        self.assertEqual(set(consumer_probe_paths), registered_pages)
+        self.assertTrue(all(str(path).startswith("/api/") for path in consumer_probe_paths.values()))
+        self.assertEqual(set(consumer_business_roots), registered_pages)
+        self.assertTrue(all(consumer_business_roots[page_key] for page_key in registered_pages))
+        runtime_consumers = write_operation_e2e_smoke.REVERSIBLE_RELATION_CONSUMER_CONTRACTS
+        self.assertEqual(
+            consumer_probe_paths,
+            {page_key: contract["path"] for page_key, contract in runtime_consumers.items()},
+        )
+        self.assertEqual(
+            consumer_business_roots,
+            {page_key: list(contract["business_roots"]) for page_key, contract in runtime_consumers.items()},
+        )
+        runtime_shapes = write_operation_e2e_smoke.REVERSIBLE_RELATION_SHAPE_CONTRACTS
+        for shape, pair in pairs_by_shape.items():
+            runtime_pair = runtime_shapes[shape]
+            for key in (
+                "mutation_contract",
+                "confirm_profile",
+                "withdraw_profile",
+                "affected_consumer_page_keys",
+                "non_consumer_isolation_page_keys",
+            ):
+                self.assertEqual(
+                    list(pair[key]) if isinstance(pair[key], list) else pair[key],
+                    list(runtime_pair[key]) if isinstance(runtime_pair[key], tuple) else runtime_pair[key],
+                )
+        retired_asymmetric_profiles = {
+            "workbench_relation_confirm_bank_turnover_cross_page",
+            "workbench_relation_withdraw_bank_turnover_cross_page",
+        }
+        self.assertEqual(retired_asymmetric_profiles & set(self.rows_by_operation), set())
+        self.assertEqual(retired_asymmetric_profiles & set(_audit_scope_types_by_operation()), set())
+
+    def test_full_bank_oa_invoice_pair_includes_oa_pending_payment_fanout(self) -> None:
+        for operation in REVERSIBLE_RELATION_PROFILE_PAIRS["bank_oa_invoice"]:
+            row = self.rows_by_operation[operation]
+            self.assertIn("oa_pending_payment", row["expected_outbox_scope_types"], operation)
+            self.assertIn("oa-pending-payments", row["target_page_keys"], operation)
+
+    def test_bank_invoice_profile_matches_real_workbench_fanout_including_cost(self) -> None:
+        facade = object.__new__(WorkbenchWriteFacade)
+        actual_downstream = facade._relation_downstream_scope_types(
+            relation={"row_types": ["bank", "invoice"]},
+            rows=[{"type": "bank"}, {"type": "invoice", "invoice_type": "input"}],
+        )
+        expected_with_workbench = actual_downstream | {"workbench"}
+
+        for operation in REVERSIBLE_RELATION_PROFILE_PAIRS["bank_invoice"]:
+            self.assertEqual(
+                set(self.rows_by_operation[operation]["expected_outbox_scope_types"]),
+                expected_with_workbench,
+                operation,
+            )
+
+        full_downstream = facade._relation_downstream_scope_types(
+            relation={"row_types": ["bank", "oa", "invoice"]},
+            rows=[{"type": "bank"}, {"type": "oa"}, {"type": "invoice", "invoice_type": "input"}],
+        )
+        for operation in REVERSIBLE_RELATION_PROFILE_PAIRS["bank_oa_invoice"]:
+            self.assertEqual(
+                set(self.rows_by_operation[operation]["expected_outbox_scope_types"]),
+                full_downstream | {"workbench"},
+                operation,
+            )
 
     def test_production_gate_policy_is_explicit_and_matches_standing_ticket_rules(self) -> None:
         policy_by_page = {

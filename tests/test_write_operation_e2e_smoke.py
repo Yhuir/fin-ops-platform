@@ -73,11 +73,274 @@ def _turnover_withdraw_rows() -> list[dict[str, object]]:
     ]
 
 
+def _system_audit_payload(audit_id: str = "system-audit:test-1") -> dict[str, object]:
+    page_results = [
+        {
+            "page_key": f"page-{index}",
+            "overall_status": "pass",
+            "audit_status": {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+        }
+        for index in range(16)
+    ]
+    return {
+        "overall_status": "pass",
+        "audit_status": {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+        "summary": {
+            "registered_page_count": 17,
+            "audited_business_page_count": 16,
+            "passed_business_page_count": 16,
+            "database_internal_contracts": "pass",
+        },
+        "database_system_snapshot": {
+            "system_audit_id": audit_id,
+            "snapshot_identity": f"snapshot:{audit_id}",
+            "snapshot_consistency": "repeatable_read_read_only",
+            "database_snapshot": True,
+            "page_results": page_results,
+        },
+        "audit_contract": {"contract_revision": "page-audit-contract.v25"},
+        "external_evidence": {"status": "unknown"},
+    }
+
+
+def _strict_checkpoint(
+    name: str,
+    *,
+    key: str,
+    relation_state_after: str,
+) -> write_operation_e2e_smoke.WriteCheckpoint:
+    return write_operation_e2e_smoke.WriteCheckpoint(
+        name=name,
+        operations=("workbench_relation_withdraw",),
+        steps=(
+            write_operation_e2e_smoke.WriteStep(
+                name=name,
+                method="POST",
+                path=f"/api/workbench/actions/{name}",
+                json_body={"idempotency_key": key, "row_ids": ["test-row-1"]},
+                expected_statuses=(200,),
+            ),
+        ),
+        consumers=(
+            write_operation_e2e_smoke.ConsumerProbe(
+                probe=http_slo_probe.HttpProbe("consumer", "/api/consumer", target_ms=1000),
+                assertions=(write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/linked", "equals", True),),
+            ),
+        ),
+        system_audit_path="/api/operations/app-health/page-audit?page=app-health-operations",
+        relation_state_after=relation_state_after,
+    )
+
+
+_BANK_INVOICE_CONSUMER_PAGES = (
+    "reconciliation-workbench",
+    "bank-details",
+    "pending-invoices",
+    "input-invoice-usage",
+    "cost-statistics",
+    "tax-offset",
+)
+
+_CONSUMER_PATHS = {
+    "reconciliation-workbench": "/api/workbench/groups?month=2026-07&zone=paired&page=1&page_size=20",
+    "bank-details": "/api/bank-details/transactions?year=2026&page=1&page_size=20",
+    "pending-invoices": "/api/pending-invoices/rows?page=1&page_size=20",
+    "input-invoice-usage": "/api/input-invoice-usage/rows?page=1&page_size=20",
+    "oa-pending-payments": "/api/oa-pending-payments/rows?page=1&page_size=20",
+    "cost-statistics": "/api/cost-statistics/explorer?month=2026-07",
+    "tax-offset": "/api/tax-offset?month=2026-07",
+    "turnover-ledger": "/api/turnover-ledger?view=grouped&page=1&page_size=20",
+}
+
+
+def _raw_relation_checkpoint(
+    *,
+    name: str,
+    operation: str,
+    idempotency_key: str,
+    relation_state_after: str,
+) -> dict[str, object]:
+    is_withdraw = name == "withdraw-link"
+    preview_captures = (
+        {
+            f"{name}_preview_id": "/preview_id",
+            f"{name}_versions": "/submit_expected_versions",
+        }
+        if is_withdraw
+        else {}
+    )
+    mutation_json: dict[str, object] = {
+        "month": "2026-07",
+        "row_ids": ["bank-test-1", "invoice-test-1"],
+        "idempotency_key": idempotency_key,
+    }
+    if is_withdraw:
+        mutation_json.update(
+            {
+                "preview_id": f"${{{name}_preview_id}}",
+                "expected_versions": f"${{{name}_versions}}",
+                "operation_type": "withdraw_relation",
+            }
+        )
+    return {
+        "name": name,
+        "operation": operation,
+        "steps": [
+            {
+                "name": f"{name}-preview",
+                "method": "POST",
+                "path": f"/api/workbench/actions/{name}/preview",
+                "mutation": False,
+                "json": {"month": "2026-07", "row_ids": ["bank-test-1", "invoice-test-1"]},
+                "captures": preview_captures,
+            },
+            {
+                "name": name,
+                "method": "POST",
+                "path": f"/api/workbench/actions/{name}",
+                "json": mutation_json,
+            },
+        ],
+        "consumers": [
+            {
+                "name": page_key,
+                "page_key": page_key,
+                "path": _CONSUMER_PATHS[page_key],
+                "assertions": [
+                    {
+                        "pointer": (
+                            "/input_plan_items"
+                            if page_key == "tax-offset"
+                            else "/bank_flow_time_rows/0/transaction_id"
+                            if page_key == "cost-statistics"
+                            else "/groups/0/bank_rows/0/id"
+                            if page_key == "reconciliation-workbench"
+                            else "/rows/0/id"
+                        ),
+                        "equals": [] if page_key == "tax-offset" else "bank-test-1",
+                    }
+                ],
+            }
+            for page_key in _BANK_INVOICE_CONSUMER_PAGES
+        ],
+        "system_audit": True,
+        "relation_state_after": relation_state_after,
+    }
+
+
+def _raw_bank_invoice_scenario(name: str, key_prefix: str) -> dict[str, object]:
+    confirm = _raw_relation_checkpoint(
+        name="confirm-link",
+        operation="workbench_relation_confirm_bank_invoice_cross_page",
+        idempotency_key=f"{key_prefix}-confirm",
+        relation_state_after="active",
+    )
+    withdraw = _raw_relation_checkpoint(
+        name="withdraw-link",
+        operation="workbench_relation_withdraw_bank_invoice_cross_page",
+        idempotency_key=f"{key_prefix}-withdraw",
+        relation_state_after="inactive",
+    )
+    recovery = _raw_relation_checkpoint(
+        name="withdraw-link",
+        operation="workbench_relation_withdraw_bank_invoice_cross_page",
+        idempotency_key=f"{key_prefix}-recovery",
+        relation_state_after="inactive",
+    )
+    return {
+        "name": name,
+        "shape": "bank_invoice",
+        "fixture_ownership": "test_owned",
+        "checkpoints": [confirm, withdraw],
+        "recovery_checkpoint": recovery,
+    }
+
+
+def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]:
+    fixture_row_ids = ["turnover-bank-test-1", "turnover-bank-test-2"]
+    consumers = [
+        {
+            "name": page_key,
+            "page_key": page_key,
+            "path": _CONSUMER_PATHS[page_key],
+            "assertions": [
+                {
+                    "pointer": (
+                        "/rows"
+                        if page_key == "input-invoice-usage"
+                        else "/bank_flow_time_rows/0/transaction_id"
+                        if page_key == "cost-statistics"
+                        else "/groups/0/bank_rows/0/id"
+                        if page_key == "reconciliation-workbench"
+                        else "/rows/0/id"
+                    ),
+                    "equals": [] if page_key == "input-invoice-usage" else fixture_row_ids[0],
+                }
+            ],
+        }
+        for page_key in (
+            "reconciliation-workbench",
+            "cost-statistics",
+            "turnover-ledger",
+            "input-invoice-usage",
+        )
+    ]
+    confirm = {
+        "name": "turnover-confirm",
+        "operation": "turnover_relation_confirm_cross_page",
+        "fixture_row_ids": fixture_row_ids,
+        "steps": [
+            {
+                "name": "turnover-confirm",
+                "method": "POST",
+                "path": "/api/turnover-ledger/closures/confirm",
+                "json": {
+                    "bank_row_ids": fixture_row_ids,
+                    "expected_versions": {f"turnover_bank_row:{row_id}": 1 for row_id in fixture_row_ids},
+                    "idempotency_key": f"{key_prefix}-confirm",
+                },
+                "captures": {"turnover_relation_id": "/turnover_relation/relation_id"},
+            }
+        ],
+        "consumers": consumers,
+        "system_audit": True,
+        "relation_state_after": "active",
+    }
+
+    def withdraw(checkpoint_name: str, idempotency_key: str) -> dict[str, object]:
+        return {
+            "name": checkpoint_name,
+            "operation": "turnover_relation_withdraw_cross_page",
+            "fixture_row_ids": fixture_row_ids,
+            "steps": [
+                {
+                    "name": checkpoint_name,
+                    "method": "POST",
+                    "path": "/api/turnover-ledger/relations/${turnover_relation_id}/withdraw",
+                    "json": {"idempotency_key": idempotency_key},
+                }
+            ],
+            "consumers": consumers,
+            "system_audit": True,
+            "relation_state_after": "inactive",
+        }
+
+    return {
+        "name": name,
+        "shape": "bank_turnover",
+        "fixture_ownership": "test_owned",
+        "checkpoints": [confirm, withdraw("turnover-withdraw", f"{key_prefix}-withdraw")],
+        "recovery_checkpoint": withdraw("turnover-recovery", f"{key_prefix}-recovery"),
+    }
+
+
 class WriteOperationE2ESmokeTests(unittest.TestCase):
     def test_empty_scenarios_return_input_error_instead_of_pass(self) -> None:
         calls: list[str] = []
 
-        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
             calls.append(url)
             return http_slo_probe.HttpProbeResponse(status_code=200, headers={}, body=b"{}")
 
@@ -301,7 +564,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         )
         calls: list[str] = []
 
-        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
             calls.append(url)
             return http_slo_probe.HttpProbeResponse(status_code=200, headers={}, body=b"{}")
 
@@ -337,7 +602,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         )
         calls: list[str] = []
 
-        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
             calls.append(url)
             return http_slo_probe.HttpProbeResponse(status_code=200, headers={}, body=b"{}")
 
@@ -373,7 +640,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         )
         observed: list[tuple[str, str, bytes | None]] = []
 
-        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
             observed.append((url, method, body))
             return http_slo_probe.HttpProbeResponse(
                 status_code=200,
@@ -395,7 +664,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "pass")
         self.assertEqual(observed[0][1], "POST")
-        self.assertEqual(observed[0][0], "https://example.test/fin-ops-api/api/turnover-ledger/relations/REL-1/withdraw")
+        self.assertEqual(
+            observed[0][0], "https://example.test/fin-ops-api/api/turnover-ledger/relations/REL-1/withdraw"
+        )
         self.assertEqual(report["results"][0]["write_slo"]["status"], "pass")
         self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 5)
 
@@ -425,7 +696,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             ]
         )
 
-        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
             return http_slo_probe.HttpProbeResponse(
                 status_code=200,
                 headers={"content-type": "application/json"},
@@ -452,7 +725,40 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             write_slo["effective_event_sample_limit"],
             write_operation_e2e_smoke.MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT,
         )
-        self.assertEqual(connection.fetch_all_calls[-1][1][-1], write_operation_e2e_smoke.MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT)
+        self.assertEqual(
+            connection.fetch_all_calls[-1][1][-1], write_operation_e2e_smoke.MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT
+        )
+
+    def test_exact_checkpoint_event_set_rejects_unknown_or_unmatched_event_ids(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="workbench_relation_changed", action_name="confirm_link"),
+            _event(
+                scope_type="workbench_relation",
+                reason="workbench_pair_relation_changed",
+                action_name="confirm_link",
+            ),
+        ]
+        event_ids = [str(row["event_id"]) for row in rows]
+
+        with patch(
+            "fin_ops_platform.tools.write_operation_e2e_smoke.monotonic",
+            side_effect=[100.0, 102.0],
+        ):
+            report = write_operation_e2e_smoke._wait_for_write_slo(
+                FakeConnection(rows),
+                operations=("workbench_relation_confirm",),
+                tenant_id="default",
+                started_at=datetime(2026, 6, 13, 10, 0, 0, tzinfo=timezone.utc),
+                target_ms=1000,
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                limit=10,
+                event_ids=[*event_ids, "unknown-extra-event"],
+            )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["error"], "exact_checkpoint_event_set_mismatch")
+        self.assertEqual(report["missing_or_unmatched_event_ids"], ["unknown-extra-event"])
 
     def test_write_step_failure_skips_write_slo_claim(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
@@ -470,7 +776,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             post_api_probes=(),
         )
 
-        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
             return http_slo_probe.HttpProbeResponse(
                 status_code=409,
                 headers={"content-type": "application/json"},
@@ -508,7 +816,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             post_api_probes=(),
         )
 
-        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
             return http_slo_probe.HttpProbeResponse(
                 status_code=200,
                 headers={"content-type": "application/json"},
@@ -516,7 +826,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             )
 
         monotonic_values = iter([100.0, 101.25])
-        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.monotonic", side_effect=lambda: next(monotonic_values)):
+        with patch(
+            "fin_ops_platform.tools.write_operation_e2e_smoke.monotonic", side_effect=lambda: next(monotonic_values)
+        ):
             report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
                 FakeConnection(_turnover_withdraw_rows()),
                 scenarios=[scenario],
@@ -553,7 +865,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             post_api_probes=(),
         )
 
-        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
             return http_slo_probe.HttpProbeResponse(
                 status_code=200,
                 headers={"content-type": "text/html; charset=utf-8"},
@@ -595,6 +909,803 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "Unknown write-operation SLO profiles"):
                 write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+    def test_legacy_scenario_is_normalized_to_one_checkpoint(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "name": "legacy",
+                            "operation": "workbench_relation_withdraw",
+                            "steps": [{"path": "/api/workbench/actions/withdraw-link"}],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            scenario = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        self.assertEqual(len(scenario.checkpoints), 1)
+        self.assertEqual(scenario.checkpoints[0].name, "legacy")
+
+    def test_checkpoint_contract_requires_test_owned_fixture_idempotency_consumers_audit_and_recovery(self) -> None:
+        base = {
+            "name": "closure",
+            "shape": "bank_invoice",
+            "fixture_ownership": "test_owned",
+            "checkpoints": [
+                {
+                    "name": "confirm",
+                    "operation": "workbench_relation_withdraw",
+                    "steps": [{"path": "/api/workbench/actions/confirm-link", "json": {}}],
+                    "consumers": [],
+                    "system_audit": True,
+                    "relation_state_after": "active",
+                }
+            ],
+        }
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([base]), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "idempotency_key"):
+                write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+    def test_reversible_scenario_rejects_noncanonical_mutation_audit_override_and_unbound_assertion(self) -> None:
+        cases: list[tuple[str, dict[str, object], str]] = []
+        wrong_endpoint = _raw_bank_invoice_scenario("wrong-endpoint", "strict-1")
+        wrong_endpoint["checkpoints"][0]["steps"][1]["path"] = "/api/legacy/confirm"  # type: ignore[index]
+        cases.append(("endpoint", wrong_endpoint, "canonical Workbench"))
+
+        audit_override = _raw_bank_invoice_scenario("audit-override", "strict-2")
+        audit_override["checkpoints"][0]["system_audit"] = {"path": "/api/test"}  # type: ignore[index]
+        cases.append(("audit", audit_override, "enable system_audit"))
+
+        unbound = _raw_bank_invoice_scenario("unbound", "strict-3")
+        unbound["checkpoints"][0]["consumers"][0]["assertions"] = [  # type: ignore[index]
+            {"pointer": "/groups/0/status", "equals": "fresh"}
+        ]
+        cases.append(("identity", unbound, "test-owned row"))
+
+        metadata_only = _raw_bank_invoice_scenario("metadata-only", "strict-metadata")
+        metadata_only["checkpoints"][0]["consumers"][0]["assertions"] = [  # type: ignore[index]
+            {"pointer": "/read_model_status", "equals": "fresh"}
+        ]
+        cases.append(("business-root", metadata_only, "business roots"))
+
+        wrong_consumer_path = _raw_bank_invoice_scenario("wrong-consumer", "strict-4")
+        wrong_consumer_path["checkpoints"][0]["consumers"][0]["path"] = "/api/health"  # type: ignore[index]
+        cases.append(("consumer-path", wrong_consumer_path, "consumer paths"))
+
+        swapped_withdraw_lock = _raw_bank_invoice_scenario("swapped-lock", "strict-5")
+        withdraw_body = swapped_withdraw_lock["checkpoints"][1]["steps"][1]["json"]  # type: ignore[index]
+        withdraw_body["preview_id"], withdraw_body["expected_versions"] = (  # type: ignore[index]
+            withdraw_body["expected_versions"],
+            withdraw_body["preview_id"],
+        )
+        cases.append(("withdraw-lock", swapped_withdraw_lock, "must consume preview_id"))
+
+        for label, scenario, expected_error in cases:
+            with self.subTest(label=label), TemporaryDirectory() as temp_dir:
+                path = Path(temp_dir) / "scenario.json"
+                path.write_text(json.dumps([scenario]), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, expected_error):
+                    write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+    def test_reversible_scenario_matches_registered_shape_consumers_and_bounded_rows(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([_raw_bank_invoice_scenario("bank-invoice", "shape-1")]), encoding="utf-8")
+
+            scenarios = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+        self.assertEqual(scenarios[0].shape, "bank_invoice")
+        self.assertEqual(len(scenarios[0].checkpoints), 2)
+        self.assertEqual(
+            {consumer.page_key for consumer in scenarios[0].checkpoints[0].consumers},
+            set(_BANK_INVOICE_CONSUMER_PAGES),
+        )
+
+    def test_bank_turnover_scenario_uses_real_turnover_closure_contract(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([_raw_bank_turnover_scenario("turnover", "shape-2")]), encoding="utf-8")
+
+            scenario = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        self.assertEqual(scenario.shape, "bank_turnover")
+        self.assertEqual(scenario.checkpoints[0].steps[0].path, "/api/turnover-ledger/closures/confirm")
+        self.assertEqual(
+            scenario.checkpoints[1].steps[0].path,
+            "/api/turnover-ledger/relations/${turnover_relation_id}/withdraw",
+        )
+        self.assertEqual(scenario.checkpoints[0].fixture_row_ids, scenario.checkpoints[1].fixture_row_ids)
+
+    def test_reversible_scenarios_reject_missing_consumer_or_cross_scenario_idempotency_reuse(self) -> None:
+        missing_consumer = _raw_bank_invoice_scenario("missing-consumer", "shape-1")
+        missing_consumer["checkpoints"][0]["consumers"].pop()  # type: ignore[index]
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([missing_consumer]), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "consumers must exactly match"):
+                write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            first = _raw_bank_invoice_scenario("first", "shared")
+            second = _raw_bank_invoice_scenario("second", "shared")
+            path.write_text(json.dumps([first, second]), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unique across the file"):
+                write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+    def test_json_pointer_equals_and_contains_are_typed_and_fail_closed(self) -> None:
+        payload = {"rows": [{"id": "row-1", "labels": ["linked"], "meta": {"state": "active"}}]}
+        equals = write_operation_e2e_smoke._evaluate_json_assertion(
+            write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/id", "equals", "row-1"),
+            payload=payload,
+            variables={},
+        )
+        contains = write_operation_e2e_smoke._evaluate_json_assertion(
+            write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/meta", "contains", {"state": "active"}),
+            payload=payload,
+            variables={},
+        )
+        missing = write_operation_e2e_smoke._evaluate_json_assertion(
+            write_operation_e2e_smoke.JsonPointerAssertion("/rows/1/id", "equals", "row-1"),
+            payload=payload,
+            variables={},
+        )
+
+        self.assertEqual(equals["status"], "pass")
+        self.assertEqual(contains["status"], "pass")
+        self.assertEqual(missing["status"], "fail")
+
+    def test_canonical_preview_payloads_fail_closed_before_mutation(self) -> None:
+        confirm = write_operation_e2e_smoke.WriteStep(
+            name="confirm-preview",
+            method="POST",
+            path=write_operation_e2e_smoke.CONFIRM_PREVIEW_PATH,
+            json_body={"month": "2026-07", "row_ids": ["bank-1", "invoice-1"]},
+            expected_statuses=(200,),
+            mutation=False,
+        )
+        withdraw = write_operation_e2e_smoke.WriteStep(
+            name="withdraw-preview",
+            method="POST",
+            path=write_operation_e2e_smoke.WITHDRAW_PREVIEW_PATH,
+            json_body={"month": "2026-07", "row_ids": ["bank-1", "invoice-1"]},
+            expected_statuses=(200,),
+            mutation=False,
+            captures=(
+                ("preview_id", "/preview_id"),
+                ("expected_versions", "/submit_expected_versions"),
+            ),
+        )
+
+        confirm_result = write_operation_e2e_smoke._execute_step(
+            confirm,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            target_ms=1000,
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"operation":"confirm_link","can_submit":false}',
+            ),
+        )
+        withdraw_result = write_operation_e2e_smoke._execute_step(
+            withdraw,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            target_ms=1000,
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"operation":"withdraw_link","can_submit":true,"preview_id":"p1"}',
+            ),
+        )
+
+        self.assertEqual(confirm_result.result.status, "fail")
+        self.assertIn("canonical_relation_preview_not_submittable", confirm_result.result.error or "")
+        self.assertEqual(withdraw_result.result.status, "fail")
+        self.assertIn("canonical_withdraw_preview_contract_invalid", withdraw_result.result.error or "")
+
+    def test_consumer_and_system_audit_gates_reject_nonfresh_or_incomplete_payloads(self) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+
+        def nonfresh_request(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"read_model_status":"refreshing","refresh_enqueued":true,"rows":[{"linked":true}]}',
+            )
+
+        consumer = write_operation_e2e_smoke._collect_checkpoint_consumers(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=nonfresh_request,
+            variables={},
+            strict=True,
+        )
+        audit = write_operation_e2e_smoke._collect_system_audit(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"overall_status":"pass"}',
+            ),
+        )
+
+        self.assertEqual(consumer["status"], "fail")
+        self.assertEqual(consumer["results"][0]["error"], "consumer_read_model_not_fresh")
+        self.assertEqual(audit["status"], "fail")
+        self.assertEqual(audit["error"], "system_audit_snapshot_missing")
+
+    def test_nonconsumer_isolation_compares_post_write_payload_to_fresh_baseline(self) -> None:
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="isolation",
+            operations=("workbench_relation_confirm_bank_invoice_cross_page",),
+            steps=(),
+            consumers=(
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe("tax", "/api/tax-offset", target_ms=1000),
+                    assertions=(write_operation_e2e_smoke.JsonPointerAssertion("/stable_total", "equals", 100),),
+                    page_key="tax-offset",
+                    role="isolation",
+                ),
+            ),
+        )
+        current_total = 100
+
+        def request_fn(*_args) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(
+                    {"read_model_status": "fresh", "refresh_enqueued": False, "stable_total": current_total}
+                ).encode(),
+            )
+
+        baseline = write_operation_e2e_smoke._capture_isolation_baseline(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=request_fn,
+            variables={},
+        )
+        current_total = 101
+        result = write_operation_e2e_smoke._collect_checkpoint_consumers(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=request_fn,
+            variables={},
+            strict=True,
+            isolation_baseline=baseline["values"],
+        )
+
+        self.assertEqual(baseline["status"], "pass")
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["results"][0]["assertions"][0]["error"], "non_consumer_changed")
+
+    def test_admin_system_audit_preflight_blocks_first_mutation(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="closure",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=(_strict_checkpoint("confirm", key="confirm-key", relation_state_after="active"),),
+            recovery_checkpoint=_strict_checkpoint("recover", key="recover-key", relation_state_after="inactive"),
+            fixture_ownership="test_owned",
+        )
+        calls: list[tuple[str, str]] = []
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            calls.append((method, url))
+            return http_slo_probe.HttpProbeResponse(
+                status_code=403,
+                headers={"content-type": "application/json"},
+                body=b'{"error":"forbidden"}',
+            )
+
+        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+            FakeConnection([]),
+            scenarios=[scenario],
+            apply=True,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            tenant_id="default",
+            headers={"Authorization": "Bearer token"},
+            approval_reference="TEST-APPROVAL",
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(
+            calls, [("GET", f"https://example.test/fin-ops-api{write_operation_e2e_smoke.SYSTEM_AUDIT_PATH}")]
+        )
+        self.assertEqual(report["results"][0]["checkpoints"], [])
+
+    def test_ordered_checkpoints_have_independent_timestamps_exact_events_consumers_and_audits(self) -> None:
+        checkpoints = (
+            _strict_checkpoint("confirm-link", key="confirm-key", relation_state_after="active"),
+            _strict_checkpoint("withdraw-link", key="withdraw-key", relation_state_after="inactive"),
+        )
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="closure",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=checkpoints,
+            recovery_checkpoint=_strict_checkpoint("recover", key="recovery-key", relation_state_after="inactive"),
+            fixture_ownership="test_owned",
+        )
+        audit_count = 0
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            nonlocal audit_count
+            if "page-audit" in url:
+                audit_count += 1
+                response = _system_audit_payload(f"system-audit:{audit_count}")
+            elif url.endswith("/api/consumer"):
+                response = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": [{"linked": True}]}
+            else:
+                response = {"ok": True}
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(response).encode(),
+            )
+
+        timestamps = iter(
+            [
+                datetime(2026, 7, 12, 1, 0, tzinfo=timezone.utc),
+                datetime(2026, 7, 12, 1, 1, tzinfo=timezone.utc),
+            ]
+        )
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._database_timestamp",
+                side_effect=lambda connection: next(timestamps),
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                side_effect=[["event-confirm"], ["event-withdraw"]],
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_write_slo",
+                return_value={"status": "pass", "results": []},
+            ) as wait_slo,
+        ):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "pass")
+        self.assertNotEqual(result["checkpoints"][0]["started_at"], result["checkpoints"][1]["started_at"])
+        self.assertEqual(wait_slo.call_args_list[0].kwargs["event_ids"], ["event-confirm"])
+        self.assertEqual(wait_slo.call_args_list[1].kwargs["event_ids"], ["event-withdraw"])
+        self.assertNotEqual(
+            result["checkpoints"][0]["system_audit"]["system_audit_id"],
+            result["checkpoints"][1]["system_audit"]["system_audit_id"],
+        )
+
+    def test_committed_confirm_gate_failure_runs_declared_recovery_and_keeps_original_failure(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="closure",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=(_strict_checkpoint("confirm", key="confirm-key", relation_state_after="active"),),
+            recovery_checkpoint=_strict_checkpoint("recover", key="recover-key", relation_state_after="inactive"),
+            fixture_ownership="test_owned",
+        )
+        audit_count = 0
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            nonlocal audit_count
+            if "page-audit" in url:
+                audit_count += 1
+                response = _system_audit_payload(f"system-audit:recovery:{audit_count}")
+            elif url.endswith("/api/consumer"):
+                response = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": [{"linked": True}]}
+            else:
+                response = {"ok": True}
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(response).encode(),
+            )
+
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                side_effect=[["event-confirm"], ["event-recover"]],
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_write_slo",
+                side_effect=[{"status": "fail", "error": "timeout"}, {"status": "pass", "results": []}],
+            ),
+        ):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(result["checkpoints"][0]["write_slo"]["status"], "fail")
+        self.assertEqual(result["recovery"]["status"], "pass")
+        self.assertFalse(result["recovery_required"])
+
+    def test_committed_withdraw_gate_failure_does_not_issue_a_second_withdraw(self) -> None:
+        checkpoints = (
+            _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active"),
+            _strict_checkpoint("withdraw", key="withdraw-key", relation_state_after="inactive"),
+        )
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="closure",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=checkpoints,
+            recovery_checkpoint=_strict_checkpoint("recover", key="recover-key", relation_state_after="inactive"),
+            fixture_ownership="test_owned",
+        )
+        audit_count = 0
+        mutation_calls = 0
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            nonlocal audit_count, mutation_calls
+            if "page-audit" in url:
+                audit_count += 1
+                response = _system_audit_payload(f"system-audit:withdraw:{audit_count}")
+            elif url.endswith("/api/consumer"):
+                response = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": [{"linked": True}]}
+            else:
+                mutation_calls += 1
+                response = {"ok": True}
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(response).encode(),
+            )
+
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                side_effect=[["event-confirm"], ["event-withdraw"]],
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_write_slo",
+                side_effect=[{"status": "pass", "results": []}, {"status": "fail", "error": "timeout"}],
+            ),
+        ):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(mutation_calls, 2)
+        self.assertNotIn("recovery", result)
+        self.assertFalse(result["recovery_required"])
+
+    def test_ambiguous_mutation_is_not_blindly_retried_or_cleaned_up(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="closure",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=(_strict_checkpoint("confirm", key="confirm-key", relation_state_after="active"),),
+            recovery_checkpoint=_strict_checkpoint("recover", key="recover-key", relation_state_after="inactive"),
+            fixture_ownership="test_owned",
+        )
+        calls = 0
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            nonlocal calls
+            calls += 1
+            if "page-audit" in url:
+                return http_slo_probe.HttpProbeResponse(
+                    status_code=200,
+                    headers={"content-type": "application/json"},
+                    body=json.dumps(_system_audit_payload("system-audit:preflight")).encode(),
+                )
+            raise TimeoutError("network result unknown")
+
+        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+            FakeConnection([]),
+            scenarios=[scenario],
+            apply=True,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            tenant_id="default",
+            headers={"Authorization": "Bearer token"},
+            approval_reference="TEST-APPROVAL",
+            request_fn=request_fn,
+        )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(calls, 2)
+        self.assertNotIn("recovery", result)
+        self.assertTrue(result["recovery_required"])
+
+    def test_http_500_after_durable_commit_runs_recovery(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="closure",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=(_strict_checkpoint("confirm", key="confirm-key", relation_state_after="active"),),
+            recovery_checkpoint=_strict_checkpoint("recover", key="recover-key", relation_state_after="inactive"),
+            fixture_ownership="test_owned",
+        )
+        mutation_calls = 0
+        audit_count = 0
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            nonlocal mutation_calls, audit_count
+            if "page-audit" in url:
+                audit_count += 1
+                payload = _system_audit_payload(f"system-audit:500-commit:{audit_count}")
+                return http_slo_probe.HttpProbeResponse(
+                    status_code=200,
+                    headers={"content-type": "application/json"},
+                    body=json.dumps(payload).encode(),
+                )
+            if url.endswith("/api/consumer"):
+                return http_slo_probe.HttpProbeResponse(
+                    status_code=200,
+                    headers={"content-type": "application/json"},
+                    body=b'{"read_model_status":"fresh","refresh_enqueued":false,"rows":[{"linked":true}]}',
+                )
+            mutation_calls += 1
+            return http_slo_probe.HttpProbeResponse(
+                status_code=500 if mutation_calls == 1 else 200,
+                headers={"content-type": "application/json"},
+                body=b'{"error":"gateway_response_mapping_failed"}' if mutation_calls == 1 else b'{"ok":true}',
+            )
+
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.workbench_idempotency_evidence",
+                return_value={"status": "committed", "outbox_event_ids": ["event-confirm"], "response_payload": {}},
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                return_value=["event-recover"],
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_write_slo",
+                return_value={"status": "pass", "results": []},
+            ),
+        ):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertTrue(result["checkpoints"][0]["mutation_committed"])
+        self.assertFalse(result["checkpoints"][0]["mutation_ambiguous"])
+        self.assertEqual(result["recovery"]["status"], "pass")
+        self.assertFalse(result["recovery_required"])
+        self.assertEqual(mutation_calls, 2)
+
+    def test_http_500_without_durable_record_requires_manual_recovery(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="closure",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=(_strict_checkpoint("confirm", key="confirm-key", relation_state_after="active"),),
+            recovery_checkpoint=_strict_checkpoint("recover", key="recover-key", relation_state_after="inactive"),
+            fixture_ownership="test_owned",
+        )
+        mutation_calls = 0
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            nonlocal mutation_calls
+            if "page-audit" in url:
+                return http_slo_probe.HttpProbeResponse(
+                    status_code=200,
+                    headers={"content-type": "application/json"},
+                    body=json.dumps(_system_audit_payload("system-audit:500-missing")).encode(),
+                )
+            mutation_calls += 1
+            return http_slo_probe.HttpProbeResponse(
+                status_code=500,
+                headers={"content-type": "application/json"},
+                body=b'{"error":"unknown"}',
+            )
+
+        with patch(
+            "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.workbench_idempotency_evidence",
+            side_effect=ValueError("expected exactly one Workbench idempotency record"),
+        ):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertFalse(result["checkpoints"][0]["mutation_committed"])
+        self.assertTrue(result["checkpoints"][0]["mutation_ambiguous"])
+        self.assertTrue(result["recovery_required"])
+        self.assertNotIn("recovery", result)
+        self.assertEqual(mutation_calls, 1)
+
+    def test_turnover_http_500_after_commit_recovers_relation_id_from_durable_response(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps([_raw_bank_turnover_scenario("turnover-500", "turnover-500")]),
+                encoding="utf-8",
+            )
+            scenario = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        audit_count = 0
+        mutation_paths: list[str] = []
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            nonlocal audit_count
+            route = url.split("/fin-ops-api", 1)[-1]
+            if "page-audit" in route:
+                audit_count += 1
+                payload = _system_audit_payload(f"system-audit:turnover-500:{audit_count}")
+                status = 200
+            elif method == "POST":
+                mutation_paths.append(route)
+                payload = {"error": "post_commit_mapping_failed"} if len(mutation_paths) == 1 else {"ok": True}
+                status = 500 if len(mutation_paths) == 1 else 200
+            elif route.startswith("/api/cost-statistics/explorer"):
+                payload = {
+                    "read_model_status": "fresh",
+                    "refresh_enqueued": False,
+                    "bank_flow_time_rows": [{"transaction_id": "turnover-bank-test-1"}],
+                }
+                status = 200
+            elif route.startswith("/api/input-invoice-usage/rows"):
+                payload = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": []}
+                status = 200
+            elif route.startswith("/api/workbench/groups"):
+                payload = {
+                    "read_model_status": "fresh",
+                    "refresh_enqueued": False,
+                    "groups": [{"bank_rows": [{"id": "turnover-bank-test-1"}]}],
+                }
+                status = 200
+            else:
+                payload = {
+                    "read_model_status": "fresh",
+                    "refresh_enqueued": False,
+                    "rows": [{"id": "turnover-bank-test-1"}],
+                }
+                status = 200
+            return http_slo_probe.HttpProbeResponse(
+                status_code=status,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            )
+
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.workbench_idempotency_evidence",
+                return_value={
+                    "status": "committed",
+                    "outbox_event_ids": ["event-confirm"],
+                    "response_payload": {"turnover_relation": {"relation_id": "turnover-relation-500"}},
+                },
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                return_value=["event-recovery"],
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_write_slo",
+                return_value={"status": "pass", "results": []},
+            ),
+        ):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(
+            mutation_paths,
+            [
+                "/api/turnover-ledger/closures/confirm",
+                "/api/turnover-ledger/relations/turnover-relation-500/withdraw",
+            ],
+        )
+        self.assertEqual(result["recovery"]["status"], "pass")
+        self.assertFalse(result["recovery_required"])
 
 
 if __name__ == "__main__":

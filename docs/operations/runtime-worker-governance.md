@@ -9,6 +9,13 @@ read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写�
 invoice usage/output collection backfill、App Health/workbench performance 和 worker 运维治理的长期结论。
 阶段报告和一次性执行记录不再单独保留。
 
+## 可逆关系 checkpoint 证据边界
+
+- mutation 仍只走 Workbench action API → relation command → UoW；runner 不写 relation、outbox、dirty、readiness 或 read model。
+- mutation 与 worker 证据通过 durable idempotency committed record 的精确 event ID 集关联；`started_at` 只是下界，不能让同 profile 并发事件串入。合法 optional scope 可记录为 skipped/pass，未知 scope 或未匹配 event ID fail closed。
+- bank+invoice、bank+turnover closure、bank+OA+invoice 的可执行 profile pair、mutation contract 与 affected/non-consumer 页面由部署包内 `write_operation_e2e_smoke.REVERSIBLE_RELATION_*_CONTRACTS` 负责；`docs/dev/write-operation-impact-matrix.json` 是由测试机械约束的运维/架构镜像，不是运行时文件 I/O。bank+invoice 必须包含真实 `cost_statistics` fan-out；完整三方关系还必须包含 `oa_pending_payment`；税金抵扣是 Workbench relation 非消费者，不得产生 relation dirty/outbox。bank+turnover 只走正式 turnover closure confirm/withdraw，不得用 Workbench profile 反向伪造事件。
+- discovery 不再把普通生产 turnover/Workbench/no-OA 事实转换成可执行 relation mutation；只保留 read-only context。现有 bank-flow submit 仍由自己的正式 owner 生成场景。
+
 ## Hardening 基线
 
 - SQL-native read model 必须有 source version guard，避免读取旧 projection 并标记为 fresh。

@@ -2,8 +2,8 @@
 gsd_state_version: '1.0'
 status: executing
 progress:
-  total_phases: 19
-  completed_phases: 1
+  total_phases: 20
+  completed_phases: 2
   total_plans: 22
   completed_plans: 21
   percent: 95
@@ -16,14 +16,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 19 production closure for all-page Audit proof, relation equality, readiness semantics, and legacy runtime removal.
+**Current focus:** Phase 19 production release evidence remains gated; Phase 20 reversible relation runtime-proof capability is implementation-complete.
 
 ## Current Position
 
-Phase: 19 of 19 (全页面 Audit 证明、跨页关系一致性、readiness 语义与旧链路移除的生产闭环)
-Plan: 19-21 gated
-Status: Release scope and production deploy authorization confirmed; validating the exact Phase 19 release before commit/deploy
-Last activity: 2026-07-12 - corrected 19-21: external complete snapshots are optional upstream reconciliation evidence, not a prerequisite for direct canonical/read-model/relation comparison
+Phase: 20 of 20 (三组可逆关系写操作的 Fan-out、Worker、Freshness 与 System Audit 生产级闭环)
+Plan: 20-01 complete; 19-21 production evidence remains gated
+Status: Phase 20 implementation and full local verification complete; controlled staging/production apply requires explicit test-owned fixtures and runtime credentials
+Last activity: 2026-07-13 - completed the single checkpoint runner, three reversible shape contracts, exact durable evidence, recovery safety, legacy cleanup and full regression
 
 Progress: [█████████░] 95%
 
@@ -72,6 +72,9 @@ Progress: [█████████░] 95%
 - Phase 19: Cost statistics consumes active Workbench relations, not candidate-only grouping; tests and repair evidence must create formal relations before expecting cost rows.
 - Phase 19: ETC tickets is a direct canonical page with no own manifest read model; its Audit must prove internal batch/task/invoice/file relations without treating downstream impact targets as page consumers.
 - Phase 19: process-owned background-job service survives in-process runtime reload; only first application startup/real process restart may create an owner and run interrupted-job recovery.
+- Phase 20: reversible relation runtime contracts ship inside backend code; the impact matrix is a test-constrained documentation mirror, not production file I/O.
+- Phase 20: every checkpoint binds its mutation to exact committed idempotency outbox IDs, affected business-root assertions, non-consumer baseline equality and a new read-only System Audit.
+- Phase 20: nonexpected HTTP/HTML/network outcomes remain ambiguous until durable evidence resolves them; committed responses may drive formal recovery, while missing/reserved evidence never triggers blind cleanup.
 
 ### Roadmap Evolution
 
@@ -84,6 +87,7 @@ Progress: [█████████░] 95%
 - 2026-06-16: Phase 0 added and completed as the cross-page dependency baseline before page implementation work.
 - 2026-07-11: Phase 19 added for the cross-page Audit proof, readiness semantics, and legacy-path production closure.
 - 2026-07-12: Phase 20 added for three reversible relation write scenarios spanning fan-out, worker drain, freshness, System Audit, and legacy test-path removal.
+- 2026-07-13: Phase 20 implementation completed with disposable PostgreSQL, full backend/frontend/build and 178-test Chromium verification; real-environment apply remains an explicit external gate.
 
 ### Pending Todos
 

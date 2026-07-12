@@ -12,7 +12,12 @@ const workbenchRowIds = [
 
 test.describe("workbench withdraw browser flow", () => {
   test("withdraws a paired relation only after preview lock, freshness barrier, and fresh refetch", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, {
+      costStatisticsRelationFanout: true,
+      inputInvoiceUsageRelationFanout: true,
+      oaPendingPaymentRelationFanout: true,
+      sessionMode: "full_access",
+    });
 
     await page.goto("/");
     await confirmWorkbenchRelation(page);
@@ -78,6 +83,30 @@ test.describe("workbench withdraw browser flow", () => {
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(workbenchGroupCallsBeforeWithdraw);
+
+    await page.getByRole("link", { name: "银行明细" }).click();
+    const bankRow = page.getByRole("row", { name: /智能工厂设备商/ });
+    await expect(bankRow.getByText("候选oa")).toBeVisible();
+    await expect(bankRow.getByText("候选发票")).toBeVisible();
+
+    await page.getByRole("link", { name: "待找发票" }).click();
+    const pendingRow = page.getByRole("row", { name: /智能工厂设备商/ });
+    await expect(pendingRow.getByText("已支付待开票")).toBeVisible();
+    await expect(pendingRow.getByText("12561048")).toHaveCount(0);
+
+    await page.getByRole("link", { name: "进项发票使用情况" }).click();
+    const invoiceRow = page.getByRole("row", { name: /SD-INV-E2E-REL-001/ });
+    await expect(invoiceRow).toContainText("待处理");
+    await expect(invoiceRow).toContainText("设备尾款候选关系");
+
+    await page.getByRole("link", { name: "OA待付款核对" }).click();
+    const oaRow = page.getByRole("row", { name: /陈涛/ });
+    await expect(oaRow.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("未支付");
+    expect(await oaRow.getByText("候选").count()).toBeGreaterThan(0);
+
+    await page.getByRole("link", { name: "成本统计" }).click();
+    await page.getByRole("button", { name: "按项目" }).click();
+    await expect(page.getByRole("button", { name: /智能工厂项目/ })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

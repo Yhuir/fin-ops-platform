@@ -8,10 +8,11 @@
 
 ## 当前正式链路
 
-- Mutation owner：Workbench action API → `WorkbenchRelationCommandService` → `WorkbenchWriteUnitOfWork` → `app.workbench_pair_relations` / history。
+- Mutation owner：bank+invoice / bank+OA+invoice 走 Workbench action API → `WorkbenchRelationCommandService` → `WorkbenchWriteUnitOfWork`；bank+turnover 走 Turnover closure API → `TurnoverLedgerWriteFacade` → `TurnoverLedgerWriteUnitOfWork`。二者都事务写 canonical relation 与 refresh intents。
 - Transactional fan-out owner：UoW 收集 refresh intents，由 `RuntimeQueueReadModelRefreshWriter` 批量写 `job.read_model_dirty_scopes` 与 `job.outbox_events`。
 - Worker/readiness owner：runtime worker registry、PostgreSQL durable queue、read model projection repositories、source versions/readiness。
 - Write proof owner：`write_operation_slo_audit.DEFAULT_OPERATION_EXPECTATIONS`。
+- Reversible runtime contract owner：随 backend release 发布的 `write_operation_e2e_smoke.REVERSIBLE_RELATION_*_CONTRACTS`；impact matrix 仅是测试约束的文档镜像，不能成为生产运行时文件依赖。
 - System proof owner：`OperationsAuditService` → `PostgresOperationsAuditRepository.audit_system(...)`；单一 `REPEATABLE READ READ ONLY` snapshot。
 - Deployed write orchestrator：`write_operation_e2e_smoke`，已有 auth、approval、dry-run、HTTP write steps、SLO wait 和 post API freshness/SLO probes。
 
@@ -30,11 +31,19 @@
 
 | Shape | Confirm profile | Withdraw profile | Required consumer emphasis |
 | --- | --- | --- | --- |
-| bank + invoice | `workbench_relation_confirm_bank_invoice_cross_page` | `workbench_relation_withdraw_bank_invoice_cross_page` | workbench/relation、bank detail、invoice lifecycle、pending invoice、input usage、search；cost/tax 不得伪 fan-out |
-| bank + turnover | `workbench_relation_confirm_bank_turnover_cross_page` | `workbench_relation_withdraw_bank_turnover_cross_page` | workbench/relation、bank detail、pending invoice、cost、search；invoice/tax 不得伪 fan-out |
+| bank + invoice | `workbench_relation_confirm_bank_invoice_cross_page` | `workbench_relation_withdraw_bank_invoice_cross_page` | workbench/relation、bank detail、invoice lifecycle、pending invoice、input usage、cost、search；tax 不得伪 fan-out |
+| bank + turnover | `turnover_relation_confirm_cross_page` | `turnover_relation_withdraw_cross_page` | turnover ledger、workbench/relation、cost、search；使用正式 closure endpoint/reason，不伪装成 Workbench relation |
 | bank + OA + invoice | `workbench_relation_confirm_cross_page` | `workbench_relation_withdraw_cross_page` | workbench/relation、bank detail、invoice lifecycle、pending invoice、input usage、cost、search；OA consumer由System Audit edge equality覆盖 |
 
-每个 shape 使用两个 checkpoint：confirm 与 withdraw。withdraw 必须经正式 preview/version contract，或者使用由安全 scenario builder基于刚才 confirm 响应生成的正式 submit body；禁止 cleanup SQL。
+每个 shape 使用两个 checkpoint：confirm 与 withdraw。Workbench withdraw 必须经正式 preview/version contract；turnover confirm 必须携带 bank row expected versions，withdraw 必须消费 confirm 返回的 relation ID；禁止 cleanup SQL。
+
+## 2026-07-12 终审纠偏
+
+- 真实 `WorkbenchWriteFacade._relation_downstream_scope_types` 对 bank+input-invoice 包含 `cost_statistics`；旧 bank+invoice non-consumer 登记错误，已改为 affected，tax-offset 作为 isolation。
+- 旧 `workbench_relation_*_bank_turnover_cross_page` 来自一次“不对称 Workbench withdraw 恢复 bank-only turnover relation”样本，不能定义可逆 pair；按 profile 反向制造事件会遮蔽真实 fan-out，故从新闭环 registry 移除。
+- bank+turnover 现在精确对应 `/api/turnover-ledger/closures/confirm` 与 `/api/turnover-ledger/relations/{relation_id}/withdraw`，事件 owner 是 `TurnoverLedgerWriteUnitOfWork`。
+- consumer assertion 必须落在正式 API 的业务根；成本 explorer 使用 `time_rows`/`bank_flow_time_rows`/`project_rows`/`expense_type_rows`，不能写不存在的 `/rows`，也不能只断言 freshness 元数据。
+- mutation 遇到 5xx/HTML/网络异常先视为 ambiguous；只有 durable idempotency record 明确 committed/failed 才能收敛判定，committed response payload 可恢复正式 relation identity，missing/reserved 继续要求人工恢复且禁止盲写。
 
 ## 场景数据与环境边界
 
@@ -63,7 +72,7 @@
 ## 计划切片
 
 1. Runner contract：checkpoint schema、per-checkpoint write SLO/post API/System Audit、fail-closed tests、旧 branch迁移/删除。
-2. Three-shape scenario contract：profile pair registry/impact matrix、safe fixture/scenario builder、confirm/withdraw response handoff、whole-repo legacy scan和docs。
+2. Three-shape scenario contract：release 内 runtime registry + 测试约束的 impact matrix 镜像、safe fixture/scenario builder、confirm/withdraw response handoff、whole-repo legacy scan和docs。
 3. Integration/verification：disposable PostgreSQL opt-in闭环、failure/restart/duplicate/dependency negative gates、frontend regression、full verification和真实环境preflight。
 
 ## 主要风险
