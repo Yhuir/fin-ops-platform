@@ -83,6 +83,7 @@ Progress: [█████████░] 95%
 - 2026-06-16: Phases 4-17 added for the remaining registered pages.
 - 2026-06-16: Phase 0 added and completed as the cross-page dependency baseline before page implementation work.
 - 2026-07-11: Phase 19 added for the cross-page Audit proof, readiness semantics, and legacy-path production closure.
+- 2026-07-12: Phase 20 added for three reversible relation write scenarios spanning fan-out, worker drain, freshness, System Audit, and legacy test-path removal.
 
 ### Pending Todos
 
