@@ -144,6 +144,18 @@ class WorkbenchSqlProjectionRelationPayloadTests(unittest.TestCase):
         )
         self.assertEqual(connection.fetch_all_calls[0][1], ("2026-02-01",))
 
+    def test_etc_invoice_summary_does_not_use_legacy_fallback_in_another_month_when_link_owner_exists(self) -> None:
+        connection = EtcSummaryCanonicalOwnerConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        rows = builder._etc_invoice_summary_rows(month="2026-05")
+
+        self.assertEqual(rows, {})
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("select distinct", queried_sql)
+        self.assertIn("from app.etc_batch_invoice_links", queried_sql)
+        self.assertIn("with submitted_batches as", queried_sql)
+
 
 class WorkbenchSqlReadConnection:
     def __init__(
@@ -329,6 +341,29 @@ class EtcSummaryLinkTableConnection:
                     "status": "pending",
                     "workbench_visibility": "hidden_after_etc_submission",
                     "raw_payload": {},
+                }
+            ]
+        return []
+
+
+class EtcSummaryCanonicalOwnerConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "select distinct" in normalized and "from app.etc_batch_invoice_links" in normalized:
+            return [{"external_etc_batch_id": "etc-canonical-owner"}]
+        if "from app.etc_batch_invoice_links" in normalized:
+            return []
+        if "with submitted_batches as" in normalized and "from app.invoices invoices" in normalized:
+            return [
+                {
+                    "external_etc_batch_id": "etc-canonical-owner",
+                    "row_id": "legacy-fallback-invoice",
+                    "invoice_no": "legacy-fallback-invoice",
+                    "total_with_tax": Decimal("88.00"),
                 }
             ]
         return []

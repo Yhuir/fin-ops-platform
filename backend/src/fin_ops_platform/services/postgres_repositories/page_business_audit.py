@@ -2428,6 +2428,7 @@ def _key_display_field_issues(
                            coalesce(source.legacy_mongo_id, source.id::text) as canonical_transaction_id,
                            source.amount as canonical_amount,
                            detail.transaction_id as bank_detail_transaction_id,
+                           detail.scope_key as bank_detail_scope_key,
                            detail.trade_date,
                            detail.counterparty_name,
                            detail.bank_name,
@@ -2493,7 +2494,7 @@ def _key_display_field_issues(
                 where canonical_id is null
                    or bank_detail_transaction_id is null
                    or coalesce(value->>'transaction_id', '') <> coalesce(canonical_transaction_id, '')
-                   or month_key <> coalesce(substring(trade_date::text from 1 for 7), '')
+                   or month_key <> coalesce(bank_detail_scope_key, substring(trade_date::text from 1 for 7), '')
                    or case
                           when replace(coalesce(value->>'amount', ''), ',', '') ~ '^-?[0-9]+([.][0-9]+)?$'
                           then abs(replace(value->>'amount', ',', '')::numeric)

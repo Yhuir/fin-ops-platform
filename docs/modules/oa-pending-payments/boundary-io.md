@@ -1,6 +1,6 @@
 # OA待付款核对模块边界与 I/O
 
-日期：2026-07-06
+日期：2026-07-12
 
 ## 模块化状态
 
@@ -29,7 +29,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面查询/过滤 | `OaPendingPaymentsPage.tsx`、`features/oaPendingPayments/api.ts` | 必须进入 `OaPendingPaymentReadModelService` fresh gate；read model service 未配置或 payload 不 fresh 时 fail closed，不回退 live query |
-| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?page=oa-pending-payments`；completed App OA 与已进入 App 的 externally admitted in-progress OA 构成可证明 expected-set，collapsed OA 成员、申请人/项目/金额/payment status 结构必须一致；以这些 OA 为 anchor 的 linked shared relation OA/bank/input-invoice typed edges，必须与 fresh `oa_pending_payment_rows.payload` 三类 summaries 按 `relationCaseId + member` 双向相等，并在同一只读一致性快照中执行；只证明 App 内部事实/投影一致，不替代外部 OA 或 `t_payment_simple` 来源完整性对账 |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?page=oa-pending-payments`；completed App OA 与已进入 App 的 externally admitted in-progress OA 构成可证明 expected-set，collapsed OA 成员、申请人/项目/金额/payment status 结构必须一致；以这些 OA 为 anchor 的 linked shared relation OA/bank/input-invoice typed edges，必须与 fresh `oa_pending_payment_rows.payload` 按 `relationCaseId + member` 双向相等。支出流水进入付款 summaries；非支出流水不参与付款金额/状态展示，但必须逐边持久化到 `bankTransaction.nonOutflowRelationEdges`，不能只保存 count 或直接从 Audit expected-set 排除。全部比较在同一只读一致性快照中执行；只证明 App 内部事实/投影一致，不替代外部 OA 或 `t_payment_simple` 来源完整性对账 |
 | 关联支出流水候选查询 | `GET /api/oa-pending-payments/bank-transaction-candidates` | `oa_row_ids` 只作为后续提交关联的目标 OA 上下文；候选读取全部支出流水，不按 OA 月份收敛 |
 | 已支付写回/银行关联 | command service | 写操作必须审计并触发 read model scopes；逐行写回只能由 `writeback-paid` 触发，且后端必须重新校验已存在的 Workbench active relation 或 in-progress active pending relation、outflow、金额合计和 `flow_id`；`link-bank-transactions` 成功创建关系后仍可自动写回 |
 | OA projection sync | OA sync/projection services | 输入必须带 source version |
@@ -103,3 +103,4 @@
 - consumer projection 必须与上述逻辑并集做双向 typed edge equality；promotion 后同一关系只能由 shared source 代表，不能双写两个 active owner。
 - consumer edge equality 使用 Workbench 已独立证明的 stable identity alias map，把重复银行源行收敛到 canonical primary；shared raw relation edge 仍由 relation Audit 全量证明，OA 页面无需重复展示同一金融对象的 alias 行。
 - shared relation 的银行成员类型允许 canonical `bank` 与 `bank_transaction` 两种登记值；query/projection 边界和 relation context 的跨月补载都必须归一到同一银行对象，并同时以 relation 请求 alias 与对象 canonical id 建索引后把每个成员写入 `bankTransaction.summaries`。不得因类型别名、UUID/legacy identity 差异或成员流水不在 OA scope 的初始月份列表中而跳过关系成员。
+- `bankTransaction.summaries` 只保存可作为付款事实的支出边；收入等非支出共享关系仍必须写入结构化 `nonOutflowRelationEdges`，字段至少包含 canonical bank id、relation case id 和 linked status。`nonOutflowBankRelationCount` 只能从该 edge list 派生，不能替代 identity-level proof。source version 为 `oa-pending-payment:complete-relation-edge-proof-v6`，旧 v5 payload 必须经正式 gateway 重建。

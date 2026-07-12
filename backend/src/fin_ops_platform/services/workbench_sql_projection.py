@@ -41,7 +41,7 @@ from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHIN
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-12-cross-scope-proof-v3"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-12-canonical-source-proof-v4"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -1396,11 +1396,16 @@ class WorkbenchSqlProjectionBuilder:
                 existing_payload = batch_payload_by_external_batch_id.get(external_batch_id, {})
                 batch_payload_by_external_batch_id[external_batch_id] = {**existing_payload, **batch_payload}
 
-        for row in self._etc_invoice_summary_link_rows(
+        link_rows = self._etc_invoice_summary_link_rows(
             normalized_month,
             normalized_external_batch_ids,
             normalized_excluded_external_batch_ids,
-        ):
+        )
+        linked_external_batch_ids = self._etc_invoice_summary_link_source_ids(
+            normalized_external_batch_ids,
+            normalized_excluded_external_batch_ids,
+        )
+        for row in link_rows:
             append_summary_source_row(
                 row,
                 batch_payload=self._etc_business_summary_batch_payload(row),
@@ -1447,6 +1452,8 @@ class WorkbenchSqlProjectionBuilder:
             tuple(params),
         )
         for row in rows:
+            if str(row.get("external_etc_batch_id") or "").strip() in linked_external_batch_ids:
+                continue
             batch_payload = row_payload(row, "batch_payload")
             append_summary_source_row(row, batch_payload=batch_payload if isinstance(batch_payload, dict) else None)
 
@@ -1530,6 +1537,8 @@ class WorkbenchSqlProjectionBuilder:
             ),
         )
         for row in business_rows:
+            if str(row.get("external_etc_batch_id") or "").strip() in linked_external_batch_ids:
+                continue
             append_summary_source_row(
                 row,
                 batch_payload=self._etc_business_summary_batch_payload(row),
@@ -1609,6 +1618,45 @@ class WorkbenchSqlProjectionBuilder:
             tuple(params),
         )
         return list(rows)
+
+    def _etc_invoice_summary_link_source_ids(
+        self,
+        external_batch_ids: set[str],
+        excluded_external_batch_ids: set[str] | None = None,
+    ) -> set[str]:
+        batch_id_expr = """
+            coalesce(
+                nullif(business_batches.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                nullif(business_batches.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                nullif(business_batches.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                nullif(business_batches.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                links.business_batch_id
+            )
+        """
+        filters = ["links.link_status = 'active'", "invoices.status <> 'deleted'"]
+        params: list[Any] = []
+        if external_batch_ids:
+            filters.append(f"{batch_id_expr} = any(%s)")
+            params.append(sorted(external_batch_ids))
+        if excluded_external_batch_ids:
+            filters.append(f"{batch_id_expr} <> all(%s)")
+            params.append(sorted(excluded_external_batch_ids))
+        rows = self._connection.fetch_all(
+            f"""
+            select distinct {batch_id_expr} as external_etc_batch_id
+            from app.etc_batch_invoice_links links
+            join app.invoices invoices on invoices.id = links.invoice_id
+            left join app.etc_business_batches business_batches
+              on business_batches.business_batch_id = links.business_batch_id
+            where {" and ".join(filters)}
+            """,
+            tuple(params),
+        )
+        return {
+            str(row.get("external_etc_batch_id") or "").strip()
+            for row in rows
+            if str(row.get("external_etc_batch_id") or "").strip()
+        }
 
     @staticmethod
     def _etc_business_summary_filters(

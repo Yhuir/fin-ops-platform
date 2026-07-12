@@ -77,7 +77,9 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertIn("canonical_expected_scopes", queried_sql)
         self.assertIn("related.scope_key", queried_sql)
-        self.assertIn("projected.source_kind not in ('etc_invoice_summary', 'etc_invoice')", queried_sql)
+        self.assertIn("'etc_invoice_summary'", queried_sql)
+        self.assertIn("'bank_flow_rule_batch_summary'", queried_sql)
+        self.assertIn("where member.row_id = oa.row_id", queried_sql)
         self.assertIn("like 'candidate:%%'", queried_sql)
 
     def test_relation_display_can_be_clean_while_canonical_object_is_missing(self) -> None:

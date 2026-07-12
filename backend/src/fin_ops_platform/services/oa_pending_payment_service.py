@@ -30,7 +30,7 @@ from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRe
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
-SOURCE_VERSION = "oa-pending-payment:relation-alias-proof-v5"
+SOURCE_VERSION = "oa-pending-payment:complete-relation-edge-proof-v6"
 READ_MODEL_STATUS = "live_query"
 VIEW_MODE_COMPLETED = "completed"
 VIEW_MODE_IN_PROGRESS = "in_progress"
@@ -889,8 +889,9 @@ class OaPendingPaymentQueryService:
     ) -> dict[str, Any]:
         summaries = []
         seen: set[str] = set()
+        seen_non_outflow_edges: set[tuple[str, str]] = set()
+        non_outflow_relation_edges: list[dict[str, str]] = []
         missing_bank_relation_count = 0
-        non_outflow_relation_count = 0
         resolved_oa_amount = oa_amount if oa_amount is not None else (_parse_decimal(record.amount) if record is not None else None)
         resolved_oa_amount = resolved_oa_amount or ZERO
         for relation in relations:
@@ -905,7 +906,17 @@ class OaPendingPaymentQueryService:
                     continue
                 if _bank_direction(bank) != "outflow":
                     if linked_relation:
-                        non_outflow_relation_count += 1
+                        edge_key = (str(relation.get("case_id") or ""), bank.id)
+                        if edge_key not in seen_non_outflow_edges:
+                            seen_non_outflow_edges.add(edge_key)
+                            non_outflow_relation_edges.append(
+                                {
+                                    "bankTransactionId": bank.id,
+                                    "relationCaseId": edge_key[0],
+                                    "relationStatus": relation_status(relation),
+                                    "relationSource": str(relation.get("relation_source") or ""),
+                                }
+                            )
                     continue
                 if bank.id not in seen:
                     seen.add(bank.id)
@@ -947,7 +958,8 @@ class OaPendingPaymentQueryService:
             "summaries": public_summaries,
             "linkedRelationCount": len(linked_summaries),
             "missingBankRelationCount": missing_bank_relation_count,
-            "nonOutflowBankRelationCount": non_outflow_relation_count,
+            "nonOutflowBankRelationCount": len(non_outflow_relation_edges),
+            "nonOutflowRelationEdges": non_outflow_relation_edges,
         }
 
     @staticmethod

@@ -172,6 +172,19 @@ def _oa_pending_payment_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple[A
             where row.cache_status = 'fresh'
               and lower(coalesce(summary.value->>'relationStatus', '')) = 'linked'
             union all
+            select edge.value->>'relationCaseId', row.scope_key,
+                   coalesce(identity.canonical_row_id, edge.value->>'bankTransactionId'),
+                   'bank_transaction'::text
+            from read_model.oa_pending_payment_rows row
+            join lateral jsonb_array_elements(
+                case when jsonb_typeof(row.payload->'bankTransaction'->'nonOutflowRelationEdges') = 'array'
+                     then row.payload->'bankTransaction'->'nonOutflowRelationEdges' else '[]'::jsonb end
+            ) edge(value) on true
+            left join identity_aliases identity
+              on identity.alias_row_id = edge.value->>'bankTransactionId'
+            where row.cache_status = 'fresh'
+              and lower(coalesce(edge.value->>'relationStatus', '')) = 'linked'
+            union all
             select summary.value->>'relationCaseId', row.scope_key,
                    summary.value->>'invoiceId', 'input_invoice'::text
             from read_model.oa_pending_payment_rows row

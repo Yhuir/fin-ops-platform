@@ -660,6 +660,18 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["paymentStatus"]["code"], "paid")
         self.assertIn("流水方向待检查", row["paymentStatus"]["reason"])
         self.assertEqual(row["bankTransaction"]["relationCount"], 0)
+        self.assertEqual(row["bankTransaction"]["nonOutflowBankRelationCount"], 1)
+        self.assertEqual(
+            row["bankTransaction"]["nonOutflowRelationEdges"],
+            [
+                {
+                    "bankTransactionId": "bank-income",
+                    "relationCaseId": "case-income",
+                    "relationStatus": "linked",
+                    "relationSource": "",
+                }
+            ],
+        )
 
     def test_missing_related_bank_fact_still_counts_as_paid_status(self) -> None:
         pair_service = WorkbenchPairRelationService()

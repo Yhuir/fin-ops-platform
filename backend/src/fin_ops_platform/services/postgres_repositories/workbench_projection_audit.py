@@ -58,7 +58,7 @@ with active_generations as (
     order by scope_key, activated_at desc nulls last, updated_at desc
 ),
 active_relation_members as (
-    select member.row_id, relation.row_types[member.ordinality] as row_type
+    select member.row_id
     from app.workbench_pair_relations relation
     join lateral unnest(relation.row_ids) with ordinality member(row_id, ordinality) on true
     where relation.status = 'active'
@@ -88,7 +88,7 @@ canonical_oa as (
          or oa.workflow_status in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2')
          or exists (
               select 1 from active_relation_members member
-              where member.row_id = oa.row_id and member.row_type = 'oa'
+              where member.row_id = oa.row_id
          )
       )
       and oa.scope_month is not null
@@ -103,9 +103,15 @@ canonical_bank as (
     from app.bank_transactions bank
     where bank.status <> 'deleted'
       and bank.txn_month is not null
-      and not exists (
-            select 1 from claimed_bank claim
-            where claim.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
+      and (
+            not exists (
+                select 1 from claimed_bank claim
+                where claim.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
+            )
+         or exists (
+                select 1 from active_relation_members member
+                where member.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
+            )
       )
 ),
 canonical_invoice as (
@@ -245,7 +251,12 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
              and canonical.row_id = projected.row_id
              and canonical.source_kind = projected.source_kind
             where projected.generation_scope <> 'all'
-              and projected.source_kind not in ('etc_invoice_summary', 'etc_invoice')
+              and projected.source_kind not in (
+                  'etc_invoice_summary',
+                  'etc_invoice',
+                  'no_oa_bank_batch_summary',
+                  'bank_flow_rule_batch_summary'
+              )
               and canonical.row_id is null
         )
         select * from mismatches

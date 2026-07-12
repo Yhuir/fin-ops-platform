@@ -792,6 +792,39 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
         self.assertEqual(report["issues"][0]["details"]["mismatch_kind"], "shared_edge_missing_consumer")
 
+    def test_oa_pending_payment_audit_proves_non_outflow_edges_without_treating_them_as_payment_summaries(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="oa_pending_payments",
+        )
+
+        consumer_sql, _params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "consumer_relation_edge_equality" in sql
+        )
+        self.assertIn("nonOutflowRelationEdges", consumer_sql)
+        self.assertIn("edge.value->>'bankTransactionId'", consumer_sql)
+        self.assertIn("edge.value->>'relationCaseId'", consumer_sql)
+
+    def test_cost_statistics_bank_flow_recalculation_uses_bank_detail_scope_owner(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="cost_statistics",
+        )
+
+        bank_flow_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "cost_bank_flow_key_fields" in sql
+        )
+        self.assertIn("detail.scope_key as bank_detail_scope_key", bank_flow_sql)
+        self.assertIn("month_key <> coalesce(bank_detail_scope_key", bank_flow_sql)
+
     def test_pending_invoice_audit_proves_registered_consumer_edges(self) -> None:
         connection = FakeConnection()
 
