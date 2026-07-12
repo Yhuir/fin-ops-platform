@@ -1,5 +1,5 @@
 ---
-status: fixing
+status: resolved
 trigger: "Production System Audit regressed from 16/16 to 15/16 because Workbench source versions advanced while cost statistics stayed fresh/drained on older upstream versions."
 created: 2026-07-12
 updated: 2026-07-12
@@ -20,7 +20,7 @@ updated: 2026-07-12
 - hypothesis: confirmed dual boundary failure: cost refresh was scheduled in parallel with Workbench rather than after active-generation publication, and the cost query expected-set omitted current Workbench source versions.
 - test: Workbench month publication must enqueue active/all cost month scopes after projection commit and before completing the Workbench dirty scope; a cost API read built from an older Workbench generation must return refreshing and enqueue repair.
 - expecting: normal asynchronous operation converges without a manual cost refresh, and stale cost data cannot report fresh.
-- next_action: run architecture/lint/full regressions, deploy the exact commit, trigger only an upstream Workbench refresh, and prove cost automatically converges before a 16/16 read-only System Audit.
+- next_action: closed; monitor normal production writes through the existing App Health/Audit gates.
 - reasoning_checkpoint: Workbench `source_version` is the durable dirty-scope commit sequence consumed by cost lineage; deleting it would hide a real ordering failure. The producer must sequence the dependent refresh instead.
 - tdd_checkpoint: targeted cost-statistics and Workbench SQL runtime suites pass with publication-order and stale-fresh-gate regressions.
 
@@ -45,5 +45,5 @@ updated: 2026-07-12
 - root_cause: Business lifecycle events enqueue Workbench and cost statistics independently, so cost can finish from the old active generation before Workbench publishes the new one. Workbench publication did not enqueue a dependent cost refresh. Separately, the cost API expected source versions omitted `workbench_source_versions`, so the query gateway could label that stale snapshot fresh even though Audit compared and rejected it.
 - fix: Add a narrow repository port for current Workbench active-generation source versions; use it in both the cost projection builder and API expected-set. After a Workbench month shard publishes, enqueue normalized active/all cost month scopes through `ReadModelRefreshGateway` before completing the Workbench dirty scope. Do not fan out from the compatibility all aggregate.
 - hardening: Preserve fail-closed behavior, durable queue ordering, tenant/priority/trace propagation, parent fan-out from cost shard completion, and remove the builder's duplicate raw SQL version reader.
-- verification: initial targeted/full verification passed, but the production composed repository caught the missing delegate. A production-shaped facade/port regression and hotfix are in progress before rerunning the same upstream-only convergence proof.
+- verification: local full verification passed (4,386 backend tests, 834 frontend tests, 178 Playwright tests, production build/docs/infra-smoke), plus 280 focused tests and 213 subtests after the facade regression. Production release `main-3473f57c-coststats-facade-20260712205834` activated commit `3473f57c4`. An all-scope Workbench refresh produced downstream cost events; the initial release's 40 dead letters were archived only after `runtime-queue-resolve-covered` proved every event covered by exact-scope fresh readiness and later done events. System Audit `system-audit:b4855a65d7267c5c9f414751` then passed 16/16. A second independent operator refresh targeted only `workbench=2026-07`; without any direct cost refresh, the queue drained and System Audit `system-audit:089ebb1281910f6a8db0aa96` again passed 16/16 with `integrity=pass`, `freshness=fresh`, and `queue=drained`.
 - files_changed: `workbench_read_model_refresh.py`, `cost_statistics_read_model_repository.py`, `postgres_repositories/read_models.py`, `cost_tax_sql_projection.py`, `app/server.py`, tests, and boundary docs.
