@@ -96,6 +96,33 @@ class WorkbenchObjectIdentityArbitrationTests(unittest.TestCase):
         self.assertNotIn("bank-right", rows_by_id)
         self.assertEqual(rows_by_id["bank-left"]["identity_alias_rows"]["bank"][0]["id"], "bank-right")
 
+    def test_active_auto_close_override_owns_strong_invoice_identity(self) -> None:
+        rows_by_id = {
+            "oa-att-inv-1": {
+                "id": "oa-att-inv-1",
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "status": "open",
+                "auto_close_suppressed": True,
+                "digital_invoice_no": "265320000000993",
+                "total_with_tax": "300.00",
+            },
+            "invoice-1": {
+                "id": "invoice-1",
+                "type": "invoice",
+                "source_kind": "invoice",
+                "status": "open",
+                "digital_invoice_no": "265320000000993",
+                "total_with_tax": "300.00",
+            },
+        }
+
+        result = WorkbenchObjectIdentityArbitrationService().arbitrate_rows(rows_by_id)
+
+        self.assertEqual(result["suppressed_row_ids"], ["invoice-1"])
+        self.assertTrue(rows_by_id["oa-att-inv-1"]["auto_close_suppressed"])
+        self.assertEqual(rows_by_id["oa-att-inv-1"]["identity_alias_rows"]["invoice"][0]["id"], "invoice-1")
+
     def test_oa_rows_keep_row_id_identity_without_weak_business_field_merge(self) -> None:
         rows_by_id = {
             "oa-left": {

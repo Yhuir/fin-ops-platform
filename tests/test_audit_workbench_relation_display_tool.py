@@ -246,7 +246,7 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         relation = _relation()
         relation["relation_mode"] = "batch_accounting"
         relation["raw_payload"]["normalized_payload"]["relation_mode"] = "batch_accounting"
-        relation["raw_payload"]["normalized_payload"]["amount_check"] = {
+        relation["amount_check"] = {
             "external_etc_batch_id": "ETC-BATCH-1"
         }
         summary = _group_row("2026-01", "etc-summary-ETC-BATCH-1", relation_mode="batch_accounting")
@@ -366,6 +366,9 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertIn("from app.workbench_pair_relations", core_source)
         self.assertNotIn("ArgumentParser", core_source)
         self.assertIn("from app.oa_applications", projection_source)
+        self.assertIn("detail.row_role = 'collapsed'", projection_source)
+        self.assertIn("detail.column_values->>'digitalInvoiceNo'", projection_source)
+        self.assertIn("select 1 from claimed_bank claim", projection_source)
         self.assertNotIn("ArgumentParser", projection_source)
 
 

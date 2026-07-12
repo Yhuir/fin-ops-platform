@@ -406,7 +406,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
             "relation_source": "oa_pending_payment_bank_relations",
             "month_scope": "2026-02",
             "row_ids": ["oa-progress-paid", bank.id],
-            "row_types": ["oa", "bank"],
+            "row_types": ["oa", "bank_transaction"],
             "oa_row_ids": ["oa-progress-paid"],
             "bank_transaction_ids": [bank.id],
             "amount_check": {"matched": True, "rule_code": "oa_bank_exact_amount"},

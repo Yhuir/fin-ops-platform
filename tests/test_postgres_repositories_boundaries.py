@@ -864,6 +864,37 @@ def test_read_model_tax_save_counts_inner_tax_items_for_entry_count() -> None:
     assert model_insert[3] == 3
 
 
+def test_read_model_tax_save_rewrites_structured_amounts_from_item_payload() -> None:
+    connection = RecordingConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.save_tax_offset_read_models(
+        {
+            "read_models": {
+                "2026-03": {
+                    "payload": {
+                        "input_plan_items": [
+                            {
+                                "id": "input-1",
+                                "issue_date": "2026-03-02",
+                                "tax_amount": "159.66",
+                                "total_with_tax": "2,820.72",
+                            }
+                        ]
+                    },
+                    "generated_at": "2026-03-02T00:00:00+00:00",
+                }
+            }
+        }
+    )
+
+    item_insert = next(
+        params for sql, params in connection.executed if "insert into read_model.tax_offset_items" in sql
+    )
+    assert item_insert[15] == "159.66"
+    assert item_insert[16] == "2820.72"
+
+
 def test_invoice_lifecycle_rows_are_saved_in_batch_and_scope_is_updated() -> None:
     connection = RecordingConnection()
     repository = PostgresReadModelRepository(connection)

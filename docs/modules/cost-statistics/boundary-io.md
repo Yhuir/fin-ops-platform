@@ -70,11 +70,13 @@
 - `time_rows.bank_tag_*` 的来源是 `BankTransactionTagReadFacade` 暴露的 fresh `bank_detail` scoped read model 有效分类字段，经 `cost_statistics_bank_tags.bank_tag_context_from_row(...)` 归一化后写入成本统计 read model payload。父 scope 从已物化月份 rows 的 payload 回读这些字段，不能回头读 Workbench `all`、Workbench 行内旧标签字段或银行明细页面 API。
 - `bank_flow_time_rows.bank_tag_*` 的来源是成本统计投影层通过银行明细 read facade 批量读取的 fresh 支出流水；它是 `按标签`、`按时间` 的全流水统计输入。`time_rows` 继续是 OA 配对成本输入；两类 rowset 的总金额口径允许不同。
 - Audit 不把上述投影依赖误当成 canonical 完整性来源：银行支出集合直接对 `app.bank_transactions` 做双向 equality，标签内容再与通过独立 bank-detail proof 的有效标签比较；同时复用 Workbench 全页面 proof，防止 Workbench 与成本统计共同漏掉同一对象却一起绿色。
+- 银行支出 canonical identity 与页面 payload 一律使用 `coalesce(legacy_mongo_id, id::text)`；无标签流水的 code 为空，但 label/primary/sub/path 统一为 `未标记` 语义。Audit 不得拿内部 UUID 与 legacy 页面 ID 比较，也不得把空标签与 `未标记` 误判为业务差异。
 - 成本统计标签规则由 `AppSettingsService` 持久化，`CostStatisticsQueryService` 读取归一后的 selected leaf codes 并在 query/export 层过滤。该规则不是投影 source version，保存时不触发 read model rebuild；页面只等待当前 scope freshness，避免全量刷新放大耗时。
 - `bank_accounts` 的来源是 settings owner 的银行账户映射，投影层通过 `cost_statistics_bank_accounts.py` 归一为页面只读 payload，并以 `bank_account_mappings_fingerprint` 纳入 source version。页面银行统计以 `bank_accounts + time_rows` 合并生成，禁止恢复只从当前流水推断银行全集的旧逻辑。
 - Upstream read model 输入：月份 shard 只消费 Workbench active generation；父 scope 从已物化 `read_model.cost_statistics_rows` 聚合，不读 Workbench `all` 或历史 generation。
 - Audit lineage：月份 scope 已保存的 `workbench_source_versions` 和 `bank_detail_source_versions` 必须与同一 snapshot 中当前 active generation / bank-detail scope 精确相等；父 scope 的 `cost_statistics_parent_source=materialized_shards`、`source_shard_count`、`source_shards` 必须与当前同 project scope 的全部月份模型精确相等。无需新增 lineage 表。
 - 父 scope 正式重建会删除不再存在于 Workbench active month shard 集合中的旧 cost_statistics month scopes，并清理对应 Redis payload；旧 shard 不得继续进入 Audit、parent rollup 或页面月份集合。
+- `active:all` / `all:all` 的 summary 与 project/expense 聚合都从当前 concrete `cost_statistics_rows` 重算；父模型不要求重复物化 parent rows，但 Audit 必须使用同一 child-union 口径，不能以 parent row 表为空误报 summary。
 - Explorer payload schema version：`2026-07-cost-statistics-audit-proof-v7`。生产 v7 投影必须输出 `bank_accounts`、`bank_flow_summary`、`bank_flow_time_rows`，并在 `time_rows` 持久化 canonical `group_id/project_id`，使 Workbench relation 到成本行的归属可独立证明；带千分位的展示金额必须无损写入结构化 `cost_statistics_rows.amount`。旧 schema payload 或仍使用 Workbench 行内旧标签字段时必须通过 schema gate fail-closed 并重新投影。
 
 ## 文件范围

@@ -103,16 +103,9 @@ canonical_bank as (
     from app.bank_transactions bank
     where bank.status <> 'deleted'
       and bank.txn_month is not null
-      and (
-            not exists (
-                select 1 from claimed_bank claim
-                where claim.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
-            )
-         or exists (
-                select 1 from active_relation_members member
-                where member.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
-                  and member.row_type in ('bank', 'bank_transaction')
-            )
+      and not exists (
+            select 1 from claimed_bank claim
+            where claim.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
       )
 ),
 canonical_invoice as (
@@ -513,11 +506,14 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
                     - coalesce(projected.display_amount, 0)
                   ) > 0.01
                or coalesce(invoice.invoice_type, '') <> coalesce(projected.payload->>'invoice_type', '')
-               or coalesce(invoice.invoice_no, '') <> coalesce(projected.payload->>'invoice_no', '')
-               or coalesce(invoice.invoice_code, '') <> coalesce(projected.payload->>'invoice_code', '')
-               or coalesce(invoice.digital_invoice_no, '') <> coalesce(projected.payload->>'digital_invoice_no', '')
+               or coalesce(invoice.invoice_no, '')
+                  <> coalesce(nullif(projected.payload->>'invoice_no', '—'), '')
+               or coalesce(invoice.invoice_code, '')
+                  <> coalesce(nullif(projected.payload->>'invoice_code', '—'), '')
+               or coalesce(invoice.digital_invoice_no, '')
+                  <> coalesce(nullif(projected.payload->>'digital_invoice_no', '—'), '')
                or coalesce(to_char(invoice.invoice_date, 'YYYY-MM-DD'), '')
-                  <> left(coalesce(projected.payload->>'issue_date', ''), 10)
+                  <> left(coalesce(nullif(projected.payload->>'issue_date', '—'), ''), 10)
         ),
         mismatches as (
             select * from oa_mismatch
@@ -639,30 +635,34 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             order by row.row_id, generation.scope_key desc
         ),
         projected_detail_rows as (
-            select summary.summary_row_id,
+            select summary_member.row_id as summary_row_id,
                    coalesce(
-                       nullif(detail.value->>'digital_invoice_no', ''),
-                       nullif(detail.value->>'invoice_no', ''),
-                       nullif(detail.value->>'id', ''),
-                       nullif(detail.value->>'row_id', '')
+                       nullif(detail.column_values->>'digitalInvoiceNo', ''),
+                       nullif(detail.column_values->>'invoiceNo', ''),
+                       detail.row_id
                    ) as invoice_row_id,
                    coalesce(
-                       case when coalesce(replace(detail.value->>'amount_value', ',', ''), '')
+                       case when coalesce(replace(detail.column_values->>'grossAmount', ',', ''), '')
                                       ~ '^-?[0-9]+([.][0-9]+)?$'
-                            then replace(detail.value->>'amount_value', ',', '')::numeric end,
-                       case when coalesce(replace(detail.value->>'total_with_tax', ',', ''), '')
+                            then replace(detail.column_values->>'grossAmount', ',', '')::numeric end,
+                       case when coalesce(replace(detail.column_values->>'amount', ',', ''), '')
                                       ~ '^-?[0-9]+([.][0-9]+)?$'
-                            then replace(detail.value->>'total_with_tax', ',', '')::numeric end,
-                       case when coalesce(replace(detail.value->>'amount', ',', ''), '')
-                                      ~ '^-?[0-9]+([.][0-9]+)?$'
-                            then replace(detail.value->>'amount', ',', '')::numeric end,
+                            then replace(detail.column_values->>'amount', ',', '')::numeric end,
                        0
                    ) as amount
-            from projected_summary summary
-            join lateral jsonb_array_elements(
-                case when jsonb_typeof(summary.payload->'etc_invoice_detail_rows') = 'array'
-                     then summary.payload->'etc_invoice_detail_rows' else '[]'::jsonb end
-            ) detail(value) on true
+            from active_months generation
+            join read_model.workbench_group_rows summary_member
+              on summary_member.generation_id = generation.generation_id
+             and summary_member.scope_key = generation.scope_key
+             and summary_member.source_kind = 'etc_invoice_summary'
+             and summary_member.row_role <> 'collapsed'
+            join read_model.workbench_group_rows detail
+              on detail.generation_id = summary_member.generation_id
+             and detail.scope_key = summary_member.scope_key
+             and detail.group_id = summary_member.group_id
+             and detail.pane = 'invoice'
+             and detail.row_role = 'collapsed'
+             and detail.source_kind = 'etc_invoice'
         ),
         projected_detail as (
             select summary_row_id, invoice_row_id, count(*)::integer as projected_count,

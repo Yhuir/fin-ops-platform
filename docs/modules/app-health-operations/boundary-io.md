@@ -104,8 +104,8 @@
 - App Health 旧 `InputInvoiceUsageAuditPanel`、专项 state/callback 和 Browser mock specialized URL 已删除；进项页仍通过自己的统一 page key Audit 控件证明自身合同。
 - specialized input/output HTTP routes、frontend clients 和 service/repository public methods 已删除；统一 repository executor 与只读 CLI thin adapters 继续复用同一 invoice proof core。
 
-## Page Audit contract v20（2026-07-12）
+## Page Audit contract v21（2026-07-12）
 
-- v20 在 v19 基础上修正 canonical object identity：Workbench 与 OA pending consumer 把稳定身份别名证明为同一金融对象，不把别名压缩误报为对象/关系遗漏；ETC 重复导入批次按不可变事件成员证明，不再误当单一当前 owner；Tax Offset 不再猜测 canonical `amount` 是否含税，只比较明确的 `total_with_tax` 事实与投影。旧 v19 结果不能代表当前合同。
+- v21 在 v20 基础上按真实物化边界收敛证明：Workbench 区分 OA claim ownership、结构化 relation metadata 与 collapsed ETC 明细；OA pending 归一 `bank`/`bank_transaction` 成员类型；成本统计统一 legacy 页面 identity、未标记语义和 child-to-parent 汇总；Tax Offset 通过 v3 schema 重写 structured columns。旧 v20 结果不能代表当前合同。
 - 绿色只证明同一 immutable PostgreSQL snapshot 内“已进入 App 的 canonical facts、页面 expected-set/read model、共享/页面 relation consumer、关键字段与 durable freshness/queue”一致。
 - pre-contract import provenance warning 明确声明历史 workflow artifact 未被证明；对应 canonical bank/invoice/ETC 业务事实仍须由业务页面 Audit 阻断证明。

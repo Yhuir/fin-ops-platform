@@ -592,7 +592,7 @@ function appHealthSystemAuditPayload() {
       snapshot_consistency: "repeatable_read_read_only",
       database_snapshot: true,
       proof_availability: "ready",
-      contract_revision: "page-audit-contract.v20",
+      contract_revision: "page-audit-contract.v21",
       write_policy: "read_only",
     },
     database_system_snapshot: {
@@ -2178,7 +2178,7 @@ function etcBusinessBatchListPayload(status: string | null, batchStatus: EtcBusi
 
 function taxSourceVersions(month: string) {
   return {
-    tax_offset_read_model_schema_version: "2026-07-tax-offset-audit-proof-v2",
+    tax_offset_read_model_schema_version: "2026-07-tax-offset-audit-proof-v3",
     invoice_fact_source_version: `mock-invoice-facts:${month}`,
     tax_certified_import_source_version: `mock-certified:${month}`,
   };

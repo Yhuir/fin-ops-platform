@@ -203,7 +203,11 @@ class WorkbenchObjectIdentityArbitrationService:
         exception_case = row.get("exception_case")
         if isinstance(exception_case, dict) and _text(exception_case.get("case_id")):
             return True
-        return bool(row.get("ignored") or row.get("exception_case_id"))
+        return bool(
+            row.get("ignored")
+            or row.get("exception_case_id")
+            or row.get("auto_close_suppressed")
+        )
 
 
 def _primary_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:

@@ -844,17 +844,20 @@ def _read_model_source_version_mismatch_issues(
                            parent_source_versions->>'source_shard_count' as stored_source_shard_count,
                            parent_source_versions->>'cost_statistics_parent_source' as parent_source
                     from expected_parents
-                    where parent_source_versions is null
-                       or present_shard_count <> expected_shard_count
-                       or parent_source_versions->>'cost_statistics_parent_source' <> 'materialized_shards'
-                       or not parent_source_versions ? 'source_shards'
-                       or not parent_source_versions ? 'source_shard_count'
-                       or coalesce(parent_source_versions->'source_shards', '{}'::jsonb) <> expected_source_shards
-                       or case
-                              when coalesce(parent_source_versions->>'source_shard_count', '') ~ '^[0-9]+$'
-                              then (parent_source_versions->>'source_shard_count')::integer
-                              else -1
-                          end <> expected_shard_count
+                    where expected_shard_count > 0
+                      and (
+                           parent_source_versions is null
+                        or present_shard_count <> expected_shard_count
+                        or parent_source_versions->>'cost_statistics_parent_source' <> 'materialized_shards'
+                        or not parent_source_versions ? 'source_shards'
+                        or not parent_source_versions ? 'source_shard_count'
+                        or coalesce(parent_source_versions->'source_shards', '{}'::jsonb) <> expected_source_shards
+                        or case
+                               when coalesce(parent_source_versions->>'source_shard_count', '') ~ '^[0-9]+$'
+                               then (parent_source_versions->>'source_shard_count')::integer
+                               else -1
+                           end <> expected_shard_count
+                      )
                     order by scope_key
                     limit %s
                     """,
@@ -1794,7 +1797,15 @@ def _canonical_expected_set_issues(
             where tenant_id = %s
         ),
         bank_tag_contexts as (
-            select transaction_id, bank_tag_code, bank_tag_label,
+            select transaction_id, bank_tag_code,
+                   coalesce(
+                       nullif(bank_tag_label, ''),
+                       explicit_sub_label,
+                       effective_label_path[2],
+                       explicit_primary_label,
+                       effective_label_path[1],
+                       '未标记'
+                   ) as bank_tag_label,
                    coalesce(
                        explicit_primary_label,
                        effective_label_path[1],
@@ -1972,7 +1983,7 @@ def _canonical_expected_set_issues(
         ),
         expected_bank_flow as (
             select to_char(source.txn_month, 'YYYY-MM') as scope_key,
-                   source.id::text as transaction_id,
+                   coalesce(source.legacy_mongo_id, source.id::text) as transaction_id,
                    count(*)::integer as expected_count,
                    sum(abs(source.amount))::numeric as expected_amount
             from app.bank_transactions source
@@ -1981,7 +1992,7 @@ def _canonical_expected_set_issues(
               and source.txn_month is not null
               and coalesce(source.amount, 0) <> 0
             group by to_char(source.txn_month, 'YYYY-MM'),
-                     source.id::text
+                     coalesce(source.legacy_mongo_id, source.id::text)
         ),
         projected_bank_flow as (
             select substring(model.scope_key from '([0-9]{4}-[0-9]{2})$') as scope_key,
@@ -2506,7 +2517,12 @@ def _key_display_field_issues(
                       )
                    or coalesce(value->>'bank_tag_code', '') <> coalesce(effective_category_code, '')
                    or coalesce(value->>'bank_tag_label', '')
-                      <> coalesce(effective_category_label, effective_category_sub_label, '')
+                      <> coalesce(
+                           effective_category_label,
+                           effective_category_sub_label,
+                           expected_sub_label,
+                           '未标记'
+                      )
                    or coalesce(value->>'bank_tag_primary_label', '')
                       <> coalesce(expected_primary_label, '未标记')
                    or coalesce(value->>'bank_tag_sub_label', '')
@@ -2533,12 +2549,20 @@ def _key_display_field_issues(
             (
                 """
                 /* check: cost_summary_recalculation */
-                with recalculated as (
+                with expected_scope_rows as (
+                    select scope_key, row_key, amount
+                    from read_model.cost_statistics_rows
+                    union all
+                    select project_scope || ':all', row_key, amount
+                    from read_model.cost_statistics_rows
+                    where scope_key ~ '^(active|all):[0-9]{4}-[0-9]{2}$'
+                ),
+                recalculated as (
                     select model.scope_key,
                            count(row.row_key)::integer as row_count,
                            coalesce(sum(row.amount), 0)::numeric as total_amount
                     from read_model.cost_statistics_read_models model
-                    left join read_model.cost_statistics_rows row on row.scope_key = model.scope_key
+                    left join expected_scope_rows row on row.scope_key = model.scope_key
                     group by model.scope_key
                 ),
                 bank_recalculated as (

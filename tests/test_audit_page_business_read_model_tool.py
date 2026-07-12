@@ -611,6 +611,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("projected_fields", canonical_sql)
         expected_bank_flow_sql = canonical_sql.split("expected_bank_flow as", 1)[1].split("projected_bank_flow as", 1)[0]
         self.assertIn("from app.bank_transactions source", expected_bank_flow_sql)
+        self.assertIn("coalesce(source.legacy_mongo_id, source.id::text) as transaction_id", expected_bank_flow_sql)
         self.assertNotIn("read_model.bank_detail_rows", expected_bank_flow_sql)
 
     def test_cost_statistics_reuses_workbench_integrity_proof_in_same_snapshot(self) -> None:
@@ -675,6 +676,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("source_versions->'workbench_source_versions'", queried_sql)
         self.assertIn("source_versions->'bank_detail_source_versions'", queried_sql)
         self.assertIn("expected_source_shards", queried_sql)
+        self.assertIn("expected_shard_count > 0", queried_sql)
 
     def test_cost_statistics_recalculates_bank_flow_and_group_summaries(self) -> None:
         connection = FakeConnection()
@@ -688,6 +690,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("cost_bank_flow_key_fields", queried_sql)
         self.assertIn("bank_tag_label_path", queried_sql)
         self.assertIn("bank_flow_summary", queried_sql)
+        self.assertIn("select project_scope || ':all', row_key, amount", queried_sql)
+        self.assertIn("expected_sub_label", queried_sql)
         self.assertIn("cost_group_summaries", queried_sql)
         self.assertIn("expected_projects", queried_sql)
         self.assertIn("expected_expenses", queried_sql)

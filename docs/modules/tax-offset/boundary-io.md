@@ -99,5 +99,5 @@
 - Downstream outputs: tax_offset、cost_statistics、invoice_lifecycle dirty scopes 或 owner producer 输出。
 - Forbidden paths: 其它模块不得直接写认证抵扣或计划表；tax read model 不得反向成为抵扣事实源。
 - `app.tax_offset_plans` 是计划写入事实，但当前页面 read model 不读取计划表；因此页面 Audit expected-set 不混入计划表。若未来页面 projection 消费计划，必须先更新 projection、source version、Audit 和 API 合同。
-- Audit v20 不从 `amount + tax_amount` 猜测 `total_with_tax`：历史来源对 `amount` 的含税语义并不统一。证明边界以 canonical `total_with_tax` 为事实，逐项比较 payload/结构化列并重算页面 summary；空字符串与 SQL NULL 在可空展示字段上按同一空值处理。
+- Audit v21 不从 `amount + tax_amount` 猜测 `total_with_tax`：历史来源对 `amount` 的含税语义并不统一。证明边界以 canonical `total_with_tax` 为事实，逐项比较 payload/结构化列并重算页面 summary；空字符串与 SQL NULL 在可空展示字段上按同一空值处理。schema `2026-07-tax-offset-audit-proof-v3` 强制正式 worker 重写 `tax_offset_items` structured columns，禁止旧 structured amount 残留与新 payload 并存。
 - Old code deletion: 旧认证抵扣 snapshot、旧计划 fallback 和直接 SQL 写税金事实路径必须删除；migration/audit/rollback 工具保留不算 closure。

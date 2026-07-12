@@ -896,7 +896,7 @@ class OaPendingPaymentQueryService:
         for relation in relations:
             linked_relation = relation_status(relation) == "linked"
             for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
-                if row_type != "bank":
+                if row_type not in {"bank", "bank_transaction"}:
                     continue
                 bank = bank_by_id.get(row_id)
                 if bank is None:

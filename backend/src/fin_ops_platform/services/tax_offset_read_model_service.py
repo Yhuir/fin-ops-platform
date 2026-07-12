@@ -7,7 +7,7 @@ from threading import RLock
 from typing import Any
 
 
-TAX_OFFSET_READ_MODEL_SCHEMA_VERSION = "2026-07-tax-offset-audit-proof-v2"
+TAX_OFFSET_READ_MODEL_SCHEMA_VERSION = "2026-07-tax-offset-audit-proof-v3"
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 

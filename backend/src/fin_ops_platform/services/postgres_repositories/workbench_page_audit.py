@@ -300,6 +300,8 @@ def _fetch_active_relations(connection: Any) -> list[dict[str, Any]]:
           row_ids,
           row_types,
           month_scope::text as month_scope,
+          amount_check,
+          special_metadata,
           updated_at::text as updated_at,
           raw_payload
         from app.workbench_pair_relations
@@ -368,10 +370,16 @@ def _normalize_relation(row: dict[str, Any]) -> dict[str, Any]:
     row_types = text_list(row.get("row_types")) or text_list(relation_payload.get("row_types"))
     normalized_payload = relation_payload.get("normalized_payload")
     normalized_payload = normalized_payload if isinstance(normalized_payload, dict) else relation_payload
-    amount_check = normalized_payload.get("amount_check")
-    amount_check = amount_check if isinstance(amount_check, dict) else relation_payload.get("amount_check")
-    special_metadata = normalized_payload.get("special_metadata")
-    special_metadata = special_metadata if isinstance(special_metadata, dict) else relation_payload.get("special_metadata")
+    amount_check = row_payload(row, "amount_check")
+    if not isinstance(amount_check, dict):
+        amount_check = normalized_payload.get("amount_check")
+    if not isinstance(amount_check, dict):
+        amount_check = relation_payload.get("amount_check")
+    special_metadata = row_payload(row, "special_metadata")
+    if not isinstance(special_metadata, dict):
+        special_metadata = normalized_payload.get("special_metadata")
+    if not isinstance(special_metadata, dict):
+        special_metadata = relation_payload.get("special_metadata")
     return {
         "case_id": text(row.get("case_id") or relation_payload.get("case_id")) or "",
         "relation_mode": text(row.get("relation_mode") or relation_payload.get("relation_mode")) or "",
