@@ -169,6 +169,33 @@ canonical_rows as (
     union all select * from canonical_bank
     union all select * from canonical_invoice
 ),
+attachment_scope_owners as (
+    select distinct
+           regexp_replace(
+               coalesce(
+                   nullif(link.value->>'derived_from_oa_id', ''),
+                   nullif(link.value->>'source_expense_item_id', '')
+               ),
+               ':item:.*$',
+               ''
+           ) as oa_row_id,
+           to_char(invoice.invoice_month, 'YYYY-MM') as scope_key
+    from app.invoices invoice
+    join lateral jsonb_array_elements(
+        case when jsonb_typeof(invoice.source_links) = 'array'
+             then invoice.source_links else '[]'::jsonb end
+    ) link(value) on true
+    where invoice.status <> 'deleted'
+      and invoice.invoice_month is not null
+      and link.value->>'source_type' = 'oa_attachment_invoice'
+      and nullif(
+          coalesce(
+              link.value->>'derived_from_oa_id',
+              link.value->>'source_expense_item_id'
+          ),
+          ''
+      ) is not null
+),
 canonical_expected_scopes as (
     select canonical.row_id, canonical.scope_key as source_scope_key,
            canonical.scope_key as expected_scope_key, canonical.source_kind,
@@ -184,6 +211,14 @@ canonical_expected_scopes as (
      and canonical.row_id = any(relation.row_ids)
     join lateral unnest(relation.row_ids) related_member(row_id) on true
     join canonical_rows related on related.row_id = related_member.row_id
+    union
+    select canonical.row_id, canonical.scope_key,
+           attachment.scope_key, canonical.source_kind,
+           canonical.amount, canonical.counterparty_name, canonical.project_name
+    from canonical_rows canonical
+    join attachment_scope_owners attachment
+      on canonical.source_kind = 'oa'
+     and attachment.oa_row_id = canonical.row_id
 ),
 projected_primary_rows as (
     select generation.scope_key as generation_scope,

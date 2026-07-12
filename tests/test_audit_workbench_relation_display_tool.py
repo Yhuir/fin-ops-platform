@@ -77,6 +77,8 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertIn("canonical_expected_scopes", queried_sql)
         self.assertIn("related.scope_key", queried_sql)
+        self.assertIn("attachment_scope_owners", queried_sql)
+        self.assertIn("':item:.*$'", queried_sql)
         self.assertIn("'etc_invoice_summary'", queried_sql)
         self.assertIn("'bank_flow_rule_batch_summary'", queried_sql)
         self.assertIn("where member.row_id = oa.row_id", queried_sql)
