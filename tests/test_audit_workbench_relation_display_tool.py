@@ -64,7 +64,8 @@ class FakeConnection:
 
 class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
     def test_clean_relation_display_audit_has_no_blocking_issues(self) -> None:
-        report = audit_workbench_relation_display.audit_workbench_relation_display(FakeConnection())
+        connection = FakeConnection()
+        report = audit_workbench_relation_display.audit_workbench_relation_display(connection)
 
         self.assertEqual(report["overall_status"], "pass")
         self.assertEqual(report["summary"]["active_relation_count"], 1)
@@ -73,6 +74,11 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertEqual(report["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
         self.assertIn("query_composed_relation_case_ownership", report["audit_contract"]["proof_checks"])
         self.assertIn("canonical_object_expected_set_equality", report["audit_contract"]["proof_checks"])
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
+        self.assertIn("canonical_expected_scopes", queried_sql)
+        self.assertIn("related.scope_key", queried_sql)
+        self.assertIn("projected.source_kind not in ('etc_invoice_summary', 'etc_invoice')", queried_sql)
+        self.assertIn("like 'candidate:%%'", queried_sql)
 
     def test_relation_display_can_be_clean_while_canonical_object_is_missing(self) -> None:
         report = audit_workbench_relation_display.audit_workbench_relation_display(

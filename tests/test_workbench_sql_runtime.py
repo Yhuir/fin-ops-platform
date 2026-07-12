@@ -138,6 +138,10 @@ class WorkbenchSqlProjectionRelationPayloadTests(unittest.TestCase):
         self.assertEqual(summary["etc_invoice_count"], 1)
         self.assertEqual(summary["amount_value"], "19.19")
         self.assertIn("app.etc_batch_invoice_links", connection.fetch_all_calls[0][0])
+        self.assertIn(
+            "coalesce(business_batches.scope_month, invoices.invoice_month) = %s::date",
+            connection.fetch_all_calls[0][0],
+        )
         self.assertEqual(connection.fetch_all_calls[0][1], ("2026-02-01",))
 
 
@@ -2502,6 +2506,50 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("business_batches.scope_month = %s::date", connection.business_summary_query)
         self.assertNotIn("etc_invoices.scope_month = %s::date", connection.business_summary_query)
         self.assertEqual([row["id"] for row in summary_row["etc_invoice_detail_rows"]], ["ETC001", "ETC002"])
+
+    def test_candidate_demotion_preserves_etc_summary_collapsed_members(self) -> None:
+        payload = {
+            "summary": {"paired_count": 0, "open_count": 1, "exception_count": 0},
+            "paired": {"groups": []},
+            "open": {
+                "groups": [
+                    {
+                        "group_id": "candidate:etc-summary",
+                        "group_type": "candidate",
+                        "reason": "candidate",
+                        "oa_rows": [],
+                        "bank_rows": [],
+                        "invoice_rows": [
+                            {
+                                "id": "etc-summary-batch-1",
+                                "type": "invoice",
+                                "source_kind": "etc_invoice_summary",
+                                "etc_invoice_detail_count": 2,
+                            }
+                        ],
+                        "collapsed_rows": {
+                            "invoice": [
+                                {"id": "etc-invoice-1", "type": "invoice", "source_kind": "etc_invoice"},
+                                {"id": "etc-invoice-2", "type": "invoice", "source_kind": "etc_invoice"},
+                            ]
+                        },
+                        "collapsed_row_counts": {"invoice": 2},
+                    }
+                ]
+            },
+        }
+
+        WorkbenchSqlProjectionBuilder._demote_visible_candidate_groups(payload)
+
+        groups = payload["open"]["groups"]
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["display_mode"], "collapsed_summary")
+        self.assertTrue(groups[0]["default_collapsed"])
+        self.assertEqual(groups[0]["collapsed_row_counts"], {"invoice": 2})
+        self.assertEqual(
+            [row["id"] for row in groups[0]["collapsed_rows"]["invoice"]],
+            ["etc-invoice-1", "etc-invoice-2"],
+        )
 
     def test_sql_projection_excludes_open_etc_summary_when_batch_has_active_relation(self) -> None:
         connection = EtcBusinessSummaryWithActiveRelationConnection()

@@ -199,6 +199,7 @@ class DistributedInvoiceRelationContext:
             except KeyError:
                 continue
             if isinstance(transaction, BankTransaction):
+                self._bank_transactions_by_id[bank_id] = transaction
                 self._bank_transactions_by_id[transaction.id] = transaction
 
     def _assert_fresh_distribution(self, result: dict[str, Any]) -> None:

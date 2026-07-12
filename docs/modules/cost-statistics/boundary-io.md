@@ -79,6 +79,7 @@
 - `active:all` / `all:all` 的 summary 与 project/expense 聚合都从当前 concrete `cost_statistics_rows` 重算；父模型不要求重复物化 parent rows，但 Audit 必须使用同一 child-union 口径，不能以 parent row 表为空误报 summary。
 - 成本 bank-flow 字段证明按银行流水 canonical legacy/public transaction id 连接 `bank_detail_rows.transaction_id`；不得只用 PostgreSQL UUID 连接后把完整投影误报为缺失。
 - Explorer payload schema version：`2026-07-cost-statistics-audit-proof-v7`。生产 v7 投影必须输出 `bank_accounts`、`bank_flow_summary`、`bank_flow_time_rows`，并在 `time_rows` 持久化 canonical `group_id/project_id`，使 Workbench relation 到成本行的归属可独立证明；带千分位的展示金额必须无损写入结构化 `cost_statistics_rows.amount`。旧 schema payload 或仍使用 Workbench 行内旧标签字段时必须通过 schema gate fail-closed 并重新投影。
+- Audit 重算 `bank_flow_time_rows` 时，bank-detail identity 必须同时接受 PostgreSQL UUID 与 legacy public transaction id；两者都只能归一到同一 canonical `app.bank_transactions` 对象。禁止只按其中一种 ID 连接而把完整投影误报为明细缺失。
 
 ## 文件范围
 

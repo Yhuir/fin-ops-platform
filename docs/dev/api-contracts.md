@@ -1279,7 +1279,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
     "relation_tables": ["read_model.workbench_relation_rows", "read_model.workbench_relation_groups"],
     "scope_types": ["bank_detail", "bank_account_balance", "workbench_relation"],
     "event_types": ["bank_detail.read_model.refresh", "bank_account_balance.read_model.refresh", "workbench_relation.read_model.refresh"],
-    "contract_revision": "page-audit-contract.v22",
+    "contract_revision": "page-audit-contract.v23",
     "proof_availability": "ready",
     "registered_read_model_keys": ["bank_detail", "bank_account_balance", "workbench_relation"],
     "relation_proof_required": true,

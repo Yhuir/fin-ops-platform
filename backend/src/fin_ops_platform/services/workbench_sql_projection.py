@@ -41,7 +41,7 @@ from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHIN
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-12-collapsed-detail-proof-v2"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-12-cross-scope-proof-v3"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -842,7 +842,44 @@ class WorkbenchSqlProjectionBuilder:
             str(group.get("group_id") or "candidate").strip() or "candidate",
             remaining_rows_by_type,
         )
+        cls._restore_etc_collapsed_details_after_demotion(group, demoted_groups)
         return [], [*source_groups, *demoted_groups]
+
+    @staticmethod
+    def _restore_etc_collapsed_details_after_demotion(
+        source_group: dict[str, Any],
+        demoted_groups: list[dict[str, Any]],
+    ) -> None:
+        collapsed_rows = source_group.get("collapsed_rows")
+        invoice_details = (
+            collapsed_rows.get("invoice")
+            if isinstance(collapsed_rows, dict)
+            else None
+        )
+        if not isinstance(invoice_details, list) or not invoice_details:
+            return
+        summary_ids = {
+            str(row.get("id") or row.get("row_id") or "").strip()
+            for row in list(source_group.get("invoice_rows") or [])
+            if isinstance(row, dict)
+            and str(row.get("source_kind") or "").strip() == "etc_invoice_summary"
+            and str(row.get("id") or row.get("row_id") or "").strip()
+        }
+        if not summary_ids:
+            return
+        for group in demoted_groups:
+            owns_summary = any(
+                str(row.get("id") or row.get("row_id") or "").strip() in summary_ids
+                for row in list(group.get("invoice_rows") or [])
+                if isinstance(row, dict)
+            )
+            if not owns_summary:
+                continue
+            group["display_mode"] = "collapsed_summary"
+            group["default_collapsed"] = True
+            group["collapsed_rows"] = {"invoice": deepcopy(invoice_details)}
+            group["collapsed_row_counts"] = {"invoice": len(invoice_details)}
+            return
 
     @classmethod
     def _group_is_explicit_active_relation_group(cls, group: dict[str, Any]) -> bool:
@@ -1525,7 +1562,9 @@ class WorkbenchSqlProjectionBuilder:
         filters = ["links.link_status = 'active'", "invoices.status <> 'deleted'"]
         params: list[Any] = []
         if month:
-            filters.append("invoices.invoice_month = %s::date")
+            filters.append(
+                "coalesce(business_batches.scope_month, invoices.invoice_month) = %s::date"
+            )
             params.append(month_start(month))
         if external_batch_ids:
             filters.append(f"{batch_id_expr} = any(%s)")

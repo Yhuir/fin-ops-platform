@@ -30,7 +30,7 @@ from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRe
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
-SOURCE_VERSION = "oa-pending-payment:admission-proof-v4"
+SOURCE_VERSION = "oa-pending-payment:relation-alias-proof-v5"
 READ_MODEL_STATUS = "live_query"
 VIEW_MODE_COMPLETED = "completed"
 VIEW_MODE_IN_PROGRESS = "in_progress"

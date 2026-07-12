@@ -2450,7 +2450,10 @@ def _key_display_field_issues(
                      and source.txn_direction = 'outflow'
                     left join read_model.bank_detail_rows detail
                       on detail.tenant_id = %s
-                     and detail.transaction_id = coalesce(source.legacy_mongo_id, source.id::text)
+                     and detail.transaction_id in (
+                           source.id::text,
+                           coalesce(source.legacy_mongo_id, source.id::text)
+                     )
                 ),
                 tag_sources as (
                     select resolved.*,

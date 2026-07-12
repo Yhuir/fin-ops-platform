@@ -125,12 +125,14 @@
 - Forbidden paths: legacy workbench handler 不得直接写 relation facts、read model 或 dirty/outbox；building/failed projection 不得被当作页面事实。
 - Old code deletion: frontend legacy full-payload client 已删除；legacy `WorkbenchActionService` 已删除，legacy `WorkbenchApiRoutes` 只保留 read-only `get_workbench` / `get_row_detail` 兼容壳，不得承载 `confirm_link`、`mark_exception`、`cancel_link` 或 `update_bank_exception` 写状态机；旧 `/workbench`、`/workbench/prototype` 和 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP compat route owner 已删除，ledger/reminder 行为保留在 reconciliation/ledger service 和 `/ledgers`/`/reminders` API；后端 `GET /api/workbench` full payload 是受限 read-only compat API，不进入前端页面 runtime，不拥有写 I/O，不作为旧代码污染面。
 
-## Audit v22 query-composed、折叠明细与 object identity 合同（2026-07-12）
+## Audit v23 query-composed、跨月 expected-set、折叠明细与 object identity 合同（2026-07-12）
 
 - `month=all` 的页面事实是 active 月度 generation 的 query-composed 结果；Audit 只证明这些月度 generation，不再要求或读取历史 materialized `all` generation。
 - 多 OA / 多流水 / 多发票关系按完整 typed hyperedge row-set 与 canonical case owner 证明；禁止把一个多成员 case 拆成不存在的 `source_oa_id` 单边配对要求。
 - 每个 active relation member 必须在 query-composed 月度 shard 中归属同一 canonical case；relation group/row distribution 继续做双向 edge equality。
+- canonical expected-set 的 scope 由对象自己的 canonical 月份与同一 active relation 中所有 canonical 成员月份的并集组成；Audit 必须按这个精确集合双向比较，不能把合法跨月补载报成 orphan，也不能退化成只比较全局 row id 而漏掉错误月份。
 - 被 `oa_pending_payment_relation` 正式 claim 的银行流水已移交 OA 待付款页面 ownership，不进入 Workbench canonical visible expected-set；它的共享关系成员仍由 relation Audit 与 OA consumer edge Audit 证明，禁止为了让 Workbench 集合相等而复制显示。
 - 稳定身份仲裁压缩的源行必须完整保存在 canonical primary row 的 `identity_alias_rows`；业务折叠的源行必须保存在 `workbench_group_rows` membership 与 `workbench_rows` row-detail owner。带 active override（包括 `auto_close_suppressed`）且属于当前页面 canonical expected-set 的行必须成为 identity owner，不能在压缩时丢失控制字段；页面 scope 之外的 orphan control fact 不得被伪装成页面投影字段缺失。
-- ETC summary/detail 是由已登记 external ETC batch 派生的显示扩展，不是 relation edge；正式 batch id 以 relation 的结构化 `amount_check`/`special_metadata` 列为准。summary row 与 `workbench_group_rows.row_role=collapsed` + `workbench_rows` row detail 的明细共同构成页面显示事实，Audit 必须按实际 canonical ETC 发票重算明细 identity/count/amount，不能使用 OA/业务批次总额替代发票合计，也不能要求明细继续嵌套在 summary payload。
+- ETC summary/detail 是由已登记 external ETC batch 派生的显示扩展，不是 relation edge；正式 batch id 以 relation 的结构化 `amount_check`/`special_metadata` 列为准。batch `scope_month` 拥有 link 表登记的全部发票成员，即使成员开票月份不同也不得截断。summary row 与 `workbench_group_rows.row_role=collapsed` + `workbench_rows` row detail 的明细共同构成页面显示事实；候选组降级为 open singleton 时必须一并迁移 collapsed membership。Audit 必须按实际 canonical ETC 发票重算明细 identity/count/amount，不能使用 OA/业务批次总额替代发票合计，也不能要求明细继续嵌套在 summary payload。
+- `app.workbench_row_overrides.case_id=null` 表示清除持久 relation/exception case；后续匹配可以产生临时 `candidate:*` 展示分组。Audit 只把非 candidate case 视为违反空 override，不能把计算型 candidate 当成持久控制事实。
 - 已删除的旧证明路径包括 materialized-all freshness/union、raw automatic decision row 和 singular OA-bank alignment；不得恢复为 fallback。

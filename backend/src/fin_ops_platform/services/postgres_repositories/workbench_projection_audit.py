@@ -163,6 +163,22 @@ canonical_rows as (
     union all select * from canonical_bank
     union all select * from canonical_invoice
 ),
+canonical_expected_scopes as (
+    select canonical.row_id, canonical.scope_key as source_scope_key,
+           canonical.scope_key as expected_scope_key, canonical.source_kind,
+           canonical.amount, canonical.counterparty_name, canonical.project_name
+    from canonical_rows canonical
+    union
+    select canonical.row_id, canonical.scope_key,
+           related.scope_key, canonical.source_kind,
+           canonical.amount, canonical.counterparty_name, canonical.project_name
+    from canonical_rows canonical
+    join app.workbench_pair_relations relation
+      on relation.status = 'active'
+     and canonical.row_id = any(relation.row_ids)
+    join lateral unnest(relation.row_ids) related_member(row_id) on true
+    join canonical_rows related on related.row_id = related_member.row_id
+),
 projected_primary_rows as (
     select generation.scope_key as generation_scope,
            row.row_id, row.source_kind,
@@ -211,12 +227,12 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         /* check: workbench_canonical_object_set */
         , mismatches as (
             select 'canonical_missing_projection'::text as mismatch_kind,
-                   canonical.row_id as subject_id, canonical.scope_key,
+                   canonical.row_id as subject_id, canonical.expected_scope_key as scope_key,
                    canonical.source_kind as canonical_source_kind,
                    projected.source_kind as projected_source_kind
-            from canonical_rows canonical
+            from canonical_expected_scopes canonical
             left join projected_rows projected
-              on projected.generation_scope = canonical.scope_key
+              on projected.generation_scope = canonical.expected_scope_key
              and projected.row_id = canonical.row_id
              and projected.source_kind = canonical.source_kind
             where projected.row_id is null
@@ -224,12 +240,12 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             select 'projection_not_canonical', projected.row_id, projected.generation_scope,
                    canonical.source_kind, projected.source_kind
             from projected_rows projected
-            left join canonical_rows canonical
-              on canonical.scope_key = projected.generation_scope
+            left join canonical_expected_scopes canonical
+              on canonical.expected_scope_key = projected.generation_scope
              and canonical.row_id = projected.row_id
              and canonical.source_kind = projected.source_kind
             where projected.generation_scope <> 'all'
-              and projected.source_kind <> 'etc_invoice_summary'
+              and projected.source_kind not in ('etc_invoice_summary', 'etc_invoice')
               and canonical.row_id is null
         )
         select * from mismatches
@@ -299,7 +315,13 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
               and not (
                     field.value = 'null'::jsonb
                 and projected.payload is not null
-                and projected.payload->field.key is null
+                and (
+                     projected.payload->field.key is null
+                     or (
+                          field.key = 'case_id'
+                      and coalesce(projected.payload->>field.key, '') like 'candidate:%%'
+                     )
+                )
               )
               and projected.payload->field.key is distinct from field.value
         ),

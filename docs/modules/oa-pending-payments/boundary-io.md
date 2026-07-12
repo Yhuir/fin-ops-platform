@@ -96,10 +96,10 @@
 - Forbidden paths: 其它模块不得直接 claim 银行流水关系；workbench relation migration 不得保留为 normal write path。
 - Old code deletion: legacy workbench-pair based OA pending relation fallback、direct bank claim write 和 snapshot relation inference 必须删除；migration/audit/rollback 工具保留不算 closure。
 
-## Audit v22 relation source、跨月补载与 object identity（2026-07-12）
+## Audit v23 relation source、跨月补载与 object identity（2026-07-12）
 
 - relation expected-set 是 completed/promoted shared `app.workbench_pair_relations` 与流程中的 `app.oa_pending_payment_bank_relations` 的逻辑并集。
 - pending relation 在 promotion 前不写 shared Workbench relation；Audit 不得把这个明确生命周期边界误报为 `consumer_edge_not_shared`。
 - consumer projection 必须与上述逻辑并集做双向 typed edge equality；promotion 后同一关系只能由 shared source 代表，不能双写两个 active owner。
 - consumer edge equality 使用 Workbench 已独立证明的 stable identity alias map，把重复银行源行收敛到 canonical primary；shared raw relation edge 仍由 relation Audit 全量证明，OA 页面无需重复展示同一金融对象的 alias 行。
-- shared relation 的银行成员类型允许 canonical `bank` 与 `bank_transaction` 两种登记值；query/projection 边界和 relation context 的跨月补载都必须归一到同一银行对象并把每个成员写入 `bankTransaction.summaries`。不得因类型别名或成员流水不在 OA scope 的初始月份列表中而跳过关系成员。
+- shared relation 的银行成员类型允许 canonical `bank` 与 `bank_transaction` 两种登记值；query/projection 边界和 relation context 的跨月补载都必须归一到同一银行对象，并同时以 relation 请求 alias 与对象 canonical id 建索引后把每个成员写入 `bankTransaction.summaries`。不得因类型别名、UUID/legacy identity 差异或成员流水不在 OA scope 的初始月份列表中而跳过关系成员。

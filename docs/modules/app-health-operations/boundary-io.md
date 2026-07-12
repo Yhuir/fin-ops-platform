@@ -104,8 +104,8 @@
 - App Health 旧 `InputInvoiceUsageAuditPanel`、专项 state/callback 和 Browser mock specialized URL 已删除；进项页仍通过自己的统一 page key Audit 控件证明自身合同。
 - specialized input/output HTTP routes、frontend clients 和 service/repository public methods 已删除；统一 repository executor 与只读 CLI thin adapters 继续复用同一 invoice proof core。
 
-## Page Audit contract v22（2026-07-12）
+## Page Audit contract v23（2026-07-12）
 
-- v22 在 v21 基础上要求 Workbench 折叠明细同时拥有 group membership 与完整 row detail、ETC 摘要从实际发票明细重算、OA pending 跨月补载 `bank`/`bank_transaction` 成员；成本统计按 canonical public transaction id 连接 bank-detail，红票金额保留事实正负号。Tax Offset 继续通过 v3 schema 重写 structured columns。旧 v21 结果不能代表当前合同。
+- v23 在 v22 基础上把 Workbench canonical expected-set 扩展为 relation 成员月份的精确跨月集合，要求 ETC 批次拥有的全部成员在候选降级后仍保留 collapsed membership/detail；OA pending 同时按 relation 原始 alias 与 canonical id 索引补载流水；成本统计 Audit 接受 PostgreSQL UUID 与 legacy public id 两种 bank-detail 合法身份。空 `case_id` override 只禁止持久 relation case，不禁止重新计算的 `candidate:*` 展示分组。旧 v22 结果不能代表当前合同。
 - 绿色只证明同一 immutable PostgreSQL snapshot 内“已进入 App 的 canonical facts、页面 expected-set/read model、共享/页面 relation consumer、关键字段与 durable freshness/queue”一致。
 - pre-contract import provenance warning 明确声明历史 workflow artifact 未被证明；对应 canonical bank/invoice/ETC 业务事实仍须由业务页面 Audit 阻断证明。

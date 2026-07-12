@@ -94,6 +94,38 @@ class FakePendingRelationService:
 
 
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
+    def test_relation_context_indexes_repository_transaction_by_requested_relation_alias(self) -> None:
+        bank = self._bank("canonical-bank-id", "88.00")
+
+        class AliasImportService:
+            @staticmethod
+            def list_transactions(*, month: str | None = None) -> list[BankTransaction]:
+                _ = month
+                return []
+
+            @staticmethod
+            def get_transaction(transaction_id: str) -> BankTransaction:
+                if transaction_id != "txn_imported_alias":
+                    raise KeyError(transaction_id)
+                return bank
+
+        context = DistributedInvoiceRelationContext(import_service=AliasImportService())  # type: ignore[arg-type]
+        context._bank_transactions_by_id = {}
+        context._distributed_relations_by_row_id = {
+            "oa-cross-month": [
+                {
+                    "case_id": "case-cross-month",
+                    "row_ids": ["oa-cross-month", "txn_imported_alias"],
+                    "row_types": ["oa", "bank_transaction"],
+                }
+            ]
+        }
+
+        context._load_bank_transactions_from_loaded_relations()
+
+        self.assertIs(context.bank_transactions_by_id()["txn_imported_alias"], bank)
+        self.assertIs(context.bank_transactions_by_id()["canonical-bank-id"], bank)
+
     def test_relation_context_loads_bank_transaction_alias_members_outside_initial_scope(self) -> None:
         bank = self._bank("bank-cross-month", "88.00")
         context = DistributedInvoiceRelationContext(
