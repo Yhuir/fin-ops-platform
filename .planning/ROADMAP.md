@@ -435,13 +435,22 @@ Plans:
 
 ### Phase 20: 三组可逆关系写操作的 Fan-out、Worker、Freshness 与 System Audit 生产级闭环
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Extend the existing controlled write-operation runner into one production-grade per-mutation closure path, then prove reversible bank+invoice, bank+turnover, and bank+OA+invoice relation shapes across canonical writes, durable fan-out, workers, freshness, affected consumers, and a new read-only System Audit after both confirm and withdraw.
+**Requirements**: RELCL-01, RELCL-02, RELCL-03, RELCL-04, RELCL-05, RELCL-06, RELCL-07
 **Depends on:** Phase 19
-**Plans:** 0 plans
+**Canonical refs:** `.planning/phases/20-fan-out-worker-freshness-system-audit/20-CONTEXT.md`, `.planning/phases/20-fan-out-worker-freshness-system-audit/20-RESEARCH.md`, `docs/architecture/module-boundaries/canonical-facts.md`, `docs/architecture/module-boundaries/read-model-contracts.md`, `docs/modules/workbench-relations/boundary-io.md`, `docs/modules/runtime-workers/boundary-io.md`, `docs/modules/app-health-operations/boundary-io.md`, `docs/operations/runtime-worker-governance.md`
+**Success Criteria** (what must be TRUE):
+
+  1. One checkpoint runner proves each mutation independently; no scenario-level shortcut combines confirm and withdraw evidence.
+  2. Three reversible relation shapes pass required fan-out, worker drain, freshness, affected consumer and new System Audit gates after both directions.
+  3. Canonical relation, queue, freshness and Audit ownership remain modular and no test/runtime path writes derived facts directly.
+  4. Retired parallel/legacy execution paths are removed after caller scan; retained adapters have explicit owner and deletion conditions.
+  5. Deterministic/full regression and opt-in disposable PostgreSQL gates are complete without 17×operation duplication or external-source overclaim.
+
+**Plans:** 1 plan
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 20 to break down)
+- [ ] 20-01-PLAN — Build the single checkpoint closure runner, register three reversible relation shapes, remove retired paths, and verify deterministic plus disposable-PostgreSQL evidence.
 
 ---
