@@ -200,6 +200,43 @@ function formatCostTradeTime(value: string) {
   return `${match[1]} ${match[2]}${match[3] ? `:${match[3]}` : ""}`;
 }
 
+function DirectionAmount({
+  amount,
+  label,
+  tone,
+}: {
+  amount: string;
+  label: string;
+  tone: "expense" | "income";
+}) {
+  return (
+    <span
+      aria-label={`${label} ${amount}`}
+      className={`cost-direction-amount cost-direction-amount--aligned cost-direction-amount--${tone}`}
+    >
+      <span className="cost-direction-amount-label">{label}</span>
+      <span className="cost-direction-amount-value">{amount}</span>
+    </span>
+  );
+}
+
+function TransactionIdentity({ label, tradeTime }: { label: string; tradeTime: string }) {
+  const formattedTradeTime = formatCostTradeTime(tradeTime);
+  return (
+    <span className="cost-transaction-identity grid min-w-0 justify-items-start gap-1.5">
+      <span className="max-w-full text-left font-extrabold leading-5 text-[var(--fp-text)] [overflow-wrap:anywhere]">
+        {label || "--"}
+      </span>
+      <time
+        className="cost-transaction-time-chip inline-flex min-h-5 items-center whitespace-nowrap rounded-sm border border-[var(--fp-border)] bg-[var(--fp-surface-muted)] px-1.5 text-[11px] font-bold leading-none text-[var(--fp-text-muted)] tabular-nums"
+        dateTime={tradeTime}
+      >
+        {formattedTradeTime || "--"}
+      </time>
+    </span>
+  );
+}
+
 function groupProjectExpenseTypes(rows: CostTimeRow[]) {
   const grouped = new Map<string, { totalAmount: number; transactionCount: number }>();
   const projectTotalAmount = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
@@ -1245,56 +1282,6 @@ export default function CostStatisticsPage() {
     ).sort((left, right) => left.localeCompare(right, "zh-CN"));
   }, [exportReferenceData, projectExportNames]);
 
-	  const projectScopeLabel = useMemo(() => {
-	    if (projectScopeMode === "all") {
-	      return "全部时间";
-	    }
-	    if (projectScopeMode === "year") {
-	      return `${projectScopeYear}年`;
-	    }
-	    return formatMonthLabel(projectScopeMonth);
-	  }, [projectScopeMode, projectScopeYear, projectScopeMonth]);
-
-	  const timeScopeLabel = useMemo(() => {
-	    if (timeScopeMode === "all") {
-	      return "全部时间";
-	    }
-	    if (timeScopeMode === "year") {
-	      return `${timeScopeYear}年`;
-	    }
-	    return formatMonthLabel(timeScopeMonth);
-	  }, [timeScopeMode, timeScopeYear, timeScopeMonth]);
-
-	  const bankScopeLabel = useMemo(() => {
-	    if (bankScopeMode === "all") {
-	      return "全部时间";
-	    }
-	    if (bankScopeMode === "year") {
-	      return `${bankScopeYear}年`;
-	    }
-	    return formatMonthLabel(bankScopeMonth);
-	  }, [bankScopeMode, bankScopeYear, bankScopeMonth]);
-
-	  const expenseTypeScopeLabel = useMemo(() => {
-	    if (expenseTypeScopeMode === "all") {
-	      return "全部时间";
-	    }
-	    if (expenseTypeScopeMode === "year") {
-	      return `${expenseTypeScopeYear}年`;
-	    }
-	    return formatMonthLabel(expenseTypeScopeMonth);
-	  }, [expenseTypeScopeMode, expenseTypeScopeYear, expenseTypeScopeMonth]);
-
-	  const bankTagScopeLabel = useMemo(() => {
-	    if (bankTagScopeMode === "all") {
-	      return "全部时间";
-	    }
-	    if (bankTagScopeMode === "year") {
-	      return `${bankTagScopeYear}年`;
-	    }
-	    return formatMonthLabel(bankTagScopeMonth);
-	  }, [bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth]);
-
   const readModelStatus = explorerData?.readModelStatus?.trim().toLowerCase();
   const isReadModelRefreshing = readModelStatus === "refreshing";
   const isReadModelStale = readModelStatus === "stale";
@@ -1632,10 +1619,21 @@ export default function CostStatisticsPage() {
 
   const transactionColumns = useMemo<CostStatisticsTableColumn<CostTimeRow>[]>(
     () => [
-      { key: "tradeTime", header: "时间", width: 170, render: (row) => formatCostTradeTime(row.tradeTime) },
       viewMode === "expenseType"
-        ? { key: "projectName", header: "项目名", flex: 1, render: (row) => row.projectName }
-        : { key: "counterpartyName", header: "对方户名", flex: 1, render: (row) => row.counterpartyName },
+        ? {
+            key: "projectName",
+            header: "项目名",
+            flex: 1.15,
+            getTextValue: (row) => `${row.projectName} ${formatCostTradeTime(row.tradeTime)}`,
+            render: (row) => <TransactionIdentity label={row.projectName} tradeTime={row.tradeTime} />,
+          }
+        : {
+            key: "counterpartyName",
+            header: "对方户名",
+            flex: 1.15,
+            getTextValue: (row) => `${row.counterpartyName} ${formatCostTradeTime(row.tradeTime)}`,
+            render: (row) => <TransactionIdentity label={row.counterpartyName} tradeTime={row.tradeTime} />,
+          },
       {
         key: "amount",
         header: "金额",
@@ -1672,11 +1670,57 @@ export default function CostStatisticsPage() {
 
   return (
     <div className="page-stack cost-page">
-      <header className="page-header">
-        <div>
+      <header className="page-header cost-page-header">
+        <div className="cost-page-header-main">
           <div className="page-title-row">
             <h1 className="page-title">成本统计</h1>
             {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
+          </div>
+          <div className="cost-analysis-toolbar">
+            <div className="cost-view-switcher" role="tablist" aria-label="成本统计视图切换">
+              <div className="cost-view-group">
+                <span className="cost-view-group-label">OA配对流水统计</span>
+                <button
+                  className={viewMode === "project" ? "cost-view-tab active" : "cost-view-tab"}
+                  type="button"
+                  onClick={() => handleViewModeChange("project")}
+                >
+                  按项目
+                </button>
+                <button
+                  className={viewMode === "bank" ? "cost-view-tab active" : "cost-view-tab"}
+                  type="button"
+                  onClick={() => handleViewModeChange("bank")}
+                >
+                  按银行
+                </button>
+                <button
+                  className={viewMode === "expenseType" ? "cost-view-tab active" : "cost-view-tab"}
+                  type="button"
+                  onClick={() => handleViewModeChange("expenseType")}
+                >
+                  按OA费用类型
+                </button>
+              </div>
+              <span className="cost-view-divider" aria-hidden="true" />
+              <div className="cost-view-group">
+                <span className="cost-view-group-label">流水统计</span>
+                <button
+                  className={viewMode === "bankTag" ? "cost-view-tab active" : "cost-view-tab"}
+                  type="button"
+                  onClick={() => handleViewModeChange("bankTag")}
+                >
+                  按标签
+                </button>
+                <button
+                  className={viewMode === "time" ? "cost-view-tab active" : "cost-view-tab"}
+                  type="button"
+                  onClick={() => handleViewModeChange("time")}
+                >
+                  按时间
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         <div className="page-header-actions cost-header-actions">
@@ -1709,53 +1753,6 @@ export default function CostStatisticsPage() {
 	      </header>
 
 	      <section className="cost-content-shell">
-	        <div className="cost-analysis-toolbar">
-          <div className="cost-view-switcher" role="tablist" aria-label="成本统计视图切换">
-            <div className="cost-view-group">
-              <span className="cost-view-group-label">OA配对流水统计</span>
-              <button
-                className={viewMode === "project" ? "cost-view-tab active" : "cost-view-tab"}
-                type="button"
-                onClick={() => handleViewModeChange("project")}
-              >
-                按项目
-              </button>
-              <button
-                className={viewMode === "bank" ? "cost-view-tab active" : "cost-view-tab"}
-                type="button"
-                onClick={() => handleViewModeChange("bank")}
-              >
-                按银行
-              </button>
-              <button
-                className={viewMode === "expenseType" ? "cost-view-tab active" : "cost-view-tab"}
-                type="button"
-                onClick={() => handleViewModeChange("expenseType")}
-              >
-                按OA费用类型
-              </button>
-            </div>
-            <span className="cost-view-divider" aria-hidden="true" />
-            <div className="cost-view-group">
-              <span className="cost-view-group-label">流水统计</span>
-              <button
-                className={viewMode === "bankTag" ? "cost-view-tab active" : "cost-view-tab"}
-                type="button"
-                onClick={() => handleViewModeChange("bankTag")}
-              >
-                按标签
-              </button>
-              <button
-                className={viewMode === "time" ? "cost-view-tab active" : "cost-view-tab"}
-                type="button"
-                onClick={() => handleViewModeChange("time")}
-              >
-                按时间
-              </button>
-            </div>
-	          </div>
-	        </div>
-
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
         {isExplorerLoading && !explorerData ? (
           <div className="state-panel">正在加载成本统计数据...</div>
@@ -1791,14 +1788,9 @@ export default function CostStatisticsPage() {
                   <div className="cost-section-heading cost-view-scope-heading">
                     <div className="cost-section-heading-copy">
                       <h2>按时间统计</h2>
-                      <span>{timeScopeLabel}</span>
                       <div className="cost-direction-summary" aria-label="时间统计方向金额">
-                        <strong className="cost-direction-amount cost-direction-amount--expense">
-                          支出金额 {timeDirectionSummary.expenseAmount}
-                        </strong>
-                        <strong className="cost-direction-amount cost-direction-amount--income">
-                          收入金额 {timeDirectionSummary.incomeAmount}
-                        </strong>
+                        <DirectionAmount amount={timeDirectionSummary.expenseAmount} label="支出金额" tone="expense" />
+                        <DirectionAmount amount={timeDirectionSummary.incomeAmount} label="收入金额" tone="income" />
                       </div>
 	                    </div>
 	                    <div className="cost-section-heading-actions cost-project-scope-actions">
@@ -1838,8 +1830,7 @@ export default function CostStatisticsPage() {
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按项目统计</h2>
-                    <span>{projectScopeLabel}</span>
-                    <strong className="cost-section-total">总金额 {projectTotalAmount}</strong>
+                    <DirectionAmount amount={projectTotalAmount} label="支出金额" tone="expense" />
 	                  </div>
 	                  <div className="cost-section-heading-actions cost-project-scope-actions">
 	                    <div ref={scopeControlsRef} className="cost-scope-controls">
@@ -1878,7 +1869,7 @@ export default function CostStatisticsPage() {
                     renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.expenseTypeCount} 类费用`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <span>{row.totalAmount}</span>
+                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
                         {row.percentageLabel ? (
                           <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
                         ) : null}
@@ -1901,7 +1892,7 @@ export default function CostStatisticsPage() {
                     renderSecondary={(row) => `${row.transactionCount} 条流水`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <span>{row.totalAmount}</span>
+                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
                         <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
                       </div>
                     )}
@@ -1934,8 +1925,7 @@ export default function CostStatisticsPage() {
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按银行统计</h2>
-                    <span>{bankScopeLabel}</span>
-                    <strong className="cost-section-total">总金额 {bankTotalAmount}</strong>
+                    <DirectionAmount amount={bankTotalAmount} label="支出金额" tone="expense" />
 	                  </div>
 	                  <div className="cost-section-heading-actions cost-project-scope-actions">
 	                    <div ref={scopeControlsRef} className="cost-scope-controls">
@@ -1974,7 +1964,7 @@ export default function CostStatisticsPage() {
                     renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.projectCount} 个项目`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <span>{row.totalAmount}</span>
+                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
                         <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
                       </div>
                     )}
@@ -1995,7 +1985,7 @@ export default function CostStatisticsPage() {
                     renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.expenseTypeCount} 类费用`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <span>{row.totalAmount}</span>
+                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
                         <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
                       </div>
                     )}
@@ -2028,8 +2018,7 @@ export default function CostStatisticsPage() {
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按OA费用类型统计</h2>
-                    <span>{expenseTypeScopeLabel}</span>
-                    <strong className="cost-section-total">总金额 {expenseTypeTotalAmount}</strong>
+                    <DirectionAmount amount={expenseTypeTotalAmount} label="支出金额" tone="expense" />
 	                  </div>
 	                  <div className="cost-section-heading-actions cost-project-scope-actions">
 	                    <div ref={scopeControlsRef} className="cost-scope-controls">
@@ -2067,7 +2056,7 @@ export default function CostStatisticsPage() {
                     renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.projectCount} 个项目`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <span>{row.totalAmount}</span>
+                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
                         <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
                       </div>
                     )}
@@ -2100,14 +2089,9 @@ export default function CostStatisticsPage() {
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按标签统计</h2>
-                    <span>{bankTagScopeLabel}</span>
                     <div className="cost-direction-summary" aria-label="标签统计方向金额">
-                      <strong className="cost-direction-amount cost-direction-amount--expense">
-                        支出金额 {bankTagDirectionSummary.expenseAmount}
-                      </strong>
-                      <strong className="cost-direction-amount cost-direction-amount--income">
-                        收入金额 {bankTagDirectionSummary.incomeAmount}
-                      </strong>
+                      <DirectionAmount amount={bankTagDirectionSummary.expenseAmount} label="支出金额" tone="expense" />
+                      <DirectionAmount amount={bankTagDirectionSummary.incomeAmount} label="收入金额" tone="income" />
                     </div>
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
@@ -2149,8 +2133,8 @@ export default function CostStatisticsPage() {
                     )}
                     renderMeta={(row) => (
                       <div className="cost-direction-meta">
-                        <span className="cost-direction-amount cost-direction-amount--expense">支出 {row.expenseAmount}</span>
-                        <span className="cost-direction-amount cost-direction-amount--income">收入 {row.incomeAmount}</span>
+                        <DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" />
+                        <DirectionAmount amount={row.incomeAmount} label="收入" tone="income" />
                       </div>
                     )}
                   />
@@ -2170,8 +2154,8 @@ export default function CostStatisticsPage() {
                     renderSecondary={(row) => `支出 ${row.expenseTransactionCount} 笔 / 收入 ${row.incomeTransactionCount} 笔`}
                     renderMeta={(row) => (
                       <div className="cost-direction-meta">
-                        <span className="cost-direction-amount cost-direction-amount--expense">支出 {row.expenseAmount}</span>
-                        <span className="cost-direction-amount cost-direction-amount--income">收入 {row.incomeAmount}</span>
+                        <DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" />
+                        <DirectionAmount amount={row.incomeAmount} label="收入" tone="income" />
                       </div>
                     )}
                   />

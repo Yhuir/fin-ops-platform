@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-14 - Phase 19 历史任务时间戳回归修复
+
+- 目标：恢复 ETC 新建批次后的流程列表和 ETC 发票导入 ready task 列表，保证历史已提交批次与新任务共同存在时不会因排序异常返回 500。
+- 影响范围：新增 PostgreSQL migration 0103、迁移清单、ETC PostgreSQL 集成回归、ETC/canonical/运维文档；不改变 API shape、任务状态机、repository/service 排序、worker、read model 或前端逻辑。
+- 关键决策：不修改已在生产执行的 0101，不给排序加入 `None` fallback；0103 只从 `app.etc_reconciliation_tasks` 同一行的 typed `created_at/updated_at` 补齐缺失 normalized payload 字段，保留现有非空 payload 值，且不触碰 status/version/scope/typed 时间。
+- 文档影响：同步 `boundary-io.md`、`tests.md`、canonical facts 边界和 ETC 上线运维 smoke；产品口径和 API 合同不变。
+- 测试覆盖：迁移 SQL 契约测试锁定列来源和禁止改写字段；真实 disposable PostgreSQL 集成测试构造 0101 形态历史任务与当前 ready task，迁移连跑两次后验证 hydrate、list、ready-list 和 typed/payload 时间一致。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：真实对象存储、真实 ETC ZIP、真实 OA 草稿属于外部系统写 gate；发布后用生产只读 API/Audit/worker readiness 验证本次故障链路，真实导入写 smoke 仍需批准样本。
+
 ## 2026-07-05 - ETC旧入口删除与模块边界close
 
 - 目标：完成 ETC 票据管理模块边界与 I/O 收口，移除仍会污染新 business-batch 链路或测试环境的旧入口。

@@ -33,6 +33,7 @@
 - 关联台确认/撤回是跨页面事实，必须产生 affected scopes/months、审计和下游 refresh 信号。
 - 进行中 OA 在 OA 待付款核对页面关联的支出流水会写入 Workbench active relation，并在关联台银行行展示“已关联进行中OA”chip。由于进行中 OA 尚不属于普通 completed OA 关联台主流程，这类流水仍可能出现在 open/未配对上下文，但不得被当作未占用流水重复确认到其他 active case。
 - 普通 `relation_mode=manual_confirmed` 两栏 relation 是 Workbench active pair relation 事实源，允许 OA+银行、OA+发票、银行+发票任意两栏先确认或由 free paired decision 自动正式化并占用 row。含银行流水的 relation 必须按 Bank Transaction Paired Policy metadata 判定 paired/open；不含银行流水的普通两栏 relation 仍保留 canonical `case:<case_id>` open group，等待补齐三栏或显式业务例外。若 matching engine 产出唯一三栏 `paired` decision，且该 decision 正好补齐一个普通两栏 active relation 的剩余栏，后台可以通过 relation command service 原子替换原 case 为三栏 relation，并把 decision 标记为 `consumed`。
+- 自动 decision 正式化为 active `manual_confirmed` relation 后可以继续使用原 `decision:*` case id；当前状态由 canonical relation mode 和 active generation group type 决定，不能从 ID 前缀反推。未正式化组仍可按 `automatic_decision` / `automatic_match` 或缺少正式关系状态被隐藏；正式化两栏组按普通 active relation 留在 open，补齐三栏或满足显式 paired policy 后再进入 paired。
 - 任何含银行流水的 group 必须先按 Bank Transaction Paired Policy 判定是否可进入 paired：银行流水 row 的 `special_metadata.requires_oa` / `paired_requires_oa` 为 true 时必须存在 OA row，`special_metadata.requires_invoice` / `paired_requires_invoice` 为 true 时必须存在发票 row；两者都为 false 时银行-only 或部分栏位 relation 可 paired。缺 metadata 或单项字段缺失时默认等价于需要 OA 和发票，fail closed 到 open。已配对例外不能再绕过这个门。
 - `relation_mode=bank_flow_rule_batch` 只是流水规则批量处理的关系类型和展示类型，不再单独决定 paired/open；它必须满足 Bank Transaction Paired Policy。银行流水数大于 3 条时默认折叠展示，原始 rows 必须可展开。
 - 外部往来 `relation_mode=turnover_manual_closure` 是 Workbench active pair relation 事实源；同一个 active case 下两条及以上银行流水形成的外部往来闭环必须保留 canonical `case:<case_id>` ownership 和“收支闭环”证据。分区仍只读取物化 relation metadata，不回读当前标签设置；旧 `manual_confirmed` 的 `turnover:*` case 必须先由规则保存同步链路升级为 `turnover_manual_closure`。
@@ -43,6 +44,7 @@
 - 禁止 read model 非 fresh 时把空 open rows 当成真实无候选。
 - 禁止 ETC 批次人工确认后直接进入 paired；必须仍经过普通 OA/银行/发票关系确认。
 - 禁止 failed generation、building generation 或 stale Redis payload 被展示为 fresh。
+- 禁止 groups list、group detail 或 all-scope owner 仲裁仅凭 `case:decision:*` 历史来源前缀隐藏已经正式化的 active relation；也禁止放开真正未正式化 automatic decision 使其成为可操作 group。
 - 禁止 active relation payload 保留重复 row id，或以不同 active case 复用同一 row id 来表达多付款/多发票场景；这类场景必须合并到同一 relation 并通过 summaries/+N 展开。
 - 禁止 all-scope open 区把已被 `app.workbench_pair_relations.status='active'` 占用的 row 发布到非 canonical owner（例如 `scope:*:temp:*`、standalone、candidate 残留）。active relation 的合法 open/display owner 必须是 `case:<case_id>`；非 canonical owner 必须在 publish/consistency 阶段被抑制或标为 inconsistent，不能进入 fresh。若 all-scope 中同一个 `case:<case_id>` 已经存在可见 paired group，则该 paired group 的 row owner 优先级高于 same-case canonical-open 例外，open candidate 残留必须被删除。
 

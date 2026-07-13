@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from fin_ops_platform.postgres import migrate
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import (
@@ -532,6 +534,94 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             parsed_seed["selected_invoice_numbers"],
         )
         self.assertEqual(self.store.load_historical_etc_repair_states()["ETC-HIST-TEST"]["status"], "ok")
+
+    def test_timestamp_repair_restores_mixed_historical_and_current_task_lists(self) -> None:
+        historical_created_at = datetime(2026, 1, 14, 8, 0, tzinfo=UTC)
+        historical_updated_at = datetime(2026, 7, 12, 8, 0, tzinfo=UTC)
+        current_created_at = datetime(2026, 7, 14, 1, 0, tzinfo=UTC)
+        current_updated_at = datetime(2026, 7, 14, 1, 5, tzinfo=UTC)
+        with self.connection.transaction() as transaction:
+            transaction.execute(
+                """
+                insert into app.etc_reconciliation_tasks(
+                    task_id, status, result_summary, version, raw_payload, created_at, updated_at
+                )
+                values (%s, 'imported', '{}'::jsonb, 1, %s::jsonb, %s, %s)
+                """,
+                (
+                    "ETC-RECON-HIST-20260114",
+                    json.dumps(
+                        {
+                            "normalized_payload": {
+                                "task_id": "ETC-RECON-HIST-20260114",
+                                "status": "imported",
+                                "version": 1,
+                                "title": "历史ETC批次 2026-01",
+                            }
+                        }
+                    ),
+                    historical_created_at,
+                    historical_updated_at,
+                ),
+            )
+            transaction.execute(
+                """
+                insert into app.etc_reconciliation_tasks(
+                    task_id, status, result_summary, version, raw_payload, created_at, updated_at
+                )
+                values (%s, 'ready_for_import', '{}'::jsonb, 1, %s::jsonb, %s, %s)
+                """,
+                (
+                    "ETC-RECON-000001",
+                    json.dumps(
+                        {
+                            "normalized_payload": {
+                                "task_id": "ETC-RECON-000001",
+                                "status": "ready_for_import",
+                                "version": 1,
+                                "title": "新建ETC批次",
+                                "created_at": current_created_at.isoformat(),
+                                "updated_at": current_updated_at.isoformat(),
+                            }
+                        }
+                    ),
+                    current_created_at,
+                    current_updated_at,
+                ),
+            )
+
+        migration_sql = (
+            Path("backend/src/fin_ops_platform/postgres/migrations/0103_etc_reconciliation_task_timestamps.sql")
+            .read_text(encoding="utf-8")
+        )
+        migrate.run_psql(self.database_url, sql=migration_sql)
+        migrate.run_psql(self.database_url, sql=migration_sql)
+
+        reconciliation = EtcReconciliationTaskService(state_store=self.store)
+        self.assertEqual(
+            [task.task_id for task in reconciliation.list_tasks()],
+            ["ETC-RECON-000001", "ETC-RECON-HIST-20260114"],
+        )
+        self.assertEqual(
+            [task.task_id for task in reconciliation.list_ready_for_import_tasks()],
+            ["ETC-RECON-000001"],
+        )
+        historical_task = reconciliation.get_task("ETC-RECON-HIST-20260114")
+        self.assertEqual(historical_task.created_at, historical_created_at)
+        self.assertEqual(historical_task.updated_at, historical_updated_at)
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                """
+                select
+                    (raw_payload->'normalized_payload'->>'created_at')::timestamptz = created_at
+                    and (raw_payload->'normalized_payload'->>'updated_at')::timestamptz = updated_at
+                from app.etc_reconciliation_tasks
+                where task_id = 'ETC-RECON-HIST-20260114';
+                """,
+            ),
+            "t",
+        )
 
     def test_changed_scope_preserves_absent_workbench_generation_rows_and_updates_candidates(self) -> None:
         self.store.save_workbench_read_models(

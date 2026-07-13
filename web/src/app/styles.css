@@ -16659,8 +16659,22 @@ body.column-layout-dragging {
   gap: var(--fp-space-3);
 }
 
+.cost-page-header {
+  align-items: center;
+}
+
+.cost-page-header-main {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--fp-space-4);
+  flex-wrap: wrap;
+}
+
 .cost-header-actions {
-  align-items: flex-end;
+  align-items: center;
+  flex: 0 0 auto;
 }
 
 .workbench-settings-modal {
@@ -18613,11 +18627,12 @@ body.column-layout-dragging {
 
 .cost-analysis-toolbar {
   display: flex;
-  justify-content: space-between;
+  min-width: 0;
+  justify-content: flex-start;
   align-items: center;
   gap: var(--fp-space-3);
-  padding: 0 0 var(--fp-space-2);
-  border-bottom: 1px solid var(--fp-border-subtle);
+  padding: 0;
+  border: 0;
   background: transparent;
 }
 
@@ -18651,8 +18666,8 @@ body.column-layout-dragging {
 }
 
 .cost-view-tab {
-  min-height: 36px;
-  padding: 0 14px;
+  min-height: 34px;
+  padding: 0 12px;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
@@ -18681,6 +18696,11 @@ body.column-layout-dragging {
   border-color: var(--fp-accent);
   background: var(--fp-accent);
   color: #ffffff;
+}
+
+.cost-view-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--fp-accent) 38%, transparent);
+  outline-offset: 2px;
 }
 
 .cost-toolbar-refreshing {
@@ -18857,6 +18877,10 @@ body.column-layout-dragging {
   min-height: 52px;
 }
 
+.cost-explorer-lane-table .cost-finance-table .finance-table__row {
+  min-height: 64px;
+}
+
 .cost-finance-table .finance-table__row.cost-table-row--clickable {
   cursor: pointer;
   transition:
@@ -18972,6 +18996,39 @@ body.column-layout-dragging {
   grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(420px, 2fr);
 }
 
+@media (min-width: 1025px) {
+  .cost-explorer-grid.project,
+  .cost-explorer-grid.expense,
+  .cost-explorer-grid.bank-tag {
+    height: max(560px, calc(100dvh - 240px));
+    align-items: stretch;
+  }
+
+  .cost-explorer-grid > .cost-explorer-lane {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100%;
+  }
+
+  .cost-explorer-grid .cost-explorer-list {
+    min-height: 0;
+    align-content: start;
+    overflow: auto;
+  }
+
+  .cost-explorer-lane-table .cost-table-shell,
+  .cost-explorer-lane-table .cost-finance-table,
+  .cost-explorer-lane-table .finance-table__scroll {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .cost-explorer-lane-table .finance-table__scroll {
+    max-height: none;
+    overflow: auto;
+  }
+}
+
 .cost-section-heading,
 .cost-explorer-lane-header {
   display: flex;
@@ -18998,20 +19055,11 @@ body.column-layout-dragging {
   font-weight: 800;
 }
 
-.cost-section-total {
-  color: var(--fp-accent);
-  font-family: var(--fp-font-data);
-  font-size: 13px;
-  font-weight: 900;
-  letter-spacing: 0;
-  font-variant-numeric: tabular-nums;
-}
-
 .cost-direction-summary {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, max-content));
   align-items: center;
   gap: var(--fp-space-3);
-  flex-wrap: wrap;
 }
 
 .cost-direction-amount {
@@ -19020,6 +19068,21 @@ body.column-layout-dragging {
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.cost-direction-amount--aligned {
+  display: grid;
+  grid-template-columns: auto minmax(82px, max-content);
+  align-items: baseline;
+  gap: var(--fp-space-2);
+}
+
+.cost-direction-amount-label {
+  text-align: left;
+}
+
+.cost-direction-amount-value {
+  text-align: right;
 }
 
 .cost-direction-amount--expense,
@@ -19033,8 +19096,11 @@ body.column-layout-dragging {
 }
 
 .cost-section-heading-copy {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--fp-space-4);
+  flex-wrap: wrap;
 }
 
 .cost-section-heading-actions {
@@ -19046,14 +19112,14 @@ body.column-layout-dragging {
 }
 
 .cost-project-scope-actions {
-  align-items: flex-end;
+  align-items: flex-start;
 }
 
 .cost-scope-controls {
   position: relative;
   display: inline-flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 8px;
 }
 
@@ -19128,7 +19194,7 @@ body.column-layout-dragging {
 .cost-scope-popover {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   z-index: 12;
   width: min(360px, calc(100vw - 32px));
   padding: 12px;
@@ -19202,10 +19268,20 @@ body.column-layout-dragging {
 }
 
 .cost-view-scope-heading {
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--fp-space-5);
+  flex-wrap: wrap;
+  padding: var(--fp-space-2) 0 var(--fp-space-3);
   border: 0;
   border-bottom: 1px solid var(--fp-border-subtle);
   border-radius: 0;
   background: transparent;
+}
+
+.cost-view-scope-heading .cost-section-heading-actions {
+  order: -1;
+  justify-content: flex-start;
 }
 
 .project-export-history {
@@ -19786,16 +19862,13 @@ body.column-layout-dragging {
   gap: var(--fp-space-1);
 }
 
+.cost-explorer-item-meta-stack .cost-direction-amount,
 .cost-direction-meta .cost-direction-amount {
-  font-size: 11px;
+  min-width: 138px;
 }
 
-.cost-explorer-item-meta-stack span {
-  color: var(--fp-accent);
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+.cost-direction-meta .cost-direction-amount {
+  font-size: 11px;
 }
 
 .cost-explorer-percentage-badge {
@@ -20009,6 +20082,19 @@ body.column-layout-dragging {
     flex-direction: column;
   }
 
+  .cost-page-header-main,
+  .cost-analysis-toolbar {
+    width: 100%;
+  }
+
+  .cost-page-header-main {
+    align-items: flex-start;
+  }
+
+  .cost-header-actions {
+    justify-content: flex-start;
+  }
+
   .project-export-actions,
   .project-export-history-item,
   .project-export-modal-header,
@@ -20163,6 +20249,15 @@ body.column-layout-dragging {
 }
 
 @media (max-width: 720px) {
+  .cost-direction-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--fp-space-1);
+  }
+
+  .cost-view-divider {
+    display: none;
+  }
+
   .detail-modal-backdrop {
     padding: 0;
     align-items: flex-end;

@@ -114,6 +114,7 @@ EXPECTED_MIGRATION_FILES = [
     "0100_phase19_runtime_grants.sql",
     "0101_phase19_audit_contract_boundaries.sql",
     "0102_workbench_idempotency_runtime_evidence_grant.sql",
+    "0103_etc_reconciliation_task_timestamps.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

@@ -3742,7 +3742,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-    def test_repository_composed_all_open_page_drops_visible_automatic_decision_group(self) -> None:
+    def test_repository_composed_all_open_page_keeps_formalized_decision_origin_group(self) -> None:
         class DuplicateOpenOwnerConnection(ActiveWorkbenchGenerationConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 normalized = " ".join(sql.lower().split())
@@ -3767,6 +3767,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     decision_group_id = (
                         "case:decision:2026-07:oa_bank_exact_amount:oa-pay-2309:txn_imported_0472"
                     )
+                    formalized_case_id = (
+                        "decision:2026-05:oa_invoice_exact_amount:oa-pay-2169:inv_imported_0369"
+                    )
+                    formalized_group_id = f"case:{formalized_case_id}"
                     return [
                         {
                             "group_id": "scope:2026-06:temp:0003",
@@ -3804,6 +3808,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                                 "zone": "open",
                                 "group_type": "candidate",
                                 "reason": "existing_case_candidate",
+                                "relation_mode": "automatic_decision",
                                 "case_id": "decision:2026-07:oa_bank_exact_amount:oa-pay-2309:txn_imported_0472",
                                 "oa_rows": [
                                     {
@@ -3822,6 +3827,40 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                                 "invoice_rows": [],
                             },
                         },
+                        {
+                            "group_id": formalized_group_id,
+                            "source_group_id": formalized_group_id,
+                            "scope_key": "2026-05",
+                            "generation_id": "gen-2026-05",
+                            "zone": "open",
+                            "payload": {
+                                "group_id": formalized_group_id,
+                                "zone": "open",
+                                "group_type": "manual_confirmed",
+                                "reason": "existing_case_group",
+                                "relation_mode": "manual_confirmed",
+                                "case_id": formalized_case_id,
+                                "oa_rows": [
+                                    {
+                                        "id": "oa-pay-2169",
+                                        "type": "oa",
+                                        "case_id": formalized_case_id,
+                                        "relation_mode": "manual_confirmed",
+                                        "amount": "520.00",
+                                    }
+                                ],
+                                "bank_rows": [],
+                                "invoice_rows": [
+                                    {
+                                        "id": "inv_imported_0369",
+                                        "type": "invoice",
+                                        "case_id": formalized_case_id,
+                                        "relation_mode": "manual_confirmed",
+                                        "amount": "520.00",
+                                    }
+                                ],
+                            },
+                        },
                     ]
                 return super().fetch_all(sql, params)
 
@@ -3830,20 +3869,27 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
 
-        self.assertEqual(page["total"], 1)
+        self.assertEqual(page["total"], 2)
         self.assertTrue(
             any(
                 "not like 'case:decision:%%'" in sql
+                and "g.group_type = 'manual_confirmed'" in sql
+                and "g.payload->>'relation_mode'" in sql
                 for sql, _params in connection.fetch_all_calls
             )
         )
-        self.assertEqual(page["row_counts"], {"oa": 1, "bank": 0, "invoice": 0, "rows": 1})
+        self.assertEqual(page["row_counts"], {"oa": 2, "bank": 0, "invoice": 1, "rows": 3})
         self.assertEqual(
             [group["group_id"] for group in page["groups"]],
-            ["scope:2026-06:temp:0003"],
+            [
+                "scope:2026-06:temp:0003",
+                "case:decision:2026-05:oa_invoice_exact_amount:oa-pay-2169:inv_imported_0369",
+            ],
         )
         self.assertEqual(page["groups"][0]["oa_rows"][0]["id"], "oa-pay-2309")
         self.assertEqual(page["groups"][0]["bank_rows"], [])
+        self.assertEqual(page["groups"][1]["relation_mode"], "manual_confirmed")
+        self.assertEqual(page["groups"][1]["invoice_rows"][0]["id"], "inv_imported_0369")
 
     def test_repository_bounds_all_scope_groups_page_query(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
@@ -4269,6 +4315,72 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(group["group_id"], "case:1")
         self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
         self.assertTrue(any("group_id = %s" in sql for sql, _params in connection.fetch_one_calls))
+
+    def test_repository_group_detail_distinguishes_formalized_decision_origin_relation(self) -> None:
+        class DecisionOriginGroupDetailConnection(WorkbenchSummaryGroupsConnection):
+            def __init__(self, *, relation_mode: str, group_type: str) -> None:
+                super().__init__()
+                self.relation_mode = relation_mode
+                self.group_type = group_type
+
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                if "g.group_id = %s" in normalized and "gen.source_versions" in normalized:
+                    self.fetch_one_calls.append((normalized, params))
+                    case_id = "decision:2026-05:oa_invoice_exact_amount:oa-pay-2169:inv_imported_0369"
+                    return {
+                        "group_id": f"case:{case_id}",
+                        "zone": "open",
+                        "scope_key": "2026-05",
+                        "generation_id": "gen-active",
+                        "source_versions": {"source_version": 12},
+                        "payload": {
+                            "group_id": f"case:{case_id}",
+                            "group_type": self.group_type,
+                            "reason": "existing_case_group"
+                            if self.group_type == "manual_confirmed"
+                            else "existing_case_candidate",
+                            "relation_mode": self.relation_mode,
+                            "oa_rows": [
+                                {
+                                    "id": "oa-pay-2169",
+                                    "type": "oa",
+                                    "case_id": case_id,
+                                    "relation_mode": self.relation_mode,
+                                }
+                            ],
+                            "bank_rows": [],
+                            "invoice_rows": [
+                                {
+                                    "id": "inv_imported_0369",
+                                    "type": "invoice",
+                                    "case_id": case_id,
+                                    "relation_mode": self.relation_mode,
+                                }
+                            ],
+                        },
+                    }
+                return super().fetch_one(sql, params)
+
+        automatic = PostgresReadModelRepository(
+            DecisionOriginGroupDetailConnection(relation_mode="automatic_decision", group_type="candidate")
+        ).get_workbench_group_detail(
+            scope_key="2026-05",
+            zone="open",
+            group_id="case:decision:2026-05:oa_invoice_exact_amount:oa-pay-2169:inv_imported_0369",
+        )
+        formalized = PostgresReadModelRepository(
+            DecisionOriginGroupDetailConnection(relation_mode="manual_confirmed", group_type="manual_confirmed")
+        ).get_workbench_group_detail(
+            scope_key="2026-05",
+            zone="open",
+            group_id="case:decision:2026-05:oa_invoice_exact_amount:oa-pay-2169:inv_imported_0369",
+        )
+
+        self.assertIsNone(automatic)
+        self.assertIsNotNone(formalized)
+        self.assertEqual(formalized["relation_mode"], "manual_confirmed")
+        self.assertEqual(formalized["invoice_rows"][0]["id"], "inv_imported_0369")
 
     def test_repository_group_detail_reads_only_active_generation(self) -> None:
         connection = ActiveWorkbenchGenerationConnection()
@@ -6488,7 +6600,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn(":", parsed_version or "")
         self.assertEqual(len(parsed_version or ""), 24)
 
-    def test_workbench_groups_api_redis_cache_key_includes_read_model_schema_version(self) -> None:
+    def test_workbench_groups_api_redis_cache_key_includes_groups_page_schema_version(self) -> None:
         app = object.__new__(Application)
         kwargs = {
             "cache_version": "v7",
@@ -6503,9 +6615,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "detail_level": "summary",
         }
 
-        with patch("fin_ops_platform.app.server.WORKBENCH_READ_MODEL_SCHEMA_VERSION", "schema-a"):
+        with patch("fin_ops_platform.app.server.WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION", "schema-a"):
             key_a = app._workbench_groups_redis_cache_key_from_version(**kwargs)
-        with patch("fin_ops_platform.app.server.WORKBENCH_READ_MODEL_SCHEMA_VERSION", "schema-b"):
+        with patch("fin_ops_platform.app.server.WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION", "schema-b"):
             key_b = app._workbench_groups_redis_cache_key_from_version(**kwargs)
 
         self.assertNotEqual(key_a, key_b)

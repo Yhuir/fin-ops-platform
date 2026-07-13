@@ -69,12 +69,14 @@ afterAll(() => {
 });
 
 function expectProjectCostShell() {
-  const page = screen.getByRole("heading", { name: "成本统计" }).closest(".cost-page");
+  const heading = screen.getByRole("heading", { name: "成本统计" });
+  const page = heading.closest(".cost-page");
   expect(page).not.toBeNull();
   expect(page).not.toHaveClass("MuiBox-root");
   const viewSwitcher = screen.getByRole("tablist", { name: "成本统计视图切换" });
   expect(viewSwitcher).toHaveClass("cost-view-switcher");
   expect(viewSwitcher).not.toHaveClass("MuiTabs-root");
+  expect(heading.closest(".page-header")).toContainElement(viewSwitcher);
 }
 
 function expectProjectCostTable(name: string) {
@@ -119,13 +121,16 @@ describe("Cost statistics page", () => {
     const css = readFileSync("src/app/styles.css", "utf8");
 
     expect(css).not.toContain(".cost-page .stat-card");
-    expect(css).toMatch(/\.cost-analysis-toolbar\s*{[^}]*border-bottom:\s*1px solid var\(--fp-border-subtle\)/s);
+    expect(css).toMatch(/\.cost-analysis-toolbar\s*{[^}]*border:\s*0/s);
     expect(css).toMatch(/\.cost-finance-table \.finance-table__row\s*{[^}]*min-height:\s*52px/s);
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-scope-trigger\s*{[^}]*min-height:\s*42px[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-scope-popover\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 32px\)\)/s);
     expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*padding:\s*10px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-explorer-grid\.bank-tag\s*{[^}]*grid-template-columns:\s*minmax\(180px,\s*1fr\) minmax\(180px,\s*1fr\) minmax\(420px,\s*2fr\)/s);
+    expect(css).toMatch(/\.cost-explorer-grid\.project,[\s\S]*height:\s*max\(560px,\s*calc\(100dvh - 240px\)\)/s);
+    expect(css).toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*order:\s*-1/s);
+    expect(css).toMatch(/\.cost-direction-amount--aligned\s*{[^}]*grid-template-columns:\s*auto minmax\(82px,\s*max-content\)/s);
     expect(css).toMatch(/\.export-center-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
     expect(css).toMatch(/\.cost-detail-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
   });
@@ -153,8 +158,8 @@ describe("Cost statistics page", () => {
     expect(within(timeGrid).queryByText("2026-03-10T21:27:55+08:00")).not.toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
     expect(within(timeGrid).getAllByText("支出")[0]).toHaveClass("direction-tag");
-    expect(screen.getByText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
-    expect(screen.getByText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
+    expect(screen.getByLabelText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(screen.getByLabelText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
     expect(screen.queryByText("总金额 15,360.00")).not.toBeInTheDocument();
     expect(within(timeGrid).getByRole("button", { name: "查看流水 cost-income-001" })).toBeInTheDocument();
     expect(within(timeGrid).getByText("2,000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
@@ -264,6 +269,7 @@ describe("Cost statistics page", () => {
     const projectLane = screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane");
     expect(projectLane).not.toBeNull();
     expect(within(projectLane as HTMLElement).getByText("58.2%")).toBeInTheDocument();
+    expect(within(projectLane as HTMLElement).getByLabelText("支出 13,360.00")).toHaveClass("cost-direction-amount--aligned");
     await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
 
     const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
@@ -277,8 +283,11 @@ describe("Cost statistics page", () => {
 
     const transactionTable = screen.getByRole("grid", { name: "项目对应流水表" });
     expectProjectCostTable("项目对应流水表");
-    expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" })).toBeInTheDocument();
+    const projectTransactionTrigger = within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" });
+    expect(projectTransactionTrigger).toBeInTheDocument();
+    expect(within(projectTransactionTrigger).getByText("2026-03-10 21:27:55")).toHaveClass("cost-transaction-time-chip");
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
+    expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
     expect(within(transactionTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
 
     await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
@@ -380,15 +389,18 @@ describe("Cost statistics page", () => {
 
     const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
     expect(expenseLane).not.toBeNull();
+    expect(within(expenseLane as HTMLElement).getByLabelText("支出 860.00")).toHaveClass("cost-direction-amount--aligned");
     await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /交通费/ }));
 
     const transactionTable = screen.getByRole("grid", { name: "按费用类型流水表" });
     expectProjectCostTable("按费用类型流水表");
     expect(within(transactionTable).getByText("2026-03-18 17:02:09")).toBeInTheDocument();
+    expect(within(transactionTable).getByText("2026-03-18 17:02:09")).toHaveClass("cost-transaction-time-chip");
     expect(within(transactionTable).getByText("云南溯源科技")).toBeInTheDocument();
     expect(within(transactionTable).getByText("860.00")).toBeInTheDocument();
     expect(within(transactionTable).getByText("项目现场往返交通")).toBeInTheDocument();
     expect(within(transactionTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
+    expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
     await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-003" }));
     const dialog = await screen.findByRole("dialog", { name: "流水详情" });
     expectProjectCostDialog("流水详情");
@@ -418,8 +430,8 @@ describe("Cost statistics page", () => {
     expect(within(primaryLane as HTMLElement).getByText("项目开销")).toBeInTheDocument();
     expect(within(primaryLane as HTMLElement).getByText("差旅交通")).toBeInTheDocument();
     expect(within(primaryLane as HTMLElement).getByText("经营收入")).toBeInTheDocument();
-    expect(screen.getByText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
-    expect(screen.getByText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
+    expect(screen.getByLabelText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(screen.getByLabelText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
     expect(within(primaryLane as HTMLElement).queryByText(/%$/)).not.toBeInTheDocument();
     expect(within(primaryLane as HTMLElement).getByText("支出 0 笔 / 收入 1 笔 / 1 个子标签")).toBeInTheDocument();
 
@@ -434,6 +446,8 @@ describe("Cost statistics page", () => {
     expectProjectCostTable("流水标签对应流水表");
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" })).toBeInTheDocument();
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
+    expect(within(transactionTable).getByText("2026-03-10 21:27:55")).toHaveClass("cost-transaction-time-chip");
+    expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
 
     await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
 
@@ -504,7 +518,8 @@ describe("Cost statistics page", () => {
     expect(within(bankLane as HTMLElement).getByText("平安银行 账户 8821")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("54.4%")).toBeInTheDocument();
-    expect(screen.getByText("总金额 22,960.00")).toBeInTheDocument();
+    expect(screen.getByLabelText("支出金额 22,960.00")).toBeInTheDocument();
+    expect(within(bankLane as HTMLElement).getByLabelText("支出 12,500.00")).toHaveClass("cost-direction-amount--aligned");
 
     await user.click(within(bankLane as HTMLElement).getByRole("button", { name: /工商银行 账户 0001/ }));
 
@@ -518,6 +533,8 @@ describe("Cost statistics page", () => {
     expectProjectCostTable("银行对应流水表");
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" })).toBeInTheDocument();
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
+    expect(within(transactionTable).getByText("2026-03-10 21:27:55")).toHaveClass("cost-transaction-time-chip");
+    expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
 
     await chooseScopeOption(user, "银行统计时间范围：全部时间", "2026年");
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
@@ -530,7 +547,7 @@ describe("Cost statistics page", () => {
     expect(await within(bankLane as HTMLElement).findByText("平安银行 账户 8821")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("工商银行 账户 0001")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
-    expect(screen.getByText("总金额 9,600.00")).toBeInTheDocument();
+    expect(screen.getByLabelText("支出金额 9,600.00")).toBeInTheDocument();
   });
 
   test("time and expense type scopes stay independent with one range control per view", async () => {

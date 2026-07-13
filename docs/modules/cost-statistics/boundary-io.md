@@ -1,6 +1,6 @@
 # 成本统计模块边界与 I/O
 
-日期：2026-07-13
+日期：2026-07-14
 
 ## 模块化状态
 
@@ -18,6 +18,7 @@
 - OA 配对统计继续展示自身支出汇总；全流水的按时间、按标签视图不展示收入与支出的合并总金额，只从当前 fresh explorer payload 经标签规则过滤后的可见行分别汇总支出金额、收入金额和对应笔数，页面不得回读源表。
 - 成本统计页面的按银行统计；银行账户全集来自 `app.app_settings.bank_account_mappings` 经后端 owner read port 注入 explorer payload，页面只做零金额账户补位和筛选，不直接调用设置页 API。
 - 成本统计页面的 `按标签` 三栏视图；该视图只从 `cost_statistics` explorer read model 的 `bank_flow_time_rows.bank_tag_*` 字段派生主标签、子标签和流水，不直接读取银行明细页 read model。
+- 成本统计页面的紧凑展示合同：五个分类与标题同排，范围控件位于金额摘要行最左；OA 配对金额显式标注支出，收支标签左对齐、金额右对齐；四种 explorer 下钻表把时间合并到户名/项目名复合单元格，桌面端各栏等高且独立滚动。该合同只改变展示，不改变 explorer/API DTO。
 - 成本统计标签规则抽屉；抽屉读取 app settings owner 归一后的银行主/子标签与虚拟 `__uncategorized__` 未分类标签，保存后等待当前成本统计 scope fresh 再关闭。
 - `cost_statistics` read model 的 parent rollup 投影。
 - 与税金抵扣共享 cost/tax 投影 worker 时保持明确 event/scope。
@@ -50,7 +51,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 成本统计 rows/summary | 前端页面 | query gateway 后返回 freshness；`time_rows` 输出 OA 配对支出流水字段，供 `按项目`、`按银行`、`按OA费用类型` 使用；`bank_flow_time_rows` 输出全部银行收支流水及标签/方向字段，`bank_flow_summary` 输出 `expense_amount`、`income_amount`、`expense_transaction_count`、`income_transaction_count`，供 `按标签`、`按时间` 使用 |
+| 成本统计 rows/summary | 前端页面 | query gateway 后返回 freshness；`time_rows` 输出 OA 配对支出流水字段，供 `按项目`、`按银行`、`按OA费用类型` 使用；`bank_flow_time_rows` 输出全部银行收支流水及标签/方向字段，`bank_flow_summary` 输出 `expense_amount`、`income_amount`、`expense_transaction_count`、`income_transaction_count`，供 `按标签`、`按时间` 使用。前端四种 explorer 下钻表复用 `trade_time` 生成户名/项目名下方 chip，不改变字段 shape；`按时间`主表继续使用独立时间列。 |
 | 页面 Audit 状态 | 标题附件 | 只有 audit status 与 explorer read model 均明确 fresh/pass 才显示成功；问题数量是有上限 sample |
 | Explorer bank accounts | 前端页面 | `bank_accounts` 输出设置中的银行账户全集，字段为 `bank_name`、`account_last4`、`payment_account_label`、`source`；按银行统计必须展示这些账户，即使当前范围金额为 0 |
 | Source versions | read model/query gateway | 月份 scope 的 `source_versions` 必须包含当前 Workbench active generation 的完整 `workbench_source_versions`、`bank_detail_source_versions`、`bank_auto_tag_rules_version` 和 `bank_account_mappings_fingerprint`；projection builder、页面 fresh gate 与 Audit 必须经同一 repository port 读取 Workbench 版本。任一上游变化都使旧 payload fail-closed 为 refreshing 并入队刷新，禁止只在 Audit 中识别漂移而让页面继续显示 fresh |
@@ -112,6 +113,7 @@
 - `web/src/test/CostStatisticsApi.test.ts`
 - `web/e2e/cost-statistics-flow.spec.ts`
 - `web/e2e/cost-statistics-relation-fanout.spec.ts`
+- 页面测试必须锁定顶部分类位置、范围控件左置、收支金额对齐、OA“支出”标签、四种下钻表复合时间 chip 和桌面 explorer 等高；Browser 测试至少真实量测一组三栏高度。
 
 ## 当前缺口和删除条件
 

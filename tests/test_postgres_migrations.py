@@ -116,6 +116,7 @@ EXPECTED_MIGRATIONS = [
     "0100_phase19_runtime_grants.sql",
     "0101_phase19_audit_contract_boundaries.sql",
     "0102_workbench_idempotency_runtime_evidence_grant.sql",
+    "0103_etc_reconciliation_task_timestamps.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -267,7 +268,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 103)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 104)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1287,6 +1288,26 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             normalized_sql,
             r"grant [^;]*(?:insert|update|delete)[^;]*workbench_idempotency_records",
         )
+
+    def test_etc_reconciliation_task_timestamp_repair_uses_typed_canonical_columns(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0103_etc_reconciliation_task_timestamps.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("update app.etc_reconciliation_tasks task", normalized_sql)
+        self.assertIn("jsonb_build_object('created_at', payload.created_at)", normalized_sql)
+        self.assertIn("jsonb_build_object('updated_at', payload.updated_at)", normalized_sql)
+        self.assertIn(
+            "nullif(payload.normalized_payload->>'created_at', '') is null",
+            normalized_sql,
+        )
+        self.assertIn(
+            "nullif(payload.normalized_payload->>'updated_at', '') is null",
+            normalized_sql,
+        )
+        self.assertNotIn("updated_at = now()", normalized_sql)
+        self.assertNotRegex(normalized_sql, r"\bset\s+(?:status|version|scope_month)\s*=")
 
 
 

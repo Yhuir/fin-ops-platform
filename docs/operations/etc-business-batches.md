@@ -14,6 +14,7 @@
 - 如果旧生产环境曾启用 `fin-ops-worker@etc-business-oa-detection.service`，发布后必须一次性 `disable --now` 该 unit；仓库部署样例不再包含 `etc-business-oa-detection` worker 或 `etc_business.oa_detection.refresh` dispatcher 事件。
 - 对象存储配置必须可供 PostgreSQL 文件写入链路识别 backend 和 bucket；上传信用卡账单、票根网文件和业务批次源文件前，先确认对象存储健康检查、bucket 权限和服务环境变量一致。
 - `0065_invoice_canonical_identity_fingerprint_invariant.sql` 必须随发布执行，用于清理历史 canonical invoice 中同时存在强 `source_unique_key` 和弱 `data_fingerprint` 的列值与 raw payload；否则旧快照仍可能在 ETC ZIP 导入或 OA 草稿创建后的本地持久化阶段触发 `invoices_data_fingerprint_uidx`。
+- `0103_etc_reconciliation_task_timestamps.sql` 必须随发布执行，用正式 task 行的 typed `created_at/updated_at` 补齐 Phase 19 历史任务 payload 时间戳；该迁移幂等，不能改写 task 状态、版本、scope 或 typed 时间列。
 
 ## 迁移 dry-run
 
@@ -50,6 +51,7 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - `GET /health` 返回健康。
 - `GET /api/session/me` 返回 JSON，不返回 HTML。
 - `GET /api/etc/business-batches` 返回 JSON envelope；无权限时返回结构化 403 JSON。
+- `GET /api/etc/reconciliation-tasks` 与 `GET /api/etc/reconciliation-tasks/ready-for-import` 均返回 JSON，不得因历史任务和新任务混合排序返回 500；新建 business batch 后必须同时能读取单 task、任务列表和 ready task 列表。
 - `POST /api/etc/business-batches` 可省略 `taskId`，成功响应必须返回已绑定 `taskId` 和 `title` 的 business batch；随后 `GET /api/etc/business-batches?status=active` 能看到该批次，且 `/api/etc/reconciliation-tasks` 中的 task-only 记录不得额外混入 ETC 左侧批次列表。
 - `POST /api/etc/business-batches`、`PATCH /api/etc/business-batches/{id}`、`POST /api/etc/business-batches/{id}/etc-import/preview`、`POST /api/etc/business-batches/{id}/etc-import/confirm`、`POST /api/etc/business-batches/{id}/manual-oa-status` 和 `DELETE /api/etc/business-batches/{id}` 的代理路径都命中后端。
 - Nginx `/api/` 与 `/fin-ops-api/` 下的 GET、POST、DELETE 都不返回 HTML 502、官网 HTML 或 React shell。

@@ -27,6 +27,7 @@ export type CostStatisticsTableColumn<Row> = {
   cellClassName?: string;
   width?: number;
   flex?: number;
+  getTextValue?: (row: Row) => string;
   render: (row: Row) => ReactNode | CostStatisticsAmountCell;
 };
 
@@ -93,7 +94,7 @@ export default function CostStatisticsTable<Row extends object>({
                 {columns.map((column, columnIndex) => {
                   const content = column.render(row);
                   const renderedContent = renderTableCellContent(content);
-                  const cellText = getCellText(content);
+                  const cellText = column.getTextValue?.(row) ?? getCellText(content);
                   const cellContent = columnIndex === 0 && onRowClick ? (
                     <button
                       aria-label={getRowActionLabel ? getRowActionLabel(row) : "查看行详情"}

@@ -146,6 +146,7 @@ test.describe("cost statistics browser flow", () => {
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.locator(".cost-page-header").getByRole("tablist", { name: "成本统计视图切换" })).toBeVisible();
     await expect(page.getByText("成本统计数据加载暂时失败，请刷新后重试。")).toBeVisible();
     await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toHaveCount(0);
@@ -339,7 +340,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.locator(".cost-page .stat-card")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
     await expect(page.getByLabel("时间统计方向金额")).toContainText("支出金额");
-    await expect(page.getByLabel("时间统计方向金额")).toContainText("收入金额 8,888.00");
+    await expect(page.getByLabel("收入金额 8,888.00")).toBeVisible();
     await expect(page.locator(".cost-direction-amount--income").first()).toHaveCSS("color", /rgb\(/);
     await expect(page.getByRole("button", { name: "查看流水 cost-income-e2e-001" })).toBeVisible();
     await page.getByRole("button", { name: "查看流水 cost-income-e2e-001" }).click();
@@ -455,7 +456,7 @@ test.describe("cost statistics browser flow", () => {
     });
     await expect(page.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeVisible();
     await expect(page.getByLabel("标签统计方向金额")).toContainText("支出金额");
-    await expect(page.getByLabel("标签统计方向金额")).toContainText("收入金额 8,888.00");
+    await expect(page.getByLabel("收入金额 8,888.00")).toBeVisible();
     await expect(page.getByRole("button", { name: /收入/ }).first()).toBeVisible();
     await recordLatency({
       operationId: "cost-statistics.drilldown-bank-tag",
@@ -477,6 +478,21 @@ test.describe("cost statistics browser flow", () => {
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("grid", { name: "流水标签对应流水表" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "流水标签对应流水表" })).toBeVisible());
     });
+    const bankTagTransactions = page.getByRole("grid", { name: "流水标签对应流水表" });
+    await expect(bankTagTransactions.getByRole("columnheader", { name: "时间" })).toHaveCount(0);
+    await expect(bankTagTransactions.locator(".cost-transaction-time-chip").first()).toBeVisible();
+    const laneHeights = await page.locator(".cost-explorer-grid.bank-tag > .cost-explorer-lane").evaluateAll((lanes) => (
+      lanes.map((lane) => Math.round(lane.getBoundingClientRect().height))
+    ));
+    expect(Math.max(...laneHeights) - Math.min(...laneHeights)).toBeLessThanOrEqual(1);
+    const tableLaneBox = await page.locator(".cost-explorer-lane-table").boundingBox();
+    const tableShellBox = await page.locator(".cost-explorer-lane-table .cost-table-shell").boundingBox();
+    expect(tableLaneBox).not.toBeNull();
+    expect(tableShellBox).not.toBeNull();
+    expect(Math.abs(
+      (tableLaneBox?.y ?? 0) + (tableLaneBox?.height ?? 0)
+      - (tableShellBox?.y ?? 0) - (tableShellBox?.height ?? 0),
+    )).toBeLessThanOrEqual(1);
     expect(browserErrors).toEqual([]);
   });
 

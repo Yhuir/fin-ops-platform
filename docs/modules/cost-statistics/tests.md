@@ -2,6 +2,16 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-14 - 成本统计紧凑导航、金额对齐与下钻时间 chip
+
+- 变更类型：frontend layout + interaction + existing feature regression。
+- 架构结论：只调整 `CostStatisticsPage`、共享成本表格 cell text contract 与页面样式；API、read model、worker、权限和业务金额口径不变。五类分类进入标题行，范围控件进入下一行最左；OA 三类金额统一显示“支出”；四种 explorer 下钻表移除独立时间列并在户名/项目名下显示时间 chip；按时间主表保留时间列。
+- 新增/更新测试：`web/src/test/CostStatisticsPage.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts`。
+- 覆盖点：标题行包含分类 tablist；范围控件 CSS/阅读层级左置；标签/金额两列对齐；OA 项目、银行、费用类型列表出现“支出”；项目、银行、费用类型、标签流水表无“时间”表头且复合首列包含格式化时间 chip；真实 Chromium 量测标签三栏高度一致。
+- 七类测试决策：1 业务核心不适用，金额和分类规则未变；2 service-layer 不适用，未改 service/repository；3 API contract 不适用，DTO/状态码未变；4 read model/cache/background job 不适用，未改 freshness/worker；5 frontend component and interaction 适用并更新 Vitest 与 Chromium；6 end-to-end business-flow 不新增跨模块写流，既有成本统计 browser 主流程继续回归；7 existing regression 适用，保护五视图切换、范围选择、下钻详情、收入/支出方向和宽表滚动。
+- 验证命令：`cd web && npm test -- --run src/test/CostStatisticsPage.test.tsx --reporter=verbose`；`cd web && npx playwright test e2e/cost-statistics-flow.spec.ts -g "keeps redesigned view buttons and range controls usable" --project=chromium`；`cd web && npm run build`；`bash scripts/verify.sh docs`。
+- 未测风险：真实生产超长户名/项目名、极端浏览器缩放和生产数据量下的视觉密度仍需 staging/manual smoke。
+
 ## 2026-07-13 - 全流水收入纳入标签、分方向展示与导出
 
 - 变更类型：business rule + read model/API contract + settings migration + frontend interaction/export。
