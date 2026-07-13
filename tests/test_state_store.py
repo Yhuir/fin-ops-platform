@@ -176,6 +176,78 @@ class StateStoreTests(unittest.TestCase):
             self.assertIsNone(store.mongo_database_name)
             self.assertEqual(loaded, payload)
 
+    def test_narrow_invoice_persistence_merges_without_replacing_other_state(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = ApplicationStateStore(Path(temp_dir))
+            store.save(
+                {
+                    "imports": {
+                        "batch_counter": 2,
+                        "invoices": [{"id": "invoice-1", "amount": "10.00"}],
+                    },
+                    "file_imports": {"session_counter": 3},
+                }
+            )
+
+            store.save_invoice_etc_metadata(
+                [
+                    {"id": "invoice-1", "amount": "10.00", "etc_invoice_id": "etc-1"},
+                    {"id": "invoice-2", "amount": "20.00"},
+                ]
+            )
+
+            loaded = store.load()
+            self.assertEqual(loaded["file_imports"], {"session_counter": 3})
+            self.assertEqual(loaded["imports"]["batch_counter"], 2)
+            self.assertEqual(
+                loaded["imports"]["invoices"],
+                [
+                    {"id": "invoice-1", "amount": "10.00", "etc_invoice_id": "etc-1"},
+                    {"id": "invoice-2", "amount": "20.00"},
+                ],
+            )
+
+    def test_import_delta_merges_batches_facts_and_sessions_without_replacing_existing_state(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = ApplicationStateStore(Path(temp_dir))
+            store.save(
+                {
+                    "imports": {
+                        "batch_counter": 1,
+                        "batches": {"batch-1": {"id": "batch-1"}},
+                        "invoices": [{"id": "invoice-1"}],
+                        "transactions": [],
+                    },
+                    "file_imports": {
+                        "session_counter": 1,
+                        "sessions": {"session-1": {"id": "session-1"}},
+                    },
+                    "matching": {"run_counter": 4},
+                }
+            )
+
+            store.save_import_delta(
+                {
+                    "imports": {
+                        "batch_counter": 2,
+                        "batches": {"batch-2": {"id": "batch-2"}},
+                        "invoices": [],
+                        "transactions": [{"id": "transaction-2"}],
+                    },
+                    "file_imports": {
+                        "session_counter": 2,
+                        "sessions": {"session-2": {"id": "session-2"}},
+                    },
+                }
+            )
+
+            loaded = store.load()
+            self.assertEqual(set(loaded["imports"]["batches"]), {"batch-1", "batch-2"})
+            self.assertEqual(loaded["imports"]["invoices"], [{"id": "invoice-1"}])
+            self.assertEqual(loaded["imports"]["transactions"], [{"id": "transaction-2"}])
+            self.assertEqual(set(loaded["file_imports"]["sessions"]), {"session-1", "session-2"})
+            self.assertEqual(loaded["matching"], {"run_counter": 4})
+
     def test_application_state_store_ignores_app_mongo_config(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)

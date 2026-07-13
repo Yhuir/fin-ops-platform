@@ -40,6 +40,8 @@
 | Claim hot path index | PostgreSQL migration | `job.outbox_events` active queue claim 必须保留 event-type-first 索引 `outbox_events_claim_event_type_priority_idx`，覆盖 `event_type/status/priority rank/available_at/created_at/id`；该索引只优化 worker lane claim I/O，不改变 durable queue 状态机、priority 语义或 freshness/readiness 事实源 |
 | Handler call | runtime worker | handler 只处理登记 event type |
 | Import processor state | PostgreSQL canonical/import file facts | import worker 只缓存 processor 类型；每个 job 调用必须重新构造 durable processor state，禁止启动时 snapshot 污染后来创建的 file session、canonical dedupe 或确认结果 |
+| Import persistence delta | import processing service | confirm job 只接收并持久化所选 session/batch 与本次创建或状态更新的 canonical facts；不得从 worker service 实例重取全量 snapshot，也不得回写 ETC、tax-certified 或其它未受影响事实域 |
+| ETC canonical invoice metadata | ETC existing-invoice link service | 只把实际发生 ETC 关联的 invoice 列表交给 `save_invoice_etc_metadata`；禁止借 file import/full-state writer 回写全部 invoice |
 
 ## 输出 I/O
 
@@ -49,6 +51,7 @@
 | Fan-out parent result | readiness / app health | manifest 为 `fan_out_command` 的 command-only `all` parent 只负责入队 child scopes，不写 current readiness；parent event/dirty scope 的当前失败仍可观察，历史 readiness 只作为 diagnostics。真实 queryable all scope（当前 `bank_account_balance:all`）和 queryable parent 不适用该忽略规则。 |
 | Worker heartbeat | `job.runtime_worker_heartbeats` | 空轮询 `idle` heartbeat 必须节流，禁止每个 0.05s poll 同步写库；`processing`、`deferred`、`failed`、`stopping`、`stopped` 等事件状态必须即时写入 |
 | Read model projection | 对应 repository | 只写 worker 对应投影 |
+| Import canonical delta | state-store/import repository | 只通过 `save_import_delta` 窄端口；PostgreSQL 幂等 upsert、本地按稳定 id 合并，禁止 generic full-state replace；随后只 fan-out write target envelope 声明的受影响 scope |
 | Wakeup/transport | RabbitMQ 可选 | 不能作为状态事实源 |
 | Queue history retention result | runtime queue ops / deploy timer | 只删除 `done` 历史；输出按 outbox event type 与 dirty scope type 聚合的 candidate/deleted count |
 

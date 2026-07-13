@@ -8745,7 +8745,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.saved_payloads: list[dict[str, object]] = []
 
-            def save(self, payload: dict[str, object]) -> None:
+            def save_import_delta(self, payload: dict[str, object]) -> None:
                 self.saved_payloads.append(payload)
 
         queue = FakeQueue()
@@ -8755,14 +8755,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             search_service=FakeSearch(),
             workbench_source_versions_provider=lambda: {},
         )
-        snapshot_service = SimpleNamespace(snapshot=lambda: {})
-
-        lifecycle.persist_import_state(
-            import_service=snapshot_service,
-            file_import_service=snapshot_service,
-            etc_service=snapshot_service,
-            etc_reconciliation_task_service=snapshot_service,
-            tax_certified_import_service=snapshot_service,
+        lifecycle.persist_confirmed_import_delta(
+            import_state_payload={"imports": {}, "file_imports": {}},
             cost_statistics_scope_keys=["2026-05"],
         )
 
@@ -8817,7 +8811,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 return None
 
         class FakeStateStore:
-            def save(self, _payload: dict[str, object]) -> None:
+            def save_import_delta(self, _payload: dict[str, object]) -> None:
                 return None
 
         queue = FakeQueue()
@@ -8827,14 +8821,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             search_service=FakeSearch(),
             workbench_source_versions_provider=lambda: {},
         )
-        snapshot_service = SimpleNamespace(snapshot=lambda: {})
-
-        lifecycle.persist_import_state(
-            import_service=snapshot_service,
-            file_import_service=snapshot_service,
-            etc_service=snapshot_service,
-            etc_reconciliation_task_service=snapshot_service,
-            tax_certified_import_service=snapshot_service,
+        lifecycle.persist_confirmed_import_delta(
+            import_state_payload={"imports": {}, "file_imports": {}},
             cost_statistics_scope_keys=["2026-05"],
             input_invoice_usage_scope_keys=["2026-05"],
             output_invoice_collection_scope_keys=[],
@@ -8866,7 +8854,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 self.calls.append(dict(kwargs))
 
         class FakeStateStore:
-            def save(self, _payload: dict[str, object]) -> None:
+            def save_import_delta(self, _payload: dict[str, object]) -> None:
                 return None
 
         lifecycle = _RuntimeWorkerDerivedLifecycle(
@@ -8875,14 +8863,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             search_service=SimpleNamespace(clear_cache=lambda: None),
             workbench_source_versions_provider=lambda: {},
         )
-        snapshot_service = SimpleNamespace(snapshot=lambda: {})
-
-        lifecycle.persist_import_state(
-            import_service=snapshot_service,
-            file_import_service=snapshot_service,
-            etc_service=snapshot_service,
-            etc_reconciliation_task_service=snapshot_service,
-            tax_certified_import_service=snapshot_service,
+        lifecycle.persist_confirmed_import_delta(
+            import_state_payload={"imports": {}, "file_imports": {}},
             cost_statistics_scope_keys=["2026-05"],
             bank_detail_scope_keys=["2026-06"],
         )

@@ -1269,7 +1269,7 @@ class Application:
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             schedule_or_run_workbench_auto_matching_for_scopes=self._schedule_or_run_workbench_auto_matching_for_scopes,
             enqueue_workbench_auto_matching_for_scopes=self._enqueue_workbench_auto_matching_for_scopes,
-            persist_state_with_workbench_invalidation=self._persist_import_state_with_read_model_invalidation,
+            persist_confirmed_import_delta=self._persist_confirmed_import_delta_with_read_model_invalidation,
             invalidate_tax_offset_read_model_scopes=self._invalidate_tax_offset_read_model_scopes,
             workbench_matching_scope_months_for_import_file_session=self._workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=self._tax_offset_scope_keys_for_import_file_session,
@@ -5158,7 +5158,6 @@ class Application:
                 triggered_by=f"background_job_retry:{job.job_id}",
             )
             self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
-            self._persist_state()
             return self._json_response(
                 HTTPStatus.ACCEPTED,
                 {
@@ -5178,7 +5177,7 @@ class Application:
                 {"error": "invalid_import_file_retry_request", "message": str(exc)},
             )
         self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
-        self._persist_state()
+        self._persist_import_preview_state()
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -5205,7 +5204,6 @@ class Application:
             target_scope_keys=target_scope_keys,
         )
         self._close_replaced_cost_statistics_warmup_job(job, owner_user_id, None)
-        self._persist_state()
         return self._json_response(
             HTTPStatus.ACCEPTED,
             {
@@ -5266,6 +5264,7 @@ class Application:
         return EtcExistingInvoiceLinkService(
             import_service=self._import_service,
             etc_service=self._etc_service,
+            persist_linked_invoices=self._persist_linked_invoice_etc_metadata,
         ).link_import_result_to_existing_invoices(result)
 
     @staticmethod
@@ -5303,7 +5302,14 @@ class Application:
         return EtcExistingInvoiceLinkService(
             import_service=self._import_service,
             etc_service=self._etc_service,
+            persist_linked_invoices=self._persist_linked_invoice_etc_metadata,
         ).link_etc_invoices_to_existing_invoices(etc_invoices)
+
+    def _persist_linked_invoice_etc_metadata(self, invoices: list[object]) -> None:
+        persist = getattr(self._state_store, "save_invoice_etc_metadata", None)
+        if not callable(persist):
+            raise RuntimeError("ETC invoice linking requires the canonical invoice metadata persistence port.")
+        persist(invoices)
 
     def _refresh_after_etc_invoice_link(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
@@ -5319,7 +5325,6 @@ class Application:
             metadata={"source": "etc_invoice_link", "reason": reason},
         )
         self._schedule_or_run_workbench_auto_matching_for_scopes(normalized_months, reason=reason)
-        self._persist_state()
 
     def _refresh_after_historical_etc_repair_link(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
@@ -5334,7 +5339,6 @@ class Application:
             months=normalized_months,
             metadata={"source": "historical_etc_repair_link", "reason": reason},
         )
-        self._persist_state()
 
     def _etc_business_application_service(self) -> EtcBusinessBatchApplicationService:
         dependency_key = (
@@ -6062,11 +6066,15 @@ class Application:
         scope_keys.add("all")
         normalized_scope_keys = sorted(scope_keys)
         if promoted_count:
-            self._persist_state_with_workbench_invalidation(
+            self._execute_import_state_changed_lifecycle(
                 cost_statistics_scope_keys=[
                     scope_key for scope_key in normalized_scope_keys if SEARCH_MONTH_RE.match(scope_key)
                 ],
+                bank_detail_scope_keys=[],
+                input_invoice_usage_scope_keys=None,
+                output_invoice_collection_scope_keys=None,
                 invalidate_cost_statistics=True,
+                source="oa_attachment_invoice_promotion",
             )
         for scope_key in normalized_scope_keys:
             self._enqueue_oa_projection_sync_refresh(scope_key, reason="oa_attachment_invoice_cache")
@@ -6085,6 +6093,7 @@ class Application:
             return 0
         recognition_service = InvoiceAttachmentRecognitionService(invoice_repository=self._import_service)
         promoted_count = 0
+        promoted_invoices: dict[str, object] = {}
         for month in sorted(scope_keys):
             if not SEARCH_MONTH_RE.match(month):
                 continue
@@ -6113,6 +6122,12 @@ class Application:
                     )
                     if invoice is not None:
                         promoted_count += 1
+                        promoted_invoices[str(getattr(invoice, "id", "") or row_id)] = invoice
+        if promoted_invoices:
+            persist = getattr(self._state_store, "save_invoices", None)
+            if not callable(persist):
+                raise RuntimeError("OA attachment promotion requires the canonical invoice persistence port.")
+            persist(list(promoted_invoices.values()))
         return promoted_count
 
     def _formal_oa_attachment_invoice_candidates(self, record: object) -> list[dict[str, object]]:
@@ -9774,7 +9789,7 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_import_file_retry_request", "message": str(exc)},
             )
-        self._persist_state()
+        self._persist_import_preview_state()
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
     def _handle_import_file_session(self, session_id: str) -> Response:
@@ -10745,55 +10760,40 @@ class Application:
         self._search_service.clear_cache()
         if self._state_store is None:
             return
-        self._state_store.save(
-            {
-                "imports": self._import_service.snapshot(),
-                "bank_transaction_categories": self._bank_transaction_category_service.snapshot(),
-                "file_imports": self._file_import_service.snapshot(),
-                "matching": self._matching_service.snapshot(),
-                "workbench_overrides": self._workbench_override_service.snapshot(),
-                "workbench_exception_cases": self._workbench_exception_case_service.snapshot(),
-                "workbench_read_models": self._workbench_read_model_service.snapshot(),
-                "workbench_candidate_matches": self._workbench_candidate_match_service.snapshot(),
-                "workbench_matching_dirty_scopes": self._workbench_matching_dirty_scope_service.snapshot(),
-                "turnover_relations": self._turnover_relation_service.snapshot(),
-                "turnover_ledger_extras": self._turnover_ledger_api_routes.extras_snapshot(),
-                "pending_invoice_commands": dict(getattr(self, "_pending_invoice_commands", {}) or {}),
-            }
+        persistence_calls = (
+            ("save_bank_transaction_categories", self._bank_transaction_category_service.snapshot()),
+            ("save_matching_snapshot", self._matching_service.snapshot()),
+            ("save_workbench_overrides", self._workbench_override_service.snapshot()),
+            ("save_workbench_exception_cases", self._workbench_exception_case_service.snapshot()),
+            ("save_workbench_read_models", self._workbench_read_model_service.snapshot()),
+            ("save_workbench_candidate_matches", self._workbench_candidate_match_service.snapshot()),
+            ("save_workbench_matching_dirty_scopes", self._workbench_matching_dirty_scope_service.snapshot()),
+            ("save_turnover_relations", self._turnover_relation_service.snapshot()),
+            ("save_turnover_ledger_extras", self._turnover_ledger_api_routes.extras_snapshot()),
+            ("save_pending_invoice_commands", dict(getattr(self, "_pending_invoice_commands", {}) or {})),
         )
-
-    def _persist_state_with_workbench_invalidation(
-        self,
-        *,
-        cost_statistics_scope_keys: list[str] | None = None,
-        bank_detail_scope_keys: list[str] | None = None,
-        input_invoice_usage_scope_keys: list[str] | None = None,
-        output_invoice_collection_scope_keys: list[str] | None = None,
-        invalidate_cost_statistics: bool = True,
-    ) -> None:
-        self._execute_import_state_changed_lifecycle(
-            cost_statistics_scope_keys=cost_statistics_scope_keys,
-            bank_detail_scope_keys=bank_detail_scope_keys,
-            input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
-            output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
-            invalidate_cost_statistics=invalidate_cost_statistics,
-            source="application_state_persist",
-        )
-        self._persist_state()
+        for method_name, snapshot in persistence_calls:
+            persist = getattr(self._state_store, method_name, None)
+            if callable(persist):
+                persist(snapshot)
 
     def _persist_import_preview_state(self) -> None:
         if self._state_store is None:
             return
-        self._state_store.save(
+        persist = getattr(self._state_store, "save_import_delta", None)
+        if not callable(persist):
+            raise RuntimeError("File import preview requires the import delta persistence port.")
+        persist(
             {
                 "imports": self._import_service.snapshot(include_facts=False),
                 "file_imports": self._file_import_service.snapshot(),
             }
         )
 
-    def _persist_import_state_with_read_model_invalidation(
+    def _persist_confirmed_import_delta_with_read_model_invalidation(
         self,
         *,
+        import_state_payload: dict[str, object],
         cost_statistics_scope_keys: list[str] | None = None,
         bank_detail_scope_keys: list[str] | None = None,
         input_invoice_usage_scope_keys: list[str] | None = None,
@@ -10802,23 +10802,13 @@ class Application:
     ) -> None:
         self._search_service.clear_cache()
         if self._state_store is not None:
-            self._state_store.save(
-                {
-                    "imports": self._import_service.snapshot(),
-                    "file_imports": self._file_import_service.snapshot(),
-                }
-            )
-            save_etc_state = getattr(self._state_store, "save_etc_state", None)
-            if callable(save_etc_state):
-                save_etc_state(
-                    {
-                        **self._etc_service.snapshot(),
-                        "reconciliation_tasks": self._etc_reconciliation_task_service.snapshot(),
-                    }
-                )
-            save_tax_certified_imports = getattr(self._state_store, "save_tax_certified_imports", None)
-            if callable(save_tax_certified_imports):
-                save_tax_certified_imports(self._tax_certified_import_service.snapshot())
+            payload = dict(import_state_payload or {})
+            if not payload or set(payload) - {"imports", "file_imports"}:
+                raise ValueError("File import persistence requires only imports and file_imports payloads.")
+            persist = getattr(self._state_store, "save_import_delta", None)
+            if not callable(persist):
+                raise RuntimeError("File import confirmation requires the import delta persistence port.")
+            persist(payload)
 
         self._execute_import_state_changed_lifecycle(
             cost_statistics_scope_keys=cost_statistics_scope_keys,

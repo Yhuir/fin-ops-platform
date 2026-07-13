@@ -204,6 +204,41 @@ class ImportNormalizationService:
             snapshot["transactions"] = self.list_transactions()
         return snapshot
 
+    def persistence_snapshot_for_batches(self, batch_ids: list[str]) -> dict[str, Any]:
+        selected_ids = {str(batch_id).strip() for batch_id in batch_ids if str(batch_id).strip()}
+        selected_batches = {
+            batch_id: preview
+            for batch_id, preview in self._batches.items()
+            if batch_id in selected_ids
+        }
+        invoice_ids: set[str] = set()
+        transaction_ids: set[str] = set()
+        for preview in selected_batches.values():
+            for row in preview.row_results:
+                linked_id = str(row.linked_object_id or "").strip()
+                if not linked_id:
+                    continue
+                if row.linked_object_type == "invoice":
+                    invoice_ids.add(linked_id)
+                elif (
+                    row.linked_object_type == "bank_transaction"
+                    and row.decision in {ImportDecision.CREATED, ImportDecision.STATUS_UPDATED}
+                ):
+                    transaction_ids.add(linked_id)
+        return {
+            "batch_counter": self._batch_counter,
+            "row_counter": self._row_counter,
+            "invoice_counter": self._invoice_counter,
+            "txn_counter": self._txn_counter,
+            "counterparty_counter": self._counterparty_counter,
+            "batches": selected_batches,
+            "invoices": [self._invoices_by_id[invoice_id] for invoice_id in sorted(invoice_ids)],
+            "transactions": [
+                self._transactions_by_id[transaction_id]
+                for transaction_id in sorted(transaction_ids)
+            ],
+        }
+
     def preview_import(
         self,
         *,

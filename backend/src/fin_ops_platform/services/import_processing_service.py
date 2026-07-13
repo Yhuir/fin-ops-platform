@@ -27,7 +27,7 @@ class ImportProcessingService:
         execute_derived_data_lifecycle_event: Callable[..., Any],
         schedule_or_run_workbench_auto_matching_for_scopes: Callable[..., Any],
         enqueue_workbench_auto_matching_for_scopes: Callable[..., Any],
-        persist_state_with_workbench_invalidation: Callable[..., Any],
+        persist_confirmed_import_delta: Callable[..., Any],
         invalidate_tax_offset_read_model_scopes: Callable[..., Any],
         workbench_matching_scope_months_for_import_file_session: Callable[[Any, list[str]], list[str]],
         tax_offset_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
@@ -49,7 +49,7 @@ class ImportProcessingService:
         self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
         self._schedule_or_run_workbench_auto_matching_for_scopes = schedule_or_run_workbench_auto_matching_for_scopes
         self._enqueue_workbench_auto_matching_for_scopes = enqueue_workbench_auto_matching_for_scopes
-        self._persist_state_with_workbench_invalidation = persist_state_with_workbench_invalidation
+        self._persist_confirmed_import_delta = persist_confirmed_import_delta
         self._invalidate_tax_offset_read_model_scopes = invalidate_tax_offset_read_model_scopes
         self._workbench_matching_scope_months_for_import_file_session = workbench_matching_scope_months_for_import_file_session
         self._tax_offset_scope_keys_for_import_file_session = tax_offset_scope_keys_for_import_file_session
@@ -195,11 +195,16 @@ class ImportProcessingService:
                 confirmed_session,
                 selected_file_ids,
             )
+            import_state_payload = self._file_import_service.confirmed_session_persistence_payload(
+                session_id=session_id,
+                selected_file_ids=selected_file_ids,
+            )
             self._invalidate_tax_offset_read_model_scopes(
                 tax_offset_scope_keys,
                 reason="invoice_file_import_confirm",
             )
-            self._persist_state_with_workbench_invalidation(
+            self._persist_confirmed_import_delta(
+                import_state_payload=import_state_payload,
                 cost_statistics_scope_keys=cost_statistics_scope_keys,
                 bank_detail_scope_keys=bank_detail_scope_keys,
                 input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,

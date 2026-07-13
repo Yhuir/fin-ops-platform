@@ -70,7 +70,7 @@ Refresh / fan-out 来源：
 
 - `/imports/files/confirm` inline 或 worker confirm selected files。
 - `ImportProcessingService.execute_file_import_confirm_job(...)` enqueue Workbench auto matching。
-- `_persist_state_with_workbench_invalidation(...)` 触发 Workbench 及成本统计相关刷新。
+- `ImportProcessingService` 先输出所选 session/batch 的精确 persistence delta，再通过 `import_state_changed` lifecycle 触发受影响 Workbench、银行明细、成本统计等 refresh。
 - `DerivedDataLifecycleService` 的 `bank_import_confirmed` 映射到 `bank_account_balance`、`bank_detail`、`workbench`、`workbench_relation`、`workbench_matching`、`invoice_lifecycle`、`cost_statistics`、`search`。
 
 失败恢复：

@@ -256,6 +256,23 @@ class MatchingFormalAndFallbackConnection(FakePostgresConnection):
 
 
 class PostgresStateStoreTests(unittest.TestCase):
+    def test_import_delta_port_rejects_cross_domain_payload(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = PostgresStateStore(
+                data_dir=Path(temp_dir),
+                connection=FakePostgresConnection(),
+            )
+
+            store.save_import_delta({"imports": {}, "file_imports": {}})
+            with self.assertRaisesRegex(ValueError, "only imports and file_imports"):
+                store.save_import_delta(
+                    {
+                        "imports": {},
+                        "file_imports": {},
+                        "tax_certified_imports": {},
+                    }
+                )
+
     def test_database_url_is_redacted_without_query_or_password(self) -> None:
         redacted = redact_database_url("postgresql://fin_ops:secret@db.example.com:5432/fin_ops?sslmode=require")
 

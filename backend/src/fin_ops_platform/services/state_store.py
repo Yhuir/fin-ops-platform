@@ -862,6 +862,98 @@ class ApplicationStateStore:
     def save(self, payload: dict[str, Any]) -> None:
         self._save_local_pickle(payload)
 
+    def save_import_delta(self, payload: dict[str, Any]) -> None:
+        normalized = dict(payload or {})
+        if not normalized or set(normalized) - {"imports", "file_imports"}:
+            raise ValueError("Import delta requires only imports and file_imports payloads.")
+        current_payload = self._load_local_pickle()
+        imports_delta = normalized.get("imports")
+        if isinstance(imports_delta, dict):
+            current_payload["imports"] = self._merge_import_snapshot(
+                current_payload.get("imports"),
+                imports_delta,
+            )
+        file_imports_delta = normalized.get("file_imports")
+        if isinstance(file_imports_delta, dict):
+            current_payload["file_imports"] = self._merge_file_import_snapshot(
+                current_payload.get("file_imports"),
+                file_imports_delta,
+            )
+        self._save_local_pickle(current_payload)
+
+    def save_invoices(self, invoices: list[Any]) -> None:
+        self._merge_import_invoices(invoices)
+
+    def save_invoice_etc_metadata(self, invoices: list[Any]) -> None:
+        self._merge_import_invoices(invoices)
+
+    def _merge_import_invoices(self, invoices: list[Any]) -> None:
+        changed = list(invoices or [])
+        if not changed:
+            return
+        current_payload = self._load_local_pickle()
+        current_payload["imports"] = self._merge_import_snapshot(
+            current_payload.get("imports"),
+            {"invoices": changed},
+        )
+        self._save_local_pickle(current_payload)
+
+    @classmethod
+    def _merge_import_snapshot(cls, current: Any, delta: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(current) if isinstance(current, dict) else {}
+        for counter in ("batch_counter", "row_counter", "invoice_counter", "txn_counter", "counterparty_counter"):
+            if counter in delta:
+                merged[counter] = max(int(merged.get(counter) or 0), int(delta.get(counter) or 0))
+        batches = delta.get("batches")
+        if isinstance(batches, dict):
+            merged["batches"] = {**dict(merged.get("batches") or {}), **batches}
+        for field in ("invoices", "transactions"):
+            if field in delta:
+                merged[field] = cls._merge_import_entity_list(merged.get(field), delta.get(field))
+        return merged
+
+    @staticmethod
+    def _merge_file_import_snapshot(current: Any, delta: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(current) if isinstance(current, dict) else {}
+        for counter in ("session_counter", "file_counter"):
+            if counter in delta:
+                merged[counter] = max(int(merged.get(counter) or 0), int(delta.get(counter) or 0))
+        sessions = delta.get("sessions")
+        if isinstance(sessions, dict):
+            merged["sessions"] = {**dict(merged.get("sessions") or {}), **sessions}
+        return merged
+
+    @classmethod
+    def _merge_import_entity_list(cls, current: Any, delta: Any) -> list[Any]:
+        existing = list(current or [])
+        changed_by_id = {
+            entity_id: entity
+            for entity in list(delta or [])
+            if (entity_id := cls._import_entity_id(entity))
+        }
+        merged: list[Any] = []
+        seen: set[str] = set()
+        for entity in existing:
+            entity_id = cls._import_entity_id(entity)
+            if entity_id in changed_by_id:
+                merged.append(changed_by_id[entity_id])
+                seen.add(entity_id)
+            else:
+                merged.append(entity)
+        merged.extend(entity for entity_id, entity in changed_by_id.items() if entity_id not in seen)
+        return merged
+
+    def save_matching_snapshot(self, snapshot: dict[str, Any]) -> None:
+        current_payload = self._load_local_pickle()
+        current_payload["matching"] = dict(snapshot or {})
+        self._save_local_pickle(current_payload)
+
+    @staticmethod
+    def _import_entity_id(entity: Any) -> str:
+        if isinstance(entity, dict):
+            return str(entity.get("id") or "").strip()
+        return str(getattr(entity, "id", "") or "").strip()
+
     def save_workbench_overrides(
         self,
         workbench_overrides_snapshot: dict[str, Any],

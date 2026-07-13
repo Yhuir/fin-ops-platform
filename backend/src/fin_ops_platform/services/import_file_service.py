@@ -201,6 +201,28 @@ class FileImportService:
             "sessions": self._sessions,
         }
 
+    def confirmed_session_persistence_payload(
+        self,
+        *,
+        session_id: str,
+        selected_file_ids: list[str],
+    ) -> dict[str, Any]:
+        session = self._sessions[session_id]
+        selected = {str(file_id).strip() for file_id in selected_file_ids if str(file_id).strip()}
+        batch_ids = [
+            str(item.batch_id).strip()
+            for item in session.files
+            if item.id in selected and item.status == "confirmed" and str(item.batch_id or "").strip()
+        ]
+        return {
+            "imports": self._import_service.persistence_snapshot_for_batches(batch_ids),
+            "file_imports": {
+                "session_counter": self._session_counter,
+                "file_counter": self._file_counter,
+                "sessions": {session.id: session},
+            },
+        }
+
     def list_templates(self) -> list[dict[str, Any]]:
         return [dict(template) for template in TEMPLATE_DEFINITIONS]
 

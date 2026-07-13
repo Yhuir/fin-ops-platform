@@ -216,7 +216,7 @@
 | --- | --- | --- |
 | file preview | 创建 `FileImportSession`，不应刷新业务 read model | 当前导入页 |
 | file confirm queued | `file_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
-| file confirm processed | import facts 持久化、Workbench matching 入队、`_persist_state_with_workbench_invalidation` | 银行明细、关联台、往来款、成本统计、搜索 |
+| file confirm processed | 所选 session/batch import delta 持久化、Workbench matching 入队、`import_state_changed` lifecycle | 银行明细、关联台、往来款、成本统计、搜索 |
 | bank import lifecycle | `bank_import_confirmed` -> bank balance/detail、workbench、workbench relation、workbench matching、invoice lifecycle、cost、search | 银行明细、关联台、待找发票、成本统计、App Health |
 | preview stale | API `409 preview_stale`，前端提示重新预览 | 当前导入页 |
 

@@ -253,6 +253,45 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         codes = report["summary"]["issue_sample_counts_by_code"]
         self.assertIn("bank_import_row_transaction_orphan", codes)
 
+    def test_duplicate_decision_can_reference_canonical_transaction_owned_by_older_batch(self) -> None:
+        connection = FakeConnection()
+        audit = bank_transaction_import_page_audit._zero_audit_counts()
+        audit.update(
+            {
+                "original_count": 1,
+                "unique_count": 1,
+                "existing_duplicate_count": 1,
+                "skipped_count": 1,
+            }
+        )
+        connection.files[0]["raw_payload"]["normalized_payload"]["audit"] = audit
+        connection.files[0]["raw_payload"]["normalized_payload"]["session_audit"] = audit
+        connection.batches[0].update({"success_count": 0, "duplicate_count": 1})
+        connection.batches[0]["raw_payload"]["normalized_payload"].update(
+            {"success_count": 0, "duplicate_count": 1}
+        )
+        connection.rows[0].update(
+            {
+                "decision": "duplicate_skipped",
+                "decision_reason": "existing",
+                "linked_object_id": "txn-old",
+            }
+        )
+        connection.rows[0]["raw_payload"]["normalized_payload"].update(
+            {
+                "decision": "duplicate_skipped",
+                "decision_reason": "existing",
+                "linked_object_id": "txn-old",
+            }
+        )
+        connection.transactions[0].update({"transaction_id": "txn-old", "batch_id": "batch-old"})
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertEqual(report["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
+        self.assertEqual(report["summary"]["bank_import_owned_transaction_count"], 0)
+        self.assertEqual(report["summary"]["bank_import_referenced_transaction_count"], 1)
+
     def test_batch_counts_are_recomputed_from_all_rows(self) -> None:
         connection = FakeConnection()
         connection.batches[0]["success_count"] = 2

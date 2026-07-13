@@ -39,6 +39,10 @@ Import worker 注册 handler 时只固定 processor 类型，不得把启动时�
 
 生产 API 的 session GET、confirm、retry 与 background retry 在进入 file/session service 前同样必须从 `load_imports_snapshot` + `load_file_imports_snapshot` 显式恢复当前 PostgreSQL import runtime；该恢复只属于导入操作边界，不得重新启用 `state:imports`、`state:file_imports` 或 full-state bootstrap fallback。
 
+file/session confirm 的持久化输出必须是本次所选 session、正式 batch 及其新建/状态更新 canonical facts 的精确 delta。合法重复行只引用既有 transaction，不重新拥有或回写该 transaction；该链不得回写其它 session、未受影响 invoice、ETC 或 tax-certified 全量 snapshot。调用方必须通过 `ApplicationStateStoreProtocol.save_import_delta(...)` 写入；PostgreSQL 实现幂等 upsert，本地实现按 batch/entity/session id 合并，二者共享“未出现在 delta 中的事实保持不变”语义，再由 write target envelope 触发受影响页面 fan-out。
+
+通用 `Application._persist_state()` 已从 import canonical/session 写链隔离，不得再包含 `imports`、`file_imports` 或调用其全量 snapshot。preview/retry 只通过 `_persist_import_preview_state()` 持久化 session/file 状态，confirm 只通过上述 delta 边界持久化正式事实；OA 附件发票晋升和 ETC metadata 关联分别使用 `save_invoices` 与 `save_invoice_etc_metadata` 窄端口。
+
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
@@ -48,7 +52,7 @@ Import worker 注册 handler 时只固定 processor 类型，不得把启动时�
 | 导入 job status | background job/app status | 可查询、可失败恢复 |
 | Dirty scope | derived lifecycle/runtime queue | bank_detail/workbench/search 等受影响 scope |
 | Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets，消费 completed job 的页面必须先等待 targets |
-| Page Audit | `/api/operations/app-health/page-audit?page=imports.bank-transactions` | admin-only、只读、`read_model_keys=[]`、`relation_proof_required=false`；下游 read model 只登记为 impact targets，不冒充页面 consumer |
+| Page Audit | `/api/operations/app-health/page-audit?page=imports.bank-transactions` | admin-only、只读、`read_model_keys=[]`、`relation_proof_required=false`；expected-set 同时包含本次正式 batch 拥有的 transaction 与 duplicate row 引用的历史 canonical transaction，反向 owner 唯一性只约束本批次拥有的 transaction；下游 read model 只登记为 impact targets，不冒充页面 consumer |
 
 失败但仍可重试的 import job 必须在 admin-only Audit issue 中返回 `attempt_count/max_attempts`、`last_error`、`session_id` 和 `selected_file_ids`，使运维只能通过正式 file/session retry/confirm I/O 定位和恢复；不得要求直接查询或改写 `job.import_jobs`。
 

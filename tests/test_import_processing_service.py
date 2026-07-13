@@ -21,6 +21,8 @@ def test_import_write_target_envelope_uses_bank_detail_months_for_pending_invoic
 
 
 def test_file_import_confirm_job_returns_import_write_targets() -> None:
+    persisted: list[dict[str, object]] = []
+    import_state_payload = {"imports": {"batches": {"batch-1": object()}}, "file_imports": {"sessions": {}}}
     confirmed_session = SimpleNamespace(
         id="session-1",
         files=[
@@ -36,6 +38,7 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
         file_import_service=SimpleNamespace(
             get_session=lambda _session_id: confirmed_session,
             confirm_session=lambda **_kwargs: confirmed_session,
+            confirmed_session_persistence_payload=lambda **_kwargs: import_state_payload,
         ),
         tax_certified_import_service=SimpleNamespace(),
         etc_service=SimpleNamespace(),
@@ -45,7 +48,7 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
         execute_derived_data_lifecycle_event=lambda *args, **kwargs: None,
         schedule_or_run_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
         enqueue_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
-        persist_state_with_workbench_invalidation=lambda **kwargs: None,
+        persist_confirmed_import_delta=lambda **kwargs: persisted.append(dict(kwargs)),
         invalidate_tax_offset_read_model_scopes=lambda *args, **kwargs: None,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
@@ -66,6 +69,7 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
     )
 
     assert result["affected_months"] == ["2026-06"]
+    assert persisted[0]["import_state_payload"] is import_state_payload
     assert {"read_model_key": "bank_detail", "scope_key": "2026-06"} in result["operation_barrier_targets"]
     assert {"read_model_key": "bank_account_balance", "scope_key": "all"} in result["operation_barrier_targets"]
     assert {"read_model_key": "cost_statistics", "scope_key": "active:2026-06"} in result["operation_barrier_targets"]
@@ -100,7 +104,7 @@ def test_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are
         execute_derived_data_lifecycle_event=lambda *args, **kwargs: None,
         schedule_or_run_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
         enqueue_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
-        persist_state_with_workbench_invalidation=lambda **kwargs: None,
+        persist_confirmed_import_delta=lambda **kwargs: None,
         invalidate_tax_offset_read_model_scopes=lambda *args, **kwargs: None,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: [],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],

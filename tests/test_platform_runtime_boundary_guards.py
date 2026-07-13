@@ -8478,7 +8478,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             (APP_ROOT / "server.py", "_link_etc_import_result_to_existing_invoices"),
             (APP_ROOT / "server.py", "_link_etc_invoices_to_existing_invoices"),
             (SERVICES_ROOT / "runtime_worker_handlers.py", "_link_etc_import_result_to_existing_invoices"),
-            (SERVICES_ROOT / "runtime_worker_handlers.py", "_link_etc_invoices_to_existing_invoices"),
         ]
         violations: list[str] = []
 
@@ -8492,6 +8491,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"{rel_path}.{function_name} owns ETC canonical invoice link loop")
             if "list_invoices_by_numbers" in function_source:
                 violations.append(f"{rel_path}.{function_name} owns ETC import result invoice lookup")
+
+        runtime_source = (SERVICES_ROOT / "runtime_worker_handlers.py").read_text(encoding="utf-8")
+        if "def _link_etc_invoices_to_existing_invoices(" in runtime_source:
+            violations.append("runtime worker retains unused ETC invoice-link wrapper")
 
         self.assertEqual(violations, [])
 
@@ -9080,7 +9083,12 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
                 ]
 
         etc_service = EtcService()
-        link = _link_etc_import_result_to_existing_invoices(ImportService(), etc_service)
+        persisted: list[list[object]] = []
+        link = _link_etc_import_result_to_existing_invoices(
+            ImportService(),
+            etc_service,
+            SimpleNamespace(save_invoice_etc_metadata=lambda invoices: persisted.append(list(invoices))),
+        )
 
         months = link(
             EtcImportResult(
@@ -9098,6 +9106,7 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
         self.assertEqual(etc_service.invoice_numbers, ["26537911470300077680"])
         self.assertEqual([getattr(item, "invoice_number") for item in upserted], ["26537911470300077680"])
         self.assertEqual(months, ["2026-03"])
+        self.assertEqual(len(persisted), 1)
 
     def test_link_etc_import_result_tolerates_missing_canonical_invoice_without_creation(self) -> None:
         upserted: list[object] = []
@@ -9119,7 +9128,11 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
                     )
                 ]
 
-        link = _link_etc_import_result_to_existing_invoices(ImportService(), EtcService())
+        link = _link_etc_import_result_to_existing_invoices(
+            ImportService(),
+            EtcService(),
+            SimpleNamespace(save_invoice_etc_metadata=lambda _invoices: None),
+        )
 
         months = link(
             EtcImportResult(
@@ -9165,7 +9178,11 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
                     )
                 ]
 
-        link = _link_etc_import_result_to_existing_invoices(ImportService(), EtcService())
+        link = _link_etc_import_result_to_existing_invoices(
+            ImportService(),
+            EtcService(),
+            SimpleNamespace(save_invoice_etc_metadata=lambda _invoices: None),
+        )
 
         months = link(
             EtcImportResult(

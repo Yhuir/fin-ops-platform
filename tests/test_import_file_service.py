@@ -95,6 +95,40 @@ class FailingSubmittedEtcIdentityRepository:
 
 
 class ImportFileServiceTests(unittest.TestCase):
+    def test_confirmed_session_persistence_payload_excludes_unrelated_fact_domains_and_sessions(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        invoice_session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
+        )
+        service.confirm_session(
+            session_id=invoice_session.id,
+            selected_file_ids=[invoice_session.files[0].id],
+        )
+        bank_session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=PINGAN_JAN.name, content=PINGAN_JAN.content)],
+        )
+        service.confirm_session(
+            session_id=bank_session.id,
+            selected_file_ids=[bank_session.files[0].id],
+        )
+
+        payload = service.confirmed_session_persistence_payload(
+            session_id=bank_session.id,
+            selected_file_ids=[bank_session.files[0].id],
+        )
+
+        self.assertEqual(set(payload), {"imports", "file_imports"})
+        self.assertEqual(set(payload["file_imports"]["sessions"]), {bank_session.id})
+        self.assertEqual(set(payload["imports"]["batches"]), {bank_session.files[0].batch_id})
+        self.assertEqual(payload["imports"]["invoices"], [])
+        self.assertTrue(payload["imports"]["transactions"])
+        self.assertTrue(
+            all(transaction.source_batch_id == bank_session.files[0].batch_id for transaction in payload["imports"]["transactions"])
+        )
+
     def test_company_identity_name_keywords_use_yunnan_and_generic_suyuan_names(self) -> None:
         self.assertTrue(is_company_identity(None, "云南溯源科技有限公司"))
         self.assertTrue(is_company_identity(None, "溯源科技有限公司"))

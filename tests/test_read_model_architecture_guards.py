@@ -408,7 +408,7 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
     def test_cost_and_tax_read_models_are_not_written_by_broad_full_state_persist(self) -> None:
         server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
         start = server_source.index("    def _persist_state(self) -> None:")
-        end = server_source.index("\n    def _persist_state_with_workbench_invalidation", start)
+        end = server_source.index("\n    def _persist_import_preview_state", start)
         helper_body = server_source[start:end]
 
         self.assertNotIn("cost_statistics_read_models", helper_body)
@@ -418,10 +418,37 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertIn("def _persist_cost_statistics_read_models_best_effort(", server_source)
         self.assertIn("def _persist_tax_offset_read_models_best_effort(", server_source)
 
+    def test_broad_state_persist_does_not_write_import_canonical_or_session_facts(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+        start = server_source.index("    def _persist_state(self) -> None:")
+        end = server_source.index("\n    def _persist_import_preview_state", start)
+        helper_body = server_source[start:end]
+
+        self.assertNotIn('"imports"', helper_body)
+        self.assertNotIn('"file_imports"', helper_body)
+        self.assertNotIn("_import_service.snapshot()", helper_body)
+        self.assertNotIn("_file_import_service.snapshot()", helper_body)
+        self.assertNotIn("self._state_store.save(", helper_body)
+        self.assertIn('("save_workbench_read_models",', helper_body)
+        self.assertIn('("save_pending_invoice_commands",', helper_body)
+
+    def test_file_import_persistence_does_not_write_unrelated_fact_domains(self) -> None:
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+        start = server_source.index("    def _persist_confirmed_import_delta_with_read_model_invalidation(")
+        end = server_source.index("\n    def _execute_import_state_changed_lifecycle", start)
+        helper_body = server_source[start:end]
+
+        self.assertNotIn("save_etc_state", helper_body)
+        self.assertNotIn("save_tax_certified_imports", helper_body)
+        self.assertNotIn("_etc_service.snapshot()", helper_body)
+        self.assertNotIn("_tax_certified_import_service.snapshot()", helper_body)
+        self.assertIn('getattr(self._state_store, "save_import_delta", None)', helper_body)
+        self.assertIn("persist(payload)", helper_body)
+
     def test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist(self) -> None:
         server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
         start = server_source.index("    def _persist_state(self) -> None:")
-        end = server_source.index("\n    def _persist_state_with_workbench_invalidation", start)
+        end = server_source.index("\n    def _persist_import_preview_state", start)
         helper_body = server_source[start:end]
 
         self.assertNotIn('"no_oa_bank_batches"', helper_body)

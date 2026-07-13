@@ -147,14 +147,8 @@ class ImportRuntimeProcessorFactory:
             search_service=_runtime_search_service(import_service),
             workbench_source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
         )
-        persist_import_state = _persist_import_state_callback(
+        persist_confirmed_import_delta = _persist_confirmed_import_delta_callback(
             lifecycle=lifecycle,
-            state_store=state_store,
-            import_service=import_service,
-            file_import_service=file_import_service,
-            etc_service=etc_service,
-            etc_reconciliation_task_service=etc_reconciliation_task_service,
-            tax_certified_import_service=tax_certified_import_service,
         )
         processing_service = ImportProcessingService(
             file_import_service=file_import_service,
@@ -166,7 +160,7 @@ class ImportRuntimeProcessorFactory:
             execute_derived_data_lifecycle_event=lifecycle.execute_event,
             schedule_or_run_workbench_auto_matching_for_scopes=lifecycle.schedule_workbench_matching,
             enqueue_workbench_auto_matching_for_scopes=lifecycle.enqueue_workbench_matching_job,
-            persist_state_with_workbench_invalidation=persist_import_state,
+            persist_confirmed_import_delta=persist_confirmed_import_delta,
             invalidate_tax_offset_read_model_scopes=lifecycle.invalidate_tax_offset_scopes,
             workbench_matching_scope_months_for_import_file_session=_workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
@@ -177,6 +171,7 @@ class ImportRuntimeProcessorFactory:
             link_etc_import_result_to_existing_invoices=_link_etc_import_result_to_existing_invoices(
                 import_service,
                 etc_service,
+                state_store,
             ),
             refresh_after_etc_invoice_link=lifecycle.refresh_after_etc_invoice_link,
             etc_import_preview_service=etc_import_preview_service,
@@ -392,38 +387,23 @@ class _RuntimeWorkerDerivedLifecycle:
         )
         self.schedule_workbench_matching(months, reason=reason)
 
-    def persist_import_state(
+    def persist_confirmed_import_delta(
         self,
         *,
-        import_service: Any,
-        file_import_service: Any,
-        etc_service: Any,
-        etc_reconciliation_task_service: Any,
-        tax_certified_import_service: Any,
+        import_state_payload: dict[str, Any],
         cost_statistics_scope_keys: list[str] | None = None,
         bank_detail_scope_keys: list[str] | None = None,
         input_invoice_usage_scope_keys: list[str] | None = None,
         output_invoice_collection_scope_keys: list[str] | None = None,
         invalidate_cost_statistics: bool = True,
     ) -> None:
-        payload = {
-            "imports": import_service.snapshot(),
-            "file_imports": file_import_service.snapshot(),
-        }
-        save = getattr(self._state_store, "save", None)
-        if callable(save):
-            save(payload)
-        save_etc_state = getattr(self._state_store, "save_etc_state", None)
-        if callable(save_etc_state):
-            save_etc_state(
-                {
-                    **etc_service.snapshot(),
-                    "reconciliation_tasks": etc_reconciliation_task_service.snapshot(),
-                }
-            )
-        save_tax_certified_imports = getattr(self._state_store, "save_tax_certified_imports", None)
-        if callable(save_tax_certified_imports):
-            save_tax_certified_imports(tax_certified_import_service.snapshot())
+        payload = dict(import_state_payload or {})
+        if not payload or set(payload) - {"imports", "file_imports"}:
+            raise ValueError("File import persistence requires only imports and file_imports payloads.")
+        persist = getattr(self._state_store, "save_import_delta", None)
+        if not callable(persist):
+            raise RuntimeError("File import confirmation requires the import delta persistence port.")
+        persist(payload)
         self._execute_import_state_changed(
             cost_statistics_scope_keys=cost_statistics_scope_keys,
             bank_detail_scope_keys=bank_detail_scope_keys,
@@ -752,40 +732,29 @@ def _current_bank_auto_tag_rules_version(app_settings_service: AppSettingsServic
         return 1
 
 
-def _persist_import_state_callback(
+def _persist_confirmed_import_delta_callback(
     *,
     lifecycle: _RuntimeWorkerDerivedLifecycle,
-    state_store: Any,
-    import_service: Any,
-    file_import_service: Any,
-    etc_service: Any,
-    etc_reconciliation_task_service: Any,
-    tax_certified_import_service: Any,
 ) -> Callable[..., None]:
-    return lambda **kwargs: lifecycle.persist_import_state(
+    return lambda **kwargs: lifecycle.persist_confirmed_import_delta(**kwargs)
+
+
+def _link_etc_import_result_to_existing_invoices(
+    import_service: Any,
+    etc_service: Any,
+    state_store: Any,
+) -> Callable[[Any], list[str]]:
+    persist = getattr(state_store, "save_invoice_etc_metadata", None)
+    if not callable(persist):
+        raise RuntimeError("ETC import processing requires the canonical invoice metadata persistence port.")
+    link_service = EtcExistingInvoiceLinkService(
         import_service=import_service,
-        file_import_service=file_import_service,
         etc_service=etc_service,
-        etc_reconciliation_task_service=etc_reconciliation_task_service,
-        tax_certified_import_service=tax_certified_import_service,
-        **kwargs,
+        persist_linked_invoices=persist,
     )
-
-
-def _link_etc_import_result_to_existing_invoices(import_service: Any, etc_service: Any | None = None) -> Callable[[Any], list[str]]:
-    link_service = EtcExistingInvoiceLinkService(import_service=import_service, etc_service=etc_service)
 
     def link(result: Any) -> list[str]:
         return link_service.link_import_result_to_existing_invoices(result)
-
-    return link
-
-
-def _link_etc_invoices_to_existing_invoices(import_service: Any) -> Callable[[list[Any]], list[str]]:
-    link_service = EtcExistingInvoiceLinkService(import_service=import_service)
-
-    def link(etc_invoices: list[Any]) -> list[str]:
-        return link_service.link_etc_invoices_to_existing_invoices(etc_invoices)
 
     return link
 

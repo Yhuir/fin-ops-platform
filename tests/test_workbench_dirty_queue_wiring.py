@@ -266,7 +266,8 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         queue = RecordingReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
 
-        app._persist_import_state_with_read_model_invalidation(
+        app._persist_confirmed_import_delta_with_read_model_invalidation(
+            import_state_payload={"imports": {}, "file_imports": {}},
             cost_statistics_scope_keys=["2026-05"],
             bank_detail_scope_keys=["2026-06"],
             input_invoice_usage_scope_keys=["2026-04"],

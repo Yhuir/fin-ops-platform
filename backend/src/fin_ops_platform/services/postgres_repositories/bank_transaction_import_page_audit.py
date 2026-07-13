@@ -84,7 +84,19 @@ def _audit_snapshot(
     }
     formal_batches = [row for row in batches if _text(row.get("batch_id")) in formal_batch_ids]
     formal_rows = [row for row in rows if _text(row.get("batch_id")) in formal_batch_ids]
-    formal_transactions = [row for row in transactions if _text(row.get("batch_id")) in formal_batch_ids]
+    referenced_transaction_ids = {
+        _text(row.get("linked_object_id"))
+        for row in formal_rows
+        if _text(row.get("linked_object_type")) == "bank_transaction"
+        and _text(row.get("linked_object_id"))
+    }
+    formal_transactions = [
+        row
+        for row in transactions
+        if _text(row.get("batch_id")) in formal_batch_ids
+        or _text(row.get("transaction_id")) in referenced_transaction_ids
+    ]
+    owned_transactions = [row for row in formal_transactions if _text(row.get("batch_id")) in formal_batch_ids]
     bank_file_ids = {_text(row.get("file_id")) for row in formal_files if _text(row.get("file_id"))}
     bank_session_ids = {_text(row.get("session_id")) for row in formal_files if _text(row.get("session_id"))}
     bank_jobs = [
@@ -131,7 +143,8 @@ def _audit_snapshot(
             "legacy_file_count": len(legacy_files),
             "bank_import_batch_count": len(formal_batches),
             "bank_import_row_count": len(formal_rows),
-            "bank_import_owned_transaction_count": len(formal_transactions),
+            "bank_import_owned_transaction_count": len(owned_transactions),
+            "bank_import_referenced_transaction_count": len(formal_transactions),
             "bank_import_job_count": len(bank_jobs),
             "bank_import_outbox_attention_count": len(bank_outbox),
             **evaluation.summary,
@@ -446,6 +459,7 @@ def _canonical_transaction_issues(
 ) -> list[AuditIssue]:
     issues: list[AuditIssue] = []
     batch_status = {_text(row.get("batch_id")): _text(row.get("status")) for row in batches}
+    batch_ids = set(batch_status)
     transaction_by_id = {_text(row.get("transaction_id")): row for row in transactions}
     created_owner_counts: Counter[str] = Counter()
     for row in rows:
@@ -475,6 +489,8 @@ def _canonical_transaction_issues(
             issues.append(_issue("bank_import_nonlinked_decision_has_transaction", row_id, {"decision": decision, "linked_object_id": linked_id}))
 
     for transaction in transactions:
+        if _text(transaction.get("batch_id")) not in batch_ids:
+            continue
         transaction_id = _text(transaction.get("transaction_id"))
         if created_owner_counts[transaction_id] != 1:
             issues.append(
@@ -768,10 +784,9 @@ select coalesce(t.legacy_mongo_id, t.id::text) as transaction_id,
        t.amount, t.signed_amount, t.txn_date, t.trade_time, t.bank_serial_no,
        t.source_unique_key, t.data_fingerprint, t.status, t.raw_payload
 from app.bank_transactions t
-join app.import_batches b
+left join app.import_batches b
   on b.id = t.source_batch_id
   or (t.source_batch_id is null and b.legacy_mongo_id = t.legacy_source_batch_id)
-where b.batch_type = 'bank_transaction'
 order by batch_id, transaction_id
 """
 _JOB_SQL = """

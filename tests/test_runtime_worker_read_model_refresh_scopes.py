@@ -12,6 +12,14 @@ class QueueRecorder:
         self.refreshes.append((scope_type, scope_key, reason))
 
 
+class StateStoreRecorder:
+    def __init__(self) -> None:
+        self.saved_payloads: list[dict[str, object]] = []
+
+    def save_import_delta(self, payload: dict[str, object]) -> None:
+        self.saved_payloads.append(payload)
+
+
 class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
     def _lifecycle(
         self,
@@ -22,7 +30,7 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
     ) -> _RuntimeWorkerDerivedLifecycle:
         return _RuntimeWorkerDerivedLifecycle(
             queue_repository=queue,
-            state_store=SimpleNamespace(),
+            state_store=StateStoreRecorder(),
             search_service=SimpleNamespace(clear_cache=lambda: None),
             workbench_source_versions_provider=lambda: {},
             search_read_model_refresh_producer=search_read_model_refresh_producer,
@@ -59,17 +67,13 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
         queue = QueueRecorder()
         search_producer = FakeSearchRefreshProducer()
         lifecycle = self._lifecycle(queue, search_read_model_refresh_producer=search_producer)
-        snapshot_service = SimpleNamespace(snapshot=lambda: {})
-
-        lifecycle.persist_import_state(
-            import_service=snapshot_service,
-            file_import_service=snapshot_service,
-            etc_service=snapshot_service,
-            etc_reconciliation_task_service=snapshot_service,
-            tax_certified_import_service=snapshot_service,
+        import_state_payload = {"imports": {"batches": {"batch-1": {}}}, "file_imports": {"sessions": {}}}
+        lifecycle.persist_confirmed_import_delta(
+            import_state_payload=import_state_payload,
             cost_statistics_scope_keys=["2026-03"],
         )
 
+        self.assertEqual(lifecycle._state_store.saved_payloads, [import_state_payload])
         self.assertEqual(search_producer.calls, [(["2026-03"], "import_state_changed")])
         self.assertNotIn(("search", "2026-03", "import_state_changed"), queue.refreshes)
         self.assertIn(("workbench_relation", "2026-03", "import_state_changed"), queue.refreshes)
@@ -84,20 +88,28 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
             queue,
             bank_account_balance_read_model_refresh_producer=bank_account_balance_producer,
         )
-        snapshot_service = SimpleNamespace(snapshot=lambda: {})
-
-        lifecycle.persist_import_state(
-            import_service=snapshot_service,
-            file_import_service=snapshot_service,
-            etc_service=snapshot_service,
-            etc_reconciliation_task_service=snapshot_service,
-            tax_certified_import_service=snapshot_service,
+        lifecycle.persist_confirmed_import_delta(
+            import_state_payload={"imports": {}, "file_imports": {}},
             bank_detail_scope_keys=["2026-03"],
         )
 
         self.assertEqual(bank_account_balance_producer.calls, [(["all"], "import_state_changed")])
         self.assertNotIn(("bank_account_balance", "all", "import_state_changed"), queue.refreshes)
         self.assertIn(("bank_detail", "2026-03", "import_facts_changed"), queue.refreshes)
+
+    def test_import_state_persistence_rejects_cross_domain_payload(self) -> None:
+        lifecycle = self._lifecycle(QueueRecorder())
+
+        with self.assertRaisesRegex(ValueError, "only imports and file_imports"):
+            lifecycle.persist_confirmed_import_delta(
+                import_state_payload={
+                    "imports": {},
+                    "file_imports": {},
+                    "tax_certified_imports": {},
+                }
+            )
+
+        self.assertEqual(lifecycle._state_store.saved_payloads, [])
 
     def test_lifecycle_bank_account_balance_refresh_uses_all_only_producer_boundary(self) -> None:
         queue = QueueRecorder()
