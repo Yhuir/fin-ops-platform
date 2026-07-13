@@ -2,11 +2,12 @@
 
 ## 2026-07-13 - `all` 受控强制重建透传闭环
 
-- 生产证据：正式 gateway enqueue `tax_offset=all --force-refresh` 后父事件与 queue 均完成，但 17 个现有月份仍保留旧 `invoice_fact_source_version`；单独 force-refresh `2026-07` 后该 scope 立即收敛，证明缺口位于 parent→month fan-out。
-- 真实原因：`TaxOffsetReadModelRefreshService._enqueue_all_scope_shards(...)` 只传 scope/reason，丢失 parent 的 tenant、priority、trace 和 `force_refresh` metadata；父 command 可完成，但 child 无法保持同一受控重建合同。
-- 修复边界：继续使用现有 `ReadModelRefreshGateway` 与 PostgreSQL durable queue，只补齐 event I/O 透传；没有新增 queue、fallback、直接 SQL 或页面同步重建。
-- 旧逻辑删除：替换原来无控制元数据的 `enqueue_many("tax_offset", ...)` 调用，不保留兼容旁路。
-- 验证：新增 all-force fan-out 回归，发布后必须重新执行正式 `all --force-refresh`、等待 queue drained，并由 `page-audit?page=tax-offset` 与 17 页 System Audit 同时通过。
+- 生产证据：正式 gateway enqueue `tax_offset=all --force-refresh` 后父事件与 queue 均完成，但 17 个现有月份仍保留旧 `invoice_fact_source_version`；单独 force-refresh `2026-07` 后该 scope 立即收敛。首轮透传修复发布后，10 个当前 canonical 月份在 23:39 被重建，剩余 16 个历史 projection 月份仍未更新，机械证明存在两个独立缺口。
+- 真实原因一：`TaxOffsetReadModelRefreshService._enqueue_all_scope_shards(...)` 只传 scope/reason，丢失 parent 的 tenant、priority、trace 和 `force_refresh` metadata。
+- 真实原因二：`TaxOffsetSqlProjectionBuilder.list_tax_offset_scope_shards("all")` 只枚举当前 canonical invoice/certified 月份，没有把现存 projection scope 纳入 expected-set；历史空/旧 shard 永远无法被重建或清空。
+- 修复边界：继续使用现有 SQL projection、`ReadModelRefreshGateway` 与 PostgreSQL durable queue；shard expected-set 改为 canonical 月份与现有 projection 月份的并集，并补齐 event I/O 透传。没有新增 queue、fallback、直接 SQL 或页面同步重建。
+- 旧逻辑删除：替换原来无控制元数据的 `enqueue_many("tax_offset", ...)` 与 canonical-only shard 枚举，不保留兼容旁路。
+- 验证：新增 all-force fan-out 与 existing-projection scope union 回归；发布后必须重新执行正式 `all --force-refresh`、等待 queue drained，并由 `page-audit?page=tax-offset` 与 17 页 System Audit 同时通过。
 
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。

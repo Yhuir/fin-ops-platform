@@ -245,6 +245,29 @@ class TaxOffsetReadConnection:
 
 
 class TaxOffsetSqlRuntimeTests(unittest.TestCase):
+    def test_tax_offset_all_scope_shards_include_existing_projection_scopes(self) -> None:
+        class ScopeConnection:
+            def __init__(self) -> None:
+                self.sql = ""
+
+            def fetch_all(self, sql: str, _params: tuple = ()) -> list[dict[str, str]]:
+                self.sql = " ".join(sql.lower().split())
+                return [
+                    {"scope_key": "2026-07"},
+                    {"scope_key": "2023-05"},
+                    {"scope_key": "invalid"},
+                ]
+
+        connection = ScopeConnection()
+        builder = TaxOffsetSqlProjectionBuilder(connection=connection)
+
+        scopes = builder.list_tax_offset_scope_shards("all")
+
+        self.assertEqual(scopes, ["2026-07", "2023-05"])
+        self.assertIn("from app.invoices", connection.sql)
+        self.assertIn("from app.tax_certified_import_records", connection.sql)
+        self.assertIn("from read_model.tax_offset_read_models", connection.sql)
+
     def test_repository_reads_tax_offset_view_and_dirty_status_from_sql(self) -> None:
         connection = TaxOffsetReadConnection(
             read_model_row={

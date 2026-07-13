@@ -748,6 +748,10 @@ class TaxOffsetSqlProjectionBuilder:
                 select distinct to_char(scope_month, 'YYYY-MM') as scope_key
                 from app.tax_certified_import_records
                 where scope_month is not null
+                union
+                select distinct scope_key
+                from read_model.tax_offset_read_models
+                where scope_key ~ '^[0-9]{4}-[0-9]{2}$'
             ) scopes
             where scope_key is not null
             order by scope_key desc
