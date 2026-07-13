@@ -533,7 +533,15 @@ def _job_issues(
                     "银行流水导入任务尚未排空。",
                     job_id,
                     "file_import.confirm",
-                    {"status": status, "stage": row.get("stage")},
+                    {
+                        "status": status,
+                        "stage": row.get("stage"),
+                        "attempt_count": _int(row.get("attempt_count"), 0),
+                        "max_attempts": _int(row.get("max_attempts"), 0),
+                        "last_error": _text(row.get("last_error")) or None,
+                        "session_id": session_id or None,
+                        "selected_file_ids": sorted(selected_file_ids),
+                    },
                 )
             )
         elif status == "failed":

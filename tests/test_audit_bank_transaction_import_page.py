@@ -296,6 +296,34 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         self.assertEqual(report["audit_status"]["freshness"], "not_fresh")
         self.assertEqual(report["audit_status"]["queue"], "backlog")
 
+    def test_retryable_failed_job_exposes_admin_safe_retry_coordinates(self) -> None:
+        connection = FakeConnection()
+        connection.jobs[0].update(
+            {
+                "status": "failed",
+                "stage": "processor_failed",
+                "attempt_count": 1,
+                "max_attempts": 5,
+                "last_error": "fixture processor failure",
+            }
+        )
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        issue = next(item for item in report["issues"] if item["code"] == "page_runtime_queue_not_drained")
+        self.assertEqual(
+            issue["details"],
+            {
+                "status": "failed",
+                "stage": "processor_failed",
+                "attempt_count": 1,
+                "max_attempts": 5,
+                "last_error": "fixture processor failure",
+                "session_id": "session-1",
+                "selected_file_ids": ["file-1"],
+            },
+        )
+
 
 class BankTransactionImportPageAuditPostgresTests(unittest.TestCase):
     @classmethod
