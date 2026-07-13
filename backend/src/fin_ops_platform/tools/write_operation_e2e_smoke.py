@@ -942,9 +942,10 @@ def _execute_step(
             else None
         )
         elapsed_rounded = round(elapsed_ms, 3)
-        response_request_id, response_error_code = _response_error_diagnostics(
+        response_request_id, response_error_code = _response_diagnostics(
             response.body or b"",
             content_type,
+            response.headers,
         )
         error = None
         if html_api_error:
@@ -1054,16 +1055,24 @@ def _validate_canonical_preview_payload(step: WriteStep, payload: Any) -> None:
         raise ValueError("canonical_withdraw_preview_contract_invalid")
 
 
-def _response_error_diagnostics(body: bytes, content_type: str) -> tuple[str | None, str | None]:
+def _response_diagnostics(
+    body: bytes,
+    content_type: str,
+    headers: Mapping[str, str],
+) -> tuple[str | None, str | None]:
+    header_request_id = _header(headers, "x-request-id").strip() or None
     if "json" not in str(content_type or "").lower():
-        return None, None
+        return header_request_id, None
     try:
         payload = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return None, None
+        return header_request_id, None
     if not isinstance(payload, dict):
-        return None, None
-    request_id = str(payload.get("requestId") or payload.get("request_id") or "").strip() or None
+        return header_request_id, None
+    request_id = (
+        str(payload.get("requestId") or payload.get("request_id") or "").strip()
+        or header_request_id
+    )
     error_code = str(payload.get("error") or "").strip() or None
     return request_id, error_code
 

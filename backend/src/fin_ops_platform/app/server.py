@@ -2071,6 +2071,7 @@ class Application:
             return self._handle_api_workbench_exception_apply(body, request_id=request_id)
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link":
             response = self._handle_api_workbench_confirm_link(body, request_id=request_id, headers=headers)
+            response.headers["X-Request-ID"] = request_id or "no-request-id"
             self._emit_workbench_action_timing(
                 request_id=request_id or "no-request-id",
                 action_name="confirm_link",
@@ -2085,6 +2086,7 @@ class Application:
             return self._handle_api_workbench_mark_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
             response = self._handle_api_workbench_cancel_link(body, request_id=request_id, headers=headers)
+            response.headers["X-Request-ID"] = request_id or "no-request-id"
             self._emit_workbench_action_timing(
                 request_id=request_id or "no-request-id",
                 action_name="cancel_link",
@@ -2097,6 +2099,7 @@ class Application:
             return self._handle_api_workbench_withdraw_link_preview(body)
         if method == "POST" and route_path == "/api/workbench/actions/withdraw-link":
             response = self._handle_api_workbench_withdraw_link(body, request_id=request_id, headers=headers)
+            response.headers["X-Request-ID"] = request_id or "no-request-id"
             self._emit_workbench_action_timing(
                 request_id=request_id or "no-request-id",
                 action_name="withdraw_link",

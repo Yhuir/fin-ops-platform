@@ -6257,6 +6257,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertRegex(response.headers["X-Request-ID"], r"^[0-9a-f]{12}$")
         phases = [call.kwargs["phase"] for call in emit_timing.call_args_list]
         self.assertIn("oa_auth", phases)
         self.assertIn("resolve_rows", phases)

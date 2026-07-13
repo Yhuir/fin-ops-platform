@@ -438,6 +438,7 @@ sudo /usr/local/sbin/finops-deploy-control read-model-slo-smoke <release-name> \
 sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-name> \
   /tmp/finops-write-e2e-<run-id>.json --dry-run
 sudo /usr/local/sbin/finops-deploy-control api-request-error <request-id>
+sudo /usr/local/sbin/finops-deploy-control api-request-timing <request-id>
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
   --scope tax_offset=all --scope turnover_ledger=all --dry-run
 sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --dry-run
@@ -459,6 +460,8 @@ apply 的 Admin Token 与 approval ticket 只从 stdin 的前两行读取，固�
 不提供任意命令或 SQL 能力；第二行为空时在任何业务写请求前失败。
 `api-request-error` 只接受 API 返回的 12 位小写十六进制 request ID，并只从最近两小时
 `fin-ops.service` journal 返回匹配的单行异常摘要；它不开放任意 journal 参数或日志全文。
+`api-request-timing` 使用同一 request ID，只返回最近两小时最多 32 条结构化
+`workbench_action_timing` 记录；它不返回业务 payload，也不开放时间窗或 journal 参数。
 
 说明：
 

@@ -47,6 +47,7 @@ commands:
                                       run read model SLO smoke dry-run using runtime env; --apply is refused
   write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]
   api-request-error <request-id>
+  api-request-timing <request-id>
                                       run the fixed production relation runner; admin token is read from stdin
   read-model-refresh <release-name> [args]
                                       validate or enqueue read-model refresh scopes through the durable gateway
@@ -557,6 +558,19 @@ api_request_error() {
   printf '%s\n' "$match"
 }
 
+api_request_timing() {
+  local request_id="${1:-}"
+  [[ "$request_id" =~ ^[0-9a-f]{12}$ ]] || die "request id must be 12 lowercase hexadecimal characters"
+  [[ $# -le 1 ]] || die "api-request-timing accepts only request id"
+  local matches
+  matches="$(journalctl -u fin-ops.service --since '2 hours ago' --no-pager -o cat \
+    | grep -F '"kind": "workbench_action_timing"' \
+    | grep -F "\"request_id\": \"$request_id\"" \
+    | tail -n 32 || true)"
+  [[ -n "$matches" ]] || die "request timing not found in the bounded journal window"
+  printf '%s\n' "$matches"
+}
+
 read_model_refresh() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "read-model-refresh requires release name"
@@ -644,6 +658,10 @@ case "$cmd" in
   api-request-error)
     shift
     api_request_error "$@"
+    ;;
+  api-request-timing)
+    shift
+    api_request_timing "$@"
     ;;
   read-model-refresh)
     shift
