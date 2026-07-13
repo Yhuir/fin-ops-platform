@@ -5,6 +5,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fin_ops_platform.services.import_preview_audit import (
     ImportPreviewAuditRow,
@@ -24,6 +25,7 @@ KNOWN_BATCH_STATUSES = frozenset({"pending", "completed", "completed_with_errors
 KNOWN_DECISIONS = frozenset({"created", "status_updated", "duplicate_skipped", "suspected_duplicate", "error"})
 TERMINAL_BATCH_STATUSES = frozenset({"completed", "completed_with_errors"})
 IMPORT_AUDIT_CONTRACT_REVISION = "import-page-audit.v1"
+BANK_IMPORT_LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 def audit_bank_transaction_import_page(
@@ -698,10 +700,18 @@ def _decimal_text(value: Any) -> str:
 def _time_text(value: Any) -> str:
     if value in (None, ""):
         return ""
+    parsed: datetime | None
     if isinstance(value, datetime):
-        normalized = value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
-        return normalized.isoformat().replace("+00:00", "Z")
-    return _text(value).replace("+00:00", "Z")
+        parsed = value
+    else:
+        text = _text(value)
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return text.replace("+00:00", "Z")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=BANK_IMPORT_LOCAL_TIMEZONE)
+    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _comparable(value: Any) -> Any:

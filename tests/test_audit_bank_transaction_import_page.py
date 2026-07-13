@@ -554,6 +554,47 @@ class BankTransactionImportPageAuditPostgresTests(unittest.TestCase):
         self.assertIn("bank_import_job_terminal_failure", codes)
         self.assertIn("bank_import_outbox_terminal_failure", codes)
 
+    def test_naive_china_trade_time_is_compared_as_the_same_instant_and_real_drift_blocks(self) -> None:
+        self.connection.execute(
+            """
+            update app.import_batch_rows
+            set raw_payload = jsonb_set(
+                raw_payload,
+                '{normalized_payload,trade_time}',
+                to_jsonb('2026-07-01 18:00:00'::text)
+            )
+            where legacy_mongo_id = 'row-1'
+            """
+        )
+
+        equivalent_instant = self._audit()
+        self.assertNotIn(
+            "bank_import_row_formal_payload_mismatch",
+            equivalent_instant["summary"]["issue_sample_counts_by_code"],
+        )
+        self.assertEqual(
+            equivalent_instant["audit_status"],
+            {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+        )
+
+        self.connection.execute(
+            """
+            update app.import_batch_rows
+            set raw_payload = jsonb_set(
+                raw_payload,
+                '{normalized_payload,trade_time}',
+                to_jsonb('2026-07-01 18:00:01'::text)
+            )
+            where legacy_mongo_id = 'row-1'
+            """
+        )
+
+        drift = self._audit()
+        self.assertIn(
+            "bank_import_row_formal_payload_mismatch",
+            drift["summary"]["issue_sample_counts_by_code"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

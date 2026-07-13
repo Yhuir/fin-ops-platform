@@ -18,6 +18,7 @@
 - 通过后台任务和 lifecycle 触发银行明细及下游 read model 刷新。
 - 记录导入预览审计。
 - 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
+- Audit 比较交易时间时必须比较同一时间点：银行文件中无时区的 `trade_time` 按 `Asia/Shanghai` 解释，PostgreSQL `timestamptz` 与带时区 ISO 值统一归一到 UTC 后比较；禁止把同一时刻的本地时间与 UTC 表示误报为漂移，也禁止忽略真实的时间差异。
 - 导入确认结果或完成后的 job result 必须透出 read model write target envelope；银行流水导入必须包含 `bank_detail:<month>` 与 `bank_account_balance:all` operation barrier targets。
 
 ### 不负责
