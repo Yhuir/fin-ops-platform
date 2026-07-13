@@ -69,6 +69,7 @@ class _WorkbenchConfirmLinkCommand:
     tenant_id: str = "default"
     actor_id: str = "system"
     refresh_metadata: dict[str, object] | None = None
+    timing_emit: Callable[[str, float, str | None], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -447,6 +448,7 @@ class WorkbenchWriteFacade:
                 {"error": "invalid_confirm_link_request", "message": str(exc)},
             )
 
+        resolve_rows_started_at = monotonic()
         try:
             selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
             rows_by_type = self._rows_by_type(selected_rows)
@@ -486,7 +488,6 @@ class WorkbenchWriteFacade:
                 },
             )
 
-        resolve_rows_started_at = monotonic()
         self._emit_timing_if_requested(
             request_id=request_id,
             action_name=action_name,
@@ -496,6 +497,12 @@ class WorkbenchWriteFacade:
         )
 
         resolved_case_id = case_id or self._next_case_id()
+        paired_policy_metadata = self._bank_transaction_paired_policy_metadata(
+            row_ids=row_ids,
+            row_types=row_types,
+            selected_rows=selected_rows,
+            amount_check=amount_check,
+        )
         operation_projection = self._confirm_link_operation_projection(
             case_id=resolved_case_id,
             row_ids=row_ids,
@@ -503,6 +510,7 @@ class WorkbenchWriteFacade:
             selected_rows=selected_rows,
             month=month,
             amount_check=amount_check,
+            paired_policy_metadata=paired_policy_metadata,
         )
         before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
         internal_transfer_status = self._bank_only_internal_transfer_confirm_status(
@@ -560,6 +568,7 @@ class WorkbenchWriteFacade:
                 history_before_relations=history_before_relations,
                 changed_scope_keys=changed_scope_keys,
                 operation_projection=operation_projection,
+                paired_policy_metadata=paired_policy_metadata,
             )
 
         previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
@@ -580,6 +589,7 @@ class WorkbenchWriteFacade:
                     history_before_relations=history_before_relations,
                     idempotency_key=self._idempotency_key_from_payload(payload),
                     selected_rows=selected_rows,
+                    paired_policy_metadata=paired_policy_metadata,
                 )
             except WorkbenchRelationCommandError as exc:
                 return self._relation_command_error_result(exc)
@@ -672,8 +682,18 @@ class WorkbenchWriteFacade:
         history_before_relations: list[dict[str, object]],
         changed_scope_keys: list[str],
         operation_projection: dict[str, object],
+        paired_policy_metadata: dict[str, object],
     ) -> WorkbenchWriteResult:
         action_name = "confirm_link"
+        def emit_phase_timing(phase: str, started_at: float, detail: str | None = None) -> None:
+            self._emit_timing_if_requested(
+                request_id=request_id,
+                action_name=action_name,
+                phase=phase,
+                started_at=started_at,
+                detail=detail,
+            )
+
         idempotency_key = str(
             payload.get("idempotency_key") or payload.get("request_idempotency_key") or ""
         ).strip() or None
@@ -704,6 +724,7 @@ class WorkbenchWriteFacade:
                 "case_id": resolved_case_id,
                 **relation_refresh_metadata,
             },
+            timing_emit=emit_phase_timing,
         )
 
         def handler(ctx: object) -> dict[str, object]:
@@ -729,6 +750,7 @@ class WorkbenchWriteFacade:
                 history_before_relations=history_before_relations,
                 idempotency_key=None,
                 selected_rows=selected_rows,
+                paired_policy_metadata=paired_policy_metadata,
             )
             self._emit_timing_if_requested(
                 request_id=request_id,
@@ -810,6 +832,7 @@ class WorkbenchWriteFacade:
         history_before_relations: list[dict[str, object]],
         idempotency_key: str | None,
         selected_rows: list[dict[str, object]],
+        paired_policy_metadata: dict[str, object],
     ) -> dict[str, object]:
         confirm_relation = getattr(relation_command, "confirm_relation", None)
         if not callable(confirm_relation):
@@ -823,12 +846,7 @@ class WorkbenchWriteFacade:
             month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             note=note,
             amount_check=dict(amount_check or {}),
-            special_metadata=self._bank_transaction_paired_policy_metadata(
-                row_ids=row_ids,
-                row_types=row_types,
-                selected_rows=selected_rows,
-                amount_check=amount_check,
-            ),
+            special_metadata=dict(paired_policy_metadata or {}),
             idempotency_key=idempotency_key,
             before_relations=list(history_before_relations),
             replace_existing=True,
@@ -953,6 +971,7 @@ class WorkbenchWriteFacade:
         selected_rows: list[dict[str, object]],
         month: str,
         amount_check: dict[str, object],
+        paired_policy_metadata: dict[str, object],
     ) -> dict[str, object]:
         after_relation = {
             "case_id": case_id,
@@ -962,12 +981,7 @@ class WorkbenchWriteFacade:
             "relation_mode": "manual_confirmed",
             "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             "amount_check": dict(amount_check or {}),
-            "special_metadata": self._bank_transaction_paired_policy_metadata(
-                row_ids=row_ids,
-                row_types=row_types,
-                selected_rows=selected_rows,
-                amount_check=amount_check,
-            ),
+            "special_metadata": dict(paired_policy_metadata or {}),
         }
         after_groups = self._relation_groups([after_relation], selected_rows=selected_rows)
         if self._confirm_link_projection_is_paired(

@@ -403,6 +403,8 @@ def _new_facade(
     resolve_live_rows_direct: object | None = None,
     resolved_row_types_for_row_ids: object | None = None,
     pair_relation_service: object | None = None,
+    bank_transaction_category_codes_for_row_ids: object | None = None,
+    bank_flow_rule_tag_rules_payload: object | None = None,
 ) -> WorkbenchWriteFacade:
     resolved_pair_relation_service = pair_relation_service or _PairRelationService()
     return WorkbenchWriteFacade(
@@ -461,6 +463,8 @@ def _new_facade(
         cancel_link_uow=cancel_uow,
         withdraw_link_uow=withdraw_uow,
         persist_pair_relations_in_transaction=lambda **_: None,
+        bank_transaction_category_codes_for_row_ids=bank_transaction_category_codes_for_row_ids,
+        bank_flow_rule_tag_rules_payload=bank_flow_rule_tag_rules_payload,
         relation_command_service=relation_command_service,
         reconciliation_decision_store=reconciliation_decision_store,
     )
@@ -747,6 +751,51 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
+
+    def test_confirm_link_uow_reuses_one_paired_policy_metadata_snapshot(self) -> None:
+        rule_reads: list[bool] = []
+        relation_command = _RecordingRelationCommandService()
+        facade = _new_facade(
+            confirm_uow=_HandlerCallingUoW(),
+            relation_command_service=relation_command,
+            resolve_rows_for_amount_check=lambda row_ids, **_: [
+                {"id": row_id, "type": "oa" if row_id.startswith("oa") else "bank"}
+                for row_id in row_ids
+            ],
+            bank_transaction_category_codes_for_row_ids=lambda row_ids: {
+                row_id: "external_turnover" for row_id in row_ids
+            },
+            bank_flow_rule_tag_rules_payload=lambda: (
+                rule_reads.append(True)
+                or {
+                    "version": 3,
+                    "rules": [
+                        {
+                            "tag_code": "external_turnover",
+                            "requires_oa": True,
+                            "requires_invoice": False,
+                        }
+                    ],
+                }
+            ),
+        )
+
+        result = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "confirm:single-policy-snapshot",
+            },
+            request_id="req-confirm-single-policy",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(len(rule_reads), 1)
+        metadata = relation_command.confirm_calls[0]["special_metadata"]
+        self.assertEqual(metadata["paired_requirement_version"], 3)
+        self.assertFalse(metadata["requires_invoice"])
 
     def test_withdraw_link_response_returns_operation_freshness_targets_for_affected_scopes(self) -> None:
         facade = _new_facade(

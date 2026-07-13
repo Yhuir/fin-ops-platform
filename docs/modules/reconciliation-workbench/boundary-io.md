@@ -39,6 +39,7 @@
 | no-OA relation metadata | `workbench_relation` / no-OA submit | legacy `special_metadata.paired_requires_oa`、`paired_requires_invoice` 决定 no-OA relation 是否具备进入 paired 区的 row type |
 | 写后 target envelope | `WorkbenchWriteFacade` | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；`read_model_key=workbench_relation` |
 | Confirm response projection | `WorkbenchWriteFacade` | 必须在 mutation 前从已解析 selection snapshot 预计算，并作为 UoW/idempotency response 的一部分提交；禁止事务提交并 invalidates downstream 后再次读取 `bank_detail` 等刚被标脏的 read model 来构造响应 |
+| Confirm paired-policy snapshot | `WorkbenchWriteFacade` -> relation command + response projection | 每次 confirm 只读取并计算一次 bank paired-policy metadata；同一不可变 snapshot 同时进入 relation fact 与 operation projection，禁止为响应和事务分别重复读取 settings/category I/O。 |
 | Confirm UoW rollback | `WorkbenchWriteUnitOfWork` / PostgreSQL transaction | UoW 路径由同一数据库事务原子提交或回滚 relation、idempotency 与 dirty/outbox；禁止读取全量 legacy pair snapshot，也禁止异常后调用事务外 snapshot restore 补写。仅非 UoW legacy 兼容路径保留自身 snapshot/restore 责任。 |
 | API 失败 envelope | backend error response -> `features/workbench/api.ts` | 结构化 `message` 映射为用户错误时必须保留 `requestId` / `request_id`，便于从页面错误定位后端日志；不得把 `ApiClientError` 降级成丢失关联 ID 的普通错误 |
 | 页面 Audit 请求 | 管理员页面控件或运维 CLI | 页面统一调用 `page-audit?page=reconciliation-workbench`；CLI 仅作为同一 proof core 的参数/连接/JSON/退出码适配器。两者必须进入 `workbench_page_audit` 的同一只读 `REPEATABLE READ` snapshot，禁止 route、页面或 tool 复制 SQL/判断逻辑 |
