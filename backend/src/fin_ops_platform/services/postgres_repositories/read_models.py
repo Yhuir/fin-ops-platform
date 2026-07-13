@@ -7234,7 +7234,7 @@ class PostgresReadModelRepository:
             params.append(normalized)
         excludes_linked_etc_summary_groups = normalized_zone == "open"
         if excludes_linked_etc_summary_groups:
-            clauses.append("g.group_id not like 'case:decision:%%'")
+            clauses.append(_workbench_open_automatic_decision_group_exclusion_sql())
             clauses.append(_workbench_open_linked_etc_summary_group_exclusion_sql(group_id_sql=group_row_join_id_sql))
         normalized_search = text(search)
         if (
@@ -7390,8 +7390,6 @@ class PostgresReadModelRepository:
             group = materialized_group
             if not isinstance(group, dict):
                 group = {"group_id": text(row.get("group_id"))}
-            if normalized_zone == "open" and _is_workbench_automatic_decision_group(group):
-                continue
             group = _sanitize_workbench_group_invoice_rows(group)
             group = _with_workbench_group_counts(group)
             if normalized_detail_level == "summary":
@@ -7590,6 +7588,8 @@ class PostgresReadModelRepository:
         group = materialized_groups[0] if materialized_groups else _read_model_payload(row)
         if not isinstance(group, dict):
             group = {"group_id": text(row.get("group_id"))}
+        if normalized_zone == "open" and _is_workbench_automatic_decision_group(group):
+            return None
         result = _with_workbench_group_counts(_sanitize_workbench_group_invoice_rows(group))
         result["scope_key"] = "all" if composed_all_scope else resolved_scope_key
         if composed_all_scope and resolved_scope_key and resolved_scope_key != "all":
@@ -11768,12 +11768,24 @@ def _drop_all_scope_automatic_decision_group(group: dict[str, Any]) -> None:
 
 
 def _is_workbench_automatic_decision_group(group: dict[str, Any]) -> bool:
+    automatic_modes = {"automatic_decision", "automatic_match"}
+    group_type = text(group.get("group_type")) or ""
+    relation_modes = {
+        mode
+        for mode in [
+            text(group.get("relation_mode")),
+            *(text(row.get("relation_mode")) for row in _iter_group_rows(group)),
+        ]
+        if mode
+    }
+    if group_type == "manual_confirmed" or any(mode not in automatic_modes for mode in relation_modes):
+        return False
+    if relation_modes.intersection(automatic_modes):
+        return True
     group_id = text(group.get("group_id") or group.get("id")) or ""
     if group_id.startswith("case:decision:"):
         return True
     for row in _iter_group_rows(group):
-        if text(row.get("relation_mode")) == "automatic_decision":
-            return True
         case_id = text(row.get("case_id"))
         if case_id and case_id.startswith("decision:"):
             return True
@@ -12506,6 +12518,20 @@ def _workbench_groups_order_by(sort: str | None) -> str:
     if prefix is None:
         return "scope_month desc nulls last, updated_at desc, group_id"
     return f"{prefix}, scope_month desc nulls last, updated_at desc, group_id"
+
+
+def _workbench_open_automatic_decision_group_exclusion_sql() -> str:
+    return """
+    (
+        g.group_id not like 'case:decision:%%'
+        or g.group_type = 'manual_confirmed'
+        or coalesce(nullif(g.payload->>'relation_mode', ''), '') not in (
+            '',
+            'automatic_decision',
+            'automatic_match'
+        )
+    )
+    """
 
 
 def _workbench_open_linked_etc_summary_group_exclusion_sql(*, group_id_sql: str = "g.group_id") -> str:

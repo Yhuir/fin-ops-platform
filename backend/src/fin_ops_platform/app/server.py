@@ -453,6 +453,7 @@ from fin_ops_platform.services.workbench_auto_pair_conflict_relation_read_port i
 )
 from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchMatchingRelationReadPort
 from fin_ops_platform.services.workbench_groups_page_cache import (
+    WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
     build_workbench_groups_redis_cache_key_from_version,
     workbench_groups_redis_cache_version_from_key,
     workbench_groups_redis_ttl_seconds_from_env,
@@ -3669,7 +3670,7 @@ class Application:
             return None
         return build_workbench_groups_redis_cache_key_from_version(
             cache_version=cache_version,
-            schema_version=WORKBENCH_READ_MODEL_SCHEMA_VERSION,
+            schema_version=WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
             scope_key=scope_key,
             zone=zone,
             page=page,
@@ -3713,7 +3714,7 @@ class Application:
     ) -> str | None:
         return build_workbench_groups_redis_cache_key_from_version(
             cache_version=cache_version,
-            schema_version=WORKBENCH_READ_MODEL_SCHEMA_VERSION,
+            schema_version=WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
             scope_key=scope_key,
             zone=zone,
             page=page,

@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 
-WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION = "2026-06-09-etc-linked-summary-filter"
+WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION = "2026-07-14-formalized-decision-origin-visibility"
 
 
 def normalize_workbench_group_search_mode(value: str | None) -> str:

@@ -1040,3 +1040,13 @@
 - 测试覆盖：更新 `CommonPlatformComponents.test.tsx` 覆盖共用抽屉 busy/close disabled；更新 `WorkbenchExceptionModal.test.tsx` 覆盖中文关系展示、候选分组 ID 隐藏和抽屉提交；更新 `WorkbenchSelection.test.tsx` 覆盖确认/撤回抽屉忙碌态、模态抽屉背景不可访问语义、异常处理抽屉提交后已处理异常链路；更新 `workbench-exception-flow.spec.ts` 覆盖浏览器异常处理抽屉不展示内部 case id。
 - 验证命令：`cd web && npm test -- --run src/test/CommonPlatformComponents.test.tsx src/test/WorkbenchExceptionModal.test.tsx src/test/WorkbenchSelection.test.tsx`；`cd web && npm run build`；`cd web && npm run e2e -- e2e/workbench-candidate-split-flow.spec.ts e2e/workbench-withdraw-flow.spec.ts e2e/workbench-exception-flow.spec.ts --project=chromium`；`bash scripts/verify.sh docs`。
 - 未测风险：尚未人工验收所有屏宽下的视觉密度；E2E 已覆盖核心确认、撤回和异常处理流程，但未跑完整 `npm run e2e:smoke`。
+
+## 2026-07-14 - decision-origin 正式关系被 open 列表误过滤
+
+- 触发事实：进项发票使用情况可见云南立孚科技 `520.00` 发票 `inv_imported_0369`、已完成 OA `oa-pay-2169` 和 active linked relation；关联台 active generation 的精确 group detail 也存在，但 `month=all` / `2026-05` open groups list 均返回 0。
+- 根因：matching engine 正式化自动决策时保留 `decision:*` 作为 case id，同时写入 `relation_mode=manual_confirmed`。旧 groups list SQL 与 all-scope classifier 仅凭 `case:decision:*` / `decision:*` 前缀把该正式关系当作 `automatic_decision` 删除，混淆了历史来源 identity 和当前 relation state。
+- 决策：不改 canonical relation、active generation、worker 或下游 relation distribution。repository groups list/detail 与 all-scope classifier 改为当前正式状态优先；真正无正式 mode 或明确 `automatic_decision` / `automatic_match` 的旧组继续隐藏。删除列表 materialize 后的重复 Python filter，保持 SQL 层 count/pagination 与可见集合一致。
+- Cache：复用 `WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION` 并让 API 与 worker warmer 使用同一 schema；部署后旧空列表 Redis payload 自动 miss，无需 bump projection schema 或重建数据。
+- 测试覆盖：`test_repository_composed_all_open_page_keeps_formalized_decision_origin_group` 同时证明旧 automatic group 被移除、正式化 decision-origin group 被保留且 counts 正确；`test_repository_group_detail_distinguishes_formalized_decision_origin_relation` 保护 detail；`test_workbench_groups_api_redis_cache_key_includes_groups_page_schema_version` 保护 cache invalidation I/O。
+- 旧链路清理：全仓扫描确认仅移除 repository groups list 的前缀-only SQL 和重复后置过滤；relation mode registry、downstream distribution、projection cleanup 与 withdraw 对未正式化 decision 的拒绝继续保留。
+- 数据安全：修复是纯 read-side 查询和缓存键变更，不写 canonical facts、read model rows、dirty scope 或 outbox。生产恢复只需发布代码并只读复核目标 list/detail/page audit；不执行 repair SQL 或 read model rebuild。
