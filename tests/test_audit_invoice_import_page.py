@@ -232,6 +232,10 @@ class FakeConnection:
         self.executed.append(sql)
         if sql.startswith("set transaction"):
             return 0
+        if sql == "select set_config('statement_timeout', %s, true)":
+            if params != ("60000",):
+                raise AssertionError(f"Unexpected Audit statement timeout params: {params}")
+            return 0
         raise AssertionError("Invoice import Audit must be read-only")
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:

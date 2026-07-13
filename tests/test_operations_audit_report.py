@@ -22,7 +22,10 @@ class OperationsAuditReportTests(unittest.TestCase):
 
         self.assertEqual(
             transaction.executed,
-            [("set transaction isolation level repeatable read read only", ())],
+            [
+                ("set transaction isolation level repeatable read read only", ()),
+                ("select set_config('statement_timeout', %s, true)", ("60000",)),
+            ],
         )
         self.assertEqual(connection.transaction_count, 1)
 

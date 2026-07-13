@@ -11,6 +11,7 @@ FRESHNESS_ISSUE_CODES = frozenset(
     {"read_model_scope_not_fresh", "read_model_outbox_not_drained", "page_runtime_queue_not_drained"}
 )
 QUEUE_ISSUE_CODES = frozenset({"read_model_outbox_not_drained", "page_runtime_queue_not_drained"})
+AUDIT_STATEMENT_TIMEOUT_MS = 60_000
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,10 @@ def read_only_audit_snapshot(connection: Any) -> Iterator[AuditSnapshot]:
         return
     with transaction() as snapshot_connection:
         snapshot_connection.execute("set transaction isolation level repeatable read read only")
+        snapshot_connection.execute(
+            "select set_config('statement_timeout', %s, true)",
+            (str(AUDIT_STATEMENT_TIMEOUT_MS),),
+        )
         yield AuditSnapshot(
             connection=snapshot_connection,
             consistency="repeatable_read_read_only",

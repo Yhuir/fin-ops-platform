@@ -231,7 +231,10 @@ class AppHealthSystemAuditTests(unittest.TestCase):
         self.assertEqual(connection.transaction_count, 1)
         self.assertEqual(
             connection.executed,
-            ["set transaction isolation level repeatable read read only"],
+            [
+                "set transaction isolation level repeatable read read only",
+                "select set_config('statement_timeout', %s, true)",
+            ],
         )
         self.assertEqual(len(repository.snapshots), 16)
         self.assertEqual(len({id(snapshot) for snapshot in repository.snapshots}), 1)

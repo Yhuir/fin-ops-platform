@@ -161,6 +161,10 @@ class FakeConnection:
         self.executed.append(sql)
         if sql.startswith("set transaction"):
             return 0
+        if sql == "select set_config('statement_timeout', %s, true)":
+            if params != ("60000",):
+                raise AssertionError(f"Unexpected Audit statement timeout params: {params}")
+            return 0
         raise AssertionError("Bank import Audit must be read-only")
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
@@ -188,7 +192,13 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         self.assertEqual(report["overall_status"], "pass")
         self.assertEqual(report["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
         self.assertTrue(report["audit_contract"]["database_snapshot"])
-        self.assertEqual(connection.executed, ["set transaction isolation level repeatable read read only"])
+        self.assertEqual(
+            connection.executed,
+            [
+                "set transaction isolation level repeatable read read only",
+                "select set_config('statement_timeout', %s, true)",
+            ],
+        )
 
     def test_legacy_file_is_non_blocking_but_explicitly_unproven(self) -> None:
         connection = FakeConnection()
