@@ -454,7 +454,8 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 用于在不暴露 PostgreSQL DSN 的情况下发现 critical read model scopes；该 helper 明确拒绝 `--apply`，
 真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。
 `write-operation-e2e-smoke` 只运行 release 内的固定 relation runner；scenario 仅接受受限 `/tmp` JSON，
-apply 的 Admin Token 只从 stdin 读取，固定走公网 `/fin-ops-api`，不提供任意命令或 SQL 能力。
+apply 的 Admin Token 与 approval ticket 只从 stdin 的前两行读取，固定走公网 `/fin-ops-api`，
+不提供任意命令或 SQL 能力；第二行为空时在任何业务写请求前失败。
 
 说明：
 

@@ -31,6 +31,7 @@
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |
+| Controlled write smoke stdin | operator | `--apply-stdin` 第一行为 Admin Token、第二行为 approval ticket；两者均必填且不落盘 |
 
 ## 输出 I/O
 
@@ -81,3 +82,5 @@
 - `read-model-refresh` 只调用 `runtime_queue_ops enqueue-read-model-refresh`，由 scope policy 和 `ReadModelRefreshGateway` 写 durable queue；必须显式 dry-run 或 execute。
 - `settings-normalize` 只调用 canonical settings normalizer/repository tool。
 - `runtime-queue-resolve-covered` 只处理已有 exact-scope fresh/done 覆盖证明的 dead letter，不开放通用 SQL 或任意 queue mutation。
+- `write-operation-e2e-smoke --apply-stdin` 只把两行 stdin 注入固定 relation runner：Admin Token 与 approval ticket；
+  缺任一输入都在 mutation 前失败，不依赖 root-owned env 已同步才能保留审批闸门。

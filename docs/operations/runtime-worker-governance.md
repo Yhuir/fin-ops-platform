@@ -119,6 +119,8 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - `FIN_OPS_WRITE_E2E_APPROVAL_TICKET=FINOPS-WRITE-SMOKE-STANDING-20260702`
 - 每个 operation 最多写入 1 个受控 scenario，避免同一月份连续撤回造成 Workbench/read model 串行刷新长尾。
 - discovery 只读 PostgreSQL 事实并输出候选；真正 apply 仍必须提供真实 OA/Admin auth，但不再需要临时业务 ticket。
+- `finops-deploy-control write-operation-e2e-smoke ... --apply-stdin` 从 stdin 第一行读取 Admin Token、
+  第二行读取 standing approval ticket；任一为空都在业务 mutation 前失败，避免把 root-owned env 漂移误判为已授权。
 - no-OA withdraw 候选必须同时满足 `app.no_oa_bank_batches.status='submitted'`、`relation.status='active'`
   和 `relation.relation_mode='no_oa_bank_batch'`，不能把 bank-flow rule batch 关系误送到 no-OA endpoint。
 

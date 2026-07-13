@@ -525,10 +525,13 @@ write_operation_e2e_smoke() {
     export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
     local apply_args=()
     if [[ "$mode" == "--apply-stdin" ]]; then
-      local admin_token
+      local admin_token approval_ticket
       IFS= read -r admin_token
       [[ -n "$admin_token" ]] || die "admin token stdin is empty"
+      IFS= read -r approval_ticket
+      [[ -n "$approval_ticket" ]] || die "write approval ticket stdin is empty"
       export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"
+      export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="$approval_ticket"
       apply_args=(--apply)
     fi
     cd "$src"
