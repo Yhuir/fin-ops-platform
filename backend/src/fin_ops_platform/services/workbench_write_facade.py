@@ -959,6 +959,7 @@ class WorkbenchWriteFacade:
             **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
             "amount_check": dict(result.get("amount_check") or {}),
             "operation_projection": dict(result.get("operation_projection") or {}),
+            "outbox_event_ids": list(result.get("outbox_event_ids") or []),
             "message": str(result.get("message") or ""),
         }
 
@@ -1649,6 +1650,7 @@ class WorkbenchWriteFacade:
             "affected_months": list(result.get("affected_months") or []),
             "affected_scope_keys": affected_scope_keys,
             **WorkbenchWriteFacade._operation_write_target_envelope(affected_scope_keys),
+            "outbox_event_ids": list(result.get("outbox_event_ids") or []),
             "message": str(result.get("message") or ""),
         }
 
@@ -2276,6 +2278,7 @@ class WorkbenchWriteFacade:
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "restored_relations": list(result.get("restored_relations") or []),
             "operation_projection": dict(result.get("operation_projection") or {}),
+            "outbox_event_ids": list(result.get("outbox_event_ids") or []),
             "message": str(result.get("message") or "已撤回 1 组关联。"),
         }
 

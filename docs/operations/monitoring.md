@@ -2,8 +2,8 @@
 
 ## 可逆关系写后闭环
 
-- 生产可逆关系 smoke 统一使用 `write_operation_e2e_smoke` 的 checkpoint 模式；每个 confirm/withdraw 都以唯一 `idempotency_key` 从 committed `app.workbench_idempotency_records` 解析精确 `outbox_event_ids`，不得只按时间窗/profile 抽取样本。
-- 受控 runner 使用 runtime 登录角色只读查询上述幂等证据；该角色仅拥有 `SELECT`，业务写仍只能经 API/UoW 事务角色完成，runner 不得 insert/update/delete 幂等记录。
+- 生产可逆关系 smoke 统一使用 `write_operation_e2e_smoke` 的 checkpoint 模式；成功的 confirm/withdraw 从同一已提交 UoW response receipt 取得精确 `outbox_event_ids`，再按这些 IDs 查询 durable outbox/dirty scope，不得只按时间窗/profile 抽取样本。HTTP 歧义时才回读 committed `app.workbench_idempotency_records`；证据缺失必须 fail closed。
+- 受控 runner 使用 runtime 登录角色只读查询上述 durable 证据；该角色仅拥有 `SELECT`，业务写仍只能经 API/UoW 事务角色完成，runner 不得 insert/update/delete 幂等记录。
 - 首次 mutation 前必须先通过固定 admin-only `GET /api/operations/app-health/page-audit?page=app-health-operations`；scenario 不能覆盖 Audit path。每个 checkpoint 再依次通过 required/optional scope 合同、worker done/dirty done、consumer API `fresh`、绑定 fixture identity 的 affected assertions、non-consumer 写前/写后 baseline equality，以及新的 17/16 页只读 System Audit。任一事件 ID 未被正式 profile 接受、页面/path/role 不匹配或复用旧 `system_audit_id` 均失败。
 - 只允许 `fixture_ownership=test_owned`、最多 20 个显式 row IDs、三种登记 shape、审批票和正式 mutation contract。bank+invoice/full 只走 Workbench preview/confirm/withdraw；bank+turnover 只走 turnover closure confirm 与 relation-id withdraw。confirm 已提交而后置 gate 失败时执行声明的 recovery checkpoint；withdraw 已提交后不重复撤回；网络结果不明确时不盲重试，输出 `recovery_required`。
 - 该闭环证明 App 内部已登记 canonical/read model/relation 合同，不证明外部银行/OA/发票/ETC 未漏导；外部 evidence `unknown` 可以保留，但不得扩大结论。

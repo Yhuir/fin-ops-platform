@@ -106,6 +106,7 @@ REVERSIBLE_RELATION_SHAPE_CONTRACTS: dict[str, dict[str, object]] = {
 }
 
 RequestFn = Callable[[str, str, Mapping[str, str], bytes | None, float], http_slo_probe.HttpProbeResponse]
+_RESPONSE_OUTBOX_EVENT_IDS = "__response_outbox_event_ids"
 
 
 @dataclass(frozen=True)
@@ -774,23 +775,25 @@ def _run_checkpoint(
             mutation_committed=mutation_committed,
             mutation_ambiguous=mutation_ambiguous,
         )
-    event_ids: list[str] | None = None
+    response_event_ids = _response_outbox_event_ids(variables.get(_RESPONSE_OUTBOX_EVENT_IDS))
+    event_ids: list[str] | None = response_event_ids or None
     if idempotency_key:
-        try:
-            event_ids = write_operation_slo_audit.committed_workbench_outbox_event_ids(
-                connection,
-                tenant_id=tenant_id,
-                idempotency_key=idempotency_key,
-            )
-        except Exception as exc:
-            return _failed_checkpoint(
-                checkpoint,
-                started_at=started_at,
-                step_results=step_results,
-                mutation_committed=mutation_committed,
-                mutation_ambiguous=mutation_ambiguous,
-                write_slo={"status": "fail", "error": str(exc) or exc.__class__.__name__},
-            )
+        if not event_ids:
+            try:
+                event_ids = write_operation_slo_audit.committed_workbench_outbox_event_ids(
+                    connection,
+                    tenant_id=tenant_id,
+                    idempotency_key=idempotency_key,
+                )
+            except Exception as exc:
+                return _failed_checkpoint(
+                    checkpoint,
+                    started_at=started_at,
+                    step_results=step_results,
+                    mutation_committed=mutation_committed,
+                    mutation_ambiguous=mutation_ambiguous,
+                    write_slo={"status": "fail", "error": str(exc) or exc.__class__.__name__},
+                )
     write_slo = _wait_for_write_slo(
         connection,
         operations=checkpoint.operations,
@@ -971,12 +974,16 @@ def _execute_step(
         if (
             status_ok
             and not html_api_error
-            and (step.captures or step.path in {CONFIRM_PREVIEW_PATH, WITHDRAW_PREVIEW_PATH})
+            and (step.mutation or step.captures or step.path in {CONFIRM_PREVIEW_PATH, WITHDRAW_PREVIEW_PATH})
         ):
             try:
                 payload = json.loads((response.body or b"").decode("utf-8"))
                 _validate_canonical_preview_payload(step, payload)
                 captures = {name: _json_pointer(payload, pointer) for name, pointer in step.captures}
+                if step.mutation:
+                    response_event_ids = _response_outbox_event_ids(payload.get("outbox_event_ids"))
+                    if response_event_ids:
+                        captures[_RESPONSE_OUTBOX_EVENT_IDS] = response_event_ids
             except (UnicodeDecodeError, json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
                 result = WriteStepResult(
                     **{**asdict(result), "status": "fail", "error": f"response_capture_failed:{exc}"}
@@ -1005,6 +1012,18 @@ def _execute_step(
             committed=False,
             ambiguous=step.mutation,
         )
+
+
+def _response_outbox_event_ids(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    event_ids: list[str] = []
+    for item in value:
+        event_id = str(item or "").strip()
+        if not event_id or event_id in event_ids:
+            continue
+        event_ids.append(event_id)
+    return event_ids
 
 
 def _reconcile_ambiguous_mutation(

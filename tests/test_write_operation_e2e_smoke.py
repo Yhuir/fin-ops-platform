@@ -891,6 +891,34 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(executed.result.request_id, "123456abcdef")
         self.assertIsNone(executed.result.response_error_code)
 
+    def test_write_step_captures_transaction_outbox_receipt(self) -> None:
+        step = write_operation_e2e_smoke.WriteStep(
+            name="confirm",
+            method="POST",
+            path="/api/workbench/actions/confirm-link",
+            json_body={"idempotency_key": "receipt"},
+            expected_statuses=(200,),
+        )
+
+        executed = write_operation_e2e_smoke._execute_step(
+            step,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            target_ms=1000,
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"success":true,"outbox_event_ids":["event-1","event-2","event-1"]}',
+            ),
+        )
+
+        self.assertEqual(
+            executed.captures[write_operation_e2e_smoke._RESPONSE_OUTBOX_EVENT_IDS],
+            ["event-1", "event-2"],
+        )
+
     def test_slow_write_step_fails_before_claiming_write_slo(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
             name="workbench-withdraw",
