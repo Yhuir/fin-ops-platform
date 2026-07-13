@@ -569,10 +569,18 @@ def recent_read_model_refresh_events_since(
     expectation_filter_sql, expectation_params = _expectation_filter_sql(expectations)
     event_filter_sql = ""
     event_params: tuple[Any, ...] = ()
+    time_filter_sql = "and e.created_at >= %s"
+    time_params: tuple[Any, ...] = (started_at,)
     if event_ids is not None:
         exact_event_ids = _exact_event_ids(event_ids)
         event_filter_sql = "and e.id::text = any(%s)"
         event_params = (exact_event_ids,)
+        # The transactional receipt is the causal boundary. A refresh enqueue may
+        # deduplicate onto an already-pending durable event created before the HTTP
+        # request, so applying the fallback time window would discard valid receipt
+        # evidence even though the exact event id is known.
+        time_filter_sql = ""
+        time_params = ()
     rows = connection.fetch_all(
         f"""
         select
@@ -601,13 +609,13 @@ def recent_read_model_refresh_events_since(
          and d.source_version = coalesce(e.source_version, 0)
         where e.tenant_id = %s
           and (e.event_type like '%%.read_model.refresh' or e.event_type = 'import.fact.changed')
-          and e.created_at >= %s
+          {time_filter_sql}
           {expectation_filter_sql}
           {event_filter_sql}
         order by e.created_at desc, e.id desc
         limit %s
         """,
-        (tenant_id, started_at, *expectation_params, *event_params, limit),
+        (tenant_id, *time_params, *expectation_params, *event_params, limit),
     )
     return [dict(row) for row in rows]
 

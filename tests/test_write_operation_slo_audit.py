@@ -395,12 +395,23 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         sql, params = connection.fetch_all_calls[-1]
         normalized_sql = " ".join(sql.lower().split())
         self.assertIn("e.tenant_id = %s", normalized_sql)
-        self.assertIn("e.created_at >= %s", normalized_sql)
+        self.assertNotIn("e.created_at >= %s", normalized_sql)
         self.assertIn("e.event_type = %s", normalized_sql)
         self.assertIn("e.id::text = any(%s)", normalized_sql)
-        self.assertEqual(params[0:2], ("default", started_at))
+        self.assertEqual(params[0], "default")
         self.assertEqual(params[-2], ["event-1", "event-2"])
         self.assertEqual(params[-1], 50)
+
+        write_operation_slo_audit.recent_read_model_refresh_events_since(
+            connection,
+            tenant_id="default",
+            started_at=started_at,
+            limit=50,
+            expectations=expectations,
+        )
+        fallback_sql, fallback_params = connection.fetch_all_calls[-1]
+        self.assertIn("e.created_at >= %s", " ".join(fallback_sql.lower().split()))
+        self.assertEqual(fallback_params[0:2], ("default", started_at))
 
         with self.assertRaisesRegex(ValueError, "sequence of strings"):
             write_operation_slo_audit.recent_read_model_refresh_events_since(

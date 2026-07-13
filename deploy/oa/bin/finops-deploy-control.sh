@@ -542,7 +542,9 @@ write_operation_e2e_smoke() {
       --base-url https://www.yn-sourcing.com \
       --api-prefix /fin-ops-api \
       --write-target-ms 5000 \
+      --refresh-target-ms 30000 \
       --http-target-ms 1000 \
+      --timeout-seconds 120 \
       "${apply_args[@]}"
   )
 }

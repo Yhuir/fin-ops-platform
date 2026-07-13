@@ -32,6 +32,7 @@ class SloToolDefaultTests(unittest.TestCase):
         self.assertIsNone(write_audit_args.p99_target_ms)
         self.assertEqual(write_operation_slo_audit.effective_p99_target_ms_for(write_audit_args.target_ms, None), 3_000.0)
         self.assertEqual(write_e2e_args.write_target_ms, 1_000.0)
+        self.assertEqual(write_e2e_args.refresh_target_ms, 30_000.0)
         self.assertEqual(write_e2e_args.http_target_ms, 1_000.0)
         self.assertEqual(closure_gate_args.http_target_ms, 1_000.0)
         self.assertEqual(closure_gate_args.sse_target_ms, 1_000.0)

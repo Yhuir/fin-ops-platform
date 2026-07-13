@@ -24,6 +24,7 @@ from fin_ops_platform.tools.cli_reports import (
 
 
 DEFAULT_WRITE_TARGET_MS = 1_000.0
+DEFAULT_REFRESH_TARGET_MS = 30_000.0
 DEFAULT_HTTP_TARGET_MS = 1_000.0
 DEFAULT_TIMEOUT_SECONDS = 90.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
@@ -201,6 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Required with --apply. Business approval reference for mutating production write-operation smoke.",
     )
     parser.add_argument("--write-target-ms", type=float, default=DEFAULT_WRITE_TARGET_MS)
+    parser.add_argument("--refresh-target-ms", type=float, default=DEFAULT_REFRESH_TARGET_MS)
     parser.add_argument("--http-target-ms", type=float, default=DEFAULT_HTTP_TARGET_MS)
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--poll-interval-seconds", type=float, default=DEFAULT_POLL_INTERVAL_SECONDS)
@@ -214,6 +216,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
     write_target_ms = max(1.0, float(args.write_target_ms))
+    refresh_target_ms = max(1.0, float(args.refresh_target_ms))
     try:
         scenarios = load_scenarios(args.scenario, http_target_ms=max(1.0, float(args.http_target_ms)))
     except FileNotFoundError:
@@ -275,6 +278,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         headers=headers,
         approval_reference=approval_ticket,
         write_target_ms=write_target_ms,
+        refresh_target_ms=refresh_target_ms,
         timeout_seconds=max(1.0, float(args.timeout_seconds)),
         poll_interval_seconds=max(0.05, float(args.poll_interval_seconds)),
         limit=max(1, int(args.limit)),
@@ -430,6 +434,7 @@ def run_write_operation_e2e_smoke(
     headers: Mapping[str, str],
     approval_reference: str | None = None,
     write_target_ms: float = DEFAULT_WRITE_TARGET_MS,
+    refresh_target_ms: float = DEFAULT_REFRESH_TARGET_MS,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
     limit: int = DEFAULT_LIMIT,
@@ -494,6 +499,7 @@ def run_write_operation_e2e_smoke(
             tenant_id=tenant_id,
             headers=headers,
             write_target_ms=write_target_ms,
+            refresh_target_ms=refresh_target_ms,
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
             limit=limit,
@@ -548,6 +554,7 @@ def _run_one_scenario(
     tenant_id: str,
     headers: Mapping[str, str],
     write_target_ms: float,
+    refresh_target_ms: float,
     timeout_seconds: float,
     poll_interval_seconds: float,
     limit: int,
@@ -595,6 +602,7 @@ def _run_one_scenario(
             tenant_id=tenant_id,
             headers=headers,
             write_target_ms=write_target_ms,
+            refresh_target_ms=refresh_target_ms,
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
             limit=limit,
@@ -624,6 +632,7 @@ def _run_one_scenario(
                     tenant_id=tenant_id,
                     headers=headers,
                     write_target_ms=write_target_ms,
+                    refresh_target_ms=refresh_target_ms,
                     timeout_seconds=timeout_seconds,
                     poll_interval_seconds=poll_interval_seconds,
                     limit=limit,
@@ -674,6 +683,7 @@ def _run_checkpoint(
     tenant_id: str,
     headers: Mapping[str, str],
     write_target_ms: float,
+    refresh_target_ms: float,
     timeout_seconds: float,
     poll_interval_seconds: float,
     limit: int,
@@ -799,7 +809,7 @@ def _run_checkpoint(
         operations=checkpoint.operations,
         tenant_id=tenant_id,
         started_at=started_at,
-        target_ms=write_target_ms,
+        target_ms=refresh_target_ms,
         timeout_seconds=timeout_seconds,
         poll_interval_seconds=poll_interval_seconds,
         limit=limit,

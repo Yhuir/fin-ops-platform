@@ -2,7 +2,7 @@
 
 ## 可逆关系写后闭环
 
-- 生产可逆关系 smoke 统一使用 `write_operation_e2e_smoke` 的 checkpoint 模式；成功的 confirm/withdraw 从同一已提交 UoW response receipt 取得精确 `outbox_event_ids`，再按这些 IDs 查询 durable outbox/dirty scope，不得只按时间窗/profile 抽取样本。HTTP 歧义时才回读 committed `app.workbench_idempotency_records`；证据缺失必须 fail closed。
+- 生产可逆关系 smoke 统一使用 `write_operation_e2e_smoke` 的 checkpoint 模式；成功的 confirm/withdraw 从同一已提交 UoW response receipt 取得精确 `outbox_event_ids`，再按这些 IDs 查询 durable outbox/dirty scope，不得只按时间窗/profile 抽取样本。receipt ID 是因果边界；同 scope enqueue 去重到请求前已经 pending 的 durable event 时，exact-ID 查询不得再附加 `created_at` fallback 窗口。HTTP 歧义时才回读 committed `app.workbench_idempotency_records`；证据缺失必须 fail closed。
 - 受控 runner 使用 runtime 登录角色只读查询上述 durable 证据；该角色仅拥有 `SELECT`，业务写仍只能经 API/UoW 事务角色完成，runner 不得 insert/update/delete 幂等记录。
 - 首次 mutation 前必须先通过固定 admin-only `GET /api/operations/app-health/page-audit?page=app-health-operations`；scenario 不能覆盖 Audit path。每个 checkpoint 再依次通过 required/optional scope 合同、worker done/dirty done、consumer API `fresh`、绑定 fixture identity 的 affected assertions、non-consumer 写前/写后 baseline equality，以及新的 17/16 页只读 System Audit。任一事件 ID 未被正式 profile 接受、页面/path/role 不匹配或复用旧 `system_audit_id` 均失败。
 - 只允许 `fixture_ownership=test_owned`、最多 20 个显式 row IDs、三种登记 shape、审批票和正式 mutation contract。bank+invoice/full 只走 Workbench preview/confirm/withdraw；bank+turnover 只走 turnover closure confirm 与 relation-id withdraw。confirm 已提交而后置 gate 失败时执行声明的 recovery checkpoint；withdraw 已提交后不重复撤回；网络结果不明确时不盲重试，输出 `recovery_required`。
@@ -648,7 +648,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \
   --write-target-ms 5000 \
+  --refresh-target-ms 30000 \
   --http-target-ms 1000 \
+  --timeout-seconds 120 \
   --output /tmp/finops-write-e2e-slo-$(date +%Y%m%d%H%M%S).json
 ```
 
@@ -662,9 +664,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 - `--apply` 必须带审批引用；缺少 `--approval-ticket` / `FIN_OPS_WRITE_E2E_APPROVAL_TICKET` 会返回 `status=approval_missing`，且不会连接 Postgres 或发起 mutating HTTP。
 - 每个 mutating step 必须有预期状态码；工具不会把 409/403/500 继续包装成已同步。
 - mutating step 如果拿到 `text/html` 或 HTML 页面壳，即使状态码匹配，也会按 `html_response_for_api_probe` 失败并跳过 write SLO claim；这通常表示 API prefix、Nginx fallback 或路径配置错误。
-- 正式 relation confirm/withdraw 同步完成权限、freshness、canonical 校验、事务关系写、幂等提交和 durable fan-out；生产 standing correctness smoke 的 HTTP 写响应门禁固定为 `5000ms`。consumer HTTP、SSE、worker enqueue-to-fresh 仍保持各自 `1000ms` 门禁；需要证明“所有页面一秒级真同步”时，后文 closure gate 继续显式使用 `--write-target-ms 1000`，不得把 standing correctness 门禁冒充一秒级性能证明。
-- 写步骤成功后，工具以数据库 `clock_timestamp()` 为起点，等待对应 operation profile 的 outbox/dirty scope 达到 p95
-  `1000ms` / p99 `3000ms` SLO。
+- 正式 relation confirm/withdraw 同步完成权限、freshness、canonical 校验、事务关系写、幂等提交和 durable fan-out；生产 standing correctness smoke 的 HTTP 写响应门禁固定为 `5000ms`，exact receipt 绑定的异步 refresh 收敛门禁为 `30000ms`、总等待上限为 `120s`，consumer HTTP 读取门禁为 `1000ms`。这些门禁分别证明同步写响应、最终一致收敛和 fresh 后读取性能，禁止共用一个阈值。需要证明“所有页面一秒级真同步”时，后文 closure gate 必须显式使用独立的 1s 性能合同，不得把 standing correctness 门禁冒充一秒级性能证明。
+- 写步骤成功后，工具优先以事务 response receipt 的 exact event IDs 为因果边界，等待对应 operation profile 的 outbox/dirty scope 全部 `done`；standing correctness 使用 refresh p95/p99 `30000ms` 门禁。只有没有 receipt 的旧式只读性能审计才使用数据库 `clock_timestamp()` 时间窗。
 - post API probe 只用于验证写后页面首屏 API；最终仍要结合登录态 HTTP SLO、App Health 和审计记录。
 - 输出不包含 token、cookie、Authorization header，也不输出 scenario 请求 body，只记录路径、状态码、耗时和 outbox/readiness 结果。
 
