@@ -38,6 +38,7 @@
 | 外部往来闭环 relation metadata | `workbench_relation` / turnover manual closure and tag-rule sync | `relation_mode=turnover_manual_closure` 仍是外部往来闭环事实类型，但 paired/open 分区不再由 relation mode 直接决定；必须满足上面的 Bank Transaction Paired Policy。旧 `turnover:* manual_confirmed` 必须由规则 owner 通过 relation command 升级，Workbench 不回读当前标签设置。 |
 | no-OA relation metadata | `workbench_relation` / no-OA submit | legacy `special_metadata.paired_requires_oa`、`paired_requires_invoice` 决定 no-OA relation 是否具备进入 paired 区的 row type |
 | 写后 target envelope | `WorkbenchWriteFacade` | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；`read_model_key=workbench_relation` |
+| Confirm response projection | `WorkbenchWriteFacade` | 必须在 mutation 前从已解析 selection snapshot 预计算，并作为 UoW/idempotency response 的一部分提交；禁止事务提交并 invalidates downstream 后再次读取 `bank_detail` 等刚被标脏的 read model 来构造响应 |
 | API 失败 envelope | backend error response -> `features/workbench/api.ts` | 结构化 `message` 映射为用户错误时必须保留 `requestId` / `request_id`，便于从页面错误定位后端日志；不得把 `ApiClientError` 降级成丢失关联 ID 的普通错误 |
 | 页面 Audit 请求 | 管理员页面控件或运维 CLI | 页面统一调用 `page-audit?page=reconciliation-workbench`；CLI 仅作为同一 proof core 的参数/连接/JSON/退出码适配器。两者必须进入 `workbench_page_audit` 的同一只读 `REPEATABLE READ` snapshot，禁止 route、页面或 tool 复制 SQL/判断逻辑 |
 | 外部 OA 手工导入影响 | settings/OA manual import API | 不属于 `WorkbenchWriteFacade`，但必须返回并等待 `workbench`/`workbench_relation` 等受影响 read model targets |

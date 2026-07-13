@@ -496,6 +496,14 @@ class WorkbenchWriteFacade:
         )
 
         resolved_case_id = case_id or self._next_case_id()
+        operation_projection = self._confirm_link_operation_projection(
+            case_id=resolved_case_id,
+            row_ids=row_ids,
+            row_types=row_types,
+            selected_rows=selected_rows,
+            month=month,
+            amount_check=amount_check,
+        )
         before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
         internal_transfer_status = self._bank_only_internal_transfer_confirm_status(
             row_ids=row_ids,
@@ -554,6 +562,7 @@ class WorkbenchWriteFacade:
                 previous_pair_snapshot=previous_pair_snapshot,
                 changed_scope_keys=changed_scope_keys,
                 changed_case_ids=changed_case_ids,
+                operation_projection=operation_projection,
             )
 
         relation_command = self._relation_command_service_for()
@@ -627,29 +636,22 @@ class WorkbenchWriteFacade:
             return WorkbenchWriteResult(
                 HTTPStatus.OK,
                 self._confirm_link_response_payload(
-                    self._confirm_link_result_with_operation_projection(
-                        {
-                            "success": True,
-                            "action": action_name,
-                            "month": month,
-                            "case_id": resolved_case_id,
-                            "affected_row_ids": list(row_ids),
-                            "affected_months": list(command_result.get("affected_months") or changed_scope_keys),
-                            "affected_scope_keys": list(
-                                command_result.get("read_model_scope_keys")
-                                or command_result.get("affected_months")
-                                or changed_scope_keys
-                            ),
-                            "amount_check": amount_check,
-                            "message": f"已确认 {len(row_ids)} 条记录关联。",
-                        },
-                        case_id=resolved_case_id,
-                        row_ids=row_ids,
-                        row_types=row_types,
-                        selected_rows=selected_rows,
-                        month=month,
-                        amount_check=amount_check,
-                    )
+                    {
+                        "success": True,
+                        "action": action_name,
+                        "month": month,
+                        "case_id": resolved_case_id,
+                        "affected_row_ids": list(row_ids),
+                        "affected_months": list(command_result.get("affected_months") or changed_scope_keys),
+                        "affected_scope_keys": list(
+                            command_result.get("read_model_scope_keys")
+                            or command_result.get("affected_months")
+                            or changed_scope_keys
+                        ),
+                        "amount_check": amount_check,
+                        "operation_projection": operation_projection,
+                        "message": f"已确认 {len(row_ids)} 条记录关联。",
+                    }
                 ),
             )
 
@@ -673,6 +675,7 @@ class WorkbenchWriteFacade:
         previous_pair_snapshot: dict[str, object],
         changed_scope_keys: list[str],
         changed_case_ids: list[str],
+        operation_projection: dict[str, object],
     ) -> WorkbenchWriteResult:
         action_name = "confirm_link"
         idempotency_key = str(
@@ -758,6 +761,7 @@ class WorkbenchWriteFacade:
                 "affected_months": list(changed_scope_keys),
                 "affected_scope_keys": list(changed_scope_keys),
                 "amount_check": amount_check,
+                "operation_projection": operation_projection,
                 "message": f"已确认 {len(row_ids)} 条记录关联。",
             }
 
@@ -792,19 +796,11 @@ class WorkbenchWriteFacade:
                 changed_case_ids=changed_case_ids,
             )
             return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
+        if not isinstance(result.get("operation_projection"), dict) or not result.get("operation_projection"):
+            result = {**result, "operation_projection": operation_projection}
         return WorkbenchWriteResult(
             HTTPStatus.OK,
-            self._confirm_link_response_payload(
-                self._confirm_link_result_with_operation_projection(
-                    result,
-                    case_id=resolved_case_id,
-                    row_ids=row_ids,
-                    row_types=row_types,
-                    selected_rows=selected_rows,
-                    month=month,
-                    amount_check=amount_check,
-                )
-            ),
+            self._confirm_link_response_payload(result),
         )
 
     def _confirm_relation_via_command_service(
@@ -955,30 +951,6 @@ class WorkbenchWriteFacade:
             "operation_projection": dict(result.get("operation_projection") or {}),
             "message": str(result.get("message") or ""),
         }
-
-    def _confirm_link_result_with_operation_projection(
-        self,
-        result: dict[str, object],
-        *,
-        case_id: str,
-        row_ids: list[str],
-        row_types: list[str],
-        selected_rows: list[dict[str, object]],
-        month: str,
-        amount_check: dict[str, object],
-    ) -> dict[str, object]:
-        payload = dict(result)
-        if isinstance(payload.get("operation_projection"), dict) and payload.get("operation_projection"):
-            return payload
-        payload["operation_projection"] = self._confirm_link_operation_projection(
-            case_id=case_id,
-            row_ids=row_ids,
-            row_types=row_types,
-            selected_rows=selected_rows,
-            month=month,
-            amount_check=amount_check,
-        )
-        return payload
 
     def _confirm_link_operation_projection(
         self,

@@ -356,6 +356,36 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertGreater(first_outbox_count, 0)
         self.assertEqual(len(writer.calls), first_outbox_count)
 
+    def test_confirm_link_does_not_read_invalidated_bank_detail_after_commit(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        connection, _writer, _persisted = self._install_confirm_link_uow(app)
+
+        def category_codes(selected_row_ids: list[str]) -> dict[str, str]:
+            if connection.commits:
+                raise RuntimeError("bank_detail_read_model_not_fresh")
+            return {row_id: "test-expense" for row_id in selected_row_ids}
+
+        with patch.object(
+            app,
+            "_bank_transaction_category_codes_for_workbench_row_ids",
+            side_effect=category_codes,
+        ):
+            response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {
+                    "month": "2026-03",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-UOW-NO-POST-COMMIT-BANK-READ",
+                    "idempotency_key": "confirm:uow-no-post-commit-bank-read",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(connection.commits, 1)
+        self.assertTrue(_json_response(response)["operation_projection"]["after"]["paired_groups"])
+
     def test_confirm_link_uow_rejects_same_idempotency_key_with_different_payload(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
