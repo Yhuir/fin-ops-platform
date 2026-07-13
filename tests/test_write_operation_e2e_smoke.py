@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import gzip
 from io import StringIO
 import json
 import os
@@ -337,6 +338,36 @@ def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]
 
 
 class WriteOperationE2ESmokeTests(unittest.TestCase):
+    def test_http_request_decodes_gzip_json_before_preflight_parsing(self) -> None:
+        payload = json.dumps(_system_audit_payload("system-audit:gzip")).encode("utf-8")
+
+        class Response:
+            headers = {"Content-Type": "application/json", "Content-Encoding": "gzip"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+            def getcode(self) -> int:
+                return 200
+
+            def read(self) -> bytes:
+                return gzip.compress(payload)
+
+        with patch("urllib.request.urlopen", return_value=Response()):
+            response = write_operation_e2e_smoke._http_request(
+                "https://example.test/fin-ops-api/api/operations/app-health/page-audit",
+                "GET",
+                {"Accept-Encoding": "gzip"},
+                None,
+                1,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body.decode("utf-8"))["overall_status"], "pass")
+
     def test_empty_scenarios_return_input_error_instead_of_pass(self) -> None:
         calls: list[str] = []
 

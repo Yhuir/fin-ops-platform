@@ -1446,16 +1446,18 @@ def _http_request(
     request = Request(url, data=body, method=method, headers=dict(headers))
     try:
         with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310 - operator-provided URL.
+            response_headers = {key.lower(): value for key, value in response.headers.items()}
             return http_slo_probe.HttpProbeResponse(
                 status_code=int(response.getcode()),
-                headers={key.lower(): value for key, value in response.headers.items()},
-                body=response.read(),
+                headers=response_headers,
+                body=http_slo_probe._decoded_response_body(response.read(), response_headers),
             )
     except HTTPError as exc:
+        response_headers = {key.lower(): value for key, value in exc.headers.items()}
         return http_slo_probe.HttpProbeResponse(
             status_code=int(exc.code),
-            headers={key.lower(): value for key, value in exc.headers.items()},
-            body=exc.read(),
+            headers=response_headers,
+            body=http_slo_probe._decoded_response_body(exc.read(), response_headers),
         )
     except URLError as exc:
         reason = getattr(exc, "reason", exc)
