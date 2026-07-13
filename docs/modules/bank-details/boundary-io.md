@@ -1,6 +1,6 @@
 # 银行明细模块边界与 I/O
 
-日期：2026-07-05
+日期：2026-07-13
 
 ## 模块化状态
 
@@ -37,7 +37,7 @@
 | Worker 关系源端快路径 | `WorkbenchRelationReadModelRepositoryPort` | `bank-detail` SQL projection v9 可通过 `list_active_workbench_relation_source_rows(...)` / `workbench_relation_source_summary_from_source(...)` 读取 active relation source summary，用于关系标签投影和 source-version proof；查询必须同时携带银行流水 legacy row id 与 canonical UUID，并在投影边界归一回页面 row id，保证撤回后重新确认产生 canonical member id 时仍能命中；该身份语义变化必须提升 read-model schema version，禁止被 unchanged-scope 优化跳过；SQL owner 仍归 workbench-relations repository，下游不得直接读 relation 表，也不得用该快路径做 relation 写前判断 |
 | 可用月份 scope 枚举 | `BankDetailAvailableMonthScopeProvider` | PostgreSQL read-model runtime 下只从 `BankDetailReadModelRepositoryPort.bank_detail_scope_keys_for_range(...)` 读取 scope；只有非 SQL/local runtime 才允许回退导入服务扫描，生产/API 页面读不得使用导入扫描证明 fresh |
 | 自动分类候选推断 | `BankDetailAutoCategorySuggestionProvider` | 作为显式 provider 注入 `BankDetailsApplicationService`；应用服务本身不直接读取 import service 或 `BankDetailsService.auto_category_input_row(...)` |
-| Refresh scope | `bank_detail` manifest | month or `all`；`all` 只允许 fan-out 到 month shards |
+| Refresh scope | `bank_detail` manifest | month or `all`；`all` 只允许 fan-out 到 month shards；受控 `force_refresh` 必须由 handler 继续传递给所有 month shard，并由 projection builder 绕过 unchanged-scope fast-path 后重算，不得被当作普通刷新静默忽略 |
 
 ## 输出 I/O
 

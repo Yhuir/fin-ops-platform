@@ -428,6 +428,13 @@
 - 边界：页面读取仍由 `BankDetailsApplicationService` / `bank_detail` read model fresh gate 控制；源端快路径只服务 worker 投影，不用于 relation 写前事实或 raw Workbench payload fallback。
 - 本地保护：`tests/test_bank_details_sql_runtime.py::BankDetailSqlProjectionBuilderTests::test_relation_tags_source_fast_path_does_not_wait_for_relation_read_model`。
 
+## 2026-07-13 - bank detail force refresh 合同闭环
+
+- 生产验证发现：受控 gateway 已把 `force_refresh` 写入 durable queue，但 `BankDetailReadModelRefreshService` 没有把该标记传给 month projection builder，`source_versions_unchanged` 因而跳过关系标签重算，撤回关系后的旧 OA 标签可继续残留。
+- 修复边界：handler 解析 runtime event metadata；`all` fan-out 原样向 month shard 传递；month handler 显式传入 builder；builder 仅在 force 模式下绕过 unchanged fast-path。事实读取仍通过既有 canonical bank transaction 与 workbench-relations repository port，持久化仍由 bank-detail read model repository owner 执行。
+- 删除项：移除“force refresh 被静默降级成普通 refresh”的旧行为；没有增加 fallback、第二事实源、页面同步扫描或直接 SQL 运维修复。
+- 验证责任：普通 unchanged 优化、force month rebuild、force all fan-out、完整 bank-details 回归、生产 durable queue/freshness/page Audit。
+
 ## 2026-06-14 - Bank detail stale source guard
 
 - 目标：修复真实关联台 confirm/withdraw 连续写入时，旧 `bank_detail` source_version 事件仍完整 rebuild，导致新版本 bank detail 和下游 pending invoice 写后 SLO 超过 5s。

@@ -19,6 +19,7 @@ class BankDetailReadModelRefreshService:
         scope_key = str(event.scope_key or event.payload.get("scope_key") or event.aggregate_id or "").strip()
         if scope_type != "bank_detail" or not scope_key:
             raise ValueError("Bank detail refresh requires scope_type='bank_detail' and scope_key.")
+        force_refresh = _event_force_refresh(event)
         source_version = event.source_version or event.payload.get("source_version")
         if not self._event_source_version_is_current(event, scope_key=scope_key, source_version=source_version):
             return {
@@ -29,17 +30,26 @@ class BankDetailReadModelRefreshService:
             }
 
         if scope_key == "all":
-            shard_result = self._enqueue_all_scope_shards(event, source_version=source_version)
+            shard_result = self._enqueue_all_scope_shards(
+                event,
+                source_version=source_version,
+                force_refresh=force_refresh,
+            )
             if shard_result is not None:
                 return shard_result
 
         rebuild = getattr(self._projection_builder, "rebuild_bank_detail_read_model_scope", None)
         if not callable(rebuild):
             raise RuntimeError("Projection builder does not expose rebuild_bank_detail_read_model_scope.")
-        if "source_version" in signature(rebuild).parameters:
-            result = rebuild(scope_key, source_version=source_version)
-        else:
-            result = rebuild(scope_key)
+        rebuild_parameters = signature(rebuild).parameters
+        if force_refresh and "force_refresh" not in rebuild_parameters:
+            raise RuntimeError("Bank detail projection builder does not support force_refresh.")
+        rebuild_kwargs: dict[str, Any] = {}
+        if "source_version" in rebuild_parameters:
+            rebuild_kwargs["source_version"] = source_version
+        if "force_refresh" in rebuild_parameters:
+            rebuild_kwargs["force_refresh"] = force_refresh
+        result = rebuild(scope_key, **rebuild_kwargs)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         if not self._event_source_version_is_current(event, scope_key=scope_key, source_version=source_version):
             return {
@@ -51,13 +61,24 @@ class BankDetailReadModelRefreshService:
         self._complete_dirty_scope(event, scope_key=scope_key, source_version=source_version)
         return payload
 
-    def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent, *, source_version: Any) -> dict[str, Any] | None:
+    def _enqueue_all_scope_shards(
+        self,
+        event: RuntimeQueueEvent,
+        *,
+        source_version: Any,
+        force_refresh: bool,
+    ) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_bank_detail_scope_shards", None)
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards("all") or []) if str(item).strip()]
-        enqueued_scope_keys = refresh_gateway.enqueue_many("bank_detail", shard_keys, reason="bank_detail_all_shard")
+        enqueued_scope_keys = refresh_gateway.enqueue_many(
+            "bank_detail",
+            shard_keys,
+            reason="bank_detail_all_shard",
+            metadata={"force_refresh": True} if force_refresh else None,
+        )
         self._complete_dirty_scope(event, scope_key="all", source_version=source_version)
         return {"scope_key": "all", "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
 
@@ -89,3 +110,10 @@ class BankDetailReadModelRefreshService:
                 source_version=source_version,
             )
         )
+
+
+def _event_force_refresh(event: RuntimeQueueEvent) -> bool:
+    if event.payload.get("force_refresh") is True:
+        return True
+    metadata = event.payload.get("metadata")
+    return isinstance(metadata, dict) and metadata.get("force_refresh") is True

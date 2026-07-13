@@ -66,6 +66,7 @@ class ReadModelRefreshGateway:
                     scope_type=normalized_scope_type,
                     scope_key=scope_key,
                     reason=reason,
+                    metadata=metadata,
                 ):
                     continue
                 enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id, metadata))
@@ -97,6 +98,7 @@ class ReadModelRefreshGateway:
                 scope_type=normalized_scope_type,
                 scope_key=scope_key,
                 reason=reason,
+                metadata=metadata,
             ):
                 continue
             events.append(enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id, metadata)))
@@ -109,7 +111,10 @@ class ReadModelRefreshGateway:
         scope_type: str,
         scope_key: str,
         reason: str,
+        metadata: dict[str, object] | None,
     ) -> bool:
+        if isinstance(metadata, dict) and metadata.get("force_refresh") is True:
+            return False
         if not _reason_is_active_coalescible(reason):
             return False
         checker = getattr(self._queue_repository, "read_model_refresh_is_active", None)

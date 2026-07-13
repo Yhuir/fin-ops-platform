@@ -65,7 +65,13 @@ class BankDetailSqlProjectionBuilder:
         )
         return [value for row in rows if (value := text(row.get("scope_key")))]
 
-    def rebuild_bank_detail_read_model_scope(self, scope_key: str, *, source_version: int | None = None) -> dict[str, Any]:
+    def rebuild_bank_detail_read_model_scope(
+        self,
+        scope_key: str,
+        *,
+        source_version: int | None = None,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "").strip()
         if not _is_month_scope(normalized_scope_key):
             raise ValueError("Bank detail read model rebuild requires YYYY-MM scope_key.")
@@ -86,13 +92,14 @@ class BankDetailSqlProjectionBuilder:
                 manual_categories=manual_categories,
             ),
         )
-        unchanged = self._unchanged_scope_result(
-            scope_key=normalized_scope_key,
-            row_count=len(transaction_rows),
-            source_versions=source_versions,
-        )
-        if unchanged is not None:
-            return unchanged
+        if not force_refresh:
+            unchanged = self._unchanged_scope_result(
+                scope_key=normalized_scope_key,
+                row_count=len(transaction_rows),
+                source_versions=source_versions,
+            )
+            if unchanged is not None:
+                return unchanged
         if not transaction_rows:
             self._read_model_repository.save_bank_detail_rows(scope_key=normalized_scope_key, rows=[])
             self._read_model_repository.mark_bank_detail_scope(

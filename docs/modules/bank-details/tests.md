@@ -2,6 +2,14 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-13 - force refresh 合同闭环
+
+- 变更类型：read model / worker I/O 合同修复。
+- 新增/更新测试：`tests/test_bank_details_sql_runtime.py::BankDetailSqlProjectionBuilderTests::test_force_refresh_bypasses_unchanged_scope_fast_path`、`BankDetailReadModelRefreshServiceTests.test_force_refresh_rebuilds_month_scope_without_unchanged_shortcut`、`BankDetailReadModelRefreshServiceTests.test_all_force_refresh_propagates_to_month_shards`。
+- 覆盖点：受控 `bank_detail` force refresh 从 runtime event 进入 handler 后必须穿透 `all -> month` fan-out 和 month worker/builder 边界；builder 必须绕过 `source_versions_unchanged` fast-path，重新读取 canonical relation source 并替换该月投影；普通刷新仍保留 unchanged 优化。
+- 旧逻辑删除：删除 force metadata 在 handler/fan-out 边界被忽略的行为；不新增兼容路径、同步页面扫描或直接 read model 写入口。
+- 生产验收：对受影响月份走正式 gateway 强制刷新，等待 durable queue drained，再要求 bank-details 页面 Audit 的 canonical expected-set、typed relation edges、展示标签、freshness 和 queue 全部通过。
+
 ## 2026-07-05 - page read model-only close
 
 - 变更类型：旧代码删除 / 模块边界收口。

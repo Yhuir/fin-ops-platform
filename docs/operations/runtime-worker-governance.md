@@ -206,6 +206,8 @@ sudo -n /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> 
 `--force-refresh`。该标志只把 `force_refresh=true` 写入通过 scope policy 校验后的 durable event metadata，
 由已登记 projection handler 重算目标 scope；它不直接写 read model、不修改 readiness，也不能替代重建后
 的 queue drain、freshness 和只读 Audit 复验。执行前必须先 dry-run 同一组 scopes，且只选择已证明受影响的 scope。
+`force_refresh=true` 的 durable request 不得与已有普通 pending/processing refresh coalesce；`all` fan-out 时该 metadata
+必须继续传递给每个实际 shard，避免受控重建被静默降级成普通 unchanged-scope refresh。
 
 如果 downstream refresh handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，runtime worker
 会调用 `RuntimeQueueRepository.defer_event(...)`，把该 outbox event 短延迟放回 `pending`，生产模板默认 0.25 秒后
@@ -851,6 +853,7 @@ PYTHONPATH="$release_src/backend/src" \
 `workbench_relation_write_precondition`、`downstream_bank_tag_read` 属于 ensure/wakeup 类刷新请求。它们只能确保目标
 read model 有 refresh 在跑；当同一 `tenant_id + scope_type + scope_key` 已经 `pending` 或 `processing` 时，
 `ReadModelRefreshGateway` 必须 coalesce，不应 bump `source_version`，否则 downstream projection 会追逐移动目标。
+上述 coalesce 仅适用于普通 ensure/wakeup；显式 `force_refresh=true` 必须保留独立 durable event 语义。
 
 真实写入原因，例如 `workbench_relation_changed`、`confirm_link`、`withdraw_link`、导入/设置/标签变更，仍然必须写
 durable dirty scope 并在 active scope 上提高 `source_version`。这是防止旧 worker 把新事实误发布为 fresh 的一致性边界。

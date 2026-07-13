@@ -203,7 +203,10 @@ def scope_row(scope_key: str, **overrides: object) -> dict[str, object]:
     return row
 
 
-def runtime_event(scope_key: str) -> RuntimeQueueEvent:
+def runtime_event(scope_key: str, *, metadata: dict[str, object] | None = None) -> RuntimeQueueEvent:
+    payload: dict[str, object] = {"scope_type": "bank_detail", "scope_key": scope_key, "source_version": 7}
+    if metadata is not None:
+        payload["metadata"] = dict(metadata)
     return RuntimeQueueEvent(
         event_id="event-1",
         tenant_id="default",
@@ -213,7 +216,7 @@ def runtime_event(scope_key: str) -> RuntimeQueueEvent:
         scope_type="bank_detail",
         scope_key=scope_key,
         dedupe_key=f"bank_detail.read_model.refresh:bank_detail:{scope_key}",
-        payload={"scope_type": "bank_detail", "scope_key": scope_key, "source_version": 7},
+        payload=payload,
         attempts=0,
         status="processing",
         source_version=7,
@@ -1961,6 +1964,44 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(marked_source_versions["bank_detail_source_signature"], source_signature)
         self.assertEqual(marked_source_versions["workbench_relation_source_versions"], relation_source_versions)
 
+    def test_force_refresh_bypasses_unchanged_scope_fast_path(self) -> None:
+        class ForceProjectionBuilder(BankDetailSqlProjectionBuilder):
+            def _load_transaction_rows_with_auto_category_context(
+                self,
+                scope_key: str,
+            ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+                self.loaded_scope_key = scope_key
+                return [], []
+
+            def _configure_auto_category_service_from_app_settings(self) -> None:
+                return None
+
+            def _workbench_relation_source_versions_for_scope(self, scope_key: str) -> dict[str, object]:
+                return {"scope_key": scope_key, "source_version": 5}
+
+            def _source_versions(self, **kwargs: object) -> dict[str, object]:
+                return {"source_version": kwargs.get("source_version"), "row_count": 0}
+
+            def _unchanged_scope_result(self, **_kwargs: object) -> dict[str, object] | None:
+                raise AssertionError("force refresh must bypass the unchanged-scope fast path")
+
+        repository = CaptureBankDetailReadModelRepository()
+        builder = ForceProjectionBuilder(
+            connection=FakeConnection(),
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_bank_detail_read_model_scope(
+            "2026-05",
+            source_version=9,
+            force_refresh=True,
+        )
+
+        self.assertEqual(result["scope_key"], "2026-05")
+        self.assertEqual(result["row_count"], 0)
+        self.assertEqual(repository.saved_rows, [])
+        self.assertEqual(repository.marked_scopes[0]["scope_key"], "2026-05")
+
     def test_rebuild_loads_custom_auto_tag_rules_from_app_settings(self) -> None:
         repository = CaptureBankDetailReadModelRepository()
         connection = FakeConnection(
@@ -2648,26 +2689,34 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
 class FakeProjectionBuilder:
     def __init__(self) -> None:
         self.rebuilt: list[str] = []
+        self.force_refreshes: list[bool] = []
 
     def list_bank_detail_scope_shards(self, scope_key: str) -> list[str]:
         self.rebuilt.append(f"list:{scope_key}")
         return ["2026-04", "2026-05"]
 
-    def rebuild_bank_detail_read_model_scope(self, scope_key: str, *, source_version: int | None = None) -> dict[str, object]:
+    def rebuild_bank_detail_read_model_scope(
+        self,
+        scope_key: str,
+        *,
+        source_version: int | None = None,
+        force_refresh: bool = False,
+    ) -> dict[str, object]:
         self.rebuilt.append(f"rebuild:{scope_key}:{source_version}")
+        self.force_refreshes.append(force_refresh)
         return {"scope_key": scope_key, "row_count": 1}
 
 
 class FakeQueue:
     def __init__(self) -> None:
-        self.enqueued: list[tuple[str, str, str]] = []
+        self.enqueued: list[dict[str, object]] = []
         self.completed: list[tuple[str, str, object]] = []
         self.current_checks: list[tuple[str, str, str, object]] = []
         self.current = True
         self.current_results: list[bool] = []
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-        self.enqueued.append((scope_type, scope_key, reason))
+    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+        self.enqueued.append(dict(kwargs))
 
     def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str, source_version: object = None) -> bool:
         self.completed.append((scope_type, scope_key, source_version))
@@ -2702,8 +2751,8 @@ class BankDetailReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(
             queue.enqueued,
             [
-                ("bank_detail", "2026-04", "bank_detail_all_shard"),
-                ("bank_detail", "2026-05", "bank_detail_all_shard"),
+                {"scope_type": "bank_detail", "scope_key": "2026-04", "reason": "bank_detail_all_shard"},
+                {"scope_type": "bank_detail", "scope_key": "2026-05", "reason": "bank_detail_all_shard"},
             ],
         )
         self.assertEqual(queue.completed, [("bank_detail", "all", 7)])
@@ -2721,7 +2770,58 @@ class BankDetailReadModelRefreshServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["scope_key"], "2026-05")
         self.assertEqual(builder.rebuilt, ["rebuild:2026-05:7"])
+        self.assertEqual(builder.force_refreshes, [False])
         self.assertEqual(queue.completed, [("bank_detail", "2026-05", 7)])
+
+    def test_force_refresh_rebuilds_month_scope_without_unchanged_shortcut(self) -> None:
+        builder = FakeProjectionBuilder()
+        queue = FakeQueue()
+        service = BankDetailReadModelRefreshService(
+            projection_builder=builder,
+            queue_repository=queue,
+        )
+
+        payload = service.handle_runtime_event(
+            runtime_event("2026-05", metadata={"force_refresh": True}),
+        )
+
+        self.assertEqual(payload["scope_key"], "2026-05")
+        self.assertEqual(builder.rebuilt, ["rebuild:2026-05:7"])
+        self.assertEqual(builder.force_refreshes, [True])
+        self.assertEqual(queue.completed, [("bank_detail", "2026-05", 7)])
+
+    def test_all_force_refresh_propagates_to_month_shards(self) -> None:
+        builder = FakeProjectionBuilder()
+        queue = FakeQueue()
+        service = BankDetailReadModelRefreshService(
+            projection_builder=builder,
+            queue_repository=queue,
+        )
+
+        payload = service.handle_runtime_event(
+            runtime_event("all", metadata={"force_refresh": True}),
+        )
+
+        self.assertEqual(payload["enqueued_scope_keys"], ["2026-04", "2026-05"])
+        self.assertEqual(
+            queue.enqueued,
+            [
+                {
+                    "scope_type": "bank_detail",
+                    "scope_key": "2026-04",
+                    "reason": "bank_detail_all_shard",
+                    "metadata": {"force_refresh": True},
+                },
+                {
+                    "scope_type": "bank_detail",
+                    "scope_key": "2026-05",
+                    "reason": "bank_detail_all_shard",
+                    "metadata": {"force_refresh": True},
+                },
+            ],
+        )
+        self.assertEqual(queue.completed, [("bank_detail", "all", 7)])
+        self.assertEqual(builder.force_refreshes, [])
 
     def test_stale_source_version_does_not_rebuild_or_complete(self) -> None:
         builder = FakeProjectionBuilder()
