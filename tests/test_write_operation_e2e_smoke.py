@@ -833,6 +833,34 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["results"][0]["write_slo"]["status"], "skipped")
+        self.assertEqual(report["results"][0]["steps"][0]["response_error_code"], "conflict")
+        self.assertIsNone(report["results"][0]["steps"][0]["request_id"])
+
+    def test_write_step_reports_safe_request_id_for_bounded_log_lookup(self) -> None:
+        step = write_operation_e2e_smoke.WriteStep(
+            name="confirm",
+            method="POST",
+            path="/api/workbench/actions/confirm-link",
+            json_body={"idempotency_key": "safe-diagnostic"},
+            expected_statuses=(200,),
+        )
+
+        executed = write_operation_e2e_smoke._execute_step(
+            step,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            target_ms=1000,
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=500,
+                headers={"content-type": "application/json"},
+                body=b'{"error":"internal_server_error","requestId":"abcdef123456"}',
+            ),
+        )
+
+        self.assertEqual(executed.result.request_id, "abcdef123456")
+        self.assertEqual(executed.result.response_error_code, "internal_server_error")
 
     def test_slow_write_step_fails_before_claiming_write_slo(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(

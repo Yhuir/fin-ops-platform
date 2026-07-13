@@ -46,6 +46,7 @@ commands:
   read-model-slo-smoke <release-name> [args]
                                       run read model SLO smoke dry-run using runtime env; --apply is refused
   write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]
+  api-request-error <request-id>
                                       run the fixed production relation runner; admin token is read from stdin
   read-model-refresh <release-name> [args]
                                       validate or enqueue read-model refresh scopes through the durable gateway
@@ -545,6 +546,17 @@ write_operation_e2e_smoke() {
   )
 }
 
+api_request_error() {
+  local request_id="${1:-}"
+  [[ "$request_id" =~ ^[0-9a-f]{12}$ ]] || die "request id must be 12 lowercase hexadecimal characters"
+  [[ $# -le 1 ]] || die "api-request-error accepts only request id"
+  local match
+  match="$(journalctl -u fin-ops.service --since '2 hours ago' --no-pager -o cat \
+    | grep -F "request_id=$request_id" | tail -n 1 || true)"
+  [[ -n "$match" ]] || die "request error not found in the bounded journal window"
+  printf '%s\n' "$match"
+}
+
 read_model_refresh() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "read-model-refresh requires release name"
@@ -628,6 +640,10 @@ case "$cmd" in
   write-operation-e2e-smoke)
     shift
     write_operation_e2e_smoke "$@"
+    ;;
+  api-request-error)
+    shift
+    api_request_error "$@"
     ;;
   read-model-refresh)
     shift

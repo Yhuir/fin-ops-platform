@@ -130,6 +130,8 @@ class WriteStepResult:
     response_bytes: int
     content_type: str
     error: str | None = None
+    request_id: str | None = None
+    response_error_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -940,6 +942,10 @@ def _execute_step(
             else None
         )
         elapsed_rounded = round(elapsed_ms, 3)
+        response_request_id, response_error_code = _response_error_diagnostics(
+            response.body or b"",
+            content_type,
+        )
         error = None
         if html_api_error:
             error = html_api_error
@@ -957,6 +963,8 @@ def _execute_step(
             response_bytes=len(response.body or b""),
             content_type=content_type,
             error=error,
+            request_id=response_request_id,
+            response_error_code=response_error_code,
         )
         captures: dict[str, Any] = {}
         if (
@@ -1044,6 +1052,20 @@ def _validate_canonical_preview_payload(step: WriteStep, payload: Any) -> None:
         or not payload.get("submit_expected_versions")
     ):
         raise ValueError("canonical_withdraw_preview_contract_invalid")
+
+
+def _response_error_diagnostics(body: bytes, content_type: str) -> tuple[str | None, str | None]:
+    if "json" not in str(content_type or "").lower():
+        return None, None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    request_id = str(payload.get("requestId") or payload.get("request_id") or "").strip() or None
+    error_code = str(payload.get("error") or "").strip() or None
+    return request_id, error_code
 
 
 def _wait_for_write_slo(
