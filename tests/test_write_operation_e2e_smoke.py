@@ -1324,6 +1324,45 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(audit["status"], "fail")
         self.assertEqual(audit["error"], "system_audit_snapshot_missing")
 
+    def test_system_audit_waits_for_transient_queue_backlog_and_requires_new_snapshot(self) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        attempts = 0
+
+        def request_fn(*_args) -> http_slo_probe.HttpProbeResponse:
+            nonlocal attempts
+            attempts += 1
+            payload = _system_audit_payload(f"system-audit:attempt:{attempts}")
+            if attempts == 1:
+                payload["overall_status"] = "issues_found"
+                payload["audit_status"] = {
+                    "integrity": "pass",
+                    "freshness": "not_fresh",
+                    "queue": "backlog",
+                }
+                payload["summary"]["passed_business_page_count"] = 15
+                payload["summary"]["database_internal_contracts"] = "issues_found"
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            )
+
+        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None):
+            result = write_operation_e2e_smoke._wait_for_system_audit(
+                checkpoint,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                request_fn=request_fn,
+                excluded_audit_ids={"system-audit:attempt:1"},
+            )
+
+        self.assertEqual(attempts, 2)
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["system_audit_id"], "system-audit:attempt:2")
+
     def test_nonconsumer_isolation_compares_post_write_payload_to_fresh_baseline(self) -> None:
         checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
             name="isolation",

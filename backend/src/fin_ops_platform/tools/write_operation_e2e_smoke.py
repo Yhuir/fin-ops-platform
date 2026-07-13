@@ -573,13 +573,15 @@ def _run_one_scenario(
     audit_ids: set[str] = set()
     preflight: dict[str, Any] | None = None
     if scenario.fixture_ownership == "test_owned":
-        preflight = _collect_system_audit(
+        preflight = _wait_for_system_audit(
             checkpoints[0],
             base_url=base_url,
             api_prefix=api_prefix,
             headers=headers,
             timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
             request_fn=request_fn,
+            excluded_audit_ids=audit_ids,
         )
         if preflight.get("status") != "pass":
             return {
@@ -845,13 +847,15 @@ def _run_checkpoint(
             write_slo=write_slo,
             post_api=post_api,
         )
-    system_audit = _collect_system_audit(
+    system_audit = _wait_for_system_audit(
         checkpoint,
         base_url=base_url,
         api_prefix=api_prefix,
         headers=headers,
         timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
         request_fn=request_fn,
+        excluded_audit_ids=audit_ids,
     )
     if system_audit["status"] not in {"pass", "skipped"}:
         return _failed_checkpoint(
@@ -1513,6 +1517,52 @@ def _collect_system_audit(
         }
     except Exception as exc:
         return {"status": "fail", "error": str(exc) or exc.__class__.__name__}
+
+
+_RETRYABLE_SYSTEM_AUDIT_ERRORS = {
+    "system_audit_page_count_or_contract_failed",
+    "system_audit_internal_gate_failed",
+    "system_audit_business_pages_failed",
+    "system_audit_id_reused",
+    "unexpected_status:500",
+    "unexpected_status:502",
+    "unexpected_status:503",
+    "unexpected_status:504",
+}
+
+
+def _wait_for_system_audit(
+    checkpoint: WriteCheckpoint,
+    *,
+    base_url: str,
+    api_prefix: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+    request_fn: RequestFn,
+    excluded_audit_ids: set[str],
+) -> dict[str, Any]:
+    deadline = monotonic() + max(1.0, timeout_seconds)
+    last_result: dict[str, Any] = {"status": "fail", "error": "system_audit_not_attempted"}
+    while True:
+        result = _collect_system_audit(
+            checkpoint,
+            base_url=base_url,
+            api_prefix=api_prefix,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            request_fn=request_fn,
+        )
+        if result.get("status") == "pass":
+            audit_id = str(result.get("system_audit_id") or "")
+            if audit_id and audit_id not in excluded_audit_ids:
+                return result
+            result = {"status": "fail", "error": "system_audit_id_reused"}
+        last_result = result
+        error = str(result.get("error") or "")
+        if error not in _RETRYABLE_SYSTEM_AUDIT_ERRORS or monotonic() >= deadline:
+            return last_result
+        sleep(max(0.05, poll_interval_seconds))
 
 
 def _effective_write_slo_event_sample_limit(limit: int, *, expectation_count: int) -> int:
