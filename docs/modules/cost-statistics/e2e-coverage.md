@@ -2,6 +2,8 @@
 
 本文件把 `cost-statistics` 的 Spec ID 映射到自动化测试。状态定义见 `docs/dev/spec-first-e2e-audit.md`。
 
+2026-07-13 增量：`COST-E2E-001` 已增加真实 Browser 的按时间/按标签收支分列金额、收入流水和收入标签断言；`COST-E2E-004` / `COST-E2E-009` 由 Browser、Vitest 与后端 API 共同覆盖 time/bank_tag 的资金方向、收入流水、方向摘要和 XLSX 标签列。下表旧描述中的“全银行支出”统一按当前产品合同解释为“全银行收入与支出”。
+
 ## 覆盖矩阵
 
 | Spec ID | 状态 | 当前覆盖 | 缺口/说明 |

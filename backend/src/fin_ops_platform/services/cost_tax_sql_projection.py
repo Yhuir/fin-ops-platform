@@ -372,13 +372,7 @@ class CostStatisticsSqlProjectionBuilder:
                 "total_amount": format_decimal(sum((entry["amount_decimal"] for entry in sorted_entries), start=ZERO)),
             },
             "time_rows": [_serialize_cost_entry(entry) for entry in sorted_entries],
-            "bank_flow_summary": {
-                "row_count": len(sorted_bank_flow_entries),
-                "transaction_count": len(sorted_bank_flow_entries),
-                "total_amount": format_decimal(
-                    sum((entry["amount_decimal"] for entry in sorted_bank_flow_entries), start=ZERO)
-                ),
-            },
+            "bank_flow_summary": _bank_flow_summary(sorted_bank_flow_entries),
             "bank_flow_time_rows": [_serialize_cost_entry(entry) for entry in sorted_bank_flow_entries],
             "bank_accounts": self._bank_accounts_from_settings(),
             "project_rows": [
@@ -537,7 +531,6 @@ class CostStatisticsSqlProjectionBuilder:
             return []
         payload = list_by_month(
             month,
-            direction="expense",
             require_fresh=True,
             reason="cost_statistics_bank_flow_rows",
         )
@@ -546,6 +539,9 @@ class CostStatisticsSqlProjectionBuilder:
         entries: list[dict[str, Any]] = []
         for index, row in enumerate(list(payload.get("rows") or [])):
             if not isinstance(row, dict):
+                continue
+            direction = _bank_flow_direction(row)
+            if direction is None:
                 continue
             transaction_id = str(row.get("transaction_id") or row.get("id") or row.get("row_id") or f"bank-flow-{index}").strip()
             amount = _decimal(row.get("amount") or row.get("signed_amount") or row.get("debit_amount"))
@@ -566,7 +562,7 @@ class CostStatisticsSqlProjectionBuilder:
                     "trade_time": str(row.get("trade_time") or row.get("trade_date") or ""),
                     "counterparty_name": str(row.get("counterparty_name") or ""),
                     "payment_account_label": _bank_detail_payment_account_label(row),
-                    "direction": "支出",
+                    "direction": direction,
                     "remark": str(row.get("purpose") or row.get("remark") or row.get("summary") or ""),
                     "project_name": "未配对OA",
                     "project_id": "",
@@ -955,6 +951,29 @@ def _outflow_amount(bank_row: dict[str, Any]) -> Decimal | None:
     if amount in (None, ZERO):
         return None
     return abs(amount)
+
+
+def _bank_flow_direction(row: dict[str, Any]) -> str | None:
+    direction = str(row.get("direction") or row.get("txn_direction") or "").strip().lower()
+    if direction in {"income", "inflow", "收入", "收", "收款", "credit"}:
+        return "收入"
+    if direction in {"expense", "outflow", "支出", "支", "付款", "debit"}:
+        return "支出"
+    return None
+
+
+def _bank_flow_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    expense_entries = [entry for entry in entries if entry.get("direction") == "支出"]
+    income_entries = [entry for entry in entries if entry.get("direction") == "收入"]
+    return {
+        "row_count": len(entries),
+        "transaction_count": len(entries),
+        "total_amount": format_decimal(sum((entry["amount_decimal"] for entry in entries), start=ZERO)),
+        "expense_amount": format_decimal(sum((entry["amount_decimal"] for entry in expense_entries), start=ZERO)),
+        "income_amount": format_decimal(sum((entry["amount_decimal"] for entry in income_entries), start=ZERO)),
+        "expense_transaction_count": len(expense_entries),
+        "income_transaction_count": len(income_entries),
+    }
 
 
 def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:

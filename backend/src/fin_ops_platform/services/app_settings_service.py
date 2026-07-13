@@ -78,8 +78,10 @@ DEFAULT_TURNOVER_LEDGER_TAG_SELECTION = {
     "selected_tag_codes": None,
 }
 COST_STATISTICS_UNCATEGORIZED_TAG_CODE = "__uncategorized__"
+COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION = 2
 DEFAULT_COST_STATISTICS_TAG_SELECTION = {
     "version": 1,
+    "selection_schema_version": COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION,
     "selected_tag_codes": None,
 }
 
@@ -861,6 +863,7 @@ class AppSettingsService:
         next_selection = self._normalize_cost_statistics_tag_selection(
             {
                 "version": int(current.get("version") or 1) + 1,
+                "selection_schema_version": COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION,
                 "selected_tag_codes": payload.get("selected_tag_codes"),
             },
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
@@ -1868,9 +1871,6 @@ class AppSettingsService:
             code = str(tag.get("code") or "").strip()
             if not code or code in seen_codes:
                 continue
-            direction = str(tag.get("direction") or "any").strip().lower()
-            if direction in {"income", "in", "收入", "收款", "credit"}:
-                continue
             seen_codes.add(code)
             path = [str(item).strip() for item in list(tag.get("path") or []) if str(item).strip()]
             primary = str(tag.get("output_primary_label") or tag.get("label") or code).strip() or code
@@ -1894,7 +1894,7 @@ class AppSettingsService:
                 "path": ["未分类", "未分类"],
                 "source": "system",
                 "status": "active",
-                "direction": "expense",
+                "direction": "any",
                 "output_primary_label": "未分类",
                 "output_sub_label": "未分类",
             }
@@ -1914,14 +1914,19 @@ class AppSettingsService:
         )
         if version <= 0:
             version = int(DEFAULT_COST_STATISTICS_TAG_SELECTION["version"])
+        selection_schema_version = BankTransactionCategoryService._normalize_version(
+            raw_payload.get("selection_schema_version", 1)
+        )
+        active_tags = AppSettingsService._cost_statistics_active_tag_definitions(bank_transaction_tags)
         active_codes = {
             str(tag.get("code") or "").strip()
-            for tag in AppSettingsService._cost_statistics_active_tag_definitions(bank_transaction_tags)
+            for tag in active_tags
             if str(tag.get("code") or "").strip()
         }
         if raw_payload.get("selected_tag_codes") is None:
             return {
                 "version": version,
+                "selection_schema_version": COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION,
                 "selected_tag_codes": None,
             }
         selected_tag_codes: list[str] = []
@@ -1939,8 +1944,18 @@ class AppSettingsService:
                 continue
             seen.add(tag_code)
             selected_tag_codes.append(tag_code)
+        if selection_schema_version < COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION:
+            for tag in active_tags:
+                direction = str(tag.get("direction") or "any").strip().lower()
+                tag_code = str(tag.get("code") or "").strip()
+                if direction not in {"income", "in", "收入", "收款", "credit"} or not tag_code or tag_code in seen:
+                    continue
+                seen.add(tag_code)
+                selected_tag_codes.append(tag_code)
+            version += 1
         return {
             "version": version,
+            "selection_schema_version": COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION,
             "selected_tag_codes": selected_tag_codes,
         }
 
@@ -1975,6 +1990,9 @@ class AppSettingsService:
         )
         return {
             "version": int(payload.get("version") or 1),
+            "selection_schema_version": int(
+                payload.get("selection_schema_version") or COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION
+            ),
             "bank_auto_tag_rules_version": int(bank_transaction_tags.get("version") or 1),
             "default_selection_applied": default_selection_applied,
             "selected_tag_codes": selected,

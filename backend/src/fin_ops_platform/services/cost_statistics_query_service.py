@@ -133,6 +133,16 @@ class CostStatisticsQueryService:
             None,
         )
         if entry is None:
+            bank_flow_entries = self._entries_from_explorer_payload(payload, rows_key="bank_flow_time_rows")
+            entry = next(
+                (
+                    candidate
+                    for candidate in bank_flow_entries
+                    if candidate["transaction_id"] == normalized_transaction_id
+                ),
+                None,
+            )
+        if entry is None:
             raise KeyError(transaction_id)
         month = entry["month"] or (entry["trade_time"] or "")[:7] or "all"
         return {
@@ -345,7 +355,7 @@ class CostStatisticsQueryService:
         next_payload["project_rows"] = self._project_rows_from_time_rows(filtered_time_rows)
         next_payload["expense_type_rows"] = self._expense_type_rows_from_time_rows(filtered_time_rows)
         next_payload["bank_flow_time_rows"] = filtered_bank_flow_rows
-        next_payload["bank_flow_summary"] = self._summary_from_time_rows(filtered_bank_flow_rows)
+        next_payload["bank_flow_summary"] = self._bank_flow_summary_from_time_rows(filtered_bank_flow_rows)
         next_payload["cost_statistics_tag_selection_version"] = (
             int(tag_selection_payload.get("version") or 1) if isinstance(tag_selection_payload, dict) else 1
         )
@@ -377,6 +387,23 @@ class CostStatisticsQueryService:
             "row_count": len(rows),
             "transaction_count": len(transaction_ids) if transaction_ids else len(rows),
             "total_amount": _plain_money(total_amount),
+        }
+
+    @staticmethod
+    def _bank_flow_summary_from_time_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        summary = CostStatisticsQueryService._summary_from_time_rows(rows)
+        expense_rows = [row for row in rows if str(row.get("direction") or "").strip() == "支出"]
+        income_rows = [row for row in rows if str(row.get("direction") or "").strip() == "收入"]
+        return {
+            **summary,
+            "expense_amount": _plain_money(
+                sum((_decimal_from_value(row.get("amount")) or Decimal("0.00") for row in expense_rows), start=Decimal("0.00"))
+            ),
+            "income_amount": _plain_money(
+                sum((_decimal_from_value(row.get("amount")) or Decimal("0.00") for row in income_rows), start=Decimal("0.00"))
+            ),
+            "expense_transaction_count": len(expense_rows),
+            "income_transaction_count": len(income_rows),
         }
 
     @staticmethod
@@ -534,6 +561,10 @@ class CostStatisticsQueryService:
                 "row_count": 0,
                 "transaction_count": 0,
                 "total_amount": "0.00",
+                "expense_amount": "0.00",
+                "income_amount": "0.00",
+                "expense_transaction_count": 0,
+                "income_transaction_count": 0,
             },
             "bank_flow_time_rows": [],
             "bank_accounts": [],
@@ -608,6 +639,7 @@ class CostStatisticsQueryService:
             )
             self._ensure_export_row_limit(view=view, total=len(entries))
             scope_label = self._build_scope_label(month=month, **range_kwargs)
+            directional_summary = self._directional_summary_from_entries(entries)
             return self._preview_payload(
                 view=view,
                 file_name=self._build_filename(month=scope_label, view=view),
@@ -628,6 +660,26 @@ class CostStatisticsQueryService:
                     for entry in entries
                 ],
                 total_amount=_plain_money(sum((entry["amount_decimal"] for entry in entries), start=Decimal("0.00"))),
+                summary_extra=directional_summary,
+            )
+        if view == "bank_tag":
+            entries = self._filtered_entries_from_read_model(
+                month=month,
+                project_scope=project_scope,
+                rows_key="bank_flow_time_rows",
+                **range_kwargs,
+            )
+            self._ensure_export_row_limit(view=view, total=len(entries))
+            scope_label = self._build_scope_label(month=month, **range_kwargs)
+            return self._preview_payload(
+                view=view,
+                file_name=self._build_filename(month=scope_label, view=view),
+                scope_label=scope_label,
+                sheet_names=["按标签统计"],
+                columns=["时间", "主标签", "子标签", "资金方向", "金额", "费用内容", "对方户名", "支付账户"],
+                rows=[self._bank_tag_row_from_entry(entry) for entry in entries],
+                total_amount=_plain_money(sum((entry["amount_decimal"] for entry in entries), start=Decimal("0.00"))),
+                summary_extra=self._directional_summary_from_entries(entries),
             )
         if view == "project":
             if not project_names:
@@ -735,7 +787,7 @@ class CostStatisticsQueryService:
                 ],
                 total_amount=_plain_money(sum((entry["amount_decimal"] for entry in entries), start=Decimal("0.00"))),
             )
-        raise ValueError("view must be time, project, or expense_type.")
+        raise ValueError("view must be time, bank_tag, project, or expense_type.")
 
     def _export_view_from_read_model(self, **kwargs: Any) -> tuple[str, bytes]:
         view = str(kwargs.get("view") or "").strip()
@@ -760,6 +812,23 @@ class CostStatisticsQueryService:
                 "按时间统计",
                 ["时间", "项目名称", "费用类型", "金额", "费用内容", "资金方向", "对方户名", "支付账户"],
                 rows,
+            )
+            return (
+                self._build_filename(month=self._build_scope_label(month=month, **range_kwargs), view=view),
+                self._serialize_workbook(workbook),
+            )
+        if view == "bank_tag":
+            entries = self._filtered_entries_from_read_model(
+                month=month,
+                project_scope=project_scope,
+                rows_key="bank_flow_time_rows",
+                **range_kwargs,
+            )
+            self._ensure_export_row_limit(view=view, total=len(entries))
+            workbook = self._table_workbook(
+                "按标签统计",
+                ["时间", "主标签", "子标签", "资金方向", "金额", "费用内容", "对方户名", "支付账户"],
+                [self._bank_tag_row_from_entry(entry) for entry in entries],
             )
             return (
                 self._build_filename(month=self._build_scope_label(month=month, **range_kwargs), view=view),
@@ -1058,6 +1127,7 @@ class CostStatisticsQueryService:
         columns: list[str],
         rows: list[list[Any]],
         total_amount: str,
+        summary_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "view": view,
@@ -1068,6 +1138,7 @@ class CostStatisticsQueryService:
                 "transaction_count": len(rows),
                 "total_amount": total_amount,
                 "sheet_count": len(sheet_names),
+                **dict(summary_extra or {}),
             },
             "sheet_names": sheet_names,
             "columns": columns,
@@ -1086,6 +1157,34 @@ class CostStatisticsQueryService:
             entry["counterparty_name"],
             entry["payment_account_label"],
         ]
+
+    @staticmethod
+    def _bank_tag_row_from_entry(entry: dict[str, Any]) -> list[Any]:
+        return [
+            entry["trade_time"],
+            entry["bank_tag_primary_label"],
+            entry["bank_tag_sub_label"],
+            entry["direction"],
+            _plain_money(entry["amount_decimal"]),
+            entry["expense_content"],
+            entry["counterparty_name"],
+            entry["payment_account_label"],
+        ]
+
+    @staticmethod
+    def _directional_summary_from_entries(entries: list[dict[str, Any]]) -> dict[str, Any]:
+        expense_entries = [entry for entry in entries if entry.get("direction") == "支出"]
+        income_entries = [entry for entry in entries if entry.get("direction") == "收入"]
+        return {
+            "expense_amount": _plain_money(
+                sum((entry["amount_decimal"] for entry in expense_entries), start=Decimal("0.00"))
+            ),
+            "income_amount": _plain_money(
+                sum((entry["amount_decimal"] for entry in income_entries), start=Decimal("0.00"))
+            ),
+            "expense_transaction_count": len(expense_entries),
+            "income_transaction_count": len(income_entries),
+        }
 
     @staticmethod
     def _project_aggregate_rows(entries: list[dict[str, Any]], *, aggregate_by: str) -> list[dict[str, Any]]:
@@ -1361,6 +1460,8 @@ class CostStatisticsQueryService:
         month_segment = "全部期间" if (month or "").strip().lower() == "all" else month
         if view == "time":
             return f"成本统计_{month_segment}_按时间统计.xlsx"
+        if view == "bank_tag":
+            return f"成本统计_{month_segment}_按标签统计.xlsx"
         if view == "month":
             return f"成本统计_{month_segment}_月份汇总.xlsx"
         if view == "project":

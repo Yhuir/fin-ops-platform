@@ -91,19 +91,20 @@ type CostBankExplorerRow = {
 
 type CostBankTagPrimaryRow = {
   primaryLabel: string;
-  totalAmount: string;
-  transactionCount: number;
+  expenseAmount: string;
+  incomeAmount: string;
+  expenseTransactionCount: number;
+  incomeTransactionCount: number;
   subTagCount: number;
-  percentageLabel: string;
 };
 
 type CostBankTagSubRow = {
   primaryLabel: string;
   subLabel: string;
-  totalAmount: string;
-  transactionCount: number;
-  projectCount: number;
-  percentageLabel: string;
+  expenseAmount: string;
+  incomeAmount: string;
+  expenseTransactionCount: number;
+  incomeTransactionCount: number;
 };
 
 type ScopeRangePickerProps = {
@@ -162,6 +163,32 @@ function formatMoney(value: number) {
 
 function sumCostTimeRows(rows: CostTimeRow[]) {
   return rows.reduce((sum, row) => sum + moneyToNumber(row.amount), 0);
+}
+
+function isIncomeRow(row: CostTimeRow) {
+  return row.direction.trim() === "收入";
+}
+
+function summarizeDirectionAmounts(rows: CostTimeRow[]) {
+  let expenseAmount = 0;
+  let incomeAmount = 0;
+  let expenseTransactionCount = 0;
+  let incomeTransactionCount = 0;
+  for (const row of rows) {
+    if (isIncomeRow(row)) {
+      incomeAmount += moneyToNumber(row.amount);
+      incomeTransactionCount += 1;
+    } else {
+      expenseAmount += moneyToNumber(row.amount);
+      expenseTransactionCount += 1;
+    }
+  }
+  return {
+    expenseAmount: formatMoney(expenseAmount),
+    incomeAmount: formatMoney(incomeAmount),
+    expenseTransactionCount,
+    incomeTransactionCount,
+  };
 }
 
 function formatCostTradeTime(value: string) {
@@ -297,18 +324,15 @@ function bankTagSubLabel(row: CostTimeRow) {
 }
 
 function buildBankTagPrimaryRowsFromTimeRows(rows: CostTimeRow[]) {
-  const grouped = new Map<string, { totalAmount: number; transactionCount: number; subTags: Set<string> }>();
-  const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
+  const grouped = new Map<string, { rows: CostTimeRow[]; subTags: Set<string> }>();
 
   for (const row of rows) {
     const primaryLabel = bankTagPrimaryLabel(row);
     const bucket = grouped.get(primaryLabel) ?? {
-      totalAmount: 0,
-      transactionCount: 0,
+      rows: [],
       subTags: new Set<string>(),
     };
-    bucket.totalAmount += Number(row.amount.replace(/,/g, ""));
-    bucket.transactionCount += 1;
+    bucket.rows.push(row);
     bucket.subTags.add(bankTagSubLabel(row));
     grouped.set(primaryLabel, bucket);
   }
@@ -316,33 +340,24 @@ function buildBankTagPrimaryRowsFromTimeRows(rows: CostTimeRow[]) {
   return Array.from(grouped.entries())
     .map<CostBankTagPrimaryRow>(([primaryLabel, bucket]) => ({
       primaryLabel,
-      totalAmount: bucket.totalAmount.toLocaleString("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-      transactionCount: bucket.transactionCount,
+      ...summarizeDirectionAmounts(bucket.rows),
       subTagCount: bucket.subTags.size,
-      percentageLabel: `${((bucket.totalAmount / (totalAmount || 1)) * 100).toFixed(1)}%`,
     }))
-    .sort((left, right) => Number(right.totalAmount.replace(/,/g, "")) - Number(left.totalAmount.replace(/,/g, "")));
+    .sort((left, right) => (
+      moneyToNumber(right.expenseAmount) + moneyToNumber(right.incomeAmount)
+      - moneyToNumber(left.expenseAmount) - moneyToNumber(left.incomeAmount)
+    ));
 }
 
 function buildBankTagSubRowsFromTimeRows(rows: CostTimeRow[]) {
-  const grouped = new Map<string, { totalAmount: number; transactionCount: number; projects: Set<string> }>();
-  const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
+  const grouped = new Map<string, CostTimeRow[]>();
 
   for (const row of rows) {
     const primaryLabel = bankTagPrimaryLabel(row);
     const subLabel = bankTagSubLabel(row);
     const groupKey = `${primaryLabel}\u0000${subLabel}`;
-    const bucket = grouped.get(groupKey) ?? {
-      totalAmount: 0,
-      transactionCount: 0,
-      projects: new Set<string>(),
-    };
-    bucket.totalAmount += Number(row.amount.replace(/,/g, ""));
-    bucket.transactionCount += 1;
-    bucket.projects.add(row.projectName);
+    const bucket = grouped.get(groupKey) ?? [];
+    bucket.push(row);
     grouped.set(groupKey, bucket);
   }
 
@@ -352,16 +367,13 @@ function buildBankTagSubRowsFromTimeRows(rows: CostTimeRow[]) {
       return {
         primaryLabel,
         subLabel,
-        totalAmount: bucket.totalAmount.toLocaleString("en-US", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        }),
-        transactionCount: bucket.transactionCount,
-        projectCount: bucket.projects.size,
-        percentageLabel: `${((bucket.totalAmount / (totalAmount || 1)) * 100).toFixed(1)}%`,
+        ...summarizeDirectionAmounts(bucket),
       };
     })
-    .sort((left, right) => Number(right.totalAmount.replace(/,/g, "")) - Number(left.totalAmount.replace(/,/g, "")));
+    .sort((left, right) => (
+      moneyToNumber(right.expenseAmount) + moneyToNumber(right.incomeAmount)
+      - moneyToNumber(left.expenseAmount) - moneyToNumber(left.incomeAmount)
+    ));
 }
 
 function filterScopeTimeRows(
@@ -1067,7 +1079,7 @@ export default function CostStatisticsPage() {
 	      ),
 	    [bankFlowRows, timeScopeMode, timeScopeYear, timeScopeMonth],
 	  );
-  const timeTotalAmount = useMemo(() => formatMoney(sumCostTimeRows(filteredTimeRows)), [filteredTimeRows]);
+  const timeDirectionSummary = useMemo(() => summarizeDirectionAmounts(filteredTimeRows), [filteredTimeRows]);
   const filteredProjectTimeRows = useMemo(
     () =>
       filterScopeTimeRows(
@@ -1125,7 +1137,7 @@ export default function CostStatisticsPage() {
 	      ),
 	    [bankFlowRows, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth],
 	  );
-  const bankTagTotalAmount = useMemo(() => formatMoney(sumCostTimeRows(filteredBankTagRows)), [filteredBankTagRows]);
+  const bankTagDirectionSummary = useMemo(() => summarizeDirectionAmounts(filteredBankTagRows), [filteredBankTagRows]);
   const bankTagPrimaryRows = useMemo(
     () => buildBankTagPrimaryRowsFromTimeRows(filteredBankTagRows),
     [filteredBankTagRows],
@@ -1435,12 +1447,16 @@ export default function CostStatisticsPage() {
 	      setExpenseTypeStartDate(bounds.startDate);
 	      setExpenseTypeEndDate(bounds.endDate);
       setExpenseTypeSelections(selectedExpenseType ? [selectedExpenseType] : []);
-	    } else {
-	      setExportCenterMode("time");
-	      const rangeMode = timeScopeMode === "month" ? "month" : "custom";
-	      const bounds = getScopeDateRange(bankFlowRows, timeScopeMode, timeScopeYear, timeScopeMonth);
+    } else {
+      const isBankTagExport = viewMode === "bankTag";
+	      setExportCenterMode(isBankTagExport ? "bank_tag" : "time");
+      const activeScopeMode = isBankTagExport ? bankTagScopeMode : timeScopeMode;
+      const activeScopeYear = isBankTagExport ? bankTagScopeYear : timeScopeYear;
+      const activeScopeMonth = isBankTagExport ? bankTagScopeMonth : timeScopeMonth;
+	      const rangeMode = activeScopeMode === "month" ? "month" : "custom";
+	      const bounds = getScopeDateRange(bankFlowRows, activeScopeMode, activeScopeYear, activeScopeMonth);
 	      setTimeRangeMode(rangeMode);
-	      setTimeMonth(timeScopeMonth);
+	      setTimeMonth(activeScopeMonth);
 	      setTimeStartDate(bounds.startDate);
       setTimeEndDate(bounds.endDate);
     }
@@ -1448,17 +1464,17 @@ export default function CostStatisticsPage() {
   }
 
   function buildExportParamsFromState(): CostExportParams | null {
-    if (exportCenterMode === "time") {
+    if (exportCenterMode === "time" || exportCenterMode === "bank_tag") {
       if (timeRangeMode === "month") {
         return {
           month: timeMonth,
-          view: "time",
+          view: exportCenterMode,
           projectScope: costProjectScope,
         };
       }
       return {
         month: "all",
-        view: "time",
+        view: exportCenterMode,
         projectScope: costProjectScope,
         startDate: timeStartDate <= timeEndDate ? timeStartDate : timeEndDate,
         endDate: timeStartDate <= timeEndDate ? timeEndDate : timeStartDate,
@@ -1606,6 +1622,7 @@ export default function CostStatisticsPage() {
           amount: row.amount,
           direction: row.direction,
           paymentAccountLabel: row.paymentAccountLabel,
+          toneByDirection: true,
         }),
       },
       { key: "expenseContent", header: "费用内容", flex: 1.2, render: (row) => row.expenseContent },
@@ -1628,6 +1645,7 @@ export default function CostStatisticsPage() {
           amount: row.amount,
           direction: row.direction,
           paymentAccountLabel: row.paymentAccountLabel,
+          toneByDirection: viewMode === "bankTag",
         }),
       },
       { key: "expenseContent", header: "费用内容", flex: 1.1, render: (row) => row.expenseContent },
@@ -1760,8 +1778,8 @@ export default function CostStatisticsPage() {
                 : viewMode === "expenseType"
                   ? "当前时间范围没有可用于 OA 费用类型统计的支出流水。"
                   : viewMode === "bankTag"
-                    ? "当前时间范围没有可用于标签统计的支出流水。"
-                  : "当前时间范围没有可用于成本统计的支出流水。"}
+                    ? "当前时间范围没有可用于标签统计的收入或支出流水。"
+                  : "当前时间范围没有可用于流水统计的收入或支出流水。"}
           </div>
         ) : null}
 
@@ -1774,7 +1792,14 @@ export default function CostStatisticsPage() {
                     <div className="cost-section-heading-copy">
                       <h2>按时间统计</h2>
                       <span>{timeScopeLabel}</span>
-                      <strong className="cost-section-total">总金额 {timeTotalAmount}</strong>
+                      <div className="cost-direction-summary" aria-label="时间统计方向金额">
+                        <strong className="cost-direction-amount cost-direction-amount--expense">
+                          支出金额 {timeDirectionSummary.expenseAmount}
+                        </strong>
+                        <strong className="cost-direction-amount cost-direction-amount--income">
+                          收入金额 {timeDirectionSummary.incomeAmount}
+                        </strong>
+                      </div>
 	                    </div>
 	                    <div className="cost-section-heading-actions cost-project-scope-actions">
 	                      <div ref={scopeControlsRef} className="cost-scope-controls">
@@ -1800,7 +1825,7 @@ export default function CostStatisticsPage() {
                     columns={timeColumns}
                     rows={filteredTimeRows}
                     getRowKey={getCostTimeRowRenderKey}
-                    emptyLabel="当前时间范围没有可用于成本统计的支出流水。"
+                    emptyLabel="当前时间范围没有收入或支出流水。"
                     onRowClick={(row) => void openTransactionDetail(row, "time")}
                     getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                   />
@@ -2076,7 +2101,14 @@ export default function CostStatisticsPage() {
                   <div className="cost-section-heading-copy">
                     <h2>按标签统计</h2>
                     <span>{bankTagScopeLabel}</span>
-                    <strong className="cost-section-total">总金额 {bankTagTotalAmount}</strong>
+                    <div className="cost-direction-summary" aria-label="标签统计方向金额">
+                      <strong className="cost-direction-amount cost-direction-amount--expense">
+                        支出金额 {bankTagDirectionSummary.expenseAmount}
+                      </strong>
+                      <strong className="cost-direction-amount cost-direction-amount--income">
+                        收入金额 {bankTagDirectionSummary.incomeAmount}
+                      </strong>
+                    </div>
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
                     <div ref={scopeControlsRef} className="cost-scope-controls">
@@ -2112,11 +2144,13 @@ export default function CostStatisticsPage() {
                       setTransactionDetail(null);
                     }}
                     renderPrimary={(row) => row.primaryLabel}
-                    renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.subTagCount} 个子标签`}
+                    renderSecondary={(row) => (
+                      `支出 ${row.expenseTransactionCount} 笔 / 收入 ${row.incomeTransactionCount} 笔 / ${row.subTagCount} 个子标签`
+                    )}
                     renderMeta={(row) => (
-                      <div className="cost-explorer-item-meta-stack">
-                        <span>{row.totalAmount}</span>
-                        <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
+                      <div className="cost-direction-meta">
+                        <span className="cost-direction-amount cost-direction-amount--expense">支出 {row.expenseAmount}</span>
+                        <span className="cost-direction-amount cost-direction-amount--income">收入 {row.incomeAmount}</span>
                       </div>
                     )}
                   />
@@ -2133,11 +2167,11 @@ export default function CostStatisticsPage() {
                       setTransactionDetail(null);
                     }}
                     renderPrimary={(row) => row.subLabel}
-                    renderSecondary={(row) => `${row.transactionCount} 条流水`}
+                    renderSecondary={(row) => `支出 ${row.expenseTransactionCount} 笔 / 收入 ${row.incomeTransactionCount} 笔`}
                     renderMeta={(row) => (
-                      <div className="cost-explorer-item-meta-stack">
-                        <span>{row.totalAmount}</span>
-                        <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
+                      <div className="cost-direction-meta">
+                        <span className="cost-direction-amount cost-direction-amount--expense">支出 {row.expenseAmount}</span>
+                        <span className="cost-direction-amount cost-direction-amount--income">收入 {row.incomeAmount}</span>
                       </div>
                     )}
                   />

@@ -2,20 +2,28 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
-## 2026-07-11 - 正式 relation lineage 与全银行支出口径测试收敛
+## 2026-07-13 - 全流水收入纳入标签、分方向展示与导出
+
+- 变更类型：business rule + read model/API contract + settings migration + frontend interaction/export。
+- 架构结论：OA 统计继续只消费配对支出 `time_rows`；按时间/按标签消费收入与支出 `bank_flow_time_rows`，不显示合并总额或净额，只显示正数绝对值的分方向金额/笔数。收入与支出标签都进入规则，legacy 显式选择升级为 schema v2 时保留原支出选择并加入当前有效收入标签。
+- 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`tests/test_app_settings_service.py`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts`。
+- 覆盖点：投影拉取 inflow/outflow 且输出方向摘要；query/tag/export/filter 合同；legacy 规则迁移；页面顶部、主标签、子标签分方向金额/笔数；绿/橘方向样式；收入明细；time/bank_tag preview 和下载字段；OA 统计旧口径回归。
+- 七类测试决策：1 业务核心适用（方向分类、金额、规则迁移）；2 service 适用（projection/query/settings）；3 API contract 适用（explorer、preview、export）；4 read model/cache/worker 适用（schema v8、Audit expected-set）；5 frontend interaction 适用；6 E2E 适用（bank detail -> projection -> API -> UI/export）；7 existing regression 适用（OA 统计、旧选择和旧导出）。权限合同未改变，沿用既有 tag-rules 写权限和 export 权限回归。
+
+## 2026-07-11 - 正式 relation lineage 与全银行流水口径测试收敛
 
 - 变更类型：test fixture contract correction + read model lineage regression。
-- 架构结论：成本统计 OA 归因只能消费 active `workbench_relation`，Workbench open/proposed candidate 即使相似度很高也不得进入成本；API fixture 必须通过正式 confirm-link 写边界建立 active relation，禁止直接改 pair query service 或恢复 candidate fallback。`按标签` / `按时间` 的 `bank_flow_time_rows` 是独立的全银行支出 projection，测试数据必须从 canonical bank transactions 构造，不能借用 OA 配对成本行冒充该事实集。
+- 架构结论：成本统计 OA 归因只能消费 active `workbench_relation`，Workbench open/proposed candidate 即使相似度很高也不得进入成本；API fixture 必须通过正式 confirm-link 写边界建立 active relation。`按标签` / `按时间` 的 `bank_flow_time_rows` 是独立的全银行流水 projection；2026-07-13 起包含收入与支出，测试数据必须从 canonical bank transactions 构造。
 - 更新测试：`tests/test_cost_statistics_api.py`。
-- 覆盖点：fixture 通过真实 `/api/workbench/actions/confirm-link` 建立关系；候选关系仍被排除；全银行支出可包含没有 OA relation 的流水，并保持 `未配对OA` / `未分类` 展示口径；project/expense-type export 继续消费 OA 配对成本行。
+- 覆盖点：fixture 通过真实 `/api/workbench/actions/confirm-link` 建立关系；候选关系仍被排除；全银行流水可包含没有 OA relation 的收入或支出，并保持 `未配对OA` / `未分类` 展示口径；project/expense-type export 继续消费 OA 配对支出行。
 - 七类测试决策：business core、service-layer、API contract、read model/cache/background job、end-to-end business-flow integration、existing regression 适用并由成本统计 API/服务组合测试覆盖；frontend interaction 行为未变，继续由既有 `CostStatisticsPage.test.tsx` 与 Browser flow 覆盖。
 
 ## 2026-07-10 - 成本统计标签规则和双统计口径
 
 - 变更类型：settings-backed rule contract + read model payload contract + frontend drawer interaction。
-- 架构结论：成本统计标签规则由 `AppSettingsService` 持久化，暴露主/子标签 leaf code 与虚拟 `__uncategorized__` 未分类标签；默认未配置等价于全选当前有效支出标签 + 未分类，显式空数组表示全部不进入成本统计。`按项目`、`按银行`、`按OA费用类型` 只统计规则过滤后的 OA 配对 `time_rows`；`按标签`、`按时间` 只统计规则过滤后的全部银行支出 `bank_flow_time_rows`。规则保存不触发 read model rebuild，只返回当前成本统计 scope 的 operation barrier target；页面等待 fresh 后关闭抽屉。
+- 架构结论：成本统计标签规则由 `AppSettingsService` 持久化，暴露主/子标签 leaf code 与虚拟 `__uncategorized__` 未分类标签；当前 schema v2 默认全选有效收入与支出标签 + 未分类，显式空数组表示全部不进入成本统计。`按项目`、`按银行`、`按OA费用类型` 只统计 OA 配对支出 `time_rows`；`按标签`、`按时间` 统计全部银行收支 `bank_flow_time_rows`。规则保存不触发 read model rebuild。
 - 新增/更新测试：`tests/test_app_settings_service.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx`。
-- 覆盖点：默认标签选择包含有效支出标签和未分类；保存空选择可持久化；API 读写标签规则并返回 operation barrier target，且缺少写权限时不调用 settings service；query service 对 OA 配对行和全银行支出行按同一标签规则过滤，并证明两组统计口径总额可不同、组内总额一致；前端 mapper 支持 `bank_flow_time_rows`；规则抽屉保存后等待 `cost_statistics` fresh 才关闭，且 API 标记只读时禁用保存。
+- 覆盖点：默认标签选择包含有效收支标签和未分类；保存空选择可持久化；API 读写标签规则并返回 operation barrier target，且缺少写权限时不调用 settings service；query service 对 OA 配对行和全银行收支行按同一标签规则过滤；前端 mapper 支持 `bank_flow_time_rows`；规则抽屉保存后等待 `cost_statistics` fresh 才关闭，且 API 标记只读时禁用保存。
 - 七类测试决策：business core 适用，覆盖标签选择和金额口径过滤；service-layer 适用，覆盖 settings 持久化、query service 过滤和 read model payload 使用；API contract 适用，覆盖 `GET/PUT /api/cost-statistics/tag-rules` 与 explorer 新字段；read model/cache/background job 适用，覆盖 v5 payload、query-time filtering 和不触发 rebuild 的边界；frontend interaction 适用，覆盖紧凑抽屉和等待 fresh；end-to-end business-flow 本轮用 API/service/component 闭环，真实 worker/browser 写流沿用既有成本统计 e2e；existing regression 适用，覆盖旧 explorer mapper、旧五视图按钮和导出/详情不会回退 live fallback。
 - 验证命令：见本轮最终说明。
 
@@ -31,9 +39,9 @@
 ## 2026-07-05 - 银行账户全集、标签规则联动、时间格式与表头总金额
 
 - 变更类型：read model payload contract + frontend interaction/layout + cross-module lifecycle。
-- 架构结论：按银行统计的银行全集由 settings owner 的 `bank_account_mappings` 经成本统计 SQL projection 写入 explorer `bank_accounts`，页面只合并 `bank_accounts + time_rows`，不再只从当前流水推断银行列表。当时按流水标签类型只读 `time_rows.bank_tag_*`；2026-07-10 后 `按标签` / `按时间` 改为读取 `bank_flow_time_rows`。自动标签规则变化通过 `bank_auto_tag_rules_changed -> cost_statistics.read_model.refresh` 刷新 read model。按时间展示格式化后的 `YYYY-MM-DD HH:mm:ss`，过滤仍使用原始 `trade_time`。五种统计口径表头均展示当前范围总金额。
+- 架构结论：按银行统计的银行全集由 settings owner 的 `bank_account_mappings` 经成本统计 SQL projection 写入 explorer `bank_accounts`，页面只合并 `bank_accounts + time_rows`。按时间展示格式化后的 `YYYY-MM-DD HH:mm:ss`，过滤仍使用原始 `trade_time`。2026-07-13 起全流水视图已用收支分列金额替代当时的表头总金额。
 - 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_bank_details_sql_runtime.py`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx`、`web/src/test/AppSidebar.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts`。
-- 覆盖点：explorer payload 必须包含 `bank_accounts`；settings 银行账户映射进入 `source_versions.bank_account_mappings_fingerprint`；标签规则版本继续进入 `source_versions.bank_auto_tag_rules_version`；`bank_auto_tag_rules_changed` lifecycle 计划包含 `cost_statistics.read_model.refresh`；前端 mapper 归一 `bank_accounts`；按银行统计展示设置中的零金额账户；时间列不直出 ISO/T 字符串；各视图表头展示总金额；sidebar 深蓝背景有组件回归断言。
+- 覆盖点：explorer payload 必须包含 `bank_accounts`；settings 银行账户映射进入 `source_versions.bank_account_mappings_fingerprint`；标签规则版本继续进入 `source_versions.bank_auto_tag_rules_version`；按银行统计展示设置中的零金额账户；时间列不直出 ISO/T 字符串；sidebar 深蓝背景有组件回归断言。全流水收支分列由 2026-07-13 测试覆盖。
 - 七类测试决策：service-layer、API contract、read model/cache/background job、frontend interaction、existing regression 适用并覆盖；business core 金额归因口径不变，不新增独立业务规则测试；end-to-end business-flow 使用既有成本统计/银行明细/settings browser flows，本轮新增的是读模型合同与页面交互，不新增跨模块写流 e2e。
 - 验证命令：见本轮最终说明。
 

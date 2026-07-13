@@ -153,7 +153,11 @@ describe("Cost statistics page", () => {
     expect(within(timeGrid).queryByText("2026-03-10T21:27:55+08:00")).not.toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
     expect(within(timeGrid).getAllByText("支出")[0]).toHaveClass("direction-tag");
-    expect(screen.getByText("总金额 13,360.00")).toBeInTheDocument();
+    expect(screen.getByText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(screen.getByText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
+    expect(screen.queryByText("总金额 15,360.00")).not.toBeInTheDocument();
+    expect(within(timeGrid).getByRole("button", { name: "查看流水 cost-income-001" })).toBeInTheDocument();
+    expect(within(timeGrid).getByText("2,000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年3月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?month=2026-03&project_scope=active",
@@ -184,6 +188,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "成本统计标签规则" }));
     const drawer = await screen.findByRole("dialog", { name: "成本统计标签规则" });
     expect(within(drawer).getAllByText("未分类").length).toBeGreaterThan(0);
+    expect(within(drawer).getByText("收入 · 经营收入")).toBeInTheDocument();
 
     await user.click(within(drawer).getByRole("button", { name: "保存并同步" }));
 
@@ -412,6 +417,11 @@ describe("Cost statistics page", () => {
     expect(primaryLane).not.toBeNull();
     expect(within(primaryLane as HTMLElement).getByText("项目开销")).toBeInTheDocument();
     expect(within(primaryLane as HTMLElement).getByText("差旅交通")).toBeInTheDocument();
+    expect(within(primaryLane as HTMLElement).getByText("经营收入")).toBeInTheDocument();
+    expect(screen.getByText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(screen.getByText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
+    expect(within(primaryLane as HTMLElement).queryByText(/%$/)).not.toBeInTheDocument();
+    expect(within(primaryLane as HTMLElement).getByText("支出 0 笔 / 收入 1 笔 / 1 个子标签")).toBeInTheDocument();
 
     await user.click(within(primaryLane as HTMLElement).getByRole("button", { name: /项目开销/ }));
 
@@ -434,6 +444,32 @@ describe("Cost statistics page", () => {
     );
   });
 
+  test("exports bank tag income and expense rows with directional summaries", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "按标签" }));
+    await user.click(screen.getByRole("button", { name: "导出中心" }));
+    const dialog = await screen.findByRole("dialog", { name: "导出中心" });
+    expect(within(dialog).getByRole("button", { name: "按标签" })).toHaveClass("active");
+
+    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
+
+    expect(await within(dialog).findByText("支出金额 13,360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(within(dialog).getByText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/export-preview?month=2026-03&view=bank_tag&project_scope=active",
+      expect.any(Object),
+    );
+
+    await user.click(within(dialog).getByRole("button", { name: "导出" }));
+    expect(await within(dialog).findByText("已导出 成本统计_2026-03_按标签统计.xlsx")).toBeInTheDocument();
+  });
+
   test("shows empty state when the selected month has no cost statistics", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
@@ -444,7 +480,8 @@ describe("Cost statistics page", () => {
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     await chooseScopeOption(user, "时间统计时间范围：2026年3月", "五月");
 
-    expect(await screen.findAllByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveLength(2);
+    expect(await screen.findAllByText("当前时间范围没有收入或支出流水。")).toHaveLength(1);
+    expect(screen.getByText("当前时间范围没有可用于流水统计的收入或支出流水。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年5月" })).toBeInTheDocument();
     await chooseScopeOption(user, "时间统计时间范围：2026年5月", "三月");
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
@@ -676,7 +713,9 @@ describe("Cost statistics page", () => {
       "/api/cost-statistics/export-preview?month=all&view=time&project_scope=active&start_date=2026-03-10&end_date=2026-04-16",
       expect.any(Object),
     );
-    expect(within(dialog).getByText("预计导出 5 条流水")).toBeInTheDocument();
+    expect(within(dialog).getByText("预计导出 6 条流水")).toBeInTheDocument();
+    expect(within(dialog).getByText("支出金额 22,960.00")).toHaveClass("cost-direction-amount--expense");
+    expect(within(dialog).getByText("收入金额 2,000.00")).toHaveClass("cost-direction-amount--income");
 
     await user.click(within(dialog).getByRole("button", { name: "导出" }));
     expect(await within(dialog).findByText("已导出 成本统计_2026-03-10至2026-04-16_按时间统计.xlsx")).toBeInTheDocument();

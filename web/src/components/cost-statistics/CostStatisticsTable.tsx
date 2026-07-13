@@ -17,6 +17,7 @@ export type CostStatisticsAmountCell = {
   amount: string;
   direction: string;
   paymentAccountLabel?: string;
+  toneByDirection?: boolean;
 };
 
 export type CostStatisticsTableColumn<Row> = {
@@ -170,10 +171,16 @@ function renderTableCellContent(content: ReactNode | CostStatisticsAmountCell) {
     const amount = String((content as { amount: string }).amount ?? "--");
     const direction = String((content as { direction: string }).direction ?? "");
     const paymentAccountLabel = String((content as { paymentAccountLabel?: string }).paymentAccountLabel ?? "");
+    const toneByDirection = Boolean((content as { toneByDirection?: boolean }).toneByDirection);
+    const amountToneClass = toneByDirection
+      ? direction === "收入"
+        ? "cost-flow-amount--income"
+        : "cost-flow-amount--expense"
+      : "";
     const shouldShowAccount = paymentAccountLabel !== "" && paymentAccountLabel !== "--" && paymentAccountLabel !== "—";
     return (
       <span className="money-cell-stack">
-        <span className="money-cell-value">
+        <span className={`money-cell-value ${amountToneClass}`.trim()}>
           <span>{amount}</span>
         </span>
         {direction || shouldShowAccount ? (

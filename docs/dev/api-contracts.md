@@ -29,6 +29,25 @@
 - `/api/operations/app-health/input-invoice-usage-refresh`：管理员受控入队刷新进项使用 read model scope。
 - `/api/operations/app-health/output-invoice-collection-refresh`：管理员受控入队刷新销项收款 read model scope。
 
+## 成本统计 API
+
+`GET /api/cost-statistics/explorer`
+
+- `time_rows` 是 OA 配对支出事实集，供项目、银行和 OA 费用类型视图使用。
+- `bank_flow_time_rows` 是全银行收入与支出事实集，每行必须输出规范化 `direction=收入|支出` 和 `bank_tag_*` 字段，供按时间、按标签视图使用。
+- `bank_flow_summary` 保留兼容字段 `total_amount`，但页面不得将其显示为总金额；正式方向合同是 `expense_amount`、`income_amount`、`expense_transaction_count`、`income_transaction_count`。
+
+`GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
+
+- `view=time` 和 `view=bank_tag` 均导出全银行收入与支出；`bank_tag` 工作表包含主标签、子标签、资金方向和金额。
+- preview 的 `summary` 返回分方向金额和笔数。`view=project|expense_type|transaction` 继续使用 OA 配对支出口径。
+- read model 非 fresh 时返回 `409 cost_statistics_read_model_not_fresh`，route 不回退 live scan。
+
+`GET|PUT /api/cost-statistics/tag-rules`
+
+- payload 包含 `selection_schema_version=2`；active tags 包含收入、支出及共用/未分类标签。
+- legacy 显式选择归一化到 v2 时保留原支出选择并一次性加入当前有效收入标签；显式空选择仍表示不让任何标签进入成本统计。
+
 ## Workbench 设置 API
 
 `GET /api/workbench/settings`

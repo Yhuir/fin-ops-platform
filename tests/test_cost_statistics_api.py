@@ -99,19 +99,28 @@ def _confirm_active_cost_relation(
 def _canonical_bank_flow_projection(app, month: str) -> tuple[list[dict[str, object]], dict[str, object]]:
     rows: list[dict[str, object]] = []
     total_amount = 0
+    expense_amount = 0
+    income_amount = 0
+    expense_count = 0
+    income_count = 0
     for transaction in app._import_service.list_transactions():
         transaction_month = str(transaction.txn_date or "")[:7]
         if month != "all" and transaction_month != month:
             continue
-        if str(transaction.txn_direction.value) != "outflow":
-            continue
         amount = transaction.amount
         total_amount += amount
+        is_income = str(transaction.txn_direction.value) == "inflow"
+        if is_income:
+            income_amount += amount
+            income_count += 1
+        else:
+            expense_amount += amount
+            expense_count += 1
         rows.append(
             {
                 "transaction_id": transaction.id,
                 "trade_time": transaction.trade_time or transaction.pay_receive_time or transaction.txn_date,
-                "direction": "支出",
+                "direction": "收入" if is_income else "支出",
                 "project_name": "未配对OA",
                 "expense_type": "未分类",
                 "expense_content": transaction.summary or transaction.remark or "未分类",
@@ -130,6 +139,10 @@ def _canonical_bank_flow_projection(app, month: str) -> tuple[list[dict[str, obj
         "row_count": len(rows),
         "transaction_count": len(rows),
         "total_amount": f"{total_amount:.2f}",
+        "expense_amount": f"{expense_amount:.2f}",
+        "income_amount": f"{income_amount:.2f}",
+        "expense_transaction_count": expense_count,
+        "income_transaction_count": income_count,
     }
 
 
@@ -870,6 +883,20 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(time_sheet.title, "按时间统计")
         self.assertEqual(time_sheet["A2"].value, "2026-03-10 21:27:55")
         self.assertEqual(time_sheet["B2"].value, "未配对OA")
+
+        bank_tag_response = self.app.handle_request(
+            "GET",
+            "/api/cost-statistics/export?month=2026-03&view=bank_tag",
+        )
+        self.assertEqual(bank_tag_response.status_code, 200)
+        self.assertIn(
+            "%E6%88%90%E6%9C%AC%E7%BB%9F%E8%AE%A1_2026-03_%E6%8C%89%E6%A0%87%E7%AD%BE%E7%BB%9F%E8%AE%A1.xlsx",
+            bank_tag_response.headers["Content-Disposition"],
+        )
+        bank_tag_sheet = load_workbook(BytesIO(bank_tag_response.body)).active
+        self.assertEqual(bank_tag_sheet.title, "按标签统计")
+        self.assertEqual(bank_tag_sheet["B1"].value, "主标签")
+        self.assertEqual(bank_tag_sheet["D1"].value, "资金方向")
 
         expense_type = quote("设备货款及材料费", safe="")
         expense_response = self.app.handle_request(

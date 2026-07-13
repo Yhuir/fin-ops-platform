@@ -19007,6 +19007,31 @@ body.column-layout-dragging {
   font-variant-numeric: tabular-nums;
 }
 
+.cost-direction-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--fp-space-3);
+  flex-wrap: wrap;
+}
+
+.cost-direction-amount {
+  font-family: var(--fp-font-data);
+  font-size: 13px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cost-direction-amount--expense,
+.cost-flow-amount--expense {
+  color: var(--fp-warning) !important;
+}
+
+.cost-direction-amount--income,
+.cost-flow-amount--income {
+  color: var(--fp-success) !important;
+}
+
 .cost-section-heading-copy {
   display: grid;
   gap: 4px;
@@ -19753,6 +19778,16 @@ body.column-layout-dragging {
   display: grid;
   justify-items: end;
   gap: var(--fp-space-1);
+}
+
+.cost-direction-meta {
+  display: grid;
+  justify-items: end;
+  gap: var(--fp-space-1);
+}
+
+.cost-direction-meta .cost-direction-amount {
+  font-size: 11px;
 }
 
 .cost-explorer-item-meta-stack span {

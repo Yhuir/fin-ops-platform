@@ -19,6 +19,10 @@ type ApiCostSummary = {
   row_count: number;
   transaction_count: number;
   total_amount: string;
+  expense_amount?: string | null;
+  income_amount?: string | null;
+  expense_transaction_count?: number | null;
+  income_transaction_count?: number | null;
 };
 
 type ApiCostMonthSummaryRow = {
@@ -133,7 +137,7 @@ type ApiCostTransactionDetail = {
 };
 
 type ApiCostStatisticsExportPreview = {
-  view: "time" | "project" | "expense_type";
+  view: "time" | "bank_tag" | "project" | "expense_type";
   file_name: string;
   scope_label: string;
   summary: ApiCostSummary & {
@@ -181,6 +185,10 @@ function mapSummary(summary: ApiCostSummary) {
     rowCount: summary.row_count,
     transactionCount: summary.transaction_count,
     totalAmount: summary.total_amount,
+    expenseAmount: optionalString(summary.expense_amount),
+    incomeAmount: optionalString(summary.income_amount),
+    expenseTransactionCount: summary.expense_transaction_count ?? undefined,
+    incomeTransactionCount: summary.income_transaction_count ?? undefined,
   };
 }
 
@@ -507,7 +515,7 @@ export type ProjectCostExportParams = {
 export type CostExportParams =
   | {
       month: string;
-      view: "time";
+      view: "time" | "bank_tag";
       projectScope?: CostProjectScope;
       startMonth?: string;
       endMonth?: string;
@@ -555,7 +563,7 @@ function parseContentDispositionFileName(contentDisposition: string | null) {
 }
 
 function buildFallbackExportFileName(params: CostExportParams) {
-  if (params.view === "time") {
+  if (params.view === "time" || params.view === "bank_tag") {
     const scopeLabel =
       params.startDate && params.endDate
         ? `${params.startDate}至${params.endDate}`
@@ -564,7 +572,7 @@ function buildFallbackExportFileName(params: CostExportParams) {
         : params.month === "all"
             ? "全部期间"
             : params.month;
-    return `成本统计_${scopeLabel}_按时间统计.xlsx`;
+    return `成本统计_${scopeLabel}_${params.view === "bank_tag" ? "按标签统计" : "按时间统计"}.xlsx`;
   }
   if (params.view === "month") {
     return `成本统计_${params.month}_月份汇总.xlsx`;
@@ -587,7 +595,10 @@ function buildFallbackExportFileName(params: CostExportParams) {
       params.expenseTypes.length === 1 ? params.expenseTypes[0] : `${params.expenseTypes[0]}等${params.expenseTypes.length}类`;
     return `成本统计_${scopeLabel}_按费用类型统计_${expenseTypeLabel}.xlsx`;
   }
-  return `成本统计_${params.month}_流水详情_${params.projectName ?? "未命名项目"}_${params.transactionId}.xlsx`;
+  if (params.view === "transaction") {
+    return `成本统计_${params.month}_流水详情_${params.projectName ?? "未命名项目"}_${params.transactionId}.xlsx`;
+  }
+  throw new Error(`unsupported cost statistics export view: ${params.view}`);
 }
 
 function buildCostStatisticsQuery(
@@ -739,7 +750,7 @@ export async function exportCostStatisticsView(params: CostExportParams) {
 export type PreviewCostExportParams =
   | {
       month: string;
-      view: "time";
+      view: "time" | "bank_tag";
       projectScope?: CostProjectScope;
       startMonth?: string;
       endMonth?: string;
@@ -786,6 +797,10 @@ export async function fetchCostStatisticsExportPreview(
       rowCount: payload.summary.row_count,
       transactionCount: payload.summary.transaction_count,
       totalAmount: payload.summary.total_amount,
+      expenseAmount: optionalString(payload.summary.expense_amount),
+      incomeAmount: optionalString(payload.summary.income_amount),
+      expenseTransactionCount: payload.summary.expense_transaction_count ?? undefined,
+      incomeTransactionCount: payload.summary.income_transaction_count ?? undefined,
       sheetCount: payload.summary.sheet_count,
     },
     sheetNames: payload.sheet_names,

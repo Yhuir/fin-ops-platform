@@ -171,7 +171,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                     "bank_tag_label_path": ["差旅", "交通"],
                 },
             ],
-            "bank_flow_summary": {"row_count": 3, "transaction_count": 3, "total_amount": "155.00"},
+            "bank_flow_summary": {"row_count": 4, "transaction_count": 4, "total_amount": "355.00"},
             "bank_flow_time_rows": [
                 {
                     "transaction_id": "oa-fee",
@@ -224,6 +224,23 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                     "bank_tag_sub_label": "未标记",
                     "bank_tag_label_path": ["未标记"],
                 },
+                {
+                    "transaction_id": "income-fee",
+                    "trade_time": "2026-05-25 09:00:00",
+                    "direction": "收入",
+                    "project_name": "未配对OA",
+                    "expense_type": "材料",
+                    "expense_content": "退款",
+                    "amount": "200.00",
+                    "counterparty_name": "供应商",
+                    "payment_account_label": "工行",
+                    "remark": "",
+                    "bank_tag_code": "fee",
+                    "bank_tag_label": "费用",
+                    "bank_tag_primary_label": "费用",
+                    "bank_tag_sub_label": "材料",
+                    "bank_tag_label_path": ["费用", "材料"],
+                },
             ],
             "bank_accounts": [],
             "project_rows": [],
@@ -255,9 +272,21 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         self.assertEqual(explorer["expense_type_rows"][0]["total_amount"], "100.00")
         self.assertEqual(
             [row["transaction_id"] for row in explorer["bank_flow_time_rows"]],
-            ["oa-fee", "flow-fee"],
+            ["oa-fee", "flow-fee", "income-fee"],
         )
-        self.assertEqual(explorer["bank_flow_summary"]["total_amount"], "150.00")
+        self.assertEqual(explorer["bank_flow_summary"]["expense_amount"], "150.00")
+        self.assertEqual(explorer["bank_flow_summary"]["income_amount"], "200.00")
+        self.assertEqual(explorer["bank_flow_summary"]["expense_transaction_count"], 2)
+        self.assertEqual(explorer["bank_flow_summary"]["income_transaction_count"], 1)
+        detail_source_versions = runtime.expected_source_versions("active:all")
+        detail_service = CostStatisticsQueryService(
+            runtime_service=runtime,
+            sql_read_repository=CostStatisticsSqlReadRepositoryStub(payload, detail_source_versions),
+            tag_selection_provider=provider,
+        )
+        income_detail = detail_service.get_transaction_detail("income-fee", project_scope="active")
+        self.assertEqual(income_detail["transaction"]["direction"], "收入")
+        self.assertEqual(income_detail["transaction"]["amount"], "200.00")
 
 
 class CostStatisticsReadConnection:
@@ -444,6 +473,7 @@ class CostStatisticsBankTagFacade:
         self.status = status
         self.source_version_calls: list[tuple[list[str], dict[str, object]]] = []
         self.category_calls: list[tuple[list[str], dict[str, object]]] = []
+        self.month_calls: list[tuple[str, dict[str, object]]] = []
 
     def source_versions_for_scope_keys(self, scope_keys: list[str], **kwargs: object) -> dict[str, object]:
         self.source_version_calls.append((list(scope_keys), dict(kwargs)))
@@ -465,6 +495,38 @@ class CostStatisticsBankTagFacade:
                 "effective_category_sub_label": "设备材料",
                 "effective_category_label_path": ["项目开销", "设备材料"],
             }
+        }
+
+    def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
+        self.month_calls.append((month, dict(kwargs)))
+        return {
+            "status": self.status,
+            "rows": [
+                {
+                    "transaction_id": "bank-expense",
+                    "trade_time": "2026-05-04 10:00:00",
+                    "direction": "expense",
+                    "amount": "20.00",
+                    "counterparty_name": "供应商",
+                    "bank_name": "工商银行",
+                    "account_last4": "0001",
+                    "summary": "采购",
+                    "effective_category_code": "project_material",
+                    "effective_category_label": "设备材料",
+                },
+                {
+                    "transaction_id": "bank-income",
+                    "trade_time": "2026-05-05 10:00:00",
+                    "direction": "income",
+                    "amount": "30.00",
+                    "counterparty_name": "客户",
+                    "bank_name": "工商银行",
+                    "account_last4": "0001",
+                    "summary": "回款",
+                    "effective_category_code": "project_collection",
+                    "effective_category_label": "项目回款",
+                },
+            ],
         }
 
 
@@ -1314,6 +1376,13 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         payload = snapshot["read_models"]["active:2026-05"]["payload"]
         self.assertEqual(payload["summary"]["transaction_count"], 1)
         self.assertEqual(payload["summary"]["total_amount"], "10.00")
+        self.assertEqual(
+            [(row["transaction_id"], row["direction"]) for row in payload["bank_flow_time_rows"]],
+            [("bank-income", "收入"), ("bank-expense", "支出")],
+        )
+        self.assertEqual(payload["bank_flow_summary"]["expense_amount"], "20.00")
+        self.assertEqual(payload["bank_flow_summary"]["income_amount"], "30.00")
+        self.assertNotIn("direction", tag_facade.month_calls[0][1])
         self.assertEqual([row["transaction_id"] for row in payload["time_rows"]], ["bank-1"])
         self.assertEqual(payload["time_rows"][0]["group_id"], "group-1")
         self.assertEqual(payload["time_rows"][0]["project_id"], "P-A")

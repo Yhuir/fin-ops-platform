@@ -224,10 +224,13 @@ class CostStatisticsApiRoutes:
         project_scope: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
-        if view not in {"month", "time", "project", "expense_type", "transaction"}:
+        if view not in {"month", "time", "bank_tag", "project", "expense_type", "transaction"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cost_statistics_export_request", "message": "view must be month, time, project, expense_type, or transaction."},
+                {
+                    "error": "invalid_cost_statistics_export_request",
+                    "message": "view must be month, time, bank_tag, project, expense_type, or transaction.",
+                },
             )
         try:
             normalized_project_scope = self._normalize_project_scope(project_scope)
@@ -286,12 +289,12 @@ class CostStatisticsApiRoutes:
         project_scope: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
-        if view not in {"time", "project", "expense_type"}:
+        if view not in {"time", "bank_tag", "project", "expense_type"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_export_preview_request",
-                    "message": "view must be time, project, or expense_type.",
+                    "message": "view must be time, bank_tag, project, or expense_type.",
                 },
             )
         try:

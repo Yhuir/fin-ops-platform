@@ -1,7 +1,7 @@
 import MonthPicker from "../MonthPicker";
 import type { CostStatisticsExportPreview } from "../../features/cost-statistics/types";
 
-export type ExportCenterMode = "time" | "project" | "expense_type";
+export type ExportCenterMode = "time" | "bank_tag" | "project" | "expense_type";
 export type ExportRangeMode = "month" | "custom";
 
 type ExportCenterModalProps = {
@@ -167,7 +167,7 @@ export default function ExportCenterModal({
         <header className="export-center-modal-header">
           <div>
             <h2 id="export-center-modal-title">导出中心</h2>
-            <p>统一配置按时间、按项目和按费用类型的成本统计导出，并在下载前先查看预览范围。</p>
+            <p>统一配置按时间、按标签、按项目和按费用类型的成本统计导出，并在下载前先查看预览范围。</p>
           </div>
           <button className="secondary-button" type="button" onClick={onClose} disabled={isBusy}>
             关闭
@@ -176,6 +176,13 @@ export default function ExportCenterModal({
 
         <div className="export-center-modal-body">
           <div className="export-center-view-switcher" role="tablist" aria-label="导出视图切换">
+            <button
+              className={mode === "bank_tag" ? "cost-view-tab active" : "cost-view-tab"}
+              type="button"
+              onClick={() => onModeChange("bank_tag")}
+            >
+              按标签
+            </button>
             <button
               className={mode === "time" ? "cost-view-tab active" : "cost-view-tab"}
               type="button"
@@ -199,7 +206,7 @@ export default function ExportCenterModal({
             </button>
           </div>
 
-          {mode === "time" ? (
+          {mode === "time" || mode === "bank_tag" ? (
             <div className="export-center-config-grid">
               <section className="export-center-section">
                 <div className="export-center-section-header">
@@ -339,7 +346,16 @@ export default function ExportCenterModal({
                 <div className="export-center-preview-summary">
                   <strong>预计导出 {preview.summary.transactionCount} 条流水</strong>
                   <span>预计 {preview.summary.sheetCount} 个 sheet</span>
-                  <span>总金额 {preview.summary.totalAmount}</span>
+                  {preview.view === "time" || preview.view === "bank_tag" ? (
+                    <>
+                      <span className="cost-direction-amount cost-direction-amount--expense">
+                        支出金额 {preview.summary.expenseAmount ?? "0.00"}
+                      </span>
+                      <span className="cost-direction-amount cost-direction-amount--income">
+                        收入金额 {preview.summary.incomeAmount ?? "0.00"}
+                      </span>
+                    </>
+                  ) : <span>总金额 {preview.summary.totalAmount}</span>}
                 </div>
                 <div className="export-center-sheet-list">
                   {preview.sheetNames.map((sheetName) => (

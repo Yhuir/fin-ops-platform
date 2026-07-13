@@ -26,8 +26,9 @@ function groupTags(tags: CostStatisticsTagRuleTag[]): TagGroup[] {
   const groups = new Map<string, TagGroup>();
   for (const tag of tags) {
     const primary = tag.path[0] || tag.outputPrimaryLabel || tag.label || "未分类";
-    const key = primary;
-    const group = groups.get(key) ?? { key, label: primary, tags: [] };
+    const directionLabel = tag.direction === "income" ? "收入" : tag.direction === "expense" ? "支出" : "收支共用";
+    const key = `${tag.direction}:${primary}`;
+    const group = groups.get(key) ?? { key, label: `${directionLabel} · ${primary}`, tags: [] };
     group.tags.push(tag);
     groups.set(key, group);
   }

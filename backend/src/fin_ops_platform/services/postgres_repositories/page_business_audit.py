@@ -1988,7 +1988,7 @@ def _canonical_expected_set_issues(
                    sum(abs(source.amount))::numeric as expected_amount
             from app.bank_transactions source
             where source.status <> 'deleted'
-              and source.txn_direction = 'outflow'
+              and source.txn_direction in ('outflow', 'inflow')
               and source.txn_month is not null
               and coalesce(source.amount, 0) <> 0
             group by to_char(source.txn_month, 'YYYY-MM'),
@@ -2427,6 +2427,7 @@ def _key_display_field_issues(
                            source.id::text as canonical_id,
                            coalesce(source.legacy_mongo_id, source.id::text) as canonical_transaction_id,
                            source.amount as canonical_amount,
+                           source.txn_direction as canonical_direction,
                            detail.transaction_id as bank_detail_transaction_id,
                            detail.scope_key as bank_detail_scope_key,
                            detail.trade_date,
@@ -2447,9 +2448,9 @@ def _key_display_field_issues(
                       on (
                             source.id::text = projected.value->>'transaction_id'
                          or source.legacy_mongo_id = projected.value->>'transaction_id'
-                         )
+                     )
                      and source.status <> 'deleted'
-                     and source.txn_direction = 'outflow'
+                     and source.txn_direction in ('outflow', 'inflow')
                     left join read_model.bank_detail_rows detail
                       on detail.tenant_id = %s
                      and detail.transaction_id in (
@@ -2507,7 +2508,10 @@ def _key_display_field_issues(
                           then bank_name || ' 账户 ' || account_last4
                           else coalesce(bank_name, account_last4, '')
                       end
-                   or coalesce(value->>'direction', '') <> '支出'
+                   or coalesce(value->>'direction', '') <> case
+                          when canonical_direction = 'inflow' then '收入'
+                          else '支出'
+                      end
                    or coalesce(value->>'remark', '') <> coalesce(nullif(purpose, ''), nullif(summary, ''), '')
                    or coalesce(value->>'project_name', '') <> '未配对OA'
                    or coalesce(value->>'project_id', '') <> ''
@@ -2587,6 +2591,30 @@ def _key_display_field_issues(
                                    else 0
                                end
                            ), 0)::numeric as total_amount
+                           , count(member.value) filter (
+                               where member.value->>'direction' = '支出'
+                           )::integer as expense_transaction_count
+                           , count(member.value) filter (
+                               where member.value->>'direction' = '收入'
+                           )::integer as income_transaction_count
+                           , coalesce(sum(
+                               case
+                                   when member.value->>'direction' = '支出'
+                                    and replace(coalesce(member.value->>'amount', ''), ',', '')
+                                        ~ '^-?[0-9]+([.][0-9]+)?$'
+                                   then abs(replace(member.value->>'amount', ',', '')::numeric)
+                                   else 0
+                               end
+                           ), 0)::numeric as expense_amount
+                           , coalesce(sum(
+                               case
+                                   when member.value->>'direction' = '收入'
+                                    and replace(coalesce(member.value->>'amount', ''), ',', '')
+                                        ~ '^-?[0-9]+([.][0-9]+)?$'
+                                   then abs(replace(member.value->>'amount', ',', '')::numeric)
+                                   else 0
+                               end
+                           ), 0)::numeric as income_amount
                     from read_model.cost_statistics_read_models model
                     left join lateral jsonb_array_elements(
                         case
@@ -2603,7 +2631,9 @@ def _key_display_field_issues(
                        recalculated.total_amount::text as recalculated_total_amount,
                        model.payload->'payload'->'bank_flow_summary' as stored_bank_flow_summary,
                        bank_recalculated.row_count as bank_flow_row_count,
-                       bank_recalculated.total_amount::text as bank_flow_total_amount
+                       bank_recalculated.total_amount::text as bank_flow_total_amount,
+                       bank_recalculated.expense_amount::text as bank_flow_expense_amount,
+                       bank_recalculated.income_amount::text as bank_flow_income_amount
                 from read_model.cost_statistics_read_models model
                 join recalculated on recalculated.scope_key = model.scope_key
                 join bank_recalculated on bank_recalculated.scope_key = model.scope_key
@@ -2662,6 +2692,42 @@ def _key_display_field_issues(
                         end
                         - bank_recalculated.total_amount
                    ) > 0.01
+                   or case
+                          when coalesce(
+                                   model.payload->'payload'->'bank_flow_summary'->>'expense_transaction_count', ''
+                               ) ~ '^[0-9]+$'
+                          then (model.payload->'payload'->'bank_flow_summary'->>'expense_transaction_count')::integer
+                          else -1
+                      end <> bank_recalculated.expense_transaction_count
+                   or case
+                          when coalesce(
+                                   model.payload->'payload'->'bank_flow_summary'->>'income_transaction_count', ''
+                               ) ~ '^[0-9]+$'
+                          then (model.payload->'payload'->'bank_flow_summary'->>'income_transaction_count')::integer
+                          else -1
+                      end <> bank_recalculated.income_transaction_count
+                   or abs(
+                        case
+                            when replace(coalesce(
+                                    model.payload->'payload'->'bank_flow_summary'->>'expense_amount', ''
+                                 ), ',', '') ~ '^-?[0-9]+([.][0-9]+)?$'
+                            then replace(
+                                model.payload->'payload'->'bank_flow_summary'->>'expense_amount', ',', ''
+                            )::numeric
+                            else 0
+                        end - bank_recalculated.expense_amount
+                      ) > 0.01
+                   or abs(
+                        case
+                            when replace(coalesce(
+                                    model.payload->'payload'->'bank_flow_summary'->>'income_amount', ''
+                                 ), ',', '') ~ '^-?[0-9]+([.][0-9]+)?$'
+                            then replace(
+                                model.payload->'payload'->'bank_flow_summary'->>'income_amount', ',', ''
+                            )::numeric
+                            else 0
+                        end - bank_recalculated.income_amount
+                      ) > 0.01
                 order by model.scope_key
                 limit %s
                 """,

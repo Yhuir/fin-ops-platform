@@ -4,6 +4,10 @@ export type CostSummary = {
   rowCount: number;
   transactionCount: number;
   totalAmount: string;
+  expenseAmount?: string;
+  incomeAmount?: string;
+  expenseTransactionCount?: number;
+  incomeTransactionCount?: number;
 };
 
 export type CostTimeRow = {
@@ -120,13 +124,17 @@ export type CostTransactionDetail = {
 };
 
 export type CostStatisticsExportPreview = {
-  view: "time" | "project" | "expense_type";
+  view: "time" | "bank_tag" | "project" | "expense_type";
   fileName: string;
   scopeLabel: string;
   summary: {
     rowCount: number;
     transactionCount: number;
     totalAmount: string;
+    expenseAmount?: string;
+    incomeAmount?: string;
+    expenseTransactionCount?: number;
+    incomeTransactionCount?: number;
     sheetCount: number;
   };
   sheetNames: string[];

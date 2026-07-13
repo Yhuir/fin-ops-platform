@@ -1,13 +1,13 @@
 # 成本统计模块边界与 I/O
 
-日期：2026-07-10
+日期：2026-07-13
 
 ## 模块化状态
 
 - 状态：closed
 - 当前边界可信度：high
 - 目标边界：成本统计页面读取 `cost_statistics` SQL read model，经 query gateway 暴露 parent rollup fresh 状态。
-- 当前结论：local/non-SQL explorer fallback、route-owner live service fallback、live export workbook helper 和旧 `ProjectDetailExportService` 已删除。成本统计页不再暴露项目范围切换按钮，页面查询固定使用 `project_scope=active`；`project_scope=all` 仍是后端 API/export/read model 合同。按银行统计的银行全集来自 settings owner 输出的银行账户映射，由成本统计 read model payload 暴露给页面；成本统计标签规则来自 app settings owner，只在 query/export 层过滤 fresh explorer payload，不进入 read model source_versions，也不触发全量重建。`按项目`、`按银行`、`按OA费用类型` 只统计被规则选中的 OA 配对流水；`按标签`、`按时间` 统计被规则选中的全部银行支出流水。
+- 当前结论：local/non-SQL explorer fallback、route-owner live service fallback、live export workbook helper 和旧 `ProjectDetailExportService` 已删除。成本统计页不再暴露项目范围切换按钮，页面查询固定使用 `project_scope=active`；`project_scope=all` 仍是后端 API/export/read model 合同。按银行统计的银行全集来自 settings owner 输出的银行账户映射，由成本统计 read model payload 暴露给页面；成本统计标签规则来自 app settings owner，只在 query/export 层过滤 fresh explorer payload，不进入 read model source_versions，也不触发全量重建。`按项目`、`按银行`、`按OA费用类型` 只统计被规则选中的 OA 配对支出流水；`按标签`、`按时间` 统计被规则选中的全部银行收入与支出流水。
 - 旧代码删除状态：route owner 不接收旧 `CostStatisticsService` 依赖；project/detail/export/export-preview 只调用 `CostStatisticsQueryService`；`CostStatisticsService` 的旧 live project/detail public methods 已删除；query miss/stale 只返回 refreshing 并入队 durable refresh，不同步扫描 live service；历史 `cost_statistics_cache_warmup` job 入口仅作为兼容桥接，关闭或转入 `cost_statistics.read_model.refresh`，不再构造 payload、写 read model 或写 Redis fresh cache。
 
 ## 职责边界
@@ -15,7 +15,7 @@
 ### 负责
 
 - 成本统计页面汇总、筛选、父聚合和明细读取。
-- 成本统计页面按时间、项目、银行、OA 费用类型、流水标签五种统计口径的表头总金额展示；总金额只从当前 fresh explorer payload 经标签规则过滤后的可见行汇总，页面不得回读源表。
+- OA 配对统计继续展示自身支出汇总；全流水的按时间、按标签视图不展示收入与支出的合并总金额，只从当前 fresh explorer payload 经标签规则过滤后的可见行分别汇总支出金额、收入金额和对应笔数，页面不得回读源表。
 - 成本统计页面的按银行统计；银行账户全集来自 `app.app_settings.bank_account_mappings` 经后端 owner read port 注入 explorer payload，页面只做零金额账户补位和筛选，不直接调用设置页 API。
 - 成本统计页面的 `按标签` 三栏视图；该视图只从 `cost_statistics` explorer read model 的 `bank_flow_time_rows.bank_tag_*` 字段派生主标签、子标签和流水，不直接读取银行明细页 read model。
 - 成本统计标签规则抽屉；抽屉读取 app settings owner 归一后的银行主/子标签与虚拟 `__uncategorized__` 未分类标签，保存后等待当前成本统计 scope fresh 再关闭。
@@ -33,12 +33,12 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面筛选/月份/父级聚合查询 | `CostStatisticsPage.tsx`、`features/cost-statistics/api.ts` | 进入成本统计 API/query service；页面主时间范围只暴露单一按钮选择 `all` / `year` / `month`，不再暴露主页面自定义日期范围；精确日期范围只属于导出中心 |
-| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?page=cost-statistics`；在同一个 repeatable-read read-only snapshot 内复用完整 Workbench integrity proof 与银行明细 canonical/字段/version proof。canonical paired-cost expected-set 从已证明的 Workbench active generation group/member payload 形成，并与 projection builder 使用同一 candidate/linked-open 优先级和完整 OA context tuple；full bank-flow identity/month/amount expected-set 必须直接从 active `app.bank_transactions` 支出事实形成，不能由 `bank_detail_rows` 反推完整性。cost rows 的 transaction/group/project/expense/content/applicant/time/counterparty/amount/tag fields、project/expense/bank-flow summaries，以及每个 scope 的 `bank_accounts` 与 settings owner 映射集合必须重算一致；逐月 `workbench_source_versions` / `bank_detail_source_versions` 必须等于当前上游，`active:all` / `all:all` 的 `source_shards` 必须精确覆盖当前月份模型。任一缺失、额外、旧版或字段漂移均 blocking；审计只读，不能触发 rebuild/export 或读取旧 live service |
+| 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?page=cost-statistics`；在同一个 repeatable-read read-only snapshot 内复用完整 Workbench integrity proof 与银行明细 canonical/字段/version proof。canonical paired-cost expected-set 从已证明的 Workbench active generation group/member payload 形成；full bank-flow identity/month/direction/amount expected-set 必须直接从 active `app.bank_transactions` 的收入与支出事实形成，不能由 `bank_detail_rows` 反推完整性。cost rows、project/expense summaries，以及 bank-flow 的收支金额与收支笔数必须重算一致；任一缺失、额外、旧版或字段漂移均 blocking；审计只读，不能触发 rebuild/export 或读取旧 live service |
 | 银行账户全集 | `AppSettingsService.get_cost_statistics_source_settings_payload()` / `app.app_settings.bank_account_mappings` | 仅后端投影层读取 settings owner 输出，写入 explorer payload 的 `bank_accounts`；页面不得直接读取 settings API 或设置页面状态 |
 | 银行自动标签规则版本 | `AppSettingsService.get_cost_statistics_source_settings_payload()` / `app.app_settings.bank_transaction_tags` | 进入 `source_versions.bank_auto_tag_rules_version`；规则更新由 `bank_auto_tag_rules_changed` lifecycle 入队 `cost_statistics.read_model.refresh` |
 | 银行明细有效标签 | `BankTransactionTagReadFacade` / fresh `bank_detail` read model | 成本统计 worker 按月份批量读取银行流水 `effective_category_*`，写入 `time_rows.bank_tag_*`；`bank_detail_source_versions` 纳入成本统计 source_versions，非 fresh 时 worker fail-closed 并等待依赖刷新 |
-| 成本统计标签规则 | `AppSettingsService.get_cost_statistics_tag_selection_payload()` / `app.app_settings.cost_statistics_tag_selection` | route 只暴露归一后的主/子标签、`__uncategorized__` 未分类标签和已选 leaf codes；默认未配置时等价于全选当前有效支出标签 + 未分类，显式空数组表示全部不进入成本统计。保存规则不写 read model、不写 dirty scope，只返回当前 `cost_statistics` operation barrier target 供页面等待 fresh |
-| 全流水标签统计输入 | `CostStatisticsSqlProjectionBuilder` + `BankDetailsApplicationService` | 月度投影在 read model 边界内批量读取 fresh `bank_detail` 支出流水，写入 `bank_flow_time_rows` 与 `bank_flow_summary`；父 scope 只从已物化月份 shard payload 汇总这些字段，禁止页面直接读银行明细 API |
+| 成本统计标签规则 | `AppSettingsService.get_cost_statistics_tag_selection_payload()` / `app.app_settings.cost_statistics_tag_selection` | route 只暴露归一后的收入/支出主子标签、`__uncategorized__` 未分类标签和已选 leaf codes；默认未配置时等价于全选当前有效收入与支出标签 + 未分类，显式空数组表示全部不进入成本统计。legacy 显式选择升级到 schema v2 时保留原支出选择并一次性加入当前有效收入标签。保存规则不写 read model、不写 dirty scope |
+| 全流水标签统计输入 | `CostStatisticsSqlProjectionBuilder` + `BankDetailsApplicationService` | 月度投影在 read model 边界内批量读取 fresh `bank_detail` 收入与支出流水，写入 `bank_flow_time_rows` 与带方向金额/笔数的 `bank_flow_summary`；父 scope 只从已物化月份 shard payload 汇总这些字段，禁止页面直接读银行明细 API |
 | 流水标签三栏统计 | `CostStatisticsPage.tsx` | 输入是 fresh explorer `bank_flow_time_rows` 中的 `bank_tag_code`、`bank_tag_label`、`bank_tag_primary_label`、`bank_tag_sub_label`、`bank_tag_label_path`；缺失旧 payload 在 query/API mapper 层可回退到 `time_rows`，正常生产链路通过 fresh `bank_detail` 标签重新投影 |
 | 项目明细/流水详情/导出请求 | `routes_cost_statistics.py` | 只调用 `CostStatisticsQueryService`；read model 不 fresh 时返回 `409 cost_statistics_read_model_not_fresh`，不得同步扫描旧 live service 伪装成功；成本统计页面默认透传 `project_scope=active` |
 | Refresh scope | `cost_statistics` manifest | active/all month + parent aggregate |
@@ -50,7 +50,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 成本统计 rows/summary | 前端页面 | query gateway 后返回 freshness；`time_rows` 输出 OA 配对成本流水字段和流水标签 `bank_tag_*` 字段，供 `按项目`、`按银行`、`按OA费用类型` 使用；`bank_flow_time_rows` 输出全部银行支出流水标签字段，供 `按标签`、`按时间` 使用 |
+| 成本统计 rows/summary | 前端页面 | query gateway 后返回 freshness；`time_rows` 输出 OA 配对支出流水字段，供 `按项目`、`按银行`、`按OA费用类型` 使用；`bank_flow_time_rows` 输出全部银行收支流水及标签/方向字段，`bank_flow_summary` 输出 `expense_amount`、`income_amount`、`expense_transaction_count`、`income_transaction_count`，供 `按标签`、`按时间` 使用 |
 | 页面 Audit 状态 | 标题附件 | 只有 audit status 与 explorer read model 均明确 fresh/pass 才显示成功；问题数量是有上限 sample |
 | Explorer bank accounts | 前端页面 | `bank_accounts` 输出设置中的银行账户全集，字段为 `bank_name`、`account_last4`、`payment_account_label`、`source`；按银行统计必须展示这些账户，即使当前范围金额为 0 |
 | Source versions | read model/query gateway | 月份 scope 的 `source_versions` 必须包含当前 Workbench active generation 的完整 `workbench_source_versions`、`bank_detail_source_versions`、`bank_auto_tag_rules_version` 和 `bank_account_mappings_fingerprint`；projection builder、页面 fresh gate 与 Audit 必须经同一 repository port 读取 Workbench 版本。任一上游变化都使旧 payload fail-closed 为 refreshing 并入队刷新，禁止只在 Audit 中识别漂移而让页面继续显示 fresh |
@@ -68,8 +68,8 @@
 - Query owner：`CostStatisticsQueryService`；项目明细、流水详情、export-preview、export 都归属该 owner。
 - Miss/stale owner：`ReadModelQueryGateway`；SQL view 缺失、stale、source mismatch 或 payload invalid 时返回 `refreshing` envelope 并入队 `cost_statistics.read_model.refresh`，禁止同步 rebuild。
 - `time_rows.bank_tag_*` 的来源是 `BankTransactionTagReadFacade` 暴露的 fresh `bank_detail` scoped read model 有效分类字段，经 `cost_statistics_bank_tags.bank_tag_context_from_row(...)` 归一化后写入成本统计 read model payload。父 scope 从已物化月份 rows 的 payload 回读这些字段，不能回头读 Workbench `all`、Workbench 行内旧标签字段或银行明细页面 API。
-- `bank_flow_time_rows.bank_tag_*` 的来源是成本统计投影层通过银行明细 read facade 批量读取的 fresh 支出流水；它是 `按标签`、`按时间` 的全流水统计输入。`time_rows` 继续是 OA 配对成本输入；两类 rowset 的总金额口径允许不同。
-- Audit 不把上述投影依赖误当成 canonical 完整性来源：银行支出集合直接对 `app.bank_transactions` 做双向 equality，标签内容再与通过独立 bank-detail proof 的有效标签比较；同时复用 Workbench 全页面 proof，防止 Workbench 与成本统计共同漏掉同一对象却一起绿色。
+- `bank_flow_time_rows.bank_tag_*` 的来源是成本统计投影层通过银行明细 read facade 批量读取的 fresh 收入与支出流水；它是 `按标签`、`按时间` 的全流水统计输入。金额均以正数绝对值输出，方向决定进入支出或收入汇总，不计算净额，也不向页面展示合并总额。`time_rows` 继续是 OA 配对支出输入。
+- Audit 不把上述投影依赖误当成 canonical 完整性来源：银行收入与支出集合直接对 `app.bank_transactions` 做双向 equality，标签内容再与通过独立 bank-detail proof 的有效标签比较；同时复用 Workbench 全页面 proof。
 - 银行支出 canonical identity 与页面 payload 一律使用 `coalesce(legacy_mongo_id, id::text)`；无标签流水的 code 为空，但 label/primary/sub/path 统一为 `未标记` 语义。Audit 不得拿内部 UUID 与 legacy 页面 ID 比较，也不得把空标签与 `未标记` 误判为业务差异。
 - 成本统计标签规则由 `AppSettingsService` 持久化，`CostStatisticsQueryService` 读取归一后的 selected leaf codes 并在 query/export 层过滤。该规则不是投影 source version，保存时不触发 read model rebuild；页面只等待当前 scope freshness，避免全量刷新放大耗时。
 - `bank_accounts` 的来源是 settings owner 的银行账户映射，投影层通过 `cost_statistics_bank_accounts.py` 归一为页面只读 payload，并以 `bank_account_mappings_fingerprint` 纳入 source version。页面银行统计以 `bank_accounts + time_rows` 合并生成，禁止恢复只从当前流水推断银行全集的旧逻辑。
@@ -78,7 +78,7 @@
 - 父 scope 正式重建会删除不再存在于 Workbench active month shard 集合中的旧 cost_statistics month scopes，并清理对应 Redis payload；旧 shard 不得继续进入 Audit、parent rollup 或页面月份集合。
 - `active:all` / `all:all` 的 summary 与 project/expense 聚合都从当前 concrete `cost_statistics_rows` 重算；父模型不要求重复物化 parent rows，但 Audit 必须使用同一 child-union 口径，不能以 parent row 表为空误报 summary。
 - 成本 bank-flow 字段证明按银行流水 canonical legacy/public transaction id 连接 `bank_detail_rows.transaction_id`；不得只用 PostgreSQL UUID 连接后把完整投影误报为缺失。
-- Explorer payload schema version：`2026-07-cost-statistics-audit-proof-v7`。生产 v7 投影必须输出 `bank_accounts`、`bank_flow_summary`、`bank_flow_time_rows`，并在 `time_rows` 持久化 canonical `group_id/project_id`，使 Workbench relation 到成本行的归属可独立证明；带千分位的展示金额必须无损写入结构化 `cost_statistics_rows.amount`。旧 schema payload 或仍使用 Workbench 行内旧标签字段时必须通过 schema gate fail-closed 并重新投影。
+- Explorer payload schema version：`2026-07-cost-statistics-income-expense-v8`。生产 v8 投影必须在 `bank_flow_time_rows` 输出全部银行收入与支出及规范化方向，并在 `bank_flow_summary` 输出分方向金额和笔数；`time_rows` 仍持久化 canonical `group_id/project_id`。旧 schema payload 必须通过 schema gate fail-closed 并重新投影。
 - Audit 重算 `bank_flow_time_rows` 时，bank-detail identity 必须同时接受 PostgreSQL UUID 与 legacy public transaction id；两者都只能归一到同一 canonical `app.bank_transactions` 对象。月份归属使用 bank-detail 的 `scope_key` owner（必要时才回退 `trade_date`），不得用可空 `trade_date` 否定已经由 `trade_time/txn_month` 正确归属的行。禁止只按其中一种 ID 连接或只按可空日期字段校验而把完整投影误报为明细缺失。
 
 ## 文件范围

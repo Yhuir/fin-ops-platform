@@ -1,6 +1,6 @@
 # 设置模块边界与 I/O
 
-日期：2026-07-11
+日期：2026-07-13
 
 ## 模块化状态
 
@@ -43,7 +43,7 @@
 | Dirty scope/lifecycle | runtime queue | 设置影响 read model 时必须显式触发 |
 | OA manual import target envelope | operation barrier/frontend refresh | OA 手工导入、附件刷新、删除导入标记返回的 `operation_barrier_targets` 必须被设置页等待后再展示最终 fresh 状态 |
 | 银行账户映射只读 payload | cost_statistics projection/query source version | `AppSettingsService.get_cost_statistics_source_settings_payload()` 可一次性输出 `bank_account_mappings` 与 `bank_transaction_tags`，供成本统计计算 `bank_accounts` 和 source version；下游不得直接读取设置页前端状态 |
-| 成本统计标签规则 payload | cost_statistics query/filter route | `AppSettingsService.get_cost_statistics_tag_selection_payload()` 输出归一后的银行主/子标签、虚拟 `__uncategorized__` 未分类标签和 selected leaf codes；`update_cost_statistics_tag_selection(...)` 只持久化 `app.app_settings.cost_statistics_tag_selection` 并记录 audit，不写成本统计 read model、不入队 dirty scope |
+| 成本统计标签规则 payload | cost_statistics query/filter route | `AppSettingsService.get_cost_statistics_tag_selection_payload()` 输出归一后的收入/支出主子标签、虚拟 `__uncategorized__` 未分类标签、selection schema version 和 selected leaf codes；schema v2 默认全选当前有效收支标签，legacy 显式选择保留原支出选择并一次性加入当前有效收入标签。`update_cost_statistics_tag_selection(...)` 只持久化 `app.app_settings.cost_statistics_tag_selection` 并记录 audit，不写成本统计 read model、不入队 dirty scope |
 | 外部往来标签选择事务端口 | turnover ledger local write UoW | 只允许调用 `get_turnover_ledger_tag_selection_state()`、`commit_turnover_ledger_tag_selection_update(...)`、`restore_turnover_ledger_tag_selection_state(...)`；rollback 只恢复该 setting family，禁止读取/保存整份私有 `_snapshot` |
 
 ## 持久化与投影
@@ -52,7 +52,7 @@
 - 页面 Audit：direct canonical，registry `read_model_keys=()` 且 relation proof 不适用；只证明 persisted singleton、非敏感 credential registration 与 reset job state。下游 read model 不属于本页 consumer。
 - 影响 read model：设置重置可能影响全部 read model。
 - OA 手工导入设置入口会影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search`、`cost_statistics`，不拥有这些 read model。
-- Services：`AppSettingsService`、`SettingsDataResetService`、OA applicant credentials。`AppSettingsService.get_cost_statistics_source_settings_payload()` 是成本统计读取银行账户映射与自动标签规则版本的受控 read port，避免成本统计页面直接调用 settings API；`AppSettingsService.get_cost_statistics_tag_selection_payload()` / `update_cost_statistics_tag_selection(...)` 是成本统计标签规则的受控 read/write port，由成本统计 route 暴露给页面抽屉；Turnover Ledger 本地 UoW 只能通过领域化 tag-selection state/commit/restore 端口进入 Settings owner。
+- Services：`AppSettingsService`、`SettingsDataResetService`、OA applicant credentials。`AppSettingsService.get_cost_statistics_source_settings_payload()` 是成本统计读取银行账户映射与自动标签规则版本的受控 read port；`get_cost_statistics_tag_selection_payload()` / `update_cost_statistics_tag_selection(...)` 是 selection schema v2 收支标签规则的受控 read/write port，由成本统计 route 暴露给页面抽屉；Turnover Ledger 本地 UoW 只能通过领域化 tag-selection state/commit/restore 端口进入 Settings owner。
 
 ## 文件范围
 

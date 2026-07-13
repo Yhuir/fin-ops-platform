@@ -17,15 +17,15 @@
 
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
-| `COST-E2E-001` | fresh time/project/bank/expense baseline | P0 | 页面加载 fresh explorer，按时间、项目、银行和费用类型展示一致金额；首屏不从前端伪造金额或项目范围。 |
+| `COST-E2E-001` | fresh time/tag/project/bank/expense baseline | P0 | 页面加载 fresh explorer；按时间/按标签分别显示支出金额与收入金额并展示收入明细，项目/银行/OA 费用类型保持 OA 配对支出口径；首屏不显示全流水合并总金额。 |
 | `COST-E2E-002` | project scope active page / all API contract | P0 | 页面默认 `active` 并排除已完成项目，且不暴露项目范围切换 UI；`project_scope=all` 保留为后端 API/read model 合同。 |
 | `COST-E2E-003` | project/expense/transaction drilldown | P0 | 用户可从项目进入费用类型，再进入对应流水，详情 modal 展示后端返回的流水和成本字段。 |
-| `COST-E2E-004` | export preview / row-limit feedback | P0 | 导出中心使用当前 view/project scope/filter 请求 preview；后端行数上限错误必须在浏览器中展示结构化消息。 |
+| `COST-E2E-004` | export preview / row-limit feedback | P0 | 导出中心使用当前 view/project scope/filter 请求 preview；time/bank_tag preview 分别显示收支金额并包含资金方向，后端行数上限错误必须在浏览器中展示结构化消息。 |
 | `COST-E2E-005` | Workbench cost-bearing relation fan-out | P0 | 关联台 open candidate 不进入成本项目、金额或明细；确认 OA+bank+invoice 成本关系后，成本页重新读取并展示对应项目、金额、流水和详情。 |
 | `COST-E2E-006` | read model refreshing/stale/failed | P0 | explorer/month/export/detail 在 missing/stale/failed/unavailable 时展示刷新或错误语义，不把空 payload 当最终空结果。 |
 | `COST-E2E-007` | 权限与导出 gate | P1 | `read_export_only` 能查看/导出但不能触发写操作；API 403 不被 UI 当作成功。 |
 | `COST-E2E-008` | large table / visual stability | P1 | 大项目、大费用类型和宽表在真实浏览器中不遮挡、不丢行、滚动可用。 |
-| `COST-E2E-009` | real download event | P1 | 浏览器 download event 成功，文件名、筛选、字段、权限和 row-limit contract 与后端一致。 |
+| `COST-E2E-009` | real download event | P1 | 浏览器 download event 成功；time/bank_tag 文件包含收入与支出、资金方向和筛选，文件名、权限和 row-limit contract 与后端一致。 |
 | `COST-E2E-010` | downstream/import/settings fan-out | P1 | 导入确认、项目范围设置、turnover/no-OA/ETC 等成本相关写入后，成本统计通过自己的 read model 展示一致结果。 |
 
 ## 不属于本地 deterministic E2E 的风险

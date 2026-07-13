@@ -32,6 +32,15 @@
 
 ## 历史记录
 
+## 2026-07-13 - 流水统计按收入与支出双方向闭环
+
+- 目标：让按时间、按标签统计完整消费银行收入与支出，并按用户确认的层级分别展示金额和笔数。
+- 影响范围：成本统计 SQL projection、read model schema/Audit、query/export API、AppSettings 标签选择 schema、成本统计页面和导出中心；OA 配对统计不变。
+- 关键决策：不展示合并总金额或净额；金额均为正数绝对值；收入绿色、支出橘色；主标签、子标签均分列收支，明细保留方向；收入标签进入同一规则；新增 `bank_tag` 导出。
+- 文档影响：同步产品口径、API contract、read-model contract、cost-statistics/settings boundary、E2E spec/coverage 和测试矩阵。
+- 测试覆盖：backend projection/query/API/settings/Audit contract，frontend mapper/component/interaction，deterministic Browser flow。
+- 未测风险：生产历史 read model 需由 schema v8 freshness gate 触发重建；真实生产数据量 XLSX 打开耗时仍需 staging smoke。
+
 ## 2026-07-12 - 成本流水展示字段 Audit 与 canonical 文本优先级对齐
 
 - 目标：消除成本统计 Audit 对未配对 OA 银行流水「费用内容」的假阳性，保持关键展示字段独立重算证明。

@@ -1,0 +1,172 @@
+{
+  "scenarios": [
+    {
+      "name": "phase20-production-bank-turnover-20260713",
+      "shape": "bank_turnover",
+      "fixture_ownership": "test_owned",
+      "checkpoints": [
+        {
+          "name": "turnover-confirm",
+          "operation": "turnover_relation_confirm_cross_page",
+          "fixture_row_ids": ["txn_imported_1278", "txn_imported_1348"],
+          "steps": [
+            {
+              "name": "turnover-confirm",
+              "method": "POST",
+              "path": "/api/turnover-ledger/closures/confirm",
+              "json": {
+                "bank_row_ids": ["txn_imported_1278", "txn_imported_1348"],
+                "expected_versions": {
+                  "turnover_bank_row:txn_imported_1278": 2,
+                  "turnover_bank_row:txn_imported_1348": 2
+                },
+                "idempotency_key": "phase20-prod-g3-v2-confirm-20260713"
+              },
+              "captures": {
+                "turnover_relation_id": "/turnover_relation/relation_id"
+              }
+            }
+          ],
+          "consumers": [
+            {
+              "name": "workbench-confirm",
+              "page_key": "reconciliation-workbench",
+              "path": "/api/workbench/groups?month=2026-03&zone=open&page=1&page_size=20&search=txn_imported_1348&detail_level=full",
+              "assertions": [
+                {"pointer": "/groups/0/bank_rows/0/id", "equals": "txn_imported_1348"}
+              ]
+            },
+            {
+              "name": "cost-statistics-confirm",
+              "page_key": "cost-statistics",
+              "path": "/api/cost-statistics/explorer?month=2026-03&project_scope=all",
+              "assertions": [
+                {"pointer": "/bank_flow_time_rows/76/transaction_id", "equals": "txn_imported_1348"}
+              ]
+            },
+            {
+              "name": "turnover-ledger-confirm",
+              "page_key": "turnover-ledger",
+              "path": "/api/turnover-ledger?view=grouped&family=personal&page=1&page_size=100",
+              "assertions": [
+                {"pointer": "/groups/2/flow_rows/0/source_bank_row_id", "equals": "txn_imported_1278"}
+              ]
+            },
+            {
+              "name": "input-invoice-isolation-confirm",
+              "page_key": "input-invoice-usage",
+              "path": "/api/input-invoice-usage/rows?page=1&page_size=20&keyword=inv_imported_0789&month=2026-06",
+              "assertions": [
+                {"pointer": "/rows/0/invoiceId", "equals": "inv_imported_0789"}
+              ]
+            }
+          ],
+          "system_audit": true,
+          "relation_state_after": "active"
+        },
+        {
+          "name": "turnover-withdraw",
+          "operation": "turnover_relation_withdraw_cross_page",
+          "fixture_row_ids": ["txn_imported_1278", "txn_imported_1348"],
+          "steps": [
+            {
+              "name": "turnover-withdraw",
+              "method": "POST",
+              "path": "/api/turnover-ledger/relations/${turnover_relation_id}/withdraw",
+              "json": {
+                "idempotency_key": "phase20-prod-g3-v2-withdraw-20260713"
+              }
+            }
+          ],
+          "consumers": [
+            {
+              "name": "workbench-withdraw",
+              "page_key": "reconciliation-workbench",
+              "path": "/api/workbench/groups?month=2026-03&zone=open&page=1&page_size=20&search=txn_imported_1348&detail_level=full",
+              "assertions": [
+                {"pointer": "/groups/0/bank_rows/0/id", "equals": "txn_imported_1348"}
+              ]
+            },
+            {
+              "name": "cost-statistics-withdraw",
+              "page_key": "cost-statistics",
+              "path": "/api/cost-statistics/explorer?month=2026-03&project_scope=all",
+              "assertions": [
+                {"pointer": "/bank_flow_time_rows/76/transaction_id", "equals": "txn_imported_1348"}
+              ]
+            },
+            {
+              "name": "turnover-ledger-withdraw",
+              "page_key": "turnover-ledger",
+              "path": "/api/turnover-ledger?view=grouped&family=personal&page=1&page_size=100",
+              "assertions": [
+                {"pointer": "/groups/2/flow_rows/0/source_bank_row_id", "equals": "txn_imported_1278"}
+              ]
+            },
+            {
+              "name": "input-invoice-isolation-withdraw",
+              "page_key": "input-invoice-usage",
+              "path": "/api/input-invoice-usage/rows?page=1&page_size=20&keyword=inv_imported_0789&month=2026-06",
+              "assertions": [
+                {"pointer": "/rows/0/invoiceId", "equals": "inv_imported_0789"}
+              ]
+            }
+          ],
+          "system_audit": true,
+          "relation_state_after": "inactive"
+        }
+      ],
+      "recovery_checkpoint": {
+        "name": "turnover-recovery",
+        "operation": "turnover_relation_withdraw_cross_page",
+        "fixture_row_ids": ["txn_imported_1278", "txn_imported_1348"],
+        "steps": [
+          {
+            "name": "turnover-recovery",
+            "method": "POST",
+            "path": "/api/turnover-ledger/relations/${turnover_relation_id}/withdraw",
+            "json": {
+              "idempotency_key": "phase20-prod-g3-v2-recovery-20260713"
+            }
+          }
+        ],
+        "consumers": [
+          {
+            "name": "workbench-recovery",
+            "page_key": "reconciliation-workbench",
+            "path": "/api/workbench/groups?month=2026-03&zone=open&page=1&page_size=20&search=txn_imported_1348&detail_level=full",
+            "assertions": [
+              {"pointer": "/groups/0/bank_rows/0/id", "equals": "txn_imported_1348"}
+            ]
+          },
+          {
+            "name": "cost-statistics-recovery",
+            "page_key": "cost-statistics",
+            "path": "/api/cost-statistics/explorer?month=2026-03&project_scope=all",
+            "assertions": [
+              {"pointer": "/bank_flow_time_rows/76/transaction_id", "equals": "txn_imported_1348"}
+            ]
+          },
+          {
+            "name": "turnover-ledger-recovery",
+            "page_key": "turnover-ledger",
+            "path": "/api/turnover-ledger?view=grouped&family=personal&page=1&page_size=100",
+            "assertions": [
+              {"pointer": "/groups/2/flow_rows/0/source_bank_row_id", "equals": "txn_imported_1278"}
+            ]
+          },
+          {
+            "name": "input-invoice-isolation-recovery",
+            "page_key": "input-invoice-usage",
+            "path": "/api/input-invoice-usage/rows?page=1&page_size=20&keyword=inv_imported_0789&month=2026-06",
+            "assertions": [
+              {"pointer": "/rows/0/invoiceId", "equals": "inv_imported_0789"}
+            ]
+          }
+        ],
+        "system_audit": true,
+        "relation_state_after": "inactive"
+      }
+    }
+  ]
+}

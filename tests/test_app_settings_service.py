@@ -282,7 +282,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(restored["turnover_ledger_tag_selection"], previous_state)
         self.assertEqual(app._audit_service.as_dicts()[-1]["action"], "turnover_ledger_tag_selection_updated")
 
-    def test_cost_statistics_tag_selection_defaults_to_active_expense_tags_and_uncategorized(self) -> None:
+    def test_cost_statistics_tag_selection_defaults_to_active_income_expense_tags_and_uncategorized(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(
                 temp_dir,
@@ -298,7 +298,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             self.assertTrue(selection["default_selection_applied"])
             self.assertIn("fee", selection["selected_tag_codes"])
             self.assertIn(COST_STATISTICS_UNCATEGORIZED_TAG_CODE, selection["selected_tag_codes"])
-            self.assertNotIn("income_refund", selection["selected_tag_codes"])
+            self.assertIn("income_refund", selection["selected_tag_codes"])
             self.assertEqual(selection["inactive_selected_tag_codes"], [])
 
             saved = app._app_settings_service.update_cost_statistics_tag_selection(
@@ -320,6 +320,30 @@ class AppSettingsServiceTests(unittest.TestCase):
                     actor_id="cost-owner",
                 )
             self.assertEqual(context.exception.error_code, "unknown_cost_statistics_tag")
+
+    def test_cost_statistics_tag_selection_migrates_legacy_explicit_selection_with_income_tags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[
+                    {**self._custom_auto_rule("fee", "手续费"), "direction": "expense"},
+                    {**self._custom_auto_rule("income_refund", "退款"), "direction": "income"},
+                ],
+            )
+            store = ApplicationStateStore(Path(temp_dir))
+            snapshot = store.load_app_settings()
+            snapshot["cost_statistics_tag_selection"] = {
+                "version": 4,
+                "selected_tag_codes": ["fee"],
+            }
+            store.save_app_settings(snapshot)
+
+            app = build_application(data_dir=Path(temp_dir))
+            selection = app._app_settings_service.get_cost_statistics_tag_selection_payload()
+
+            self.assertEqual(selection["version"], 5)
+            self.assertEqual(selection["selection_schema_version"], 2)
+            self.assertEqual(selection["selected_tag_codes"], ["fee", "income_refund"])
 
     def test_file_rule_replacement_detaches_pending_invoice_and_no_oa_archived_codes_atomically(self) -> None:
         fixture = json.loads(

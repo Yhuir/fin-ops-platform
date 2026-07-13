@@ -4100,6 +4100,45 @@ function buildCostStatisticsExplorerPayload(
       })),
     )
     .sort((left, right) => right.trade_time.localeCompare(left.trade_time));
+  const incomeRows = month === "all" || month === "2026-03"
+    ? [{
+        transaction_id: "cost-income-001",
+        trade_time: "2026-03-22 10:30:00",
+        direction: "收入",
+        project_name: "未配对OA",
+        expense_type: "项目回款",
+        expense_content: "客户回款",
+        amount: "2,000.00",
+        counterparty_name: "项目客户",
+        payment_account_label: "工商银行 账户 0001",
+        remark: "项目回款",
+        bank_tag_code: "income_collection",
+        bank_tag_label: "项目回款",
+        bank_tag_primary_label: "经营收入",
+        bank_tag_sub_label: "项目回款",
+        bank_tag_label_path: ["经营收入", "项目回款"],
+      }]
+    : month === "2026-04"
+      ? [{
+          transaction_id: "cost-income-101",
+          trade_time: "2026-04-18 10:30:00",
+          direction: "收入",
+          project_name: "未配对OA",
+          expense_type: "其他收入",
+          expense_content: "退款到账",
+          amount: "1,500.00",
+          counterparty_name: "供应商退款",
+          payment_account_label: "平安银行 账户 8821",
+          remark: "退款",
+          bank_tag_code: "income_refund",
+          bank_tag_label: "退款",
+          bank_tag_primary_label: "经营收入",
+          bank_tag_sub_label: "退款",
+          bank_tag_label_path: ["经营收入", "退款"],
+        }]
+      : [];
+  const bankFlowTimeRows = [...timeRows, ...incomeRows]
+    .sort((left, right) => right.trade_time.localeCompare(left.trade_time));
 
   const projectRows = Object.entries(projectRowMap)
     .map(([projectName, rows]) => ({
@@ -4143,6 +4182,16 @@ function buildCostStatisticsExplorerPayload(
       total_amount: sumCostAmounts(timeRows),
     },
     time_rows: timeRows,
+    bank_flow_summary: {
+      row_count: bankFlowTimeRows.length,
+      transaction_count: bankFlowTimeRows.length,
+      total_amount: sumCostAmounts(bankFlowTimeRows),
+      expense_amount: sumCostAmounts(bankFlowTimeRows.filter((row) => row.direction === "支出")),
+      income_amount: sumCostAmounts(bankFlowTimeRows.filter((row) => row.direction === "收入")),
+      expense_transaction_count: bankFlowTimeRows.filter((row) => row.direction === "支出").length,
+      income_transaction_count: bankFlowTimeRows.filter((row) => row.direction === "收入").length,
+    },
+    bank_flow_time_rows: bankFlowTimeRows,
     bank_accounts: [
       {
         bank_name: "工商银行",
@@ -4297,6 +4346,7 @@ function buildFilteredCostTimeRows({
         rows.map((row) => ({
           transaction_id: row.transaction_id,
           trade_time: row.trade_time,
+          direction: row.direction,
           project_name: resolvedProjectName,
           expense_type: row.expense_type,
           expense_content: row.expense_content,
@@ -4357,6 +4407,9 @@ function buildCostStatisticsExportFileName(
   if (view === "time") {
     return `成本统计_${monthLabel}_按时间统计.xlsx`;
   }
+  if (view === "bank_tag") {
+    return `成本统计_${monthLabel}_按标签统计.xlsx`;
+  }
   if (view === "month") {
     return `成本统计_${monthLabel}_月份汇总.xlsx`;
   }
@@ -4408,6 +4461,19 @@ function buildCostStatisticsExportPreviewPayload({
     expenseTypes,
     projectScope,
   });
+  const bankFlowRows = (view === "time" || view === "bank_tag")
+    ? resolveCostStatisticMonths(month, startMonth, endMonth, startDate, endDate)
+        .flatMap((resolvedMonth) => (
+          buildCostStatisticsExplorerPayload(resolvedMonth, projectScope ?? "active").bank_flow_time_rows
+        ))
+        .filter((row) => {
+          const tradeDate = row.trade_time.slice(0, 10);
+          const normalizedStartDate = startDate && endDate && startDate > endDate ? endDate : startDate;
+          const normalizedEndDate = startDate && endDate && startDate > endDate ? startDate : endDate;
+          return (!normalizedStartDate || tradeDate >= normalizedStartDate)
+            && (!normalizedEndDate || tradeDate <= normalizedEndDate);
+        })
+    : rows;
   const scopeLabel =
     startDate && endDate
       ? `${startDate}至${endDate}`
@@ -4496,18 +4562,22 @@ function buildCostStatisticsExportPreviewPayload({
     };
   }
   return {
-    view: "time",
-    file_name: buildCostStatisticsExportFileName(month, "time", undefined, null, null, null, startMonth, endMonth, undefined, startDate, endDate),
+    view,
+    file_name: buildCostStatisticsExportFileName(month, view, undefined, null, null, null, startMonth, endMonth, undefined, startDate, endDate),
     scope_label: scopeLabel,
     summary: {
-      row_count: rows.length,
-      transaction_count: rows.length,
-      total_amount: sumCostAmounts(rows),
+      row_count: bankFlowRows.length,
+      transaction_count: bankFlowRows.length,
+      total_amount: sumCostAmounts(bankFlowRows),
+      expense_amount: sumCostAmounts(bankFlowRows.filter((row) => row.direction === "支出")),
+      income_amount: sumCostAmounts(bankFlowRows.filter((row) => row.direction === "收入")),
+      expense_transaction_count: bankFlowRows.filter((row) => row.direction === "支出").length,
+      income_transaction_count: bankFlowRows.filter((row) => row.direction === "收入").length,
       sheet_count: 1,
     },
-    sheet_names: ["按时间统计"],
+    sheet_names: [view === "bank_tag" ? "按标签统计" : "按时间统计"],
     columns: ["时间", "项目名称", "费用类型", "金额", "费用内容", "对方户名", "支付账户"],
-    rows: rows.map((row) => [
+    rows: bankFlowRows.map((row) => [
       row.trade_time,
       row.project_name,
       row.expense_type,
@@ -5458,9 +5528,19 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               path: ["费用", "材料费"],
               source: "custom",
               status: "active",
-              direction: "expense",
+              direction: "any",
               output_primary_label: "费用",
               output_sub_label: "材料费",
+            },
+            {
+              code: "income_collection",
+              label: "项目回款",
+              path: ["经营收入", "项目回款"],
+              source: "custom",
+              status: "active",
+              direction: "income",
+              output_primary_label: "经营收入",
+              output_sub_label: "项目回款",
             },
             {
               code: "__uncategorized__",
@@ -5468,7 +5548,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               path: ["未分类", "未分类"],
               source: "system",
               status: "active",
-              direction: "expense",
+              direction: "any",
               output_primary_label: "未分类",
               output_sub_label: "未分类",
             },

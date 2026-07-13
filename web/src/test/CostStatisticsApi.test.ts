@@ -236,9 +236,13 @@ describe("Cost statistics export API", () => {
           },
         ],
         bank_flow_summary: {
-          row_count: 2,
-          transaction_count: 2,
-          total_amount: "130.00",
+          row_count: 3,
+          transaction_count: 3,
+          total_amount: "330.00",
+          expense_amount: "130.00",
+          income_amount: "200.00",
+          expense_transaction_count: 2,
+          income_transaction_count: 1,
         },
         bank_flow_time_rows: [
           {
@@ -253,6 +257,19 @@ describe("Cost statistics export API", () => {
             payment_account_label: "建行 8106",
             remark: "",
             bank_tag_code: "fee",
+          },
+          {
+            transaction_id: "income-fee",
+            trade_time: "2026-03-20 09:00:00",
+            direction: "收入",
+            project_name: "未配对OA",
+            expense_type: "退款",
+            expense_content: "供应商退款",
+            amount: "200.00",
+            counterparty_name: "供应商",
+            payment_account_label: "建行 8106",
+            remark: "",
+            bank_tag_code: "income_refund",
           },
           {
             transaction_id: "flow-fee",
@@ -277,9 +294,12 @@ describe("Cost statistics export API", () => {
     const payload = await fetchCostStatisticsExplorer("2026-03", undefined, "active");
 
     expect(payload.summary.totalAmount).toBe("100.00");
-    expect(payload.bankFlowSummary.totalAmount).toBe("130.00");
+    expect(payload.bankFlowSummary.expenseAmount).toBe("130.00");
+    expect(payload.bankFlowSummary.incomeAmount).toBe("200.00");
+    expect(payload.bankFlowSummary.expenseTransactionCount).toBe(2);
+    expect(payload.bankFlowSummary.incomeTransactionCount).toBe(1);
     expect(payload.timeRows.map((row) => row.transactionId)).toEqual(["oa-fee"]);
-    expect(payload.bankFlowTimeRows.map((row) => row.transactionId)).toEqual(["oa-fee", "flow-fee"]);
+    expect(payload.bankFlowTimeRows.map((row) => row.transactionId)).toEqual(["oa-fee", "income-fee", "flow-fee"]);
   });
 
   test("loads and saves cost statistics tag rules with operation barrier targets", async () => {

@@ -1,0 +1,269 @@
+{
+  "scenarios": [
+    {
+      "name": "phase20-production-bank-oa-invoice-20260713",
+      "shape": "bank_oa_invoice",
+      "fixture_ownership": "test_owned",
+      "checkpoints": [
+        {
+          "name": "confirm-link",
+          "operation": "workbench_relation_confirm_cross_page",
+          "relation_state_after": "active",
+          "system_audit": true,
+          "steps": [
+            {
+              "name": "confirm-link-preview",
+              "method": "POST",
+              "path": "/api/workbench/actions/confirm-link/preview",
+              "mutation": false,
+              "json": {
+                "month": "2026-06",
+                "row_ids": ["txn_imported_0454", "oa-pay-2324", "inv_imported_0696"],
+                "case_id": "phase20-prod-g2-v4-case-20260713"
+              }
+            },
+            {
+              "name": "confirm-link",
+              "method": "POST",
+              "path": "/api/workbench/actions/confirm-link",
+              "json": {
+                "month": "2026-06",
+                "row_ids": ["txn_imported_0454", "oa-pay-2324", "inv_imported_0696"],
+                "case_id": "phase20-prod-g2-v4-case-20260713",
+                "idempotency_key": "phase20-prod-g2-v4-confirm-20260713"
+              }
+            }
+          ],
+          "consumers": [
+            {
+              "name": "workbench-confirm",
+              "page_key": "reconciliation-workbench",
+              "path": "/api/workbench/groups?month=2026-06&zone=paired&page=1&page_size=20&search=txn_imported_0454&detail_level=full",
+              "assertions": [
+                {"pointer": "/groups/0/bank_rows/0/id", "equals": "txn_imported_0454"},
+                {"pointer": "/groups/0/oa_rows/0/id", "equals": "oa-pay-2324"},
+                {"pointer": "/groups/0/invoice_rows/0/id", "equals": "inv_imported_0696"}
+              ]
+            },
+            {
+              "name": "bank-details-confirm",
+              "page_key": "bank-details",
+              "path": "/api/bank-details/transactions?date_from=2026-06-01&date_to=2026-06-30&keyword=txn_imported_0454&page=1&page_size=20",
+              "assertions": [
+                {"pointer": "/rows/0/id", "equals": "txn_imported_0454"},
+                {"pointer": "/rows/0/relation_status", "equals": "linked"}
+              ]
+            },
+            {
+              "name": "pending-invoices-confirm",
+              "page_key": "pending-invoices",
+              "path": "/api/pending-invoices/rows?direction=expense&keyword=txn_imported_0454&page=1&page_size=20",
+              "assertions": [
+                {"pointer": "/rows/0/id", "equals": "txn_imported_0454"},
+                {"pointer": "/rows/0/oa/primary/id", "equals": "oa-pay-2324"},
+                {"pointer": "/rows/0/input_invoices/primary/id", "equals": "inv_imported_0696"}
+              ]
+            },
+            {
+              "name": "input-invoice-usage-confirm",
+              "page_key": "input-invoice-usage",
+              "path": "/api/input-invoice-usage/rows?page=1&page_size=20&keyword=inv_imported_0696&month=2026-06",
+              "assertions": [
+                {"pointer": "/rows/0/invoiceId", "equals": "inv_imported_0696"},
+                {"pointer": "/rows/0/oa/primaryOaId", "equals": "oa-pay-2324"},
+                {"pointer": "/rows/0/bankTransactions/primaryBankTransactionId", "equals": "txn_imported_0454"}
+              ]
+            },
+            {
+              "name": "oa-pending-confirm",
+              "page_key": "oa-pending-payments",
+              "path": "/api/oa-pending-payments/rows?page=1&page_size=20&keyword=oa-pay-2324",
+              "assertions": [
+                {"pointer": "/rows/0/oa/primaryOaId", "equals": "oa-pay-2324"},
+                {"pointer": "/rows/0/bankTransaction/primaryBankTransactionId", "equals": "txn_imported_0454"},
+                {"pointer": "/rows/0/invoice/primaryInvoiceId", "equals": "inv_imported_0696"}
+              ]
+            },
+            {
+              "name": "cost-statistics-confirm",
+              "page_key": "cost-statistics",
+              "path": "/api/cost-statistics/explorer?month=2026-06&project_scope=all",
+              "assertions": [
+                {"pointer": "/bank_flow_time_rows/8/transaction_id", "equals": "txn_imported_0454"}
+              ]
+            },
+            {
+              "name": "output-invoice-isolation-confirm",
+              "page_key": "output-invoice-collections",
+              "path": "/api/output-invoice-collections/rows?page=1&page_size=20&month=2026-06",
+              "assertions": [
+                {"pointer": "/rows/0/id", "equals": "output_invoice_collection_row_c4a01c096825b4c5"}
+              ]
+            },
+            {
+              "name": "tax-offset-isolation-confirm",
+              "page_key": "tax-offset",
+              "path": "/api/tax-offset?month=2026-06",
+              "assertions": [
+                {"pointer": "/output_items/0/id", "equals": "inv_imported_0372"}
+              ]
+            }
+          ]
+        },
+        {
+          "name": "withdraw-link",
+          "operation": "workbench_relation_withdraw_cross_page",
+          "relation_state_after": "inactive",
+          "system_audit": true,
+          "steps": [
+            {
+              "name": "withdraw-link-preview",
+              "method": "POST",
+              "path": "/api/workbench/actions/withdraw-link/preview",
+              "mutation": false,
+              "json": {
+                "month": "2026-06",
+                "row_ids": ["txn_imported_0454", "oa-pay-2324", "inv_imported_0696"]
+              },
+              "captures": {
+                "withdraw_preview_id": "/preview_id",
+                "withdraw_versions": "/submit_expected_versions"
+              }
+            },
+            {
+              "name": "withdraw-link",
+              "method": "POST",
+              "path": "/api/workbench/actions/withdraw-link",
+              "json": {
+                "month": "2026-06",
+                "row_ids": ["txn_imported_0454", "oa-pay-2324", "inv_imported_0696"],
+                "preview_id": "${withdraw_preview_id}",
+                "expected_versions": "${withdraw_versions}",
+                "operation_type": "withdraw_relation",
+                "idempotency_key": "phase20-prod-g2-v4-withdraw-20260713"
+              }
+            }
+          ],
+          "consumers": [
+            {
+              "name": "workbench-withdraw",
+              "page_key": "reconciliation-workbench",
+              "path": "/api/workbench/groups?month=2026-06&zone=open&page=1&page_size=20&search=txn_imported_0454&detail_level=full",
+              "assertions": [
+                {"pointer": "/groups/0/bank_rows/0/id", "equals": "txn_imported_0454"}
+              ]
+            },
+            {
+              "name": "bank-details-withdraw",
+              "page_key": "bank-details",
+              "path": "/api/bank-details/transactions?date_from=2026-06-01&date_to=2026-06-30&keyword=txn_imported_0454&page=1&page_size=20",
+              "assertions": [
+                {"pointer": "/rows/0/id", "equals": "txn_imported_0454"},
+                {"pointer": "/rows/0/relation_status", "equals": ""}
+              ]
+            },
+            {
+              "name": "pending-invoices-withdraw",
+              "page_key": "pending-invoices",
+              "path": "/api/pending-invoices/rows?direction=expense&keyword=txn_imported_0454&page=1&page_size=20",
+              "assertions": [
+                {"pointer": "/rows/0/id", "equals": "txn_imported_0454"},
+                {"pointer": "/rows/0/oa/relation_count", "equals": 0},
+                {"pointer": "/rows/0/input_invoices/relation_count", "equals": 0}
+              ]
+            },
+            {
+              "name": "input-invoice-usage-withdraw",
+              "page_key": "input-invoice-usage",
+              "path": "/api/input-invoice-usage/rows?page=1&page_size=20&keyword=inv_imported_0696&month=2026-06",
+              "assertions": [
+                {"pointer": "/rows/0/invoiceId", "equals": "inv_imported_0696"},
+                {"pointer": "/rows/0/oa/relationCount", "equals": 0},
+                {"pointer": "/rows/0/bankTransactions/relationCount", "equals": 0}
+              ]
+            },
+            {
+              "name": "oa-pending-withdraw",
+              "page_key": "oa-pending-payments",
+              "path": "/api/oa-pending-payments/rows?page=1&page_size=20&keyword=oa-pay-2324",
+              "assertions": [
+                {"pointer": "/rows/0/oa/primaryOaId", "equals": "oa-pay-2324"},
+                {"pointer": "/rows/0/bankTransaction/relationCount", "equals": 0},
+                {"pointer": "/rows/0/invoice/relationCount", "equals": 0}
+              ]
+            },
+            {
+              "name": "cost-statistics-withdraw",
+              "page_key": "cost-statistics",
+              "path": "/api/cost-statistics/explorer?month=2026-06&project_scope=all",
+              "assertions": [
+                {"pointer": "/bank_flow_time_rows/8/transaction_id", "equals": "txn_imported_0454"}
+              ]
+            },
+            {
+              "name": "output-invoice-isolation-withdraw",
+              "page_key": "output-invoice-collections",
+              "path": "/api/output-invoice-collections/rows?page=1&page_size=20&month=2026-06",
+              "assertions": [
+                {"pointer": "/rows/0/id", "equals": "output_invoice_collection_row_c4a01c096825b4c5"}
+              ]
+            },
+            {
+              "name": "tax-offset-isolation-withdraw",
+              "page_key": "tax-offset",
+              "path": "/api/tax-offset?month=2026-06",
+              "assertions": [
+                {"pointer": "/output_items/0/id", "equals": "inv_imported_0372"}
+              ]
+            }
+          ]
+        }
+      ],
+      "recovery_checkpoint": {
+        "name": "withdraw-link-recovery",
+        "operation": "workbench_relation_withdraw_cross_page",
+        "relation_state_after": "inactive",
+        "system_audit": true,
+        "steps": [
+          {
+            "name": "withdraw-link-recovery-preview",
+            "method": "POST",
+            "path": "/api/workbench/actions/withdraw-link/preview",
+            "mutation": false,
+            "json": {
+              "month": "2026-06",
+              "row_ids": ["txn_imported_0454", "oa-pay-2324", "inv_imported_0696"]
+            },
+            "captures": {
+              "recovery_preview_id": "/preview_id",
+              "recovery_versions": "/submit_expected_versions"
+            }
+          },
+          {
+            "name": "withdraw-link-recovery",
+            "method": "POST",
+            "path": "/api/workbench/actions/withdraw-link",
+            "json": {
+              "month": "2026-06",
+              "row_ids": ["txn_imported_0454", "oa-pay-2324", "inv_imported_0696"],
+              "preview_id": "${recovery_preview_id}",
+              "expected_versions": "${recovery_versions}",
+              "operation_type": "withdraw_relation",
+              "idempotency_key": "phase20-prod-g2-v4-recovery-20260713"
+            }
+          }
+        ],
+        "consumers": [
+          {"name": "workbench-recovery", "page_key": "reconciliation-workbench", "path": "/api/workbench/groups?month=2026-06&zone=open&page=1&page_size=20&search=txn_imported_0454&detail_level=full", "assertions": [{"pointer": "/groups/0/bank_rows/0/id", "equals": "txn_imported_0454"}]},
+          {"name": "bank-details-recovery", "page_key": "bank-details", "path": "/api/bank-details/transactions?date_from=2026-06-01&date_to=2026-06-30&keyword=txn_imported_0454&page=1&page_size=20", "assertions": [{"pointer": "/rows/0/id", "equals": "txn_imported_0454"}]},
+          {"name": "pending-invoices-recovery", "page_key": "pending-invoices", "path": "/api/pending-invoices/rows?direction=expense&keyword=txn_imported_0454&page=1&page_size=20", "assertions": [{"pointer": "/rows/0/id", "equals": "txn_imported_0454"}]},
+          {"name": "input-invoice-usage-recovery", "page_key": "input-invoice-usage", "path": "/api/input-invoice-usage/rows?page=1&page_size=20&keyword=inv_imported_0696&month=2026-06", "assertions": [{"pointer": "/rows/0/invoiceId", "equals": "inv_imported_0696"}]},
+          {"name": "oa-pending-recovery", "page_key": "oa-pending-payments", "path": "/api/oa-pending-payments/rows?page=1&page_size=20&keyword=oa-pay-2324", "assertions": [{"pointer": "/rows/0/oa/primaryOaId", "equals": "oa-pay-2324"}]},
+          {"name": "cost-statistics-recovery", "page_key": "cost-statistics", "path": "/api/cost-statistics/explorer?month=2026-06&project_scope=all", "assertions": [{"pointer": "/bank_flow_time_rows/8/transaction_id", "equals": "txn_imported_0454"}]},
+          {"name": "output-invoice-isolation-recovery", "page_key": "output-invoice-collections", "path": "/api/output-invoice-collections/rows?page=1&page_size=20&month=2026-06", "assertions": [{"pointer": "/rows/0/id", "equals": "output_invoice_collection_row_c4a01c096825b4c5"}]},
+          {"name": "tax-offset-isolation-recovery", "page_key": "tax-offset", "path": "/api/tax-offset?month=2026-06", "assertions": [{"pointer": "/output_items/0/id", "equals": "inv_imported_0372"}]}
+        ]
+      }
+    }
+  ]
+}

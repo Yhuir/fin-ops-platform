@@ -310,8 +310,10 @@ test.describe("cost statistics browser flow", () => {
     const downloadPath = testInfo.outputPath(download.suggestedFilename());
     await download.saveAs(downloadPath);
     const downloadedText = await readFile(downloadPath, "utf8");
-    expect(downloadedText).toContain("时间,项目名称,费用类型,金额,费用内容,对方户名,支付账户");
+    expect(downloadedText).toContain("时间,项目名称,费用类型,金额,费用内容,资金方向,对方户名,支付账户");
     expect(downloadedText).toContain("cost-txn-e2e-001");
+    expect(downloadedText).toContain("cost-income-e2e-001");
+    expect(downloadedText).toContain("浏览器客户回款");
     expect(downloadedText).toContain("云南溯源科技");
     expect(downloadedText).toContain("设备货款及材料费");
     expect(downloadedText).toContain("PLC 模块采购");
@@ -336,6 +338,15 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByText(/以已配对的支出流水为基准/)).toHaveCount(0);
     await expect(page.locator(".cost-page .stat-card")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
+    await expect(page.getByLabel("时间统计方向金额")).toContainText("支出金额");
+    await expect(page.getByLabel("时间统计方向金额")).toContainText("收入金额 8,888.00");
+    await expect(page.locator(".cost-direction-amount--income").first()).toHaveCSS("color", /rgb\(/);
+    await expect(page.getByRole("button", { name: "查看流水 cost-income-e2e-001" })).toBeVisible();
+    await page.getByRole("button", { name: "查看流水 cost-income-e2e-001" }).click();
+    const incomeDetailDialog = page.getByRole("dialog", { name: "流水详情" });
+    await expect(incomeDetailDialog).toContainText("收入");
+    await expect(incomeDetailDialog).toContainText("8,888.00");
+    await incomeDetailDialog.getByRole("button", { name: "关闭" }).click();
 
     const refreshResponse = waitForCostStatisticsExplorer(page, "2026-03", "active");
     await recordLatency({
@@ -443,6 +454,9 @@ test.describe("cost statistics browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeVisible());
     });
     await expect(page.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeVisible();
+    await expect(page.getByLabel("标签统计方向金额")).toContainText("支出金额");
+    await expect(page.getByLabel("标签统计方向金额")).toContainText("收入金额 8,888.00");
+    await expect(page.getByRole("button", { name: /收入/ }).first()).toBeVisible();
     await recordLatency({
       operationId: "cost-statistics.drilldown-bank-tag",
       visibleLabel: "主标签 / 子标签",

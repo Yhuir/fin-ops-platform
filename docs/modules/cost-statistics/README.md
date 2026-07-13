@@ -39,7 +39,7 @@
 
 月度 scope projection 只能消费对应 `read_model.workbench_generations` 的 active generation，并必须把 active generation 的 `source_versions` 纳入自身 `source_versions`。禁止直接按 `scope_key` 扫描 `read_model.workbench_groups` / `workbench_rows` 的历史 generation；父 scope shard 枚举也只能来自 active `workbench_generations`。当 SQL read model 已经 fresh 且 `source_versions` 完全一致时，worker 可以返回 `skipped/source_versions_unchanged`，不得扫描 Workbench groups 或重写 payload；缺少读取接口或版本不一致时必须按 active generation 重建。
 
-2026-07-10 后成本统计页面有两组统计口径：`按项目`、`按银行`、`按OA费用类型` 是 OA 配对流水统计，只消费规则选中后的 `time_rows`；`按标签`、`按时间` 是全银行支出流水统计，只消费规则选中后的 `bank_flow_time_rows`。两组总金额可以不同，但组内视图总金额必须一致。成本统计标签规则由右侧紧凑抽屉维护，数据来自 `AppSettingsService.get_cost_statistics_tag_selection_payload()` 归一后的银行主/子标签和虚拟 `__uncategorized__` 未分类标签；保存规则只持久化 app settings，不触发 read model rebuild，页面等待当前 `cost_statistics` scope fresh 后关闭抽屉。
+2026-07-13 后成本统计页面有两组统计口径：`按项目`、`按银行`、`按OA费用类型` 是 OA 配对支出流水统计，只消费规则选中后的 `time_rows`；`按标签`、`按时间` 是全银行收支流水统计，消费规则选中后的全部收入与支出 `bank_flow_time_rows`。全流水视图不显示收入与支出的合并总金额：页面顶部、主标签和子标签均分别显示正数绝对值的“支出金额 / 收入金额”，同时分别显示笔数；收入使用绿色，支出使用橘色，流水明细保留资金方向和该笔金额。成本统计标签规则由右侧紧凑抽屉维护，收入与支出标签都可选择；旧显式选择在 selection schema v2 归一化时保留原支出选择并一次性加入当前有效收入标签。保存规则只持久化 app settings，不触发 read model rebuild。
 
 ## 维护触发器
 
