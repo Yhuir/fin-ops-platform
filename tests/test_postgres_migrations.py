@@ -115,6 +115,7 @@ EXPECTED_MIGRATIONS = [
     "0099_external_control_evidence.sql",
     "0100_phase19_runtime_grants.sql",
     "0101_phase19_audit_contract_boundaries.sql",
+    "0102_workbench_idempotency_runtime_evidence_grant.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -266,7 +267,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 102)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 103)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1269,6 +1270,23 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("from app.etc_reconciliation_files file", sql)
         self.assertNotIn("insert into app.file_objects", sql)
         self.assertNotIn("sha256 =", sql)
+
+    def test_workbench_idempotency_runtime_evidence_grant_is_read_only(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0102_workbench_idempotency_runtime_evidence_grant.sql").read_text(
+                encoding="utf-8"
+            )
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn(
+            "grant select on app.workbench_idempotency_records to fin_ops_app_runtime",
+            normalized_sql,
+        )
+        self.assertNotRegex(
+            normalized_sql,
+            r"grant [^;]*(?:insert|update|delete)[^;]*workbench_idempotency_records",
+        )
 
 
 
