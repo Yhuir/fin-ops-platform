@@ -2372,6 +2372,7 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertIn("from app.workbench_pair_relations", sql_text)
 
     def test_relation_tags_source_fast_path_resolves_canonical_bank_id_alias(self) -> None:
+        self.assertGreaterEqual(BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, 9)
         connection = FakeConnection(
             relation_rows=[
                 {
