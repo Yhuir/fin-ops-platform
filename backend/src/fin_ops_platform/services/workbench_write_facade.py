@@ -534,7 +534,6 @@ class WorkbenchWriteFacade:
                 month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             ),
         )
-        previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
         changed_scope_keys = self._operation_scope_keys_for_rows_and_row_ids(
             month=month,
             rows=selected_rows,
@@ -559,12 +558,11 @@ class WorkbenchWriteFacade:
                 amount_check=amount_check,
                 selected_rows=selected_rows,
                 history_before_relations=history_before_relations,
-                previous_pair_snapshot=previous_pair_snapshot,
                 changed_scope_keys=changed_scope_keys,
-                changed_case_ids=changed_case_ids,
                 operation_projection=operation_projection,
             )
 
+        previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
         relation_command = self._relation_command_service_for()
         if relation_command is not None:
             pair_relation_started_at = monotonic()
@@ -672,9 +670,7 @@ class WorkbenchWriteFacade:
         amount_check: dict[str, object],
         selected_rows: list[dict[str, object]],
         history_before_relations: list[dict[str, object]],
-        previous_pair_snapshot: dict[str, object],
         changed_scope_keys: list[str],
-        changed_case_ids: list[str],
         operation_projection: dict[str, object],
     ) -> WorkbenchWriteResult:
         action_name = "confirm_link"
@@ -790,10 +786,6 @@ class WorkbenchWriteFacade:
                         "request_id": request_id,
                     }
                 },
-            )
-            self._restore_pair_relation_snapshot(
-                previous_pair_snapshot,
-                changed_case_ids=changed_case_ids,
             )
             return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
         if not isinstance(result.get("operation_projection"), dict) or not result.get("operation_projection"):

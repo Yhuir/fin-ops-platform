@@ -4367,6 +4367,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_workbench_confirm_uow_does_not_use_legacy_snapshot_rollback_io(self) -> None:
+        path = SERVICES_ROOT / "workbench_write_facade.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "_confirm_link_with_uow")
+
+        self.assertNotIn("_relation_read_snapshot_port.snapshot", method_source)
+        self.assertNotIn("_restore_pair_relation_snapshot", method_source)
+
     def test_workbench_write_facade_relation_reads_and_cash_special_mutations_use_ports(self) -> None:
         path = SERVICES_ROOT / "workbench_write_facade.py"
         source = path.read_text(encoding="utf-8")

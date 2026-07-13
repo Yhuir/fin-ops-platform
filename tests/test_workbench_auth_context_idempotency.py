@@ -727,6 +727,27 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
 
+    def test_confirm_link_uow_path_does_not_read_legacy_pair_snapshot(self) -> None:
+        facade = _new_facade(
+            confirm_uow=_RecordingUoW(),
+            relation_command_service=_RecordingRelationCommandService(),
+            pair_relation_service=_SnapshotForbiddenPairRelationService(),
+        )
+
+        result = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "confirm:no-legacy-snapshot",
+            },
+            request_id="req-confirm-no-snapshot",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
+
     def test_withdraw_link_response_returns_operation_freshness_targets_for_affected_scopes(self) -> None:
         facade = _new_facade(
             withdraw_uow=_RecordingUoW(),
