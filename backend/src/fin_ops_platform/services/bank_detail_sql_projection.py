@@ -102,7 +102,17 @@ class BankDetailSqlProjectionBuilder:
             )
             return {"scope_key": normalized_scope_key, "row_count": 0, "source_versions": source_versions}
         transaction_ids = [str(row["id"]) for row in transaction_rows]
-        relations = self._load_relation_tags(scope_key=normalized_scope_key, transaction_ids=transaction_ids)
+        transaction_id_aliases = {
+            str(row["transaction_id"]): str(row["id"])
+            for row in transaction_rows
+            if str(row.get("transaction_id") or "").strip()
+            and str(row.get("transaction_id")) != str(row.get("id"))
+        }
+        relations = self._load_relation_tags(
+            scope_key=normalized_scope_key,
+            transaction_ids=transaction_ids,
+            transaction_id_aliases=transaction_id_aliases,
+        )
         auto_categories = self._auto_category_service.suggestions_by_transaction_id(auto_category_context_rows)
         auto_category_context_by_id = {
             str(row.get("id")): row
@@ -298,12 +308,16 @@ class BankDetailSqlProjectionBuilder:
         transaction_ids: list[str] | None = None,
         *,
         scope_key: str = "all",
+        transaction_id_aliases: dict[str, str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         transaction_ids = list(transaction_ids or [])
         if not transaction_ids:
             return {}
         if self._relation_tags_from_source:
-            return self._load_relation_tags_from_source(transaction_ids)
+            return self._load_relation_tags_from_source(
+                transaction_ids,
+                transaction_id_aliases=transaction_id_aliases,
+            )
         if not self._require_fresh_relation_tags:
             return {}
         result_payload = self._workbench_relation_read_facade.list_by_month(
@@ -341,20 +355,31 @@ class BankDetailSqlProjectionBuilder:
             )
         return result
 
-    def _load_relation_tags_from_source(self, transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
+    def _load_relation_tags_from_source(
+        self,
+        transaction_ids: list[str],
+        *,
+        transaction_id_aliases: dict[str, str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         normalized_transaction_ids = [transaction_id for transaction_id in text_list(transaction_ids) if transaction_id]
         if not normalized_transaction_ids:
             return {}
+        normalized_aliases = {
+            str(source_id).strip(): str(target_id).strip()
+            for source_id, target_id in dict(transaction_id_aliases or {}).items()
+            if str(source_id).strip() and str(target_id).strip()
+        }
+        relation_lookup_ids = text_list([*normalized_transaction_ids, *normalized_aliases])
         source_reader = getattr(self._read_model_repository, "list_active_workbench_relation_source_rows", None)
         rows = (
-            source_reader(row_ids=normalized_transaction_ids)
+            source_reader(row_ids=relation_lookup_ids)
             if callable(source_reader)
             else []
         )
         result: dict[str, dict[str, Any]] = {}
         transaction_id_set = set(normalized_transaction_ids)
         for row in rows:
-            row_ids = text_list(row.get("row_ids"))
+            row_ids = [normalized_aliases.get(row_id, row_id) for row_id in text_list(row.get("row_ids"))]
             bank_ids = [row_id for row_id in row_ids if row_id in transaction_id_set]
             if not bank_ids:
                 continue

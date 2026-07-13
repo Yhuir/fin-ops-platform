@@ -2371,6 +2371,36 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertIn("from app.workbench_pair_relations", sql_text)
 
+    def test_relation_tags_source_fast_path_resolves_canonical_bank_id_alias(self) -> None:
+        connection = FakeConnection(
+            relation_rows=[
+                {
+                    "case_id": "CASE-SOURCE-ALIAS",
+                    "status": "active",
+                    "row_ids": ["uuid-bank-1", "oa-source-1", "inv-source-1"],
+                    "row_types": ["bank", "oa", "invoice"],
+                }
+            ],
+        )
+        builder = BankDetailSqlProjectionBuilder(
+            connection=connection,
+            relation_tags_from_source=True,
+        )
+
+        tags = builder._load_relation_tags(  # noqa: SLF001
+            ["txn_imported_1"],
+            scope_key="2026-05",
+            transaction_id_aliases={"uuid-bank-1": "txn_imported_1"},
+        )
+
+        self.assertEqual(tags["txn_imported_1"]["oa_relation_tag"], "有oa")
+        self.assertEqual(tags["txn_imported_1"]["invoice_relation_tag"], "有发票")
+        self.assertEqual(tags["txn_imported_1"]["relation_case_id"], "CASE-SOURCE-ALIAS")
+        relation_call = next(
+            call for call in connection.calls if "from app.workbench_pair_relations" in " ".join(call[1].lower().split())
+        )
+        self.assertEqual(relation_call[2], (["txn_imported_1", "uuid-bank-1"],))
+
     def test_normalized_row_splits_bank_text_fields_for_bank_detail_table(self) -> None:
         builder = BankDetailSqlProjectionBuilder(connection=FakeConnection())
 
