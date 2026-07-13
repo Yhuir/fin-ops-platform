@@ -324,6 +324,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('IFS= read -r approval_ticket', script)
         self.assertIn('export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"', script)
         self.assertIn('export FIN_OPS_WRITE_E2E_APPROVAL_TICKET="$approval_ticket"', script)
+        self.assertIn("--write-target-ms 5000", script)
+        self.assertIn("--http-target-ms 1000", script)
         self.assertIn('write approval ticket stdin is empty', script)
         self.assertIn("write-operation-e2e-smoke accepts no additional arguments", script)
         self.assertIn("api-request-error <request-id>", script)

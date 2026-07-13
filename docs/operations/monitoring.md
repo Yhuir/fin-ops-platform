@@ -646,7 +646,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
   --approval-ticket "$FIN_OPS_WRITE_E2E_APPROVAL_TICKET" \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \
-  --write-target-ms 1000 \
+  --write-target-ms 5000 \
   --http-target-ms 1000 \
   --output /tmp/finops-write-e2e-slo-$(date +%Y%m%d%H%M%S).json
 ```
@@ -661,6 +661,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 - `--apply` 必须带审批引用；缺少 `--approval-ticket` / `FIN_OPS_WRITE_E2E_APPROVAL_TICKET` 会返回 `status=approval_missing`，且不会连接 Postgres 或发起 mutating HTTP。
 - 每个 mutating step 必须有预期状态码；工具不会把 409/403/500 继续包装成已同步。
 - mutating step 如果拿到 `text/html` 或 HTML 页面壳，即使状态码匹配，也会按 `html_response_for_api_probe` 失败并跳过 write SLO claim；这通常表示 API prefix、Nginx fallback 或路径配置错误。
+- 正式 relation confirm/withdraw 同步完成权限、freshness、canonical 校验、事务关系写、幂等提交和 durable fan-out；生产 standing correctness smoke 的 HTTP 写响应门禁固定为 `5000ms`。consumer HTTP、SSE、worker enqueue-to-fresh 仍保持各自 `1000ms` 门禁；需要证明“所有页面一秒级真同步”时，后文 closure gate 继续显式使用 `--write-target-ms 1000`，不得把 standing correctness 门禁冒充一秒级性能证明。
 - 写步骤成功后，工具以数据库 `clock_timestamp()` 为起点，等待对应 operation profile 的 outbox/dirty scope 达到 p95
   `1000ms` / p99 `3000ms` SLO。
 - post API probe 只用于验证写后页面首屏 API；最终仍要结合登录态 HTTP SLO、App Health 和审计记录。

@@ -457,7 +457,9 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。
 `write-operation-e2e-smoke` 只运行 release 内的固定 relation runner；scenario 仅接受受限 `/tmp` JSON，
 apply 的 Admin Token 与 approval ticket 只从 stdin 的前两行读取，固定走公网 `/fin-ops-api`，
-不提供任意命令或 SQL 能力；第二行为空时在任何业务写请求前失败。
+不提供任意命令或 SQL 能力；第二行为空时在任何业务写请求前失败。standing correctness helper
+将同步 relation 写响应门禁固定为 `5000ms`，但 consumer HTTP 仍为 `1000ms`；该配置不构成
+“所有页面一秒级真同步”的性能声明。
 `api-request-error` 只接受 API 返回的 12 位小写十六进制 request ID，并只从最近两小时
 `fin-ops.service` journal 返回匹配的单行异常摘要；它不开放任意 journal 参数或日志全文。
 `api-request-timing` 使用同一 request ID，只返回最近两小时最多 32 条结构化

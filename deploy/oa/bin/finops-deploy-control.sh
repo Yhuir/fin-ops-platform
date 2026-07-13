@@ -541,7 +541,7 @@ write_operation_e2e_smoke() {
       --scenario "$scenario" \
       --base-url https://www.yn-sourcing.com \
       --api-prefix /fin-ops-api \
-      --write-target-ms 1000 \
+      --write-target-ms 5000 \
       --http-target-ms 1000 \
       "${apply_args[@]}"
   )
