@@ -35,7 +35,7 @@
 | 税金导入/认证 | tax certified import services | 写后触发受影响 tax_offset scope；直接确认响应必须返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | 普通银行流水导入 | bank file/session confirm | 不属于 tax canonical 输入：不得回写 invoice、tax-certified 或 tax_offset source version，也不得投递 tax_offset refresh；只有同一导入任务真实确认了 invoice facts 时才按 invoice scope 触发 tax_offset |
 | 抵扣计划保存 | `TaxOffsetPlanService.save_plan(...)` | 验证 source versions 后保存计划，并返回当前月份 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
-| Refresh scope | `tax_offset` manifest | month or `all`；`all` 是 fan-out command |
+| Refresh scope | `tax_offset` manifest | month or `all`；`all` 是 fan-out command，必须把 parent 的 tenant、priority、trace 和显式 `force_refresh=true` 透传到每个 month shard，禁止父事件完成但月份仍保留旧 projection |
 | 页面 Audit | 管理员统一 page-audit API | 同一 `REPEATABLE READ READ ONLY` snapshot 读取 canonical、projection、dirty/outbox；只读 |
 
 ## 输出 I/O

@@ -38,7 +38,7 @@ Spec-first Browser e2e 审计入口：
 | API shape 与 metric | P1 | `tests/test_tax_offset_api.py`、`web/src/test/TaxApi.test.ts` | covered | month、calculate、summary、plan save、job mapper、structured metric。 |
 | read model service scope | P0 | `tests/test_tax_offset_read_model_service.py` | covered | 只允许月份 scope，schema mismatch 丢弃，deep copy，metadata 无 payload。 |
 | SQL read model / Redis cache | P0 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_postgres_state_store.py` | covered | SQL rows 优先、Redis hit/miss/timeout、summary 小 payload、Postgres 不回退 runtime snapshot。 |
-| refresh worker / all fan-out | P0 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | covered | `all` 展开月份 shard，refresh 完成 dirty scope，gateway 去重，worker lifecycle 归属。 |
+| refresh worker / all fan-out | P0 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | covered | `all` 展开月份 shard并透传 tenant/priority/trace/显式 `force_refresh`，refresh 完成 dirty scope，gateway 去重，worker lifecycle 归属。 |
 | lifecycle fan-out | P0 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_tax_offset_api.py` | covered | 发票导入、认证导入、规则变更、OA rebuild 等事件刷新 tax offset，不误刷银行导入。 |
 | Workbench relation 隔离 | P1 | `web/e2e/workbench-relations-tax-offset-isolation.spec.ts`、`tests/test_workbench_relation_repository.py` | covered | Browser 证明 relation confirm 前后税金 item 不变；repository 证明 relation 写不污染 `tax_offset` queue。 |
 | App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_worker_registry.py` | covered | route/domain registry、read model readiness、`tax-offset` worker 注册与回填。 |
@@ -69,6 +69,7 @@ Spec-first Browser e2e 审计入口：
 | 长期 | 已认证进项被用户再次作为未认证计划行选择，导致重复抵扣。 | `tests/test_tax_offset_service.py::test_month_payload_uses_real_certified_records_to_lock_matching_plan_and_split_outside_plan`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
 | 长期 | API miss/stale 在请求线程同步 rebuild 并伪装 fresh。 | `tests/test_tax_offset_sql_runtime.py` | covered |
 | 长期 | `all` refresh 被当作普通 tax offset 月份 payload。 | `tests/test_tax_offset_sql_runtime.py::test_tax_offset_refresh_handler_expands_all_into_month_shards` | covered |
+| 2026-07-13 | 受控 `tax_offset=all --force-refresh` 父事件完成，但 month shard 丢失 tenant/priority/trace/`force_refresh`，导致 queue drained 后旧投影仍未重建。 | `tests/test_tax_offset_sql_runtime.py::TaxOffsetSqlRuntimeTests::test_tax_offset_all_force_refresh_propagates_control_metadata_to_month_shards` | covered |
 | 长期 | 保存税金抵扣计划时没有校验 read model source version，导致基于旧数据保存。 | `tests/test_tax_offset_api.py::test_tax_offset_plan_save_rejects_stale_source_versions`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
 | 长期 | 税金认证导入确认后页面不刷新税金 read model。 | `tests/test_tax_offset_api.py::test_tax_certified_confirm_triggers_tax_offset_lifecycle_refresh`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
 | 长期 | 银行流水导入误刷新税金抵扣。 | `tests/test_tax_offset_api.py::test_bank_import_confirm_does_not_invalidate_tax_offset_cache` | covered |

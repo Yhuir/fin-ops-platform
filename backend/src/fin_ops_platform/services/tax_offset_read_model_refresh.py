@@ -25,7 +25,11 @@ class TaxOffsetReadModelRefreshService:
             raise ValueError("Tax offset refresh requires scope_type='tax_offset' and scope_key.")
 
         if scope_key == "all":
-            shard_result = self._enqueue_all_scope_shards(event, scope_key)
+            shard_result = self._enqueue_all_scope_shards(
+                event,
+                scope_key,
+                force_refresh=_event_force_refresh(event),
+            )
             if shard_result is not None:
                 return shard_result
 
@@ -40,14 +44,35 @@ class TaxOffsetReadModelRefreshService:
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type=scope_type, scope_key=scope_key)
         return payload
 
-    def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
+    def _enqueue_all_scope_shards(
+        self,
+        event: RuntimeQueueEvent,
+        scope_key: str,
+        *,
+        force_refresh: bool,
+    ) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_tax_offset_scope_shards", None)
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
-        enqueued_scope_keys = refresh_gateway.enqueue_many("tax_offset", shard_keys, reason="tax_offset_all_shard")
+        enqueued_scope_keys = refresh_gateway.enqueue_many(
+            "tax_offset",
+            shard_keys,
+            reason="tax_offset_all_shard",
+            tenant_id=event.tenant_id,
+            priority=str(event.priority or "normal").strip() or "normal",
+            trace_id=event.trace_id,
+            metadata={"force_refresh": True} if force_refresh else None,
+        )
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type="tax_offset", scope_key=scope_key)
         return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "entry_count": 0}
+
+
+def _event_force_refresh(event: RuntimeQueueEvent) -> bool:
+    if event.payload.get("force_refresh") is True:
+        return True
+    metadata = event.payload.get("metadata")
+    return isinstance(metadata, dict) and metadata.get("force_refresh") is True

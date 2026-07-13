@@ -61,10 +61,32 @@ def redis_fresh_payload(
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str, str]] = []
+        self.refresh_requests: list[dict[str, object]] = []
         self.completed: list[tuple[str, str, str]] = []
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+    def enqueue_read_model_refresh(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+        self.refresh_requests.append(
+            {
+                "scope_type": scope_type,
+                "scope_key": scope_key,
+                "reason": reason,
+                "tenant_id": tenant_id,
+                "priority": priority,
+                "trace_id": trace_id,
+                "metadata": dict(metadata) if isinstance(metadata, dict) else None,
+            }
+        )
 
     def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> None:
         self.completed.append((tenant_id, scope_type, scope_key))
@@ -628,6 +650,60 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(queue.completed, [("tenant-a", "tax_offset", "all")])
         self.assertEqual(result["entry_count"], 0)
+
+    def test_tax_offset_all_force_refresh_propagates_control_metadata_to_month_shards(self) -> None:
+        class FakeBuilder:
+            def list_tax_offset_scope_shards(self, scope_key: str) -> list[str]:
+                return ["2026-05", "2026-04"]
+
+            def rebuild_tax_offset_read_model_scope(self, scope_key: str) -> dict[str, object]:
+                raise AssertionError(scope_key)
+
+        queue = QueueRecorder()
+        service = TaxOffsetReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-all-force",
+            tenant_id="tenant-a",
+            event_type="tax_offset.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="tax_offset",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all", "metadata": {"force_refresh": True}},
+            attempts=1,
+            status="processing",
+            priority="high",
+            trace_id="tax-offset-force-trace",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result["enqueued_scope_keys"], ["2026-05", "2026-04"])
+        self.assertEqual(
+            queue.refresh_requests,
+            [
+                {
+                    "scope_type": "tax_offset",
+                    "scope_key": "2026-05",
+                    "reason": "tax_offset_all_shard",
+                    "tenant_id": "tenant-a",
+                    "priority": "high",
+                    "trace_id": "tax-offset-force-trace",
+                    "metadata": {"force_refresh": True},
+                },
+                {
+                    "scope_type": "tax_offset",
+                    "scope_key": "2026-04",
+                    "reason": "tax_offset_all_shard",
+                    "tenant_id": "tenant-a",
+                    "priority": "high",
+                    "trace_id": "tax-offset-force-trace",
+                    "metadata": {"force_refresh": True},
+                },
+            ],
+        )
+        self.assertEqual(queue.completed, [("tenant-a", "tax_offset", "all")])
 
     def test_tax_offset_invalidation_marks_dirty_and_deletes_redis_even_when_no_cached_model_exists(self) -> None:
         class EmptyTaxOffsetReadModelService:
