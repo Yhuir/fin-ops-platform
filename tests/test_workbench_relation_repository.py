@@ -218,7 +218,7 @@ def test_relation_change_enqueues_relation_read_model_before_relevant_downstream
     assert dirty_by_scope_type["search"]["priority"] == "high"
     assert "tax_offset" not in dirty_by_scope_type
     assert "cost_statistics" not in dirty_by_scope_type
-    assert "oa_pending_payment" not in dirty_by_scope_type
+    assert dirty_by_scope_type["oa_pending_payment"]["priority"] == "high"
     assert "no_oa_bank_batch" not in dirty_by_scope_type
     assert outbox_by_scope_type["workbench_relation"]["priority"] == "high"
     assert outbox_by_scope_type["workbench"]["priority"] == "high"
@@ -278,7 +278,7 @@ def test_no_oa_relation_change_keeps_no_oa_read_model_in_downstream_scope() -> N
     assert "input_invoice_usage" not in dirty_by_scope_type
     assert "output_invoice_collection" not in dirty_by_scope_type
     assert "tax_offset" not in dirty_by_scope_type
-    assert "oa_pending_payment" not in dirty_by_scope_type
+    assert dirty_by_scope_type["oa_pending_payment"]["priority"] == "high"
 
 
 def test_bank_flow_relation_change_enqueues_bank_flow_read_model_refresh() -> None:
@@ -330,7 +330,7 @@ def test_relation_refresh_fanout_uses_one_batch_queue_write() -> None:
     )
 
 
-def test_input_expense_relation_change_skips_output_and_income_downstream_scopes() -> None:
+def test_input_expense_relation_change_refreshes_shared_consumers_and_expense_pending_scopes() -> None:
     connection = RecordingConnection(invoice_types=["input"], bank_directions=["outflow"])
     repository = PostgresWorkbenchRelationRepository(connection)
 
@@ -345,8 +345,8 @@ def test_input_expense_relation_change_skips_output_and_income_downstream_scopes
     }
 
     assert "input_invoice_usage" in dirty_by_scope_type
-    assert "output_invoice_collection" not in dirty_by_scope_type
-    assert "oa_pending_payment" not in dirty_by_scope_type
+    assert "output_invoice_collection" in dirty_by_scope_type
+    assert "oa_pending_payment" in dirty_by_scope_type
     assert pending_scope_keys == {
         "expense:all:2026-05",
         "expense:requires_invoice:2026-05",
@@ -456,7 +456,7 @@ def test_relation_refresh_uses_full_workbench_all_only_when_scope_is_unknown() -
     assert "aggregate_only" not in workbench_all_outbox_payloads[-1]
 
 
-def test_relation_downstream_refresh_enqueues_all_scope_when_oa_month_is_unresolved() -> None:
+def test_relation_downstream_refresh_uses_known_relation_month_when_oa_month_is_unresolved() -> None:
     connection = RecordingConnection(
         bank_scope_keys=["2026-04"],
         invoice_scope_keys=[],
@@ -475,7 +475,7 @@ def test_relation_downstream_refresh_enqueues_all_scope_when_oa_month_is_unresol
         scope_keys_by_type.setdefault(str(row["scope_type"]), set()).add(str(row["scope_key"]))
 
     assert scope_keys_by_type["workbench_relation"] == {"2026-04"}
-    assert scope_keys_by_type["oa_pending_payment"] == {"all"}
+    assert scope_keys_by_type["oa_pending_payment"] == {"2026-04"}
 
 
 def test_relation_downstream_refresh_enqueues_all_scope_when_invoice_month_is_unresolved() -> None:

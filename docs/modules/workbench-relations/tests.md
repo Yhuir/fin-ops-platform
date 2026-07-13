@@ -73,6 +73,9 @@ Spec-first Browser e2e 审计入口：
 - `tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview`：confirm preview 基于 canonical active relation 判定已配对 row-set，返回 withdraw preview，而不是继续允许 confirm。
 - `tests/test_write_operation_slo_audit.py`：Workbench/turnover canonical UoW 后的 write operation SLO profile，覆盖 `workbench_relation`、下游 read model reason、bank+invoice 真实成本 fan-out、turnover closure 正反向 profile，以及 `--since` 过滤旧样本。
 - `tests/test_workbench_relation_sql_projection.py`：`workbench_relation` distribution、linked/unlinked rows、open automatic decision 不再作为 downstream candidate group、正式发票和 OA 附件发票 identity 去重。
+- `tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_rows_reprojects_members_removed_from_previous_group`：局部投影从同 scope 旧 group 扩展 invalidation closure；退出当前关系的旧 OA 成员必须重算为 unlinked，且显式类型限定不能恢复无关 invoice 源表探测。
+- `tests/test_postgres_repositories_boundaries.py::test_workbench_relation_distribution_partial_save_deletes_overlap_and_counts_scope`：局部保存必须在删除旧 group 前，按旧 group membership 删除全部 row index；不能只删除本次 affected/current rows。
+- `tests/test_reversible_relation_closure_postgres.py::ReversibleRelationClosurePostgresTests::test_partial_relation_projection_removes_stale_members_from_replaced_group`：可选 disposable PostgreSQL 集成验证旧 OA 成员随被替换 turnover group 一起删除，同时不污染无关 group/row。
 - `tests/test_workbench_relation_read_facade.py`：freshness-gated facade、missing 入队刷新、unlinked 过滤、relation status 不被硬编码为 active。
 - `tests/test_platform_runtime_boundary_guards.py`：下游读模型不得直接 join `app.workbench_pair_relations`，银行明细关系标签必须走 facade，ETC summary 删除、server OA offset auto pair、OA 附件上下文 repair、batch accounting legacy repair 和 no-OA legacy repair/consolidation 不得退回 direct pair relation mutation。
 - `tests/test_batch_accounting_api.py`、`tests/test_platform_runtime_boundary_guards.py`、`web/src/test/BatchAccountingPage.test.tsx`：批量账务 relation freshness 诊断、submit/withdraw command service 委托、submit/withdraw/repair 缺 command fail-fast、direct pair fallback 禁止和 canonical write safety。
@@ -205,6 +208,7 @@ Spec-first Browser e2e 审计入口：
 - 页面 service 禁止 `from app.workbench_pair_relations`。
 - `server.py` 禁止新增 relation business helper，允许列表只保留 route/dependency wiring。
 - relation 写入口必须依赖 `WorkbenchRelationCommandService` 或明确的 command port；ETC 业务批次删除、历史 repair、historical migration、existing link、input invoice OA reverse、server OA offset auto pair、OA 附件上下文 repair、batch accounting legacy repair 和 no-OA legacy repair/consolidation 不得在生产 wiring 或 service fallback 中直接调用 pair service mutation。
+- `tests/test_workbench_relation_repository.py` 的 fan-out 回归以当前共享 source-version 合同为准：所有 relation change 刷新对应月份 `oa_pending_payment`；含发票关系同时刷新 input/output 两个消费者；OA 自身月份不可解析但 relation 月份已知时使用已知月份，不退化成无界 `all`。
 - `PostgresWorkbenchRepository` 不再拥有 relation SQL 实现。
 - turnover closure/withdraw 的 Application wiring 不得回退到只注入 `pair_relation_service`。
 

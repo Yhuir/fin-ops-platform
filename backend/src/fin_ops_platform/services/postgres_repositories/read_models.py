@@ -3763,6 +3763,48 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             return
 
         def write(connection: Any) -> None:
+            if row_ids_to_replace or affected_ids or group_ids_to_replace:
+                connection.execute(
+                    """
+                    with replaced_row_ids(row_id) as (
+                      select unnest(%s::text[])
+                      union
+                      select unnest(
+                        coalesce(oa_row_ids, array[]::text[])
+                        || coalesce(bank_transaction_ids, array[]::text[])
+                        || coalesce(input_invoice_ids, array[]::text[])
+                        || coalesce(output_invoice_ids, array[]::text[])
+                      )
+                      from read_model.workbench_relation_groups
+                      where tenant_id = %s
+                        and scope_key = %s
+                        and (
+                          group_id = any(%s::text[])
+                          or coalesce(oa_row_ids, array[]::text[]) && %s::text[]
+                          or coalesce(bank_transaction_ids, array[]::text[]) && %s::text[]
+                          or coalesce(input_invoice_ids, array[]::text[]) && %s::text[]
+                          or coalesce(output_invoice_ids, array[]::text[]) && %s::text[]
+                        )
+                    )
+                    delete from read_model.workbench_relation_rows target
+                    using replaced_row_ids replacement
+                    where target.tenant_id = %s
+                      and target.scope_key = %s
+                      and target.row_id = replacement.row_id
+                    """,
+                    (
+                        row_ids_to_replace,
+                        tenant_id,
+                        normalized_scope_key,
+                        group_ids_to_replace,
+                        affected_ids,
+                        affected_ids,
+                        affected_ids,
+                        affected_ids,
+                        tenant_id,
+                        normalized_scope_key,
+                    ),
+                )
             if affected_ids or group_ids_to_replace:
                 connection.execute(
                     """
@@ -3786,16 +3828,6 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                         affected_ids,
                         affected_ids,
                     ),
-                )
-            if row_ids_to_replace:
-                connection.execute(
-                    """
-                    delete from read_model.workbench_relation_rows
-                    where tenant_id = %s
-                      and scope_key = %s
-                      and row_id = any(%s::text[])
-                    """,
-                    (tenant_id, normalized_scope_key, row_ids_to_replace),
                 )
             group_params: list[tuple[Any, ...]] = []
             for group in groups_to_save:

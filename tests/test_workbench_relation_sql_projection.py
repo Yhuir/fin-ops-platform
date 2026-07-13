@@ -11,6 +11,24 @@ class CaptureWorkbenchRelationRepository:
         self.saved_rows: list[dict[str, object]] = []
         self.existing_scope_summary: dict[str, object] | None = None
         self.scope_summary_calls: list[dict[str, object]] = []
+        self.previous_distribution: dict[str, object] | None = None
+        self.previous_distribution_calls: list[dict[str, object]] = []
+
+    def get_workbench_relation_rows_by_ids(
+        self,
+        row_ids: list[str],
+        *,
+        tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
+    ) -> dict[str, object] | None:
+        self.previous_distribution_calls.append(
+            {
+                "row_ids": list(row_ids),
+                "tenant_id": tenant_id,
+                "scope_keys_hint": list(scope_keys_hint or []),
+            }
+        )
+        return self.previous_distribution
 
     def workbench_relation_scope_summary(
         self,
@@ -424,6 +442,29 @@ class LegacyCompletedOaRelationProjectionConnection(CrossMonthRelationProjection
         return super().fetch_all(sql, params)
 
 
+class RemovedOaMemberRelationProjectionConnection(CrossMonthRelationProjectionConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.workbench_pair_relations" in normalized:
+            self.sql_statements.append(sql)
+            requested_ids = set(params[1]) if len(params) > 1 and isinstance(params[1], list) else set()
+            if requested_ids & {"bank-nanjing", "oa-yang"}:
+                return [
+                    {
+                        "case_id": "turnover:target",
+                        "relation_mode": "turnover_manual_closure",
+                        "month_scope": "2026-04-01",
+                        "row_ids": ["bank-nanjing"],
+                        "row_types": ["bank"],
+                        "amount_check": {"matched": True},
+                        "source_versions": {},
+                        "raw_payload": {},
+                    }
+                ]
+            return []
+        return super().fetch_all(sql, params)
+
+
 class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
     def _statement_count(self, connection: WorkbenchRelationProjectionConnection, fragment: str) -> int:
         return sum(fragment in " ".join(sql.lower().split()) for sql in connection.sql_statements)
@@ -583,6 +624,53 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
             )
         )
 
+    def test_rebuild_rows_reprojects_members_removed_from_previous_group(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        repository.previous_distribution = {
+            "read_model_status": "refreshing",
+            "rows": [],
+            "groups": [
+                {
+                    "group_id": "turnover:target",
+                    "scope_key": "2026-04",
+                    "oa_row_ids": ["oa-yang"],
+                    "bank_transaction_ids": ["bank-nanjing"],
+                    "input_invoice_ids": [],
+                    "output_invoice_ids": [],
+                }
+            ],
+        }
+        connection = RemovedOaMemberRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_workbench_relation_read_model_rows("2026-04", row_ids=["bank-nanjing"])
+
+        self.assertEqual(result["affected_row_count"], 2)
+        self.assertEqual(
+            repository.previous_distribution_calls,
+            [
+                {
+                    "row_ids": ["bank-nanjing"],
+                    "tenant_id": "default",
+                    "scope_keys_hint": ["2026-04"],
+                }
+            ],
+        )
+        saved = repository.saved_rows[0]
+        self.assertEqual(saved["affected_row_ids"], ["bank-nanjing", "oa-yang"])
+        rows_by_id = {row["row_id"]: row for row in saved["rows"]}
+        self.assertEqual(rows_by_id["bank-nanjing"]["group_ids"], ["turnover:target"])
+        self.assertEqual(rows_by_id["oa-yang"]["relation_status"], "unlinked")
+        self.assertEqual(rows_by_id["oa-yang"]["group_ids"], [])
+        self.assertEqual(saved["groups"][0]["oa_row_ids"], [])
+        self.assertEqual(saved["groups"][0]["bank_transaction_ids"], ["bank-nanjing"])
+        self.assertEqual(self._statement_count(connection, "from app.bank_transactions"), 1)
+        self.assertEqual(self._statement_count(connection, "from app.oa_applications"), 1)
+        self.assertEqual(self._statement_count(connection, "from app.invoices"), 0)
+
     def test_cross_month_member_index_schema_change_invalidates_old_scope(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
         connection = CrossMonthRelationProjectionConnection()
@@ -593,7 +681,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         source_versions = builder._source_versions()
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-10-active-relations-force-rebuild-v2",
+            "2026-07-13-partial-replacement-closure-v1",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         repository.existing_scope_summary = {
@@ -613,7 +701,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         saved = repository.saved[0]
         self.assertEqual(
             saved["source_versions"]["workbench_relation_schema_version"],
-            "2026-07-10-active-relations-force-rebuild-v2",
+            "2026-07-13-partial-replacement-closure-v1",
         )
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
         self.assertIn("input-invoice-nanjing", rows_by_id)
@@ -629,7 +717,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
 
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-10-active-relations-force-rebuild-v2",
+            "2026-07-13-partial-replacement-closure-v1",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         self.assertEqual(connection.fetch_one_calls[0][1], ("2026-04-01",))

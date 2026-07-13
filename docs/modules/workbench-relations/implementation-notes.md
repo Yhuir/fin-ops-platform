@@ -4600,3 +4600,26 @@ PYTHONPATH=backend/src:. python3 -m pytest tests/test_deploy_runtime_examples.py
 ```
 
 后续：发布后重新执行生产受控 `withdraw-link` 写 smoke，要求 HTTP submit、`workbench_relation:<month>`、`workbench:<month>` 和 `workbench:all` aggregate 均进入 1s SLO；若仍失败，继续按生产事件时间线拆分 worker pickup 与 aggregate rebuild 耗时。
+## 2026-07-13 - Workbench relation partial replacement stale-member cleanup
+
+目标：修复生产 turnover closure 撤回后，`workbench_relation` 局部投影已把 group 重建为 bank-only，但旧 OA row index 仍引用同一 group，造成银行明细、OA 待付款、发票、成本和 System Audit 出现幽灵配对。
+
+根因与边界：
+
+- turnover mutation 的初始 affected rows 只包含直接变化的银行流水；projection builder 未从旧 distribution 扩出已经退出新关系的旧 OA 成员。旧实现随后先删除与 affected rows overlap 的 group，再只按 `affected/current row_ids` 删除 row index，因此 OA 既不重算为 unlinked，也不会被清理。
+- projection builder 现在通过既有窄 read-model port 读取同 scope 旧 group，仅把旧 typed members 用作 invalidation closure；随后从 canonical facts 重算这些成员的当前 active group、row type 和展示字段。旧 distribution 不成为当前关系事实源。
+- repository SQL 在删除旧 group 前，从旧 group membership 解析被替换 group 的全部 row ids，删除旧 row index；随后沿用既有 group/row upsert 和 scope summary 更新。已退出关系但仍存在的 canonical 对象会由 builder 写回 unlinked row。
+- projection 行为版本提升为 `2026-07-13-partial-replacement-closure-v1`；发布后旧 scope 不能继续凭旧 source-version proof 伪装 fresh，必须受控重建 relation shard 及其下游消费者。
+- 已删除原先 group-first + current-row-only 清理顺序；没有新增 full-scope refresh、fallback、direct read-model repair 或第二条 relation 投影链路。
+- disposable PostgreSQL harness 的迁移清单补入已发布的 `0102_workbench_idempotency_runtime_evidence_grant.sql`，使真实 SQL 集成测试不会因测试清单滞后而在建库阶段误失败。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_postgres_repositories_boundaries.py::test_workbench_relation_distribution_partial_save_deletes_overlap_and_counts_scope -q
+FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m pytest tests/test_reversible_relation_closure_postgres.py::ReversibleRelationClosurePostgresTests::test_partial_relation_projection_removes_stale_members_from_replaced_group -q
+```
+
+生产验收：只能通过正式 turnover/workbench 写入口触发局部投影，等待 durable queue 与所有受影响 consumer fresh 后复跑 17 页 System Audit；禁止直接 SQL 删除幽灵 row 或伪造 readiness。
+
+对本修复发布前已产生且 source versions 未再变化的损坏 scope，使用 `finops-deploy-control read-model-refresh ... --force-refresh` 经过 scope policy、gateway 和 durable queue 做一次受控全量重算；该恢复入口不改变 canonical facts。

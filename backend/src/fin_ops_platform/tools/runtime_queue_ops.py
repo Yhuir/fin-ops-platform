@@ -105,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue_read_model.add_argument("--tenant-id", default="default")
     enqueue_read_model.add_argument("--priority", choices=("low", "normal", "high"), default="high")
     enqueue_read_model.add_argument("--trace-id")
+    enqueue_read_model.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Force the registered projection handler to rebuild even when source versions are unchanged.",
+    )
     enqueue_read_model_mode = enqueue_read_model.add_mutually_exclusive_group(required=True)
     enqueue_read_model_mode.add_argument("--dry-run", action="store_true")
     enqueue_read_model_mode.add_argument("--execute", action="store_true")
@@ -229,6 +234,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None, std
             reason=args.reason,
             priority=args.priority,
             trace_id=args.trace_id,
+            force_refresh=bool(args.force_refresh),
             execute=args.execute,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
@@ -268,6 +274,7 @@ def _enqueue_read_model_refreshes(
     reason: str,
     priority: str,
     trace_id: str | None,
+    force_refresh: bool,
     execute: bool,
 ) -> dict[str, object]:
     normalized_tenant_id = str(tenant_id or "default").strip() or "default"
@@ -284,6 +291,7 @@ def _enqueue_read_model_refreshes(
             "tenant_id": normalized_tenant_id,
             "reason": normalized_reason,
             "priority": priority,
+            "force_refresh": force_refresh,
             "target_count": len(requested),
             "targets": requested,
             "event_ids": [],
@@ -300,7 +308,10 @@ def _enqueue_read_model_refreshes(
                 tenant_id=normalized_tenant_id,
                 priority=priority,
                 trace_id=normalized_trace_id,
-                metadata={"action_name": "production_audit_contract_rebuild"},
+                metadata={
+                    "action_name": "production_audit_contract_rebuild",
+                    **({"force_refresh": True} if force_refresh else {}),
+                },
             )
         )
     return {
@@ -308,6 +319,7 @@ def _enqueue_read_model_refreshes(
         "tenant_id": normalized_tenant_id,
         "reason": normalized_reason,
         "priority": priority,
+        "force_refresh": force_refresh,
         "target_count": len(requested),
         "targets": requested,
         "enqueued_count": len(events),

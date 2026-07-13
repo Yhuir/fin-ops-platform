@@ -13,7 +13,7 @@ from fin_ops_platform.services.workbench_relation_read_model_repository import W
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-10-active-relations-force-rebuild-v2"
+WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-13-partial-replacement-closure-v1"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
@@ -141,16 +141,41 @@ class WorkbenchRelationSqlProjectionBuilder:
         if unchanged is not None:
             return {**unchanged, "partial": True, "affected_row_count": len(affected_row_ids)}
 
+        previous_distribution_loader = getattr(self._read_model_repository, "get_workbench_relation_rows_by_ids", None)
+        previous_distribution = (
+            previous_distribution_loader(
+                affected_row_ids,
+                tenant_id=self._tenant_id,
+                scope_keys_hint=[normalized_scope],
+            )
+            if callable(previous_distribution_loader)
+            else None
+        )
+        previous_member_types = _previous_relation_group_member_types(
+            previous_distribution,
+            scope_key=normalized_scope,
+        )
+        affected_row_ids = _dedupe_preserve_order([*affected_row_ids, *previous_member_types])
         pending_claimed_bank_ids = set(self._pending_claimed_bank_transaction_ids_for_month(normalized_scope))
         relations = self._active_relations_for_scope(month=normalized_scope, row_ids=affected_row_ids)
         relation_row_ids = _dedupe_preserve_order(row_id for relation in relations for row_id in text_list(relation.get("row_ids")))
         object_row_ids = _dedupe_preserve_order([*affected_row_ids, *relation_row_ids])
+        source_kinds = _source_kinds_for_relation_row_ids(relations, object_row_ids)
+        source_kinds.update(
+            "bank_transaction"
+            if row_type in {"bank", "bank_transaction"}
+            else "oa"
+            if row_type == "oa"
+            else "invoice"
+            for row_type in previous_member_types.values()
+            if row_type in {"bank", "bank_transaction", "oa", "invoice", "input_invoice", "output_invoice"}
+        )
         objects = self._source_objects_for_month(
             normalized_scope,
             relation_row_ids=object_row_ids,
             excluded_bank_transaction_ids=pending_claimed_bank_ids,
             include_month_scope=False,
-            source_kinds=_source_kinds_for_relation_row_ids(relations, object_row_ids),
+            source_kinds=source_kinds,
         )
         if pending_claimed_bank_ids:
             active_relation_row_ids = set(relation_row_ids)
@@ -746,6 +771,29 @@ def _source_kinds_for_relation_row_ids(relations: list[dict[str, Any]], row_ids:
             else:
                 return {"bank_transaction", "oa", "invoice"}
     return source_kinds or {"bank_transaction", "oa", "invoice"}
+
+
+def _previous_relation_group_member_types(
+    payload: dict[str, Any] | None,
+    *,
+    scope_key: str,
+) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        return {}
+    member_types: dict[str, str] = {}
+    field_types = {
+        "oa_row_ids": "oa",
+        "bank_transaction_ids": "bank_transaction",
+        "input_invoice_ids": "input_invoice",
+        "output_invoice_ids": "output_invoice",
+    }
+    for group in list(payload.get("groups") or []):
+        if not isinstance(group, dict) or text(group.get("scope_key")) != scope_key:
+            continue
+        for field_name, row_type in field_types.items():
+            for row_id in text_list(group.get(field_name)):
+                member_types.setdefault(row_id, row_type)
+    return member_types
 
 
 def _dedupe_invoice_ids_by_identity(row_ids: list[str], objects: dict[str, dict[str, Any]]) -> list[str]:

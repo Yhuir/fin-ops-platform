@@ -493,9 +493,32 @@ def test_workbench_relation_distribution_partial_save_deletes_overlap_and_counts
     )
 
     executed_sql = [sql for sql, _params in connection.executed]
-    assert any("delete from read_model.workbench_relation_groups" in sql for sql in executed_sql)
+    row_delete_index = next(
+        index
+        for index, sql in enumerate(executed_sql)
+        if "delete from read_model.workbench_relation_rows target" in sql
+    )
+    group_delete_index = next(
+        index for index, sql in enumerate(executed_sql) if "delete from read_model.workbench_relation_groups" in sql
+    )
+    assert row_delete_index < group_delete_index
+    row_delete_sql, row_delete_params = connection.executed[row_delete_index]
+    assert "with replaced_row_ids(row_id) as ( select unnest(%s::text[]) union select unnest(" in row_delete_sql
+    assert "from read_model.workbench_relation_groups" in row_delete_sql
+    assert "target.row_id = replacement.row_id" in row_delete_sql
+    assert row_delete_params == (
+        ["txn-1", "oa-1"],
+        "default",
+        "2026-05",
+        ["case-1"],
+        ["txn-1", "oa-1"],
+        ["txn-1", "oa-1"],
+        ["txn-1", "oa-1"],
+        ["txn-1", "oa-1"],
+        "default",
+        "2026-05",
+    )
     assert any("coalesce(bank_transaction_ids, array[]::text[]) && %s::text[]" in sql for sql in executed_sql)
-    assert any("delete from read_model.workbench_relation_rows" in sql for sql in executed_sql)
     assert not any("update read_model.workbench_relation_rows" in sql for sql in executed_sql)
     assert not any("update read_model.workbench_relation_groups" in sql for sql in executed_sql)
     assert any(

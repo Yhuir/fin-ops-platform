@@ -387,6 +387,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                     "phase19_audit_rebuild",
                     "--trace-id",
                     "phase19-production",
+                    "--force-refresh",
                     "--execute",
                 ],
                 stdout=stdout,
@@ -405,10 +406,14 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                     "reason": "phase19_audit_rebuild",
                     "priority": "high",
                     "trace_id": "phase19-production",
-                    "metadata": {"action_name": "production_audit_contract_rebuild"},
+                    "metadata": {
+                        "action_name": "production_audit_contract_rebuild",
+                        "force_refresh": True,
+                    },
                 }
             ],
         )
+        self.assertTrue(payload["force_refresh"])
 
     def test_release_stale_processing_dry_run_lists_candidates_without_update(self) -> None:
         connection = FakeConnection(

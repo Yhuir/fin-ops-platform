@@ -202,6 +202,11 @@ sudo -n /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> 
 `app_status_readiness` 或 dirty scope 状态。已由 exact-scope fresh/done 覆盖的 dead letter 只能通过
 `runtime-queue-resolve-covered` dry-run 后执行归档；未覆盖 failure 继续阻断 Audit。
 
+当 canonical source versions 未变化、但已证明旧 projection 算法留下错误数据时，受控重建可显式增加
+`--force-refresh`。该标志只把 `force_refresh=true` 写入通过 scope policy 校验后的 durable event metadata，
+由已登记 projection handler 重算目标 scope；它不直接写 read model、不修改 readiness，也不能替代重建后
+的 queue drain、freshness 和只读 Audit 复验。执行前必须先 dry-run 同一组 scopes，且只选择已证明受影响的 scope。
+
 如果 downstream refresh handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，runtime worker
 会调用 `RuntimeQueueRepository.defer_event(...)`，把该 outbox event 短延迟放回 `pending`，生产模板默认 0.25 秒后
 重新 claim。这只用于依赖顺序竞态，不写 fresh readiness、不缓存 payload，也不进入 failed/dead-letter。
