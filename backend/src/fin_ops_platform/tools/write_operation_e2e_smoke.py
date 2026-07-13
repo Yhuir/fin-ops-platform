@@ -1124,7 +1124,9 @@ def _wait_for_write_slo(
     deadline = monotonic() + max(1.0, timeout_seconds)
     last_results: list[Any] = []
     last_rows: list[dict[str, Any]] = []
+    last_unexpected_events: list[dict[str, Any]] = []
     expected_event_ids = set(event_ids or []) if event_ids is not None else None
+    receipt_bound = event_ids is not None
     last_matched_event_ids: set[str] = set()
     while True:
         rows = write_operation_slo_audit.recent_read_model_refresh_events_since(
@@ -1132,7 +1134,7 @@ def _wait_for_write_slo(
             tenant_id=tenant_id,
             started_at=started_at,
             limit=effective_limit,
-            expectations=expectations,
+            expectations=None if receipt_bound else expectations,
             event_ids=event_ids,
         )
         results = write_operation_slo_audit.evaluate_operation_expectations(
@@ -1140,14 +1142,27 @@ def _wait_for_write_slo(
             expectations=expectations,
             target_ms=target_ms,
             p99_target_ms=p99_target_ms,
+            match_metadata=not receipt_bound,
         )
         last_results = results
         last_rows = rows
         last_matched_event_ids = {
             str(row.get("event_id") or "").strip() for row in rows if str(row.get("event_id") or "").strip()
         }
+        last_unexpected_events = [
+            _event_contract_summary(row)
+            for row in rows
+            if not any(
+                write_operation_slo_audit.event_matches_expectation(
+                    row,
+                    expectation,
+                    match_metadata=not receipt_bound,
+                )
+                for expectation in expectations
+            )
+        ]
         exact_event_set_matches = expected_event_ids is None or last_matched_event_ids == expected_event_ids
-        if exact_event_set_matches and all(result.status == "pass" for result in results):
+        if exact_event_set_matches and not last_unexpected_events and all(result.status == "pass" for result in results):
             return {
                 "status": "pass",
                 "target_ms": target_ms,
@@ -1156,6 +1171,7 @@ def _wait_for_write_slo(
                 "effective_event_sample_limit": effective_limit,
                 "event_sample_count": len(rows),
                 "matched_event_ids": sorted(last_matched_event_ids),
+                "unexpected_event_contracts": [],
                 "results": [asdict(result) for result in results],
             }
         if monotonic() >= deadline:
@@ -1168,14 +1184,30 @@ def _wait_for_write_slo(
                 "event_sample_count": len(last_rows),
                 "matched_event_ids": sorted(last_matched_event_ids),
                 "missing_or_unmatched_event_ids": sorted((expected_event_ids or set()) - last_matched_event_ids),
+                "unexpected_event_contracts": last_unexpected_events,
                 "error": (
                     "exact_checkpoint_event_set_mismatch"
                     if not exact_event_set_matches
+                    else "unexpected_checkpoint_event_contract"
+                    if last_unexpected_events
                     else "timeout_waiting_for_write_operation_refresh_slo"
                 ),
                 "results": [asdict(result) for result in last_results],
             }
         sleep(max(0.05, poll_interval_seconds))
+
+
+def _event_contract_summary(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "event_id": str(row.get("event_id") or "") or None,
+        "event_type": str(row.get("event_type") or "") or None,
+        "scope_type": str(row.get("scope_type") or "") or None,
+        "scope_key": str(row.get("scope_key") or "") or None,
+        "reason": str(row.get("reason") or "") or None,
+        "action_name": str(row.get("action_name") or "") or None,
+        "event_status": str(row.get("event_status") or "") or None,
+        "dirty_status": str(row.get("dirty_status") or "") or None,
+    }
 
 
 def _collect_checkpoint_consumers(

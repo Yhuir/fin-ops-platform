@@ -7,7 +7,7 @@ import json
 from math import ceil
 from pathlib import Path
 import sys
-from typing import Any, Sequence, TextIO
+from typing import Any, Mapping, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import (
     PostgresConfigurationError,
@@ -483,6 +483,7 @@ def evaluate_operation_expectations(
     expectations: Sequence[OperationExpectation],
     target_ms: float,
     p99_target_ms: float | None = None,
+    match_metadata: bool = True,
 ) -> list[OperationExpectationResult]:
     effective_p99_target_ms = effective_p99_target_ms_for(target_ms, p99_target_ms)
     return [
@@ -491,6 +492,7 @@ def evaluate_operation_expectations(
             rows,
             target_ms=target_ms,
             p99_target_ms=effective_p99_target_ms,
+            match_metadata=match_metadata,
         )
         for expectation in expectations
     ]
@@ -581,6 +583,12 @@ def recent_read_model_refresh_events_since(
         # evidence even though the exact event id is known.
         time_filter_sql = ""
         time_params = ()
+        # Exact receipt ids already provide the causal selector. Metadata on an
+        # active event can predate the current request when the durable queue
+        # deduplicates onto that event, so reason/action filtering is only valid
+        # for the fallback time-window query.
+        expectation_filter_sql = ""
+        expectation_params = ()
     rows = connection.fetch_all(
         f"""
         select
@@ -717,16 +725,10 @@ def _evaluate_expectation(
     *,
     target_ms: float,
     p99_target_ms: float,
+    match_metadata: bool = True,
 ) -> OperationExpectationResult:
     expected_event_type = expectation.event_type or f"{expectation.scope_type}.read_model.refresh"
-    samples = [
-        row
-        for row in rows
-        if str(row.get("event_type") or "") == expected_event_type
-        and str(row.get("scope_type") or "") == expectation.scope_type
-        and str(row.get("reason") or "") == expectation.reason
-        and (not expectation.action_names or str(row.get("action_name") or "") in set(expectation.action_names))
-    ]
+    samples = [row for row in rows if event_matches_expectation(row, expectation, match_metadata=match_metadata)]
     latest = samples[0] if samples else {}
     if not samples:
         return OperationExpectationResult(
@@ -798,6 +800,24 @@ def _evaluate_expectation(
         latest_dirty_status=str(latest.get("dirty_status") or "") or None,
         latest_error=latest_error,
     )
+
+
+def event_matches_expectation(
+    row: Mapping[str, Any],
+    expectation: OperationExpectation,
+    *,
+    match_metadata: bool = True,
+) -> bool:
+    expected_event_type = expectation.event_type or f"{expectation.scope_type}.read_model.refresh"
+    if str(row.get("event_type") or "") != expected_event_type:
+        return False
+    if str(row.get("scope_type") or "") != expectation.scope_type:
+        return False
+    if not match_metadata:
+        return True
+    if str(row.get("reason") or "") != expectation.reason:
+        return False
+    return not expectation.action_names or str(row.get("action_name") or "") in set(expectation.action_names)
 
 
 def _duration_ms(start: Any, end: Any) -> float | None:

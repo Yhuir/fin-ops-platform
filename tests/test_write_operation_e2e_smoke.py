@@ -794,6 +794,55 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(report["error"], "exact_checkpoint_event_set_mismatch")
         self.assertEqual(report["missing_or_unmatched_event_ids"], ["unknown-extra-event"])
 
+    def test_exact_receipt_uses_scope_contract_when_deduplicated_event_metadata_predates_write(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="older_refresh", action_name="older_action"),
+            _event(scope_type="workbench_relation", reason="older_relation_refresh", action_name="older_action"),
+        ]
+
+        report = write_operation_e2e_smoke._wait_for_write_slo(
+            FakeConnection(rows),
+            operations=("workbench_relation_confirm",),
+            tenant_id="default",
+            started_at=datetime(2026, 6, 13, 10, 0, 0, tzinfo=timezone.utc),
+            target_ms=1000,
+            timeout_seconds=1,
+            poll_interval_seconds=0.05,
+            limit=10,
+            event_ids=[str(row["event_id"]) for row in rows],
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["unexpected_event_contracts"], [])
+        self.assertTrue(all(result["status"] == "pass" for result in report["results"]))
+
+    def test_exact_receipt_rejects_refresh_scope_outside_operation_contract(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="older_refresh", action_name="older_action"),
+            _event(scope_type="workbench_relation", reason="older_relation_refresh", action_name="older_action"),
+            _event(scope_type="tax_offset", reason="unexpected", action_name="unexpected"),
+        ]
+
+        with patch(
+            "fin_ops_platform.tools.write_operation_e2e_smoke.monotonic",
+            side_effect=[100.0, 102.0],
+        ):
+            report = write_operation_e2e_smoke._wait_for_write_slo(
+                FakeConnection(rows),
+                operations=("workbench_relation_confirm",),
+                tenant_id="default",
+                started_at=datetime(2026, 6, 13, 10, 0, 0, tzinfo=timezone.utc),
+                target_ms=1000,
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                limit=10,
+                event_ids=[str(row["event_id"]) for row in rows],
+            )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["error"], "unexpected_checkpoint_event_contract")
+        self.assertEqual(report["unexpected_event_contracts"][0]["scope_type"], "tax_offset")
+
     def test_write_step_failure_skips_write_slo_claim(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
             name="turnover-withdraw",
